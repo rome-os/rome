@@ -21,10 +21,10 @@ const state = (): ModelAccountReports => ({
   openai: available(),
 });
 
-it("keeps Concierge's Luna then Terra and Sonnet choices", () => {
+it("moves the Concierge to the other provider's strongest model: Sol, else Terra, or Opus", () => {
   const raw = state();
   expect(soleProviderAtUsageLimit(raw)).toBe("anthropic");
-  expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-6-luna");
+  expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-6-1-sol");
   raw.openai = available({ loggedIn: true, modelsDenied: FRONTIER_DENIED });
   expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-5-6-terra");
   raw.openai = atLimit();
@@ -32,7 +32,7 @@ it("keeps Concierge's Luna then Terra and Sonnet choices", () => {
   expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
   raw.anthropic = available();
   expect(soleProviderAtUsageLimit(raw)).toBe("openai");
-  expect(usageSwitchTarget(raw, "openai")?.selectionId).toBe("claude-sonnet");
+  expect(usageSwitchTarget(raw, "openai")?.selectionId).toBe("claude-opus-5-5");
   raw.openai = available();
   expect(soleProviderAtUsageLimit(raw)).toBeNull();
   expect(usageSwitchTarget(raw, "openai")).toBeNull();

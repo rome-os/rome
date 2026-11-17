@@ -3,6 +3,7 @@
 // Neither Rome credits nor ChatGPT credits may fund an automatic switch.
 
 import { CODEX_LUNA_MODEL } from "./model-selection.js";
+import { codexFastSelection, codexStrongSelection } from "./model-strength.js";
 import type { ModelSelectionId } from "./model-selection.js";
 import {
   accountAllowsModel,
@@ -35,9 +36,8 @@ export function soleProviderAtUsageLimit(state: ModelAccountReports): Switchable
   return codex ? "openai" : "anthropic";
 }
 
-function codexSmallSelection(codex: ModelAccountReport): ModelSelectionId {
-  return accountAllowsModel(codex.account, CODEX_LUNA_MODEL) ? "gpt-6-luna" : "gpt-5-6-terra";
-}
+const codexSmallSelection = (codex: ModelAccountReport): ModelSelectionId =>
+  codexFastSelection(codex.account);
 
 /**
  * The other provider's selection when `from` is at its limit (or `failed`
@@ -62,8 +62,9 @@ export function usageSwitchTarget(
     target.requiresChatgptCredits
   )
     return null;
-  if (provider === "anthropic") return { provider, selectionId: "claude-sonnet" };
-  return { provider, selectionId: codexSmallSelection(target) };
+  // The other provider's strongest model, so a switch keeps the chat's strength.
+  if (provider === "anthropic") return { provider, selectionId: "claude-opus-5-5" };
+  return { provider, selectionId: codexStrongSelection(target.account) };
 }
 
 /** A different model of the same provider when it is available and the chat's model hit a limit. */

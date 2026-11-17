@@ -448,12 +448,54 @@ describe("ChatLink", () => {
     expect(screen.getByText("report.pdf").closest("a")?.getAttribute("href")).toBe(href);
   });
 
-  it("leaves a look-alike link to the router", () => {
+  it("opens a malformed asset link outside the app, so the chat stays", () => {
+    const href = "/api/assets/report.md";
+
     render(
       <MemoryRouter>
-        <ChatLink href="/api/assets/x.png">x</ChatLink>
+        <ChatLink href={href}>report.md</ChatLink>
       </MemoryRouter>,
     );
-    expect(screen.getByText("x").closest("a")?.hasAttribute("download")).toBe(false);
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    // The browser follows the server response; the SPA does not move.
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it("keeps a query on a malformed asset link, and still opens it outside the app", () => {
+    const href = "/api/assets/report.md?version=2";
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.md</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it("opens a same-origin absolute malformed asset link outside the app", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const href = "https://staging.romeos.cc/api/assets/report.md";
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.md</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(fireEvent.click(link)).toBe(true);
   });
 });

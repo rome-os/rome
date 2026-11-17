@@ -995,6 +995,13 @@
       "when": 1794799296174,
       "tag": "0142_root_message_id",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "6",
+      "when": 1794865729862,
+      "tag": "0143_chat-effort-and-model-provenance",
+      "breakpoints": true
     }
   ]
 }

@@ -200,7 +200,7 @@ function setup(
   const chatOwners = new Map<string, string>();
   /** The task notes each chat's digest would list, until a digest that lists them runs to its end. */
   const taskNotes = new Map<string, DigestTaskNotes>();
-  /** Visitors dropped from the dashboard allow-list. */
+  /** Dashboard admins dropped from the allow-list. */
   const dropped = new Set<string>();
   /** The chat whose turn calls the follow actions. */
   const calling = { chat: null as string | null };
@@ -1680,7 +1680,7 @@ describe("follows in several Concierge chats", () => {
 
   const ANN = "visitor:acct-ann";
   const annMain = mainChatIdOf(ANN);
-  /** Ann, a dashboard visitor, with her own main Concierge chat. */
+  /** Ann, a dashboard admin, with her own main Concierge chat. */
   const withAnn = (s: ReturnType<typeof setup>) => {
     s.liveChats.set(annMain, { id: annMain, name: "Concierge", main: true });
     s.chatOwners.set(annMain, ANN);

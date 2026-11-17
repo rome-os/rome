@@ -511,6 +511,16 @@
         }
       }
     },
+    "Admin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理员"
+          }
+        }
+      }
+    },
     "Agent" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2565,6 +2575,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在「%@」中发消息"
+          }
+        }
+      }
+    },
+    "Microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦克风"
           }
         }
       }
@@ -4703,6 +4723,16 @@
         }
       }
     },
+    "System default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统默认"
+          }
+        }
+      }
+    },
     "Systolic blood pressure" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5517,16 +5547,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "版本"
-          }
-        }
-      }
-    },
-    "Visitor" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "访客"
           }
         }
       }

@@ -151,7 +151,7 @@ export function RomeShellLayout() {
   // that keeps the list's mode with the open chat. The new-chat shortcut and
   // the rail read that mode.
   useChatListFollowsRoute(mainChat.chatId);
-  const chatListMode = useChatListModeForShell(!mainChat.failed, "chat");
+  const chatListMode = useChatListModeForShell(!mainChat.failed);
   const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
   const [headerClaimed, setHeaderClaimed] = useState(false);
   useEffect(() => {

@@ -10,7 +10,9 @@ protocol VoiceAudioSource: AnyObject {
     func requestAccess() async -> Bool
     /// Starts capture: `onChunk` gets PCM s16le mono at `VoiceInputWire.sampleRate`,
     /// about 100 ms at a time, on any thread. Throws when capture cannot start.
-    func start(onChunk: @escaping @Sendable (Data) -> Void) throws
+    /// `onLost` runs once if capture stops by itself after it started, as
+    /// when the input changes and capture cannot go on from the new one.
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws
     /// Hands over the audio still buffered, then releases the microphone.
     func finish()
     /// Releases the microphone at once. Safe to call more than once.
@@ -35,6 +37,11 @@ final class MicrophoneSource: VoiceAudioSource {
     private let engine = AVAudioEngine()
     private var capture: PCMChunker?
     private var running = false
+    /// Whether any microphone source is recording now, which leaves the
+    /// audio session active.
+    private(set) static var capturing = false
+    private var routeChanges: NSObjectProtocol?
+    private var configurationChanges: NSObjectProtocol?
 
     func requestAccess() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -44,31 +51,58 @@ final class MicrophoneSource: VoiceAudioSource {
         }
     }
 
-    func start(onChunk: @escaping @Sendable (Data) -> Void) throws {
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .default)
+        try MicrophoneChoice.prepare(session)
         try session.setActive(true)
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0,
-              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(VoiceInputWire.sampleRate), channels: 1, interleaved: true),
-              let converter = AVAudioConverter(from: format, to: target)
-        else {
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            throw VoiceAudioError.noInput
-        }
-        let chunker = PCMChunker(converter: converter, target: target, onChunk: onChunk)
-        capture = chunker
-        input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tap(chunker))
+        MicrophoneChoice().apply(to: session)
         do {
+            try tapInput(onChunk: onChunk)
             engine.prepare()
             try engine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            engine.inputNode.removeTap(onBus: 0)
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             throw error
         }
         running = true
+        Self.capturing = true
+        routeChanges = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            MainActor.assumeIsolated {
+                MicrophoneChoice().routeChanged(reason, connected: (AVAudioSession.sharedInstance().availableInputs ?? []).map(\.uid))
+            }
+        }
+        configurationChanges = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restart(onChunk: onChunk, onLost: onLost) }
+        }
+    }
+
+    /// Taps the input in the format it has now.
+    private func tapInput(onChunk: @escaping @Sendable (Data) -> Void) throws {
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard let chunker = PCMChunker(from: format, onChunk: onChunk) else { throw VoiceAudioError.noInput }
+        capture = chunker
+        input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tap(chunker))
+    }
+
+    /// iOS stops the engine when the input's format changes, as when a
+    /// Bluetooth microphone is taken off and the built-in one, at another
+    /// sample rate, takes over. Capture goes on from the input that took over.
+    private func restart(onChunk: @escaping @Sendable (Data) -> Void, onLost: @MainActor () -> Void) {
+        guard running else { return }
+        capture?.flush()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        do {
+            try tapInput(onChunk: onChunk)
+            engine.prepare()
+            try engine.start()
+        } catch {
+            close()
+            onLost()
+        }
     }
 
     /// Built outside the main actor: the audio thread calls it.
@@ -85,6 +119,11 @@ final class MicrophoneSource: VoiceAudioSource {
     func close() {
         guard running else { return }
         running = false
+        Self.capturing = false
+        if let routeChanges { NotificationCenter.default.removeObserver(routeChanges) }
+        routeChanges = nil
+        if let configurationChanges { NotificationCenter.default.removeObserver(configurationChanges) }
+        configurationChanges = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         capture = nil
@@ -114,42 +153,68 @@ final class PCMChunker: @unchecked Sendable {
         self.onChunk = onChunk
     }
 
-    func take(_ buffer: AVAudioPCMBuffer) {
-        let ratio = target.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
-        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-        // The converter asks for input until told there is none for now.
-        let given = Flag()
-        nonisolated(unsafe) let input = buffer
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
-            if given.value {
-                status.pointee = .noDataNow
-                return nil
-            }
-            given.value = true
-            status.pointee = .haveData
-            return input
-        }
-        guard error == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return }
-        let bytes = Data(bytes: samples[0], count: Int(out.frameLength) * 2)
-        var ready: [Data] = []
-        lock.lock()
-        pending.append(bytes)
-        while pending.count >= chunkBytes {
-            ready.append(pending.prefix(chunkBytes))
-            pending.removeFirst(chunkBytes)
-        }
-        lock.unlock()
-        for chunk in ready { onChunk(Data(chunk)) }
+    /// A chunker for input in `format`, or nil when the format has no audio.
+    convenience init?(from format: AVAudioFormat, onChunk: @escaping @Sendable (Data) -> Void) {
+        guard format.sampleRate > 0, format.channelCount > 0,
+              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(VoiceInputWire.sampleRate), channels: 1, interleaved: true),
+              let converter = AVAudioConverter(from: format, to: target)
+        else { return nil }
+        self.init(converter: converter, target: target, onChunk: onChunk)
     }
 
+    /// Converts `buffer` and hands on every full chunk. The lock covers the
+    /// whole pipeline, so chunks go out in the order the audio came in, even
+    /// while `flush` runs on main.
+    func take(_ buffer: AVAudioPCMBuffer) {
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * target.sampleRate / buffer.format.sampleRate) + 16
+        let given = Flag()
+        nonisolated(unsafe) let input = buffer
+        lock.withLock {
+            pending.append(convert(capacity: capacity) { _, status in
+                // The converter asks for input until told there is none for now.
+                if given.value {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                given.value = true
+                status.pointee = .haveData
+                return input
+            })
+            while pending.count >= chunkBytes {
+                onChunk(Data(pending.prefix(chunkBytes)))
+                pending.removeFirst(chunkBytes)
+            }
+        }
+    }
+
+    /// Hands over the audio still held, the converter's included. The
+    /// converter holds back part of the input to resample it, and gives it
+    /// out only when told the input has ended.
     func flush() {
-        lock.lock()
-        let rest = pending
-        pending = Data()
-        lock.unlock()
-        if !rest.isEmpty { onChunk(rest) }
+        lock.withLock {
+            pending.append(convert(capacity: AVAudioFrameCount(target.sampleRate / 10)) { _, status in
+                status.pointee = .endOfStream
+                return nil
+            })
+            converter.reset()
+            if !pending.isEmpty { onChunk(pending) }
+            pending = Data()
+        }
+    }
+
+    /// Everything the converter gives out for the input `next` supplies,
+    /// taken as long as it fills each output buffer. Call it under `lock`.
+    private func convert(capacity: AVAudioFrameCount, _ next: @escaping AVAudioConverterInputBlock) -> Data {
+        var bytes = Data()
+        while let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) {
+            var error: NSError?
+            let status = converter.convert(to: out, error: &error, withInputFrom: next)
+            if error == nil, out.frameLength > 0, let samples = out.int16ChannelData {
+                bytes.append(Data(bytes: samples[0], count: Int(out.frameLength) * 2))
+            }
+            if status != .haveData { break }
+        }
+        return bytes
     }
 }
 

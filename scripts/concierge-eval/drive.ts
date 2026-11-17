@@ -21,6 +21,8 @@ export interface DriveOptions {
   timeoutMs: number;
   pollMs: number;
   log: (line: string) => void;
+  /** The reasoning effort each owner message asks for; the stack's setting when absent. */
+  effort?: string;
 }
 
 export interface DriveResult {
@@ -112,8 +114,8 @@ export async function drive(
     }
   };
 
-  /** Waits until no turn runs and no task is active or waits on the owner, for settleMs in a row. */
-  const settle = async (): Promise<boolean> => {
+  /** Waits until no turn runs and no task is active or waits on the owner, for `settleMs` in a row. */
+  const settle = async (settleMs: number): Promise<boolean> => {
     let quietSince: number | null = null;
     while (Date.now() < deadline) {
       const messages = await api.messages(chatId);
@@ -130,7 +132,7 @@ export async function drive(
       const open = tasks.filter((t) => t.status === "active" || t.status === "needs_you");
       if (turns.length === 0 && open.length === 0) {
         quietSince ??= Date.now();
-        if (Date.now() - quietSince >= options.settleMs) return true;
+        if (Date.now() - quietSince >= settleMs) return true;
       } else quietSince = null;
       await sleep(options.pollMs);
     }
@@ -140,9 +142,10 @@ export async function drive(
   for (const step of scenario.steps) {
     const replyTo = step.replyToResult ? latestResult(await api.messages(chatId))?.id : undefined;
     if (step.replyToResult && !replyTo) options.log("no result to reply to: sent plain");
-    await api.send(chatId, step.text, replyTo);
+    await api.send(chatId, step.text, replyTo, options.effort);
     options.log(`sent${replyTo ? ` as a reply to ${replyTo}` : ""}: ${step.text.slice(0, 60)}`);
-    if (!(await settle())) return { outcomes, tasks, timedOut: true };
+    const settleMs = step.settleS === undefined ? options.settleMs : step.settleS * 1000;
+    if (!(await settle(settleMs))) return { outcomes, tasks, timedOut: true };
   }
   return { outcomes, tasks, timedOut: false };
 }

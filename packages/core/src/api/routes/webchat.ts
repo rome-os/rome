@@ -1,4 +1,9 @@
 import { withTaskCards } from "../../concierge/task-cards.js";
+import {
+  ConciergeTurnTiming,
+  reportConciergeTurn,
+  type TimedEvent,
+} from "../../concierge/turn-timing.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
@@ -81,7 +86,11 @@ import {
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
+import {
+  resolveAgentPolicy,
+  type ModelSelection,
+  type ModelSelectionId,
+} from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -291,6 +300,16 @@ function routeError(refused: RouteAnswer): string {
 }
 
 /** What `POST /chat/sessions` takes. */
+/** A chat Rome starts for an owner, such as a task chat the Concierge hands work to. */
+export interface ChatStart {
+  agentName?: string;
+  projectPath?: string;
+  /** The chat's model, stored as a model menu pick is, whatever the model selector says. */
+  model?: ModelSelectionId;
+  /** The effort its messages run at when they name none. */
+  reasoningEffort?: ModelReasoningEffort;
+}
+
 export interface NewChatBody {
   name?: string;
   personaId?: string;
@@ -967,6 +986,20 @@ interface ActiveWebchatStream {
   writing?: MessageWriting;
   /** The turn called a tool: a message it takes from then on joins it while it runs. */
   calledTool?: boolean;
+  /** A Concierge chat's turn: how long it took as its owner sees it (concierge/turn-timing.ts). */
+  timing?: ConciergeTurnTiming;
+}
+
+/** Whether a message's stored parts carry text: a say or a forwarded result, not a card alone. */
+function carriesText(content: string): boolean {
+  try {
+    const parts = JSON.parse(content) as unknown;
+    return (
+      Array.isArray(parts) && parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface IncomingWebchatUpload {
@@ -1018,7 +1051,7 @@ export interface WebchatRuntime {
   post: DashboardInbox["post"];
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
-  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
+  startChat(input: ChatStart, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
@@ -1112,6 +1145,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     stream: ActiveWebchatStream,
     msg: Parameters<MessageWriting["on"]>[0],
   ): void => {
+    stream.timing?.event(msg as TimedEvent);
     // A working tool call that runs long shows the turn's open messages
     // working (docs/domains/chats.md#status). Only a Concierge chat has open ones.
     if (msg.type === "tool_use") {
@@ -1168,9 +1202,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     (activeStreams.get(sessionId) ?? []).some(
       (stream) => !stream.finished && (!stream.quiet || stream.spoke),
     ) || deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // The unfinished streams of a chat whose turn is `turnId`, by either id it goes by.
+  const streamsOfTurn = (sessionId: string, turnId: string | null | undefined) =>
+    turnId
+      ? (activeStreams.get(sessionId) ?? []).filter(
+          (stream) =>
+            !stream.finished && (stream.turnId === turnId || stream.agentTurnId === turnId),
+        )
+      : [];
+  // The unfinished stream timing the turn that took owner message `messageKey`.
+  const streamOfMessage = (sessionId: string, messageKey: string) =>
+    (activeStreams.get(sessionId) ?? []).find(
+      (stream) => !stream.finished && stream.timing?.start.messageKey === messageKey,
+    );
   // A quiet turn shows once it says something.
   deps.webchatRepo.onMessageInserted((message) => {
     if (message.role !== "assistant") return;
+    // A message times only the turn that said it: another turn may be queued
+    // or still finishing in the same chat.
+    if (carriesText(message.content)) {
+      for (const stream of streamsOfTurn(message.sessionId, message.turnId)) {
+        stream.timing?.said();
+      }
+    }
     let changed = false;
     for (const stream of activeStreams.get(message.sessionId) ?? []) {
       if (!stream.finished && stream.quiet && !stream.spoke) {
@@ -1182,6 +1236,34 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     if (changed) notifyTurn(message.sessionId);
   });
+  // 👀 and a reaction on the owner's message time the turn that took it, as
+  // the owner sees them, whatever set them: a long tool call, a task made
+  // for the message, or the Concierge's own reaction. Watched only while a
+  // timed turn runs: the status watch reads the store on every task change.
+  let timedRunning = 0;
+  let stopSignWatch: (() => void) | null = null;
+  const timeTurn = (stream: ActiveWebchatStream, timing: ConciergeTurnTiming): void => {
+    stream.timing = timing;
+    timedRunning += 1;
+    if (stopSignWatch) return;
+    const stopStatus = deps.concierge?.onMessageStatus?.((event) => {
+      if (event.status !== "working") return;
+      streamOfMessage(event.sessionId, event.messageId)?.timing?.working();
+    });
+    const stopReaction = deps.webchatRepo.onMessageReaction((event) => {
+      if (event.reaction) streamOfMessage(event.sessionId, event.messageId)?.timing?.reacted();
+    });
+    stopSignWatch = () => {
+      stopStatus?.();
+      stopReaction();
+    };
+  };
+  const releaseSignWatch = (): void => {
+    timedRunning = Math.max(0, timedRunning - 1);
+    if (timedRunning > 0 || !stopSignWatch) return;
+    stopSignWatch();
+    stopSignWatch = null;
+  };
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
@@ -1971,7 +2053,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
-          reasoningEffort: await resolveRequestedReasoningEffort(undefined),
+          // The source session stays live for the chat's next message, and
+          // Claude fixes effort at open, so it opens at the chat's own.
+          reasoningEffort: await chatReasoningEffort(input.session, undefined),
         },
       );
       heldSource = source;
@@ -2219,6 +2303,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   };
 
+  /**
+   * The effort a turn of `session` opens at. A Concierge chat runs at its own
+   * effort, the chat's or else its agent's (undefined), whatever the composer
+   * sends: its owner sets nothing. Elsewhere a turn that names no effort runs
+   * at the chat's own, as a task chat's do, else the dashboard's.
+   */
+  const chatReasoningEffort = async (
+    session: StoredWebchatSession,
+    requested: unknown,
+  ): Promise<ModelReasoningEffort | undefined> =>
+    isConciergeChat(session)
+      ? ((session.reasoningEffort as ModelReasoningEffort | null) ?? undefined)
+      : resolveRequestedReasoningEffort(requested ?? session.reasoningEffort ?? undefined);
+
   const resolveStoredModelSelection = (stored: unknown): ModelSelection | null => {
     if (stored === null || stored === undefined) {
       return null;
@@ -2268,7 +2366,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!initialSelection) {
       return null;
     }
-    await deps.webchatRepo.updateSessionLargeModelSelection(session.id, initialSelection.id);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      session.id,
+      initialSelection.id,
+      "owner",
+    );
     return initialSelection;
   };
 
@@ -2440,6 +2542,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const finishStream = (stream: ActiveWebchatStream): void => {
     if (stream.finished) return;
     stream.finished = true;
+    const timed = stream.timing?.finish(stream.agentTurnId ?? stream.turnId);
+    // A quiet turn that said nothing was housekeeping: nobody waited on it.
+    if (timed && (!stream.quiet || timed.firstSayMs !== null)) reportConciergeTurn(timed);
+    if (stream.timing) releaseSignWatch();
     // The live preview is over — the durable reply lives in the DB now. Drop
     // the assistant_text replay frame so a late reattach doesn't flash a
     // transient bubble before swapping to the persisted message. Subscribers
@@ -3238,7 +3344,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(sessionId, selection?.id ?? null);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      sessionId,
+      selection?.id ?? null,
+      "owner",
+    );
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
@@ -3971,6 +4081,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       taskInput?: TaskInputClaim;
     } = {},
   ): Promise<RouteAnswer> => {
+    // A Concierge turn's timing starts when the owner's send reaches Rome.
+    const receivedAtMs = Date.now();
     const actor = said.taskActor ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
@@ -4426,7 +4538,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             messageCount,
             body.largeModelSelection,
           );
-    const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
+    const reasoningEffort = await chatReasoningEffort(session, body.reasoningEffort);
     const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
@@ -4543,6 +4655,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
     }
 
+    // Whether the chat's session was still open: a turn on it starts warm.
+    const sessionWarmth = !isConciergeChat(session)
+      ? undefined
+      : deps.agentSessionManager.find({ agentName, channelThreadKey }) === undefined
+        ? ("cold" as const)
+        : ("warm" as const);
     let agentSess;
     try {
       agentSess = await deps.agentSessionManager.open(
@@ -4639,6 +4757,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       stream.interrupt = async (reason) => {
         await handle.stop(reason);
       };
+      // The effort the turn runs at: a Concierge turn names none and runs at its agent's.
+      const timedEffort =
+        reasoningEffort ?? deps.agentLoader.find(agentName)?.definition.reasoningEffort;
+      if (isConciergeChat(session)) {
+        timeTurn(
+          stream,
+          new ConciergeTurnTiming(
+            {
+              chatId: sessionId,
+              turnId,
+              trigger: said.taskInput || saidBy ? "system" : "guardian",
+              messageKey: inputId,
+              startedAtMs: receivedAtMs,
+              ...(timedEffort ? { effort: timedEffort } : {}),
+              ...(sessionWarmth ? { session: sessionWarmth } : {}),
+            },
+            agentName,
+          ),
+        );
+      }
       enqueueStream(sessionId, stream);
       if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -5205,6 +5343,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.agentName ?? "main",
     );
     if (options?.quiet) stream.quiet = true;
+    // A quiet turn is timed too, and reported only once it said something.
+    if (isConciergeChat(session)) {
+      timeTurn(
+        stream,
+        new ConciergeTurnTiming(
+          {
+            chatId: sessionId,
+            turnId: syntheticTurnId,
+            trigger: "system",
+            startedAtMs: Date.now(),
+            session:
+              deps.agentSessionManager.find({
+                agentName: session.agentName ?? "main",
+                channelThreadKey: webchatSessionKey(sessionId),
+              }) === undefined
+                ? "cold"
+                : "warm",
+          },
+          session.agentName ?? "main",
+        ),
+      );
+    }
     enqueueStream(sessionId, stream);
 
     // Capture the resumed agent's final reply so it can be persisted as a
@@ -5428,11 +5588,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return { ok: true, messageId: inputId, at: new Date() };
     },
-    async startChat(input, ownerKey) {
+    async startChat({ model, reasoningEffort, ...input }, ownerKey) {
       // A task chat is the owner's whose Concierge started it.
       const started = await startChat(input, ownerKey);
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
+      // The model and effort Rome picked for the chat hold whatever the
+      // dashboard's model selector says, as a Concierge chat's model does.
+      if (model) await deps.webchatRepo.updateSessionLargeModelSelection(id, model, "auto");
+      if (reasoningEffort) await deps.webchatRepo.updateSessionReasoningEffort(id, reasoningEffort);
       return id;
     },
     async openSession(chatId) {

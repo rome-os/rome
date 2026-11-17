@@ -345,7 +345,7 @@ export function authRoutes(deps: ApiDeps): Hono {
   });
 
   // The dashboard's "who am I" probe: which of the two authenticated
-  // identities (guardian or dashboard visitor) this request carries, plus the
+  // identities (guardian or dashboard admin) this request carries, plus the
   // display fields the shell renders (profile menu). Guardian wins when both
   // cookies are present, mirroring the app-api caller resolution. Public path
   // (under /api/auth/*): an unauthenticated caller gets `anonymous`, not 401.

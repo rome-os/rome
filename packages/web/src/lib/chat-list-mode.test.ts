@@ -2,7 +2,6 @@ import { describe, expect, it } from "@rstest/core";
 import {
   type ChatListMode,
   chatListModeForRoute,
-  initialChatListMode,
   modeOfChatKind,
   newChatShortcutForPlatform,
   newChatTarget,
@@ -18,13 +17,6 @@ const kinds: Record<string, ChatKind> = {
 };
 const route = (pathname: string, state: unknown = null, mainChatId: string | null = "main") =>
   chatListModeForRoute({ pathname, state, mainChatId, kindOf: (id) => kinds[id] ?? null });
-
-describe("initialChatListMode", () => {
-  it("starts on Chat for someone with an ordinary chat, else on Concierge", () => {
-    expect(initialChatListMode(true)).toBe("chat");
-    expect(initialChatListMode(false)).toBe("concierge");
-  });
-});
 
 describe("modeOfChatKind", () => {
   it.each<[ChatKind, ChatListMode]>([

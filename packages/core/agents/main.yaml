@@ -3,15 +3,12 @@ description: Main orchestrator. Handles trusted messages, delegates to subagents
 model: opus
 permissionMode: bypassPermissions
 tools:
-  - Agent
   - Bash
-  - TaskOutput
   - Edit
   - Read
   - Write
   - Glob
   - Grep
-  - TaskStop
   - WebFetch
   - WebSearch
   - TodoWrite

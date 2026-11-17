@@ -11,7 +11,7 @@ import {
   type MarkdownTheme,
 } from "@rome-os/ui/markdown";
 import { useTheme } from "../hooks/use-theme";
-import { isInternalHref, toInternalPath } from "../lib/internal-href";
+import { isApiHref, isInternalHref, toInternalPath } from "../lib/internal-href";
 import { transformMarkdownUrl } from "../lib/markdown-url";
 import type { ResolvedTheme, ThemeName } from "../lib/theme";
 
@@ -184,7 +184,9 @@ export function getBuiltinMermaidTheme(
 }
 
 // Web-dashboard Markdown uses the shared renderer, but keeps in-app hrefs on
-// react-router navigation. Chat can still override this through linkComponent.
+// react-router navigation. A server API href is not an in-app route, so it
+// opens in a new tab like an external link. Chat can still override this
+// through linkComponent.
 export function MarkdownLink({
   children,
   href,
@@ -196,7 +198,7 @@ export function MarkdownLink({
   ...rest
 }: MarkdownLinkProps) {
   const { label, full } = markdownLinkLabel(children);
-  if (isInternalHref(href)) {
+  if (isInternalHref(href) && !isApiHref(href)) {
     return (
       <Link to={toInternalPath(href)} className={MARKDOWN_LINK_CLASS} title={full} {...rest}>
         {label}

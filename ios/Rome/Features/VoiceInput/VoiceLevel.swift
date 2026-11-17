@@ -88,12 +88,12 @@ final class MeteredAudioSource: VoiceAudioSource {
 
     func requestAccess() async -> Bool { await source.requestAccess() }
 
-    func start(onChunk: @escaping @Sendable (Data) -> Void) throws {
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws {
         let meter = meter
-        try source.start { chunk in
+        try source.start(onChunk: { chunk in
             onChunk(chunk)
             meter.take(chunk)
-        }
+        }, onLost: onLost)
     }
 
     func finish() { source.finish() }

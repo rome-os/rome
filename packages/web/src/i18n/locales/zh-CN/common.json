@@ -157,7 +157,7 @@
   },
   "profile": {
     "menuLabel": "账户",
-    "visitor": "访客",
+    "visitor": "管理员",
     "signOut": "退出登录",
     "signOutError": "退出登录失败，请重试。"
   },

@@ -305,7 +305,7 @@ export function startConciergeEvents(
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from, owner);
       if (!chatId) return "failed";
-      // A visitor dropped from the dashboard allow-list is told nothing; their
+      // A dashboard admin dropped from the allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
       return await service.systemTurnOutcome(chatId, prompt, {

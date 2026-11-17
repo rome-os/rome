@@ -74,6 +74,23 @@ import Testing
         #expect(log.events.filter { $0.hasPrefix("begin") }.count == 1)
     }
 
+    @Test func losingTheMicrophoneWhileListeningStopsListening() async {
+        let log = StopLog()
+        let source = LoggingSource(log: log)
+        var dictation: VoiceDictation?
+        let stop: VoiceInputStop? = await withCheckedContinuation { done in
+            dictation = VoiceDictation(
+                request: URLRequest(url: URL(string: "ws://127.0.0.1:1/ws/voice-input")!),
+                source: source, stopTiming: LoggingTiming(log: log),
+                handlers: .init(onText: { _ in }, onDone: { _, stop in done.resume(returning: stop) }))
+            source.onStart = { Task { @MainActor in source.lose?() } }
+            dictation?.start()
+        }
+        #expect(stop?.reason == .microphoneFailed)
+        #expect(log.events.contains("close"))
+        _ = dictation
+    }
+
     @Test func everyOtherStopIsTimedTheSameWay() {
         let stops: [@MainActor (VoiceDictation) -> Void] = [{ $0.end(.noSpeech) }, { $0.cancel() }]
         for stop in stops {
@@ -196,9 +213,14 @@ private final class StopLog {
 private final class LoggingSource: VoiceAudioSource {
     let log: StopLog
     var onStart: (() -> Void)?
+    /// Capture stopping by itself, as when the input changes and cannot be followed.
+    private(set) var lose: (@MainActor () -> Void)?
     init(log: StopLog) { self.log = log }
     func requestAccess() async -> Bool { true }
-    func start(onChunk: @escaping @Sendable (Data) -> Void) throws { onStart?() }
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws {
+        lose = onLost
+        onStart?()
+    }
     func finish() { log.events.append("finish") }
     func close() { log.events.append("close") }
 }

@@ -1,4 +1,5 @@
 import type { AgentDefinition } from "./agent-definition.js";
+import type { ModelReasoningEffort } from "./model-port.js";
 import type { ModelSelection } from "./model-selection.js";
 
 /** Port. What a chat set for its sessions. */
@@ -8,6 +9,11 @@ export interface SessionSettings {
    * that chat leaves the choice to Rome or the session is no web chat's own.
    */
   savedModelSelection(sessionId: string): Promise<ModelSelection | null>;
+  /**
+   * The effort saved by the web chat whose own session this is, or null when
+   * that chat saved none or the session is no web chat's own.
+   */
+  savedReasoningEffort(sessionId: string): Promise<ModelReasoningEffort | null>;
 }
 
 /**

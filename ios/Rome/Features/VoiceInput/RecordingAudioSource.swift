@@ -34,7 +34,7 @@ final class RecordingAudioSource: VoiceAudioSource {
 
     func requestAccess() async -> Bool { allowed }
 
-    func start(onChunk: @escaping @Sendable (Data) -> Void) throws {
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws {
         self.onChunk = onChunk
         let chunk = VoiceInputWire.sampleRate / 10 * 2
         playing = Task { [weak self] in

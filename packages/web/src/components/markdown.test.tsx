@@ -39,6 +39,14 @@ describe("Markdown (dashboard wrapper)", () => {
     expect(external.rel).toContain("noopener");
   });
 
+  it("opens a server API link in a new tab instead of routing the SPA to it", () => {
+    renderMd("[report](/api/assets/report.md)");
+    const link = screen.getByRole("link", { name: "report" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/api/assets/report.md");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toContain("noopener");
+  });
+
   it.each([
     ["ember", "light", "#fdfcf9", "#1a130f", "#8a7868"],
     ["ember", "dark", "#14110f", "#f4f3ef", "#b0a294"],
