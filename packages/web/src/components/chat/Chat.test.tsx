@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatSession } from "@/lib/chat-types";
@@ -320,6 +321,8 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
             <span data-testid="user-text">{row.message?.content}</span>
+            {/* A popover of the message, drawn outside the chat as the real ones are. */}
+            {createPortal(<div data-testid="portal-pad" />, document.body)}
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
@@ -3097,6 +3100,25 @@ describe("Chat Concierge empty state", () => {
       expect(back()).toBeNull();
     });
 
+    it("scrolls to the newest message only after the focus has closed", async () => {
+      threaded();
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ turnId: "turn-new" } as never);
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+      const threadAtScroll: Array<string | undefined> = [];
+      stickToBottom.scrollToBottom.mockImplementation(() => {
+        threadAtScroll.push(composer().dataset.thread);
+      });
+
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+      await waitFor(() => expect(composer().dataset.thread).toBe(""));
+      await waitFor(() => expect(threadAtScroll.at(-1)).toBe(""));
+      stickToBottom.scrollToBottom.mockReset();
+    });
+
     it("keeps the thread when the send fails, so a retry still replies into it", async () => {
       threaded();
       rs.mocked(postSessionTurn).mockRejectedValueOnce(new Error("network down"));
@@ -3145,6 +3167,13 @@ describe("Chat Concierge empty state", () => {
         await focused();
         fireEvent.click(screen.getAllByTestId("user-row")[0]!);
         await waitFor(() => expect(composer().dataset.thread).toBe(""));
+      });
+
+      it("stays on a click in a popover drawn outside the thread", async () => {
+        await focused();
+        fireEvent.click(screen.getAllByTestId("portal-pad")[0]!);
+        expect(composer().dataset.thread).toBe("u-1");
+        expect(back()).not.toBeNull();
       });
 
       it("stays while text is selected", async () => {
