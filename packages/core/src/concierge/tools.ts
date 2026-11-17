@@ -62,6 +62,22 @@ const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
 
+// The write each Concierge chat is running, so the next one waits for it.
+const writing = new Map<string, Promise<unknown>>();
+
+// Runs `write` after the chat's earlier writes, so writes that must stay
+// side by side in the transcript are never split by another's.
+async function oneAtATime<T>(chatId: string, write: () => Promise<T>): Promise<T> {
+  const before = writing.get(chatId) ?? Promise.resolve();
+  const run = before.catch(() => undefined).then(write);
+  writing.set(chatId, run);
+  try {
+    return await run;
+  } finally {
+    if (writing.get(chatId) === run) writing.delete(chatId);
+  }
+}
+
 /** The parameter that names the one earlier message a `say` replies to. */
 const REPLY_TO_PARAMETER = {
   type: "string",
@@ -761,7 +777,9 @@ export async function buildConciergeTools(
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles. A task's widget is a message
   // of its own (docs/domains/chats.md#widget), so it goes just before, in the
-  // same thread but with no quote, which would share its message.
+  // same thread but with no quote, which would share its message. With no
+  // start message, the result replies to the widget, so the two still share
+  // a thread.
   const forward = async (
     text: string,
     from: ForwardedFrom,
@@ -771,21 +789,24 @@ export async function buildConciergeTools(
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
     const start = await startMessageOf(task?.id);
-    if (card) {
-      await webchatRepo.addBackendMessage(
+    const result = [
+      ...(intro ? [{ type: "text" as const, content: intro }] : []),
+      { type: "text" as const, content: text, format: "long" as const, forwardedFrom: from },
+    ];
+    // Two forwards in one turn run side by side, so each widget and its
+    // result are written as a pair, never interleaved with another's.
+    const id = await oneAtATime(chatId, async () => {
+      if (!card) return addMessage(result, start);
+      const shown = await webchatRepo.addBackendMessage(
         chatId,
         turnId,
         [card],
         start ? { replyTo: start.id } : {},
       );
-    }
-    const id = await addMessage(
-      [
-        ...(intro ? [{ type: "text" as const, content: intro }] : []),
-        { type: "text", content: text, format: "long", forwardedFrom: from },
-      ],
-      start,
-    );
+      return start
+        ? addMessage(result, start)
+        : (await webchatRepo.addBackendMessage(chatId, turnId, result, { replyTo: shown.id })).id;
+    });
     // Only a result the guardian was shown counts as said.
     if (task) {
       service.noteSaid(task.id);
@@ -1534,7 +1555,11 @@ export async function buildConciergeTools(
         required: ["chatId"],
         properties: {
           chatId: { type: "string" },
-          intro: { type: "string", description: "Optional short line sent before it." },
+          intro: {
+            type: "string",
+            description:
+              "Optional short line sent before it. A widget forwarded with the result comes first, above this line.",
+          },
           full: {
             type: "boolean",
             description:
