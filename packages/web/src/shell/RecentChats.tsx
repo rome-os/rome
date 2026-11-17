@@ -1103,7 +1103,7 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[3px]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
+          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[var(--row-switcher-pl)]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
         >
           <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}

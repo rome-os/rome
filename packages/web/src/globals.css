@@ -753,6 +753,17 @@ button.rome-upgrade-row:hover {
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
+    /* The sidebar's two columns share one icon column (x=18) and one text
+       column (x=48): a row's own padding and the gap after its icon. The link
+       form has a 1px transparent border, so it pads 1px less. */
+    --row-px: 0.625rem;
+    --row-link-px: 0.5625rem;
+    --row-icon-gap: 0.875rem;
+    /* The chat list's switcher sits a little left of the icon column, since its
+       icon is centred in a segment. */
+    --row-switcher-pl: 0.1875rem;
+    /* A Concierge chat's floating header, centred on the sidebar's 56px top bar. */
+    --control-header-pt: 0.375rem;
     /* A Concierge chat's floating header: the mascot's badge, the name tag
        under it, the status capsule under that, and the gaps around them. The
        messages start below it. */
