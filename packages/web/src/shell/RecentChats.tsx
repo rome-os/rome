@@ -321,7 +321,9 @@ function ChatModeSwitch({
       aria-label={t("recentChats.modeSwitch")}
       value={mode}
       onValueChange={onChange}
-      className="shrink-0"
+      // The kit's selected pill is the canvas colour, which on a dark track is
+      // barely lighter than the track. Dark lifts it with the foreground.
+      className="shrink-0 dark:[&_[aria-checked=true]]:bg-foreground/20"
       options={[
         {
           value: "chat",
@@ -1098,9 +1100,9 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-6 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pb-3 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
         >
-          <div className="flex min-w-0 items-center gap-1">
+          <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}
             {hasConcierge ? (
               <ChatModeSwitch
@@ -1115,7 +1117,7 @@ export function RecentChats({
               </span>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex h-10 shrink-0 items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
