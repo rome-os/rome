@@ -20,14 +20,18 @@ export interface Transcript {
   lines: string[];
   /** The Concierge's text messages after each owner message, in order. */
   saidAfter: string[][];
+  /** The Concierge's reaction to each owner message, in order; null for none. */
+  reactions: (string | null)[];
 }
 
 export function transcriptOf(messages: ChatMessage[]): Transcript {
   const lines: string[] = [];
   const saidAfter: string[][] = [];
+  const reactions: (string | null)[] = [];
   for (const m of messages) {
     if (isOwner(m)) {
       saidAfter.push([]);
+      reactions.push(m.reaction ?? null);
       lines.push(`OWNER: ${textOf(m)}`);
       if (m.reaction) lines.push(`ASSISTANT reacted to that message with ${m.reaction}`);
     } else if (m.role === "assistant") {
@@ -37,5 +41,5 @@ export function transcriptOf(messages: ChatMessage[]): Transcript {
       lines.push(`ASSISTANT: ${text}`);
     }
   }
-  return { lines, saidAfter };
+  return { lines, saidAfter, reactions };
 }
