@@ -486,7 +486,8 @@ export function RecentChats({
     const rememberedExists =
       lastConciergeChatId !== null &&
       (conciergeChats.some((chat) => chat.id === lastConciergeChatId) ||
-        sessions.some((session) => session.id === lastConciergeChatId));
+        sessions.some((session) => session.id === lastConciergeChatId) ||
+        conciergeTopicSessions.some((session) => session.id === lastConciergeChatId));
     navigate(
       next === "concierge"
         ? rememberedExists

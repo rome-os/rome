@@ -195,8 +195,9 @@ export function ChatComponent({
         onSessionNotFound();
         return;
       }
-      // A Concierge chat that is gone lands on the main chat, so the list stays
-      // in Agent mode; any other missing chat lands on a blank one.
+      // In Agent mode, or for the Concierge chat last opened, a missing chat
+      // lands on the main chat, so the list stays in Agent mode; in Chat mode
+      // it lands on a blank chat.
       const concierge =
         readChatListMode() === "concierge" || readLastConciergeChatId() === missingSessionId;
       const home = concierge ? MAIN_CHAT_PATH : "/chat";

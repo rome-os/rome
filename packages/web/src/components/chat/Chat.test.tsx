@@ -3088,7 +3088,10 @@ describe("Chat Concierge empty state", () => {
 
     it("leaves the thread for the whole chat once the server takes the reply", async () => {
       threaded();
-      rs.mocked(postSessionTurn).mockResolvedValueOnce({ turnId: "turn-new" } as never);
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({
+        ok: true,
+        data: { turnId: "turn-new" },
+      } as never);
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
       fireEvent.click(screen.getByTestId("open-other-thread"));
@@ -3102,7 +3105,10 @@ describe("Chat Concierge empty state", () => {
 
     it("scrolls to the newest message only after the focus has closed", async () => {
       threaded();
-      rs.mocked(postSessionTurn).mockResolvedValueOnce({ turnId: "turn-new" } as never);
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({
+        ok: true,
+        data: { turnId: "turn-new" },
+      } as never);
       renderChat(concierge());
       await screen.findAllByTestId("user-row");
       fireEvent.click(screen.getByTestId("open-other-thread"));
@@ -3117,6 +3123,26 @@ describe("Chat Concierge empty state", () => {
       await waitFor(() => expect(composer().dataset.thread).toBe(""));
       await waitFor(() => expect(threadAtScroll.at(-1)).toBe(""));
       stickToBottom.scrollToBottom.mockReset();
+    });
+
+    it("keeps the thread when the server turns the send down", async () => {
+      threaded();
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        error: "boom",
+      } as never);
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      await act(async () => {});
+      expect(composer().dataset.thread).toBe("u-2");
+      expect(back()).not.toBeNull();
     });
 
     it("keeps the thread when the send fails, so a retry still replies into it", async () => {

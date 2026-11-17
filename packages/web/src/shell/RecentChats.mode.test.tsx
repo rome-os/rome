@@ -277,6 +277,20 @@ describe("the Chat / Concierge switch", () => {
       expect(screen.getByTestId("path").textContent).toBe("/message");
     });
 
+    it("opens a remembered archived topic chat on Agent, which only the full session list holds", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "old-topic" });
+      serve([
+        mainChat(),
+        chat("mine", "My chat"),
+        { ...topic("old-topic", "Old plans"), archivedAt: "2026-11-01T00:00:00Z" },
+      ]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/old-topic");
+    });
+
     it("only changes the list on a phone, where the list is a screen over the chat", async () => {
       screenWidth(false);
       seedChatListMode({ mode: "chat" });

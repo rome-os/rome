@@ -2114,10 +2114,15 @@ export function Chat({
             signal: controls.signal,
           });
           // A reply the server took, sent inside a thread in focus, leaves the
-          // focus for the whole chat. A send that fails keeps the thread, so a
-          // retry still replies into it. The close is at once, then the view
+          // focus for the whole chat. A send the server turns down (a result
+          // that is not ok, or a thrown one) keeps the thread, so a retry still
+          // replies into it. Another thread opened meanwhile stays. The close is at once, then the view
           // returns to the end of the chat.
-          if (snapshot.chatThread) {
+          if (
+            accepted.ok &&
+            snapshot.chatThread &&
+            focusRef.current?.root === snapshot.chatThread
+          ) {
             await closeFocusRef.current(true);
             scrollToBottom("auto");
             if (!coarsePointer) composerRef.current?.focus();
