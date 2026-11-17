@@ -110,6 +110,7 @@ const RULE_KINDS = [
   ["rule:", "Rule regressions"],
   ["zh:", "Chinese style"],
   ["drift:", "Length drift"],
+  ["effort:", "Effort mismatch"],
 ] as const;
 
 const isRuleNote = (note: string) => RULE_KINDS.some(([prefix]) => note.startsWith(prefix));

@@ -151,6 +151,12 @@ async function playScenario(
   );
   if (driven.timedOut) notes.push("timed out before the chat was quiet");
   if (failure) notes.push(`the driver failed: ${failure}`);
+  // A Concierge chat runs at its own effort, not the one a message asks
+  // for, so a run labelled with another effort measured something else.
+  const ranAt = [...new Set(guardian.map((t) => t.effort ?? "default"))];
+  if (ranAt.some((effort) => effort !== args.effort)) {
+    notes.push(`effort: ran at ${ranAt.join(", ")}, labelled ${args.effort}`);
+  }
 
   // The owner waits from the send for the relayed result of a task.
   const relayed = turns
