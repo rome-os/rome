@@ -756,7 +756,7 @@
     "loading": "Loading outputs",
     "loadFailed": "Failed to load outputs",
     "emptyTitle": "No outputs yet",
-    "emptyDescription": "Files the agent writes or shows in this chat are listed here.",
+    "emptyDescription": "Files the agent writes or shows in this chat appear here.",
     "written": "Written",
     "shown": "Shown",
     "from": "from {{name}}",
