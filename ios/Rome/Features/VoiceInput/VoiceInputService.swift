@@ -195,6 +195,8 @@ final class VoiceInputController {
         if let chat { service.listening(in: chat) }
         meter = VoiceLevelMeter()
         state = .listening
+        // The screen locking would send the app to the background and end listening.
+        UIApplication.shared.isIdleTimerDisabled = true
         let before = (original as NSString).substring(to: range.location)
         let after = (original as NSString).substring(from: NSMaxRange(range))
         let dictation = VoiceDictation(
@@ -316,6 +318,7 @@ final class VoiceInputController {
         draftSync.finish()
         dictation = nil
         state = .idle
+        UIApplication.shared.isIdleTimerDisabled = false
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
     }
