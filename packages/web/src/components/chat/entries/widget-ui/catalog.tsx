@@ -1,8 +1,8 @@
 // Rome's A2UI catalog: the components a card described as data may use
 // (`WIDGET_UI_COMPONENTS` in @rome-os/app-runtime), drawn with the dashboard's
 // own tokens. The components from A2UI's basic catalog keep its schemas, so
-// a card reads as A2UI; `Stat` and `Progress` are Rome's, and `TextField`
-// adds Rome's `placeholder`.
+// a card reads as A2UI; `Stat`, `Progress` and `Markdown` are Rome's, and
+// `TextField` adds Rome's `placeholder`.
 import {
   ButtonApi,
   Catalog,
@@ -21,6 +21,7 @@ import {
 } from "@a2ui/web_core/v0_9";
 import { createComponentImplementation } from "@a2ui/react/v0_9";
 import { createContext, type ReactNode, useContext } from "react";
+import Markdown from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,6 +41,11 @@ const StatApi = {
     unit: CommonSchemas.DynamicString.optional(),
     caption: CommonSchemas.DynamicString.optional(),
   }).strict(),
+};
+
+const MarkdownApi = {
+  name: "Markdown",
+  schema: Base.extend({ text: CommonSchemas.DynamicString }).strict(),
 };
 
 const ProgressApi = {
@@ -157,6 +163,14 @@ const Stat = createComponentImplementation(StatApi, ({ props }) => (
     </span>
     {props.caption ? <span className="text-aux text-muted-foreground">{props.caption}</span> : null}
   </div>
+));
+
+// A card opens and loads nothing: inert Markdown shows a link as its text and
+// an image as its description, and draws no diagram or raw HTML.
+const CardMarkdown = createComponentImplementation(MarkdownApi, ({ props }) => (
+  <Markdown compact inert className="min-w-0 text-foreground">
+    {shown(props.text)}
+  </Markdown>
 ));
 
 const Progress = createComponentImplementation(ProgressApi, ({ props }) => {
@@ -374,6 +388,7 @@ export const romeWidgetCatalog = new Catalog(
   ROME_WIDGET_CATALOG_ID,
   [
     Text,
+    CardMarkdown,
     Stat,
     Progress,
     Image,

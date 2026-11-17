@@ -399,6 +399,33 @@ enum MarkdownParser {
         inlineCache.value(for: text, styledInline)
     }
 
+    /// Inline Markdown with each link drawn as its text, which opens nothing.
+    static func inline(_ text: String, linksAsText: Bool) -> AttributedString {
+        guard linksAsText else { return inline(text) }
+        var result = inline(text)
+        for run in result.runs where run.link != nil {
+            result[run.range].link = nil
+            result[run.range].foregroundColor = nil
+        }
+        return result
+    }
+
+    /// The blocks with each image and picture set drawn as its description,
+    /// so nothing is loaded.
+    static func withoutImages(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+        blocks.compactMap { block in
+            switch block {
+            case .image(let alt, _):
+                return alt.isEmpty ? nil : .paragraph(alt)
+            case .pictures(_, let items):
+                let alts = items.map(\.alt).filter { !$0.isEmpty }
+                return alts.isEmpty ? nil : .paragraph(alts.joined(separator: "\n"))
+            default:
+                return block
+            }
+        }
+    }
+
     private static func styledInline(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
@@ -601,8 +628,14 @@ struct MarkdownText: View {
     var fontSize: CGFloat = 16
     var lineSpacing: CGFloat = 5
     var color: Color = Palette.fg
+    /// Draws links as their text and images as their description, so the
+    /// Markdown opens and loads nothing, as a chat card's must not.
+    var textOnly = false
 
-    private var blocks: [MarkdownBlock] { MarkdownParser.parse(source) }
+    private var blocks: [MarkdownBlock] {
+        let parsed = MarkdownParser.parse(source)
+        return textOnly ? MarkdownParser.withoutImages(parsed) : parsed
+    }
     @State private var showViewer = false
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
@@ -641,7 +674,7 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in linkOpener?.run(url) ?? .systemAction })
+        .environment(\.openURL, OpenURLAction { url in textOnly ? .discarded : (linkOpener?.run(url) ?? .systemAction) })
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
@@ -651,22 +684,22 @@ struct MarkdownText: View {
     private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(MarkdownParser.inline(text))
+            Text(MarkdownParser.inline(text, linksAsText: textOnly))
                 .romeFont(fontSize)
                 .lineSpacing(lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
         case .heading(let level, let text):
-            Text(MarkdownParser.inline(text))
+            Text(MarkdownParser.inline(text, linksAsText: textOnly))
                 .romeFont(level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), .semibold)
                 .lineSpacing(3)
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing)
+            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
-                Text(MarkdownParser.inline(text))
+                Text(MarkdownParser.inline(text, linksAsText: textOnly))
                     .romeFont(fontSize)
                     .foregroundStyle(Palette.sub)
                     .lineSpacing(lineSpacing)
@@ -690,7 +723,7 @@ struct MarkdownText: View {
                 showViewer = true
             }
         case .table(let header, let alignments, let rows):
-            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1)
+            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1, linksAsText: textOnly)
         case .pictures(let layout, let items):
             MarkdownPictureSet(layout: layout, items: items, fontSize: fontSize) { index in
                 viewerStart = gallery.firstIndex { $0.matches(position: Self.pictureKey(block: position, item: index)) } ?? 0
@@ -708,6 +741,7 @@ struct MarkdownList: View {
     let items: [ListItem]
     let fontSize: CGFloat
     let lineSpacing: CGFloat
+    var linksAsText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -718,13 +752,13 @@ struct MarkdownList: View {
                         .foregroundStyle(Palette.sub)
                         .frame(minWidth: 12, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(MarkdownParser.inline(item.text))
+                        Text(MarkdownParser.inline(item.text, linksAsText: linksAsText))
                             .romeFont(fontSize)
                             .lineSpacing(lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             if case .list(let ordered, let start, let items) = child {
-                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing)
+                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText)
                             }
                         }
                     }
@@ -741,6 +775,7 @@ struct MarkdownTable: View {
     let alignments: [TableAlignment]
     let rows: [[String]]
     var fontSize: CGFloat = 15
+    var linksAsText = false
 
     /// The widest a column grows before its cells wrap.
     static let maxColumn: CGFloat = 220
@@ -778,7 +813,7 @@ struct MarkdownTable: View {
         let alignment = column < alignments.count ? alignments[column] : .leading
         let frame: Alignment = alignment == .center ? .center : alignment == .trailing ? .trailing : .leading
         return CappedWidth(max: Self.maxColumn) {
-            Text(MarkdownParser.inline(text))
+            Text(MarkdownParser.inline(text, linksAsText: linksAsText))
                 .romeFont(fontSize, weight)
                 .lineSpacing(3)
                 .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)
