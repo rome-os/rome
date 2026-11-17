@@ -417,43 +417,6 @@ button.rome-upgrade-row:hover {
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
 }
 
-/* The rail that joins an adjacent reply to the message it answers: a hook up
-   to the message above, or a line across the gap to the reply above that
-   answers the same message (docs/domains/chats.md#chat-thread). It grows out
-   of the bubble it attaches to and takes its color: the guardian's bubble is
-   the primary color, and the agent's fill sits too close to the page, so its
-   rail is that fill taken a quarter of the way to the text color. Both stems
-   stand on one x, so a run of replies reads as one rail. */
-.rome-reply-rail {
-  --rome-reply-rail: color-mix(in oklab, var(--surface-muted), var(--foreground) 26%);
-}
-
-.rome-reply-rail[data-side="end"] {
-  --rome-reply-rail: var(--primary);
-}
-
-.rome-reply-hook {
-  border-top: 1.5px solid var(--rome-reply-rail);
-  border-left: 1.5px solid var(--rome-reply-rail);
-  border-top-left-radius: var(--rome-radius-8);
-}
-
-.rome-reply-line {
-  border-left: 1.5px solid var(--rome-reply-rail);
-}
-
-.rome-reply-rail[data-side="end"] .rome-reply-hook {
-  border-left: 0;
-  border-right: 1.5px solid var(--rome-reply-rail);
-  border-top-left-radius: 0;
-  border-top-right-radius: var(--rome-radius-8);
-}
-
-.rome-reply-rail[data-side="end"] .rome-reply-line {
-  border-left: 0;
-  border-right: 1.5px solid var(--rome-reply-rail);
-}
-
 /* The remap gives a link the text's own color on the primary fill, so there
    the underline is what marks it, at full strength in the text's color rather
    than the faint prose-link underline. */
@@ -1097,6 +1060,13 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   transition-property: color, background-color, border-color, box-shadow;
   transition-duration: 300ms;
   transition-timing-function: ease-out;
+}
+/* A bubble with a thread's stack under it is wide enough for the stack's
+   avatar, a few words of the newest message and the count, which sit inside
+   the bubble's width less 1rem of inset each side (ThreadStack.tsx). A bubble
+   with no thread keeps the width of its content. */
+[data-bubble-box]:has(> [data-thread-stack-slot]) > :first-child {
+  min-width: 14rem;
 }
 [data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
   border-radius: var(--rome-radius-16);

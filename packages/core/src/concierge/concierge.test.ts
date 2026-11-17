@@ -751,6 +751,40 @@ describe("Concierge tools", () => {
       );
     });
 
+    it("replies into the thread the guardian wrote in, to their latest message, when it names none", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
+      guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
+      guardianSays(s, { id: "g2", replyTo: "g0", chatThread: "g0" }, "And Nara");
+      const said = saidId(await s.tool("say", { text: "Added both" }));
+      expect([replyOf(s, said), threadOf(s, said)]).toEqual(["g2", "g0"]);
+      // A repeat in the same turn is the same message, as when it names the target.
+      expect(saidId(await s.tool("say", { text: "Added both" }))).toBe(said);
+      // Naming a message still wins.
+      const named = saidId(await s.tool("say", { text: "About Kyoto", replyTo: "g0" }));
+      expect(replyOf(s, named)).toBe("g0");
+    });
+
+    it("replies to nothing when the guardian wrote in the main line, or in several threads", async () => {
+      const main = setup({ said: false });
+      guardianSays(main, { id: "g1" });
+      expect(replyOf(main, saidId(await main.tool("say", { text: "Hi" })))).toBeUndefined();
+
+      // A message that starts a thread is in the main line, not inside the thread.
+      const root = setup({ said: false });
+      guardianSays(root, { id: "g0", turnId: "older" }, "Plan Kyoto");
+      guardianSays(root, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
+      guardianSays(root, { id: "g2" });
+      expect(replyOf(root, saidId(await root.tool("say", { text: "Hi" })))).toBeUndefined();
+
+      const mixed = setup({ said: false });
+      guardianSays(mixed, { id: "a0", turnId: "older" }, "Plan Kyoto");
+      guardianSays(mixed, { id: "b0", turnId: "older" }, "Book a table");
+      guardianSays(mixed, { id: "g1", replyTo: "a0", chatThread: "a0" });
+      guardianSays(mixed, { id: "g2", replyTo: "b0", chatThread: "b0" });
+      expect(replyOf(mixed, saidId(await mixed.tool("say", { text: "Hi" })))).toBeUndefined();
+    });
+
     it("replies to the guardian message it names, and shows its quote", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g1" }, "Weather?");

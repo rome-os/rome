@@ -136,8 +136,11 @@ import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-un
 import {
   ChatThreadsProvider,
   threadTail,
+  unreadIn,
   useChatThreadsValue,
 } from "@/components/chat/reply/chat-threads";
+import { ThreadPills, waitingThreads } from "@/components/chat/reply/ThreadPills";
+import { useVisibleStacks } from "@/components/chat/reply/use-visible-stacks";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
@@ -185,6 +188,7 @@ import {
   listChatAgents,
   listSessionMessagePage,
   listSessionTurns,
+  markMessagesRead as apiMarkMessagesRead,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
   postSessionTurn,
@@ -275,6 +279,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   traceSummary: traceSummarySchema.nullable().optional(),
   chatThreadId: z.string().nullable().optional(),
   chatThreadTitle: z.string().nullable().optional(),
+  read: z.boolean().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -770,10 +775,28 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
+  // Only a Concierge chat stacks threads. A share picks whole turns and shows every
+  // message itself, so it stacks nothing.
+  const chatThreads = useChatThreadsValue(
+    displayMessages,
+    threadFocus.shown,
+    concierge && !shareMode,
+  );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
+  // The unread divider goes before a message the main line shows: the replies of
+  // a thread are in its stack.
   const unread = useMemo(
-    () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
-    [displayMessages, unreadAtOpen, olderRemains],
+    () =>
+      unreadAtOpen
+        ? summarizeUnread(
+            chatThreads.stacked.size > 0
+              ? displayMessages.filter((message) => !chatThreads.stacked.has(message.id))
+              : displayMessages,
+            unreadAtOpen,
+            olderRemains,
+          )
+        : null,
+    [displayMessages, chatThreads.stacked, unreadAtOpen, olderRemains],
   );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
@@ -850,7 +873,7 @@ export function Chat({
   const focusRef = useRef<{ root: string } | null>(null);
   const rootsRef = useRef<ReadonlyMap<string, string>>(new Map());
   const displayedRef = useRef<readonly ChatMessage[]>([]);
-  const openThreadRef = useRef<(thread: ReplyThread) => void>(() => {});
+  const openThreadRef = useRef<(thread: ReplyThread) => Promise<void>>(async () => {});
   const whenShown = useCallback(
     (find: () => HTMLElement | null, then: (el: HTMLElement) => void) => {
       const el = find();
@@ -902,13 +925,13 @@ export function Chat({
   const revealWhenLoaded = useCallback(
     async (
       find: () => HTMLElement | null,
-      reveal: () => void,
+      reveal: () => void | Promise<void>,
       missing: string,
       through?: string,
     ): Promise<boolean> => {
       if (!mainSessionId || findingMessageRef.current) return false;
       if (find()) {
-        reveal();
+        await reveal();
         return true;
       }
       findingMessageRef.current = true;
@@ -925,7 +948,7 @@ export function Chat({
           }
           await new Promise((resolve) => requestAnimationFrame(resolve));
           if (find()) {
-            reveal();
+            await reveal();
             return true;
           }
           // A page that fails to load changes nothing; two in a row end the search.
@@ -945,9 +968,33 @@ export function Chat({
     async (messageId: string, focusThread = false) => {
       const scroller = scrollerEl;
       if (!scroller) return false;
+      // A reply of a thread whose root is loaded is not on the main line: its
+      // root stands for it until the thread is in focus.
+      const hiddenIn = () => {
+        const root = rootsRef.current.get(messageId);
+        return root !== undefined &&
+          root !== messageId &&
+          rootsRef.current.get(root) === root &&
+          focusRef.current?.root !== root
+          ? root
+          : null;
+      };
       const landed = await revealWhenLoaded(
-        () => findMessageAnchor(scroller, messageId),
-        () => jumpToMessage(messageId),
+        () => {
+          const root = hiddenIn();
+          return (
+            findMessageAnchor(scroller, messageId) ??
+            (root ? findMessageAnchor(scroller, root) : null)
+          );
+        },
+        async () => {
+          const root = hiddenIn();
+          if (root) {
+            if (focusRef.current) await closeFocusRef.current(true);
+            await openThreadRef.current({ thread: root, title: "" });
+          }
+          jumpToMessage(messageId);
+        },
         t("concierge.tasks.sourceMissing"),
         messageId,
       );
@@ -978,12 +1025,54 @@ export function Chat({
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  const chatThreads = useChatThreadsValue(displayMessages, threadFocus.shown);
   const { focus, open: openFocus, close: closeFocus } = threadFocus;
   closeFocusRef.current = closeFocus;
   focusRef.current = focus;
   rootsRef.current = chatThreads.roots;
   displayedRef.current = displayMessages;
+  // The owner has seen these messages: they read as seen at once, and the
+  // server is told. The server failing to take it changes nothing here, as with
+  // the chat's own read mark: the next open reads them again.
+  const markRead = useCallback((ids: readonly string[]) => {
+    const session = mainSessionIdRef.current;
+    if (!session || ids.length === 0) return;
+    const seen = new Set(ids);
+    const unseen = (message: ChatMessage) => seen.has(message.id) && message.read === false;
+    setMessages((prev) => {
+      const list = prev.get(session);
+      if (!list?.some(unseen)) return prev;
+      return new Map(prev).set(
+        session,
+        list.map((message) => (unseen(message) ? { ...message, read: true } : message)),
+      );
+    });
+    void apiMarkMessagesRead(session, ids).catch(() => {});
+  }, []);
+  // Opening a thread reads it, and so does a message that arrives in it while
+  // it is open.
+  useEffect(() => {
+    if (focus) markRead(unreadIn(displayMessages, chatThreads.roots, focus.root));
+  }, [focus, displayMessages, chatThreads.roots, markRead]);
+  // A thread whose stack the reader sees has no pill.
+  const waitingRoots = useMemo(() => waitingThreads(chatThreads), [chatThreads]);
+  const visibleStacks = useVisibleStacks(scrollerEl, contentEl, waitingRoots);
+  // A pill of the bottom row takes the reader to its thread's stack and
+  // tints it, without opening the thread, and reads the thread.
+  const showStack = useCallback(
+    (root: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return;
+      const stack = [...scroller.querySelectorAll<HTMLElement>("[data-thread-stack]")].find(
+        (candidate) => candidate.dataset.threadStack === root,
+      );
+      if (stack) {
+        scrollToAnchor(scroller, findMessageAnchor(scroller, root) ?? stack);
+        landOn(scroller, stack);
+      }
+      markRead(unreadIn(displayedRef.current, rootsRef.current, root));
+    },
+    [scrollerEl, scrollToAnchor, landOn, markRead],
+  );
   // With a thread in focus, a quote can only go to what is shown.
   const displayedMessageIds = useMemo(
     () =>
@@ -997,16 +1086,15 @@ export function Chat({
   // A touch device keeps its keyboard down when a thread comes into focus.
   const coarsePointer = useCoarsePointer();
   const openThread = useCallback(
-    (next: ReplyThread) => {
+    async (next: ReplyThread) => {
       // A share picks whole turns, so no thread comes into focus meanwhile.
       if (shareMode || focus) return;
       // A message alone in its thread has no thread to focus.
       const root = chatThreads.roots.get(next.thread);
       if (!root) return;
       const title = chatThreads.titles.get(root) ?? next.title;
-      void openFocus({ ...next, title, root }).then(() => {
-        if (!coarsePointer) composerRef.current?.focus();
-      });
+      await openFocus({ ...next, title, root });
+      if (!coarsePointer) composerRef.current?.focus();
     },
     [shareMode, focus, closeFocus, openFocus, chatThreads, coarsePointer],
   );
@@ -2113,19 +2201,16 @@ export function Chat({
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
-          // A reply the server took, sent inside a thread in focus, leaves the
-          // focus for the whole chat. A send the server turns down (a result
-          // that is not ok, or a thrown one) keeps the thread, so a retry still
-          // replies into it. Another thread opened meanwhile stays. The close is at once, then the view
-          // returns to the end of the chat.
-          if (
-            accepted.ok &&
-            snapshot.chatThread &&
-            focusRef.current?.root === snapshot.chatThread
-          ) {
-            await closeFocusRef.current(true);
-            scrollToBottom("auto");
-            if (!coarsePointer) composerRef.current?.focus();
+          // A Reply sent from the main line starts or joins a thread, whose
+          // messages the main line leaves out for its stack: once the server
+          // takes it, the thread opens in focus, so the owner sees what they
+          // sent and the answer. The same path as pressing the stack.
+          if (accepted.ok && concierge && snapshot.replyTo && !focusRef.current) {
+            const { messageId } = snapshot.replyTo;
+            void openThreadRef.current({
+              thread: rootsRef.current.get(messageId) ?? messageId,
+              title: "",
+            });
           }
           return accepted;
         },
@@ -2149,8 +2234,6 @@ export function Chat({
       startSession,
       notifySessionsChanged,
       concierge,
-      scrollToBottom,
-      coarsePointer,
     ],
   );
 
@@ -2921,6 +3004,13 @@ export function Chat({
                     {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                     <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                      {concierge ? (
+                        <ThreadPills
+                          threads={chatThreads}
+                          onPick={showStack}
+                          visible={visibleStacks}
+                        />
+                      ) : null}
                       {isArchived ? (
                         <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                           <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>

@@ -1,6 +1,7 @@
 import { SourceLabel } from "@/components/chat/reply/chat-threads";
-import { QuotedReply, ReplyConnector } from "@/components/chat/reply/QuotedReply";
-import type { Adjacent, GroupAdjacency } from "@/components/chat/reply/adjacency";
+import { QuotedReply } from "@/components/chat/reply/QuotedReply";
+import { ThreadStack } from "@/components/chat/reply/ThreadStack";
+import type { GroupAdjacency } from "@/components/chat/reply/adjacency";
 import { memo, useMemo, type ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -37,13 +38,12 @@ const GuardianBubble = memo(
   }: {
     msg: ChatMessage;
     arrival?: number;
-    /** How the message is joined to what it answers, when it sits right under it. */
-    adjacent?: Adjacent;
+    /** Whether the message sits right under what it answers, and so shows no quote. */
+    adjacent?: boolean;
   }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const reaction = useReaction(msg);
     const status = useMessageStatus(msg);
-    const quote = parseMessageEntries(msg).find((part) => part.type === "reply_to");
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -67,11 +67,7 @@ const GuardianBubble = memo(
         anchorId={msg.id}
         arrival={arrival}
         className={GUARDIAN_BUBBLE_GAP}
-        connector={
-          adjacent && quote?.type === "reply_to" ? (
-            <ReplyConnector part={quote} hostId={msg.id} side="end" how={adjacent} />
-          ) : undefined
-        }
+        under={<ThreadStack root={msg.id} />}
       >
         <UserMessageBubble
           msg={msg}
@@ -106,8 +102,8 @@ const AgentEntry = memo(function AgentEntry({
   adjacent,
 }: {
   entry: ConciergeEntry;
-  /** How the message is joined to what it answers, when it sits right under it. */
-  adjacent?: Adjacent;
+  /** Whether the message sits right under what it answers, and so shows no quote. */
+  adjacent?: boolean;
   actions: BlockActions;
   arrival: ArrivalProps;
   /** Whether the entry's turn is over and feedback is on. */
@@ -119,6 +115,10 @@ const AgentEntry = memo(function AgentEntry({
   const lastText = parts.findLastIndex((part) => part.type === "text" && part.content.trim());
   // A quote of this message jumps to its first bubble.
   const firstBubble = parts.findIndex(
+    (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
+  );
+  // The thread the message roots hangs its stack under the message's last bubble.
+  const lastBubble = parts.findLastIndex(
     (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
   );
   // A message of several bubbles replies to one bubble's text, not to all of it.
@@ -140,10 +140,6 @@ const AgentEntry = memo(function AgentEntry({
     // under what it answers, the mark that joins it.
     const first = quote?.type === "reply_to" && index === firstBubble ? quote : null;
     const quoted = first && !adjacent ? <QuotedReply part={first} hostId={message.id} /> : null;
-    const connector =
-      first && adjacent ? (
-        <ReplyConnector part={first} hostId={message.id} side="start" how={adjacent} />
-      ) : undefined;
     if (part.type === "task_chat") {
       // The card is a message of its own, so it takes the same details as a bubble.
       return (
@@ -157,7 +153,7 @@ const AgentEntry = memo(function AgentEntry({
           reply={null}
           anchorId={index === firstBubble ? message.id : undefined}
           partOf={message.id}
-          connector={connector}
+          under={index === lastBubble ? <ThreadStack root={message.id} /> : undefined}
         >
           {quoted}
           {renderFlatEntries([part], {
@@ -197,7 +193,7 @@ const AgentEntry = memo(function AgentEntry({
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
         partOf={message.id}
-        connector={connector}
+        under={index === lastBubble ? <ThreadStack root={message.id} /> : undefined}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           <CollapsibleBubbleContent>
@@ -250,7 +246,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   typing: ReactNode;
   /** The ids of the messages a thread in focus hides, or undefined with none in focus. */
   hidden?: ReadonlySet<string>;
-  /** The group's replies that sit right under what they answer. */
+  /** The group's replies that sit right under what they answer: they show no quote. */
   adjacent?: GroupAdjacency;
 }) {
   const allHidden =
@@ -282,7 +278,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 key={entry.message.id}
                 msg={entry.message}
                 arrival={arrival(entry.message.id)["data-arrival"]}
-                adjacent={adjacent?.[entry.message.id]}
+                adjacent={adjacent?.has(entry.message.id)}
               />
             ) : (
               <AgentEntry
@@ -291,7 +287,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 actions={actions}
                 rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
                 arrival={arrival}
-                adjacent={adjacent?.[entry.message.id]}
+                adjacent={adjacent?.has(entry.message.id)}
               />
             )}
             {entry.source ? <SourceLabel source={entry.source} /> : null}

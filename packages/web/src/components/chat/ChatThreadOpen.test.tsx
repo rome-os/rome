@@ -1,4 +1,6 @@
 // @rstest-environment jsdom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
@@ -17,9 +19,13 @@ import {
   type ThreadTimelineMessage,
   threadsOf,
   threadTail,
+  unreadIn,
 } from "./reply/chat-threads";
 import { ReplyBar } from "./reply/ReplyBar";
+import { ThreadPills } from "./reply/ThreadPills";
+import { plainQuote, quoteLine, replyPreview } from "./reply/reply-source";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
+import { threadOfLink } from "./reply/thread-link";
 
 // The quote in a reply, the owner's or the agent's, in a Concierge chat's
 // transcript: where it shows and that it focuses the chat on the reply's
@@ -239,11 +245,17 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-/** `focused` is the thread in focus: a message of it, its name and its root. */
+/**
+ * `focused` is the thread in focus: a message of it, its name and its root.
+ * `stacking` leaves the replies of a thread out of the main timeline for its
+ * stack, as the chat does with no thread in focus; without it, every message
+ * shows, which is how a thread in focus and a share show them.
+ */
 function renderTranscript(
   shown: ChatMessage[] = messages,
   focused?: { thread: string; title: string; root: string },
   selection?: ComponentProps<typeof ConciergeTranscript>["selection"],
+  stacking = false,
 ) {
   const box: { thread: string | null; jumps: string[] } = { thread: null, jumps: [] };
   const rows = buildRows(shown, new Map(), idle.identity, {
@@ -268,7 +280,7 @@ function renderTranscript(
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider value={chatThreadsOf(shown, focused?.root ?? null)}>
+            <ChatThreadsProvider value={chatThreadsOf(shown, focused?.root ?? null, stacking)}>
               <ReplyBar />
               <ConciergeTranscript
                 rows={rows}
@@ -309,7 +321,6 @@ describe("the quote in a reply", () => {
     const anchor = document.querySelector<HTMLElement>('[data-timeline-anchor~="m2"]')!;
     expect(within(anchor).getByText("Which one is closest?")).toBeTruthy();
     expect(anchor.contains(quoteIn("m2"))).toBe(true);
-    expect(quoteIn("m2").querySelector(".rome-reply-hook")).toBeNull();
     // The root and a message that replies to nothing carry no mark.
     expect(
       document.querySelector('[data-timeline-anchor~="m1"]')?.querySelector("[data-reply-quote]"),
@@ -336,29 +347,14 @@ describe("the quote in a reply", () => {
     });
     const far = card("c2", 3, { messageId: "m1", author: "guardian", text: "Plan Kyoto in April" });
     renderTranscript([messages[0]!, near, messages[2]!, far]);
-    expect(quoteIn("c1").querySelector(".rome-reply-hook")).not.toBeNull();
-    expect(quoteIn("c1").getAttribute("aria-label")).toBe("Plan Kyoto in April");
+    // The card right under its request shows no quote.
+    expect(
+      document.querySelector('[data-timeline-anchor~="c1"]')?.querySelector("[data-reply-quote]"),
+    ).toBeNull();
     expect(within(quoteIn("c2")).getByText("Plan Kyoto in April")).toBeTruthy();
-    expect(quoteIn("c2").querySelector(".rome-reply-hook")).toBeNull();
   });
 
-  it("marks a reply under what it answers with a hook, the quoted text its name, and draws no text", () => {
-    renderTranscript();
-    // a1 answers m1, right above it, and a2 answers m2, right above it.
-    for (const [id, quoted] of [
-      ["a1", "Plan Kyoto in April"],
-      ["a2", "Which one is closest?"],
-    ] as const) {
-      const mark = quoteIn(id);
-      expect(mark.getAttribute("aria-label")).toBe(quoted);
-      expect(mark.getAttribute("title")).toBe(quoted);
-      expect(mark.querySelector(".rome-reply-hook")).not.toBeNull();
-      expect(within(mark).queryByText(quoted)).toBeNull();
-    }
-    expect(quotes()).toHaveLength(3);
-    // The guardian's hook stands on the guardian's side.
-    expect(quoteIn("a1").dataset.side).toBe("start");
-    cleanup();
+  it("shows nothing extra on a reply right under what it answers: no quote and no connector", () => {
     renderTranscript([
       ...messages,
       message("m3", "user", "Thanks", "m1", 4, {
@@ -367,11 +363,22 @@ describe("the quote in a reply", () => {
         text: "The river one.",
       }),
     ]);
-    expect(quoteIn("m3").dataset.side).toBe("end");
-    expect(quoteIn("m3").querySelector(".rome-reply-hook")).not.toBeNull();
+    // a1 answers m1, a2 answers m2 and m3 answers a2, each right above it.
+    for (const id of ["a1", "a2", "m3"]) {
+      expect(
+        document
+          .querySelector(`[data-timeline-anchor~="${id}"]`)
+          ?.querySelector("[data-reply-quote]"),
+      ).toBeNull();
+    }
+    // Only m2, which has f1 between it and a1, keeps its quote.
+    expect(quotes().map((quote) => quote.dataset.replyQuote)).toEqual(["a1"]);
+    expect(
+      document.querySelector(".rome-reply-rail, .rome-reply-hook, .rome-reply-line"),
+    ).toBeNull();
   });
 
-  it("joins sibling replies with a line, the first with a hook, on one side and the other", () => {
+  it("shows nothing extra on sibling replies of one message that follow each other", () => {
     const sibling = (id: string, minute: number) =>
       message(id, "assistant", `said ${id}`, "m1", minute, {
         messageId: "m1",
@@ -379,22 +386,27 @@ describe("the quote in a reply", () => {
         text: "Plan Kyoto in April",
       });
     renderTranscript([messages[0]!, sibling("s1", 1), sibling("s2", 1), sibling("s3", 1)]);
-    expect(quoteIn("s1").querySelector(".rome-reply-hook")).not.toBeNull();
-    for (const id of ["s2", "s3"]) {
-      const mark = quoteIn(id);
-      expect(mark.querySelector(".rome-reply-line")).not.toBeNull();
-      expect(mark.querySelector(".rome-reply-hook")).toBeNull();
-      // The line spans the gap between the bubbles of a group.
-      expect(mark.style.height).toBe("8px");
-    }
+    expect(quotes()).toHaveLength(0);
+    expect(screen.getByText("said s3")).toBeTruthy();
   });
 
   it("focuses the thread of the reply that holds it, whoever said it, held on that reply", () => {
     const thread = renderTranscript();
-    fireEvent.click(quoteIn("a2"));
-    expect(thread()).toBe("a2");
     fireEvent.click(quoteIn("m2"));
     expect(thread()).toBe("m2");
+    cleanup();
+    // An agent's reply with another message between it and its request shows a quote too.
+    const apart = renderTranscript([
+      messages[0]!,
+      messages[2]!,
+      message("a9", "assistant", "Done", "m1", 3, {
+        messageId: "m1",
+        author: "guardian",
+        text: "Plan Kyoto in April",
+      }),
+    ]);
+    fireEvent.click(quoteIn("a9"));
+    expect(apart()).toBe("a9");
   });
 
   it("names no task under any message", () => {
@@ -449,9 +461,18 @@ describe("the quote in a reply", () => {
   });
 
   it("goes to the original while a thread is in focus and the thread shows it, and is plain text otherwise", () => {
-    const thread = renderTranscript(messages, { thread: "a2", title: "Kyoto trip", root: "m1" });
-    // a1's original, m1, is in the thread in focus: the quote jumps to it.
-    fireEvent.click(quoteIn("a1"));
+    // a3 answers m1 with m2 between them, so it shows a quote.
+    const apart = [
+      ...messages,
+      message("a3", "assistant", "Also", "m1", 4, {
+        messageId: "m1",
+        author: "guardian",
+        text: "Plan Kyoto in April",
+      }),
+    ];
+    const thread = renderTranscript(apart, { thread: "a2", title: "Kyoto trip", root: "m1" });
+    // m1, its original, is in the thread in focus: the quote jumps to it.
+    fireEvent.click(quoteIn("a3"));
     expect(thread.jumps).toEqual(["m1"]);
     expect(thread()).toBeNull();
     cleanup();
@@ -633,5 +654,314 @@ describe("the transcript with a thread in focus", () => {
     // Without the selection the same focus hides the Flights message.
     renderTranscript(mixed, focusKyoto);
     expect(entry("ax").closest("[data-thread-out]")).not.toBeNull();
+  });
+});
+
+/** Marks message `id` of `all` as not yet seen by the owner. */
+const unseen = (all: ChatMessage[], ...ids: string[]) =>
+  all.map((message) => (ids.includes(message.id) ? { ...message, read: false } : message));
+
+describe("the main timeline", () => {
+  it("leaves out the replies of a thread and keeps its root, other threads' roots and messages in none", () => {
+    renderTranscript(messages, undefined, undefined, true);
+    const ids = [...document.querySelectorAll<HTMLElement>("[data-thread-entry]")].map(
+      (entry) => entry.dataset.threadEntry,
+    );
+    // a1, m2 and a2 reply in the Kyoto thread.
+    expect(ids).toEqual(["m1", "f1"]);
+  });
+
+  it("shows every message with a thread in focus, and in a share", () => {
+    renderTranscript(messages, { thread: "a2", title: "Kyoto trip", root: "m1" }, undefined, true);
+    expect(document.querySelector('[data-thread-entry="a2"]')).not.toBeNull();
+    expect(document.querySelector("[data-thread-stack]")).toBeNull();
+    cleanup();
+    renderTranscript(
+      messages,
+      undefined,
+      { selectableSessionId: "concierge", selectedTurns: new Set(), onToggleTurn: () => {} },
+      false,
+    );
+    expect(document.querySelector('[data-thread-entry="a2"]')).not.toBeNull();
+    expect(document.querySelector("[data-thread-stack]")).toBeNull();
+  });
+
+  it("keeps a reply whose root is not loaded, since no stack could hold it", () => {
+    renderTranscript(messages.slice(1), undefined, undefined, true);
+    expect(document.querySelector('[data-thread-entry="a1"]')).not.toBeNull();
+    expect(document.querySelector("[data-thread-stack]")).toBeNull();
+  });
+});
+
+describe("a thread's stack", () => {
+  const stackOf = (root: string) =>
+    document.querySelector<HTMLElement>(`[data-thread-stack="${root}"]`)!;
+
+  it("hangs in the root bubble's own box, so the bubble is its width reference, not the column that also holds the details row", () => {
+    renderTranscript(messages, undefined, undefined, true);
+    const anchor = document.querySelector<HTMLElement>('[data-timeline-anchor~="m1"]')!;
+    const box = anchor.querySelector<HTMLElement>("[data-bubble-box]")!;
+    const slot = stackOf("m1").parentElement!;
+    // The box holds the bubble and the stack and nothing else in flow, so it is as wide as the bubble.
+    expect(slot.parentElement).toBe(box);
+    expect(box.firstElementChild?.hasAttribute("data-chat-bubble")).toBe(true);
+    // The box takes the bubble's own width cap. Without it a long message leaves
+    // the box wider than the capped bubble, and the stack is inset against the box.
+    const cap = /min\(100%,var\(--container-2xl\)\)/.exec(
+      readFileSync(resolve(import.meta.dirname, "ChatBubble.tsx"), "utf8"),
+    )?.[0];
+    expect(cap).toBeTruthy();
+    expect(box.className).toContain(`has-[[data-thread-stack]]:max-w-[${cap}]`);
+    // The outer box also holds the touch details row: the stack is not its child.
+    expect(slot.parentElement).not.toBe(anchor);
+    // A fixed inset each side, out of the box's flow so it never widens the bubble.
+    expect(slot.className).toContain("absolute");
+    expect(slot.className).toContain("inset-x-4");
+    expect(slot.className).not.toMatch(/(^|\s)(w-|min-w-)/);
+    expect(stackOf("m1").className).toContain("w-full");
+    // The preview is cut to one line.
+    expect(within(stackOf("m1")).getByText("The river one.").className).toContain("truncate");
+  });
+
+  it("gives the bubble a minimum width only when a thread hangs under it", () => {
+    renderTranscript(messages, undefined, undefined, true);
+    // f1 has no replies: its box holds no stack.
+    const plain = document
+      .querySelector<HTMLElement>('[data-timeline-anchor~="f1"]')!
+      .querySelector<HTMLElement>("[data-bubble-box]")!;
+    expect(plain.querySelector("[data-thread-stack-slot]")).toBeNull();
+    // The rule keys on the stack's slot, and sets a width that fits an avatar, words and the count.
+    const css = readFileSync(resolve(import.meta.dirname, "../../globals.css"), "utf8");
+    const rule =
+      /\[data-bubble-box\]:has\(> \[data-thread-stack-slot\]\) > :first-child \{([^}]*)\}/.exec(
+        css,
+      );
+    expect(rule?.[1]).toMatch(/min-width:\s*14rem/);
+  });
+
+  it("shows the newest message of the thread on one line, and the total once all are seen", () => {
+    renderTranscript(messages, undefined, undefined, true);
+    expect(within(stackOf("m1")).getByText("The river one.")).toBeTruthy();
+    // a1, m2 and a2 are replies: three.
+    expect(within(stackOf("m1")).getByText("3 replies")).toBeTruthy();
+    expect(stackOf("m1").hasAttribute("data-unread")).toBe(false);
+    // Only a thread with replies has a stack.
+    expect(stackOf("f1")).toBeNull();
+  });
+
+  it("counts the unread replies the owner did not say, and shows the count in place of the total", () => {
+    renderTranscript(unseen(messages, "a1", "a2", "m2"), undefined, undefined, true);
+    // m2 is the owner's own: it is never unread.
+    expect(stackOf("m1").hasAttribute("data-unread")).toBe(true);
+    expect(within(stackOf("m1")).getByText("2")).toBeTruthy();
+    expect(within(stackOf("m1")).queryByText("3 replies")).toBeNull();
+  });
+
+  it("says nothing of waiting or working", () => {
+    renderTranscript(unseen(messages, "a2"), undefined, undefined, true);
+    expect(stackOf("m1").textContent).not.toMatch(/wait|work/i);
+  });
+
+  it("has a second layer only when the thread has two or more replies", () => {
+    const one = [messages[0]!, messages[1]!];
+    renderTranscript(one, undefined, undefined, true);
+    expect(stackOf("m1").hasAttribute("data-layered")).toBe(false);
+    expect(within(stackOf("m1")).getByText("1 reply")).toBeTruthy();
+    cleanup();
+    renderTranscript(messages, undefined, undefined, true);
+    expect(stackOf("m1").hasAttribute("data-layered")).toBe(true);
+  });
+
+  it("opens the thread in focus when pressed", () => {
+    const thread = renderTranscript(messages, undefined, undefined, true);
+    fireEvent.click(stackOf("m1"));
+    expect(thread()).toBe("m1");
+  });
+
+  it("stands under the root of an agent too, with a card as its newest message", () => {
+    const root = message("r1", "assistant", "Found three flights", "r1", 0);
+    const card = {
+      ...message("c1", "assistant", "", "r1", 1),
+      content: JSON.stringify([
+        { type: "reply_to", messageId: "r1", author: "agent", text: "Found three flights" },
+        { type: "task_chat", chatId: "t1", title: "Book the flight", show: "task" },
+      ]),
+    } as ChatMessage;
+    renderTranscript([root, card], undefined, undefined, true);
+    expect(within(stackOf("r1")).getByText("Book the flight")).toBeTruthy();
+  });
+
+  it("names a question card by its question and an approval card by its title", () => {
+    const root = message("r1", "user", "Book it", "r1", 0);
+    const ask = (card: unknown) =>
+      ({
+        ...message("c1", "assistant", "", "r1", 1),
+        content: JSON.stringify([
+          { type: "task_chat", chatId: "t1", title: "Flights", show: "ask", card },
+        ]),
+      }) as ChatMessage;
+    renderTranscript(
+      [root, ask({ kind: "approval", id: "p1", title: "Pay 300 USD", since: 1 })],
+      undefined,
+      undefined,
+      true,
+    );
+    expect(within(stackOf("r1")).getByText("Pay 300 USD")).toBeTruthy();
+    cleanup();
+    renderTranscript(
+      [
+        root,
+        ask({
+          kind: "question",
+          id: "q1",
+          messageId: "m",
+          since: 1,
+          expired: false,
+          render: { props: { questions: [{ question: "Window or aisle?" }] } },
+        }),
+      ],
+      undefined,
+      undefined,
+      true,
+    );
+    expect(within(stackOf("r1")).getByText("Window or aisle?")).toBeTruthy();
+  });
+
+  it("does not move when a reply arrives: it stays under its root", () => {
+    renderTranscript(messages, undefined, undefined, true);
+    const before = [...document.querySelectorAll("[data-thread-entry]")].map(
+      (entry) => (entry as HTMLElement).dataset.threadEntry,
+    );
+    cleanup();
+    const arrived = [...unseen(messages), message("a3", "assistant", "More", "m1", 9)];
+    renderTranscript(arrived, undefined, undefined, true);
+    const after = [...document.querySelectorAll("[data-thread-entry]")].map(
+      (entry) => (entry as HTMLElement).dataset.threadEntry,
+    );
+    expect(after).toEqual(before);
+    expect(within(stackOf("m1")).getByText("More")).toBeTruthy();
+  });
+});
+
+describe("the pills of threads with new replies", () => {
+  const roots = (all: ChatMessage[]) => threadsOf(all).roots;
+
+  it("lists the threads that have unread replies, the one waiting longest first", () => {
+    const all = unseen(
+      [
+        ...messages,
+        message("n1", "user", "Book a table", "n1", 5),
+        message("n2", "assistant", "Which night?", "n1", 6),
+        message("p1", "user", "Plan Nara", "p1", 7),
+        message("p2", "assistant", "Done", "p1", 8),
+      ],
+      "n2",
+      "a2",
+    );
+    const onPick = rs.fn();
+    render(<ThreadPills threads={chatThreadsOf(all)} onPick={onPick} />);
+    const pills = [...document.querySelectorAll<HTMLElement>("[data-thread-pill]")];
+    // a2 (Kyoto) came before n2; p1 has no unread reply.
+    expect(pills.map((pill) => pill.dataset.threadPill)).toEqual(["m1", "n1"]);
+    expect(pills[0]!.textContent).toBe('New replies in "Kyoto trip"');
+    fireEvent.click(pills[1]!);
+    expect(onPick).toHaveBeenCalledWith("n1");
+    expect(roots(all).get("n2")).toBe("n1");
+  });
+
+  it("shows no row without a pill, and none with a thread in focus", () => {
+    const { container, rerender } = render(
+      <ThreadPills threads={chatThreadsOf(messages)} onPick={() => {}} />,
+    );
+    expect(container.firstChild).toBeNull();
+    rerender(
+      <ThreadPills threads={chatThreadsOf(unseen(messages, "a1"), "m1")} onPick={() => {}} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("is one row that scrolls sideways and never wraps", () => {
+    render(<ThreadPills threads={chatThreadsOf(unseen(messages, "a1"))} onPick={() => {}} />);
+    const row = document.querySelector<HTMLElement>("[data-thread-pills]")!;
+    expect(row.className).toContain("overflow-x-auto");
+    expect(row.className).not.toContain("flex-wrap");
+    expect(document.querySelector("[data-thread-pill]")!.className).toContain("whitespace-nowrap");
+  });
+
+  it("cuts a long thread name short", () => {
+    const long = unseen(
+      [
+        { ...messages[0]!, content: JSON.stringify([{ type: "text", content: "x" }]) },
+        {
+          ...message("a1", "assistant", "Hi", "m1", 1),
+          chatThreadTitle: "A very long thread name indeed",
+        },
+      ],
+      "a1",
+    );
+    render(<ThreadPills threads={chatThreadsOf(long)} onPick={() => {}} />);
+    expect(document.querySelector("[data-thread-pill]")!.textContent).toBe(
+      'New replies in "A very long…"',
+    );
+  });
+
+  it("finds the unread messages of a thread, to read when it opens", () => {
+    const all = unseen(messages, "a1", "a2", "f1");
+    expect(unreadIn(all, roots(all), "m1")).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("a link to a thread in the Concierge's text", () => {
+  const link = (root: string, label = "Flights") =>
+    `See [${label}](#rome-thread=${root}) for the flights.`;
+  const saying = (text: string) => [...messages, message("l1", "assistant", text, "l1", 9)];
+
+  it("draws a chip named for the thread, with its live name over the link's text", () => {
+    renderTranscript(saying(link("m1")), undefined, undefined, true);
+    const chip = screen.getByRole("button", { name: "Open the thread: Kyoto trip" });
+    expect(chip.textContent).toBe("# Kyoto trip");
+    expect(document.body.textContent).not.toContain("rome-thread");
+  });
+
+  it("opens the thread in focus when pressed", () => {
+    const thread = renderTranscript(saying(link("m1")), undefined, undefined, true);
+    fireEvent.click(screen.getByRole("button", { name: "Open the thread: Kyoto trip" }));
+    expect(thread()).toBe("m1");
+  });
+
+  it("is a plain chip, named by the link's text, for a thread the chat does not hold", () => {
+    renderTranscript(saying(link("gone", "Tokyo trip")), undefined, undefined, true);
+    expect(screen.getByText("# Tokyo trip")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open the thread:/ })).toBeNull();
+  });
+
+  it("does not throw on a root that does not decode, and draws no chip", () => {
+    expect(threadOfLink("#rome-thread=%FF")).toBeNull();
+    expect(threadOfLink("#rome-thread=m1")).toBe("m1");
+    expect(threadOfLink("#elsewhere")).toBeNull();
+    expect(() =>
+      renderTranscript(saying(link("%FF", "Broken")), undefined, undefined, true),
+    ).not.toThrow();
+    expect(screen.queryByText("# Broken")).toBeNull();
+    expect(screen.getByText("Broken")).toBeTruthy();
+  });
+
+  it("is plain while a thread is in focus", () => {
+    renderTranscript(
+      [...saying(link("m1"))],
+      { thread: "a2", title: "Kyoto trip", root: "m1" },
+      undefined,
+      true,
+    );
+    // l1 is outside the thread in focus and so hidden, but the chip, if drawn, is no button.
+    expect(screen.queryByRole("button", { name: /Open the thread:/ })).toBeNull();
+  });
+
+  it("reads as its label in every text read as plain words", () => {
+    const text = link("m1");
+    expect(plainQuote(text)).toBe("See Flights for the flights.");
+    expect(quoteLine(text)).toBe("See Flights for the flights.");
+    // An image keeps its markup: only a link reads as its text.
+    expect(plainQuote("![chart](x.png)")).toBe("![chart](x.png)");
   });
 });

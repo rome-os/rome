@@ -8,8 +8,24 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
+import { isRenderable } from "@/components/chat/concierge-groups";
 import { plainQuote, replyPreview } from "./reply-source";
 import type { ReplyTarget } from "./reply-draft";
+
+/**
+ * A thread with replies, as the main timeline shows it under its root
+ * (ThreadStack.tsx): how many replies it has, how many of them the owner has
+ * not seen, and its newest message. The root is not a reply.
+ */
+export interface ThreadStack {
+  root: string;
+  total: number;
+  /** Replies not said by the owner that the owner has not seen. */
+  unread: number;
+  /** Where the newest unread reply stands among the timeline's messages, to order the threads that wait. */
+  unreadAt: number;
+  last: Pick<ChatMessage, "id" | "role" | "content">;
+}
 
 export interface ChatThreads {
   /** The root of the thread each message of more than one is in, by message id: the guardian's too. */
@@ -18,6 +34,10 @@ export interface ChatThreads {
   titles: ReadonlyMap<string, string>;
   /** The root of the thread the transcript is filtered to, or null when it shows every message. */
   focus: string | null;
+  /** Every thread that has replies, by its root. Empty where the timeline shows each message itself. */
+  stacks: ReadonlyMap<string, ThreadStack>;
+  /** The replies the main timeline leaves out for their thread's stack. Empty with a thread in focus. */
+  stacked: ReadonlySet<string>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -31,7 +51,7 @@ export function useChatThreads(): ChatThreads | null {
 
 /** A message of the timeline, as the thread rules read it. */
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
-  Partial<Pick<ChatMessage, "content" | "chatThreadTitle">>;
+  Partial<Pick<ChatMessage, "content" | "chatThreadTitle" | "read" | "sender">>;
 
 /** How much of a root's text names its thread. */
 const THREAD_NAME_MAX = 50;
@@ -82,13 +102,67 @@ export function threadsOf(messages: readonly ThreadTimelineMessage[]): {
   return { roots, titles };
 }
 
-/** What a loaded timeline shows of its chat threads, with the thread in `focus`. */
+/**
+ * The stack of each thread with replies in a loaded timeline, by root, and the
+ * replies that stand in a stack. A reply stands in it only when its root is
+ * loaded: a reply whose root has not paged in yet stays a message of the
+ * timeline, so it is never out of sight with nothing to hold it.
+ */
+function stacksOf(
+  messages: readonly ThreadTimelineMessage[],
+  roots: ReadonlyMap<string, string>,
+): { stacks: Map<string, ThreadStack>; stacked: Set<string> } {
+  const stacks = new Map<string, ThreadStack>();
+  const stacked = new Set<string>();
+  messages.forEach((message, at) => {
+    const root = roots.get(message.id);
+    if (root === undefined || root === message.id || roots.get(root) !== root) return;
+    stacked.add(message.id);
+    // What the owner reads: a message the timeline draws, and no automation's.
+    if (message.role !== "user" && message.role !== "assistant") return;
+    if (message.sender?.kind === "automated") return;
+    if (message.content !== undefined && !isRenderable(message as ChatMessage)) return;
+    const stack = stacks.get(root);
+    const unread = message.role !== "user" && message.read === false;
+    stacks.set(root, {
+      root,
+      total: (stack?.total ?? 0) + 1,
+      unread: (stack?.unread ?? 0) + (unread ? 1 : 0),
+      unreadAt: unread ? at : (stack?.unreadAt ?? -1),
+      last: { id: message.id, role: message.role, content: message.content ?? "[]" },
+    });
+  });
+  return { stacks, stacked };
+}
+
+/**
+ * What a loaded timeline shows of its chat threads, with the thread in `focus`.
+ * Unless `stacking` is off, as in a share, where a message is shown itself
+ * and not as a stack, the main timeline leaves the replies out for stacks. A thread
+ * in focus shows its replies itself, so then there are no stacks.
+ */
 export function chatThreadsOf(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
+  stacking = true,
 ): ChatThreads {
   const { roots, titles } = threadsOf(messages);
-  return { roots, titles, focus };
+  const { stacks, stacked } =
+    stacking && focus === null
+      ? stacksOf(messages, roots)
+      : { stacks: new Map<string, ThreadStack>(), stacked: new Set<string>() };
+  return { roots, titles, focus, stacks, stacked };
+}
+
+/** The ids of the messages in thread `root` that the owner has not seen, the root included. */
+export function unreadIn(
+  messages: readonly ThreadTimelineMessage[],
+  roots: ReadonlyMap<string, string>,
+  root: string,
+): string[] {
+  return messages.flatMap((message) =>
+    roots.get(message.id) === root && message.read === false ? [message.id] : [],
+  );
 }
 
 /**
@@ -127,8 +201,9 @@ export function threadTail(
 export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
+  stacking = true,
 ): ChatThreads {
-  return useMemo(() => chatThreadsOf(messages, focus), [messages, focus]);
+  return useMemo(() => chatThreadsOf(messages, focus, stacking), [messages, focus, stacking]);
 }
 
 /**

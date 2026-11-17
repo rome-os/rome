@@ -255,6 +255,7 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/messages/read`, post)).toBe(404);
     }
     // Nor the guardian the visitor's.
     expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
@@ -2149,6 +2150,49 @@ describe("Webchat API", () => {
     expect(afterRead.find((session) => session.id === created.id)).toMatchObject({
       unread: false,
     });
+  });
+
+  it("marks the messages it is given read, one chat's only, and reads each message's mark", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    await deps.webchatRepo.createSession("read-chat", "Reads");
+    await deps.webchatRepo.recordUserInput("m1", "read-chat", "[]");
+    const reply = (
+      await deps.webchatRepo.addBackendMessage(
+        "read-chat",
+        "turn-1",
+        [{ type: "text", content: "Sunny" }],
+        { replyTo: "m1" },
+      )
+    ).id;
+    const mark = (id: string, body: unknown) =>
+      app.request(`/chat/sessions/${id}/messages/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const readOf = async () =>
+      new Map(
+        (
+          (await (await app.request("/chat/sessions/read-chat/messages")).json()) as {
+            id: string;
+            read?: boolean;
+          }[]
+        ).map((message) => [message.id, message.read]),
+      );
+    expect(await readOf()).toEqual(
+      new Map([
+        ["m1", true],
+        [reply, false],
+      ]),
+    );
+
+    expect((await mark("read-chat", { ids: "nope" })).status).toBe(400);
+    expect((await mark("read-chat", { ids: [1] })).status).toBe(400);
+    expect((await mark("missing-chat", { ids: [reply] })).status).toBe(404);
+    const res = await mark("read-chat", { ids: [reply, "m1", "unknown"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ marked: 1 });
+    expect((await readOf()).get(reply)).toBe(true);
   });
 
   it("emits a content-free OTLP event after a chat session is created", async () => {

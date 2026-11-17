@@ -60,7 +60,7 @@ const DEFAULT_READ_LIMIT = 6;
 const REPLY_TO_PARAMETER = {
   type: "string",
   description:
-    "The id of the one earlier message this replies to: the message_id of a guardian message from its <chat_thread> line, a messageId say returned, or a task's start_message_id for its result. The guardian sees the quote, and the message joins that message's thread. Leave it out for a message that replies to nothing.",
+    "The id of the one earlier message this replies to: the message_id of a guardian message from its <chat_thread> line, a messageId say returned, or a task's start_message_id for its result. The guardian sees the quote, and the message joins that message's thread. Leave it out for a message that replies to nothing, except when the guardian wrote inside a thread: then it replies there.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -656,13 +656,30 @@ export async function buildConciergeTools(
     return task;
   };
 
+  // The message a `say` that names none replies to: the turn's latest
+  // guardian message when every one the turn took was said inside one chat
+  // thread, a reply there and not the thread's root. Otherwise none
+  // (docs/domains/chats.md#chat-thread).
+  const defaultReplyTarget = async () => {
+    const { chatId } = currentTurn();
+    const prompts = await turnPrompts();
+    const threads = new Set<string>();
+    for (const key of prompts) {
+      const thread = (await webchatRepo.getReplyTarget(chatId, key))?.chatThreadId;
+      if (!thread || thread === key) return undefined;
+      threads.add(thread);
+    }
+    return threads.size === 1 ? prompts.at(-1) : undefined;
+  };
+
   const say = async (
     text: string,
     format: "bubble" | "long",
     isPrivate: boolean,
-    replyTo?: string,
+    named?: string,
   ) => {
     const { chatId, turnId } = currentTurn();
+    const replyTo = named ?? (await defaultReplyTarget());
     const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },

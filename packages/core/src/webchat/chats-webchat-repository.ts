@@ -244,6 +244,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
           saidBy: fromAgent ? agentSender(standing) : dashboardSender(line.actor ?? undefined),
           body: { text: partsText(parts) },
           parts,
+          read: true,
           at: line.createdAt,
         });
         const lineId = recorded?.id ?? this.lines.idOf(standing.place.chat, line.id);
@@ -357,27 +358,29 @@ export class ChatsWebChatRepository extends WebChatRepository {
     // The input, its queued link and the session's activity commit together,
     // so an input on record is always one the session can admit.
     return this.db.transaction(() => {
+      // A tagged source records the chain kind; an agent speaking for the guardian uses their account.
+      const sender: SaidBy = saidBy
+        ? {
+            account: {
+              platform: WEBCHAT_PLATFORM,
+              id: saidBy.id.startsWith("automated::")
+                ? saidBy.id
+                : speaksForGuardian({ type: "agent", id: saidBy.id }, actor?.kind)
+                  ? "guardian"
+                  : dashboardAccountId(saidBy.id),
+            },
+            ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
+          }
+        : dashboardSender(actor);
       const recorded = this.lines.record({
         direction: "toRome",
         key: id,
         place: standing.place,
-        // A tagged source records the chain kind; an agent speaking for the guardian uses their account.
-        saidBy: saidBy
-          ? {
-              account: {
-                platform: WEBCHAT_PLATFORM,
-                id: saidBy.id.startsWith("automated::")
-                  ? saidBy.id
-                  : speaksForGuardian({ type: "agent", id: saidBy.id }, actor?.kind)
-                    ? "guardian"
-                    : dashboardAccountId(saidBy.id),
-              },
-              ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
-            }
-          : dashboardSender(actor),
+        saidBy: sender,
         body: { text: partsText(parts) },
         parts,
         ...(replyTo === undefined ? {} : { replyTo }),
+        read: saidByOwner(sender),
         at: new Date(),
       });
       if (!recorded) return false;
@@ -385,6 +388,22 @@ export class ChatsWebChatRepository extends WebChatRepository {
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
+  }
+
+  /**
+   * Opening the chat reads its main line too: every message that is not a
+   * reply inside a thread. The messages of a thread are read when the
+   * reader opens the thread ({@link markMessagesRead}).
+   */
+  override async markSessionRead(id: string) {
+    const standing = this.standingOf(id);
+    if (standing) this.lines.markMainLineRead(standing.place.chat);
+    return await super.markSessionRead(id);
+  }
+
+  override async markMessagesRead(sessionId: string, keys: readonly string[]): Promise<number> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.markRead(standing.place.chat, keys) : 0;
   }
 
   override async setMessageReaction(
@@ -700,6 +719,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       role,
       content: JSON.stringify(parts),
       ...(thread ? { chatThreadId: thread } : {}),
+      read: false,
       createdAt: new Date(Math.floor(at.getTime() / 1000) * 1000),
     };
     this.emitMessageInserted(message);
@@ -1055,6 +1075,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         body: { text: partsText(parts) },
         parts,
         ...(replyTo === undefined ? {} : { replyTo }),
+        read: role === "user",
         at,
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
@@ -1130,6 +1151,13 @@ function dashboardSender(actor: SessionActor | undefined): SaidBy {
   return { account: { platform: WEBCHAT_PLATFORM, id: "guardian" } };
 }
 
+/** Whether `saidBy` is the chat's owner: the guardian, or a visitor on the
+ *  dashboard. What the owner says is read the moment it is recorded. */
+function saidByOwner(saidBy: SaidBy): boolean {
+  const id = saidBy.account.id;
+  return id === "guardian" || id.startsWith("visitor:");
+}
+
 /** The agent's dashboard account where `standing` is, as the sender of its
  *  lines. */
 function agentSender(standing: Standing): SaidBy & { agent: string } {
@@ -1182,6 +1210,8 @@ interface LineRow {
   source_id: string | null;
   chat_thread_id: string | null;
   reaction: string | null;
+  /** 0 or 1: whether the chat's owner has seen the line. */
+  is_read: number;
   line_order: number;
   seq: number;
 }
@@ -1200,6 +1230,7 @@ function storedLine(row: LineRow): TranscriptLine {
     content: row.content,
     chatThreadId: row.chat_thread_id,
     ...(row.reaction === null ? {} : { reaction: row.reaction }),
+    read: row.is_read === 1,
     createdAt: new Date(row.created_at * 1000),
   };
 }
@@ -1233,6 +1264,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       COALESCE((SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id), m.key)
         AS chat_thread_id,
       m.reaction AS reaction,
+      m.read_at IS NOT NULL AS is_read,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -1268,7 +1300,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      NULL AS chat_thread_id, NULL AS reaction,
+      NULL AS chat_thread_id, NULL AS reaction, 1 AS is_read,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,

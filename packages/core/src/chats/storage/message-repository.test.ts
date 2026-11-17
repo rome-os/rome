@@ -453,4 +453,56 @@ describe("MessageRepository", () => {
       ["m2", undefined],
     ]);
   });
+
+  describe("read marks", () => {
+    const at = new Date("2026-10-29T01:00:00Z");
+    const readAt = (key: string) =>
+      testDb.db.all<{ read_at: number | null }>(
+        sql`SELECT read_at FROM chat_messages WHERE key = ${key}`,
+      )[0]?.read_at;
+
+    it("records a message unread unless it says it is read", () => {
+      messages.record(heard("unread", at));
+      messages.record({ ...heard("owned", at), read: true });
+      expect(readAt("unread")).toBeNull();
+      expect(readAt("owned")).toBe(at.getTime() / 1000);
+    });
+
+    it("marks the named messages of the chat read, once", () => {
+      messages.record(heard("a", at));
+      messages.record(heard("b", at));
+      messages.record(heard("c", at));
+      const first = new Date("2026-10-29T02:00:00Z");
+      expect(messages.markRead(chat, ["a", "b", "missing"], first)).toBe(2);
+      expect(readAt("a")).toBe(first.getTime() / 1000);
+      expect(readAt("c")).toBeNull();
+      // A message already read keeps its time.
+      expect(messages.markRead(chat, ["a"], new Date("2026-10-29T03:00:00Z"))).toBe(0);
+      expect(readAt("a")).toBe(first.getTime() / 1000);
+      expect(messages.markRead(chat, [])).toBe(0);
+    });
+
+    it("marks only the chat's own messages", () => {
+      const other = new ChatRepository(testDb.db).start(
+        { platform: "telegram", externalId: "chat-2" as ChatId },
+        "group",
+        null,
+      ).ref;
+      messages.record({ ...heard("a", at), place: placeIn(other) });
+      expect(messages.markRead(chat, ["a"])).toBe(0);
+      expect(readAt("a")).toBeNull();
+    });
+
+    it("marks the main line read and leaves the replies inside a thread", () => {
+      messages.record(heard("root", at));
+      messages.record({ ...heard("reply", at), replyTo: "root" });
+      messages.record({ ...heard("deeper", at), replyTo: "reply" });
+      messages.record(heard("plain", at));
+      expect(messages.markMainLineRead(chat)).toBe(2);
+      expect(readAt("root")).not.toBeNull();
+      expect(readAt("plain")).not.toBeNull();
+      expect(readAt("reply")).toBeNull();
+      expect(readAt("deeper")).toBeNull();
+    });
+  });
 });

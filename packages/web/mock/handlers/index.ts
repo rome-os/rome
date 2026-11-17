@@ -1663,6 +1663,20 @@ export const handlers = [
       unread: found.unread,
     });
   }),
+  // The messages the owner has seen, as the server marks them read.
+  http.post("/api/chat/sessions/:sessionId/messages/read", async ({ params, request }) => {
+    const messages = transcripts[String(params.sessionId)];
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { ids } = (await request.json()) as { ids: string[] };
+    let marked = 0;
+    for (const message of messages) {
+      if (ids.includes(message.id) && message.read === false) {
+        message.read = true;
+        marked += 1;
+      }
+    }
+    return HttpResponse.json({ marked });
+  }),
   // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
   // into the Pinned section and stays there until the page reloads.
   http.patch("/api/chat/sessions/:sessionId/pin", async ({ params, request }) => {

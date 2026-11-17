@@ -36,11 +36,24 @@ function TypingBubble() {
 // each time would defeat the memoized group that draws it.
 const TYPING_BUBBLE = <TypingBubble />;
 
+/** `rows` without the messages `ids` name, and without a row left with none. */
+function withoutMessages(rows: ChatRow[], ids: ReadonlySet<string>): ChatRow[] {
+  return rows.flatMap((row): ChatRow[] => {
+    if (row.kind === "user") return ids.has(row.message.id) ? [] : [row];
+    if (row.kind !== "agent") return [row];
+    const messages = row.messages.filter((message) => !ids.has(message.id));
+    if (messages.length === row.messages.length) return [row];
+    return messages.length === 0 && !row.trace ? [] : [{ ...row, messages }];
+  });
+}
+
 /**
  * The Concierge chat's transcript: the guardian's bubbles, the agent's
  * messages, and a typing indicator while a turn runs. It shows no trace, turn
  * summary, live activity, or live text: the agent's text is private, and what
- * it says arrives as messages. While a chat thread is in focus
+ * it says arrives as messages. A thread's replies are not on its main line:
+ * `useChatThreads().stacked` names them, and the stack under the thread's
+ * root stands for them. While a chat thread is in focus
  * (`useChatThreads().focus`), it marks what is outside the thread for
  * use-thread-focus.ts to fold away, and CSS hides it, except in share
  * selection.
@@ -69,11 +82,18 @@ export function ConciergeTranscript({
   const simulated = useSimulatedTyping(allRows, live);
   const rows = simulated.rows;
   const typing = showsTyping(rows, live, simulated.holding);
-  const items = useMemo(
-    () => buildConciergeItems(rows, { typing, unreadFrom }),
-    [rows, typing, unreadFrom],
-  );
   const threads = useChatThreads();
+  // The replies of a thread are not on the main line: its stack under the
+  // root stands for them.
+  const stacked = threads?.stacked;
+  const mainRows = useMemo(
+    () => (stacked && stacked.size > 0 ? withoutMessages(rows, stacked) : rows),
+    [rows, stacked],
+  );
+  const items = useMemo(
+    () => buildConciergeItems(mainRows, { typing, unreadFrom }),
+    [mainRows, typing, unreadFrom],
+  );
   const hidden = useMemo(
     // Share selection picks whole turns, which can hold messages of other
     // threads: nothing is hidden while it runs, whatever is in focus.

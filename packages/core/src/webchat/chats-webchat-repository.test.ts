@@ -274,6 +274,8 @@ describe("ChatsWebChatRepository", () => {
       ["in-1", "user", "turn-1"],
       ["out-1", "assistant", "turn-1"],
     ]);
+    // What the fork said before is history, not news.
+    expect((await repo.getMessages("fork-1")).map((line) => line.read)).toEqual([true, true]);
   });
   it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
@@ -927,6 +929,58 @@ describe("ChatsWebChatRepository", () => {
         ]);
         expect(await repo.lastInChatThread("chat-1", key)).toBe("m2");
       }
+    });
+
+    describe("read marks", () => {
+      const readOf = async () =>
+        new Map((await repo.getMessages("chat-1")).map((message) => [message.id, message.read]));
+
+      it("reads what the owner said as read, and what an agent said as unread", async () => {
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const answer = await said("Sunny", "m1");
+        const inserted: (boolean | undefined)[] = [];
+        repo.onMessageInserted((message) => inserted.push(message.read));
+        const later = await said("Later");
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [answer, false],
+            [later, false],
+          ]),
+        );
+        expect(inserted).toEqual([false]);
+      });
+
+      it("marks the named messages read, and only in that chat", async () => {
+        await repo.createSession("chat-2", "Other");
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const a = await said("Sunny", "m1");
+        const b = await said("Warm", "m1");
+        expect(await repo.markMessagesRead("chat-2", [a, b])).toBe(0);
+        expect(await repo.markMessagesRead("chat-1", [a, "missing"])).toBe(1);
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [a, true],
+            [b, false],
+          ]),
+        );
+        expect(await repo.markMessagesRead("no-chat", [b])).toBe(0);
+      });
+
+      it("reads the main line when the chat is opened, and leaves a thread's replies", async () => {
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const reply = await said("Sunny", "m1");
+        const alone = await said("Good morning");
+        await repo.markSessionRead("chat-1");
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [reply, false],
+            [alone, true],
+          ]),
+        );
+      });
     });
   });
 });

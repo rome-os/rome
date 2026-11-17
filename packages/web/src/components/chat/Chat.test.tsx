@@ -14,6 +14,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
+import { useChatThreads } from "@/components/chat/reply/chat-threads";
 import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
@@ -41,6 +42,7 @@ import {
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
+  markMessagesRead,
   markSessionRead,
   openTurnStream,
   postSessionTurn,
@@ -201,6 +203,14 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
   WidgetPicker: () => null,
 }));
 
+/** The stacks the transcript would draw, as markers a pill can take the reader to. */
+function Stacks() {
+  const threads = useChatThreads();
+  return [...(threads?.stacks.keys() ?? [])].map((root) => (
+    <div key={root} data-thread-stack={root} data-testid="thread-stack" />
+  ));
+}
+
 function ReplyJump() {
   const reply = useReplyDraft();
   return (
@@ -292,6 +302,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       <div data-testid="agent-anchor" data-timeline-anchor="a1 a2" />
       <div data-concierge-transcript ref={contentRef} />
       <ReplyJump />
+      <Stacks />
       <button
         type="button"
         onClick={() =>
@@ -531,6 +542,7 @@ rs.mock("@/lib/chat-api", () => {
       lastSeenActivityAt: null,
       unread: false,
     }),
+    markMessagesRead: rs.fn().mockResolvedValue({ marked: 0 }),
     openTurnStream: rs.fn((_turnId: string, signal?: AbortSignal) => {
       const body = new ReadableStream({
         start(controller) {
@@ -880,6 +892,37 @@ describe("Chat unread divider", () => {
     await answer(MARK);
     await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
     expect(unreadFrom()).toBe("a3");
+  });
+
+  describe("with a reply in a thread among the unread messages", () => {
+    // a3 replies in the thread a1 started; a4 is on the main line.
+    const threaded = () =>
+      rs
+        .mocked(listSessionMessages)
+        .mockResolvedValue([
+          { ...transcript[0]!, chatThreadId: "a1" },
+          transcript[1]!,
+          { ...transcript[2]!, chatThreadId: "a1" },
+          transcript[3]!,
+        ]);
+
+    it("divides a Concierge chat at the first unread message its main line shows", async () => {
+      threaded();
+      renderChat(
+        <Chat
+          sessionId="concierge"
+          variant="concierge"
+          loadReadMark={() => Promise.resolve(MARK)}
+        />,
+      );
+      await waitFor(() => expect(unreadFrom()).toBe("a4"));
+    });
+
+    it("divides any other chat at the first unread message it draws, whatever its threads", async () => {
+      threaded();
+      renderChat(<Chat sessionId="concierge" loadReadMark={() => Promise.resolve(MARK)} />);
+      await waitFor(() => expect(unreadFrom()).toBe("a3"));
+    });
   });
 
   it("places the divider by the read mark when a message arrives while the mark is pending", async () => {
@@ -3086,7 +3129,7 @@ describe("Chat Concierge empty state", () => {
       expect(composer().dataset.thread).toBe("u-2");
     });
 
-    it("leaves the thread for the whole chat once the server takes the reply", async () => {
+    it("stays in the thread once the server takes the reply, so the next one goes there too", async () => {
       threaded();
       rs.mocked(postSessionTurn).mockResolvedValueOnce({
         ok: true,
@@ -3099,30 +3142,10 @@ describe("Chat Concierge empty state", () => {
 
       fireEvent.click(screen.getByTestId("concierge-send-button"));
 
-      await waitFor(() => expect(composer().dataset.thread).toBe(""));
-      expect(back()).toBeNull();
-    });
-
-    it("scrolls to the newest message only after the focus has closed", async () => {
-      threaded();
-      rs.mocked(postSessionTurn).mockResolvedValueOnce({
-        ok: true,
-        data: { turnId: "turn-new" },
-      } as never);
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-other-thread"));
-      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
-      const threadAtScroll: Array<string | undefined> = [];
-      stickToBottom.scrollToBottom.mockImplementation(() => {
-        threadAtScroll.push(composer().dataset.thread);
-      });
-
-      fireEvent.click(screen.getByTestId("concierge-send-button"));
-
-      await waitFor(() => expect(composer().dataset.thread).toBe(""));
-      await waitFor(() => expect(threadAtScroll.at(-1)).toBe(""));
-      stickToBottom.scrollToBottom.mockReset();
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      await act(async () => {});
+      expect(composer().dataset.thread).toBe("u-2");
+      expect(back()).not.toBeNull();
     });
 
     it("keeps the thread when the server turns the send down", async () => {
@@ -3159,6 +3182,85 @@ describe("Chat Concierge empty state", () => {
       await act(async () => {});
       expect(composer().dataset.thread).toBe("u-2");
       expect(back()).not.toBeNull();
+    });
+
+    describe("threads with replies the owner has not seen", () => {
+      // Three threads, each started by the owner's message and answered. The
+      // answers of Task one and Task three are unread; Task two's is read.
+      const unreadThreads = () =>
+        rs.mocked(listSessionMessages).mockResolvedValueOnce(
+          (
+            [
+              ["u-1", "user", "First", "u-1", true],
+              ["ar-1", "assistant", "On it", "u-1", false],
+              ["u-2", "user", "Second", "u-2", true],
+              ["ar-2", "assistant", "On it too", "u-2", true],
+              ["u-3", "user", "Third", "u-3", true],
+              ["ar-3", "assistant", "Done", "u-3", false],
+            ] as const
+          ).map(([id, role, text, thread, read]) => ({
+            id,
+            sessionId: "session-1",
+            turnId: `turn-${id}`,
+            role,
+            content: JSON.stringify([{ type: "text", content: text }]),
+            createdAt: "2026-11-10T10:00:00Z",
+            chatThreadId: thread,
+            chatThreadTitle: `Task ${thread}`,
+            read,
+          })),
+        );
+      const pills = () =>
+        [...document.querySelectorAll<HTMLElement>("[data-thread-pill]")].map(
+          (pill) => pill.dataset.threadPill,
+        );
+      const stack = (root: string) =>
+        document.querySelector<HTMLElement>(`[data-thread-stack="${root}"]`)!;
+      let scrollTo: ReturnType<typeof rs.fn>;
+      const original = Element.prototype.scrollTo;
+      beforeEach(() => {
+        scrollTo = rs.fn();
+        Element.prototype.scrollTo = scrollTo as typeof Element.prototype.scrollTo;
+        rs.mocked(markMessagesRead).mockClear();
+      });
+      afterEach(() => {
+        Element.prototype.scrollTo = original;
+      });
+
+      it("shows a pill for each thread that has some, and none for a thread that has not", async () => {
+        unreadThreads();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        expect(pills()).toEqual(["u-1", "u-3"]);
+      });
+
+      it("takes the reader to the thread's stack and tints it without opening it, reads the thread, and goes", async () => {
+        unreadThreads();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        fireEvent.click(document.querySelector("[data-thread-pill='u-1']")!);
+
+        expect(scrollTo).toHaveBeenCalled();
+        expect(stack("u-1").hasAttribute("data-timeline-landed")).toBe(true);
+        expect(stack("u-3").hasAttribute("data-timeline-landed")).toBe(false);
+        expect(composer().dataset.thread).toBe("");
+        expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["ar-1"]);
+        await waitFor(() => expect(pills()).toEqual(["u-3"]));
+      });
+
+      it("hides the row while a thread is in focus, and reads the thread that opens", async () => {
+        unreadThreads();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        expect(pills()).toEqual([]);
+        expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["ar-1"]);
+        expect(markMessagesRead).toHaveBeenCalledTimes(1);
+      });
     });
 
     describe("a click on the blank of the thread", () => {
@@ -3249,6 +3351,51 @@ describe("Chat Concierge empty state", () => {
 
         await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
         expect((await sentRow())?.dataset.chatThread).toBe("u-1");
+      });
+
+      it("opens the thread in focus once the server takes the reply, so the sent message shows", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockResolvedValueOnce({
+          ok: true,
+          data: { turnId: "turn-new" },
+        } as never);
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-a-1"));
+
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        expect(back()).not.toBeNull();
+      });
+
+      it("opens the thread a reply to a message that was alone starts", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockResolvedValueOnce({
+          ok: true,
+          data: { turnId: "turn-new" },
+        } as never);
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-u-3"));
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-3"));
+      });
+
+      it("stays on the main line when the server turns the reply down", async () => {
+        replied();
+        rs.mocked(postSessionTurn).mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          error: "boom",
+        } as never);
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        fireEvent.click(screen.getByTestId("reply-to-a-1"));
+        fireEvent.click(screen.getByTestId("concierge-send-button"));
+        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+        await act(async () => {});
+        expect(composer().dataset.thread).toBe("");
       });
 
       it("starts a thread at a replied message that is alone", async () => {
