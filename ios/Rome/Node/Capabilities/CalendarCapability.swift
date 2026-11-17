@@ -19,6 +19,7 @@ struct CalendarCapability: NodeCapability {
     let name = "Calendar"
     var title: LocalizedStringResource { "Calendar" }
     let symbol = "calendar"
+    var cardIcon: String? { "calendar" }
     var summary: LocalizedStringResource { "Your Rome reads your calendars, and adds or changes events when you ask." }
     var examples: [CapabilityExample] {
         [

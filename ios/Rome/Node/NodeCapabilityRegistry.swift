@@ -73,7 +73,8 @@ struct NodeCapabilityRegistry: Sendable {
                         title: Self.words(capability.title, in: language.locale),
                         summary: Self.words(capability.summary, in: language.locale)
                     ))
-                })
+                }),
+                icon: capability.cardIcon
             ))
         }
         return list

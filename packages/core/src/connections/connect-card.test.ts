@@ -1,4 +1,5 @@
 import { checkWidgetUi } from "@rome-os/app-runtime";
+import { locationCardUi } from "@rome/api-types/location-card";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   connectAccountToolOutput,
@@ -111,6 +112,7 @@ describe("connect_account for a device kind", () => {
     const device = {
       kind: "apple_calendar",
       label: "Calendar",
+      icon: "calendar",
       summary: "Your Rome reads your calendars.",
       labels: {
         en: { title: "Calendar", summary: "Your Rome reads your calendars." },
@@ -133,5 +135,29 @@ describe("connect_account for a device kind", () => {
     expect(ui && checkWidgetUi(ui)).toEqual([]);
     const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
     expect(texts.slice(0, 2)).toEqual(["日历", "你的 Rome 会读取你的日历。"]);
+    expect(ui?.components.find((c) => c.id === "title")).toMatchObject({ icon: "calendar" });
+    // A name no reader draws leaves the title without one.
+    const odd = connectCardUiFromProps({ ...props("en"), icon: "rocket" });
+    expect(odd && checkWidgetUi(odd)).toEqual([]);
+    expect(odd?.components.find((c) => c.id === "title")).not.toHaveProperty("icon");
+  });
+
+  it("is one family with the share-location card: the same parts, in the same order", () => {
+    const connect = connectCardUiFromProps({
+      kind: "apple_health",
+      label: "Apple Health",
+      title: "Apple Health",
+      icon: "heart",
+      device: true,
+    });
+    const location = locationCardUi("To find coffee near you");
+    const shape = (ui: typeof location | null) =>
+      ui?.components.map((c) => [c.id, c.component, "variant" in c ? c.variant : undefined]);
+    expect(shape(connect)).toEqual(shape(location));
+    expect(location.components.find((c) => c.id === "title")).toMatchObject({
+      icon: "map-pin",
+      text: { string: "shareLocationTitle" },
+    });
+    expect(checkWidgetUi(location)).toEqual([]);
   });
 });

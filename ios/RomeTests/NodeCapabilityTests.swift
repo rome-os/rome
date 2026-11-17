@@ -108,7 +108,7 @@ extension DeviceStatus {
             capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
             operations: healthActions.map(\.reportedOperation),
             feeds: "apple_health", permission: "unknown", live: true,
-            summary: list[0].summary, labels: list[0].labels
+            summary: list[0].summary, labels: list[0].labels, icon: "heart"
         ), "HealthKit hides read access: always unknown")
         #expect(list[0].summary == "Your Rome reads the Health data you allow.")
         #expect(list[0].labels?["zh-CN"]?.title == "Apple 健康", "the card's words in each language")

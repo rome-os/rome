@@ -82,6 +82,7 @@ describe("/device-connections routes", () => {
         feeds: "apple_health",
         summary: null,
         labels: {},
+        icon: null,
         state: "working",
         lastSeenAt: new Date(NOW).toISOString(),
       },

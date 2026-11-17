@@ -33,6 +33,8 @@ export interface DeviceConnection {
   summary: string | null;
   /** Its name and summary by language, as the device has them. */
   labels: Record<string, DeviceLabel>;
+  /** The icon the device names for its card, or null. */
+  icon: string | null;
   state: DeviceConnectionState;
   lastSeenAt: string;
 }
@@ -75,6 +77,7 @@ export class DeviceConnectionsRepository {
           feeds: connection.feeds ?? null,
           summary: connection.summary ?? null,
           labels: connection.labels ?? null,
+          icon: connection.icon ?? null,
           originId: report.device.originId ?? null,
           lastSeenAt: now,
         };
@@ -161,6 +164,7 @@ function toConnection(row: Row): DeviceConnection {
     feeds: row.feeds,
     summary: row.summary,
     labels: row.labels ?? {},
+    icon: row.icon,
     state: deviceConnectionState(row),
     lastSeenAt: new Date(row.lastSeenAt).toISOString(),
   };

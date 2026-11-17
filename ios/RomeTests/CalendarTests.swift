@@ -277,6 +277,7 @@ enum CalendarFixtures {
         let chinese = try #require(connection.labels?["zh-CN"])
         #expect(chinese.title == "日历")
         #expect(chinese.summary != connection.summary, "in Chinese, whatever the phone's language")
+        #expect(connection.icon == "calendar")
     }
 
     @Test func theDeviceCardsRomeStringsHaveWords() {

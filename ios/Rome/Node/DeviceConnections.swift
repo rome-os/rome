@@ -57,6 +57,8 @@ struct DeviceConnectionReport: Encodable, Sendable, Equatable {
         /// Its name and summary in each language the app has, by the Rome's
         /// language code (`en`, `zh-CN`), so the card reads in the guardian's.
         var labels: [String: Label]? = nil
+        /// The icon its chat card shows, by a name the readers draw.
+        var icon: String? = nil
     }
 
     struct Label: Encodable, Sendable, Equatable {

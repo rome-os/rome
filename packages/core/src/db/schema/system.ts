@@ -1660,6 +1660,8 @@ export const deviceConnections = sqliteTable(
     labels: text("labels", { mode: "json" }).$type<
       Record<string, { title: string; summary?: string }>
     >(),
+    // The icon for its card, by a name the readers draw, such as `calendar`.
+    icon: text("icon"),
     // The personal-data origin of the app install that reports the row, which
     // stays the same across its sign-ins while the device id does not. Null
     // for an app that reports none.

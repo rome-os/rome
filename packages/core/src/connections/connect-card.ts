@@ -1,4 +1,5 @@
-import type { WidgetUi } from "@rome-os/app-runtime";
+import { WIDGET_UI_ICONS, type WidgetUi, type WidgetUiIcon } from "@rome-os/app-runtime";
+import { promptCardUi } from "@rome/api-types/prompt-card";
 import {
   getEnabledOAuthProviders,
   isOAuthProvider,
@@ -18,6 +19,8 @@ export interface DeviceKind {
   summary?: string;
   /** Its name and summary by language, as the device has them. */
   labels?: Record<string, DeviceLabel>;
+  /** The icon the device names for it, such as `calendar`. */
+  icon?: string;
   /** How it stands now, the best of the devices that report it. */
   state?: DeviceConnection["state"];
   /** The device that reports it, by name, when one does. */
@@ -63,8 +66,9 @@ export function connectCardUi(
   kindLabel: string,
   device = false,
   words?: DeviceLabel,
+  icon?: string,
 ): WidgetUi {
-  if (device) return deviceConnectCardUi(kind, words ?? { title: kindLabel });
+  if (device) return deviceConnectCardUi(kind, words ?? { title: kindLabel }, icon);
   const context = { kind };
   return {
     components: [
@@ -111,44 +115,27 @@ export function connectCardUi(
 
 /**
  * The card for a device kind, in the words of the capability's own page: its
- * name and what it lets Rome do, as the device declared them, and Rome's own
- * strings for the buttons, which each reader shows in the guardian's
- * language. A device that declared no summary gets a generic line. The
- * device's app runs the flow and sends `check` itself when it ends, so the
- * card offers no button for it, and core takes that event without one
- * (`CORE_UNSHOWN_EVENTS` in widget-events).
+ * icon, name and what it lets Rome do, as the device declared them, and Rome's
+ * own strings for the buttons, which each reader shows in the guardian's
+ * language. Built as the share-location card is, so the two read as one
+ * family. A device that declared no summary gets a generic line, and one
+ * whose icon no reader draws gets none. The device's app runs the flow and
+ * sends `check` itself when it ends, so the card offers no button for it, and
+ * core takes that event without one (`CORE_UNSHOWN_EVENTS` in widget-events).
  */
-function deviceConnectCardUi(kind: string, words: DeviceLabel): WidgetUi {
+function deviceConnectCardUi(kind: string, words: DeviceLabel, icon?: string): WidgetUi {
   const context = { kind, device: true };
-  return {
-    components: [
-      { id: "root", component: "Column", children: ["title", "note", "actions"] },
-      { id: "title", component: "Text", text: words.title, variant: "h4" },
-      {
-        id: "note",
-        component: "Text",
-        text: words.summary ?? { string: "deviceConnectNote" },
-        variant: "caption",
-      },
-      { id: "actions", component: "Row", children: ["dismiss", "connect"], justify: "end" },
-      {
-        id: "dismiss",
-        component: "Button",
-        child: "dismiss-label",
-        variant: "default",
-        action: { event: { name: "dismiss", context } },
-      },
-      { id: "dismiss-label", component: "Text", text: { string: "notNow" } },
-      {
-        id: "connect",
-        component: "Button",
-        child: "connect-label",
-        variant: "primary",
-        action: { event: { name: "connect", context } },
-      },
-      { id: "connect-label", component: "Text", text: { string: "connect" } },
-    ],
-  };
+  return promptCardUi({
+    ...(icon && isWidgetIcon(icon) ? { icon } : {}),
+    title: words.title,
+    note: words.summary ?? { string: "deviceConnectNote" },
+    dismiss: { label: { string: "notNow" }, event: "dismiss", context },
+    confirm: { label: { string: "connect" }, event: "connect", context },
+  });
+}
+
+function isWidgetIcon(name: string): name is WidgetUiIcon {
+  return (WIDGET_UI_ICONS as readonly string[]).includes(name);
 }
 
 /** A device kind's name and summary in the guardian's language, else in English. */
@@ -185,6 +172,7 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
       kind: connection.capability,
       label: known?.label ?? connection.title,
       ...(connection.summary ? { summary: connection.summary } : {}),
+      ...(connection.icon ? { icon: connection.icon } : {}),
       ...(connection.labels && Object.keys(connection.labels).length > 0
         ? { labels: connection.labels }
         : {}),
@@ -245,6 +233,7 @@ export function deviceConnectToolOutput(
         label: device.label,
         title: words.title,
         ...(words.summary ? { summary: words.summary } : {}),
+        ...(device.icon ? { icon: device.icon } : {}),
         device: true,
         ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
       },
@@ -294,19 +283,26 @@ export function connectAccountToolOutput(kind: OAuthProvider, widgetsShow: boole
 /** The connect card described as data, for the connection kind a stored
  *  card's props name, or null when they name none Rome connects. */
 export function connectCardUiFromProps(props: unknown): WidgetUi | null {
-  const { kind, label, title, summary, device } = (props ?? {}) as {
+  const { kind, label, title, summary, icon, device } = (props ?? {}) as {
     kind?: unknown;
     label?: unknown;
     title?: unknown;
     summary?: unknown;
+    icon?: unknown;
     device?: unknown;
   };
   if (device === true && typeof kind === "string" && typeof label === "string") {
     // A card stored before the words came from the device names only its label.
-    return connectCardUi(kind, label, true, {
-      title: typeof title === "string" && title ? title : label,
-      ...(typeof summary === "string" && summary ? { summary } : {}),
-    });
+    return connectCardUi(
+      kind,
+      label,
+      true,
+      {
+        title: typeof title === "string" && title ? title : label,
+        ...(typeof summary === "string" && summary ? { summary } : {}),
+      },
+      typeof icon === "string" ? icon : undefined,
+    );
   }
   if (typeof kind !== "string" || !isOAuthProvider(kind)) return null;
   return connectCardUi(kind, OAUTH_PROVIDER_DESCRIPTORS[kind].label);

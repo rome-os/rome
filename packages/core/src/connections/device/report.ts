@@ -67,6 +67,9 @@ export const deviceReportSchema = z.object({
         // What it lets Rome do, in English, as its page says. Optional: older
         // apps send none.
         summary: z.string().min(1).max(300).optional(),
+        // The icon for its card, by a name the readers draw, such as
+        // `calendar`. A name they do not draw shows none.
+        icon: z.string().min(1).max(40).optional(),
         // Its name and summary in each language the device has them, so a
         // connect card reads in the guardian's language.
         labels: z

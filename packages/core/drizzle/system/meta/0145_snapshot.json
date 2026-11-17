@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "84bd7690-0835-491a-a64b-bc89d19cd235",
+  "id": "13f46b91-01f4-47c6-a9c2-4a0c60ed81c3",
   "prevId": "2bf0f5d7-371a-4d61-953c-aaca8e90c46a",
   "tables": {
     "account_profiles": {
@@ -1969,6 +1969,13 @@
         },
         "labels": {
           "name": "labels",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "icon": {
+          "name": "icon",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
