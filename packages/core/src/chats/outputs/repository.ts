@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
+import { createLogger } from "../../logger.js";
 import {
   chatOutputBackfills,
   chatOutputs,
@@ -14,6 +15,8 @@ import {
   outputsInTrace,
   type OutputFound,
 } from "./trace-outputs.js";
+
+const log = createLogger("chat-outputs");
 
 export type ChatOutputRow = typeof chatOutputs.$inferSelect;
 
@@ -90,8 +93,16 @@ export function recordTraceOutputs(
   at: Date,
 ): void {
   if (!mayHoldOutputs(blocks)) return;
-  const found = outputsInTrace(blocks, (id) => storedToolUse(tx, place.messageId, id));
-  insertOutputs(tx, place, found, at);
+  // An output that cannot be recorded never costs the trace it came with.
+  try {
+    const found = outputsInTrace(blocks, (id) => storedToolUse(tx, place.messageId, id));
+    insertOutputs(tx, place, found, at);
+  } catch (error) {
+    log.warn("could not record a turn's outputs", {
+      sessionId: place.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export class ChatOutputsRepository {
