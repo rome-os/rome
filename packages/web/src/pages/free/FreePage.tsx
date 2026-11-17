@@ -23,18 +23,19 @@ export function MainChatRedirect() {
 
 /**
  * The home address opens the chat the rail's Chat entry would: the main chat
- * in Concierge mode or on a device with no stored mode, else the last ordinary
- * chat. The chat list follows the open chat, so opening the main chat here
- * would put a guardian who left the list in Chat mode back in Concierge mode.
+ * in Concierge mode, else, as on a device with no stored mode, the last
+ * ordinary chat. The chat list follows the open chat, so opening the main chat
+ * here would put a guardian who left the list in Chat mode back in Concierge
+ * mode.
  */
 export function HomeRedirect() {
   const mode = useStoredChatListMode();
   const lastOrdinaryChatId = useLastOrdinaryChatId();
   const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
   const to =
-    mode === "chat"
-      ? railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists)
-      : MAIN_CHAT_PATH;
+    mode === "concierge"
+      ? MAIN_CHAT_PATH
+      : railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists);
   return <Navigate to={to} replace />;
 }
 

@@ -52,8 +52,8 @@ describe("the rail's Chat entry", () => {
     expect(chatTile().getAttribute("href")).toBe("/message");
   });
 
-  it("opens the main chat on a device that has not shown a mode", () => {
-    expect(chatTile().getAttribute("href")).toBe("/message");
+  it("opens a blank chat on a device that has not shown a mode", () => {
+    expect(chatTile().getAttribute("href")).toBe("/chat");
   });
 
   it("opens the last ordinary chat in Chat mode", () => {
