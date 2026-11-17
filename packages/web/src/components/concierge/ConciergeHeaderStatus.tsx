@@ -3,6 +3,7 @@ import {
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
   useEffect,
   useRef,
   useState,
@@ -95,10 +96,28 @@ export function ConciergeHeaderStatus({
     "cursor-pointer outline-none outline-2 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
   const trigger = (props: BadgeMenuProps | null) =>
     props ? { type: "button" as const, "aria-label": menuLabel, ...props } : {};
+  const badgeRef = useRef<HTMLElement>(null);
+  const nameRef = useRef<HTMLElement>(null);
+  // The menu stands to the right of the badge and its name tag together, so a
+  // long name never runs under it.
+  const anchor = useRef({
+    getBoundingClientRect: () => {
+      const rects = [badgeRef.current, nameRef.current]
+        .filter((element): element is HTMLElement => element !== null)
+        .map((element) => element.getBoundingClientRect());
+      if (rects.length === 0) return new DOMRect();
+      const left = Math.min(...rects.map((rect) => rect.left));
+      const top = Math.min(...rects.map((rect) => rect.top));
+      const right = Math.max(...rects.map((rect) => rect.right));
+      const bottom = Math.max(...rects.map((rect) => rect.bottom));
+      return new DOMRect(left, top, right - left, bottom - top);
+    },
+  });
   const badgeEl = (props: BadgeMenuProps | null) => {
     const Badge = props ? "button" : "div";
     return (
       <Badge
+        ref={badgeRef as never}
         data-concierge-header-badge
         {...trigger(props)}
         className={cn(
@@ -121,6 +140,7 @@ export function ConciergeHeaderStatus({
     const NameTag = props ? "button" : "div";
     return (
       <NameTag
+        ref={nameRef as never}
         data-concierge-header-name
         {...trigger(props)}
         className={cn(
@@ -138,8 +158,22 @@ export function ConciergeHeaderStatus({
   };
   return (
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
-      {badge ? menu ? <QuickMenu menu={menu}>{badgeEl}</QuickMenu> : badgeEl(null) : null}
-      {!badge && menu ? <QuickMenu menu={menu}>{nameEl}</QuickMenu> : nameEl(null)}
+      {badge ? (
+        menu ? (
+          <QuickMenu menu={menu} anchor={anchor}>
+            {badgeEl}
+          </QuickMenu>
+        ) : (
+          badgeEl(null)
+        )
+      ) : null}
+      {!badge && menu ? (
+        <QuickMenu menu={menu} anchor={anchor}>
+          {nameEl}
+        </QuickMenu>
+      ) : (
+        nameEl(null)
+      )}
       <div
         data-concierge-header-activity
         aria-live="polite"
@@ -188,6 +222,9 @@ function statusText(
 // so it can cross the gap between them.
 const LEAVE_DELAY_MS = 150;
 
+/** Where the header leaves no room beside the badge: the phone layout. */
+const NARROW_QUERY = "(width < 48rem)";
+
 type BadgeMenuProps = {
   onClick: (event: MouseEvent<HTMLElement>) => void;
   onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
@@ -206,13 +243,17 @@ type BadgeMenuProps = {
  */
 function QuickMenu({
   menu,
+  anchor,
   children,
 }: {
   menu: HeaderMenu;
+  anchor: RefObject<{ getBoundingClientRect: () => DOMRect }>;
   children: (props: BadgeMenuProps) => ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
+  const narrow =
+    open && typeof window.matchMedia === "function" && window.matchMedia(NARROW_QUERY).matches;
   const leaveTimer = useRef<number | null>(null);
   // Set when the keyboard opened the menu, which then takes focus.
   const fromKeyboard = useRef(false);
@@ -258,13 +299,17 @@ function QuickMenu({
   };
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
-      <PopoverAnchor asChild>{children(badgeProps)}</PopoverAnchor>
+      <PopoverAnchor virtualRef={anchor} />
+      {children(badgeProps)}
       <PopoverContent
         role="menu"
         aria-label={t("chatHeader.menu")}
-        side="right"
-        align="start"
+        // Beside the badge, as on a desktop; under it where a phone leaves no
+        // room at its side.
+        side={narrow ? "bottom" : "right"}
+        align={narrow ? "center" : "start"}
         sideOffset={8}
+        collisionPadding={8}
         // Hover or a tap leaves focus where it was; Arrow Down moves it to
         // the first item.
         onOpenAutoFocus={(event) => {
