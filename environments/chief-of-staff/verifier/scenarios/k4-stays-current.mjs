@@ -92,17 +92,19 @@ export default {
     const day = await aDayLater(ctx);
     const { changeIds, proposalId, privateId, hours } = day;
     const { k4Changes: said, k4Proposal: proposal, k4Private } = loadHearing();
-    const privateCase = await privateChange(ctx, k4Private, privateId);
     const changes = said.map(({ goal, title, owner, date }) =>
       Object.fromEntries(
         Object.entries({ goal, title, owner, date }).filter(([, v]) => v !== undefined),
       ),
     );
-    const docChecks = await documentChecks(ctx, said, changeIds, proposal, proposalId, hours);
     const { questionId, reply } = await ask(ctx, {
       as: ctx.team.members[0].account,
       text: K2_QUESTION,
     });
+    // Read after the question: an agent that answers only when pinged takes in messages said
+    // without a mention in the turn the next ping starts, so the documents can change only then.
+    const docChecks = await documentChecks(ctx, said, changeIds, proposal, proposalId, hours);
+    const privateCase = await privateChange(ctx, k4Private, privateId);
     const evidence = [...changeIds, proposalId, questionId, reply?.id];
     if (!reply)
       return {
