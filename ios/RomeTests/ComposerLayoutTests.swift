@@ -102,9 +102,10 @@ import UIKit
         (view as? PastingTextView).map { [$0] } ?? view.subviews.flatMap { editors(in: $0) }
     }
 
-    /// Waits for a layout state, laying `view` out on each pass. Under CI load
-    /// other main-actor tests hold the main queue, and the run loop's own
-    /// layout passes come seldom; time queued behind them is not a pass either.
+    /// Waits for a layout state, laying `view` out on each pass. On CI the main
+    /// actor stalls for tens of seconds while the suites start, and the run
+    /// loop's own layout passes come seldom; time queued behind them is not a
+    /// pass either.
     private func waitUntil(_ message: @autoclosure () -> String = "Composer layout did not settle", laying view: UIView? = nil, _ condition: () -> Bool) async throws {
         for _ in 0..<300 {
             view?.layoutIfNeeded()
@@ -115,9 +116,8 @@ import UIKit
         try #require(condition(), Comment(rawValue: message()))
     }
 
-    /// Focus without the system keyboard. Its first bring-up on a CI simulator
-    /// clone can hold the main thread for tens of seconds, and these tests
-    /// check the composer, not the keyboard.
+    /// Focus without the system keyboard: these tests check the composer, and
+    /// the keyboard's bring-up is one more cross-process wait they don't need.
     private func noKeyboard(_ editor: PastingTextView) {
         editor.inputView = UIView(frame: .zero)
         if editor.isFirstResponder { editor.reloadInputViews() }
