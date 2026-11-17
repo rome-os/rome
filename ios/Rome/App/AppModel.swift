@@ -1711,8 +1711,7 @@ final class AppModel {
 
     // MARK: Widget links
 
-    /// A tap on the widget: an app on its instance, the Apps page, or Chat
-    /// to make an app. It waits while no instance is open, as a push does.
+    /// A tap on the widget waits while no instance is open, as a push does.
     func openFromWidget(_ link: WidgetLink) async {
         // The tapped app shows, not the game over it.
         stackGame = nil

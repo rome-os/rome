@@ -376,6 +376,9 @@ struct MainShell: View {
         case .apps:
             show(.apps)
             path = []
+        case .chat:
+            show(.chat)
+            path = []
         case .newApp:
             show(.chat)
             path = []

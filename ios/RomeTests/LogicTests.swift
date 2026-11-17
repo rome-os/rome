@@ -724,6 +724,35 @@ final class StubBackend: RomeBackend {
         #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)
     }
 
+    @Test func shortcutsKeepPickedOrderAlongsideApps() {
+        let chosen = WidgetSlots.choose(
+            picked: [WidgetShortcut.chat.rawValue, "c", WidgetShortcut.apps.rawValue],
+            recent: ["e", "a"], apps: Self.list
+        )
+        #expect(chosen == [.shortcut(.chat), .app(Self.app("c")), .shortcut(.apps), .app(Self.app("e"))])
+    }
+
+    @Test func shortcutsAndAppsAreDedupedAndCapped() {
+        let picked = [WidgetShortcut.apps.rawValue, "b", WidgetShortcut.apps.rawValue, "gone", WidgetShortcut.chat.rawValue, "b", "c"]
+        let chosen = WidgetSlots.choose(picked: picked, recent: ["b", "a"], apps: Self.list)
+        #expect(chosen == [.shortcut(.apps), .app(Self.app("b")), .shortcut(.chat), .app(Self.app("c"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: ["a"], apps: Self.list, limit: 2) == [.shortcut(.apps), .app(Self.app("b"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: [], apps: Self.list, limit: 0).isEmpty)
+    }
+
+    @Test func shortcutsNeedNoShelfAppsAndNeverFillAutomatically() {
+        #expect(WidgetSlots.choose(picked: ["gone", WidgetShortcut.apps.rawValue, WidgetShortcut.chat.rawValue], recent: [], apps: []) == [.shortcut(.apps), .shortcut(.chat)])
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: []).isEmpty)
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: Self.list).map(\.id) == ["a", "b", "c", "d"])
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: []).isEmpty)
+    }
+
+    @Test func scopedAndShortcutIdsStayDistinct() {
+        let apps = [Self.app("chat"), Self.app("apps"), Self.app("@rome/chat")]
+        let chosen = WidgetSlots.choose(picked: [WidgetShortcut.chat.rawValue, "chat", "@rome/chat"], recent: ["apps"], apps: apps)
+        #expect(chosen == [.shortcut(.chat), .app(apps[0]), .app(apps[2]), .app(apps[1])])
+    }
+
     /// Opening an app puts it first among the recent ones, once.
     @Test func recentOpensComeFirst() throws {
         let suite = "rome-tests-\(UUID().uuidString)"
@@ -762,6 +791,18 @@ final class StubBackend: RomeBackend {
         #expect(WidgetLink(url: odd.url(scheme: "rome")) == odd)
     }
 
+    @Test func theChatPageRoundTrips() throws {
+        #expect(WidgetLink.chat.instanceId == nil)
+        for scheme in ["rome", "rome-dev"] {
+            let url = WidgetLink.chat.url(scheme: scheme)
+            #expect(url.absoluteString == "\(scheme)://chat")
+            #expect(url.host == "chat")
+            #expect(url.path.isEmpty)
+            #expect(WidgetLink(url: url) == .chat)
+        }
+        #expect(WidgetLink(url: try #require(URL(string: "rome://chat/x"))) == nil)
+    }
+
     @Test func theAppsPageAndNewApp() throws {
         #expect(WidgetLink(url: try #require(URL(string: "rome://apps"))) == .apps)
         #expect(WidgetLink(url: try #require(URL(string: "rome-dev://new-app"))) == .newApp)
@@ -770,7 +811,7 @@ final class StubBackend: RomeBackend {
 
     /// Anything else is not a widget link.
     @Test func otherURLsAreRefused() throws {
-        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat", "other://app/a/b"] {
+        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat/", "rome://chat/x", "other://app/a/b"] {
             #expect(WidgetLink(url: try #require(URL(string: text))) == nil, "\(text)")
         }
     }
