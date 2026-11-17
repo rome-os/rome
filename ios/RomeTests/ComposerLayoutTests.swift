@@ -226,6 +226,54 @@ import UIKit
         #expect(editor.selectedRange.location == (draft.text as NSString).length)
     }
 
+    /// Typing into a restored draft keeps every key and the caret where it types. The Chat
+    /// keeps its draft in `@State`, as here, and each key that changes the field's measure
+    /// redraws the composer before its parent: the field then gets the text from before
+    /// that key, which once dropped the key and sent the caret to the end.
+    @Test func typingIntoARestoredDraftKeepsEveryKeyAndTheCaret() async throws {
+        let draft = "Remind me to call the dentist tomorrow at 9 in the morning."
+        let host = UIHostingController(rootView: StateHost(text: draft))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        editor.becomeFirstResponder()
+        try await waitUntil { editor.isFirstResponder }
+        editor.selectedRange = NSRange(location: 0, length: 0)
+
+        // Enough keys to wrap the draft onto more lines, one key per layout pass.
+        let typed = "typed after refusing en 1794877489 and some more words "
+        for key in typed {
+            editor.insertText(String(key))
+            try await Task.sleep(for: .milliseconds(16))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(editor.text == typed + draft)
+        #expect(editor.selectedRange.location == (typed as NSString).length)
+    }
+
+    private struct StateHost: View {
+        @State var text: String
+        @State private var focused = true
+
+        var body: some View {
+            VStack {
+                Spacer()
+                Composer(text: $text, placeholder: "Message", focused: $focused,
+                    attachments: ComposerAttachments(), onSend: {})
+            }
+            .padding(16)
+        }
+    }
+
     final class Reports { var overflow: Bool? }
 
     private struct MeasuredHost: View {
