@@ -40,7 +40,7 @@ const DESCRIPTION =
   "send `text` as your message instead. Components, as A2UI: each has a unique `id`, and the one " +
   'with id "root" is drawn first. `Column`/`Row` (`children`: ids; Row `justify`: ' +
   '"spaceBetween" for tiles) and `List` (`children`) lay out; `Text` (`text`, `variant` h1–h5, ' +
-  "caption or body); `Markdown` (`text`: Markdown, for notes with emphasis, a nested list or " +
+  "caption or body); `Markdown` (`text`: Markdown, for notes with emphasis, a list or " +
   "a table; links and images show as plain text); `Stat` is a metric tile (`label`, `value`, optional `unit` and `caption`, " +
   "such as the usual range); `Progress` (`value` from 0 to `max`, default 1, optional `label`). " +
   `Put at most three Stats in a Row, so they fit a phone. Example ui: ${EXAMPLE}`;

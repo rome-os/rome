@@ -16,6 +16,7 @@ import {
   Streamdown,
   type Components,
   type MermaidOptions,
+  type PluginConfig,
   type StreamdownProps,
 } from "streamdown";
 import { cn } from "./cn.js";
@@ -175,6 +176,13 @@ export interface MarkdownProps {
   controls?: StreamdownProps["controls"];
   lineNumbers?: StreamdownProps["lineNumbers"];
   urlTransform?: StreamdownProps["urlTransform"];
+  /**
+   * Draws only what never opens or loads anything: text, lists, quotes,
+   * tables and code. A link shows as its text and an image as its alt text,
+   * raw HTML is dropped, and math and diagram fences stay code. Overrides
+   * `linkComponent` and `imageComponent`.
+   */
+  inert?: boolean;
 }
 
 interface MdastNode {
@@ -285,6 +293,32 @@ const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
   rehypeDeferImages,
   rehypeTrimListItemWhitespace,
 ];
+
+// Inert Markdown leaves raw HTML out rather than trusting the sanitizer with
+// it, so the only elements that could load or open something are the `a`
+// and `img` that Markdown itself makes.
+const INERT_REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
+  ...Object.entries(defaultRehypePlugins)
+    .filter(([name]) => name !== "raw")
+    .map(([, plugin]) => plugin),
+  rehypeTrimListItemWhitespace,
+];
+
+function InertLink({ children }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  return <span>{children}</span>;
+}
+
+function InertImage({ alt }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
+  return alt ? <span>{alt}</span> : null;
+}
+
+// Diagrams draw their own SVG, links and images included, out of reach of the
+// `a` and `img` overrides, and math can link too, so inert Markdown keeps
+// neither plugin.
+function inertPlugins(plugins: PluginConfig): PluginConfig {
+  const { mermaid: _mermaid, math: _math, ...rest } = plugins;
+  return rest;
+}
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
   fontFamily: ["--font-sans"],
@@ -536,18 +570,23 @@ function MarkdownImpl({
   controls,
   lineNumbers,
   urlTransform,
+  inert = false,
 }: MarkdownProps) {
   // Keep the check conservative so nested and still-streaming fences are included.
-  const hasMermaidFence = /(?:```|~~~)[ \t]*mermaid\b/.test(children);
+  const hasMermaidFence = !inert && /(?:```|~~~)[ \t]*mermaid\b/.test(children);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const setRootFromMarker = useCallback((marker: HTMLSpanElement | null) => {
     setRoot(marker?.previousElementSibling as HTMLDivElement | null);
   }, []);
   useEffect(() => requestMarkdownPlugins(children), [children]);
-  const plugins = useSyncExternalStore(
+  const allPlugins = useSyncExternalStore(
     subscribeToMarkdownPlugins,
     getMarkdownPlugins,
     getMarkdownPlugins,
+  );
+  const plugins = useMemo(
+    () => (inert ? inertPlugins(allPlugins) : allPlugins),
+    [allPlugins, inert],
   );
   const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme, hasMermaidFence);
   const mermaidOptions = useMemo<MermaidOptions>(() => {
@@ -566,7 +605,7 @@ function MarkdownImpl({
 
   const components = useMemo<Components>(
     () => ({
-      a: linkComponent ?? MarkdownLink,
+      a: inert ? InertLink : (linkComponent ?? MarkdownLink),
       h1: MarkdownHeading1,
       h2: MarkdownHeading2,
       h3: MarkdownHeading3,
@@ -574,10 +613,10 @@ function MarkdownImpl({
       h5: MarkdownHeading5,
       h6: MarkdownHeading6,
       ...(inlineCodeComponent ? { inlineCode: inlineCodeComponent } : {}),
-      ...(imageComponent ? { img: imageComponent } : {}),
+      ...(inert ? { img: InertImage } : imageComponent ? { img: imageComponent } : {}),
       ...(preComponent ? { pre: preComponent } : {}),
     }),
-    [imageComponent, inlineCodeComponent, linkComponent, preComponent],
+    [imageComponent, inert, inlineCodeComponent, linkComponent, preComponent],
   );
 
   const wrapperClass = cn(
@@ -597,7 +636,7 @@ function MarkdownImpl({
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={plugins}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={inert ? INERT_REHYPE_PLUGINS : REHYPE_PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         // Streamdown caps a table at 300px by default and scrolls the rest
         // inside the table. Rome sets a table as text in the column, so it

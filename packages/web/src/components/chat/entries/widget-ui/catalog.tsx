@@ -20,7 +20,7 @@ import {
   TextFieldApi,
 } from "@a2ui/web_core/v0_9";
 import { createComponentImplementation } from "@a2ui/react/v0_9";
-import { type ComponentPropsWithoutRef, createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import Markdown from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,23 +165,10 @@ const Stat = createComponentImplementation(StatApi, ({ props }) => (
   </div>
 ));
 
-// A card opens and loads nothing: a link shows as its text, and an image as
-// its description.
-function LinkAsText({ children }: ComponentPropsWithoutRef<"a">) {
-  return <span>{children}</span>;
-}
-
-function ImageAsText({ alt }: ComponentPropsWithoutRef<"img">) {
-  return alt ? <span>{alt}</span> : null;
-}
-
+// A card opens and loads nothing: inert Markdown shows a link as its text and
+// an image as its description, and draws no diagram or raw HTML.
 const CardMarkdown = createComponentImplementation(MarkdownApi, ({ props }) => (
-  <Markdown
-    compact
-    className="min-w-0 text-foreground"
-    imageComponent={ImageAsText}
-    linkComponent={LinkAsText}
-  >
+  <Markdown compact inert className="min-w-0 text-foreground">
     {shown(props.text)}
   </Markdown>
 ));

@@ -101,7 +101,7 @@ describe("a widget described as data", () => {
     expect(fetch.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(2);
   });
 
-  it("draws Markdown, with a link as its text and an image as its description", async () => {
+  it("draws Markdown that opens and loads nothing: links, images, raw HTML and diagrams", async () => {
     const fetch = rs.spyOn(globalThis, "fetch");
     render(
       <MemoryRouter>
@@ -119,7 +119,14 @@ describe("a widget described as data", () => {
                       {
                         id: "root",
                         component: "Markdown",
-                        text: "**Sleep** was good. See [the CDC](https://www.cdc.gov/sleep/).\n\n![a chart](https://example.com/chart.png)",
+                        text: [
+                          "**Sleep** was good. See [the CDC](https://www.cdc.gov/sleep/).",
+                          "![a chart](https://example.com/chart.png)",
+                          '<img src="https://example.com/raw.png" alt="raw"> <a href="https://example.com/raw">raw link</a>',
+                          "```mermaid",
+                          'flowchart LR\n  A@{ img: "https://example.com/p.png" }\n  click A "https://example.com/open"',
+                          "```",
+                        ].join("\n\n"),
                       },
                     ],
                   },
@@ -136,7 +143,10 @@ describe("a widget described as data", () => {
     expect(bold.getAttribute("data-streamdown")).toBe("strong");
     expect(screen.getByText("the CDC").closest("a")).toBeNull();
     expect(screen.getByText("a chart")).toBeTruthy();
-    expect(document.querySelector("img")).toBeNull();
+    // The diagram stays its source, so it draws no SVG with links or images.
+    expect(await screen.findByText(/click A/)).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.querySelector("img, image, svg a, a[href]")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 
