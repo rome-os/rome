@@ -12,9 +12,10 @@ import { z } from "zod";
 
 /** The components a described card may use. `Text`, `Image`, `Row`,
  *  `Column`, `List`, `Button`, `ChoicePicker` and `TextField` are A2UI's
- *  basic catalog; `Stat` and `Progress` are Rome's. */
+ *  basic catalog; `Stat`, `Progress` and `Markdown` are Rome's. */
 export const WIDGET_UI_COMPONENTS = [
   "Text",
+  "Markdown",
   "Stat",
   "List",
   "Row",
@@ -98,6 +99,17 @@ export type WidgetUiComponent =
       component: "Text";
       text: WidgetUiString;
       variant?: "h1" | "h2" | "h3" | "h4" | "h5" | "caption" | "body";
+    })
+  | (Common & {
+      /**
+       * Markdown text: paragraphs, headings, lists, quotes, code and tables,
+       * with bold, italics and inline code. Readers
+       * draw a link as its text and an image as its description, and show raw
+       * HTML, math and diagrams as their source, so it never opens or loads
+       * anything.
+       */
+      component: "Markdown";
+      text: WidgetUiString;
     })
   | (Common & {
       component: "Stat";
@@ -226,6 +238,13 @@ const ComponentSchema = z.discriminatedUnion("component", [
       component: z.literal("Text"),
       text: Str,
       variant: z.enum(["h1", "h2", "h3", "h4", "h5", "caption", "body"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      component: z.literal("Markdown"),
+      text: Str,
     })
     .strict(),
   z

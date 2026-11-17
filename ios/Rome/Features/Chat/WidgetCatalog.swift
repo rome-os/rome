@@ -8,8 +8,8 @@ import SwiftUI
 /// Rome's A2UI catalog for chat cards, drawn with the app's own `Palette` and
 /// `romeFont`. Google's A2UI engine reads the card, resolves its paths and
 /// keeps its data, as it does for the dashboard; these views only draw. The
-/// components from A2UI's basic catalog keep its schemas; `Stat` and
-/// `Progress` are Rome's.
+/// components from A2UI's basic catalog keep its schemas; `Stat`,
+/// `Progress` and `Markdown` are Rome's.
 @MainActor
 enum WidgetCatalog {
     /// The id the dashboard's catalog uses too, so a card names one catalog.
@@ -18,13 +18,23 @@ enum WidgetCatalog {
     static let catalog = Catalog<ComponentImplementation>(
         id: id,
         protocolVersion: .v09,
-        components: [text, stat, progress, image, row, column, list, button, choicePicker, textField],
+        components: [text, markdown, stat, progress, image, row, column, list, button, choicePicker, textField],
         // The only functions a card may call, in its `checks`.
         functions: [TrimmedRequired(), OrFunction()]
     )
 
     private static let text = ComponentImplementation(api: BasicCatalogComponents.text) { node in
         WidgetText(node: node)
+    }
+
+    /// Markdown notes, with links drawn as their text and images as their
+    /// description, so a card opens and loads nothing.
+    private static let markdown = ComponentImplementation(
+        name: "Markdown",
+        schema: schema(["text": "DynamicString"], required: ["text"])
+    ) { node in
+        MarkdownText(source: node.string(for: "text") ?? "", fontSize: CardScale.body, lineSpacing: 3, textOnly: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private static let stat = ComponentImplementation(
