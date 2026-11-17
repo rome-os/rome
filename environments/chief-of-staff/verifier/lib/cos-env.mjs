@@ -90,6 +90,14 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l));
     },
+    /**
+     * What the agent did with its memory folder since `since`, as `cos-env memory` prints it:
+     * `{ files: [{ path, bytes, modified }], toolUses: [{ time, tool, path }] }`. An
+     * observation only, never evidence. Throws when the environment has no such command.
+     */
+    async memory(since) {
+      return JSON.parse(await call(["memory", "--since", since]));
+    },
     /** A document the app holds for the agent (`goals` or `roster`), as its current text. */
     async doc(name) {
       return call(["doc", name]);

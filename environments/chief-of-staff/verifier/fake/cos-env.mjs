@@ -187,6 +187,9 @@ switch (command) {
       positionals[0] === "roster" ? rosterDocument(state, agent) : goalsDocument(state, agent),
     );
     break;
+  case "memory":
+    console.log(JSON.stringify({ files: [], toolUses: [] }));
+    break;
   case "usage":
     for (const turn of state.turns ?? []) console.log(JSON.stringify(turn));
     break;

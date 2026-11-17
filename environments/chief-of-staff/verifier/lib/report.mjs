@@ -140,6 +140,7 @@ export function renderMarkdown(report) {
         `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : `no${s.kind === "statement" ? ", not a question" : ""}`} | ${cell(s.reply)} | ${cell(s.reason)} |`,
       );
   }
+  if (report.memory) lines.push(...memoryLines(report.memory));
   const a3 = report.results.find((r) => r.rule === "A3");
   if (a3?.cost) lines.push(...costLines(a3.cost, a3.fastCost));
   if (report.romeEvents.length > 0) {
@@ -200,6 +201,24 @@ function costBlock(cost, heading) {
       (t) =>
         `| ${t.turnId} | ${t.start} | ${t.messagesBefore} | ${t.model ?? "unknown"}${t.modelFrom === "setting" ? " (setting)" : ""} | ${usd(t.pricedUsd, 6)} | ${usd(t.recordedUsd, 6)} |`,
     ),
+  );
+  return lines;
+}
+
+function memoryLines(memory) {
+  const lines = [
+    "",
+    "## Memory folder",
+    "",
+    "An observation, never evidence: the rules are scored from the chat alone.",
+    "",
+  ];
+  if (memory.notObserved) return [...lines, `Not observed: ${memory.notObserved}.`];
+  const uses = memory.toolUses ?? [];
+  const count = (tool) => uses.filter((u) => u.tool === tool).length;
+  lines.push(
+    `- Files in the folder at the end of the run: ${memory.files.length}${memory.files.length ? ` (${memory.files.map((f) => `${f.path}, ${f.bytes} bytes`).join("; ")})` : ""}.`,
+    `- The agent's tool calls on the folder during the run: ${uses.length} (${count("Read")} Read, ${count("Write")} Write, ${count("Edit")} Edit, ${uses.length - count("Read") - count("Write") - count("Edit")} other).`,
   );
   return lines;
 }

@@ -16,7 +16,9 @@ import { a3Limit } from "../scenarios/a3-silent.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
-const PHASE_2 = [...PHASE_1, "A2", "A3", "A7", "A8", "K4"];
+const PHASE_2 = [...PHASE_1, "A2", "A3", "A7", "K4"];
+// Moved to a later phase (Ouou, 2026-11-17): listed in a phase 2 run, not run.
+const MOVED = { A8: "not_checked" };
 
 async function runAgainst(agent, options = {}) {
   const { fakeEnv = {}, ...verifyOptions } = options;
@@ -113,10 +115,14 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
 
   it("passes every phase 2 rule for the good stand-in, reporting K7 unscored", async () => {
     const { report, outDir } = await runAgainst("good", { phase: 2 });
-    assert.deepEqual(statuses(report), Object.fromEntries(PHASE_2.map((r) => [r, "pass"])));
+    assert.deepEqual(statuses(report), {
+      ...Object.fromEntries(PHASE_2.map((r) => [r, "pass"])),
+      ...MOVED,
+    });
     const k7 = report.results.find((r) => r.rule === "K7");
     assert.equal(k7.scored, false);
-    assert.equal(report.summary.rules.of, 11, "K7 is left out of the score");
+    assert.equal(report.summary.rules.of, 10, "K7 and A8 are left out of the score");
+    assert.equal(report.memory.files.length, 0, "the memory folder is observed");
     const k5 = report.results.find((r) => r.rule === "K5");
     assert.equal(k5.checks.find((c) => c.name === "a message source is linked").status, "pass");
     const cost = report.results.find((r) => r.rule === "A3").cost;
@@ -137,13 +143,25 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     );
   });
 
-  for (const rule of ["A2", "A3", "A7", "A8", "K4"]) {
+  for (const rule of ["A2", "A3", "A7", "K4"]) {
     it(`fails ${rule} alone in phase 2 for the stand-in that breaks it`, async () => {
       const { report } = await runAgainst(`fail-${rule}`, { phase: 2 });
       const expected = Object.fromEntries(PHASE_2.map((r) => [r, r === rule ? "fail" : "pass"]));
-      assert.deepEqual(statuses(report), expected);
+      assert.deepEqual(statuses(report), { ...expected, ...MOVED });
     });
   }
+
+  it("still runs A8 when named, and fails it for the stand-in that breaks it", async () => {
+    const { report } = await runAgainst("fail-A8", { rules: ["A8"], phase: 2 });
+    assert.deepEqual(statuses(report), { A8: "fail" });
+  });
+
+  it("lists A8 as moved to a later phase, not run, in a phase 2 run", () => {
+    assert.deepEqual(
+      selectScenarios({ phase: 2 }).moved.map((s) => s.rule),
+      ["A8"],
+    );
+  });
 
   it("fails K4 when the goals document takes a proposal as a decision", async () => {
     const { report } = await runAgainst("fail-K4proposal", { rules: ["K4"], phase: 2 });

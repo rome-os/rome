@@ -144,7 +144,12 @@ export function selectScenarios({ rules, phase }) {
       missing: rules.filter((r) => !SCENARIOS.some((s) => s.rule === r)),
     };
   }
-  return { scenarios: SCENARIOS.filter((s) => s.phase <= (phase ?? 1)), missing: [] };
+  const at = phase ?? 1;
+  return {
+    scenarios: SCENARIOS.filter((s) => s.phase <= at),
+    missing: [],
+    moved: SCENARIOS.filter((s) => s.movedFrom !== undefined && s.movedFrom <= at && s.phase > at),
+  };
 }
 
 function verifierCommit() {
@@ -206,7 +211,7 @@ export async function verify({
   if (dirty.length > 0 && !allowDirty) {
     throw new Error(`uncommitted changes in ${dirty.join(", ")}; commit them or pass --dirty`);
   }
-  const { scenarios, missing } = selectScenarios({ rules, phase });
+  const { scenarios, missing, moved = [] } = selectScenarios({ rules, phase });
   const stamp = startedAt.toISOString().replace(/[:.]/g, "-");
   const dir = outDir ?? join(runsDir ?? DEFAULT_RUNS_DIR, `${stamp}-${agentCommit(version)}`);
   mkdirSync(dir, { recursive: true });
@@ -331,6 +336,18 @@ export async function verify({
     });
   }
 
+  for (const scenario of live ? moved : []) {
+    results.push({
+      rule: scenario.rule,
+      title: scenario.title,
+      status: "not_checked",
+      scored: false,
+      reason: "moved to a later phase, not run (Ouou, 2026-11-17)",
+      evidence: [],
+      checks: [],
+    });
+  }
+
   const stoppedByEnvoy = await envoyStops(env, startedAt, answerTimes, results);
 
   // Rome's logs sit beside the report so a silent or failing run can be traced. A copy that
@@ -342,8 +359,17 @@ export async function verify({
     logs = `not copied: ${error.message}`;
   }
 
+  // An observation only: the rules take their evidence from the chat.
+  let memory;
+  try {
+    memory = await env.memory(startedAt.toISOString());
+  } catch (error) {
+    memory = { notObserved: error.message };
+  }
+
   const report = {
     ...head(),
+    memory,
     stoppedByEnvoy,
     logs,
     summary: summarize(results),

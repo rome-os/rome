@@ -27,7 +27,9 @@ async function delivered(env, said, ids, { timeoutMs, pollMs }) {
 export default {
   rule: "A8",
   title: "Catches up",
-  phase: 2,
+  // Ouou (2026-11-17) deferred handling a restart to a later phase; the code stays.
+  phase: 3,
+  movedFrom: 2,
   async run(ctx) {
     const { env } = ctx;
     const { a8Facts, a8Settled } = loadHearing();

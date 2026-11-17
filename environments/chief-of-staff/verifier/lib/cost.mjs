@@ -21,7 +21,7 @@ function ratesFor(model) {
 }
 
 /** The turn's tokens at the model's rates, or null when Rome has no rates for the model. */
-export function pricedUsd(turn, model) {
+function pricedUsd(turn, model) {
   const r = ratesFor(model);
   if (!r) return null;
   const n = (field) => Number(turn[field]) || 0;
