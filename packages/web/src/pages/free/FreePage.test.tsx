@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { writeChatListMode, writeLastOrdinaryChatId } from "@/lib/chat-list-mode";
+import { seedChatListMode } from "@/test/chat-list-mode";
 import FreePage, { HomeRedirect, MainChatRedirect } from "./FreePage";
 
 const concierge = rs.hoisted(() => ({
@@ -105,6 +106,13 @@ describe("HomeRedirect", () => {
     writeChatListMode("concierge");
     renderAt("/");
     expect(screen.getByTestId("where").textContent).toBe("/message");
+  });
+
+  it("opens a blank chat on a device that has not shown a mode", () => {
+    on("concierge");
+    seedChatListMode();
+    renderAt("/");
+    expect(screen.getByTestId("where").textContent).toBe("/chat");
   });
 
   it("opens the last ordinary chat in Chat mode, so a reload keeps the mode", () => {

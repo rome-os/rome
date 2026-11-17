@@ -87,14 +87,10 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
 
 /**
  * The mode for a caller that is not the chat list, such as the rail and the
- * new-chat shortcut. With the Concierge known to be unavailable it is Chat.
- * On a device that has not shown a mode it is `whenUnset`, which keeps what
- * the caller did before the switch existed.
+ * new-chat shortcut. It is Chat with the Concierge known to be unavailable,
+ * and on a device that has not shown a mode.
  */
-export function useChatListModeForShell(
-  conciergeAvailable: boolean,
-  whenUnset: ChatListMode,
-): ChatListMode {
+export function useChatListModeForShell(conciergeAvailable: boolean): ChatListMode {
   const stored = useStoredChatListMode();
-  return conciergeAvailable ? (stored ?? whenUnset) : "chat";
+  return conciergeAvailable ? (stored ?? "chat") : "chat";
 }

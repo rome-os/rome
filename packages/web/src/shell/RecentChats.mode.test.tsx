@@ -155,24 +155,24 @@ describe("the Chat / Concierge switch", () => {
   });
 
   describe("which mode shows", () => {
-    it("starts on Chat for someone with an ordinary chat, and remembers it", async () => {
+    it("starts on Chat on a device that has not shown a mode", async () => {
       serve([mainChat(), chat("mine", "My chat")]);
       open("/chat/unlisted");
       await screen.findByRole("link", { name: "My chat" });
       expect(radio("Chat").getAttribute("aria-checked")).toBe("true");
-      await waitFor(() => expect(stored()).toBe("chat"));
     });
 
-    it("starts on Concierge for someone with only Concierge chats, and remembers it", async () => {
+    it("starts on Chat for someone with only Concierge chats", async () => {
       serve([mainChat(), topic("topic-1", "Calendar"), task("task-1", "Find flights")]);
       concierge.chats = [
         { id: "concierge", name: "Concierge", main: true, unread: 0 },
         { id: "topic-1", name: "Calendar", main: false, unread: 0 },
       ];
       open("/chat/unlisted");
-      await screen.findByRole("link", { name: "Main chat" });
-      expect(radio("Agent").getAttribute("aria-checked")).toBe("true");
-      await waitFor(() => expect(stored()).toBe("concierge"));
+      expect(
+        (await screen.findByRole("radio", { name: "Chat" })).getAttribute("aria-checked"),
+      ).toBe("true");
+      expect(screen.queryByRole("link", { name: "Main chat" })).toBeNull();
     });
 
     it("uses the stored mode over the chats it has", async () => {

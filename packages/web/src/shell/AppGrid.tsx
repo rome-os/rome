@@ -175,7 +175,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const tileClass = railLinkClass(labelled);
   // Chat opens the main chat in Concierge mode, else the ordinary chat last
   // opened here, which is a blank chat once it is gone from the loaded lists.
-  const chatListMode = useChatListModeForShell(true, "concierge");
+  const chatListMode = useChatListModeForShell(true);
   const lastOrdinaryChatId = useLastOrdinaryChatId();
   const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
   const entryHref = (entry: BuiltinNavEntry): string =>

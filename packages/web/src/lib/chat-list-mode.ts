@@ -60,14 +60,6 @@ export function writeLastOrdinaryChatId(id: string): void {
   for (const listener of listeners) listener();
 }
 
-/**
- * The mode of a device that has not shown one: Chat for someone who has
- * ordinary chats, Concierge for someone whose chats are all the Concierge's.
- */
-export function initialChatListMode(hasOrdinaryChat: boolean): ChatListMode {
-  return hasOrdinaryChat ? "chat" : "concierge";
-}
-
 /** The mode a chat of this kind belongs to. */
 export function modeOfChatKind(kind: ChatKind): ChatListMode {
   return isProjectChat(kind) ? "chat" : "concierge";

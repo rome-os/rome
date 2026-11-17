@@ -54,9 +54,7 @@ import {
 } from "@/lib/chat-session";
 import {
   type ChatListMode,
-  initialChatListMode,
   newChatShortcutForPlatform,
-  readChatListMode,
   writeChatListMode,
 } from "@/lib/chat-list-mode";
 import { useStoredChatListMode } from "@/hooks/use-chat-list-mode";
@@ -454,18 +452,8 @@ export function RecentChats({
   );
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
   const storedMode = useStoredChatListMode();
-  const hasOrdinaryChat = (cachedSessions ?? []).some((s) =>
-    isProjectChat(chatKind(s, conciergeChatId)),
-  );
-  // A device with no stored mode starts where its chats are, once the list
-  // has said.
-  const mode: ChatListMode = !hasConcierge
-    ? "chat"
-    : (storedMode ?? (cachedSessions ? initialChatListMode(hasOrdinaryChat) : "chat"));
-  useEffect(() => {
-    if (!hasConcierge || !cachedSessions || readChatListMode() !== null) return;
-    writeChatListMode(initialChatListMode(hasOrdinaryChat));
-  }, [hasConcierge, cachedSessions, hasOrdinaryChat]);
+  // A device with no stored mode starts in Chat.
+  const mode: ChatListMode = hasConcierge ? (storedMode ?? "chat") : "chat";
   // The router renders a navigation as a transition, so the location stays
   // on the old chat until the new one has rendered, which takes a moment
   // when the old one is long. The row a click opens is marked at once, as an
