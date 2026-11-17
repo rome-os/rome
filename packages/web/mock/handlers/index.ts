@@ -100,7 +100,7 @@ import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { MOCK_OUTAGE_ID, pickerDevices, settingsHandlers } from "./settings";
+import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
@@ -626,25 +626,6 @@ const transcripts: Record<string, ChatMessage[]> = {
     afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
     afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
     afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
-    // Task chats wait on Claude's usage limit: one notice, which reads the
-    // open outages for its live count (the mock handler in settings.ts).
-    {
-      id: `${CONCIERGE_CHAT_ID}-outage`,
-      sessionId: CONCIERGE_CHAT_ID,
-      turnId: null,
-      role: "assistant",
-      content: JSON.stringify([
-        {
-          type: "provider_outage",
-          outageId: MOCK_OUTAGE_ID,
-          provider: "anthropic",
-          reason: "quota",
-          chatIds: ["mock-chat-lisbon", "mock-task-question"],
-          alternatives: ["rome_credits"],
-        },
-      ]),
-      createdAt: "2026-08-07T14:30:00.000Z",
-    },
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {

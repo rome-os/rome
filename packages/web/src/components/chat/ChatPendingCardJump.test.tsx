@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ComponentProps, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
 import { AiToolsCard } from "./entries/AiToolsCard";
@@ -10,6 +11,9 @@ import { type Question, questionCardUi } from "@rome/api-types/question-card";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
 import i18n from "@/i18n";
+
+// AI Tools reads the default provider through a query.
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
@@ -58,7 +62,9 @@ function Harness({
             ) : kind === "app" ? (
               <div data-chat-pending-card="">App form</div>
             ) : kind === "ai" ? (
-              <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
+              <QueryClientProvider client={queryClient}>
+                <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
+              </QueryClientProvider>
             ) : kind === "question" || questionResult ? (
               <QuestionCard
                 toolUseId="question"

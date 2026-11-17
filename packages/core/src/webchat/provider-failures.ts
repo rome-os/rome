@@ -24,7 +24,6 @@ import {
   type SignedInProviders,
 } from "../agent/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { SystemNotifyContent } from "../instance/notify-client.js";
 import { createLogger } from "../logger.js";
 import { isConciergeChat, TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
 import type { WebChatRepository } from "./repository.js";
@@ -87,7 +86,14 @@ export interface ProviderFailuresDeps {
   /** The runtime session of a chat's agent, for a turn that never opened one. */
   runtimeOf: (chatId: string, agentName: string) => Promise<string | null>;
   runner: ContinuationRunner;
-  notify?: { send(content: SystemNotifyContent): Promise<unknown> };
+  /** Pushes to the guardian's phone. Absent, nothing is pushed. */
+  notify?: {
+    send(content: {
+      body: string;
+      level?: "active" | "passive";
+      chatId?: string;
+    }): Promise<unknown>;
+  };
   delay?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
