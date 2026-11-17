@@ -121,9 +121,9 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
         <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
           {count > 0 ? (
             <Badge
-              variant="destructive"
-              shape="square"
-              className="h-5 min-w-5 shrink-0 justify-center rounded-4 border-destructive-border px-1 text-aux font-normal tabular-nums"
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums text-primary dark:border-primary/50"
               data-concierge-unread
               role="img"
               aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
@@ -273,9 +273,9 @@ function ConciergeTopicEntry({
         <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
           {count > 0 ? (
             <Badge
-              variant="destructive"
-              shape="square"
-              className="h-5 min-w-5 shrink-0 justify-center rounded-4 border-destructive-border px-1 text-aux font-normal tabular-nums"
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums text-primary dark:border-primary/50"
               data-concierge-unread
               role="img"
               aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}

@@ -853,7 +853,7 @@ export function RecentChats({
         } items-center gap-1 rounded-12 text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
           isActive
             ? onCard
-              ? "bg-surface-hover ring-1 ring-inset ring-border/70"
+              ? "bg-surface-hover ring-1 ring-border/70"
               : ACTIVE_CLASS
             : onCard
               ? "hover:bg-surface-hover"

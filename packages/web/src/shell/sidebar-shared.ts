@@ -19,7 +19,7 @@ export const LINK_CLASS =
 
 // Row state, shared by the wide rows and the rail tiles.
 export const ACTIVE_CLASS =
-  "bg-surface font-normal shadow-4 ring-1 ring-inset ring-border/70 dark:bg-surface-hover [&_.rome-sidebar-icon]:text-primary";
+  "bg-surface font-normal shadow-4 ring-1 ring-border/70 dark:bg-surface-hover [&_.rome-sidebar-icon]:text-primary";
 export const IDLE_CLASS = "hover:bg-surface-hover dark:hover:bg-surface";
 
 // The rail counterpart of LINK_CLASS: a square tile whose tooltip carries the
