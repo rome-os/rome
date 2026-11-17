@@ -860,13 +860,22 @@ const rows = db
      group by m.turn_id order by start`,
   )
   .all(since);
+// The model of the agent session that ran the turn: the newest session for
+// the chat's key opened before the turn started.
+const modelOf = db.prepare(
+  `select provider, model from sessions
+   where channel_thread_key = ? and created_at <= ? order by created_at desc limit 1`,
+);
 for (const r of rows) {
+  const session = r.name ? modelOf.get(r.name, r.start) : undefined;
   process.stdout.write(
     `${JSON.stringify({
       start: new Date(r.start * 1000).toISOString(),
       turnId: r.turn_id,
       sessionId: r.session_id,
       session: r.name ?? null,
+      model: session?.model ?? null,
+      provider: session?.provider ?? null,
       inputTokens: r.input ?? 0,
       outputTokens: r.output ?? 0,
       cacheReadTokens: r.cache_read ?? 0,
