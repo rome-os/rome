@@ -154,7 +154,7 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
-import { agentCardPart, isShowCardTool } from "../../chats/agent-card.js";
+import { claimAgentCard, isShowCardTool } from "../../chats/agent-card.js";
 import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
 import {
   locationAnswerPrompt,
@@ -558,16 +558,16 @@ function trustedWidget(
 ): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
-  // An agent card is Rome's own: trusted only from core's `show_card`, and
-  // checked again here, since the stored part is drawn on every load
-  // (docs/domains/chats.md#agent-card). No other tool may show a core card.
+  // An agent card is Rome's own: stored only as the card core's `show_card`
+  // kept under the token in its output, never as the output prints it, since
+  // any tool can be named `show_card` (docs/domains/chats.md#agent-card).
   if (widget.appId === "core") {
     const card =
-      isShowCardTool(msg.tool) && actionName === undefined && "ui" in widget && !widget.bind
-        ? agentCardPart(widget.ui, widget.text, msg.toolUseId)
+      isShowCardTool(msg.tool) && actionName === undefined
+        ? claimAgentCard(toolOutputObject(msg.output)?.cardToken, msg.toolUseId)
         : null;
-    if (card && "part" in card) return card.part;
-    log.warn("rejected widget: a core card not shown by show_card, or not a valid agent card", {
+    if (card) return card;
+    log.warn("rejected widget: a core card core's show_card did not issue", {
       sessionId,
       tool: typeof msg.tool === "string" ? msg.tool : undefined,
     });

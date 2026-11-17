@@ -1674,8 +1674,17 @@ export async function buildConciergeTools(
               `The card was not shown: ${card.problems.join("; ")}. Fix it and call show_card once more, or say the content with say instead.`,
             );
           }
-          const id = await addMessage([card.part]);
+          // A card joins the thread a threaded follow-up was said in, as a
+          // `say` does, but shows no quote: a card stands alone in its message.
+          const replyTo = await defaultReplyTarget();
+          const { id } = await webchatRepo.addBackendMessage(
+            chatId,
+            turnId,
+            [card.part],
+            replyTo ? { replyTo } : {},
+          );
           said(chatId, turnId, card.part.text);
+          await settleAnswered(replyTo, undefined);
           return {
             sent: "Shown; the guardian sees the card. Send nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
             messageId: id,

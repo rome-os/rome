@@ -1,6 +1,7 @@
 import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import {
   agentCardPart,
+  issueAgentCard,
   SHOW_CARD_INPUT_SCHEMA,
   SHOW_CARD_TOOL,
   showCardDescription,
@@ -8,9 +9,10 @@ import {
 
 /**
  * `show_card`, served with the session's own tools to every agent but the
- * Concierge, which has its own. Where cards show, the result carries the card
- * (`showWidget`) and the webchat drain stores it, trusting it only from this
- * tool (`trustedWidget` in api/routes/webchat.ts). Anywhere else, and in a fork
+ * Concierge, which has its own. Where cards show, the handler keeps the
+ * checked card under a token only this process issues, and the webchat drain
+ * stores the kept card for that token (`trustedWidget` in
+ * api/routes/webchat.ts), never a card a look-alike tool prints. Anywhere else, and in a fork
  * with no speaker, the handler says why it cannot show one, for the model to
  * write the content as text. docs/domains/chats.md#agent-card
  */
@@ -34,6 +36,7 @@ export function showCardTools(input: { widgets: WidgetDrawing; hasSpeaker: boole
           );
         }
         const { ui, text } = card.part;
+        const cardToken = issueAgentCard(card.part);
         return {
           content: [
             {
@@ -43,6 +46,7 @@ export function showCardTools(input: { widgets: WidgetDrawing; hasSpeaker: boole
                 appId: "core",
                 ui,
                 text,
+                cardToken,
                 note: "Shown: the guardian sees the card. Write nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
               }),
             },

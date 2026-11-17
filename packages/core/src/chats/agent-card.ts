@@ -3,6 +3,7 @@
 // it, the agent writes its look and its plain-text line, and the message
 // keeps it as it was shown. Vocabulary: docs/domains/chats.md#agent-card.
 
+import { randomUUID } from "node:crypto";
 import { checkWidgetUi, type MessagePart, type WidgetUi } from "@rome-os/app-runtime";
 
 /** The components an agent card may use: display only. A button, a picker or
@@ -39,7 +40,8 @@ export function isShowCardTool(tool: unknown): boolean {
  *  sends plain text, for a card it cannot show. */
 export function showCardDescription(sayInstead: string): string {
   return (
-    "Show the guardian structured content as a card you compose: steps or an itinerary, options compared, or a few key numbers. It only shows; nobody answers it, and you go on after it. " +
+    "Show the guardian structured content as a card you compose. It only shows; nobody answers it, and you go on after it. " +
+    "Use it only when the content has a real structure that reads better laid out: a few key numbers (such as a daily summary against a usual range), three or more steps or an itinerary, or options compared side by side. Never for a greeting, small talk, a short answer or a single fact. At most one card per reply. Text around the card may add what it does not hold, but never repeats what the card shows. " +
     "`ui` is an A2UI card: a flat list of components, each with an `id`, naming its children by id, drawn from the one whose id is `root`. Components: " +
     "Text {text, variant?: h1|h2|h3|h4|h5|body|caption}; Stat {label, value, unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row and Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
     "A heading Text with a caption Text under it reads as the card's title and subtitle. Stats in one Row show as a grid. " +
@@ -141,4 +143,37 @@ export function agentCardPart(
       ui: ui as WidgetUi,
     },
   };
+}
+
+// Cards core's own `show_card` handed to the webchat drain, by a token only
+// this process issued, with when each lapses. Any tool, such as one on an
+// agent's external MCP server, can be named `show_card` and print the same
+// JSON, so neither the name nor the output proves the card is Rome's; the
+// token does, and the drain stores the card kept here, not the output's. A
+// token outlives no restart, which only drops a card shown across one.
+const issuedCards = new Map<string, { part: AgentCardPart; lapses: number }>();
+const ISSUED_CARD_MS = 30 * 60 * 1000;
+
+/** Keep a card core's `show_card` checked, for the drain to store, and the
+ *  token that claims it. */
+export function issueAgentCard(part: AgentCardPart, now = Date.now()): string {
+  for (const [token, card] of issuedCards) if (card.lapses <= now) issuedCards.delete(token);
+  const token = randomUUID();
+  issuedCards.set(token, { part, lapses: now + ISSUED_CARD_MS });
+  return token;
+}
+
+/** The card a token claims, stored under the tool call that showed it, or
+ *  null when this process issued no such token or it lapsed. A token claims
+ *  its card once. */
+export function claimAgentCard(
+  token: unknown,
+  toolUseId: string,
+  now = Date.now(),
+): AgentCardPart | null {
+  if (typeof token !== "string") return null;
+  const card = issuedCards.get(token);
+  issuedCards.delete(token);
+  if (!card || card.lapses <= now) return null;
+  return { ...card.part, toolUseId };
 }

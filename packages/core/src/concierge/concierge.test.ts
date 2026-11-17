@@ -772,6 +772,28 @@ describe("Concierge tools", () => {
       expect(replyOf(s, named)).toBe("g0");
     });
 
+    it("shows a card that answers a threaded follow-up in that thread, with no quote, and settles it", async () => {
+      const s = setup({ said: false });
+      const answer = rs.spyOn(s.taskRepo, "answerMessage");
+      guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
+      guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Lay out Saturday");
+      const ui = {
+        components: [
+          { id: "root", component: "Column", children: ["title", "s1"] },
+          { id: "title", component: "Text", text: "Saturday in Kyoto", variant: "h3" },
+          { id: "s1", component: "Text", text: "9:00 Fushimi Inari" },
+        ],
+      };
+      const result = await s.tool("show_card", { ui, text: "Saturday: 9:00 Fushimi Inari" });
+      expect(result.isError).toBeFalsy();
+      const card = saidId(result);
+      expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+      expect(partsOf(s, card)).toEqual([
+        expect.objectContaining({ type: "widget", appId: "core", ui }),
+      ]);
+      expect(answer).toHaveBeenCalledWith(CONCIERGE_CHAT, "g1");
+    });
+
     it("replies to nothing when the guardian wrote in the main line, or in several threads", async () => {
       const main = setup({ said: false });
       guardianSays(main, { id: "g1" });

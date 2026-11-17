@@ -16,13 +16,6 @@ const DIAGRAMS_SECTION = [
   "This chat surface renders Mermaid fenced code blocks (```mermaid) as interactive SVG diagrams. Use them to visualize architecture, workflows, state machines, and data flows when a diagram would be clearer than prose. Supported types: flowchart (graph TD/LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, xychart-beta. Focus on structure (the right diagram type and clear labels) and leave styling to the host: the UI themes diagrams with Rome's own fonts and colors, so do NOT add color/font styling — no `%%{init}%%` directives, `style`/`classDef` color rules, or hard-coded fills.",
 ].join("\n");
 
-// Restrained on purpose: most replies stay text (docs/domains/chats.md#agent-card).
-const CARDS_SECTION = [
-  "# Cards",
-  "",
-  "`show_card` shows content as a card you compose. Use it only when the content has a real structure that reads better laid out: a few key numbers (such as a daily summary against a usual range), three or more steps or an itinerary, or options compared side by side. Never for a greeting, small talk, a short answer or a single fact. At most one card per reply. Text around the card may introduce it or add what it does not hold, but never repeats what the card shows. Where `show_card` says cards cannot show, write the content as text.",
-].join("\n");
-
 /** What a system prompt reads of an agent. */
 export interface PromptAgent {
   name: AgentName;
@@ -146,7 +139,7 @@ export function buildSystemPrompt(input: {
   const prompt = sections.join("\n\n");
 
   return input.owner === "core" && input.widgets === "card" && !input.delegatesWork
-    ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}${SECTION_DIVIDER}${CARDS_SECTION}`
+    ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}`
     : prompt;
 }
 
