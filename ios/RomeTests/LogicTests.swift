@@ -5,6 +5,21 @@ import UIKit
 @testable import Rome
 
 @Suite struct MarkdownTests {
+    // A chat card's Markdown opens and loads nothing.
+    @Test func textOnlyDropsLinksAndImages() {
+        let blocks = MarkdownParser.withoutImages(MarkdownParser.parse("""
+        Read [the CDC](https://cdc.gov).
+
+        ![a chart](https://example.com/a.png)
+
+        ![](https://example.com/b.png)
+        """))
+        #expect(blocks == [.paragraph("Read [the CDC](https://cdc.gov)."), .paragraph("a chart")])
+        let line = MarkdownParser.inline("Read [the CDC](https://cdc.gov).", linksAsText: true)
+        #expect(String(line.characters) == "Read the CDC.")
+        #expect(line.runs.allSatisfy { $0.link == nil })
+    }
+
     @Test func parsesBlocks() {
         let blocks = MarkdownParser.parse("""
         # Title

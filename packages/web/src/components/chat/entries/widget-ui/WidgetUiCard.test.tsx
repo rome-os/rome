@@ -101,6 +101,45 @@ describe("a widget described as data", () => {
     expect(fetch.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(2);
   });
 
+  it("draws Markdown, with a link as its text and an image as its description", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch");
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                {
+                  type: "widget",
+                  toolUseId: "w-md",
+                  appId: "core",
+                  text: "Sleep was good.",
+                  ui: {
+                    components: [
+                      {
+                        id: "root",
+                        component: "Markdown",
+                        text: "**Sleep** was good. See [the CDC](https://www.cdc.gov/sleep/).\n\n![a chart](https://example.com/chart.png)",
+                      },
+                    ],
+                  },
+                },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+    const bold = await screen.findByText("Sleep");
+    expect(bold.getAttribute("data-streamdown")).toBe("strong");
+    expect(screen.getByText("the CDC").closest("a")).toBeNull();
+    expect(screen.getByText("a chart")).toBeTruthy();
+    expect(document.querySelector("img")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps a widget part with neither a component nor a description out of the transcript", () => {
     expect(
       parseEntries(JSON.stringify([{ type: "widget", toolUseId: "w", appId: "meals", text: "x" }])),

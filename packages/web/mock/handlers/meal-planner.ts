@@ -180,13 +180,13 @@ export const healthSummaryCard = {
       },
       { id: "spacer", component: "Text", text: "" },
       { id: "hl-title", component: "Text", variant: "h5", text: "Worth your attention" },
-      { id: "hl", component: "List", children: ids("hl1", "hl2") },
       {
-        id: "hl1",
-        component: "Text",
-        text: "Sleep varied a lot last week. Keep bed and wake times steady.",
+        id: "hl",
+        component: "Markdown",
+        text:
+          "- **Sleep** varied a lot last week. Keep bed and wake times steady.\n" +
+          "- Stop screens *30 minutes* before bed, as [the sleep guide](https://example.com) says.",
       },
-      { id: "hl2", component: "Text", text: "Stop screens 30 minutes before bed." },
     ],
   },
 } as TranscriptPart;

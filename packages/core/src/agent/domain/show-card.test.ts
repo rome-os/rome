@@ -21,6 +21,16 @@ describe("checkShowCard", () => {
     expect(checkShowCard(tiles)).toEqual([]);
   });
 
+  it("accepts Markdown notes", () => {
+    const ui = {
+      components: [
+        { id: "root", component: "Column", children: ["notes"] },
+        { id: "notes", component: "Markdown", text: "- **Sleep** varied a lot\n- Steps were low" },
+      ],
+    };
+    expect(checkShowCard(ui)).toEqual([]);
+  });
+
   it.each(["Button", "Image", "TextField", "ChoicePicker"])("refuses a %s", (component) => {
     const ui = {
       components: [

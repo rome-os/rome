@@ -35,6 +35,13 @@ describe("checkWidgetUi", () => {
     expect(checkWidgetUi(mealCard, { "/today": "days/2026-11-11" })).toEqual([]);
   });
 
+  it("accepts Markdown text", () => {
+    const ui = {
+      components: [{ id: "root", component: "Markdown", text: "**Sleep** was *good*." }],
+    };
+    expect(checkWidgetUi(ui)).toEqual([]);
+  });
+
   it("rejects a component outside the catalog", () => {
     const ui = { components: [{ id: "root", component: "Modal", child: "x" }] };
     expect(checkWidgetUi(ui)).not.toEqual([]);

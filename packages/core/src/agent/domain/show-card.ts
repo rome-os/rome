@@ -14,9 +14,11 @@ import {
 export const SHOW_CARD_APP_ID = "core";
 
 /** The components a `show_card` card may use: no `Button`, no inputs, and no
- *  `Image`, whose URL a reader would load by itself. */
+ *  `Image`, whose URL a reader would load by itself. `Markdown` draws its
+ *  links and images as text. */
 export const SHOW_CARD_COMPONENTS: readonly WidgetUiComponentName[] = [
   "Text",
+  "Markdown",
   "Stat",
   "Progress",
   "Row",
