@@ -13,7 +13,7 @@ export interface OutputFound {
 }
 
 /** The trace blocks this module reads. Others pass through untouched. */
-interface ToolUseBlock {
+export interface ToolUseBlock {
   type: "tool_use";
   id?: string;
   tool?: string;
@@ -140,12 +140,26 @@ export function outputsInTrace(
     }
     if (block.type !== "tool_result" || typeof block.toolUseId !== "string") continue;
     const result = block as unknown as ToolResultBlock;
-    // Only a result whose tool could have written or shown a file looks its call up.
+    // Only a result whose tool could have written or shown a file looks its
+    // call up. An action's result shows a file only when it holds a copy's URL.
     if (result.tool && !WRITE_TOOLS.has(result.tool) && result.tool !== ACTION_TOOL) continue;
+    if (result.tool === ACTION_TOOL && !ASSET_URL.test(text(result.output))) continue;
     const use = uses.get(block.toolUseId) ?? findUse(block.toolUseId);
     if (use) found.push(...outputsOfToolCall(use, result));
   }
   return found;
+}
+
+/**
+ * Whether trace block `block` is a call that can make an output: a write
+ * tool's, or `core:show_file`'s. Only these are worth remembering until their
+ * result arrives.
+ */
+export function isOutputCall(block: unknown): block is ToolUseBlock & { id: string } {
+  const use = record(block);
+  if (use?.type !== "tool_use" || typeof use.id !== "string") return false;
+  const tool = typeof use.tool === "string" ? use.tool : undefined;
+  return writtenPaths(tool, use.input).length > 0 || showFilePath(tool, use.input) !== undefined;
 }
 
 /** Whether a trace stretch has a result that might have made an output. */

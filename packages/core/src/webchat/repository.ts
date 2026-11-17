@@ -3,7 +3,11 @@ import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
-import { ChatOutputsRepository, recordTraceOutputs } from "../chats/outputs/repository.js";
+import {
+  ChatOutputsRepository,
+  OutputCalls,
+  recordTraceOutputs,
+} from "../chats/outputs/repository.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -2336,6 +2340,9 @@ export class WebChatRepository {
    * against `now`. A subclass that writes more with the batch calls this
    * inside its own transaction, so the batch commits with it or not at all.
    */
+  /** The output calls of the turns being written, until each ends. */
+  private readonly outputCalls = new OutputCalls();
+
   protected writeTraceBatch(input: TraceBatch, now = new Date()): void {
     const totals = emptyTraceAccountingTotals();
     const blockRows = input.blocks.map((block, i) => {
@@ -2440,6 +2447,7 @@ export class WebChatRepository {
       );
       recordTraceOutputs(
         tx,
+        this.outputCalls,
         { sessionId: input.sessionId, turnId: input.turnId ?? null, messageId: input.messageId },
         input.blocks,
         now,

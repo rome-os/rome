@@ -1,6 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, mkdir, open, realpath, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  type FileHandle,
+  link,
+  mkdir,
+  open,
+  realpath,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { getAssetsDir, getProfileMemoryDir, getProjectsRoot } from "../paths.js";
@@ -183,17 +192,9 @@ export async function storeAssetFromPath(
   const maxBytes = options.maxBytes ?? MAX_ASSET_BYTES;
   const resolved = await resolveShowablePath(path, options.roots);
   const name = basename(resolved);
-
-  // O_NONBLOCK so that a FIFO cannot hang the open; fstat then refuses it.
-  const handle = await open(
-    resolved,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  ).catch(() => {
-    throw new AssetSourceError(`File not found: ${path}`);
-  });
+  const { handle, size } = await openRegularFile(resolved, path);
+  const info = { size };
   try {
-    const info = await handle.stat();
-    if (!info.isFile()) throw new AssetSourceError(`Not a regular file: ${path}`);
     if (info.size > maxBytes) throw new AssetTooLargeError(basename(path), maxBytes);
     return await publish(name, options, async (tmpPath) => {
       if (info.size === 0) {
@@ -214,6 +215,32 @@ export async function storeAssetFromPath(
     });
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * Opens regular file `path` for reading without following a link at its last
+ * step, and answers the open descriptor and its size as `fstat` reads it, so
+ * what is read is the file that was checked. A FIFO cannot hang the open
+ * (`O_NONBLOCK`), and `fstat` refuses it. The caller closes the handle.
+ */
+export async function openRegularFile(
+  path: string,
+  label = path,
+): Promise<{ handle: FileHandle; size: number }> {
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch(() => {
+    throw new AssetSourceError(`File not found: ${label}`);
+  });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new AssetSourceError(`Not a regular file: ${label}`);
+    return { handle, size: info.size };
+  } catch (error) {
+    await handle.close();
+    throw error;
   }
 }
 

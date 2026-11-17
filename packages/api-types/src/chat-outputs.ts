@@ -44,4 +44,9 @@ export interface ChatOutputDto {
 /** `GET /api/chat/sessions/:id/outputs`, newest first. */
 export interface ChatOutputsResponse {
   outputs: ChatOutputDto[];
+  /**
+   * Outputs from before Rome recorded them are still being read back, so the
+   * list may grow. Absent from servers that read back while listing.
+   */
+  indexing?: boolean;
 }

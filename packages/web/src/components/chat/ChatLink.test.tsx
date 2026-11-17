@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ChatLink } from "./ChatLink";
@@ -58,7 +58,7 @@ describe("ChatLink and the chat's outputs", () => {
     renderInWorkspace(
       <OutputLinksContext.Provider
         value={{
-          open: (path) => {
+          open: async (path) => {
             if (!outputs.includes(path)) return false;
             opened.push(path);
             return true;
@@ -72,33 +72,33 @@ describe("ChatLink and the chat's outputs", () => {
     return { opened, followed, store };
   }
 
-  it("opens a file the agent wrote in the Outputs tab, not the Projects panel", () => {
+  it("opens a file the agent wrote in the Outputs tab, not the Projects panel", async () => {
     const { opened, followed, store } = withOutputs(
       <ChatLink href="/projects/default/notes.md">notes</ChatLink>,
       ["/projects/default/notes.md"],
     );
     fireEvent.click(screen.getByText("notes"));
-    expect(opened).toEqual(["/projects/default/notes.md"]);
+    await waitFor(() => expect(opened).toEqual(["/projects/default/notes.md"]));
     expect(followed).toEqual([]);
     expect(store.get("followTargetPath")).toBeUndefined();
   });
 
-  it("keeps following a folder or another file in the Projects panel", () => {
+  it("keeps following a folder or another file in the Projects panel", async () => {
     const { opened, followed } = withOutputs(<ChatLink href="/projects/default">folder</ChatLink>, [
       "/projects/default/notes.md",
     ]);
     fireEvent.click(screen.getByText("folder"));
+    await waitFor(() => expect(followed).toEqual([{ paths: ["/projects/default"], force: true }]));
     expect(opened).toEqual([]);
-    expect(followed).toEqual([{ paths: ["/projects/default"], force: true }]);
   });
 
-  it("opens a shown file's chip in the Outputs tab instead of saving it", () => {
+  it("opens a shown file's chip in the Outputs tab instead of saving it", async () => {
     const { opened } = withOutputs(<ChatLink href={ASSET}>bundle.zip</ChatLink>, [ASSET]);
     const chip = screen.getByRole("link", { name: "bundle.zip" });
     const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
     chip.dispatchEvent(click);
-    expect(opened).toEqual([ASSET]);
     expect(click.defaultPrevented).toBe(true);
+    await waitFor(() => expect(opened).toEqual([ASSET]));
   });
 });
 

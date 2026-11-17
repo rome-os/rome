@@ -1,9 +1,10 @@
-import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import type { ChatOutputSource, ChatOutputsResponse } from "@rome/api-types/chat-outputs";
 import { Hono } from "hono";
 import { ChatOutputs } from "../../chats/outputs/chat-outputs.js";
 import { ChatOutputsRepository } from "../../chats/outputs/repository.js";
-import { createStreamResponse, describeFile } from "../../lib/file-browser-server.js";
+import { describeFile } from "../../lib/file-browser-server.js";
+import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { isConciergeChat } from "../../webchat/privacy.js";
 import type { ApiDeps } from "../deps.js";
@@ -15,6 +16,16 @@ type ChatOutputsApiDeps = Pick<ApiDeps, "db" | "concierge" | "webchatRepo">;
 const INLINE_KINDS = new Set(["image", "video", "audio", "pdf"]);
 const CSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
 
+/** The absolute folder of a chat's project, or null when it names none Rome can place. */
+function projectDirOf(projectPath: string | null | undefined): string | null {
+  if (!projectPath) return null;
+  try {
+    return resolveWebchatProjectPath(projectPath);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A chat's outputs, the files its agent wrote or showed, and each one's bytes.
  * Mount behind the webchat routes' private chat gate, which answers for
@@ -25,7 +36,10 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
   const app = new Hono();
   const outputs = new ChatOutputs({
     repo: new ChatOutputsRepository(deps.db),
-    chat: (id) => deps.webchatRepo.getSession(id),
+    chat: async (id) => {
+      const chat = await deps.webchatRepo.getSession(id);
+      return chat ? { id: chat.id, projectDir: projectDirOf(chat.projectPath) } : null;
+    },
     messages: (id) => deps.webchatRepo.getMessages(id),
   });
 
@@ -41,9 +55,8 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     const chatId = c.req.param("id");
     const chat = await chatOf(chatId);
     if (!chat) return c.json({ error: "Session not found" }, 404);
-    return c.json({
-      outputs: await outputs.list(chatId, chat.taskChats),
-    } satisfies ChatOutputsResponse);
+    const { outputs: list, indexing } = await outputs.list(chatId, chat.taskChats);
+    return c.json({ outputs: list, indexing } satisfies ChatOutputsResponse);
   });
 
   app.get("/chat/sessions/:id/outputs/:outputId/content", async (c) => {
@@ -51,23 +64,29 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     const notFound = () => c.json({ error: "Not found" }, 404);
     const chat = await chatOf(chatId);
     if (!chat) return notFound();
-    const file = await outputs.file(chatId, c.req.param("outputId"), chat.taskChats);
+    const file = await outputs.open(chatId, c.req.param("outputId"), chat.taskChats);
     if (!file) return notFound();
-    let size: number;
-    try {
-      size = (await stat(file.path)).size;
-    } catch {
-      return notFound();
-    }
     const described = describeFile(file.path);
     const inline = INLINE_KINDS.has(described.kind);
-    return createStreamResponse(file.path, 200, {
-      "Cache-Control": "private, no-cache",
-      "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
-      "Content-Disposition": inline ? "inline" : "attachment",
-      "Content-Length": String(size),
-      "Content-Type": described.mimeType,
-      "X-Content-Type-Options": "nosniff",
+    // Streams the descriptor that was checked, never the path opened again,
+    // and only the bytes fstat counted.
+    let body: ReadableStream | null = null;
+    if (file.size === 0) await file.handle.close();
+    else {
+      body = Readable.toWeb(
+        file.handle.createReadStream({ start: 0, end: file.size - 1 }),
+      ) as ReadableStream;
+    }
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-cache",
+        "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
+        "Content-Disposition": inline ? "inline" : "attachment",
+        "Content-Length": String(file.size),
+        "Content-Type": described.mimeType,
+        "X-Content-Type-Options": "nosniff",
+      },
     });
   });
 

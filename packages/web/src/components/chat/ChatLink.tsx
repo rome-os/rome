@@ -203,13 +203,18 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
           {...props}
           onActivate={() => {
             const path = decodeProjectsHref(projectsHref) ?? projectsHref;
+            const follow = () => {
+              // `force` bypasses the user's manual close of the panel — an
+              // explicit click is an explicit request to see the file.
+              eventBus?.emit("projects:opened", { paths: [path], force: true });
+              store.set("followTargetPath", path);
+            };
             // A file the chat's agent wrote opens in its Outputs tab. A folder
             // and any other file follow in the Projects panel.
-            if (outputs?.open(path)) return;
-            // `force` bypasses the user's manual close of the panel — an
-            // explicit click is an explicit request to see the file.
-            eventBus?.emit("projects:opened", { paths: [path], force: true });
-            store.set("followTargetPath", path);
+            if (!outputs) return follow();
+            void outputs.open(path).then((opened) => {
+              if (!opened) follow();
+            });
           }}
         />
       );

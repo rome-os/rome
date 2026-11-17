@@ -145,7 +145,14 @@ export function OutputsPanel({
   const [filter, setFilter] = useState<Filter>("all");
   // A link opened on an output opens that one.
   useEffect(() => setChosen(selectedId), [selectedId, selectionSeq]);
-  const list = outputs.data ?? [];
+  const list = outputs.data?.outputs ?? [];
+  const indexing = outputs.data?.indexing === true;
+  // Earlier outputs still being read back, said quietly where the list is.
+  const indexingNote = indexing ? (
+    <p role="status" className="px-1 text-aux text-muted-foreground">
+      {t("outputs.indexing")}
+    </p>
+  ) : null;
   const current = list.find((output) => output.id === chosen) ?? null;
 
   if (outputs.isPending) {
@@ -173,6 +180,7 @@ export function OutputsPanel({
     );
   }
   if (list.length === 0) {
+    if (indexing) return <div className="p-4">{indexingNote}</div>;
     return (
       <EmptyState className="h-full" role="region">
         <EmptyStateIcon>
@@ -224,6 +232,7 @@ export function OutputsPanel({
           onValueChange={setFilter}
           options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
         />
+        {indexingNote}
         {shown.length === 0 ? (
           <p className="px-1 text-ui text-muted-foreground">{t("outputs.noneOfType")}</p>
         ) : (
@@ -278,7 +287,7 @@ function OutputRow({
   const { t } = useTranslation("chat");
   const type = outputTypeOf(output);
   return (
-    <li className="relative flex min-w-0 items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover">
+    <li className="relative flex min-w-0 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover">
       <TypeIcon type={type} />
       <div className="min-w-0 flex-1">
         {/* The whole row opens the output; the task chat's link sits above it. */}
@@ -296,12 +305,34 @@ function OutputRow({
         <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
           <span className="shrink-0">{t(`outputs.types.${type}`)}</span>
           <span aria-hidden>·</span>
-          <SourceText output={output} />
+          <SourceText output={output} onNavigate={onNavigate} />
         </div>
       </div>
       <span className="shrink-0 text-aux tabular-nums text-muted-foreground">{when}</span>
     </li>
   );
+}
+
+/**
+ * The first `chars` characters of the file at `url`, read from the stream and
+ * then cancelled, so a large file is never downloaded or held whole.
+ */
+export async function readPrefix(
+  url: string,
+  chars: number,
+): Promise<{ text: string; cut: boolean }> {
+  const response = await fetch(url, { credentials: "include", cache: "no-store" });
+  if (!response.ok || !response.body) throw new Error("Failed to load the file");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (text.length <= chars) {
+    const { done, value } = await reader.read();
+    if (done) return { text: text + decoder.decode(), cut: false };
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+  return { text: text.slice(0, chars), cut: true };
 }
 
 function OutputPreview({
@@ -319,11 +350,7 @@ function OutputPreview({
   const textual = kind === "markdown" || kind === "text";
   const text = useQuery({
     queryKey: ["chat-output-text", url],
-    queryFn: async () => {
-      const response = await fetch(url ?? "", { credentials: "include", cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to load the file");
-      return response.text();
-    },
+    queryFn: () => readPrefix(url ?? "", PREVIEW_CHARS),
     enabled: textual && Boolean(url),
   });
 
@@ -399,8 +426,7 @@ function OutputPreview({
       </div>
     );
   }
-  const body = text.data.slice(0, PREVIEW_CHARS);
-  const cut = text.data.length > PREVIEW_CHARS;
+  const { text: body, cut } = text.data;
   return (
     <div className="flex flex-col gap-3 pb-4">
       {header}

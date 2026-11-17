@@ -237,6 +237,8 @@ function QuickMenu({
   const [open, setOpen] = useState(false);
   const leaveTimer = useRef<number | null>(null);
   const touched = useRef(false);
+  // Set when the keyboard opened the menu, which then takes focus.
+  const fromKeyboard = useRef(false);
   const cancelLeave = () => {
     if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
@@ -278,6 +280,7 @@ function QuickMenu({
     onKeyDown: (event) => {
       if (event.key === "ArrowDown") {
         event.preventDefault();
+        fromKeyboard.current = true;
         setOpen(true);
       }
     },
@@ -301,13 +304,25 @@ function QuickMenu({
         side="right"
         align="start"
         sideOffset={8}
-        // Hover opens it, so focus stays where it was; Arrow Down moves in.
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        // Hover or a tap leaves focus where it was; Arrow Down moves it to
+        // the first item.
+        onOpenAutoFocus={(event) => {
+          if (!fromKeyboard.current) event.preventDefault();
+          fromKeyboard.current = false;
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          const all = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+          const at = all.indexOf(document.activeElement as HTMLElement);
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          all[(at + step + all.length) % all.length]?.focus();
+        }}
         onPointerEnter={cancelLeave}
         onPointerLeave={(event) => {
           if (event.pointerType === "mouse") leave();
         }}
-        className="w-auto min-w-40 gap-0.5 p-1"
+        className="w-auto min-w-40 gap-1 p-1"
       >
         {entries.map((entry) => (
           <button

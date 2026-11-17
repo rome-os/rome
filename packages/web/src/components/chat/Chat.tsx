@@ -157,10 +157,10 @@ import { useOutputsPane } from "./outputs/OutputsPane";
 import { useToolMemory } from "@/pages/free/tool-memory";
 import {
   chatOutputsKey,
+  chatOutputsQuery,
   OutputLinksContext,
   type OutputLinks,
   outputOfLink,
-  useChatOutputs,
 } from "./outputs/chat-outputs";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
@@ -2566,7 +2566,6 @@ export function Chat({
   // Only a Concierge chat has them, from its mascot's menu, for now.
   const outputsChatId = concierge ? (mainSessionId ?? null) : null;
   const outputsPane = useOutputsPane(outputsChatId);
-  const chatOutputs = useChatOutputs(outputsChatId);
   const memoryPane = useToolMemory();
   const openMemory = () => {
     if (!memoryPane || memoryPane.compact) navigate("/memory");
@@ -2583,18 +2582,29 @@ export function Chat({
   }, [turnEnds, outputsChatId, queryClient]);
   // Read through a ref, so the context stays the same object and the
   // memoized transcript does not draw again when the list or pane changes.
-  const outputsLatest = useRef({ outputs: chatOutputs.data, open: outputsPane.open });
-  outputsLatest.current = { outputs: chatOutputs.data, open: outputsPane.open };
+  const outputsLatest = useRef({ chatId: outputsChatId, open: outputsPane.open });
+  outputsLatest.current = { chatId: outputsChatId, open: outputsPane.open };
   const outputLinks = useMemo<OutputLinks>(
     () => ({
-      open: (path) => {
-        const output = outputOfLink(outputsLatest.current.outputs, path);
-        if (!output) return false;
-        outputsLatest.current.open(output.id);
-        return true;
+      open: async (path) => {
+        const { chatId, open } = outputsLatest.current;
+        if (!chatId) return false;
+        try {
+          // The list is read only when a link asks, and kept briefly for the next one.
+          const list = await queryClient.fetchQuery({
+            ...chatOutputsQuery(chatId),
+            staleTime: 30_000,
+          });
+          const output = outputOfLink(list.outputs, path);
+          if (!output) return false;
+          open(output.id);
+          return true;
+        } catch {
+          return false;
+        }
       },
     }),
-    [],
+    [queryClient],
   );
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.

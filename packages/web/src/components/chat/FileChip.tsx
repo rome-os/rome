@@ -16,10 +16,10 @@ export function FileChip({
   label: string;
   className?: string;
   /**
-   * Takes a plain click instead of saving the file, when it answers true.
-   * A modified or middle click still saves or opens it as a link does.
+   * Takes a plain click, and saves the file as usual only when it answers
+   * false. A modified or middle click still saves or opens it as a link does.
    */
-  onOpen?: () => boolean;
+  onOpen?: () => Promise<boolean>;
 }) {
   return (
     <a
@@ -38,7 +38,16 @@ export function FileChip({
           event.button !== 0
         )
           return;
-        if (onOpen()) event.preventDefault();
+        event.preventDefault();
+        const chip = event.currentTarget;
+        void onOpen().then((opened) => {
+          if (opened) return;
+          // Not the chat's output: save it as the link would have.
+          const save = document.createElement("a");
+          save.href = chip.href;
+          save.download = label;
+          save.click();
+        });
       }}
       className={cn(
         "inline-flex max-w-full items-center gap-2 rounded-8 border border-border bg-muted px-2 py-1 align-middle text-ui text-foreground !no-underline outline-1 outline-offset-0 outline-transparent hover:border-border-strong focus-visible:outline-solid focus-visible:outline-ring/50",

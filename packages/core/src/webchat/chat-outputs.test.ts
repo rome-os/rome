@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { ChatOutputDto } from "@rome/api-types/chat-outputs";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { romeAgentTraceBlocks } from "../db/schema.js";
@@ -22,7 +23,6 @@ describe("ChatOutputs", () => {
   let root: string;
   let projects: string;
   let assets: string;
-  let seq = 0;
 
   beforeEach(async () => {
     testDb = createTestDb();
@@ -35,18 +35,47 @@ describe("ChatOutputs", () => {
     mkdirSync(assets, { recursive: true });
     outputs = new ChatOutputs({
       repo,
-      chat: (id) => chats.getSession(id),
+      chat: async (id) => {
+        const chat = await chats.getSession(id);
+        return chat
+          ? { id: chat.id, projectDir: chat.projectPath ? join(projects, chat.projectPath) : null }
+          : null;
+      },
       messages: (id) => chats.getMessages(id),
       roots: { projects, assets, showable: [projects, assets] },
     });
     await chats.createSession("chat-1", "Chat");
-    seq = 0;
   });
 
   afterEach(() => {
     testDb.close();
     rmSync(root, { recursive: true, force: true });
   });
+
+  /** The list once every earlier chat has been read back. */
+  async function listed(
+    chatId: string,
+    taskChats: { chatId: string; name: string }[] = [],
+  ): Promise<ChatOutputDto[]> {
+    await outputs.list(chatId, taskChats);
+    await outputs.backfillsSettled();
+    return (await outputs.list(chatId, taskChats)).outputs;
+  }
+
+  /** Opens an output's file and reads it, or null when it cannot be opened. */
+  async function read(
+    chatId: string,
+    outputId: string,
+    taskChats: { chatId: string; name: string }[] = [],
+  ) {
+    const file = await outputs.open(chatId, outputId, taskChats);
+    if (!file) return null;
+    try {
+      return { name: file.name, text: (await file.handle.readFile()).toString("utf8") };
+    } finally {
+      await file.handle.close();
+    }
+  }
 
   /** One turn's trace, stored in two stretches as a live turn stores it. */
   async function turn(sessionId: string, turnId: string, use: object, result: object) {
@@ -59,7 +88,6 @@ describe("ChatOutputs", () => {
       blocks: [{ type: "turn_start", turnId }, use],
     });
     await chats.appendTraceBlocks({ messageId, sessionId, turnId, startSeq: 2, blocks: [result] });
-    seq += 1;
   }
 
   async function write(sessionId: string, turnId: string, path: string, tool = "Write") {
@@ -123,7 +151,7 @@ describe("ChatOutputs", () => {
     await show("chat-1", "t2", join(projects, "demo", "chart.png"), `${ID_A}.png`);
     await write("chat-1", "t3", notes, "Edit");
 
-    const list = await outputs.list("chat-1");
+    const list = await listed("chat-1");
     expect(list.map((output) => [output.name, output.kind, output.turnId])).toEqual([
       ["notes.md", "written", "t3"],
       ["chart.png", "shown", "t2"],
@@ -136,7 +164,7 @@ describe("ChatOutputs", () => {
     });
     expect(list[0].contentUrl).toBe(`/api/chat/sessions/chat-1/outputs/${list[0].id}/content`);
     expect(list[1].link).toBe(`/api/assets/${ID_A}.png`);
-    expect(await outputs.file("chat-1", list[0].id)).toMatchObject({ name: "notes.md" });
+    expect(await read("chat-1", list[0].id)).toEqual({ name: "notes.md", text: "# Notes" });
   });
 
   it("lists a file written and then shown as one output", async () => {
@@ -144,15 +172,15 @@ describe("ChatOutputs", () => {
     writeFileSync(chart, "png");
     await write("chat-1", "t1", chart);
     await show("chat-1", "t2", chart, `${ID_A}.png`);
-    const list = await outputs.list("chat-1");
+    const list = await listed("chat-1");
     expect(list.map((output) => output.kind)).toEqual(["shown"]);
   });
 
   it("marks a written file that is gone as missing, and serves nothing for it", async () => {
     await write("chat-1", "t1", join(projects, "demo", "gone.txt"));
-    const [gone] = await outputs.list("chat-1");
+    const [gone] = await listed("chat-1");
     expect(gone).toMatchObject({ name: "gone.txt", missing: true, contentUrl: null });
-    expect(await outputs.file("chat-1", gone.id)).toBeNull();
+    expect(await read("chat-1", gone.id)).toBeNull();
   });
 
   it("serves no file outside the folders chat can show, or a sensitive one", async () => {
@@ -162,7 +190,7 @@ describe("ChatOutputs", () => {
     writeFileSync(secret, "KEY=1");
     await write("chat-1", "t1", outside);
     await write("chat-1", "t2", secret);
-    const list = await outputs.list("chat-1");
+    const list = await listed("chat-1");
     expect(list.map((output) => [output.name, output.missing, output.contentUrl])).toEqual([
       [".env", false, null],
       ["outside.txt", false, null],
@@ -203,16 +231,16 @@ describe("ChatOutputs", () => {
 
     const started = await tasks.taskChatsStartedBy(CONCIERGE_CHAT_ID, "guardian");
     expect(started).toEqual([{ chatId: "task-1", name: "Draft the report" }]);
-    const list = await outputs.list(CONCIERGE_CHAT_ID, started);
+    const list = await listed(CONCIERGE_CHAT_ID, started);
     expect(list.map((output) => [output.name, output.from])).toEqual([
       ["own.md", null],
       ["report.md", { chatId: "task-1", name: "Draft the report" }],
     ]);
     const fromTask = list[1];
     expect(fromTask.contentUrl).toContain(`/chat/sessions/${CONCIERGE_CHAT_ID}/outputs/`);
-    expect(await outputs.file(CONCIERGE_CHAT_ID, fromTask.id, started)).not.toBeNull();
+    expect(await read(CONCIERGE_CHAT_ID, fromTask.id, started)).not.toBeNull();
     // Another chat's output is not this list's to serve.
-    expect(await outputs.file("chat-1", fromTask.id)).toBeNull();
+    expect(await read("chat-1", fromTask.id)).toBeNull();
     expect(await tasks.taskChatsStartedBy("topic-1", "guardian")).toEqual([
       { chatId: "task-2", name: "Elsewhere" },
     ]);
@@ -272,14 +300,58 @@ describe("ChatOutputs", () => {
       "t0",
     );
 
-    const first = await outputs.list("chat-1");
+    // The first list answers at once, says earlier outputs are still being
+    // read back, and reads them back after it.
+    const pending = await outputs.list("chat-1");
+    expect(pending).toEqual({ outputs: [], indexing: true });
+    const first = await listed("chat-1");
     expect(first.map((output) => [output.name, output.kind, output.messageId]).sort()).toEqual([
       ["old.md", "written", "old-trace"],
       ["plot.png", "shown", "reply"],
     ]);
     // Read again, and with the trace recorded since: still one record each.
-    await outputs.list("chat-1");
+    expect((await outputs.list("chat-1")).indexing).toBe(false);
     expect(await repo.listFor(["chat-1"])).toHaveLength(2);
+  });
+
+  it("finds a relative path in the chat's project folder", async () => {
+    await chats.createSession("chat-rel", "Relative", undefined, "demo", null, "demo");
+    writeFileSync(join(projects, "demo", "report.md"), "# Report");
+    await write("chat-rel", "t1", "report.md");
+    const [report] = await listed("chat-rel");
+    expect(report).toMatchObject({
+      name: "report.md",
+      missing: false,
+      link: "/projects/demo/report.md",
+    });
+    expect(await read("chat-rel", report.id)).toMatchObject({ text: "# Report" });
+  });
+
+  it("serves no file a link has replaced, written or shown", async () => {
+    const notes = join(projects, "demo", "notes.md");
+    const secret = join(root, "secret.txt");
+    writeFileSync(notes, "# Notes");
+    writeFileSync(secret, "secret");
+    await write("chat-1", "t1", notes);
+    await show("chat-1", "t2", join(projects, "demo", "chart.png"), `${ID_A}.png`);
+    const list = await listed("chat-1");
+    // The files are swapped for links to a file outside the folders chat shows.
+    for (const path of [notes, join(assets, `${ID_A}.png`)]) {
+      rmSync(path);
+      symlinkSync(secret, path);
+    }
+    for (const output of list) expect(await read("chat-1", output.id)).toBeNull();
+  });
+
+  it("matches a result to its call from memory, without reading the trace back", async () => {
+    const notes = join(projects, "demo", "notes.md");
+    writeFileSync(notes, "# Notes");
+    const select = rs.spyOn(testDb.db, "select");
+    await write("chat-1", "t1", notes);
+    // The result's stretch reads no stored block to find its call.
+    expect(select).not.toHaveBeenCalled();
+    select.mockRestore();
+    expect((await repo.listFor(["chat-1"])).map((row) => row.name)).toEqual(["notes.md"]);
   });
 
   it("goes with its chat", async () => {

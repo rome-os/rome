@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "@/i18n";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { ConciergeHeaderStatus } from "./ConciergeHeaderStatus";
@@ -248,5 +248,28 @@ describe("ConciergeHeaderStatus quick menu at phone width", () => {
     fireEvent.click(badge);
     expect(opened).toEqual([]);
     expect(screen.getAllByRole("menuitem")).toHaveLength(3);
+  });
+});
+
+describe("ConciergeHeaderStatus quick menu from the keyboard", () => {
+  it("moves focus into the menu on Arrow Down, and between its items", async () => {
+    const { container } = render(
+      <ConciergeHeaderStatus
+        name="Yo"
+        activity={{ kind: "idle" }}
+        onOpenTasks={() => {}}
+        onOpenOutputs={() => {}}
+        onOpenMemory={() => {}}
+      />,
+    );
+    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    badge.focus();
+    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Tasks"));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement?.textContent).toBe("Outputs");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement?.textContent).toBe("Memory");
   });
 });

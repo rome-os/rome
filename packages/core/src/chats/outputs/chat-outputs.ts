@@ -1,7 +1,8 @@
-import { lstat, stat } from "node:fs/promises";
+import { type FileHandle, lstat, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { setImmediate as nextTick } from "node:timers/promises";
 import type { ChatOutputDto, ChatOutputSource } from "@rome/api-types/chat-outputs";
-import { resolveShowablePath } from "../../assets/store.js";
+import { openRegularFile, resolveShowablePath } from "../../assets/store.js";
 import { createLogger } from "../../logger.js";
 import { getAssetsDir, getProjectsRoot } from "../../paths.js";
 import type { BackfillMessage, ChatOutputRow, ChatOutputsRepository } from "./repository.js";
@@ -11,11 +12,15 @@ const log = createLogger("chat-outputs");
 /** The few facts of a chat the list reads. */
 export interface OutputChat {
   id: string;
-  projectPath?: string | null;
+  /** The absolute folder of the chat's project, where a relative path written in it lies. */
+  projectDir?: string | null;
 }
 
 export interface ChatOutputsDeps {
-  repo: Pick<ChatOutputsRepository, "listFor" | "get" | "backfill" | "backfilled" | "subagentsOf">;
+  repo: Pick<
+    ChatOutputsRepository,
+    "listFor" | "get" | "backfill" | "notBackfilled" | "subagentRoots"
+  >;
   /** A chat's stored messages, its traces included, read once to back fill its outputs. */
   messages: (id: string) => Promise<readonly BackfillMessage[]>;
   /** A chat's facts, or null when it is gone. */
@@ -24,11 +29,19 @@ export interface ChatOutputsDeps {
   roots?: { projects: string; assets: string; showable?: string[] };
 }
 
-/** Where a recorded output's bytes are, and what they are. */
-export interface OutputFile {
+/** An output's file, open: read it from `handle`, which the caller closes. */
+export interface OpenOutputFile {
+  handle: FileHandle;
+  size: number;
+  /** The path that was opened, for its type. */
   path: string;
   name: string;
-  mimeType: string | null;
+}
+
+/** A chat's outputs, and whether earlier ones are still being read back. */
+export interface OutputsList {
+  outputs: ChatOutputDto[];
+  indexing: boolean;
 }
 
 /** An output resolved to the file on disk it stands for. */
@@ -56,35 +69,21 @@ export class ChatOutputs {
     return this.deps.roots?.assets ?? getAssetsDir();
   }
 
+  /** Chats waiting to be read back, in order; the first is being read. */
+  private backfillQueue = new Set<string>();
+  private backfilling: Promise<void> | null = null;
+
   /**
    * Chat `chatId`'s outputs, its subagents' included. `taskChats` are the
    * task chats a Concierge chat started: their outputs are listed too, each
-   * tagged with the chat it came from. Reads back what a chat made before
-   * outputs were recorded the first time it is listed.
+   * tagged with the chat it came from. A chat from before outputs were
+   * recorded is read back in the background, one chat at a time, and the list
+   * says so with `indexing` until it is done.
    */
-  async list(
-    chatId: string,
-    taskChats: readonly ChatOutputSource[] = [],
-  ): Promise<ChatOutputDto[]> {
-    const own = [chatId, ...(await this.deps.repo.subagentsOf([chatId]))];
-    const fromTask = new Map<string, ChatOutputSource>();
-    for (const task of taskChats) {
-      fromTask.set(task.chatId, task);
-      for (const sub of await this.deps.repo.subagentsOf([task.chatId])) fromTask.set(sub, task);
-    }
-    const sessionIds = [...own, ...fromTask.keys()];
-    for (const id of sessionIds) {
-      if (this.deps.repo.backfilled(id)) continue;
-      try {
-        this.deps.repo.backfill(id, await this.deps.messages(id));
-      } catch (error) {
-        log.warn("could not read back a chat's earlier outputs", {
-          sessionId: id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
+  async list(chatId: string, taskChats: readonly ChatOutputSource[] = []): Promise<OutputsList> {
+    const { sessionIds, fromTask } = await this.sessionsOf(chatId, taskChats);
+    const waiting = this.deps.repo.notBackfilled(sessionIds);
+    this.scheduleBackfill(waiting);
     const rows = await this.deps.repo.listFor(sessionIds);
     const chats = new Map<string, OutputChat | null>();
     const chatOf = async (id: string) => {
@@ -112,27 +111,83 @@ export class ChatOutputs {
       if (!newest.has(identity)) newest.set(identity, entry);
     }
 
-    return Promise.all([...newest.values()].map((entry) => this.toDto(chatId, entry, fromTask)));
+    return {
+      outputs: await Promise.all(
+        [...newest.values()].map((entry) => this.toDto(chatId, entry, fromTask)),
+      ),
+      indexing: waiting.length > 0,
+    };
+  }
+
+  /** The chat, its task chats, and the subagent sessions under each, by what they stand for. */
+  private async sessionsOf(chatId: string, taskChats: readonly ChatOutputSource[]) {
+    const task = new Map(taskChats.map((chat) => [chat.chatId, chat]));
+    const roots = await this.deps.repo.subagentRoots([chatId, ...task.keys()]);
+    const fromTask = new Map<string, ChatOutputSource>();
+    const sessionIds = [chatId, ...task.keys()];
+    for (const [id, chat] of task) fromTask.set(id, chat);
+    for (const [sub, root] of roots) {
+      sessionIds.push(sub);
+      const from = task.get(root);
+      if (from) fromTask.set(sub, from);
+    }
+    return { sessionIds, fromTask };
+  }
+
+  /** Queues chats `ids` to be read back, and starts the reader when it is idle. */
+  private scheduleBackfill(ids: readonly string[]): void {
+    for (const id of ids) this.backfillQueue.add(id);
+    if (this.backfilling || this.backfillQueue.size === 0) return;
+    this.backfilling = this.runBackfill().finally(() => {
+      this.backfilling = null;
+    });
+  }
+
+  /** Reads the queued chats back one at a time, yielding to requests between them. */
+  private async runBackfill(): Promise<void> {
+    for (const id of this.backfillQueue) {
+      await nextTick();
+      try {
+        this.deps.repo.backfill(id, await this.deps.messages(id));
+      } catch (error) {
+        log.warn("could not read back a chat's earlier outputs", {
+          sessionId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      this.backfillQueue.delete(id);
+    }
+  }
+
+  /** Settles once every queued read back has run: test seam. */
+  async backfillsSettled(): Promise<void> {
+    while (this.backfilling) await this.backfilling;
   }
 
   /**
-   * The file behind output `outputId` of chat `chatId`'s list, or null when
-   * the list has no such output or its file cannot be served.
+   * Opens the file behind output `outputId` of chat `chatId`'s list, or null
+   * when the list has no such output or its file cannot be served. The file
+   * is opened without following a link and checked on the open descriptor,
+   * so what is read is what was checked.
    */
-  async file(
+  async open(
     chatId: string,
     outputId: string,
     taskChats: readonly ChatOutputSource[] = [],
-  ): Promise<OutputFile | null> {
+  ): Promise<OpenOutputFile | null> {
     const row = await this.deps.repo.get(outputId);
     if (!row) return null;
-    const allowed = new Set([chatId, ...taskChats.map((task) => task.chatId)]);
-    const owners = [...allowed];
-    for (const sub of await this.deps.repo.subagentsOf(owners)) allowed.add(sub);
-    if (!allowed.has(row.sessionId)) return null;
+    const { sessionIds } = await this.sessionsOf(chatId, taskChats);
+    if (!sessionIds.includes(row.sessionId)) return null;
     const entry = this.locate(row, await this.deps.chat(row.sessionId));
     const path = await this.servable(entry);
-    return path ? { path, name: row.name, mimeType: row.mimeType } : null;
+    if (!path) return null;
+    try {
+      const { handle, size } = await openRegularFile(path);
+      return { handle, size, path, name: row.name };
+    } catch {
+      return null;
+    }
   }
 
   private locate(row: ChatOutputRow, chat: OutputChat | null): Located {
@@ -143,7 +198,7 @@ export class ChatOutputs {
     // A relative path is the chat's project's, as the tool read it.
     const file = isAbsolute(row.path)
       ? resolve(row.path)
-      : resolve(chat?.projectPath ?? this.projectsRoot, row.path);
+      : resolve(chat?.projectDir ?? this.projectsRoot, row.path);
     return { row, file, identity: file };
   }
 

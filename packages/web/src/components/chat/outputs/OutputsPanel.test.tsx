@@ -7,12 +7,13 @@ import { MemoryRouter } from "react-router-dom";
 import type { ChatOutputDto } from "@rome/api-types/chat-outputs";
 import i18n from "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
-import { OutputsPanel, outputTitle, outputTypeOf, previewOf } from "./OutputsPanel";
+import { OutputsPanel, outputTitle, outputTypeOf, previewOf, readPrefix } from "./OutputsPanel";
 import { outputOfLink } from "./chat-outputs";
 
 const HOUR = 3_600_000;
 let outputs: ChatOutputDto[];
 let files: Record<string, string>;
+let indexing: boolean;
 
 function output(id: string, extra: Partial<ChatOutputDto>): ChatOutputDto {
   return {
@@ -39,12 +40,13 @@ beforeAll(async () => {
 beforeEach(() => {
   files = {};
   outputs = [];
+  indexing = false;
   rs.stubGlobal(
     "fetch",
     rs.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/chat/sessions/chat-1/outputs") {
-        return new Response(JSON.stringify({ outputs }), {
+        return new Response(JSON.stringify({ outputs, indexing }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -171,6 +173,13 @@ describe("OutputsPanel", () => {
     expect(download.getAttribute("download")).toBe("bundle.zip");
   });
 
+  it("says quietly while earlier outputs are still being read back", async () => {
+    indexing = true;
+    renderPanel();
+    expect(await screen.findByText("Still finding earlier files.")).toBeTruthy();
+    expect(screen.queryByText("No outputs yet")).toBeNull();
+  });
+
   it("says so when the chat has no outputs", async () => {
     renderPanel();
     expect(await screen.findByText("No outputs yet")).toBeTruthy();
@@ -204,5 +213,28 @@ describe("outputOfLink", () => {
     expect(outputOfLink(list, "/api/assets/abc.png?x=1")?.id).toBe("pic");
     expect(outputOfLink(list, "/projects/demo")).toBeUndefined();
     expect(outputOfLink(list, "/projects/demo/other.txt")).toBeUndefined();
+  });
+});
+
+describe("readPrefix", () => {
+  it("reads only the first characters of a large file, then stops reading", async () => {
+    let pulled = 0;
+    const chunk = new TextEncoder().encode("x".repeat(1000));
+    const cancel = rs.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+      cancel,
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(body, { status: 200 })),
+    );
+    const prefix = await readPrefix("/big.log", 2500);
+    expect(prefix).toEqual({ text: "x".repeat(2500), cut: true });
+    expect(pulled).toBeLessThan(10);
+    expect(cancel).toHaveBeenCalled();
   });
 });

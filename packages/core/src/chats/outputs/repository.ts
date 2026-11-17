@@ -10,10 +10,12 @@ import {
 } from "../../db/schema.js";
 import {
   assetUrlsIn,
+  isOutputCall,
   mayHoldOutputs,
   outputsInMessage,
   outputsInTrace,
   type OutputFound,
+  type ToolUseBlock,
 } from "./trace-outputs.js";
 
 const log = createLogger("chat-outputs");
@@ -60,22 +62,66 @@ function insertOutputs(db: Writer, place: OutputPlace, found: OutputFound[], at:
     .run();
 }
 
-/** The tool call `toolUseId` of trace message `messageId`, from the blocks already stored. */
-function storedToolUse(db: Writer, messageId: string, toolUseId: string) {
+/** How many turns' calls are kept at most, for turns that never sent their end. */
+const REMEMBERED_TRACES = 256;
+
+/**
+ * The calls that can make an output, per trace, from when a stretch stores
+ * them until their turn ends: a result arrives in a later stretch than its
+ * call, and is matched here without reading the trace back.
+ */
+export class OutputCalls {
+  private byTrace = new Map<string, Map<string, ToolUseBlock>>();
+
+  /** Remembers stretch `blocks`' output calls of trace `messageId`, and forgets them at its end. */
+  remember(messageId: string, blocks: readonly unknown[]): void {
+    for (const block of blocks) {
+      if (isOutputCall(block)) {
+        let calls = this.byTrace.get(messageId);
+        if (!calls) {
+          calls = new Map();
+          this.byTrace.set(messageId, calls);
+          if (this.byTrace.size > REMEMBERED_TRACES) {
+            const oldest = this.byTrace.keys().next().value;
+            if (oldest !== undefined) this.byTrace.delete(oldest);
+          }
+        }
+        calls.set(block.id, block);
+      }
+    }
+  }
+
+  find(messageId: string, toolUseId: string): ToolUseBlock | null {
+    return this.byTrace.get(messageId)?.get(toolUseId) ?? null;
+  }
+
+  /** Forgets trace `messageId`'s calls once its turn has ended. */
+  endIfDone(messageId: string, blocks: readonly unknown[]): void {
+    if (blocks.some((block) => (block as { type?: unknown } | null)?.type === "turn_end")) {
+      this.byTrace.delete(messageId);
+    }
+  }
+}
+
+/**
+ * The call `toolUseId` of trace `messageId` from its stored blocks, newest
+ * first. Only a call no memory holds reads it, as after a restart mid-turn.
+ */
+function storedToolUse(db: Writer, messageId: string, toolUseId: string): ToolUseBlock | null {
   const row = db
     .select({ content: romeAgentTraceBlocks.content })
     .from(romeAgentTraceBlocks)
     .where(
       and(
         eq(romeAgentTraceBlocks.messageId, messageId),
-        sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') = 'tool_use'`,
         sql`json_extract(${romeAgentTraceBlocks.content}, '$.id') = ${toolUseId}`,
       ),
     )
+    .orderBy(desc(romeAgentTraceBlocks.seq))
     .get();
   if (!row) return null;
   try {
-    return JSON.parse(row.content) as { type: "tool_use"; id?: string; tool?: string };
+    return JSON.parse(row.content) as ToolUseBlock;
   } catch {
     return null;
   }
@@ -84,19 +130,27 @@ function storedToolUse(db: Writer, messageId: string, toolUseId: string) {
 /**
  * Records the outputs a stretch of trace `messageId` made, in the transaction
  * that stores the stretch, so an output is recorded exactly when its trace is.
- * A result whose call an earlier stretch stored finds it there.
+ * A result's call comes from the stretch itself or from `calls`, which earlier
+ * stretches filled.
  */
 export function recordTraceOutputs(
   tx: DrizzleTx,
+  calls: OutputCalls,
   place: OutputPlace & { messageId: string },
   blocks: readonly unknown[],
   at: Date,
 ): void {
-  if (!mayHoldOutputs(blocks)) return;
   // An output that cannot be recorded never costs the trace it came with.
   try {
-    const found = outputsInTrace(blocks, (id) => storedToolUse(tx, place.messageId, id));
-    insertOutputs(tx, place, found, at);
+    calls.remember(place.messageId, blocks);
+    if (mayHoldOutputs(blocks)) {
+      const found = outputsInTrace(
+        blocks,
+        (id) => calls.find(place.messageId, id) ?? storedToolUse(tx, place.messageId, id),
+      );
+      insertOutputs(tx, place, found, at);
+    }
+    calls.endIfDone(place.messageId, blocks);
   } catch (error) {
     log.warn("could not record a turn's outputs", {
       sessionId: place.sessionId,
@@ -122,40 +176,49 @@ export class ChatOutputsRepository {
   }
 
   /**
-   * The subagent sessions under chats `sessionIds`, at any depth: their
-   * agent's helpers, whose work is the chat's.
+   * The subagent sessions under chats `sessionIds`, at any depth, each with
+   * the chat it works for: their agent's helpers, whose work is that chat's.
+   * One query per level of depth, whatever the number of chats.
    */
-  async subagentsOf(sessionIds: readonly string[]): Promise<string[]> {
-    const found: string[] = [];
+  async subagentRoots(sessionIds: readonly string[]): Promise<Map<string, string>> {
+    const roots = new Map<string, string>();
+    const rootOf = new Map(sessionIds.map((id) => [id, id]));
     let parents = [...sessionIds];
-    const seen = new Set(parents);
     while (parents.length > 0) {
       const rows = await this.db
-        .select({ id: romeSessions.id })
+        .select({ id: romeSessions.id, parent: romeSessions.parentSessionId })
         .from(romeSessions)
         .where(
           and(inArray(romeSessions.parentSessionId, parents), eq(romeSessions.type, "subagent")),
         );
-      parents = rows.map((row) => row.id).filter((id) => !seen.has(id));
-      for (const id of parents) seen.add(id);
-      found.push(...parents);
+      parents = [];
+      for (const row of rows) {
+        const root = row.parent ? rootOf.get(row.parent) : undefined;
+        if (!root || rootOf.has(row.id)) continue;
+        rootOf.set(row.id, root);
+        roots.set(row.id, root);
+        parents.push(row.id);
+      }
     }
-    return found;
+    return roots;
   }
 
   async get(id: string): Promise<ChatOutputRow | null> {
     return (await this.db.select().from(chatOutputs).where(eq(chatOutputs.id, id)))[0] ?? null;
   }
 
-  /** Whether chat `sessionId`'s earlier outputs were read back. */
-  backfilled(sessionId: string): boolean {
-    return Boolean(
+  /** Which of chats `sessionIds` have not been read back yet, in one query. */
+  notBackfilled(sessionIds: readonly string[]): string[] {
+    if (sessionIds.length === 0) return [];
+    const done = new Set(
       this.db
         .select({ id: chatOutputBackfills.sessionId })
         .from(chatOutputBackfills)
-        .where(eq(chatOutputBackfills.sessionId, sessionId))
-        .get(),
+        .where(inArray(chatOutputBackfills.sessionId, [...sessionIds]))
+        .all()
+        .map((row) => row.id),
     );
+    return sessionIds.filter((id) => !done.has(id));
   }
 
   /**
@@ -163,7 +226,8 @@ export class ChatOutputsRepository {
    * its `messages`: the write and show calls its stored traces still hold,
    * and the asset links its agent's messages hold that no guardian message
    * attached. An output already recorded is not recorded again, so a second
-   * read back changes nothing.
+   * read back changes nothing. A trace stored whole on its message row, from
+   * before traces were stored block by block, is not read back.
    */
   backfill(sessionId: string, messages: readonly BackfillMessage[], now = new Date()): void {
     this.db.transaction((tx) => {
@@ -180,7 +244,7 @@ export class ChatOutputsRepository {
           );
           insertOutputs(tx, place, shown, message.createdAt);
         } else if (message.role === "trace") {
-          const found = this.traceOutputs(tx, message.id, message.content);
+          const found = this.traceOutputs(tx, message.id);
           insertOutputs(tx, place, found, message.createdAt);
         }
       }
@@ -191,8 +255,8 @@ export class ChatOutputsRepository {
     });
   }
 
-  /** A stored trace's outputs: its block rows, else the whole trace kept on its message row. */
-  private traceOutputs(tx: DrizzleTx, messageId: string, content: string): OutputFound[] {
+  /** A stored trace's outputs, from its block rows. */
+  private traceOutputs(tx: DrizzleTx, messageId: string): OutputFound[] {
     const rows = tx
       .select({ content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
@@ -205,20 +269,11 @@ export class ChatOutputsRepository {
       .orderBy(asc(romeAgentTraceBlocks.seq))
       .all();
     const blocks: unknown[] = [];
-    if (rows.length > 0) {
-      for (const row of rows) {
-        try {
-          blocks.push(JSON.parse(row.content));
-        } catch {
-          // A block that does not parse made no output.
-        }
-      }
-    } else {
+    for (const row of rows) {
       try {
-        const legacy = JSON.parse(content);
-        if (Array.isArray(legacy)) blocks.push(...legacy);
+        blocks.push(JSON.parse(row.content));
       } catch {
-        return [];
+        // A block that does not parse made no output.
       }
     }
     return outputsInTrace(blocks);
