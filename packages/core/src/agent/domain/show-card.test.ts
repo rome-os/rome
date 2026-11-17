@@ -77,6 +77,13 @@ describe("checkShowCard", () => {
     expect(problems).toContain("list its children by id");
   });
 
+  it("refuses a value read from a path, which would draw a blank", () => {
+    const ui = {
+      components: [{ id: "root", component: "Stat", label: "Steps", value: { path: "/steps" } }],
+    };
+    expect(checkShowCard(ui)).toEqual(['"root".value reads a path; write the value itself']);
+  });
+
   it("refuses a card that is too big", () => {
     const items = Array.from({ length: SHOW_CARD_MAX_COMPONENTS }, (_, i) => `t${i}`);
     const ui = {

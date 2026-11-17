@@ -6133,6 +6133,17 @@ describe("Webchat API", () => {
         },
       },
       { name: "with bindings", tool: "show_card", card: { ui: statCard, bind: { "/a": "b" } } },
+      {
+        name: "reading a path",
+        tool: "show_card",
+        card: {
+          ui: {
+            components: [
+              { id: "root", component: "Stat", label: "Steps", value: { path: "/steps" } },
+            ],
+          },
+        },
+      },
       { name: "that waits", tool: "show_card", card: { ui: statCard, waits: true } },
     ])("stores no agent card $name", async ({ tool, card }) => {
       const parts = await partsAfterTurn(agentCardEvents(tool, card));

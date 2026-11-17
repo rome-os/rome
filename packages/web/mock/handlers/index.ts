@@ -513,18 +513,6 @@ const transcripts: Record<string, ChatMessage[]> = {
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
       dinnerQuestion,
     ]),
-    ...turn(
-      CONCIERGE_CHAT_ID,
-      11,
-      "2026-08-07T12:50:00.000Z",
-      "Can you send my health summary now?",
-      [
-        healthSummaryCard,
-        text(
-          "Main data synced at 10:02 p.m. Sleep advice from the [CDC](https://www.cdc.gov/sleep/).",
-        ),
-      ],
-    ),
     // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
     ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
       {
@@ -808,6 +796,14 @@ const transcripts: Record<string, ChatMessage[]> = {
         { type: "turn_end", turnId: "mock-chat-1-t3", status: "completed", durationMs: 6_400 },
       ],
     ),
+    // An agent's own widget from `show_card`, with its sources in the text.
+    ...turn("mock-chat-1", 4, "2026-08-04T09:30:00.000Z", "Can you send my health summary now?", [
+      healthSummaryCard,
+      text(
+        "Main data synced at 10:02 p.m. Sleep advice from the [CDC](https://www.cdc.gov/sleep/).",
+        "final",
+      ),
+    ]),
   ],
   "mock-chat-2": [
     ...turn(

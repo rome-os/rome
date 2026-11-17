@@ -58,6 +58,13 @@ export function checkShowCard(ui: unknown): string[] {
   if (card.data !== undefined) problems.push("the card may not have a data model");
   const parents = new Map<string, number>();
   for (const c of card.components) {
+    // With no data model a `{ path }` reads nothing, and the reader would
+    // draw a blank where the value should be.
+    for (const [key, value] of Object.entries(c)) {
+      if (value && typeof value === "object" && "path" in value) {
+        problems.push(`"${c.id}".${key} reads a path; write the value itself`);
+      }
+    }
     if ("children" in c && !Array.isArray(c.children)) {
       problems.push(`"${c.id}" draws a child per array element; list its children by id`);
     }
