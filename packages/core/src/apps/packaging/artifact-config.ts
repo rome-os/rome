@@ -125,6 +125,9 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
+    // A test-only back door: Rome honours it only for the apps in
+    // INBOX_BYPASS_APPS (app-host/inbox-bypass.ts).
+    unsafeTestOnlyBypassInbox: z.boolean().optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
     policy: z

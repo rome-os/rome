@@ -2223,6 +2223,15 @@ export interface ChannelMessageHookDeps {
    * that passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /**
+   * @internal A test-only back door for the Inbox app. True when the Inbox
+   * app must answer no message on an account linked to `agent`, a canonical
+   * agent id, because the app that installed it runs the agent's turns
+   * itself. The host answers true only for an agent that declares
+   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
+   * for every other. Not for apps to build on.
+   */
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
