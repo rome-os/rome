@@ -104,6 +104,15 @@ struct UserBubble: View {
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
 
+    /// The message has a bubble under its photos: text, or a quote drawn in it.
+    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil && rail == nil) }
+
+    /// Where the mark sits: on the text bubble when there is one, and on the
+    /// photos' corner only for photos sent alone.
+    nonisolated static func badgeOnPhotos(text: String, quoteInBubble: Bool) -> Bool {
+        text.isEmpty && !quoteInBubble
+    }
+
     private var problem: SendProblem? {
         SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
     }
@@ -124,9 +133,10 @@ struct UserBubble: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
-                            .markBadge(mark)
+                            // Only photos alone carry it.
+                            .markBadge(hasBubble ? nil : mark)
                     }
-                    if !text.isEmpty || (quote != nil && rail == nil) {
+                    if hasBubble {
                         VStack(alignment: .leading, spacing: 4) {
                             if let quote, rail == nil {
                                 QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
@@ -146,8 +156,7 @@ struct UserBubble: View {
                             }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
-                            // Photos above the bubble carry the badge instead.
-                            .markBadge(images.isEmpty ? mark : nil)
+                            .markBadge(mark)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -163,9 +172,9 @@ struct UserBubble: View {
 }
 
 private extension View {
-    /// The message's badge on the top leading corner of the photos, or of the
-    /// bubble when there are none, over the corner and clear of the first
-    /// line's start.
+    /// The message's badge on the top leading corner of its text bubble, or of
+    /// its photos when they come with no text, over the corner and clear of
+    /// the first line's start.
     func markBadge(_ mark: MessageMark?) -> some View {
         overlay(alignment: .topLeading) {
             if let mark {
