@@ -125,6 +125,7 @@ export {
   buildWorkspaceContextSection,
   FETCH_CHANNEL_HISTORY_ACTION,
   type WorkspaceContextSnapshot,
+  withoutRepeatedHeaders,
 } from "./domain/prompt.js";
 export {
   buildSlashSkillPrompt,

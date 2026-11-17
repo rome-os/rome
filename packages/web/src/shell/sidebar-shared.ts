@@ -15,7 +15,7 @@ export function isEntryActive(pathname: string, href: string): boolean {
 }
 
 export const LINK_CLASS =
-  "rome-sidebar-link group flex h-10 w-full min-h-[var(--control-min-h)] items-center gap-3 rounded-12 pl-3 pr-2 text-left text-section font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+  "rome-sidebar-link group flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-[var(--row-icon-gap)] rounded-12 border border-transparent px-[var(--row-link-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 // Row state, shared by the wide rows and the rail tiles.
 export const ACTIVE_CLASS =
@@ -25,11 +25,14 @@ export const IDLE_CLASS = "hover:bg-surface-hover dark:hover:bg-surface";
 // The rail counterpart of LINK_CLASS: a square tile whose tooltip carries the
 // label. `relative` anchors the status dots that the wide rows render inline.
 export const RAIL_LINK_CLASS =
-  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-12 text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-12 border border-transparent text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
-// The 12px left padding keeps each icon centered when the rail shows names.
+// The rail's labelled row: the tile widened to the rail, its name beside the
+// icon. It has no border, unlike the tile, so its 10px left padding (8px of
+// rail padding beside it) puts the icon in the column at x=18, text at x=48,
+// the same two columns as the chat list's rows.
 export const RAIL_ROW_CLASS =
-  "rome-sidebar-link relative flex h-10 w-full min-w-0 items-center gap-3 rounded-12 pl-3 pr-2 text-left text-section font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+  "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-12 pl-[var(--row-px)] pr-[var(--row-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 /** Whether the rail shows names beside its icons. The shell decides; every
  *  tile reads it, so the nav and the Recent zone switch together. */

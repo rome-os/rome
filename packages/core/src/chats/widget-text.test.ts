@@ -59,6 +59,30 @@ describe("widgetText", () => {
     );
   });
 
+  it("reads a request for several secrets by one title naming them all", () => {
+    const line = widgetText(
+      card({
+        actionName: "vault_apply",
+        preview: {
+          kind: "secret_access",
+          name: "GITHUB_TOKEN",
+          names: ["GITHUB_TOKEN", "STRIPE_KEY"],
+          ttlMinutes: 15,
+          reason: "Release",
+          title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+          summary: "Release",
+        },
+      }),
+    );
+    expect(line).toBe(
+      [
+        "Approval needed: Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+        "Release",
+        "The guardian approves or denies it on Rome's dashboard.",
+      ].join("\n"),
+    );
+  });
+
   it("reads a message the agent wants to send as that message and why", () => {
     const line = widgetText(
       card({

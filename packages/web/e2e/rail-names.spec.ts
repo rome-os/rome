@@ -21,21 +21,21 @@ const iconCenter = (page: Page, href: string) =>
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test("names show by default, and the edge hides and shows them without moving an icon", async ({
-    page,
-  }) => {
+  test("names show by default, and the edge hides and shows them", async ({ page }) => {
     await page.goto("/memory");
     const apps = page.locator('aside a[href="/apps"]');
     await expect(apps).toHaveText("Apps", { timeout: 30_000 });
     expect(await railWidth(page)).toBe(192);
-    const named = await iconCenter(page, "/apps");
+    // The 20px glyph stays centred in the 16px slot at x=18; the bare rail
+    // centres its 40px tiles in 64px.
+    expect(await iconCenter(page, "/apps")).toBe(26);
 
     const edge = (await page.locator("[data-rail-edge]").boundingBox())!;
     const x = edge.x + edge.width / 2;
     await page.mouse.click(x, 400);
     await expect.poll(() => railWidth(page)).toBe(64);
     await expect(apps).toHaveText("");
-    expect(await iconCenter(page, "/apps")).toBe(named);
+    expect(await iconCenter(page, "/apps")).toBe(32);
 
     // A drag snaps to the other width once it has travelled far enough.
     const bare = (await page.locator("[data-rail-edge]").boundingBox())!;
@@ -57,13 +57,34 @@ test.describe("desktop", () => {
     await page.goto("/chat/mock-chat-build-app");
     const tile = page.locator('aside nav a[aria-label="Chat"]');
     // The tile lights on any chat.
-    await expect(tile).toHaveClass(/shadow-1/, { timeout: 30_000 });
+    await expect(tile).toHaveAttribute("aria-current", "page", { timeout: 30_000 });
     // A common chat puts the chat list in Chat mode, whose tile returns to the last ordinary chat.
     await expect(tile).toHaveAttribute("href", "/chat/mock-chat-build-app");
 
     // The main chat puts it in Concierge mode, whose tile opens the main chat.
     await page.goto("/message");
     await expect(tile).toHaveAttribute("href", "/message", { timeout: 30_000 });
+  });
+
+  test("named navigation and topic chats share row heights and text columns", async ({ page }) => {
+    await page.goto("/message");
+    const topic = page.locator('[data-concierge-topic="mock-topic-travel"] > a');
+    await expect(topic).toBeVisible({ timeout: 30_000 });
+    const geometry = await page.evaluate(() => {
+      const nav = document.querySelector('aside a[href="/apps"]')!;
+      const newTopic = document.querySelector('[data-new-chat-row="topic"]')!;
+      const main = document.querySelector('[data-concierge-section] a[href="/message"]')!;
+      const topic = document.querySelector('[data-concierge-topic="mock-topic-travel"] > a')!;
+      return [nav, newTopic, main, topic].map((row) => {
+        const column = row.closest(".overflow-y-auto") ?? row.closest("aside")!;
+        return {
+          height: row.getBoundingClientRect().height,
+          textX: row.children[1].getBoundingClientRect().left - column.getBoundingClientRect().left,
+          weight: getComputedStyle(row).fontWeight,
+        };
+      });
+    });
+    expect(geometry).toEqual(Array(4).fill({ height: 36, textX: 48, weight: "400" }));
   });
 });
 

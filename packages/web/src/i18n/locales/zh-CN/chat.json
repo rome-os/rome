@@ -385,6 +385,7 @@
     },
     "secretAccess": {
       "allow": "允许 {{minutes}} 分钟",
+      "separator": "、",
       "duration": "{{minutes}} 分钟",
       "allowed": "已允许 {{name}} · {{minutes}} 分钟",
       "rejected": "已拒绝 {{name}}"

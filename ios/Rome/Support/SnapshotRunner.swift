@@ -302,6 +302,9 @@ enum SnapshotRunner {
             await capture("43c-connect-sheet-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet(health) }
             await capture("43d-connect-sheet-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet("device") }
             model.debugCommand = .connectSheet(nil)
+            // The next command in the same pass would hide this one from the
+            // shell, and the sheet would stay over every later screen.
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
@@ -380,6 +383,7 @@ enum SnapshotRunner {
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
+            await capture("59-markdown-lists", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-lists")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
             // The load-error bar: Retry, then its spinner while an attempt runs.
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
@@ -548,6 +552,8 @@ enum SnapshotRunner {
                     model.update.debugShowUpdated(target)
                 }
             }
+            // Said once: the dark pass's Chat would show it again otherwise.
+            model.update.clearUpdated()
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }

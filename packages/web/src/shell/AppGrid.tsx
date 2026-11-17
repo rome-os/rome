@@ -475,7 +475,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     // Without hoverable content, leaving the trigger closes the tooltip.
     <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
-        className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
+        className={`flex shrink-0 flex-col gap-[var(--row-gap)] pb-2 ${labelled ? "items-stretch px-2 pt-2" : "items-center px-3"}`}
       >
         {onSearch ? (
           <Tooltip>
@@ -484,7 +484,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 type="button"
                 onClick={onSearch}
                 aria-label={t("recentChats.search")}
-                className={`${labelled ? "rome-sidebar-link relative flex h-10 w-full min-w-0 items-center gap-3 rounded-full bg-surface-muted px-3 text-left text-section font-normal transition outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 hover:bg-surface-hover" : `${tileClass} ${IDLE_CLASS}`} text-muted-foreground hover:text-foreground`}
+                className={`${labelled ? "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-full bg-surface-muted px-[var(--row-px)] text-left text-ui font-normal transition outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 hover:bg-surface-hover" : `${tileClass} ${IDLE_CLASS}`} text-muted-foreground hover:text-foreground`}
               >
                 <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
                   <Search className="h-5 w-5 shrink-0" />

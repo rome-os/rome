@@ -1,6 +1,6 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -107,10 +107,11 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="flex items-center">
+    <div className="mb-[var(--row-gap)] flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0
             ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
@@ -190,11 +191,7 @@ export function ConciergeChats({
     rootMargin: "0px 0px 160px 0px",
   });
   return (
-    <section
-      aria-label={t("recentChats.conciergeSection")}
-      className="space-y-1"
-      data-concierge-section
-    >
+    <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
       {statusFilter === "archived" ? null : (
         <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
@@ -261,15 +258,19 @@ function ConciergeTopicEntry({
     );
   }
   return (
-    <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
+    <div
+      className="group/topic relative mb-[var(--row-gap)] flex items-center"
+      data-concierge-topic={chat.id}
+    >
       <Link
         to={`/chat/${chat.id}`}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
           {count > 0 ? (
             <Badge
               variant="destructive"
@@ -281,7 +282,9 @@ function ConciergeTopicEntry({
             >
               {label}
             </Badge>
-          ) : null}
+          ) : (
+            <Hash aria-hidden className="size-5 shrink-0" />
+          )}
         </span>
         {/* The menu button floats over the row's end, so the name keeps clear
             of it. */}

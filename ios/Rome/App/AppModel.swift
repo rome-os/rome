@@ -747,6 +747,10 @@ final class AppModel {
     private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
     private var foreground = ForegroundGate()
+    /// Nothing over the whole app hides its pages: it is on screen, with no
+    /// device connect sheet or stacking game over it. A line said once (the
+    /// "updated" notice) waits while it is false.
+    var pagesUncovered: Bool { !foreground.isInBackground && connections.request == nil && stackGame == nil }
 
     /// The pictures the open workspace loaded; `shared` in the app.
     private let images: StoredImageCache
@@ -1711,8 +1715,7 @@ final class AppModel {
 
     // MARK: Widget links
 
-    /// A tap on the widget: an app on its instance, the Apps page, or Chat
-    /// to make an app. It waits while no instance is open, as a push does.
+    /// A tap on the widget waits while no instance is open, as a push does.
     func openFromWidget(_ link: WidgetLink) async {
         // The tapped app shows, not the game over it.
         stackGame = nil

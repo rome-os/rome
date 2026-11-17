@@ -25,5 +25,6 @@ describe("transcriptOf", () => {
       message("user", "thanks", "🙏"),
     ]);
     expect(t.saidAfter).toEqual([["Morning!"], []]);
+    expect(t.reactions).toEqual([null, "🙏"]);
   });
 });

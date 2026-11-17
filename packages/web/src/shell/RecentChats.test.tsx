@@ -31,6 +31,12 @@ const concierge = rs.hoisted(() => ({
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChat: () => ({
+    chatId: concierge.chatId,
+    loading: concierge.loading,
+    failed: false,
+    retry: () => {},
+  }),
   useConciergeChats: () =>
     concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));
@@ -418,8 +424,16 @@ describe("RecentChats", () => {
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
       expect(entry.getAttribute("href")).toBe("/chat/topic-1");
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
+      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
       // The main chat is the Concierge entry, not a row of its own.
       expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
+
+      await userEvent.setup().click(entry);
+      const opened = await screen.findByRole("link", { name: "Calendar", exact: true });
+      expect(opened.getAttribute("aria-current")).toBe("page");
+      expect(opened.querySelector("[data-concierge-unread]")).toBeNull();
+      expect(opened.firstElementChild?.querySelector("svg.lucide-hash")).toBeTruthy();
     });
 
     it("opens a blank topic chat from the New topic row, creating nothing yet", async () => {
@@ -1022,7 +1036,7 @@ describe("RecentChats", () => {
     expect(mark("Read chat")).toBeNull();
     expect(mark("Open chat")).toBeNull();
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
-    expect(doneRow?.className).toContain("text-section");
+    expect(doneRow?.className).toContain("text-ui");
     expect(doneRow?.className).not.toContain("font-medium");
   });
 

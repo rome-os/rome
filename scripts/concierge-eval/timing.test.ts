@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { parseVerdict } from "./judge.js";
+import { judgePrompt, parseVerdict } from "./judge.js";
 import { quantile, spread, timedTurns } from "./timing.js";
 
 const line = (data: Record<string, unknown>) =>
@@ -48,5 +48,15 @@ describe("parseVerdict", () => {
     });
     expect(parseVerdict('{"score": 9, "why": "x"}')).toBeNull();
     expect(parseVerdict("no verdict")).toBeNull();
+  });
+});
+
+describe("judgePrompt", () => {
+  it("gives the judge the memory the assistant may rightly use, when there is some", () => {
+    expect(judgePrompt("r", "t", "- Allergic to peanuts")).toContain(
+      "<memory>\nThe assistant's memory about the owner",
+    );
+    expect(judgePrompt("r", "t", "- Allergic to peanuts")).toContain("- Allergic to peanuts");
+    expect(judgePrompt("r", "t")).not.toContain("<memory>");
   });
 });

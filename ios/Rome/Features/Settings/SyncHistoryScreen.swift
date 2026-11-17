@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Apple Health → Sync history: every sync of the last 30 days, by day, each
+// Apple Health → Sync history: the syncs of the last 30 days, by day, each
 // a row with how it came about, when, and how many readings went. Counts
 // only, never a value. Delete uploaded data sits at the bottom. How the sync
 // stands now, and Sync now, are on the Apple Health page.
@@ -29,12 +29,14 @@ struct SyncHistoryFormatter {
     var locale: Locale = .current
     var device: DeviceKind = .iPhone
 
-    /// Newest first, by day. A sync that found nothing new and went well
-    /// adds no row past the newest one, so the list shows what moved.
+    /// Newest first, by day. Past the newest one, a sync that went well adds
+    /// no row when it found nothing new or ran in the background, which it
+    /// does dozens of times a day; failures, skips, Sync now, Opened Rome,
+    /// history and deletes stay.
     func days(_ entries: [SyncLogEntry]) -> [SyncHistoryDay] {
         var days: [SyncHistoryDay] = []
         for (index, entry) in entries.enumerated() {
-            if index > 0, entry.outcome == .ok, entry.itemCount == 0 { continue }
+            if index > 0, Self.quiet(entry) { continue }
             let day = calendar.startOfDay(for: entry.time)
             let row = row(entry)
             if let last = days.last, last.id == day {
@@ -44,6 +46,13 @@ struct SyncHistoryFormatter {
             }
         }
         return days
+    }
+
+    /// A sync that went well with nothing to tell: no new readings, or a
+    /// background one.
+    static func quiet(_ entry: SyncLogEntry) -> Bool {
+        if entry.outcome == .ok, entry.itemCount == 0 { return true }
+        return entry.trigger == .observer && !entry.history && (entry.outcome == .ok || entry.outcome == .partial)
     }
 
     func row(_ entry: SyncLogEntry) -> SyncHistoryRow {

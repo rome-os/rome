@@ -1,6 +1,8 @@
 import {
   VAULT_MAX_DESCRIPTION_LENGTH,
   VAULT_MAX_VALUE_LENGTH,
+  VAULT_PIN_PATTERN,
+  type VaultPinState,
   type VaultSecretDto,
   vaultNameError,
 } from "@rome/api-types/vault";
@@ -27,14 +29,91 @@ const store = new Map<string, Omit<VaultSecretDto, "name">>([
   ],
 ]);
 
+// The PIN lives in memory and starts unset, so the first save asks for one. Three
+// wrong guesses lock it for 15 minutes, as the signer does.
+let pin: string | null = null;
+let failures = 0;
+let lockedUntil = 0;
+
+const lockedBody = () => ({ error: "locked", lockedUntil: new Date(lockedUntil).toISOString() });
+const pinState = (): VaultPinState => ({
+  set: pin !== null,
+  lockedUntil: lockedUntil > Date.now() ? new Date(lockedUntil).toISOString() : null,
+});
+
+/** The refusal for a PIN that does not pass, or null when it does. */
+function pinRefusal(given: unknown) {
+  if (typeof given !== "string" || !VAULT_PIN_PATTERN.test(given)) {
+    return HttpResponse.json({ error: "invalid_pin" }, { status: 400 });
+  }
+  if (pin === null) return HttpResponse.json({ error: "pin_not_set" }, { status: 409 });
+  if (lockedUntil > Date.now()) return HttpResponse.json(lockedBody(), { status: 423 });
+  if (given === pin) {
+    failures = 0;
+    return null;
+  }
+  failures += 1;
+  if (failures >= 3) {
+    failures = 0;
+    lockedUntil = Date.now() + 15 * 60_000;
+    return HttpResponse.json(lockedBody(), { status: 423 });
+  }
+  return HttpResponse.json({ error: "wrong_pin", attemptsLeft: 3 - failures }, { status: 403 });
+}
+
 export const vaultHandlers = [
   http.get("/api/vault", () =>
     HttpResponse.json({
       secrets: [...store.entries()]
         .map(([name, entry]) => ({ name, ...entry }))
         .sort((a, b) => a.name.localeCompare(b.name)),
+      pin: pinState(),
     }),
   ),
+
+  http.post("/api/vault/pin", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { pin?: unknown };
+    if (typeof body.pin !== "string" || !VAULT_PIN_PATTERN.test(body.pin)) {
+      return HttpResponse.json({ error: "invalid_pin" }, { status: 400 });
+    }
+    if (pin !== null) return HttpResponse.json({ error: "pin_already_set" }, { status: 409 });
+    pin = body.pin;
+    return HttpResponse.json({ ok: true });
+  }),
+
+  http.post("/api/vault/reset", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { pin?: unknown };
+    if (typeof body.pin !== "string" || !VAULT_PIN_PATTERN.test(body.pin)) {
+      return HttpResponse.json({ error: "invalid_pin" }, { status: 400 });
+    }
+    store.clear();
+    pin = body.pin;
+    failures = 0;
+    lockedUntil = 0;
+    return HttpResponse.json({ ok: true });
+  }),
+
+  http.post("/api/vault/grants", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      names?: unknown;
+      name?: unknown;
+      ttlMinutes?: unknown;
+      pin?: unknown;
+    };
+    const names = Array.isArray(body.names) ? body.names : [body.name];
+    const entries = names.map((name) => (typeof name === "string" ? store.get(name) : undefined));
+    if (entries.some((entry) => !entry) || typeof body.ttlMinutes !== "number") {
+      return HttpResponse.json(
+        { error: "This request changed or was already answered.", code: "stale_request" },
+        { status: 409 },
+      );
+    }
+    const refusal = pinRefusal(body.pin);
+    if (refusal) return refusal;
+    const until = new Date(Date.now() + body.ttlMinutes * 60_000).toISOString();
+    for (const entry of entries) if (entry) entry.grantedUntil = until;
+    return HttpResponse.json({ ok: true });
+  }),
 
   http.put("/api/vault/:name", async ({ params, request }) => {
     const name = String(params.name);
@@ -44,6 +123,7 @@ export const vaultHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       value?: unknown;
       description?: unknown;
+      pin?: unknown;
     };
     if (typeof body.value !== "string" || body.value.length === 0) {
       return HttpResponse.json({ error: "Value is required." }, { status: 400 });
@@ -61,6 +141,8 @@ export const vaultHandlers = [
         { status: 400 },
       );
     }
+    const refusal = pinRefusal(body.pin);
+    if (refusal) return refusal;
     const now = new Date().toISOString();
     const existing = store.get(name);
     store.set(name, {

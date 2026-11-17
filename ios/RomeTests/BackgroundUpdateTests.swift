@@ -55,6 +55,38 @@ final class CloudStatusBox {
         #expect(updater.updatedInBackgroundTo == nil)
     }
 
+    /// Only a composer the guardian sees uses the "updated" line up: Chat kept
+    /// mounted under Apps, Search or a topic chat, a chat under the drawer or a
+    /// sheet, and every chat while the app is away leave it for later.
+    @Test func onlyAVisibleComposerUsesUpTheUpdatedLine() {
+        let model = AppModel()
+        func shows(_ chat: String, in section: MainSection, covered: Bool = false) -> Bool {
+            let inFront = MainShell.visibleChat(section: section, path: [], covered: covered) == chat
+            return UpdatedNotice.shows(chatInFront: inFront, pagesUncovered: model.pagesUncovered)
+        }
+        #expect(shows(conciergeChatID, in: .chat))
+        #expect(!shows(conciergeChatID, in: .apps))
+        #expect(!shows(conciergeChatID, in: .search))
+        // A topic chat in front: its composer says it, Chat's under it does not.
+        #expect(shows("topic-1", in: .topic("topic-1")))
+        #expect(!shows(conciergeChatID, in: .topic("topic-1")))
+        // The drawer or a sheet over the chat.
+        #expect(!shows(conciergeChatID, in: .chat, covered: true))
+        #expect(!shows("topic-1", in: .topic("topic-1"), covered: true))
+
+        // The stacking game over the whole app.
+        model.stackGame = StackGameLaunch()
+        #expect(!model.pagesUncovered)
+        #expect(!shows(conciergeChatID, in: .chat))
+        model.stackGame = nil
+        #expect(shows(conciergeChatID, in: .chat))
+
+        // The app in the background.
+        model.appDidEnterBackground()
+        #expect(!model.pagesUncovered)
+        #expect(!shows(conciergeChatID, in: .chat))
+    }
+
     /// The page's own upgrade keeps the page and reopens; the composer says nothing.
     @Test func anUpgradeFromThePageStaysOnThePage() async throws {
         let backend = offered()

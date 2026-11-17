@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { type ScenarioRun, baselineMarkdown } from "./baseline-report.js";
-import { type SpanRow, taskPath } from "./task-path.js";
+import { type SpanRow, subagentToolName, taskPath } from "./task-path.js";
 
 const run = (version: number, config = "opus-low"): ScenarioRun => ({
   id: "qa-units",
@@ -19,12 +19,73 @@ const run = (version: number, config = "opus-low"): ScenarioRun => ({
   transcript: [],
 });
 
+const guardianTurn = (turnId: string, firstSayMs: number) => ({
+  chatId: "c",
+  turnId,
+  trigger: "guardian" as const,
+  model: null,
+  effort: null,
+  session: "warm" as const,
+  startMs: null,
+  workingMs: null,
+  reactedMs: null,
+  firstSayMs,
+  ackMs: firstSayMs,
+  durationMs: firstSayMs,
+  modelCalls: 1,
+  toolCalls: 1,
+  tools: { say: 1 },
+  contextTokens: 80_000,
+  inputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  outputTokens: 0,
+  failed: false,
+  at: "",
+});
+
 describe("baselineMarkdown", () => {
   it("keeps runs of a changed scenario apart, and says so", () => {
     const md = baselineMarkdown([run(1), run(2)]);
     expect(md).toContain("| opus-low (v1) |");
     expect(md).toContain("| opus-low (v2) |");
     expect(md).toContain("changed between runs (versions 1, 2)");
+  });
+
+  it("counts rule notes apart from the checks, and times no setup turn", () => {
+    const md = baselineMarkdown([
+      {
+        ...run(4),
+        id: "long-context",
+        row: "long-context",
+        lang: "en",
+        turns: [guardianTurn("setup", 60_000), guardianTurn("asked", 2_000)],
+        setupTurnIds: ["setup"],
+        notes: ['rule: 2 emoji in "x"'],
+        measures: { contextTokens: 80_000 },
+      },
+    ]);
+    expect(md).toContain(
+      "| opus-low | 1 | 1/1 | 1 | 0 | 0 | 5.00 (1) | – | – / – | 2.0 / 2.0 | – |",
+    );
+    expect(md).toContain("## Rule regressions");
+    expect(md).toContain('- opus-low r1 long-context: 2 emoji in "x"');
+    expect(md).toContain("| opus-low | 1 | 80000 |");
+    expect(md).not.toContain("60.0");
+  });
+
+  it("gives each scenario version its own overview row, and times no hand-off as inline", () => {
+    const md = baselineMarkdown([
+      {
+        ...run(4),
+        row: "reasoning",
+        turns: [{ ...guardianTurn("t1", 9_000), tools: { chat_start: 1 } }],
+      },
+      { ...run(5), row: "simple-qa", turns: [guardianTurn("t2", 2_000)] },
+    ]);
+    expect(md).toContain("| opus-low (v4) | 1 | 1/1 | 0 | 0 | 0 | 5.00 (1) | – | – / – |");
+    expect(md).toContain("| opus-low (v5) | 1 | 1/1 | 0 | 0 | 0 | 5.00 (1) | – | 2.0 / 2.0 |");
+    expect(md).toContain("The runs span scenario versions 4, 5");
   });
 
   it("labels nothing when every run has one version", () => {
@@ -90,42 +151,33 @@ describe("taskPath", () => {
 
 describe("taskPath subagent calls", () => {
   it("gives each of two overlapping calls its own child and model", () => {
+    const explore = subagentToolName("assistant:explore");
+    const research = subagentToolName("core:research");
+    const main = { agent: "core:main", thread: "webchat:task" };
     const rows = [
-      span({
-        name: "agent:core:main",
-        agent: "core:main",
-        thread: "webchat:task",
-        start: 0,
-        ms: 10_000,
-      }),
-      span({ name: "tool", tool: "sa_explore", thread: "webchat:task", start: 1_000, ms: 4_000 }),
-      span({ name: "tool", tool: "sa_research", thread: "webchat:task", start: 1_200, ms: 5_000 }),
+      span({ ...main, name: "agent:core:main", start: 0, ms: 10_000 }),
+      span({ thread: "webchat:task", tool: explore, start: 1_000, ms: 4_000 }),
+      span({ thread: "webchat:task", tool: research, start: 1_200, ms: 5_000 }),
+      // The second call's child starts first: names, not order, match them.
       span({
         name: "agent:assistant:explore",
         agent: "assistant:explore",
-        start: 1_050,
+        start: 1_300,
         ms: 3_000,
       }),
       span({
         name: "model.turn",
         agent: "assistant:explore",
-        model: "claude-haiku-5-5",
-        start: 1_100,
+        model: "haiku",
+        start: 1_350,
         ms: 2_000,
       }),
-      span({ name: "agent:core:research", agent: "core:research", start: 1_250, ms: 4_000 }),
-      span({
-        name: "model.turn",
-        agent: "core:research",
-        model: "claude-opus-5-5",
-        start: 1_300,
-        ms: 3_000,
-      }),
+      span({ name: "agent:core:research", agent: "core:research", start: 1_210, ms: 4_000 }),
+      span({ name: "model.turn", agent: "core:research", model: "opus", start: 1_220, ms: 3_000 }),
     ];
-    const calls = taskPath(rows, "con", "task", 0).subagentCalls;
-    expect(calls).toMatchObject([
-      { tool: "sa_explore", agent: "assistant:explore", model: "claude-haiku-5-5", parallel: true },
-      { tool: "sa_research", agent: "core:research", model: "claude-opus-5-5", parallel: true },
+    expect(taskPath(rows, "con", "task", 0).subagentCalls).toMatchObject([
+      { tool: explore, agent: "assistant:explore", model: "haiku", parallel: true },
+      { tool: research, agent: "core:research", model: "opus", parallel: true },
     ]);
   });
 });

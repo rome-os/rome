@@ -50,20 +50,26 @@ import {
   activeSessionFromPath,
   chatKind,
   isProjectChat,
+  chatPath,
   MAIN_CHAT_PATH,
   sessionActivityTime,
 } from "@/lib/chat-session";
 import {
   type ChatListMode,
   newChatShortcutForPlatform,
+  railChatHref,
   writeChatListMode,
 } from "@/lib/chat-list-mode";
-import { useStoredChatListMode } from "@/hooks/use-chat-list-mode";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
+import {
+  useLastConciergeChatId,
+  useLastOrdinaryChatId,
+  useStoredChatListMode,
+} from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist, useChatSessions } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   CONCIERGE_CHATS_QUERY_KEY,
-  useConciergeChatId,
+  useConciergeChat,
   useConciergeChats,
   useRefreshTopicChats,
 } from "@/hooks/use-concierge";
@@ -234,7 +240,17 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  onCard,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  onCard: boolean;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -260,8 +276,8 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-12 pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? "pl-7" : "pl-3"
+          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+            nested ? (onCard ? "pl-4" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -276,8 +292,8 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
   );
 }
 
-/** The folded Tasks card: its heading row and padding. */
-const TASKS_FOLDED_HEIGHT = "h-[calc(max(2.5rem,var(--control-min-h))_+_0.5rem)]";
+/** The folded Tasks card: its heading row, the card's padding and border. */
+const TASKS_FOLDED_HEIGHT = "h-[calc(max(var(--row-h),var(--control-min-h))_+_0.5rem_+_2px)]";
 
 // Rows fade out over the bottom padding, so a list that runs on under its
 // edge shows it, and the last row clears the fade once scrolled to the end.
@@ -322,7 +338,9 @@ function ChatModeSwitch({
       aria-label={t("recentChats.modeSwitch")}
       value={mode}
       onValueChange={onChange}
-      className="shrink-0"
+      // The kit's selected pill is the canvas colour, which on a dark track is
+      // barely lighter than the track. Dark lifts it with the foreground.
+      className="shrink-0 [&_[role=radio]]:px-[var(--row-seg-px)] dark:[&_[aria-checked=true]]:bg-foreground/20"
       options={[
         {
           value: "chat",
@@ -371,13 +389,13 @@ function NewChatRow({
       to="/chat"
       state={kind === "topic" ? { conciergeTopic: true } : undefined}
       data-new-chat-row={kind}
-      className={`${LINK_CLASS} ${IDLE_CLASS} mb-1`}
+      className={`${LINK_CLASS} ${IDLE_CLASS} mb-[var(--row-gap)]`}
     >
       <span
-        className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+        className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
         aria-hidden
       >
-        <Plus className="h-5 w-5 shrink-0" />
+        <Plus className="size-5 shrink-0" />
       </span>
       <span className="flex-1 truncate">{label}</span>
       {shortcut ? (
@@ -450,7 +468,7 @@ export function RecentChats({
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
-  const conciergeChatId = useConciergeChatId();
+  const { chatId: conciergeChatId, loading: conciergeLoading } = useConciergeChat();
   const conciergeChats = useConciergeChats();
   // Without a Concierge there is nothing to switch to: the list is the
   // ordinary chats alone.
@@ -465,8 +483,37 @@ export function RecentChats({
   );
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
   const storedMode = useStoredChatListMode();
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const lastConciergeChatId = useLastConciergeChatId();
+  // The switch opens a chat of the mode it picks, and the open chat sets the
+  // mode: the last Concierge chat opened, else the main chat; the last ordinary
+  // chat, else a blank one. Choosing the mode already showing does nothing.
+  // The remembered Concierge chat is only a hint: one no list holds any more
+  // (deleted elsewhere) opens the main chat. On a phone the list is a screen
+  // over the chat, so the switch only changes the list there.
+  const switchMode = (next: ChatListMode) => {
+    if (next === mode) return;
+    writeChatListMode(next);
+    if (!wideWindow) return;
+    const rememberedExists =
+      lastConciergeChatId !== null &&
+      (conciergeChats.some((chat) => chat.id === lastConciergeChatId) ||
+        sessions.some((session) => session.id === lastConciergeChatId) ||
+        conciergeTopicSessions.some((session) => session.id === lastConciergeChatId));
+    navigate(
+      next === "concierge"
+        ? rememberedExists
+          ? chatPath(lastConciergeChatId, conciergeChatId)
+          : MAIN_CHAT_PATH
+        : railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists),
+    );
+  };
   // A device with no stored mode starts in Chat.
-  const mode: ChatListMode = hasConcierge ? (storedMode ?? "chat") : "chat";
+  // While the Concierge is still being asked, the switcher shows at the stored
+  // mode: it is open to everyone, so no chat is the rare answer.
+  const showSwitcher = hasConcierge || conciergeLoading;
+  const mode: ChatListMode = showSwitcher ? (storedMode ?? "chat") : "chat";
   // The router renders a navigation as a transition, so the location stays
   // on the old chat until the new one has rendered, which takes a moment
   // when the old one is long. The row a click opens is marked at once, as an
@@ -784,6 +831,8 @@ export function RecentChats({
   // with the hover tone instead of the raised one.
   const renderChatRow = (session: ChatSession, nested = false, onCard = false) => {
     const isActive = activeSessionId === session.id;
+    // A chat under a project folder; the Tasks card's rows are nested but not in a group.
+    const inGroup = nested && !onCard;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
     const isEditing = rename.editingId === session.id;
@@ -799,18 +848,26 @@ export function RecentChats({
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-10 items-center gap-1 rounded-12 text-section font-normal transition min-h-[var(--control-min-h)] ${
-          session.archivedAt ? "text-subtle-foreground" : "text-foreground"
-        } ${
+        className={`group relative flex h-[var(--row-h)] ${
+          inGroup ? "ml-[var(--row-child-ml)]" : ""
+        } items-center gap-1 rounded-12 text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
           isActive
             ? onCard
-              ? "bg-surface-hover font-normal ring-1 ring-inset ring-border/70"
+              ? "bg-surface-hover ring-1 ring-inset ring-border/70"
               : ACTIVE_CLASS
             : onCard
               ? "hover:bg-surface-hover"
               : "hover:bg-surface-hover dark:hover:bg-surface"
         }`}
       >
+        {/* The selected child's mark on the folder's guide line. */}
+        {inGroup && isActive ? (
+          <span
+            aria-hidden
+            data-tree-indicator
+            className="pointer-events-none absolute inset-y-[var(--row-indicator-inset)] right-full mr-[var(--row-indicator-mr)] w-[3px] rounded-full bg-muted-foreground"
+          />
+        ) : null}
         {isEditing ? (
           <input
             {...rename.inputProps}
@@ -818,14 +875,14 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? "ml-4" : "ml-2"
+              nested ? (onCard ? "ml-4" : "ml-3") : "ml-2"
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} onCard={onCard} />
         )}
         <span
-          className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
+          className={`relative ${inGroup ? "mr-[var(--row-px)]" : "mr-2"} flex h-4 w-4 shrink-0 items-center justify-center ${
             isEditing ? "hidden" : ""
           }`}
         >
@@ -910,13 +967,13 @@ export function RecentChats({
     const projectLabel = (
       <>
         <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+          className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
           aria-hidden
         >
           {collapsed ? (
-            <Folder className="h-5 w-5 shrink-0" />
+            <Folder className="size-5 shrink-0" />
           ) : (
-            <FolderOpen className="h-5 w-5 shrink-0" />
+            <FolderOpen className="size-5 shrink-0" />
           )}
         </span>
         <span className="truncate">{label}</span>
@@ -974,14 +1031,14 @@ export function RecentChats({
             : undefined
         }
         title={deviceFolder ? undefined : label}
-        className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-12 pl-3 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="flex h-full min-w-0 flex-1 items-center gap-[var(--row-icon-gap)] rounded-12 border border-transparent pl-[var(--row-link-px)] pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
       >
         {projectLabel}
       </button>
     );
     return (
-      <div key={key} className="mb-1" data-project-group={key}>
-        <div className="group/project flex h-10 items-center min-h-[var(--control-min-h)] gap-1 rounded-12 text-section font-normal text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+      <div key={key} data-project-group={key}>
+        <div className="group/project flex h-[var(--row-h)] items-center min-h-[var(--control-min-h)] gap-1 rounded-12 text-ui font-normal text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
             <button
@@ -1000,7 +1057,7 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInFolder")}
               title={t("recentChats.newChatInFolder")}
-              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-[var(--row-trail-mr)] shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -1015,7 +1072,7 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInProject")}
               title={t("recentChats.newChatInProject")}
-              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-[var(--row-trail-mr)] shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -1023,12 +1080,20 @@ export function RecentChats({
         </div>
         {collapsed ? null : (
           <>
-            {visibleItems.map((session) => renderChatRow(session, true))}
+            {/* A guide line down the folder icon's centre ties the chats to it. */}
+            <div className="relative mt-[var(--row-gap)] flex flex-col gap-[var(--row-gap)]">
+              <span
+                aria-hidden
+                data-tree-guide
+                className="pointer-events-none absolute inset-y-0 left-[calc(var(--row-px)+0.5rem)] w-px bg-border"
+              />
+              {visibleItems.map((session) => renderChatRow(session, true))}
+            </div>
             {remainingCount > 0 ? (
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="ml-[var(--row-load-ml)] rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>
@@ -1051,7 +1116,7 @@ export function RecentChats({
         aria-labelledby="recent-chats-tasks-heading"
         data-tasks-section
         data-expanded={tasksExpanded}
-        className={`mx-3 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 bg-surface p-1 shadow-1 ring-1 ring-inset ring-border-strong transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:shadow-none ${
+        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border-strong bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:shadow-none ${
           tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
         }`}
       >
@@ -1071,9 +1136,14 @@ export function RecentChats({
                 : t("recentChats.sectionTasks")
             }
             onClick={() => setTasksExpanded((open) => !open)}
-            className="flex h-10 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 px-2 text-left text-section font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
-            <ListChecks className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <span
+              className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+              aria-hidden
+            >
+              <ListChecks className="size-5 shrink-0" />
+            </span>
             <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
             {running > 0 ? (
               <span
@@ -1085,7 +1155,7 @@ export function RecentChats({
               </span>
             ) : null}
             <ChevronUp
-              className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
+              className={`h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
                 tasksExpanded ? "rotate-180" : ""
               }`}
               aria-hidden
@@ -1116,29 +1186,32 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-4 pr-3 ${headerLeading ? "pl-2" : "pl-6"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[var(--row-switcher-pl)]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
         >
-          <div className="flex min-h-10 min-w-0 items-center gap-1">
+          <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}
-            <span className="truncate text-section text-foreground">
-              {t(mode === "concierge" ? "recentChats.modeConcierge" : "recentChats.title")}
-            </span>
-          </div>
-          <div className="flex min-h-10 items-center gap-1">
-            {hasConcierge ? (
+            {showSwitcher ? (
               <ChatModeSwitch
                 mode={mode}
-                onChange={writeChatListMode}
+                onChange={switchMode}
                 conciergeUnread={conciergeUnread}
                 chatReplying={chatReplying}
               />
-            ) : null}
+            ) : (
+              // Only once the Concierge is known to be absent: the server has
+              // none (404), or this caller has no chat (401).
+              <span className="truncate text-section text-foreground">
+                {t("recentChats.title")}
+              </span>
+            )}
+          </div>
+          <div className="flex h-10 shrink-0 items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
                   size="sm"
                   label={t("recentChats.settings")}
-                  icon={<Ellipsis className="size-5" aria-hidden />}
+                  icon={<Ellipsis aria-hidden />}
                   className="text-subtle-foreground hover:text-foreground"
                 />
               </DropdownMenuTrigger>
@@ -1192,7 +1265,7 @@ export function RecentChats({
         {/* The list and the Tasks card share what is left under the header. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <div
-            className={`min-h-0 flex-1 overflow-y-auto px-3 scrollbar-idle-hidden ${
+            className={`min-h-0 flex-1 overflow-y-auto px-2 pt-2 scrollbar-idle-hidden ${
               showTasks ? `pb-7 ${FADE_BOTTOM_7}` : "pb-3"
             }`}
             onClickCapture={markOpening}
@@ -1202,18 +1275,21 @@ export function RecentChats({
               label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
               shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
             />
-            {mode === "concierge" && conciergeChatId ? (
-              <ConciergeChats
-                mainChatId={conciergeChatId}
-                activeSessionId={activeSessionId}
-                statusFilter={statusFilter}
-                topicSessions={conciergeTopicSessions}
-              />
+            {mode === "concierge" ? (
+              // Nothing until the chat's id arrives, rather than the project list flashing.
+              conciergeChatId ? (
+                <ConciergeChats
+                  mainChatId={conciergeChatId}
+                  activeSessionId={activeSessionId}
+                  statusFilter={statusFilter}
+                  topicSessions={conciergeTopicSessions}
+                />
+              ) : null
             ) : (
               <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
                 <h2
                   id="recent-chats-projects-heading"
-                  className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+                  className="mb-[var(--row-gap)] flex h-[var(--row-h)] items-end px-[var(--row-px)] pb-1 text-aux text-subtle-foreground"
                 >
                   {t("recentChats.sectionProjects")}
                 </h2>
@@ -1224,7 +1300,7 @@ export function RecentChats({
                     <Skeleton className="h-8 w-3/5" />
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="flex flex-col gap-[var(--row-gap)]">
                     {projectGroups.map(renderProjectGroup)}
                     {/* Only with nothing to show: a refetch that fails while the
                     list already has rows keeps the rows rather than blanking them. */}

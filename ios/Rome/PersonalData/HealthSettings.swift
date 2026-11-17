@@ -422,7 +422,9 @@ final class HealthSettings {
         if isDemo { return }
         #endif
         guard let lane else { return }
-        let entries = await lane.log.recent(limit: 500)
+        // Every retained line (30 days): Sync history folds the quiet ones away,
+        // and a cap would end the list days short of them.
+        let entries = await lane.log.recent(limit: .max)
         guard self.lane === lane else { return }
         history = entries
     }

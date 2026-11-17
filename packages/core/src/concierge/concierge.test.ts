@@ -135,9 +135,11 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
   };
 }
 
-/** The line that opens every Concierge turn's input in the main chat. */
-const MAIN_LINE =
-  '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n\n';
+/** The guardian's local time every harness turn names. */
+const LOCAL_NOW = "Fri 20/11/2026 09:30 (Europe/Berlin)";
+
+/** The lines that open every Concierge turn's input in the main chat. */
+const MAIN_LINE = `<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n<now>${LOCAL_NOW}</now>\n\n`;
 
 /** What the Concierge has already said in its running turn, unless a test says it has not. */
 const ACKNOWLEDGEMENT: Row = {
@@ -285,6 +287,7 @@ function setup(
     skillCatalog: {
       find: (name: string) => (name === "coding:app_creation" ? { name } : undefined),
     },
+    localNow: async () => LOCAL_NOW,
     settingsRepo: {
       get: async () => {
         if (options.settingsDelayMs)
@@ -4143,6 +4146,43 @@ describe("Concierge chat", () => {
     expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
       '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
     );
+    // The weekday and date are the chat owner's own, not the container's UTC
+    // day: the guardian's zone, or a dashboard admin's own once reported.
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2026-11-19T17:00:00Z"));
+      const shanghai = new ConciergeService({
+        settingsRepo: {
+          get: async (key: string) => (key === "guardianTimezone" ? "Asia/Shanghai" : null),
+        },
+        webchatRepo: {
+          getSession: async (id: string) =>
+            id === annMain
+              ? { id, agentName: CONCIERGE_AGENT_ID, ownerKey: "visitor:acct-ann" }
+              : { id, agentName: CONCIERGE_AGENT_ID, ownerKey: null },
+        },
+        owners,
+      } as unknown as ConciergeDeps);
+      expect(await shanghai.nowLine("concierge")).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
+      // Before following is attached, an admin's chat falls back to the guardian's zone.
+      expect(await shanghai.nowLine(annMain)).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
+      shanghai.attachFollowing({
+        timezone: async (owner: string) =>
+          owner === "visitor:acct-ann" ? "America/Los_Angeles" : "Asia/Shanghai",
+      } as never);
+      expect(await shanghai.nowLine(annMain)).toBe(
+        "<now>Thu 19/11/2026 09:00 (America/Los_Angeles)</now>",
+      );
+      expect(await shanghai.nowLine("concierge")).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
     // A dashboard admin is served while on the allow-list, the guardian always.
     expect(await service.isServed("visitor:acct-ann")).toBe(true);
     expect(await service.isServed("visitor:acct-unknown")).toBe(false);
