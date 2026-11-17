@@ -1637,8 +1637,8 @@ export class ConciergeService {
 
   /**
    * The owner cancelled check `checkId` of chat `chatId` from the chat's
-   * checks. One for a task tells the Concierge quietly, as cancelling from
-   * the task's row does. Answers whether there was such a check.
+   * checks. One for a task tells the Concierge quietly. Answers whether
+   * there was such a check.
    */
   async cancelCheckByOwner(chatId: string, checkId: string): Promise<boolean> {
     const checks = this.deps.checks;
@@ -1654,20 +1654,6 @@ export class ConciergeService {
       await this.deps.tasks.taskChanged(check.taskId);
     }
     return true;
-  }
-
-  /**
-   * Task `taskId`'s owner called its checks off from its row: a wake-up is
-   * removed, and its schedule skips only its next run. A failure reaches the
-   * caller; once they are cancelled, the Concierge hears of it
-   * quietly, so it expects no wake-up from them.
-   */
-  async cancelChecksByOwner(taskId: string): Promise<void> {
-    const row = await this.deps.tasks.repo.get(taskId);
-    if (!row) return;
-    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
-    this.taskEvents?.mark({ taskId, kind: "checks_cancelled_by_owner", urgent: false });
-    await this.deps.tasks.taskChanged(taskId);
   }
 
   /**

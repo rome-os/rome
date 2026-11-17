@@ -7,8 +7,6 @@ export const CHAT_STATUS_TOPIC = "chat.status";
 
 /** The agent's display name changed. Carried on chat.status alongside running state. */
 export const agentNameChangedSchema = z.object({ agentName: z.string() });
-/** The Concierge task panel's rows. Its only event is `task_upsert`. */
-export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 /**
  * What the caller's own Concierge chats are doing. Its only event is
  * `concierge_activity` (`ConciergeActivityEvent`): one for each of the
