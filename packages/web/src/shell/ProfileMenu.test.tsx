@@ -113,7 +113,7 @@ describe("ProfileMenu", () => {
     await waitFor(() => expect(screen.getByText("F")).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: "Account" }));
     expect(await screen.findByText("friend@example.com")).toBeTruthy();
-    expect(screen.getByText("Dashboard admin")).toBeTruthy();
+    expect(screen.getByText("Admin")).toBeTruthy();
   });
 
   it("navigates to /settings from the menu", async () => {

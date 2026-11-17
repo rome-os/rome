@@ -1515,7 +1515,7 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-/** Dashboard admins as rows of the Access and privacy group: a heading row with
+/** Admins as rows of the Access and privacy group: a heading row with
  * the count, the add field, then one row per address. Last in the group, so a
  * long list grows at the bottom rather than pushing the other settings down. */
 function AllowedCloudEmailsRows() {

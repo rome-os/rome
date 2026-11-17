@@ -573,7 +573,7 @@
   "publicAccess": {
     "title": "Access and privacy",
     "dashboardEmails": {
-      "title": "Dashboard admins",
+      "title": "Admins",
       "description": "These accounts get the full dashboard.",
       "accountCount_one": "{{count}} account",
       "accountCount_other": "{{count}} accounts",
@@ -583,8 +583,8 @@
       "empty": "No accounts yet. Shared dashboard access stays off until you add one.",
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
-      "savedFlash": "Dashboard admins saved",
-      "saveFailedFallback": "Failed to save dashboard admins.",
+      "savedFlash": "Admins saved",
+      "saveFailedFallback": "Failed to save admins.",
       "tooMany": "Up to {{limit}} emails allowed",
       "emailTooLong": "Email longer than {{limit}} characters"
     }

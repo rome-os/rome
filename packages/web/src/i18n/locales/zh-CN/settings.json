@@ -573,7 +573,7 @@
   "publicAccess": {
     "title": "访问与隐私",
     "dashboardEmails": {
-      "title": "仪表盘管理员",
+      "title": "管理员",
       "description": "这些账号可以使用完整仪表盘。",
       "accountCount_one": "{{count}} 个账号",
       "accountCount_other": "{{count}} 个账号",
@@ -583,8 +583,8 @@
       "empty": "还没有账号。添加账号之前，共享仪表盘访问保持关闭。",
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
-      "savedFlash": "仪表盘管理员已保存",
-      "saveFailedFallback": "保存仪表盘管理员失败。",
+      "savedFlash": "管理员已保存",
+      "saveFailedFallback": "保存管理员失败。",
       "tooMany": "最多允许 {{limit}} 个邮箱",
       "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }
