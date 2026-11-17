@@ -82,6 +82,8 @@ Rules that wait "a day" or "an hour" in the rules doc run on the waits above, an
 
 From phase 2, K5's leg "a message source is linked" is scored: each K3 answer must link at least one commitment it reports, by a link that ends in that message's id. K7 runs and is reported but not scored, and its failures do not count across runs, since phase 2 puts private chats in the agent's one session.
 
+"A day later" moves the app's stored times into the past with `cos-env clock forward`; Rome, the model and Discord keep the real time. After the move the run renews the session in `general`, as K6 does. A2 and K4 state this limit in the report: a pass shows the agent answers "yesterday" questions from what it stored, not that it survives a real day.
+
 Phase 2 runs in this order: the phase 1 rules (K6 last of them), A3, A2, K4, A8, A7. K6 compares goals before K4 changes them, A3's cost is read before the clock moves, and A7's instruction comes after everything that asks about its topic.
 
 ### Direct messages

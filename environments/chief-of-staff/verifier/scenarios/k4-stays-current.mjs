@@ -1,5 +1,5 @@
 import { linkedIds } from "../lib/checks.mjs";
-import { aDayLater, entryProblems, holdsAll, loadHearing } from "../lib/hearing.mjs";
+import { aDayLater, dayLimit, entryProblems, holdsAll, loadHearing } from "../lib/hearing.mjs";
 import { ask, check, judged, required, ruleResult } from "../lib/scenario.mjs";
 import { K2_QUESTION } from "./k2-goals.mjs";
 
@@ -89,7 +89,8 @@ export default {
   title: "Stays current",
   phase: 2,
   async run(ctx) {
-    const { changeIds, proposalId, privateId, hours } = await aDayLater(ctx);
+    const day = await aDayLater(ctx);
+    const { changeIds, proposalId, privateId, hours } = day;
     const { k4Changes: said, k4Proposal: proposal, k4Private } = loadHearing();
     const privateCase = await privateChange(ctx, k4Private, privateId);
     const changes = said.map(({ goal, title, owner, date }) =>
@@ -110,7 +111,7 @@ export default {
           ...docChecks,
         ]),
         privateChange: privateCase,
-        info: [privateCase.line],
+        info: [dayLimit(day), privateCase.line],
       };
     // The sheet keeps the proposed goal's date, so an answer giving the proposed date fails.
     const verdict = await ctx.judge({
@@ -145,7 +146,7 @@ export default {
       ]),
       changesShown: shown,
       privateChange: privateCase,
-      info: [...info, privateCase.line],
+      info: [dayLimit(day), ...info, privateCase.line],
     };
   },
 };

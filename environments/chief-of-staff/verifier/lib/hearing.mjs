@@ -41,7 +41,18 @@ export async function aDayLater(ctx) {
   const [privateId] = await sayAll(ctx, [hearing.k4Private]);
   const hours = ctx.waits.dayHours ?? DAY_HOURS;
   await ctx.env.clockForward(hours);
-  ctx.memo.day = { factIds, changeIds, proposalId, privateId, hours };
+  // Renew the agent's session as K6 does, so the answers come from what it stored, not from
+  // the turns still in its session. The app owns a session per server; whether renewing a
+  // chat's session renews that one is not shown from the chat, so the report says so.
+  let renewal;
+  try {
+    await ctx.env.renewSession("general");
+    renewal =
+      "renewed with `cos-env rome renew-session --chat general` after the move; the app keeps its own session per server, and whether that renewal reaches it is not shown from the chat";
+  } catch (error) {
+    renewal = `not renewed: ${error.message}`;
+  }
+  ctx.memo.day = { factIds, changeIds, proposalId, privateId, hours, renewal };
   return ctx.memo.day;
 }
 
@@ -70,6 +81,11 @@ export function entryProblems(text, { entry, holds = [], former = [], absent = [
   for (const value of absent)
     if (lines.some((l) => l.includes(value))) problems.push(`entry names ${value}`);
   return [...new Set(problems)];
+}
+
+/** What a pass on a "day later" rule shows and does not, stated beside A2 and K4. */
+export function dayLimit({ hours, renewal }) {
+  return `Limit: the ${hours} h are simulated by moving the app's stored times into the past. Rome, the model and Discord's timestamps keep the real time, and the agent's earlier turns still show real times. So a pass shows the agent answers "yesterday" questions from what it stored, not that it survives a real day. Session: ${renewal}`;
 }
 
 /** Whether `text` holds one form of every token group (case aside). */
