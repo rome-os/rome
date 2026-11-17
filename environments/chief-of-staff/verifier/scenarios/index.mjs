@@ -16,8 +16,8 @@ import k7 from "./k7-private.mjs";
 /** The rules version the scenarios encode. Change it with the rules doc. */
 export const RULES_VERSION = "R4";
 
-// K6 restarts Rome, so it runs after the rules whose answers it reuses, and before K4 changes
-// the goals it compares. A3 runs before the clock moves a day for A2 and K4, so its cost reads
-// in real time. A8 stops Rome for an hour. A7 runs last, since it tells the agent to stay
-// out of a topic.
-export const SCENARIOS = [k1, k2, k3, k5, k7, a1, a5, k6, a3, a2, k4, a8, a7];
+// Fast rules first, so their results land early. A5 reads A1's replies, K5 reads K3's answers,
+// and K6 reuses K1's and K2's. K5 and K6 run before K4 changes the goals they ask about. A2 and
+// K4 share the move of the clock. A3's replay is the slowest, and A7 runs last, since it tells
+// the agent to stay out of a topic.
+export const SCENARIOS = [k1, k2, a1, a5, k7, k3, k5, k6, a8, a2, k4, a3, a7];

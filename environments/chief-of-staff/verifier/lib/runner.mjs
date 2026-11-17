@@ -176,6 +176,11 @@ function agentCommit(version) {
   return String(version.app?.commit ?? version.agent?.commit ?? "unknown").slice(0, 12);
 }
 
+function writeReport(dir, report) {
+  writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(join(dir, "report.md"), renderMarkdown(report));
+}
+
 /**
  * Runs the scenarios and writes report.json and report.md. Throws before touching the
  * environment when anything under test has uncommitted changes and `allowDirty` is false.
@@ -236,16 +241,41 @@ export async function verify({
     answerTimes,
     romeEvents,
   };
-  const liveness = await ask(ctx, {
+  // The parts of the report known before the rules run, kept current as they run.
+  let liveness;
+  let live;
+  const head = () => ({
+    rulesVersion: RULES_VERSION,
+    startedAt: startedAt.toISOString(),
+    finishedAt: new Date().toISOString(),
+    underTest: version,
+    dirty,
+    judge: judgeName,
+    judgeCalibration: JUDGE_CALIBRATION,
+    runFrom: { dir: dirname(dirname(dirname(verifierDir))), commit: version.verifier.commit },
+    waits,
+    notes: [
+      "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
+      ...notes,
+    ],
+    selection: rules ? { rules } : { phase: phase ?? 1 },
+    liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },
+    stopped: live ? null : NOT_ANSWERING,
+    answered,
+    answerTimes,
+    romeEvents,
+  });
+  liveness = await ask(ctx, {
     as: team.members[0].account,
     chat: "general",
     text: LIVENESS_TEXT,
   });
-  const live = Boolean(liveness.reply);
+  live = Boolean(liveness.reply);
   const results = [];
   for (const scenario of live ? scenarios : []) {
     log(`running ${scenario.rule} ${scenario.title}`);
     ctx.rule = scenario.rule;
+    const ruleStarted = Date.now();
     let result;
     try {
       result = await scenario.run(ctx);
@@ -275,8 +305,19 @@ export async function verify({
       byLeg: Boolean(scenario.legs),
       ...result,
       ...(unscored ? { scored: false, unscoredWhy: scenario.unscoredWhy } : {}),
+      seconds: Math.round((Date.now() - ruleStarted) / 1000),
     });
     log(`${scenario.rule}: ${result.status}`);
+    // Each rule's result is readable as soon as it lands; the finished report replaces this.
+    writeReport(dir, {
+      ...head(),
+      inProgress: true,
+      stoppedByEnvoy: [],
+      logs: "copied when the run finishes",
+      summary: summarize(results),
+      failures: { earlierRuns: [], counts: {}, limit: FAILURE_LIMIT },
+      results,
+    });
   }
   for (const rule of live ? missing : []) {
     results.push({
@@ -300,32 +341,13 @@ export async function verify({
   }
 
   const report = {
-    rulesVersion: RULES_VERSION,
-    startedAt: startedAt.toISOString(),
-    finishedAt: new Date().toISOString(),
-    underTest: version,
-    dirty,
-    judge: judgeName,
-    judgeCalibration: JUDGE_CALIBRATION,
-    runFrom: { dir: dirname(dirname(dirname(verifierDir))), commit: version.verifier.commit },
-    waits,
-    notes: [
-      "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
-      ...notes,
-    ],
-    selection: rules ? { rules } : { phase: phase ?? 1 },
-    liveness: { questionId: liveness.questionId, replyId: liveness.reply?.id ?? null },
-    stopped: live ? null : NOT_ANSWERING,
-    answered,
-    answerTimes,
-    romeEvents,
+    ...head(),
     stoppedByEnvoy,
     logs,
     summary: summarize(results),
     failures: failureHistory(runsDir ?? (outDir ? dirname(dir) : DEFAULT_RUNS_DIR), dir, results),
     results,
   };
-  writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
-  writeFileSync(join(dir, "report.md"), renderMarkdown(report));
+  writeReport(dir, report);
   return { report, outDir: dir };
 }

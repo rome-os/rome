@@ -38,6 +38,12 @@ export function renderMarkdown(report) {
   const lines = [
     `# Chief of staff verifier run, ${report.startedAt}`,
     "",
+    ...(report.inProgress
+      ? [
+          `In progress: ${report.results.length} rules done as of ${report.finishedAt}. The finished report replaces this one, with the envoy's stops and the failures across runs.`,
+          "",
+        ]
+      : []),
     `Answered ${report.answered.answered} of ${report.answered.sent} messages sent to the agent.`,
     "",
     ...(report.stopped
@@ -62,7 +68,7 @@ export function renderMarkdown(report) {
     `- Judge: ${report.judge}, calibrated ${report.judgeCalibration}`,
     `- Run from: \`${report.runFrom.dir}\` at \`${report.runFrom.commit}\``,
     `- Rome's logs: ${report.logs === "logs" ? "`logs/` beside this report" : report.logs}`,
-    `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s${report.waits.gapMs ? `, between replayed messages ${report.waits.gapMs / 1000} s` : ""}${report.waits.dayHours ? `, "a day later" ${report.waits.dayHours} h on the agent's clock` : ""}${report.waits.offlineMs ? `, offline ${report.waits.offlineMs / 60000} min` : ""}`,
+    `- Waits: reply ${report.waits.replyMs / 1000} s, A1 ${report.waits.a1Ms / 1000} s, poll ${report.waits.pollMs / 1000} s${report.waits.gapMs ? `, between replayed messages ${report.waits.gapMs / 1000} s` : ""}${report.waits.dayHours ? `, "a day later" ${report.waits.dayHours} h on the agent's clock` : ""}`,
   ];
   if (report.dirty.length > 0) {
     lines.push("", `Run with --dirty: uncommitted changes in ${report.dirty.join(", ")}.`);
@@ -80,13 +86,13 @@ export function renderMarkdown(report) {
     "",
     "## Results",
     "",
-    "| Rule | Result | Reason | Evidence |",
-    "| --- | --- | --- | --- |",
+    "| Rule | Result | Wall time | Reason | Evidence |",
+    "| --- | --- | --- | --- | --- |",
   );
   for (const r of report.results) {
     const reason = String(r.reason).replaceAll("|", "\\|").replaceAll("\n", " ");
     lines.push(
-      `| ${r.rule} ${r.title ?? ""} | ${status(r)} | ${reason} | ${r.evidence.join(", ")} |`,
+      `| ${r.rule} ${r.title ?? ""} | ${status(r)} | ${r.seconds === undefined ? "" : `${Math.floor(r.seconds / 60)} min ${r.seconds % 60} s`} | ${reason} | ${r.evidence.join(", ")} |`,
     );
   }
   for (const r of report.results) {

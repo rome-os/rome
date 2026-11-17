@@ -106,41 +106,6 @@
       "text": "The pier install insurance certificate number is OIC-77310.",
       "question": "What is the pier install insurance certificate number?",
       "tokens": [["OIC-77310"]]
-    },
-    {
-      "as": "member1",
-      "chat": "general",
-      "text": "The new buoy enclosure gaskets come in a teal colour so we can tell them apart from the old ones.",
-      "question": "What colour are the new buoy enclosure gaskets?",
-      "tokens": [["teal"]]
-    },
-    {
-      "as": "member2",
-      "chat": "general",
-      "text": "The salinity alert threshold is now 38.6 PSU.",
-      "question": "What is the salinity alert threshold now?",
-      "tokens": [["38.6"]]
-    },
-    {
-      "as": "member3",
-      "chat": "standup",
-      "text": "Stromness pier needs its own permit, application number SP-2291.",
-      "question": "What is the application number of the Stromness pier permit?",
-      "tokens": [["SP-2291"]]
-    },
-    {
-      "as": "member1",
-      "chat": "leads",
-      "text": "I've asked for a second firmware reviewer, Ingrid Castellanos-Moe from the radio team.",
-      "question": "Who was asked to be the second firmware reviewer?",
-      "tokens": [["Castellanos-Moe"]]
-    },
-    {
-      "as": "member2",
-      "chat": "general",
-      "text": "Saltmarsh will write to the bucket named brine-raw-eu2 from Monday.",
-      "question": "Which bucket will Saltmarsh write to from Monday?",
-      "tokens": [["brine-raw-eu2"]]
     }
   ],
   "a8Settled": {

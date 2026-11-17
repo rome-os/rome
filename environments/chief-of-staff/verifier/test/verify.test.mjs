@@ -32,7 +32,7 @@ async function runAgainst(agent, options = {}) {
     env,
     judge: makeJudge(["node", join(here, "fake/judge.mjs")]),
     judgeName: "fake judge",
-    waits: { replyMs: 0, a1Ms: 0, pollMs: 0, offlineMs: 0 },
+    waits: { replyMs: 0, a1Ms: 0, pollMs: 0 },
     allowDirty: true,
     outDir: join(dir, "run"),
     log: () => {},

@@ -24,7 +24,6 @@ node environments/chief-of-staff/verifier/verify.mjs --rules K1,A5
 | `--poll <s>` | How often to read the chat while waiting | 5 |
 | `--gap <s>` | The pause between messages A3 replays and A2 says | 3 |
 | `--day-hours <h>` | How far A2 and K4 move the agent's clock for "a day later" | 24 |
-| `--offline-wait <s>` | How long A8 keeps Rome stopped while the team talks | 3600 |
 | `--expect-app-ref <ref>` | Stop before any rule runs unless, after the reset, the environment runs the chief of staff app from this ref. A reset installs the app from the environment's settings, so a run from a shell without them tests another build | |
 | `--out <dir>` | Write the report here instead of the runs folder | |
 | `--note <text>` | A note for the report, such as the state of a pull request in the build. Repeatable | |
@@ -75,7 +74,7 @@ The rules and their pass bars come from the rules doc, version R4. `scenarios/in
 | A3 Silent by default | Replays the environment's `replay/ordinary.json`: 100 ordinary messages in the shared chats, notes in the private chats, and 3 mentions, then waits the reply wait | Every agent message in the shared chats after the first replayed message, except the first answer after each mention, is a reply to a message that needed nothing. At most 2. Replies in the private chats are reported apart and not scored, since a private chat stands in for a direct message, which is addressed to the agent. The report also gives the replay's cost from `cos-env usage`: agent turns started, replayed messages per turn and tokens, with the envoy's review turns apart. The cost is reported, not scored |
 | A1 Present | Mentions the agent once at the top of each shared chat named for it, and once in a thread in `general` | Each reply arrives within 120 s of the mention, by message times |
 | A7 Takes a hint | Runs last. member1 tells the agent in `general`, with a mention, to stay out of the Kelpie-7 firmware until told otherwise. Other members then mention it with 5 questions on that topic it could answer from the documents. member1 lifts the instruction, and one more mention on the topic follows | Zero replies to the 5 questions, waiting the A1 wait after the last. A reply that only declines is still a reply and fails; the report counts declines and answers apart. The question after the lift must be answered, by its words, or A7 fails |
-| A8 Catches up | Stops Rome for an hour. Meanwhile a member mentions the agent with a question that another member answers, and members say 10 more distinctive facts. Rome starts, and the agent gets the reply wait to catch up | No agent message in that chat after the settled question. Then A2's recall check on the hour's facts: at least 9 of 10 |
+| A8 Catches up | Stops Rome. A member mentions the agent with a question that another member answers, and members say 5 distinctive facts. Rome starts as soon as Discord shows them delivered, since the length of the stop is not part of the rule (planner, 2026-11-17), and the agent gets the reply wait to catch up | No agent message in that chat after the settled question. Then A2's recall check on the 5 facts: all 5, the 9-of-10 bar rounded up |
 | A5 Right place | Reads where A1's replies landed (phase 1 checks A5 on A1's replies only) | A reply to a mention at the top of a chat is in that chat, at the top or in a thread started from the mention. A reply in a thread is in that thread |
 
 Rules that wait "a day" or "an hour" in the rules doc run on the waits above, and the report states them.
@@ -84,7 +83,7 @@ From phase 2, K5's leg "a message source is linked" is scored: each K3 answer mu
 
 "A day later" moves the app's stored times into the past with `cos-env clock forward`; Rome, the model and Discord keep the real time. After the move the run renews the session in `general`, as K6 does. A2 and K4 state this limit in the report: a pass shows the agent answers "yesterday" questions from what it stored, not that it survives a real day.
 
-Phase 2 runs in this order: the phase 1 rules (K6 last of them), A3, A2, K4, A8, A7. K6 compares goals before K4 changes them, A3's cost is read before the clock moves, and A7's instruction comes after everything that asks about its topic.
+The rules run fast ones first: K1, K2, A1, A5, K7, K3, K5, K6, A8, A2, K4, A3, A7. A5 reads A1's replies, K5 reads K3's answers, K6 reuses K1's and K2's, and K5 and K6 run before K4 changes the goals they ask about. A7's instruction comes after everything that asks about its topic. The report is written after every rule, marked in progress until the run ends, and gives each rule's wall time.
 
 ### Direct messages
 
