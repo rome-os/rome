@@ -72,14 +72,8 @@ export function widgetStatTone(
   value: unknown,
   range: { low: number; high: number },
 ): "low" | "normal" | "high" | null {
-  const n =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && value.trim() !== ""
-        ? Number(value)
-        : Number.NaN;
-  if (!Number.isFinite(n)) return null;
-  return n < range.low ? "low" : n > range.high ? "high" : "normal";
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value < range.low ? "low" : value > range.high ? "high" : "normal";
 }
 
 export type WidgetUiStringName = (typeof WIDGET_UI_STRINGS)[number];
@@ -508,6 +502,7 @@ export function checkWidgetUi(
     }
   }
   if (problems.length === 0 && hasCycle(byId)) problems.push("the components contain a cycle");
+  if (problems.length === 0) problems.push(...linkProblems(components, byId));
 
   const bindParsed = z.record(z.string(), z.string()).safeParse(bind);
   if (!bindParsed.success) {
@@ -519,6 +514,55 @@ export function checkWidgetUi(
       }
       if (!isWidgetAppPath(path))
         problems.push(`bind "${pointer}" reads "${path}", which is not a path in the app's API`);
+    }
+  }
+  return problems;
+}
+
+const INTERACTIVE = new Set(["Button", "ChoicePicker", "TextField"]);
+
+/** Whether `id`'s subtree, itself included, holds a component `test` matches. */
+function subtreeHas(
+  id: string,
+  byId: Map<string, WidgetUiComponent>,
+  test: (c: WidgetUiComponent) => boolean,
+): boolean {
+  const c = byId.get(id);
+  return !!c && (test(c) || childIds(c).some((child) => subtreeHas(child, byId, test)));
+}
+
+const hasHref = (c: WidgetUiComponent) =>
+  (c.component === "Text" || c.component === "Row") && c.href !== undefined;
+
+/**
+ * A press opens a link or sends an event, never both: a component with an
+ * `href` holds no Button, ChoicePicker or TextField, and a Button's label
+ * holds no link. A Stat's `range` is judged against a number, so its value
+ * is a number or a path to one.
+ */
+function linkProblems(
+  components: WidgetUiComponent[],
+  byId: Map<string, WidgetUiComponent>,
+): string[] {
+  const problems: string[] = [];
+  for (const c of components) {
+    if (
+      hasHref(c) &&
+      childIds(c).some((id) => subtreeHas(id, byId, (k) => INTERACTIVE.has(k.component)))
+    ) {
+      problems.push(
+        `"${c.id}" has an href and holds a control: a press would both open the link and send an event`,
+      );
+    }
+    if (c.component === "Button" && subtreeHas(c.child, byId, hasHref)) {
+      problems.push(
+        `"${c.id}" is a Button whose label holds an href: a press would both send an event and open the link`,
+      );
+    }
+    if (c.component === "Stat" && c.range && typeof c.value === "string") {
+      problems.push(
+        `"${c.id}" has a range, so its value must be a plain number in the range's unit, or a path to one`,
+      );
     }
   }
   return problems;

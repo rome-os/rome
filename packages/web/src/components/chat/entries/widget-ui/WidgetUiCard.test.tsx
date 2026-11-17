@@ -404,4 +404,72 @@ describe("a widget described as data", () => {
     );
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  const drawCard = (components: unknown[]) =>
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                { type: "widget", toolUseId: "w-x", appId: "core", text: "x", ui: { components } },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+  it("keeps a link on a callout and on a row of stat tiles", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      { id: "root", component: "Column", children: ["tip", "tiles"] },
+      {
+        id: "tip",
+        component: "Text",
+        text: "Read more",
+        tone: "info",
+        href: "https://example.com/tip",
+      },
+      { id: "tiles", component: "Row", children: ["a", "b"], href: "https://example.com/day" },
+      { id: "a", component: "Stat", label: "Sleep", value: 7 },
+      { id: "b", component: "Stat", label: "Steps", value: 8000 },
+    ]);
+    expect((await screen.findByRole("link", { name: "Read more" })).getAttribute("href")).toBe(
+      "https://example.com/tip",
+    );
+    expect(screen.getByRole("link", { name: /Sleep.*Steps/ }).getAttribute("href")).toBe(
+      "https://example.com/day",
+    );
+  });
+
+  it("draws negative bars below a zero line, each as long as its value", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      {
+        id: "root",
+        component: "Chart",
+        kind: "bar",
+        points: [
+          { label: "Mon", value: -10 },
+          { label: "Tue", value: -100 },
+          { label: "Wed", value: 50 },
+        ],
+      },
+    ]);
+    const chart = await screen.findByRole("img", { name: "Mon -10, Tue -100, Wed 50" });
+    const bars = [...chart.querySelectorAll("rect")].map((r) => ({
+      y: Number(r.getAttribute("y")),
+      h: Number(r.getAttribute("height")),
+    }));
+    const zero = Number(chart.querySelector("line")?.getAttribute("y1"));
+    // Negative bars start at the zero line and go down; the positive one ends there.
+    expect(bars[0]?.y).toBeCloseTo(zero);
+    expect(bars[1]?.y).toBeCloseTo(zero);
+    expect(bars[2]?.y + bars[2]?.h).toBeCloseTo(zero);
+    // Sizes keep their ratio: -100 is ten times -10, and twice 50.
+    expect(bars[1]?.h).toBeCloseTo(bars[0]!.h * 10);
+    expect(bars[1]?.h).toBeCloseTo(bars[2]!.h * 2);
+  });
 });

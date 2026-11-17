@@ -128,13 +128,6 @@ export function checkAgentCard(ui: unknown, text: unknown): string[] {
       );
     }
   });
-  card.components.forEach((component, i) => {
-    if (component.component === "Stat" && component.range && typeof component.value !== "number") {
-      problems.push(
-        `ui.components.${i} ("${component.id}") has a range, so its value must be a plain number in the range's unit`,
-      );
-    }
-  });
   const paths: string[] = [];
   card.components.forEach((component, i) => pathsIn(component, `ui.components.${i}`, paths));
   for (const at of paths) {

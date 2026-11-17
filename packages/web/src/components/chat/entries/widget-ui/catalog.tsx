@@ -306,12 +306,14 @@ const Text = createComponentImplementation(TextWithToneApi, ({ props }) => {
     // A callout: a tinted strip, its icon in the tone's colour.
     const Glyph = ICONS[extras.icon as WidgetUiIcon] ?? TONE_ICON[tone];
     return (
-      <div className={cn("flex min-w-0 items-start gap-2 rounded-8 px-3 py-2", toneClass[tone])}>
-        <span className="flex h-5 shrink-0 items-center">
-          <Glyph aria-hidden className="size-4" />
-        </span>
-        <span className="min-w-0 text-ui text-foreground">{shown(props.text)}</span>
-      </div>
+      <CardLink href={extras.href}>
+        <div className={cn("flex min-w-0 items-start gap-2 rounded-8 px-3 py-2", toneClass[tone])}>
+          <span className="flex h-5 shrink-0 items-center">
+            <Glyph aria-hidden className="size-4" />
+          </span>
+          <span className="min-w-0 text-ui text-foreground">{shown(props.text)}</span>
+        </div>
+      </CardLink>
     );
   }
   const text = (
@@ -358,7 +360,7 @@ function StatRange({ value, range, unit }: { value: unknown; range: unknown; uni
         <span
           className={cn(
             "flex shrink-0 items-center gap-1",
-            tone === "normal" ? "text-success" : "text-warning",
+            tone === "normal" ? "text-success-fg" : "text-warning-fg",
           )}
         >
           {Arrow ? <Arrow aria-hidden className="size-3" /> : null}
@@ -410,7 +412,12 @@ const Chart = createComponentImplementation(ChartApi, ({ props }) => {
     .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
     .slice(0, WIDGET_UI_CHART_MAX_POINTS);
   if (points.length === 0) return null;
-  const top = Math.max(...points.map((p) => p.value), 0) || 1;
+  // Bars grow from a zero line, up for a positive value and down for a
+  // negative one, scaled across both so a sign and a size both show.
+  const top = Math.max(...points.map((p) => p.value), 0);
+  const bottom = Math.min(...points.map((p) => p.value), 0);
+  const span = top - bottom || 1;
+  const zero = (top / span) * CHART_HEIGHT;
   const fill = (h?: string) =>
     h === "accent" ? "fill-primary" : h === "warning" ? "fill-warning" : "fill-border";
   const describe = points
@@ -426,12 +433,12 @@ const Chart = createComponentImplementation(ChartApi, ({ props }) => {
         className="h-24 w-full"
       >
         {points.map((p, i) => {
-          const h = Math.max((Math.max(p.value, 0) / top) * CHART_HEIGHT, 1);
+          const h = Math.max((Math.abs(p.value) / span) * CHART_HEIGHT, 1);
           return (
             <rect
               key={i}
               x={i * 10 + 2}
-              y={CHART_HEIGHT - h}
+              y={p.value >= 0 ? zero - h : zero}
               width={6}
               height={h}
               rx={1.5}
@@ -439,6 +446,16 @@ const Chart = createComponentImplementation(ChartApi, ({ props }) => {
             />
           );
         })}
+        {bottom < 0 ? (
+          <line
+            x1={0}
+            x2={points.length * 10}
+            y1={zero}
+            y2={zero}
+            strokeWidth={0.5}
+            className="stroke-muted-foreground"
+          />
+        ) : null}
       </svg>
       <div
         className="grid text-center text-aux text-muted-foreground"
@@ -551,16 +568,15 @@ function childIdsOf(context: {
 }
 
 const Row = createComponentImplementation(RowWithLinkApi, ({ props, buildChild, context }) => {
+  const inButton = useContext(InButtonContext);
   const ids = childIdsOf(context);
   // Numbers side by side read as an even two-column grid.
-  if (ids.length > 1 && ids.every((id) => typeOf(context, id) === "Stat")) {
-    return (
-      <div className="grid min-w-0 grid-cols-2 gap-2">
-        {children(props.children as Child[], buildChild)}
-      </div>
-    );
-  }
-  const row = (
+  const tiles = ids.length > 1 && ids.every((id) => typeOf(context, id) === "Stat");
+  const row = tiles ? (
+    <div className="grid min-w-0 grid-cols-2 gap-2">
+      {children(props.children as Child[], buildChild)}
+    </div>
+  ) : (
     <div
       className={cn(
         "flex min-w-0 flex-row flex-wrap gap-3",
@@ -572,7 +588,8 @@ const Row = createComponentImplementation(RowWithLinkApi, ({ props, buildChild, 
     </div>
   );
   const extras = props as unknown as TextExtras;
-  if (!extras.icon && !extras.href) return row;
+  // Inside a button's label a link would open on the button's press too.
+  if (inButton || (!extras.icon && !extras.href)) return row;
   return (
     <CardLink href={extras.href}>
       <span className="flex min-w-0 items-center gap-2">

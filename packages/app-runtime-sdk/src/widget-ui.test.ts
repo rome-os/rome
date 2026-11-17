@@ -172,12 +172,62 @@ describe("checkWidgetUi", () => {
     ).not.toEqual([]);
   });
 
+  it("never lets one press both open a link and send an event", () => {
+    const button = {
+      id: "go",
+      component: "Button",
+      child: "go-label",
+      action: { event: { name: "go" } },
+    };
+    // A linked Row that holds a control.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Row", children: ["go"], href: "https://example.com" },
+          button,
+          { id: "go-label", component: "Text", text: "Go" },
+        ],
+      }).join("\n"),
+    ).toContain("holds a control");
+    // A Button whose label holds a link, directly or deeper.
+    for (const label of [
+      [{ id: "go-label", component: "Text", text: "Go", href: "https://example.com" }],
+      [
+        { id: "go-label", component: "Row", children: ["t"], href: "maps://?q=x" },
+        { id: "t", component: "Text", text: "Go" },
+      ],
+    ]) {
+      expect(
+        checkWidgetUi({ components: [{ ...button, id: "root" }, ...label] }).join("\n"),
+      ).toContain("label holds an href");
+    }
+  });
+
+  it("judges a range only against a number, or a path to one, and takes signed chart values", () => {
+    const stat = (value: unknown) => ({
+      components: [
+        { id: "root", component: "Stat", label: "HR", value, range: { low: 56, high: 60 } },
+      ],
+    });
+    expect(checkWidgetUi(stat("64")).join("\n")).toContain("plain number");
+    expect(checkWidgetUi(stat(64))).toEqual([]);
+    expect(checkWidgetUi(stat({ path: "/today/hr" }))).toEqual([]);
+    const points = [
+      { label: "Mon", value: -10 },
+      { label: "Tue", value: -100 },
+      { label: "Wed", value: 50 },
+    ];
+    expect(
+      checkWidgetUi({ components: [{ id: "root", component: "Chart", kind: "bar", points }] }),
+    ).toEqual([]);
+  });
+
   it("says where a value sits against its usual range", () => {
     const range = { low: 56, high: 60 };
     expect(widgetStatTone(64, range)).toBe("high");
     expect(widgetStatTone(52, range)).toBe("low");
     expect(widgetStatTone(56, range)).toBe("normal");
-    expect(widgetStatTone("58", range)).toBe("normal");
+    expect(widgetStatTone("58", range)).toBeNull();
     expect(widgetStatTone("6h 05m", range)).toBeNull();
   });
 

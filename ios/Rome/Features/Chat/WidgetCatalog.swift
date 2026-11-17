@@ -337,13 +337,25 @@ private struct CardLinkRow<Content: View>: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.widgetInButton) private var inButton
 
+    /// A Row's own icon before its children; a Text draws its icon itself.
+    @ViewBuilder private var withIcon: some View {
+        if node.type == "Row", let symbol = WidgetIcon.symbol(node.string(for: "icon")) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
+                content()
+            }
+        } else {
+            content()
+        }
+    }
+
     var body: some View {
         if !inButton, let url = WidgetIcon.link(node.string(for: "href")) {
             Button {
                 openURL(url)
             } label: {
                 HStack(spacing: 8) {
-                    content().frame(maxWidth: .infinity, alignment: .leading)
+                    withIcon.frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: url.scheme == "maps" ? "mappin.and.ellipse" : "chevron.right")
                         .romeFont(CardScale.label, .medium)
                         .foregroundStyle(Palette.sub)
@@ -353,7 +365,7 @@ private struct CardLinkRow<Content: View>: View {
             .buttonStyle(PressScaleStyle())
             .accessibilityAddTraits(.isLink)
         } else {
-            content()
+            withIcon
         }
     }
 }
