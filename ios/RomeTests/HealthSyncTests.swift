@@ -1074,4 +1074,29 @@ struct SyncRig {
         let entries = (1...4).map { SyncLogEntry(seq: 5 - $0, time: HealthFixtures.now.addingTimeInterval(-Double($0) * 60), trigger: .observer, outcome: .ok) }
         #expect(formatter.days(entries).flatMap(\.rows).count == 1)
     }
+
+    /// Background syncs that went well add no row past the newest one; what
+    /// the guardian did, history, deletes, failures and skips keep theirs.
+    @Test func backgroundSyncsThatWentWellAfterTheNewestAddNoRows() {
+        func entry(_ seq: Int, _ trigger: SyncTrigger, _ outcome: SyncOutcome, history: Bool = false) -> SyncLogEntry {
+            var entry = SyncLogEntry(seq: seq, time: HealthFixtures.now.addingTimeInterval(-Double(20 - seq) * 60), trigger: trigger, outcome: outcome, history: history)
+            if outcome != .error && outcome != .skipped && outcome != .deleted { entry.types = ["stepCount": SyncTypeCount(items: 3)] }
+            return entry
+        }
+        let entries = [
+            entry(12, .observer, .ok),
+            entry(11, .observer, .ok),
+            entry(10, .observer, .partial),
+            entry(9, .observer, .error),
+            entry(8, .observer, .skipped),
+            entry(7, .manual, .ok),
+            entry(6, .foreground, .ok),
+            entry(5, .observer, .ok, history: true),
+            entry(4, .backfill, .ok),
+            entry(3, .manual, .deleted),
+            entry(2, .observer, .interrupted),
+            entry(1, .observer, .ok),
+        ]
+        #expect(formatter.days(entries).flatMap(\.rows).map(\.id) == [12, 9, 8, 7, 6, 5, 4, 3, 2])
+    }
 }

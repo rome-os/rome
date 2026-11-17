@@ -747,6 +747,13 @@ final class AppModel {
     private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
     private var foreground = ForegroundGate()
+    /// In the background since it last came back: nothing of the app is on screen.
+    private(set) var inBackground = false
+
+    /// Nothing over the whole app hides its pages: it is on screen, with no
+    /// device connect sheet or stacking game over it. A line said once (the
+    /// "updated" notice) waits while it is false.
+    var pagesUncovered: Bool { !inBackground && connections.request == nil && stackGame == nil }
 
     /// The pictures the open workspace loaded; `shared` in the app.
     private let images: StoredImageCache
@@ -1549,6 +1556,7 @@ final class AppModel {
 
     func appDidEnterBackground() {
         foreground.enteredBackground(at: .now)
+        inBackground = true
         // Replies under way go out, then the device disconnects.
         node.setActive(false)
         // Drafts are written before the app may be killed.
@@ -1633,6 +1641,7 @@ final class AppModel {
     /// Back in front: what the screens show may be behind, whether or not the
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
+        inBackground = false
         appearance.apply()
         node.setActive(true)
         health.foreground()
