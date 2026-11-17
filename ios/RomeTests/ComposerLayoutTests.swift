@@ -283,13 +283,42 @@ import UIKit
 
         // The key and the clear land before the composer redraws.
         editor.insertText("Sent at once")
-        clears.clear()
+        clears.set("")
         try await waitUntil("The field kept the sent text") { editor.text.isEmpty }
         try await Task.sleep(for: .milliseconds(200))
         #expect(editor.text.isEmpty)
     }
 
-    final class Clears { var clear: () -> Void = {} }
+    /// Text the app sets reaches the field even when it equals a state the guardian just
+    /// typed through, such as a restore or a programmatic set right after the keys.
+    @Test func settingAnEarlierTypedStateRightAfterTheKeysApplies() async throws {
+        let clears = Clears()
+        let host = UIHostingController(rootView: StateHost(text: "", clears: clears))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        editor.becomeFirstResponder()
+        try await waitUntil { editor.isFirstResponder }
+        try await Task.sleep(for: .milliseconds(200))
+
+        editor.insertText("a")
+        editor.insertText("b")
+        clears.set("a")
+        try await waitUntil("The field kept the typed text") { editor.text == "a" }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(editor.text == "a")
+    }
+
+    final class Clears { var set: (String) -> Void = { _ in } }
 
     private struct StateHost: View {
         @State var text: String
@@ -303,7 +332,7 @@ import UIKit
                     attachments: ComposerAttachments(), onSend: {})
             }
             .padding(16)
-            .onAppear { clears.clear = { text = "" } }
+            .onAppear { clears.set = { text = $0 } }
         }
     }
 
