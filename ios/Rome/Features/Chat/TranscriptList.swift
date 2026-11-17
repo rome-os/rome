@@ -513,28 +513,86 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     // MARK: Holding a row's top
 
-    /// When the list goes back to holding its bottom.
-    private var holdUntil: ContinuousClock.Instant?
-    /// As long as a fold's spring takes to settle, with a margin.
-    private static var holdTime: Duration { .milliseconds(600) }
+    /// The row whose top stays put, its last height, and since when.
+    private var held: (id: String, height: CGFloat, steadySince: CFTimeInterval, started: CFTimeInterval)?
+    private var holdLink: CADisplayLink?
+    /// How long the row's height must stay the same before the list holds
+    /// its bottom again: past a spring's tail and a cell's late resize.
+    private static var steadyTime: CFTimeInterval { 0.2 }
+    /// The shortest a hold lasts: a fold's spring has begun by then.
+    private static var minHoldTime: CFTimeInterval { 0.35 }
+    /// The longest a hold lasts, whatever the row does.
+    private static var maxHoldTime: CFTimeInterval { 2 }
 
     /// Lets a row change height with its top, and every row above it, where
     /// they are: the list otherwise keeps its bottom still, so a row that
-    /// grows pushes what is above it up. For a moment it stops compensating
-    /// for size changes, then holds its bottom again.
+    /// grows pushes what is above it up. It stops compensating for size
+    /// changes until the row's height has settled, then holds its bottom
+    /// again; resuming then moves nothing, since nothing is changing.
     func holdTop(of id: String) {
         guard items.contains(id) else { return }
         transcriptScrollLog.debug("holding a row's top while it changes height")
         layout.keepContentOffsetAtBottomOnBatchUpdates = false
-        let until = ContinuousClock.now + Self.holdTime
-        holdUntil = until
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(until: until)
-            guard let self, self.holdUntil == until else { return }
-            self.holdUntil = nil
-            self.layout.keepContentOffsetAtBottomOnBatchUpdates = true
-            self.readScroll()
+        // Nothing pulls the list to its bottom while the row changes.
+        scroll?.set(following: false)
+        // The layout animates a cell's new size from where its bottom-held
+        // offset would put it: the row jumps up, then slides back. The
+        // change lands in place instead, until the row has its new height.
+        UIView.setAnimationsEnabled(false)
+        holdsAnimations = true
+        let now = CACurrentMediaTime()
+        held = (id, heightOf(id) ?? 0, now, now)
+        if holdLink == nil {
+            let link = CADisplayLink(target: HoldTarget { [weak self] in self?.watchHeld() }, selector: #selector(HoldTarget.tick))
+            link.add(to: .main, forMode: .common)
+            holdLink = link
         }
+    }
+
+    private func heightOf(_ id: String) -> CGFloat? {
+        guard let item = items.firstIndex(of: id) else { return nil }
+        return layout.layoutAttributesForItem(at: IndexPath(item: item, section: 0))?.frame.height
+    }
+
+    /// Each frame: ends the hold once the row has kept one height for a
+    /// moment, or the guardian drags, or it has lasted long enough.
+    private func watchHeld() {
+        guard var held else { return endHold() }
+        let now = CACurrentMediaTime()
+        let height = heightOf(held.id) ?? held.height
+        if abs(height - held.height) > 0.5 {
+            held.height = height
+            held.steadySince = now
+            self.held = held
+        } else if holdsAnimations, now - held.steadySince > 0.05, held.steadySince > held.started {
+            releaseAnimations()
+        }
+        let settled = now - held.started >= Self.minHoldTime && now - held.steadySince >= Self.steadyTime
+        if settled || now - held.started >= Self.maxHoldTime || isUserScrolling {
+            endHold()
+        }
+    }
+
+    /// Whether the hold has turned UIKit's animations off.
+    private var holdsAnimations = false
+
+    private func releaseAnimations() {
+        guard holdsAnimations else { return }
+        holdsAnimations = false
+        UIView.setAnimationsEnabled(true)
+    }
+
+    private func endHold() {
+        releaseAnimations()
+        holdLink?.invalidate()
+        holdLink = nil
+        guard held != nil else { return }
+        held = nil
+        layout.keepContentOffsetAtBottomOnBatchUpdates = true
+        readScroll()
+        // Opened below the screen, the list no longer follows the newest
+        // row, as after a drag: a bar that moves next must not pull it back.
+        scroll?.set(following: scroll?.atBottom ?? true)
     }
 
     // MARK: ChatLayoutDelegate
@@ -684,6 +742,14 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         guard let id = items[safe: indexPath.item] else { return }
         heights[id] = cell.bounds.height
     }
+}
+
+/// A display link's target that calls back: the link holds its target
+/// strongly, so the list is never kept alive by it.
+private final class HoldTarget: NSObject {
+    let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func tick() { action() }
 }
 
 #if DEBUG

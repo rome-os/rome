@@ -464,7 +464,11 @@ struct AgentBubble: View {
         // The bubble opens downward and closes upward: its top, and every
         // row above it, stay where they are.
         if let rowID { rowTopHold?.hold(rowID) }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
+        // In one step: animated, the bubble's height eased inside a cell UIKit
+        // had already given its new height, so the text dipped and rose.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { expanded.toggle() }
     }
 }
 
