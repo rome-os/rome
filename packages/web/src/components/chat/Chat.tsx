@@ -2605,7 +2605,7 @@ export function Chat({
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
-      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-[18px]"
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-1.5"
     >
       <ChatEdgeBlur edge="top" />
       {/* The phone shell's back and menu buttons move in here, and its bar

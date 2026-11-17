@@ -1103,7 +1103,7 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-3 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[3px]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
         >
           <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}
@@ -1182,7 +1182,7 @@ export function RecentChats({
         {/* The list and the Tasks card share what is left under the header. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <div
-            className={`min-h-0 flex-1 overflow-y-auto px-3 scrollbar-idle-hidden ${
+            className={`min-h-0 flex-1 overflow-y-auto px-2 pt-2 scrollbar-idle-hidden ${
               showTasks ? `pb-7 ${FADE_BOTTOM_7}` : "pb-3"
             }`}
             onClickCapture={markOpening}
@@ -1203,7 +1203,11 @@ export function RecentChats({
                 />
               ) : null
             ) : (
-              <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
+              <section
+                aria-labelledby="recent-chats-projects-heading"
+                data-projects-section
+                className="px-1"
+              >
                 <h2
                   id="recent-chats-projects-heading"
                   className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"

@@ -1,6 +1,6 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -107,7 +107,7 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="flex items-center">
+    <div className="mb-1 flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
@@ -191,7 +191,7 @@ export function ConciergeChats({
     rootMargin: "0px 0px 160px 0px",
   });
   return (
-    <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
+    <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
       {statusFilter === "archived" ? null : (
         <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
@@ -258,14 +258,16 @@ function ConciergeTopicEntry({
     );
   }
   return (
-    <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
+    <div className="group/topic relative mb-1 flex items-center" data-concierge-topic={chat.id}>
       <Link
         to={`/chat/${chat.id}`}
-        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-4`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
+        {/* A topic has no icon of its own; the # keeps its name in the text column. */}
+        <Hash aria-hidden className="rome-sidebar-icon size-4 shrink-0 text-subtle-foreground" />
         {/* The menu button floats over the row's end, so the name keeps clear
             of it: the badge holds that room when there is one. */}
         <span
