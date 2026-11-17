@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
@@ -5,9 +6,13 @@ import { join } from "node:path";
 // The vault: named secrets the guardian stores through Rome, plus short-lived
 // grants that let a command read them. Values live only in `secrets.json` in
 // the key directory, which the rome container never mounts. Grants live only in
-// memory, so a restart drops them all.
+// memory, so a restart drops them all. A 6-digit PIN, checked here and nowhere
+// else, guards every write of a value and every grant: docs/vault.md#pin.
 
 const SECRETS_FILE = "secrets.json";
+const PIN_FILE = "vault-pin.json";
+/** What `GET /v1/health` reports as `vault`. Version 2 is the first that enforces the PIN. */
+export const VAULT_VERSION = 2;
 const MAX_BODY_BYTES = 256 * 1024;
 
 const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]{0,63}$/;
@@ -15,6 +20,11 @@ const MAX_VALUE_LENGTH = 32768;
 const MAX_DESCRIPTION_LENGTH = 200;
 /** The longest grant the signer hands out: 3 hours. */
 const MAX_GRANT_SECONDS = 10800;
+/** The most secrets one grant request names. */
+const MAX_GRANT_NAMES = 10;
+const PIN_PATTERN = /^\d{6}$/;
+const MAX_PIN_FAILURES = 3;
+const LOCK_MS = 15 * 60 * 1000;
 
 interface SecretRecord {
   value: string;
@@ -22,6 +32,19 @@ interface SecretRecord {
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;
+}
+
+/** Hash and salt are hex. `lockedUntil` is epoch milliseconds, or null. */
+interface PinRecord {
+  hash: string;
+  salt: string;
+  failures: number;
+  lockedUntil: number | null;
+}
+
+interface Refusal {
+  status: number;
+  body: { error: string } & Record<string, unknown>;
 }
 
 export type Reply = (status: number, body: unknown) => void;
@@ -32,14 +55,47 @@ export interface VaultOptions {
   log: (line: string) => void;
 }
 
-/** Writes through a temporary file and a rename, so a crash never leaves a half-written store. */
-function writeStore(keyDir: string, secrets: Map<string, SecretRecord>): void {
+/** Writes through a temporary file and a rename, so a crash never leaves a half-written file. */
+function writeJsonFile(keyDir: string, name: string, data: unknown): void {
   mkdirSync(keyDir, { recursive: true, mode: 0o700 });
-  const file = join(keyDir, SECRETS_FILE);
+  const file = join(keyDir, name);
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(Object.fromEntries(secrets)), { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
   chmodSync(tmp, 0o600);
   renameSync(tmp, file);
+}
+
+function writeStore(keyDir: string, secrets: Map<string, SecretRecord>): void {
+  writeJsonFile(keyDir, SECRETS_FILE, Object.fromEntries(secrets));
+}
+
+/** Returns null when no PIN is set. Throws on a damaged file. */
+function readPin(keyDir: string): PinRecord | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(keyDir, PIN_FILE), "utf8"));
+    if (
+      typeof parsed?.hash !== "string" ||
+      typeof parsed.salt !== "string" ||
+      !Number.isInteger(parsed.failures) ||
+      (parsed.lockedUntil !== null && typeof parsed.lockedUntil !== "number")
+    ) {
+      throw new Error(`${PIN_FILE} is damaged`);
+    }
+    return parsed as PinRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function newPinRecord(pin: string): PinRecord {
+  const salt = randomBytes(16);
+  return {
+    hash: scryptSync(pin, salt, 32).toString("hex"),
+    salt: salt.toString("hex"),
+    failures: 0,
+    lockedUntil: null,
+  };
 }
 
 function readStore(keyDir: string): Map<string, SecretRecord> {
@@ -80,17 +136,28 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown> | null>
 }
 
 /**
- * Returns the handler for the `/v1/secrets` and `/v1/grants` routes. The store
- * is read on first use, so a damaged file fails vault calls with a 500 and
- * leaves token issuance alone.
+ * Returns the handler for the `/v1/secrets`, `/v1/grants`, `/v1/pin` and
+ * `/v1/reset` routes. The store and the PIN file are read on first use, so a
+ * damaged file fails vault calls with a 500 and leaves token issuance alone.
  */
 export function createVaultHandler(options: VaultOptions) {
   const { keyDir, now, log } = options;
   let secrets: Map<string, SecretRecord> | null = null;
   const grants = new Map<string, number>();
 
+  let pinRecord: PinRecord | null | undefined;
   const entries = () => (secrets ??= readStore(keyDir));
-  const record = (event: string, name: string, outcome: string) =>
+  const currentPin = (): PinRecord | null =>
+    pinRecord === undefined ? (pinRecord = readPin(keyDir)) : pinRecord;
+  const savePin = (next: PinRecord) => {
+    writeJsonFile(keyDir, PIN_FILE, next);
+    pinRecord = next;
+  };
+  const lockedUntil = (): number | null => {
+    const until = currentPin()?.lockedUntil ?? null;
+    return until !== null && until > now() ? until : null;
+  };
+  const record = (event: string, name: string | null, outcome: string) =>
     log(JSON.stringify({ at: new Date(now()).toISOString(), event, name, outcome }));
   const liveGrant = (name: string): number | null => {
     const expiresAt = grants.get(name);
@@ -98,6 +165,49 @@ export function createVaultHandler(options: VaultOptions) {
     if (expiresAt > now()) return expiresAt;
     grants.delete(name);
     return null;
+  };
+
+  // Runs with no await from the read of the counter to its write, and uses the
+  // synchronous scrypt, so concurrent requests take turns and a burst cannot
+  // spend more than MAX_PIN_FAILURES guesses. A locked check returns before it
+  // hashes, so a flood costs the signer nothing.
+  const checkPin = (pin: unknown): Refusal | null => {
+    if (typeof pin !== "string" || !PIN_PATTERN.test(pin)) {
+      return { status: 400, body: { error: "invalid_pin" } };
+    }
+    const current = currentPin();
+    if (current === null) return { status: 409, body: { error: "pin_not_set" } };
+    const until = lockedUntil();
+    if (until !== null) {
+      return { status: 423, body: { error: "locked", lockedUntil: new Date(until).toISOString() } };
+    }
+    const given = scryptSync(pin, Buffer.from(current.salt, "hex"), 32);
+    if (timingSafeEqual(given, Buffer.from(current.hash, "hex"))) {
+      if (current.failures > 0) savePin({ ...current, failures: 0, lockedUntil: null });
+      return null;
+    }
+    const failures = current.failures + 1;
+    if (failures < MAX_PIN_FAILURES) {
+      savePin({ ...current, failures, lockedUntil: null });
+      return {
+        status: 403,
+        body: { error: "wrong_pin", attemptsLeft: MAX_PIN_FAILURES - failures },
+      };
+    }
+    const lockUntil = now() + LOCK_MS;
+    savePin({ ...current, failures: 0, lockedUntil: lockUntil });
+    return {
+      status: 423,
+      body: { error: "locked", lockedUntil: new Date(lockUntil).toISOString() },
+    };
+  };
+  /** Replies with the refusal and returns true when the PIN does not pass. */
+  const pinRefused = (pin: unknown, event: string, name: string, reply: Reply): boolean => {
+    const refusal = checkPin(pin);
+    if (refusal === null) return false;
+    record(event, name, refusal.body.error);
+    reply(refusal.status, refusal.body);
+    return true;
   };
 
   return async (req: IncomingMessage, reply: Reply): Promise<void> => {
@@ -124,31 +234,87 @@ export function createVaultHandler(options: VaultOptions) {
           ...(expiresAt === null ? {} : { grantedUntil: new Date(expiresAt).toISOString() }),
         };
       });
-      reply(200, { secrets: list });
+      const until = lockedUntil();
+      reply(200, {
+        secrets: list,
+        pin: {
+          set: currentPin() !== null,
+          lockedUntil: until === null ? null : new Date(until).toISOString(),
+        },
+      });
+      return;
+    }
+
+    if (collection === "pin" && parts.length === 1 && method === "POST") {
+      const body = await readJson(req);
+      if (typeof body?.pin !== "string" || !PIN_PATTERN.test(body.pin)) {
+        reply(400, { error: "invalid_pin" });
+      } else if (currentPin() !== null) {
+        record("vault_pin", null, "already_set");
+        reply(409, { error: "pin_already_set" });
+      } else {
+        savePin(newPinRecord(body.pin));
+        record("vault_pin", null, "set");
+        reply(200, { ok: true });
+      }
+      return;
+    }
+
+    if (collection === "reset" && parts.length === 1 && method === "POST") {
+      const body = await readJson(req);
+      if (typeof body?.pin !== "string" || !PIN_PATTERN.test(body.pin)) {
+        reply(400, { error: "invalid_pin" });
+        return;
+      }
+      // The secrets go first: a failure between the two writes leaves an empty
+      // vault under the old PIN, never old secrets under a PIN the caller chose.
+      writeStore(keyDir, new Map());
+      store.clear();
+      grants.clear();
+      savePin(newPinRecord(body.pin));
+      record("vault_reset", null, "reset");
+      reply(200, { ok: true });
       return;
     }
 
     if (collection === "grants" && parts.length === 1 && method === "POST") {
       const body = await readJson(req);
-      const grantName = body?.name;
+      // `names` grants several secrets at once. `name` grants one.
+      const asked: unknown[] = Array.isArray(body?.names) ? body.names : [body?.name];
       const ttl = body?.ttlSeconds;
-      if (typeof grantName !== "string" || !store.has(grantName)) {
-        record("vault_grant", String(grantName).slice(0, 64), "unknown");
-        reply(404, { error: "unknown_secret" });
-      } else if (
-        typeof ttl !== "number" ||
-        !Number.isInteger(ttl) ||
-        ttl < 1 ||
-        ttl > MAX_GRANT_SECONDS
-      ) {
-        record("vault_grant", grantName, "invalid_ttl");
-        reply(400, { error: `ttlSeconds must be an integer from 1 to ${MAX_GRANT_SECONDS}.` });
-      } else {
-        const expiresAt = now() + ttl * 1000;
-        grants.set(grantName, expiresAt);
-        record("vault_grant", grantName, "granted");
-        reply(200, { name: grantName, expiresAt: new Date(expiresAt).toISOString() });
+      if (asked.length === 0 || asked.length > MAX_GRANT_NAMES) {
+        record("vault_grant", null, "invalid_names");
+        reply(400, { error: `names must list 1 to ${MAX_GRANT_NAMES} secrets.` });
+        return;
       }
+      const unknown = asked.filter((entry) => typeof entry !== "string" || !store.has(entry));
+      if (unknown.length > 0) {
+        for (const entry of unknown) record("vault_grant", String(entry).slice(0, 64), "unknown");
+        reply(404, { error: "unknown_secret", names: unknown.map((entry) => String(entry)) });
+        return;
+      }
+      const wanted = [...new Set(asked as string[])];
+      const label = wanted.join(",");
+      if (typeof ttl !== "number" || !Number.isInteger(ttl) || ttl < 1 || ttl > MAX_GRANT_SECONDS) {
+        record("vault_grant", label, "invalid_ttl");
+        reply(400, { error: `ttlSeconds must be an integer from 1 to ${MAX_GRANT_SECONDS}.` });
+        return;
+      }
+      // One PIN check covers the request, and every grant is set in this same
+      // synchronous step, so a request grants all of its names or none.
+      if (pinRefused(body?.pin, "vault_grant", label, reply)) return;
+      const expiresAt = now() + ttl * 1000;
+      for (const granted of wanted) {
+        grants.set(granted, expiresAt);
+        record("vault_grant", granted, "granted");
+      }
+      const until = new Date(expiresAt).toISOString();
+      reply(
+        200,
+        Array.isArray(body?.names)
+          ? { names: wanted, expiresAt: until }
+          : { name: wanted[0], expiresAt: until },
+      );
       return;
     }
 
@@ -188,6 +354,7 @@ export function createVaultHandler(options: VaultOptions) {
         });
         return;
       }
+      if (pinRefused(body?.pin, "vault_put", name, reply)) return;
       const existing = store.get(name);
       const at = new Date(now()).toISOString();
       const next: SecretRecord = {

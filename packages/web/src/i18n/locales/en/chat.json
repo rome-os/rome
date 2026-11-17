@@ -385,6 +385,7 @@
     },
     "secretAccess": {
       "allow": "Allow {{minutes}} min",
+      "separator": ", ",
       "duration": "{{minutes}} min",
       "allowed": "Allowed {{name}} · {{minutes}} min",
       "rejected": "Rejected {{name}}"

@@ -1,5 +1,5 @@
 import { appKeyNameError } from "@rome/api-types/app-keys";
-import { vaultNameError } from "@rome/api-types/vault";
+import { VAULT_PIN_PATTERN, type VaultPinState, vaultNameError } from "@rome/api-types/vault";
 import {
   FormRow,
   FormRowControl,
@@ -9,7 +9,7 @@ import {
 } from "@rome-os/ui/layout-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleAlert, KeyRound, Plus, RefreshCw, X } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,14 +24,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { RevealToggle } from "@/components/reveal-toggle";
+import { PinInput, useErrorCount } from "@/components/vault-pin-input";
 import { APP_KEYS_QUERY_KEY, deleteAppKey, fetchAppKeys, saveAppKey } from "@/lib/app-keys-api";
 import { type EnvAppKey, parseAppKeysEnv } from "@/lib/parse-app-keys-env";
 import {
   deleteVaultSecret,
+  fetchVaultPin,
   fetchVaultSecrets,
+  resetVault,
   saveVaultSecret,
+  setVaultPin,
+  VAULT_PIN_QUERY_KEY,
   VAULT_QUERY_KEY,
+  VaultError,
   type VaultItem,
+  vaultLockedText,
 } from "@/lib/vault-api";
 
 /** Blank form for "add"; prefilled name+label (value always retyped) for
@@ -56,7 +64,14 @@ interface KeyRowItem {
 interface KeysRowSpec<T extends KeyRowItem = KeyRowItem> {
   queryKey: readonly unknown[];
   fetch: () => Promise<T[]>;
-  save: (input: { name: string; label: string; value: string }) => Promise<{ overridden: boolean }>;
+  save: (input: {
+    name: string;
+    label: string;
+    value: string;
+    pin?: string;
+  }) => Promise<{ overridden: boolean }>;
+  /** Set for a store that asks for a PIN on every save. */
+  pin?: KeysPinSpec;
   remove: (name: string) => Promise<void>;
   i18nPrefix: string;
   nameError: (name: string) => string | null;
@@ -67,6 +82,20 @@ interface KeysRowSpec<T extends KeyRowItem = KeyRowItem> {
   /** Extra text or badges after a row's name. */
   meta?: (item: T) => ReactNode;
 }
+
+/** How a store with a PIN reads its state, sets the first PIN, and resets. */
+interface KeysPinSpec {
+  /** Sits under the spec's `queryKey`, so refreshing the list refreshes the PIN state. */
+  queryKey: readonly unknown[];
+  fetch: () => Promise<VaultPinState>;
+  set: (pin: string) => Promise<void>;
+  /** Deletes every key and sets a new PIN. */
+  reset: (pin: string) => Promise<void>;
+  /** The failure is about the PIN, so the next save in a batch would repeat it. */
+  isPinError: (error: unknown) => boolean;
+}
+
+const NO_PIN_QUERY_KEY = ["keys-without-pin"] as const;
 
 const APP_KEYS_SPEC: KeysRowSpec = {
   queryKey: APP_KEYS_QUERY_KEY,
@@ -113,6 +142,13 @@ const VAULT_SPEC: KeysRowSpec<VaultItem> = {
   fetch: fetchVaultSecrets,
   save: saveVaultSecret,
   remove: deleteVaultSecret,
+  pin: {
+    queryKey: VAULT_PIN_QUERY_KEY,
+    fetch: fetchVaultPin,
+    set: setVaultPin,
+    reset: resetVault,
+    isPinError: (error) => error instanceof VaultError && error.isPinError,
+  },
   i18nPrefix: "vault",
   nameError: vaultNameError,
   // The row title falls back to the name, but the description does not.
@@ -206,29 +242,86 @@ function KeysManager<T extends KeyRowItem>({
   const [label, setLabel] = useState("");
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
+  const [showValue, setShowValue] = useState(false);
   const [inputMode, setInputMode] = useState("single");
   const [envContent, setEnvContent] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<T | null>(null);
 
+  // A store with a PIN asks for it in a step before the form. The PIN is held
+  // in a ref until the save that uses it settles. Nothing stores it: it is not
+  // in the query cache, not in a mutation variable, and not in storage.
+  const pinSpec = spec.pin;
+  const pinQuery = useQuery<VaultPinState | null>({
+    queryKey: pinSpec?.queryKey ?? NO_PIN_QUERY_KEY,
+    queryFn: pinSpec?.fetch ?? (() => Promise.resolve(null)),
+    enabled: pinSpec !== undefined,
+  });
+  const pinState = pinQuery.data ?? null;
+  const pinSet = pinState?.set ?? false;
+  const lockedUntil = pinState?.lockedUntil ?? null;
+  const locked = lockedUntil !== null && Date.parse(lockedUntil) > Date.now();
+  const [askPin, setAskPin] = useState(false);
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetPin, setResetPin] = useState("");
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
+  const pinShake = useErrorCount(pinError);
+  const heldPin = useRef("");
+  // The PIN a set or a reset sends, read by the mutation instead of passed to it.
+  const newPin = useRef("");
+
+  const clearPin = () => {
+    heldPin.current = "";
+    setPin("");
+    setConfirmPin("");
+  };
   const openForm = (next: FormState) => {
     setForm(next);
     setLabel(next.mode === "replace" ? next.label : "");
     setName(next.mode === "replace" ? next.name : "");
     setValue("");
+    setShowValue(false);
     setInputMode("single");
     setEnvContent("");
     setFormError(null);
+    clearPin();
+    setPinError(null);
+    setAskPin(pinSpec !== undefined);
   };
   const closeForm = () => {
     setForm(null);
     setValue("");
+    setShowValue(false);
     setEnvContent("");
     setFormError(null);
+    clearPin();
+    setPinError(null);
+    setAskPin(false);
+  };
+  // Back to the PIN step with the form's typed values kept, so a refused PIN
+  // costs the guardian only the PIN.
+  const askPinAgain = (message: string) => {
+    clearPin();
+    setPinError(message);
+    setAskPin(true);
+    void refreshPin();
+  };
+  const refreshPin = () =>
+    pinSpec ? queryClient.invalidateQueries({ queryKey: pinSpec.queryKey }) : Promise.resolve();
+  const closeReset = () => {
+    setResetting(false);
+    setResetPin("");
+    setResetConfirm("");
+    setResetError(null);
   };
 
   const saveMutation = useMutation({
-    mutationFn: spec.save,
+    mutationFn: (input: Omit<Parameters<typeof spec.save>[0], "pin">) =>
+      spec.save({ ...input, pin: pinSpec ? heldPin.current : undefined }),
     onSuccess: async (result, input) => {
       closeForm();
       await queryClient.invalidateQueries({ queryKey: spec.queryKey });
@@ -238,7 +331,8 @@ function KeysManager<T extends KeyRowItem>({
         toast.success(tk("saved", { name: input.name }));
       }
     },
-    onError: (error: Error) => setFormError(error.message),
+    onError: (error: Error) =>
+      pinSpec?.isPinError(error) ? askPinAgain(error.message) : setFormError(error.message),
   });
 
   const batchMutation = useMutation({
@@ -251,25 +345,34 @@ function KeysManager<T extends KeyRowItem>({
       });
       const failed: EnvAppKey[] = [];
       let overridden = false;
-      for (const entry of entries) {
+      let stopped: Error | null = null;
+      for (const [index, entry] of entries.entries()) {
         try {
           const existing = existingKeys.find((key) => key.name === entry.name);
           const result = await spec.save({
             name: entry.name,
             value: entry.value,
             label: existing ? formLabelOf(existing) : blankLabelOf(entry.name),
+            pin: pinSpec ? heldPin.current : undefined,
           });
           overridden ||= result.overridden;
-        } catch {
+        } catch (error) {
           failed.push(entry);
+          // Every later save would repeat a refused PIN and spend an attempt.
+          if (pinSpec?.isPinError(error)) {
+            stopped = error as Error;
+            failed.push(...entries.slice(index + 1));
+            break;
+          }
         }
       }
-      return { failed, saved: entries.length - failed.length, overridden };
+      return { failed, saved: entries.length - failed.length, overridden, stopped };
     },
-    onSuccess: async ({ failed, saved, overridden }) => {
+    onSuccess: async ({ failed, saved, overridden, stopped }) => {
       if (failed.length > 0) {
         setEnvContent(failed.map((entry) => entry.source).join("\n"));
-        setFormError(tk("form.batchFailed", { saved, count: failed.length }));
+        if (stopped) askPinAgain(stopped.message);
+        else setFormError(tk("form.batchFailed", { saved, count: failed.length }));
       } else {
         closeForm();
       }
@@ -298,6 +401,67 @@ function KeysManager<T extends KeyRowItem>({
       toast.error(error.message);
     },
   });
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      await pinSpec?.reset(newPin.current);
+    },
+    // The new PIN is the one the flow continues with.
+    onSuccess: async () => {
+      heldPin.current = newPin.current;
+      newPin.current = "";
+      closeReset();
+      setPinError(null);
+      setAskPin(false);
+      await queryClient.invalidateQueries({ queryKey: spec.queryKey });
+    },
+    onError: (error: Error) => {
+      newPin.current = "";
+      setResetError(error.message);
+    },
+  });
+
+  const setPinMutation = useMutation({
+    mutationFn: async () => {
+      await pinSpec?.set(newPin.current);
+    },
+    onSuccess: async () => {
+      heldPin.current = newPin.current;
+      newPin.current = "";
+      setPin("");
+      setConfirmPin("");
+      setPinError(null);
+      setAskPin(false);
+      await refreshPin();
+    },
+    onError: async (error: Error) => {
+      newPin.current = "";
+      setPinError(error.message);
+      // A PIN that is already set moves the step to entering it.
+      await refreshPin();
+    },
+  });
+
+  // Typing again answers the error, so the slots stop reading as wrong.
+  const editPin = (set: (pin: string) => void) => (next: string) => {
+    set(next);
+    setPinError(null);
+  };
+
+  const continuePin = () => {
+    if (!VAULT_PIN_PATTERN.test(pin) || locked || !pinState) return;
+    if (pinSet) {
+      heldPin.current = pin;
+      setPin("");
+      setPinError(null);
+      setAskPin(false);
+    } else if (pin !== confirmPin) {
+      setPinError(tk("form.pinMismatch"));
+    } else {
+      newPin.current = pin;
+      setPinMutation.mutate();
+    }
+  };
 
   const submit = () => {
     if (isSaving) return;
@@ -339,6 +503,133 @@ function KeysManager<T extends KeyRowItem>({
   };
 
   const keys = keysQuery.data ?? [];
+  const signerOutdated =
+    keysQuery.error instanceof VaultError && keysQuery.error.code === "signer_outdated";
+  const shownError = pinError ?? (locked ? vaultLockedText(lockedUntil ?? undefined) : null);
+  const resetDialog = pinSpec && (
+    <RomeConfirmDialog
+      open={resetting}
+      title={tk("reset.title", { count: keys.length })}
+      destructive
+      confirmLabel={tk("reset.confirm")}
+      confirmDisabled={
+        resetMutation.isPending || !VAULT_PIN_PATTERN.test(resetPin) || resetPin !== resetConfirm
+      }
+      onConfirm={() => {
+        newPin.current = resetPin;
+        resetMutation.mutate();
+      }}
+      onCancel={closeReset}
+    >
+      <div className="space-y-3">
+        <Field>
+          <FieldLabel htmlFor={`${uid}-reset-pin`}>{tk("form.newPin")}</FieldLabel>
+          <PinInput id={`${uid}-reset-pin`} value={resetPin} onChange={setResetPin} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-reset-confirm`}>{tk("form.confirmPin")}</FieldLabel>
+          <PinInput id={`${uid}-reset-confirm`} value={resetConfirm} onChange={setResetConfirm} />
+        </Field>
+        {resetError && (
+          <p role="alert" className="text-ui text-destructive">
+            {resetError}
+          </p>
+        )}
+      </div>
+    </RomeConfirmDialog>
+  );
+
+  if (form !== null && askPin) {
+    return (
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(event) => {
+          event.preventDefault();
+          continuePin();
+        }}
+      >
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 pt-safe">
+          <IconButton
+            size="sm"
+            label={tk("form.back")}
+            icon={<ArrowLeft />}
+            onClick={closeForm}
+            disabled={setPinMutation.isPending}
+          />
+          <SheetTitle className="flex-1 truncate text-title text-foreground">
+            {pinSet ? tk("pinStep.enterTitle") : tk("pinStep.setTitle")}
+          </SheetTitle>
+        </div>
+        <fieldset
+          disabled={setPinMutation.isPending}
+          className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-4"
+        >
+          {pinState && (
+            <>
+              {/* Entering needs no label under the "Enter PIN" title; setting names both rows. */}
+              <Field>
+                {!pinSet && <FieldLabel htmlFor={`${uid}-pin`}>{tk("form.newPin")}</FieldLabel>}
+                <PinInput
+                  id={`${uid}-pin`}
+                  aria-label={pinSet ? tk("form.pin") : undefined}
+                  value={pin}
+                  onChange={editPin(setPin)}
+                  disabled={locked}
+                  invalid={Boolean(pinError)}
+                  shakeKey={pinShake}
+                />
+              </Field>
+              {!pinSet && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-pin-confirm`}>{tk("form.confirmPin")}</FieldLabel>
+                  <PinInput
+                    id={`${uid}-pin-confirm`}
+                    value={confirmPin}
+                    onChange={editPin(setConfirmPin)}
+                    invalid={Boolean(pinError)}
+                    shakeKey={pinShake}
+                  />
+                </Field>
+              )}
+            </>
+          )}
+          {shownError && (
+            <p role="alert" className="text-ui text-destructive">
+              {shownError}
+            </p>
+          )}
+          {pinSet && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="px-0"
+              onClick={() => setResetting(true)}
+            >
+              {tk("forgotPin")}
+            </Button>
+          )}
+        </fieldset>
+        <div className="flex shrink-0 justify-end border-t border-border p-4">
+          <Button
+            type="submit"
+            size="sm"
+            disabled={
+              setPinMutation.isPending ||
+              locked ||
+              !pinState ||
+              !VAULT_PIN_PATTERN.test(pin) ||
+              (!pinSet && !VAULT_PIN_PATTERN.test(confirmPin))
+            }
+          >
+            {tk("pinStep.continue")}
+          </Button>
+        </div>
+        {/* It renders in a portal, so its buttons cannot submit this form. */}
+        {resetDialog}
+      </form>
+    );
+  }
 
   if (form !== null) {
     return (
@@ -410,15 +701,24 @@ function KeysManager<T extends KeyRowItem>({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-app-key-value`}>{tk("form.valueField")}</FieldLabel>
-                <Input
-                  id={`${uid}-app-key-value`}
-                  type="password"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  autoComplete="off"
-                  className="w-full"
-                  autoFocus={form.mode === "replace"}
-                />
+                <div className="relative">
+                  <Input
+                    id={`${uid}-app-key-value`}
+                    type={showValue ? "text" : "password"}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    autoComplete="off"
+                    className="w-full pr-12"
+                    autoFocus={form.mode === "replace"}
+                  />
+                  <RevealToggle
+                    shown={showValue}
+                    onToggle={() => setShowValue((shown) => !shown)}
+                    showLabel={tk("form.showValue")}
+                    hideLabel={tk("form.hideValue")}
+                    className="absolute right-1 top-1/2 -translate-y-1/2"
+                  />
+                </div>
                 <p className="mt-1 text-aux text-muted-foreground">{tk("form.valueHint")}</p>
               </Field>
             </TabsContent>
@@ -482,10 +782,12 @@ function KeysManager<T extends KeyRowItem>({
         <SheetTitle className="flex-1 truncate text-title text-foreground">
           {tk("title")}
         </SheetTitle>
-        <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>
-          <Plus data-icon="inline-start" aria-hidden />
-          {tk("add")}
-        </Button>
+        {!signerOutdated && (
+          <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>
+            <Plus data-icon="inline-start" aria-hidden />
+            {tk("add")}
+          </Button>
+        )}
         <IconButton size="sm" label={tk("form.close")} icon={<X />} onClick={onClose} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -495,6 +797,8 @@ function KeysManager<T extends KeyRowItem>({
               <Skeleton key={index} className="h-14 w-full" />
             ))}
           </div>
+        ) : signerOutdated ? (
+          <p className="text-ui text-muted-foreground">{keysQuery.error?.message}</p>
         ) : keysQuery.isError ? (
           <Alert variant="destructive">
             <CircleAlert aria-hidden />

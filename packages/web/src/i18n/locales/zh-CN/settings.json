@@ -326,6 +326,8 @@
       "nameHint": "大写字母、数字和下划线。",
       "valueField": "秘密值",
       "valueHint": "Rome 不会再次显示该值。若要修改，请重新输入。",
+      "showValue": "显示值",
+      "hideValue": "隐藏值",
       "valueRequired": "请输入秘密值。",
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
@@ -380,7 +382,22 @@
       "save": "保存",
       "inputMethod": "添加密钥的方式",
       "singleKey": "单个密钥",
-      "back": "返回密码箱"
+      "back": "返回密码箱",
+      "pin": "PIN",
+      "confirmPin": "确认 PIN",
+      "newPin": "新 PIN",
+      "pinMismatch": "两次输入的 PIN 不一致"
+    },
+    "pinStep": {
+      "setTitle": "设置 PIN",
+      "enterTitle": "输入 PIN",
+      "continue": "继续"
+    },
+    "forgotPin": "忘记 PIN？",
+    "reset": {
+      "title_one": "删除全部 {{count}} 个密钥？此操作无法撤销。",
+      "title_other": "删除全部 {{count}} 个密钥？此操作无法撤销。",
+      "confirm": "重置"
     },
     "saved": "已保存 {{name}}。",
     "batchSaved_one": "已保存 {{count}} 个密钥。",

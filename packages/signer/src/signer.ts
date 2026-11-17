@@ -10,11 +10,12 @@ import {
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { createVaultHandler } from "./vault.js";
+import { createVaultHandler, VAULT_VERSION } from "./vault.js";
 
 const KEY_FILE = "signer-key.jwk";
 const TOKEN_LIFETIME_SECONDS = 60;
 const RATE_LIMIT_PER_SECOND = 20;
+const VAULT_PATHS = ["/v1/secrets", "/v1/grants", "/v1/pin", "/v1/reset"];
 
 export interface SignerOptions {
   /** The Rome Cloud origin every token is issued for. Callers cannot choose it. */
@@ -98,7 +99,7 @@ export async function startSigner(
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify(body));
     };
-    if (req.url?.startsWith("/v1/secrets") || req.url?.startsWith("/v1/grants")) {
+    if (VAULT_PATHS.some((prefix) => req.url?.startsWith(prefix))) {
       vault(req, reply).catch(() => reply(500, { error: "vault_unavailable" }));
       return;
     }
@@ -108,7 +109,7 @@ export async function startSigner(
       if (token) reply(200, { token });
       else reply(429, { error: "rate_limited" });
     } else if (req.method === "GET" && req.url === "/v1/health") {
-      reply(200, { ok: true, jkt, aud: options.audience });
+      reply(200, { ok: true, jkt, aud: options.audience, vault: VAULT_VERSION });
     } else {
       reply(404, { error: "not_found" });
     }

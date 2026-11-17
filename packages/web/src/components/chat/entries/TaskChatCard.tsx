@@ -114,6 +114,7 @@ const previewSchema = z
     z.object({
       kind: z.literal("secret_access"),
       name: z.string(),
+      names: z.array(z.string()).optional(),
       ttlMinutes: z.number(),
       reason: z.string(),
       title: z.string(),

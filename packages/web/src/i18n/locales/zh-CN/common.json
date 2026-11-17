@@ -362,5 +362,15 @@
     "noText": "无文本",
     "placeholder": "发消息给 {{name}}",
     "loadOlderFailed": "更早的消息加载失败"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "显示 PIN",
+    "hide": "隐藏 PIN",
+    "wrong_one": "PIN 不对，还剩 {{count}} 次",
+    "wrong_other": "PIN 不对，还剩 {{count}} 次",
+    "locked": "已锁定，{{time}} 后再试",
+    "notSet": "请先在设置里设置 PIN",
+    "signerOutdated": "Signer 版本太旧，升级实例后才能使用密码箱"
   }
 }

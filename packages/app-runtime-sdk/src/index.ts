@@ -243,10 +243,13 @@ export type PreviewPayload =
       fields?: { label: string; value: string }[];
     }
   | {
-      /** Time-limited use of one named secret. `title` and `summary` say the same
-       * in words, for a surface that draws only the generic card. */
+      /** Time-limited use of one or several named secrets. `title` and `summary`
+       * say the same in words, for a surface that draws only the generic card.
+       * `name` is the first of `names`. A preview stored before several names
+       * carries `name` alone. */
       kind: "secret_access";
       name: string;
+      names?: string[];
       ttlMinutes: number;
       reason: string;
       title: string;

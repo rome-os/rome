@@ -362,5 +362,15 @@
     "noText": "No text",
     "placeholder": "Message {{name}}",
     "loadOlderFailed": "Failed to load older messages"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "Show PIN",
+    "hide": "Hide PIN",
+    "wrong_one": "Wrong PIN. {{count}} try left.",
+    "wrong_other": "Wrong PIN. {{count}} tries left.",
+    "locked": "Locked. Try again at {{time}}.",
+    "notSet": "Set a PIN in Settings first.",
+    "signerOutdated": "The signer is too old for the vault. Upgrade the instance."
   }
 }
