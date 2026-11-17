@@ -67,16 +67,12 @@ function plainOf(tokens: Token[]): string {
     .join("");
 }
 
-/** A link to a chat thread, `<chat-thread root="MESSAGE_ID"/>`, which only the dashboard draws. */
-const THREAD_LINK = /<chat-thread\s+root=(["'])[^"']+\1\s*\/>/g;
-
 /**
  * The message as a push shows it: Markdown reduced to its words on one line,
  * cut to about {@link PUSH_BODY_MAX_CHARS} characters, never inside an emoji.
- * A link to a chat thread is left out: the name of its thread is not known here.
  */
 export function pushBody(markdown: string): string {
-  const text = plainOf(marked.lexer(markdown.replace(THREAD_LINK, "")))
+  const text = plainOf(marked.lexer(markdown))
     .replace(/&(amp|lt|gt|quot|#39);/g, (_, name: string) => ENTITIES[name] ?? "")
     .replace(/\s+/g, " ")
     .trim();

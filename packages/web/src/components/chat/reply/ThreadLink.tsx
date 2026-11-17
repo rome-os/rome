@@ -10,16 +10,17 @@ const CHIP =
   "inline-flex max-w-full items-center rounded-full border border-border bg-surface px-2 align-baseline text-aux text-foreground";
 
 /**
- * The chip for the thread whose root is `root`: "# name". It opens the thread
- * when the timeline holds one by that root and none is in focus. A thread the
- * timeline does not hold, which has replies nowhere to be read, is the same
- * chip, plain.
+ * The chip for the thread whose root is `root`: "# name", with the thread's
+ * live name, else `fallback`, the link's own text, else a generic name. It
+ * opens the thread when the timeline holds one by that root and none is in
+ * focus. A thread the timeline does not hold, which has replies nowhere to be
+ * read, is the same chip, plain.
  */
-export function ThreadLink({ root }: { root: string }) {
+export function ThreadLink({ root, fallback }: { root: string; fallback?: string }) {
   const { t } = useTranslation("chat");
   const threads = useChatThreads();
   const draft = useReplyDraft();
-  const title = threads?.titles.get(root) || t("thread.untitled");
+  const title = threads?.titles.get(root) || fallback || t("thread.untitled");
   const label = <span className="truncate">{`# ${title}`}</span>;
   if (!threads || threads.roots.get(root) !== root || !draft?.threads || draft.thread !== null) {
     return <span className={CHIP}>{label}</span>;

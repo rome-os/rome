@@ -50,7 +50,7 @@ describe("the message read-at migration", () => {
     ).toEqual({ readAt: null });
   });
 
-  it("leaves every existing message its own chat thread, keeping what it replies to", () => {
+  it("leaves every message of a Concierge chat its own chat thread, and keeps the roots of every other chat", () => {
     const journal = JSON.parse(
       readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8"),
     ) as { entries: { tag: string }[] };
@@ -59,27 +59,44 @@ describe("the message read-at migration", () => {
     for (const tag of tags.slice(0, tags.indexOf(TAG))) {
       for (const statement of migrationSql(tag)) sqlite.exec(statement);
     }
-    sqlite.exec(
-      "INSERT INTO chats (platform, key, kind, started_at) VALUES ('webchat', 'concierge', 'dm', 1)",
+    // 1: the main chat. 2: a topic chat. 3: a Telegram chat that Concierge-named
+    // session stands in. 4: a task chat. 5: an ordinary dashboard chat.
+    sqlite.exec(`INSERT INTO chats (platform, key, kind, started_at) VALUES
+      ('webchat', 'concierge', 'dm', 1), ('webchat', 'topic', 'dm', 1), ('telegram', 'tg', 'dm', 1),
+      ('webchat', 'task', 'dm', 1), ('webchat', 'plain', 'dm', 1)`);
+    const session = sqlite.prepare(
+      "INSERT INTO rome_sessions (id, name, type, agent_name, trigger_kind, created_at, activity_at, chat_id) VALUES (?, ?, 'webchat', ?, ?, 1, 1, ?)",
     );
-    sqlite.exec(
-      "INSERT INTO chat_messages (id, chat_id, key, sender_account_id, text, parts, said_at) VALUES (1, 1, 'u1', 'guardian', 'Hello', '[]', 100)",
+    session.run("concierge", "Concierge", null, null, 1);
+    session.run("topic-session", "Topic", "core:concierge", null, 2);
+    session.run("tg-session", "Telegram", "concierge", null, 3);
+    session.run("task-session", "Task", "main", "concierge-task", 4);
+    session.run("plain-session", "Plain", "main", null, 5);
+    // Each chat holds a root (id n) and a reply to it (id n + 5) with its root set.
+    const insert = sqlite.prepare(
+      "INSERT INTO chat_messages (id, chat_id, key, text, parts, reply_to_message_id, root_message_id, said_at) VALUES (?, ?, ?, 'x', '[]', ?, ?, 100)",
     );
-    sqlite.exec(
-      "INSERT INTO chat_messages (id, chat_id, key, sender_account_id, sender_agent, text, parts, reply_to_message_id, root_message_id, said_at) VALUES (2, 1, 'a1', 'agent:main', 'main', 'Hi', '[]', 1, 1, 200)",
-    );
+    for (let chat = 1; chat <= 5; chat++) {
+      insert.run(chat, chat, `root${chat}`, null, null);
+      insert.run(chat + 5, chat, `reply${chat}`, chat, chat);
+    }
 
     for (const statement of migrationSql(TAG)) sqlite.exec(statement);
 
+    const rootOf = (id: number) =>
+      (
+        sqlite
+          .prepare("SELECT root_message_id AS root FROM chat_messages WHERE id = ?")
+          .get(id) as {
+          root: number | null;
+        }
+      ).root;
+    // The main chat and the topic chat start over, and keep what they reply to.
+    expect([rootOf(6), rootOf(7)]).toEqual([null, null]);
     expect(
-      sqlite
-        .prepare(
-          "SELECT key, reply_to_message_id AS replyTo, root_message_id AS root FROM chat_messages ORDER BY id",
-        )
-        .all(),
-    ).toEqual([
-      { key: "u1", replyTo: null, root: null },
-      { key: "a1", replyTo: 1, root: null },
-    ]);
+      sqlite.prepare("SELECT reply_to_message_id AS r FROM chat_messages WHERE id = 6").get(),
+    ).toEqual({ r: 1 });
+    // A Telegram chat, a task chat and an ordinary dashboard chat keep their reply chains.
+    expect([rootOf(8), rootOf(9), rootOf(10)]).toEqual([3, 4, 5]);
   });
 });

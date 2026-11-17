@@ -36,6 +36,17 @@ function entryOf(scroller: HTMLElement, id: string): HTMLElement | null {
   return [...entries].find((entry) => entry.dataset.threadEntry === id) ?? null;
 }
 
+/**
+ * The live box of message `id`, else of `fallback`. A render that regroups the
+ * transcript (a thread's replies leave the main line for its stack, or come
+ * back) can remount a message in another group, so a box found before it is
+ * not the one on the screen after it. `fallback` is for a message that is no
+ * longer drawn, such as a reply that folds back into its root's stack.
+ */
+export function liveEntry(scroller: HTMLElement, id: string | undefined, fallback?: string) {
+  return (id && entryOf(scroller, id)) || (fallback ? entryOf(scroller, fallback) : null);
+}
+
 /** Tells the stick-to-bottom pin that the layout is moving on purpose, so it neither re-pins nor snaps back. */
 function hold({ content }: Env) {
   content.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
@@ -200,8 +211,8 @@ export function useThreadFocus({
       let done!: () => void;
       motion.current = new Promise<void>((resolve) => (done = resolve));
       try {
-        const anchor = entryOf(env.scroller, next.thread);
-        const y = anchor ? yOf(env, anchor) : 0;
+        const before = entryOf(env.scroller, next.thread);
+        const y = before ? yOf(env, before) : 0;
         // The rows go on showing until the motion folds them. The browser's own
         // scroll anchoring would move the scroll too, against `pin`.
         env.scroller.style.overflowAnchor = "none";
@@ -212,6 +223,8 @@ export function useThreadFocus({
           setFocus(next);
           setShown(next.root);
         });
+        // The render regrouped the transcript: hold the message as it is now drawn.
+        const anchor = liveEntry(env.scroller, next.thread, next.root);
         const rows = [...env.content.querySelectorAll<HTMLElement>("[data-thread-out]")];
         await fold(env, rows, true, reducedMotion() ? 0 : MOTION_MS, anchor, y);
         env.content.removeAttribute("data-thread-motion");
@@ -238,6 +251,7 @@ export function useThreadFocus({
       motion.current = new Promise<void>((resolve) => (done = resolve));
       try {
         const anchor = anchorOf(env, focused);
+        const held = anchor?.dataset.threadEntry;
         const y = anchor ? yOf(env, anchor) : 0;
         env.scroller.style.overflowAnchor = "none";
         env.content.setAttribute("data-thread-motion", "");
@@ -252,8 +266,11 @@ export function useThreadFocus({
         // The chat is whole again: no blank above or below.
         setSpace(env.top, 0);
         setSpace(env.bottom, 0);
-        if (anchor) env.scroller.scrollTop += yOf(env, anchor) - y;
-        anchor?.querySelector<HTMLElement>("[data-thread-label]")?.focus({ preventScroll: true });
+        // Closing regrouped the transcript again, so the box held during the
+        // motion may be gone. A reply folded into its root's stack is held by the root.
+        const kept = liveEntry(env.scroller, held, focused.root);
+        if (kept) env.scroller.scrollTop += yOf(env, kept) - y;
+        kept?.querySelector<HTMLElement>("[data-thread-label]")?.focus({ preventScroll: true });
       } finally {
         env.scroller.style.overflowAnchor = "";
         moving.current = false;

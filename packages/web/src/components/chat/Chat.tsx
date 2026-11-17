@@ -775,8 +775,13 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
-  // A share picks whole turns and shows every message itself, so it stacks nothing.
-  const chatThreads = useChatThreadsValue(displayMessages, threadFocus.shown, !shareMode);
+  // Only a Concierge chat stacks threads. A share picks whole turns and shows every
+  // message itself, so it stacks nothing.
+  const chatThreads = useChatThreadsValue(
+    displayMessages,
+    threadFocus.shown,
+    concierge && !shareMode,
+  );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
   // The unread divider goes before a message the main line shows: the replies of
   // a thread are in its stack.
@@ -2196,6 +2201,17 @@ export function Chat({
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
+          // A Reply sent from the main line starts or joins a thread, whose
+          // messages the main line leaves out for its stack: once the server
+          // takes it, the thread opens in focus, so the owner sees what they
+          // sent and the answer. The same path as pressing the stack.
+          if (accepted.ok && concierge && snapshot.replyTo && !focusRef.current) {
+            const { messageId } = snapshot.replyTo;
+            void openThreadRef.current({
+              thread: rootsRef.current.get(messageId) ?? messageId,
+              title: "",
+            });
+          }
           return accepted;
         },
         optimisticContent,

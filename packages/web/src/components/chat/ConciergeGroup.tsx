@@ -1,7 +1,6 @@
 import { SourceLabel } from "@/components/chat/reply/chat-threads";
 import { QuotedReply } from "@/components/chat/reply/QuotedReply";
 import { ThreadStack } from "@/components/chat/reply/ThreadStack";
-import { withThreadLinks, withoutThreadLinks } from "@/components/chat/reply/thread-link";
 import type { GroupAdjacency } from "@/components/chat/reply/adjacency";
 import { memo, useMemo, type ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
@@ -184,7 +183,7 @@ const AgentEntry = memo(function AgentEntry({
       <ConciergeBubble
         key={key}
         side="start"
-        copyText={withoutThreadLinks(part.content)}
+        copyText={part.content}
         createdAt={message.createdAt}
         feedbackTurn={
           rateable && entry.endsTurn && index === lastText && message.turnId
@@ -204,7 +203,7 @@ const AgentEntry = memo(function AgentEntry({
               compact={false}
               preserveSoftBreaks={!long}
             >
-              {withThreadLinks(part.content)}
+              {part.content}
             </Markdown>
           </CollapsibleBubbleContent>
         </ChatBubble>

@@ -182,7 +182,7 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   const href = props.href;
 
   const thread = threadOfLink(href);
-  if (thread !== null) return <ThreadLink root={thread} />;
+  if (thread !== null) return <ThreadLink root={thread} fallback={linkText(props.children)} />;
   if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {

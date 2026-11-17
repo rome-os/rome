@@ -95,7 +95,7 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("the task's `start_message_id`");
     expect(prompt).toContain("a `say` without `replyTo` replies to nothing");
     expect(prompt).toContain("a `say` without `replyTo` replies there");
-    expect(prompt).toContain('`<chat-thread root="ID"/>`');
+    expect(prompt).toContain("`[thread name](#rome-thread=ID)`");
     expect(prompt).toContain("Sending a message to a task changes no thread");
     // Rome sets threads from replies, so no rule asks the Concierge to place a message.
     for (const removed of [

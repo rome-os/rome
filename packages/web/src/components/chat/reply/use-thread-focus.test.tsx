@@ -12,7 +12,7 @@ import { buildRows } from "../chat-view";
 import type { BlockActions, LivePreview } from "../MessageList";
 import { ChatThreadsProvider, useChatThreadsValue } from "./chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply-draft";
-import { type Env, pin, useThreadFocus } from "./use-thread-focus";
+import { type Env, liveEntry, pin, useThreadFocus } from "./use-thread-focus";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -139,6 +139,14 @@ function Harness({
             </button>
             <button type="button" onClick={() => void threadFocus.close(true)}>
               close now
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void threadFocus.open({ thread: "k2", title: "Kyoto trip", root: "k1" })
+              }
+            >
+              open at reply
             </button>
             <p data-testid="focus">{threadFocus.focus?.title ?? ""}</p>
           </div>
@@ -314,6 +322,89 @@ describe("focusing a thread", () => {
     rerender(<Harness chatId="another" />);
     await settled();
     expect(screen.getByTestId("focus").textContent).toBe("");
+  });
+});
+
+describe("holding a message through a regrouped render", () => {
+  // Two threads, each started by the owner and answered. On the main line the
+  // owner's two messages share one group; with a thread in focus, the second
+  // one stands in a group of its own and so is a new element.
+  const pairs = [
+    say("k1", "user", "k1", 0, "One"),
+    say("k2", "assistant", "k1", 1, undefined, "k1"),
+    say("u2", "user", "u2", 2, "Two"),
+    say("a2", "assistant", "u2", 3, undefined, "u2"),
+  ];
+
+  /** Lays out entries as a browser would: a message that is drawn is at 100px, one that left the page at 0. */
+  function layOut() {
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      const top = this.hasAttribute("data-thread-entry") ? (this.isConnected ? 100 : 0) : 0;
+      return {
+        top,
+        bottom: top + 20,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 20,
+        x: 0,
+        y: top,
+      } as DOMRect;
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = rect;
+    };
+  }
+  let restore: () => void;
+  beforeEach(() => {
+    restore = layOut();
+  });
+  afterEach(() => restore());
+
+  it("takes the live box of a message, and the root's when the message is no longer drawn", () => {
+    const scroller = document.createElement("div");
+    scroller.innerHTML = '<div data-thread-entry="k1"></div>';
+    document.body.append(scroller);
+    const root = scroller.firstElementChild;
+    expect(liveEntry(scroller, "k1")).toBe(root);
+    expect(liveEntry(scroller, "k2", "k1")).toBe(root);
+    expect(liveEntry(scroller, "k2")).toBeNull();
+    scroller.remove();
+  });
+
+  it("holds the message that opens a thread as it is drawn after the regroup, with no blank left above it", async () => {
+    reduced = true;
+    render(<Harness messages={pairs} />);
+    const before = entry("u2");
+    fireEvent.click(stackOf("u2"));
+    await settled();
+    // The focus remounted u2 in a group of its own.
+    expect(entry("u2")).not.toBe(before);
+    expect(before.isConnected).toBe(false);
+    expect(screen.getByTestId("top-space").style.height).toBe("");
+    expect(screen.getByTestId("focus").textContent).toBe("Two");
+  });
+
+  it("holds the root when a reply that opened the thread folds back into the stack", async () => {
+    reduced = true;
+    render(<Harness messages={pairs} />);
+    const scrolls: number[] = [];
+    const scroller = screen.getByTestId("scroller");
+    Object.defineProperty(scroller, "scrollTop", {
+      get: () => 0,
+      set: (value: number) => void scrolls.push(value),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "open at reply" }));
+    await settled();
+    scrolls.length = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "back" }));
+    await settled();
+
+    expect(entry("k2")).toBeNull();
+    // The root is drawn where the reply was, so the position is kept: no scroll to correct.
+    expect(scrolls.every((value) => value === 0)).toBe(true);
   });
 });
 

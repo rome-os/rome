@@ -25,7 +25,7 @@ import { ReplyBar } from "./reply/ReplyBar";
 import { ThreadPills } from "./reply/ThreadPills";
 import { plainQuote, quoteLine, replyPreview } from "./reply/reply-source";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
-import { withoutThreadLinks, withThreadLinks } from "./reply/thread-link";
+import { threadOfLink } from "./reply/thread-link";
 
 // The quote in a reply, the owner's or the agent's, in a Concierge chat's
 // transcript: where it shows and that it focuses the chat on the reply's
@@ -912,14 +912,15 @@ describe("the pills of threads with new replies", () => {
 });
 
 describe("a link to a thread in the Concierge's text", () => {
-  const link = (root: string) => `See <chat-thread root="${root}"/> for the flights.`;
+  const link = (root: string, label = "Flights") =>
+    `See [${label}](#rome-thread=${root}) for the flights.`;
   const saying = (text: string) => [...messages, message("l1", "assistant", text, "l1", 9)];
 
-  it("draws a chip named for the thread, never the tag", () => {
+  it("draws a chip named for the thread, with its live name over the link's text", () => {
     renderTranscript(saying(link("m1")), undefined, undefined, true);
     const chip = screen.getByRole("button", { name: "Open the thread: Kyoto trip" });
     expect(chip.textContent).toBe("# Kyoto trip");
-    expect(document.body.textContent).not.toContain("chat-thread");
+    expect(document.body.textContent).not.toContain("rome-thread");
   });
 
   it("opens the thread in focus when pressed", () => {
@@ -928,11 +929,21 @@ describe("a link to a thread in the Concierge's text", () => {
     expect(thread()).toBe("m1");
   });
 
-  it("is a plain chip, with the fallback name, for a thread the chat does not hold", () => {
-    renderTranscript(saying(link("gone")), undefined, undefined, true);
-    expect(screen.getByText("# Thread")).toBeTruthy();
+  it("is a plain chip, named by the link's text, for a thread the chat does not hold", () => {
+    renderTranscript(saying(link("gone", "Tokyo trip")), undefined, undefined, true);
+    expect(screen.getByText("# Tokyo trip")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Open the thread:/ })).toBeNull();
-    expect(document.body.textContent).not.toContain("chat-thread");
+  });
+
+  it("does not throw on a root that does not decode, and draws no chip", () => {
+    expect(threadOfLink("#rome-thread=%FF")).toBeNull();
+    expect(threadOfLink("#rome-thread=m1")).toBe("m1");
+    expect(threadOfLink("#elsewhere")).toBeNull();
+    expect(() =>
+      renderTranscript(saying(link("%FF", "Broken")), undefined, undefined, true),
+    ).not.toThrow();
+    expect(screen.queryByText("# Broken")).toBeNull();
+    expect(screen.getByText("Broken")).toBeTruthy();
   });
 
   it("is plain while a thread is in focus", () => {
@@ -946,14 +957,11 @@ describe("a link to a thread in the Concierge's text", () => {
     expect(screen.queryByRole("button", { name: /Open the thread:/ })).toBeNull();
   });
 
-  it("leaves the tag out of every text read as plain words", () => {
+  it("reads as its label in every text read as plain words", () => {
     const text = link("m1");
-    expect(withoutThreadLinks(text)).toBe("See for the flights.");
-    expect(plainQuote(text)).toBe("See for the flights.");
-    expect(quoteLine(text)).toBe("See for the flights.");
-    expect(replyPreview(text)).toBe("See for the flights.");
-    // A line of only the tag leaves the quote's next line to show.
-    expect(quoteLine('<chat-thread root="m1"/>\nNext line')).toBe("Next line");
-    expect(withThreadLinks(text)).toContain("(#rome-thread=m1)");
+    expect(plainQuote(text)).toBe("See Flights for the flights.");
+    expect(quoteLine(text)).toBe("See Flights for the flights.");
+    // An image keeps its markup: only a link reads as its text.
+    expect(plainQuote("![chart](x.png)")).toBe("![chart](x.png)");
   });
 });
