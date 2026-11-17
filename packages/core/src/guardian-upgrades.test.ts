@@ -209,7 +209,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     }
   });
 
-  it("admits a dashboard allow-list visitor to the desktop and the Claude sign-in, but not the node console", async () => {
+  it("admits a dashboard admin to the desktop and the Claude sign-in, but not the node console", async () => {
     const testDb = createTestDb();
     const upstream = createServer();
     upstream.on("upgrade", (_req, socket) => {
