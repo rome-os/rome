@@ -143,13 +143,8 @@ describe("chatsTaskChatCards", () => {
   const cardBeside = (messageId: string) =>
     chatsTaskChatCards(testDb.db).cardBeside(taskChatPlace("task-1"), messageId);
 
+  // A widget is a message of its own, said before the answer of its turn.
   it("finds the widget the agent showed in the turn of its answer", async () => {
-    answer("a", 2, "turn-1", [widget(tiles), { type: "text", content: "You slept well." }]);
-
-    expect(await cardBeside("a")).toEqual(widget(tiles));
-  });
-
-  it("finds a widget said as its own message in the same turn", async () => {
     answer("card", 2, "turn-1", [widget(tiles)]);
     answer("a", 3, "turn-1", [{ type: "text", content: "You slept well." }]);
 
@@ -162,7 +157,8 @@ describe("chatsTaskChatCards", () => {
       components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 26m" }],
     };
     answer("first", 2, "turn-1", [widget(tiles)]);
-    answer("a", 3, "turn-1", [widget(fixed), { type: "text", content: "Fixed the time." }]);
+    answer("second", 3, "turn-1", [widget(fixed)]);
+    answer("a", 4, "turn-1", [{ type: "text", content: "Fixed the time." }]);
 
     expect(await cardBeside("a")).toEqual(widget(fixed));
   });
@@ -188,7 +184,8 @@ describe("chatsTaskChatCards", () => {
       }),
     },
   ])("leaves out $name", async ({ part }) => {
-    answer("a", 2, "turn-1", [part, { type: "text", content: "Done." }]);
+    answer("card", 2, "turn-1", [part]);
+    answer("a", 3, "turn-1", [{ type: "text", content: "Done." }]);
 
     expect(await cardBeside("a")).toBeNull();
   });

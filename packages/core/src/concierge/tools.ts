@@ -759,7 +759,9 @@ export async function buildConciergeTools(
   };
 
   // One message, so the lead-in and the report always arrive together. The
-  // transcript still shows them as two bubbles.
+  // transcript still shows them as two bubbles. A task's widget is a message
+  // of its own (docs/domains/chats.md#widget), so it goes just before, in the
+  // same thread but with no quote, which would share its message.
   const forward = async (
     text: string,
     from: ForwardedFrom,
@@ -768,13 +770,21 @@ export async function buildConciergeTools(
   ) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
+    const start = await startMessageOf(task?.id);
+    if (card) {
+      await webchatRepo.addBackendMessage(
+        chatId,
+        turnId,
+        [card],
+        start ? { replyTo: start.id } : {},
+      );
+    }
     const id = await addMessage(
       [
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
-        ...(card ? [card] : []),
         { type: "text", content: text, format: "long", forwardedFrom: from },
       ],
-      await startMessageOf(task?.id),
+      start,
     );
     // Only a result the guardian was shown counts as said.
     if (task) {

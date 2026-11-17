@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { assertWidgetAlone } from "../webchat/widget-message.js";
 import { and, eq } from "drizzle-orm";
 import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
@@ -323,6 +324,8 @@ function setup(
           parts: unknown[],
           options: { replyTo?: string } = {},
         ) => {
+          // As the real repositories hold: a widget is a message of its own.
+          assertWidgetAlone(parts);
           const list = messages.get(chatId) ?? [];
           const id = `said-${++saidCount}`;
           // A reply joins the thread of the row it replies to, as Chats records it.
@@ -413,9 +416,13 @@ function setup(
     taskChatCards: {
       cardBeside: async (place: Place, messageId: string) => {
         const rows = messages.get(place.chat.id) ?? [];
-        const row = rows.find((r, index) => (r.id ?? `row-${index}`) === messageId);
-        const parts = row ? (JSON.parse(row.content) as Array<{ type: string }>) : [];
-        return (parts.filter((part) => part.type === "widget").at(-1) ?? null) as never;
+        const at = rows.findIndex((r, index) => (r.id ?? `row-${index}`) === messageId);
+        for (let i = at - 1; i >= 0; i--) {
+          if (rows[i].role !== "assistant") break;
+          const parts = JSON.parse(rows[i].content) as Array<{ type: string }>;
+          if (parts[0]?.type === "widget") return parts[0] as never;
+        }
+        return null;
       },
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
@@ -1834,7 +1841,7 @@ describe("Concierge tools", () => {
     ]);
   });
 
-  it("chat_forward passes on the widget the task showed with its answer", async () => {
+  it("chat_forward passes on the widget the task showed, as a message of its own before the conclusion", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
     const widget = {
@@ -1844,16 +1851,21 @@ describe("Concierge tools", () => {
       text: "Sleep 7h 25m.",
       ui: { components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 25m" }] },
     };
-    s.messages.get("task-1")?.push({
-      role: "assistant",
-      content: JSON.stringify([widget, { type: "text", content: concluded("You slept well.") }]),
-    });
+    // As the task chat stores them: the widget alone, then the answer.
+    s.messages.get("task-1")?.push(
+      { role: "assistant", content: JSON.stringify([widget]) },
+      {
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: concluded("You slept well.") }]),
+      },
+    );
     const result = await s.tool("chat_forward", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toMatchObject({ cardForwarded: true });
-    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+    const said = s.messages.get(CONCIERGE_CHAT) ?? [];
+    expect(said.map((row) => JSON.parse(row.content))).toEqual([
+      [widget],
       [
         ACK_QUOTE,
-        widget,
         {
           type: "text",
           content: "You slept well.",
@@ -1862,6 +1874,9 @@ describe("Concierge tools", () => {
         },
       ],
     ]);
+    // Both are in the thread of the task's start message.
+    expect(said[0].chatThread).toBeDefined();
+    expect(said[0].chatThread).toBe(said[1].chatThread);
   });
 
   it("chat_forward without an intro stores the report alone", async () => {
