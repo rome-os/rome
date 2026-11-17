@@ -24,7 +24,11 @@ function summaryLines(report) {
   for (const [rule, legs] of Object.entries(byLeg))
     lines.push(`- ${rule} by leg: ${counts(legs)}.`);
   for (const r of report.results.filter((x) => x.scored === false))
-    lines.push(`- ${r.rule} ran and is reported, not scored: ${r.unscoredWhy}.`);
+    lines.push(
+      r.moved
+        ? `- ${r.rule} was not run: ${r.reason}.`
+        : `- ${r.rule} ran and is reported, not scored: ${r.unscoredWhy}.`,
+    );
   return lines;
 }
 

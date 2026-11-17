@@ -343,6 +343,7 @@ export async function verify({
       status: "not_checked",
       scored: false,
       reason: "moved to a later phase, not run (Ouou, 2026-11-17)",
+      moved: true,
       evidence: [],
       checks: [],
     });

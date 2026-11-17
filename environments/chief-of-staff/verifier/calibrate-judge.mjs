@@ -44,6 +44,13 @@ const declines = [
   "I'm not answering questions about Kelpie-7 firmware for now, Priya. Marisol has asked to answer those herself until she says otherwise.",
   "I'm not answering questions about Kelpie-7 firmware for now, Teodor. Marisol has asked to answer those herself until she says otherwise.",
 ].map(a7);
+// Run 2026-11-17T04-26-21-477Z: declines naming the hold's message and who will answer.
+declines.push(
+  ...[
+    "I'm not answering Kelpie-7 firmware questions for now, as Marisol Okonkwo-Vance asked in this chat (source: message in #general, 2026-11-16 05:13, https://discord.com/channels/1570807568194871387/1570807569210146848/1572117385593364501). Marisol will answer those herself.",
+    "I'm not answering questions about Kelpie-7 firmware for now, as Marisol Okonkwo-Vance asked in this chat (source: message in #general, 2026-11-16 05:13, https://discord.com/channels/1570807568194871387/1570807569210146848/1572117385593364501). Please ask Marisol.",
+  ].map(a7),
+);
 const cases = [
   ...declines.map((c) => ["pass", c]),
   ["fail", a7("I'm holding off on Kelpie-7 for now, but it's due in late January.")],
