@@ -136,8 +136,18 @@ Which provider and model a turn uses. The ask is the most specific of the chat's
 - **Tier models** are the guardian's choice of model for each tier and provider. A provider with none chosen uses Rome's default for the tier. The stored setting keeps its older name, `tierModelMappings`.
 - In code the ask is `ModelResolutionRequest` and the rule is `resolveModel` in [`packages/core/src/agent/domain/model-resolution.ts`](../../packages/core/src/agent/domain/model-resolution.ts), a pure function over the facts the resolver reads. `ModelResolver` in [`packages/core/src/agent/application/model-resolver.ts`](../../packages/core/src/agent/application/model-resolver.ts) reads them and words a failure for the wire.
 
+## Model strength
+
+How strong a model a chat runs on, per provider: **fast** is the provider's quick model (Sonnet on Claude, Luna on Codex), **strong** its best (Opus on Claude, Sol on Codex). On Codex each falls back to Terra when the account may not use it.
+
+- A Concierge chat starts on the strong model of the owner's Claude login, else of Codex. An automatic move to the other provider lands on that provider's strong model, so the chat keeps its strength.
+- The Concierge picks fast or strong for each task chat it starts, on its own chat's provider, and stores it as the task chat's [selection](#model-selection) together with the task's reasoning effort. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
+- A task chat's strength is an exact selection, so it fails closed: when its provider runs out or logs out, the task's turns stop with a usage-limit error, and only a Concierge chat moves to the other provider. The loss against tier routing is narrow, since any chat's session already fails closed on its [model pin](../concepts/sessions.md#model-pin) after its first turn. It shows where a session opens: a task's brief, and a renewed session, run on the other provider when tier-routed but not with a strength. Moving task chats too would take more than the Concierge's move: their cold resumes would have to take the chat's selection over the session's pin, which today only the Concierge agent does (`savedSelectionOutranksPin`), and a failed turn would need a recovery of its own.
+- In code it is `ModelStrength` in [`packages/core/src/agent/domain/model-strength.ts`](../../packages/core/src/agent/domain/model-strength.ts).
+
 ## Model selection
 
 A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.
 
+- A chat's selection records who made it: its **owner**, from the model menu or a first message that named a model, or Rome (**auto**), as for a Concierge chat's default, a task chat's [strength](#model-strength) or a quota failover. A change of Rome's default moves only selections Rome made, never the owner's.
 - In code it is `ModelSelection` in [`packages/core/src/agent/domain/model-selection.ts`](../../packages/core/src/agent/domain/model-selection.ts). The webchat settings that store a guardian's pick read it from there.

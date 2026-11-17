@@ -522,6 +522,15 @@ export const romeSessions = sqliteTable(
     name: text("name").notNull(),
     personaId: text("persona_id"),
     largeModelSelection: text("large_model_selection"),
+    // Who set large_model_selection: `owner` from the model menu or a first
+    // message that named a model, `auto` when Rome picked it, as for a
+    // Concierge chat's default or a quota failover. NULL for selections made
+    // before this was kept. A change of Rome's default moves only `auto` ones.
+    largeModelSelectionBy: text("large_model_selection_by").$type<"owner" | "auto">(),
+    // The reasoning effort a message to the chat runs at when it names none,
+    // such as the brief and follow-ups the Concierge sends a task chat. NULL
+    // takes the dashboard's setting.
+    reasoningEffort: text("reasoning_effort"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
     projectPath: text("project_path"),
     // Folder on a rome-node device the chat works in, set only when the chat

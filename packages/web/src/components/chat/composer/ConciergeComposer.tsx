@@ -120,7 +120,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const replyDraft = useReplyDraft();
     const { data: settings } = useSettings();
     const coarsePointer = useCoarsePointer();
-    // Turns carry the dashboard's reasoning effort, as in every other chat.
+    // Sent as in every other chat; the server runs a Concierge chat at its own effort.
     const reasoningEffort = isReasoningEffort(settings?.webchatReasoningEffort)
       ? settings.webchatReasoningEffort
       : DEFAULT_REASONING_EFFORT;

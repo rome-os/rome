@@ -5154,6 +5154,70 @@ describe("AgentRunner", () => {
       expect(provider.calls.at(-1)?.prompt).not.toContain("<continuation>");
     });
 
+    it("wakes a deferred task chat at the effort the chat saved", async () => {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession("task-low", "Task");
+      await repo.updateSessionReasoningEffort("task-low", "low");
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Watching" }],
+        [{ type: "result", content: "Checked" }],
+      ]);
+      const runner = createRunner(provider);
+      const first = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Watch CI",
+          channelThreadKey: "webchat:task-low",
+        }),
+      );
+      const start = first.find((message) => message.type === "turn_start");
+      const wake = await deferredWake(
+        start?.type === "turn_start" ? start.sessionId : "",
+        "webchat",
+        "task-low",
+      );
+
+      await collectMessages(
+        runner.run({ agentName: "test-main", prompt: wake.prompt, sessionId: wake.sessionId }),
+      );
+
+      expect(provider.sessions.length).toBe(2);
+      expect(provider.calls.at(-1)?.reasoningEffort).toBe("low");
+    });
+
+    it("resumes a task chat at the effort its opener names over the one the chat saved", async () => {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession("task-named", "Task");
+      await repo.updateSessionReasoningEffort("task-named", "low");
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Watching" }],
+        [{ type: "result", content: "Checked" }],
+        [{ type: "result", content: "Again" }],
+      ]);
+      const manager = createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
+      const opened = await manager.open(
+        { agentName: "test-main", channelThreadKey: "webchat:task-named" },
+        {},
+      );
+      await collectMessages((await startAfter(opened, { prompt: "Watch CI" })).events());
+      await manager.shutdown();
+
+      const resumed = await createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      ).resume({ id: opened.sessionId, agent: "test-main" }, { reasoningEffort: "xhigh" });
+      await collectMessages((await startAfter(resumed, { prompt: "Continue" })).events());
+      await collectMessages(
+        (await startAfter(resumed, { prompt: "Again", reasoningEffort: "high" })).events(),
+      );
+
+      expect(provider.calls.map((call) => call.reasoningEffort).slice(1)).toEqual([
+        "xhigh",
+        "high",
+      ]);
+    });
+
     it("routes a main-agent defer past an idle reset of its chat, with the note and the continuation", async () => {
       const seeded = Session.create("core:test-main", { continuityKey: "telegram:thread-defer" });
       await sessionRepository.add(seeded);

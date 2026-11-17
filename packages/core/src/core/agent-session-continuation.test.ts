@@ -2,7 +2,7 @@ import { romeToolPorts } from "./rome-tool-ports.js";
 import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { MODEL_SELECTIONS, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
@@ -408,10 +408,10 @@ describe("continuation notice through Sessions", () => {
   });
 
   it.each([
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "concierge"],
-    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", "concierge"],
+    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "concierge"],
+    [true, "gpt-6-1-sol", "claude-opus-5-5", "openai", "anthropic", "concierge"],
     // A topic chat is a Concierge chat like the main one.
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "topic-1"],
+    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "topic-1"],
     [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", CHAT],
     [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", CHAT],
   ] as const)("cold background resume concierge=%s %s to %s (%s to %s) in %s", async (concierge, from, to, source, target, chatId) => {
@@ -457,7 +457,7 @@ describe("continuation notice through Sessions", () => {
     if (concierge) {
       const raw = healthyState();
       raw[source] = reportOf("usage_limit_reached");
-      await webchatRepo.updateSessionLargeModelSelection(chatId, from);
+      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "owner");
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
@@ -465,7 +465,7 @@ describe("continuation notice through Sessions", () => {
         accounts: fakeAccounts(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
-    } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
+    } else await webchatRepo.updateSessionLargeModelSelection(chatId, to, "owner");
     await manager.shutdown();
     const runner = new AgentRunner(createManager(), loader);
     for await (const _ of runner.run({
@@ -483,9 +483,7 @@ describe("continuation notice through Sessions", () => {
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: concierge ? target : source,
       model: concierge
-        ? to === "claude-sonnet"
-          ? "claude-sonnet-5-5"
-          : to
+        ? MODEL_SELECTIONS[to].model
         : from === "claude-sonnet"
           ? "claude-sonnet-5-5"
           : from,
