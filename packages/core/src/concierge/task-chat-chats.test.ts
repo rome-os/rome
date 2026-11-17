@@ -3,7 +3,13 @@ import type { ChatRef } from "../chats/storage/place.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
-import { chatsTaskChatMessages, hasText, latestSaid, taskChatPlace } from "./task-chat.js";
+import {
+  chatsTaskChatCards,
+  chatsTaskChatMessages,
+  hasText,
+  latestSaid,
+  taskChatPlace,
+} from "./task-chat.js";
 
 // A task chat read from Chats, the way Concierge reads it: chat_read's latest
 // messages, and the latest answer chat_forward and the task events quote.
@@ -93,5 +99,103 @@ describe("chatsTaskChatMessages", () => {
 
   it("reads nothing for a chat Chats does not hold", async () => {
     expect(await latestSaid(messages(), taskChatPlace("missing"), 5, hasText)).toEqual([]);
+  });
+});
+
+// The last widget a task's agent showed with its answer, which chat_forward
+// passes on with the conclusion.
+describe("chatsTaskChatCards", () => {
+  let testDb: TestDb;
+  let chat: ChatRef;
+  let fixture: ReturnType<typeof speakerFixture>;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    fixture = speakerFixture(testDb.db);
+    chat = fixture.chat("webchat", "task-1", "dm", "Health");
+    fixture.speaker({ id: "task-1", chat, accountId: "guardian", createdAt: new Date(0) });
+  });
+
+  const tiles = {
+    components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 25m" }],
+  };
+  const widget = (ui: unknown, extra: Record<string, unknown> = {}) => ({
+    type: "widget",
+    toolUseId: "tu-card",
+    appId: "core",
+    text: "Sleep 7h 25m.",
+    ui,
+    ...extra,
+  });
+
+  function answer(id: string, at: number, turnId: string, parts: unknown[]) {
+    const line = fixture.say({
+      id,
+      chat,
+      from: "agent:main",
+      agent: "main",
+      parts,
+      at: new Date(at * 1000),
+    });
+    new TurnLinks(testDb.db).answer(line, "task-1", turnId);
+  }
+
+  const cardBeside = (messageId: string) =>
+    chatsTaskChatCards(testDb.db).cardBeside(taskChatPlace("task-1"), messageId);
+
+  it("finds the widget the agent showed in the turn of its answer", async () => {
+    answer("a", 2, "turn-1", [widget(tiles), { type: "text", content: "You slept well." }]);
+
+    expect(await cardBeside("a")).toEqual(widget(tiles));
+  });
+
+  it("finds a widget said as its own message in the same turn", async () => {
+    answer("card", 2, "turn-1", [widget(tiles)]);
+    answer("a", 3, "turn-1", [{ type: "text", content: "You slept well." }]);
+
+    expect(await cardBeside("a")).toEqual(widget(tiles));
+  });
+
+  // An agent that shows a second widget corrects the first, as a wrong date.
+  it("finds the last widget of the turn", async () => {
+    const fixed = {
+      components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 26m" }],
+    };
+    answer("first", 2, "turn-1", [widget(tiles)]);
+    answer("a", 3, "turn-1", [widget(fixed), { type: "text", content: "Fixed the time." }]);
+
+    expect(await cardBeside("a")).toEqual(widget(fixed));
+  });
+
+  it("leaves out a widget from another turn", async () => {
+    answer("card", 2, "turn-1", [widget(tiles)]);
+    answer("a", 3, "turn-2", [{ type: "text", content: "Done." }]);
+
+    expect(await cardBeside("a")).toBeNull();
+  });
+
+  // A stored part is checked again: a forward shows no more than show_card allows.
+  it.each([
+    { name: "an app's widget", part: widget(tiles, { appId: "meal-planner" }) },
+    { name: "a widget with bindings", part: widget(tiles, { bind: { x: "y" } }) },
+    {
+      name: "a widget with a button",
+      part: widget({
+        components: [
+          { id: "root", component: "Button", child: "t", action: { event: { name: "go" } } },
+          { id: "t", component: "Text", text: "Go" },
+        ],
+      }),
+    },
+  ])("leaves out $name", async ({ part }) => {
+    answer("a", 2, "turn-1", [part, { type: "text", content: "Done." }]);
+
+    expect(await cardBeside("a")).toBeNull();
+  });
+
+  it("finds nothing for a chat Chats does not hold", async () => {
+    expect(
+      await chatsTaskChatCards(testDb.db).cardBeside(taskChatPlace("missing"), "a"),
+    ).toBeNull();
   });
 });

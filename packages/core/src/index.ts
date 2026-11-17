@@ -233,7 +233,7 @@ import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
 import { deviceKinds, deviceKindState } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
 import { ConciergeService } from "./concierge/service.js";
-import { chatsTaskChatMessages } from "./concierge/task-chat.js";
+import { chatsTaskChatCards, chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
@@ -1256,6 +1256,7 @@ async function main() {
     accounts: modelAccounts,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
+    taskChatCards: chatsTaskChatCards(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
     // Created before the routine engine runs any wake-up, which it reads.
     checks: new TaskChecks({

@@ -123,7 +123,6 @@ export function showCardToolOutput(ui: WidgetUi, text: string, widgetsShow: bool
     message:
       "The card is shown in your message. Still end your reply with text, at least one short " +
       "sentence, such as what stands out or the sources. It need not repeat what the card " +
-      "shows, but a conclusion or summary you are asked to write still gives the key figures, " +
-      "since it may be read without the card.",
+      "shows: the card goes with your words, also when your conclusion is forwarded.",
   };
 }

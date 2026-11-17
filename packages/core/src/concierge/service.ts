@@ -45,7 +45,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
-import { taskChatPlace } from "./task-chat.js";
+import { taskChatPlace, type TaskChatCards } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -254,6 +254,8 @@ export interface ConciergeDeps {
   schedules?: TaskSchedules;
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
   messages: Pick<MessageRepository, "recent" | "before">;
+  /** The widgets a task chat's agent showed itself. Absent, a forward carries text alone. */
+  taskChatCards?: TaskChatCards;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<Sessions, "find">;

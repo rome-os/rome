@@ -32,7 +32,13 @@ import {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import {
+  type AgentCardPart,
+  hasText,
+  latestSaid,
+  MAX_READ_LIMIT,
+  taskChatPlace,
+} from "./task-chat.js";
 import {
   CONCLUSION_MAX_CHARS,
   NOTHING_TO_REPORT,
@@ -754,12 +760,18 @@ export async function buildConciergeTools(
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
+  const forward = async (
+    text: string,
+    from: ForwardedFrom,
+    intro?: string,
+    card: AgentCardPart | null = null,
+  ) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
     const id = await addMessage(
       [
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
+        ...(card ? [card] : []),
         { type: "text", content: text, format: "long", forwardedFrom: from },
       ],
       await startMessageOf(task?.id),
@@ -1503,7 +1515,7 @@ export async function buildConciergeTools(
     {
       name: "chat_forward",
       description:
-        "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. " +
+        "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. A widget the task showed with that answer, such as a report's numbers as tiles, goes with it. " +
         `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in a few sentences with the key specifics. ` +
         "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
         "The task chat must be one started from this Concierge chat. The message replies to the task's start message, and the task's row then points to it.",
@@ -1556,15 +1568,22 @@ export async function buildConciergeTools(
             );
           }
           const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);
+          // The report's widget goes with its words, so its numbers reach the guardian too.
+          const card = latest
+            ? ((await service.deps.taskChatCards?.cardBeside(taskChatPlace(chatId), latest.id)) ??
+              null)
+            : null;
           const messageId = await forward(
             text,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
+            card,
           );
           const task = await pointTaskTo(chatId, messageId);
           return {
             forwarded: full ? "full" : "conclusion",
             forwardedChars: text.length,
+            ...(card ? { cardForwarded: true } : {}),
             messageId,
             ...(task ? { taskAnchored: task.id } : {}),
           };

@@ -409,6 +409,15 @@ function setup(
       before: async (place: Place, cursor: { id: string }, limit: number) =>
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
+    // The last widget stored in the answer itself; chatsTaskChatCards reads a whole turn.
+    taskChatCards: {
+      cardBeside: async (place: Place, messageId: string) => {
+        const rows = messages.get(place.chat.id) ?? [];
+        const row = rows.find((r, index) => (r.id ?? `row-${index}`) === messageId);
+        const parts = row ? (JSON.parse(row.content) as Array<{ type: string }>) : [];
+        return (parts.filter((part) => part.type === "widget").at(-1) ?? null) as never;
+      },
+    },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
     agentSessionManager: { find: rs.fn(() => ({ selectModel: rs.fn() })) },
     accounts: fakeAccounts({
@@ -1820,6 +1829,36 @@ describe("Concierge tools", () => {
           content: "# Report\n\nThree options.",
           format: "long",
           forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ],
+    ]);
+  });
+
+  it("chat_forward passes on the widget the task showed with its answer", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+    const widget = {
+      type: "widget",
+      toolUseId: "tu-card",
+      appId: "core",
+      text: "Sleep 7h 25m.",
+      ui: { components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 25m" }] },
+    };
+    s.messages.get("task-1")?.push({
+      role: "assistant",
+      content: JSON.stringify([widget, { type: "text", content: concluded("You slept well.") }]),
+    });
+    const result = await s.tool("chat_forward", { chatId: "task-1" });
+    expect(JSON.parse(result.content[0].text)).toMatchObject({ cardForwarded: true });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [
+        ACK_QUOTE,
+        widget,
+        {
+          type: "text",
+          content: "You slept well.",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Health" },
         },
       ],
     ]);
