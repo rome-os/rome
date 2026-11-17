@@ -578,28 +578,44 @@ private struct HeaderCapsule: ViewModifier {
     }
 }
 
-/// The header's status line: small and muted in every state, with a faint
-/// left-to-right shimmer while the Concierge works.
-private struct StatusLine: View {
+/// The header's status line: small and muted in every state, with a
+/// highlight sweeping left to right while the Concierge works.
+struct StatusLine: View {
     let text: String
     let shimmers: Bool
     @Environment(\.offScreen) private var offScreen
 
+    /// One sweep, then a pause before the next, so it reads as a deliberate pass.
+    static let sweep: TimeInterval = 1.6
+    static let pause: TimeInterval = 0.4
+    /// The highlight band, as a share of the line's width.
+    static let band: CGFloat = 0.35
+
     var body: some View {
+        // Dimmed a little while it shimmers, so the sweep stands out against it.
         let line = Text(verbatim: text)
             .romeFont(12, .medium)
-            .foregroundStyle(Palette.sub)
+            .foregroundStyle(shimmers ? Palette.sub.opacity(0.7) : Palette.sub)
         if shimmers {
             line.overlay {
                 TimelineView(.animation(paused: offScreen)) { context in
                     let _ = PerfProbe.count("shimmerTick")
-                    // One pass every two seconds, left to right.
-                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
+                    let progress = Self.progress(at: context.date.timeIntervalSinceReferenceDate)
                     GeometryReader { geometry in
-                        let band = geometry.size.width * 0.45
-                        LinearGradient(colors: [.clear, Palette.fg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
-                            .frame(width: band)
-                            .offset(x: -band + (geometry.size.width + band) * phase)
+                        let band = geometry.size.width * Self.band
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: Palette.fg.opacity(0.35), location: 0.25),
+                                .init(color: Palette.fg.opacity(0.95), location: 0.5),
+                                .init(color: Palette.fg.opacity(0.35), location: 0.75),
+                                .init(color: .clear, location: 1),
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(width: band)
+                        .offset(x: -band + (geometry.size.width + band) * progress)
+                        .opacity(progress < 1 ? 1 : 0)
                     }
                     .mask(line)
                 }
@@ -608,6 +624,16 @@ private struct StatusLine: View {
         } else {
             line
         }
+    }
+
+    /// Where the band is, from 0 (off the left edge) to 1 (off the right
+    /// edge): a pass of `sweep` seconds left to right, then `pause` seconds at 1.
+    static func progress(at time: TimeInterval) -> Double {
+        #if DEBUG
+        if let fixed = ProcessInfo.processInfo.environment["ROME_SHIMMER_PROGRESS"].flatMap(Double.init) { return fixed }
+        #endif
+        let cycle = time.truncatingRemainder(dividingBy: sweep + pause)
+        return min(cycle / sweep, 1)
     }
 }
 
