@@ -158,7 +158,7 @@ const Text = createComponentImplementation(TextApi, ({ props }) => {
 // A tile on a subtle fill: the label above, the value below it with its
 // unit, and an optional caption such as the usual range.
 const Stat = createComponentImplementation(StatApi, ({ props }) => (
-  <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2.5">
+  <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2">
     <span className="text-aux text-muted-foreground">{shown(props.label)}</span>
     <span className="text-title text-foreground tabular-nums">
       {shown(props.value)}
@@ -266,7 +266,7 @@ const Row = createComponentImplementation(RowApi, ({ props, buildChild, context 
   // Numbers side by side read as an even two-column grid.
   if (ids.length > 1 && ids.every((id) => typeOf(context, id) === "Stat")) {
     return (
-      <div className="grid min-w-0 grid-cols-2 gap-2.5">
+      <div className="grid min-w-0 grid-cols-2 gap-2">
         {children(props.children as Child[], buildChild)}
       </div>
     );
@@ -339,7 +339,7 @@ const List = createComponentImplementation(ListApi, ({ props, buildChild }) =>
       )}
     >
       {children(props.children as Child[], buildChild).map((node, i) => (
-        <div role="listitem" key={i} className="min-w-0 py-2.5 first:pt-0 last:pb-0">
+        <div role="listitem" key={i} className="min-w-0 py-3 first:pt-0 last:pb-0">
           {node}
         </div>
       ))}
