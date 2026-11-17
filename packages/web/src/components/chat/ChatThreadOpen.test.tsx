@@ -585,7 +585,7 @@ describe("the transcript with a thread in focus", () => {
     other("n2", "assistant", "n1", 6),
     other("free1", "assistant", null, 7),
     // A later stretch with nothing of the Kyoto thread in it.
-    other("n3", "assistant", "n1", 40),
+    other("n3", "assistant", "n1", 90),
   ];
   const marked = () =>
     [...document.querySelectorAll<HTMLElement>("[data-thread-out]")].map(

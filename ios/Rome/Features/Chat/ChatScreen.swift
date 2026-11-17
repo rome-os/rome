@@ -368,7 +368,7 @@ struct ConciergeRow: View, Equatable {
         case .notice(_, let text):
             NoticeLine(text: text)
         case .sessionRenewal(_, let reason, let sessionId):
-            SessionRenewalLine(reason: reason)
+            NoticeLine(text: NoticeCopy.renewal(reason))
         case .unreadDivider:
             UnreadDivider()
         }

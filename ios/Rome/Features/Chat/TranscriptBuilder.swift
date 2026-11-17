@@ -124,11 +124,11 @@ enum TranscriptRow: Identifiable, Hashable {
 }
 
 /// Turns stored messages into rows. Messages from one sender less than five
-/// minutes apart form a group; a gap of fifteen minutes or a new day gets a
+/// minutes apart form a group; a gap of an hour or a new day gets a
 /// time separator, which also ends the group.
 enum TranscriptBuilder {
     static let groupGap: TimeInterval = 5 * 60
-    static let separatorGap: TimeInterval = 15 * 60
+    static let separatorGap: TimeInterval = 60 * 60
 
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.

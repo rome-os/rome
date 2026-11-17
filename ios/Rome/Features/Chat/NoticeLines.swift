@@ -127,16 +127,19 @@ struct UnreadPillButton: View {
     }
 }
 
-/// A faint centered line where the chat's agent session was renewed, with
-/// why. Plain: not tappable.
-struct SessionRenewalLine: View {
-    let reason: String
+/// The one faint centered line of the transcript: the chat moving to another
+/// model, a renewed session and why, an automatic location share. Plain: not
+/// tappable.
+struct NoticeLine: View {
+    let text: String
 
     var body: some View {
-        Text(verbatim: NoticeCopy.renewal(reason))
+        Text(verbatim: text)
             .romeFont(12)
             .foregroundStyle(Palette.sub.opacity(0.75))
-            .lineLimit(1)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .accessibilityLabel(Text(verbatim: text))
     }
 }

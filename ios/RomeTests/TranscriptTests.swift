@@ -85,11 +85,22 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         if case .separator = rows.first {} else { Issue.record("expected a leading separator") }
     }
 
+    @Test func aSeparatorComesAtAnHourAndNotBefore() {
+        func separators(_ gap: TimeInterval) -> Int {
+            TranscriptBuilder.rows(
+                messages: [message("a1", [text("one")], at: 3600), message("a2", [text("two")], at: 3600 + gap)],
+                pending: [], answers: [:], options: .init()
+            ).filter { if case .separator = $0 { return true } else { return false } }.count
+        }
+        #expect(separators(60 * 60 - 1) == 1)
+        #expect(separators(60 * 60) == 2)
+    }
+
     @Test func longGapsGetSeparatorsAndBreakRuns() {
         let rows = TranscriptBuilder.rows(
             messages: [
                 message("a1", [text("one")], at: 0),
-                message("a2", [text("two")], at: 60 * 20),
+                message("a2", [text("two")], at: 60 * 70),
             ],
             pending: [], answers: [:], options: .init()
         )
@@ -308,9 +319,9 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {
         let messages = [
-            message("a1", [text("one")], at: 60 * 30),
-            message("a2", [text("two")], at: 60 * 30 + 10),
-            message("a3", [text("three")], at: 60 * 30 + 20),
+            message("a1", [text("one")], at: 60 * 90),
+            message("a2", [text("two")], at: 60 * 90 + 10),
+            message("a3", [text("three")], at: 60 * 90 + 20),
         ]
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(unreadFrom: "a2"))
         #expect(rows.map(\.id) == ["sep-a1", "a1:0", "unread-divider", "a2:0", "a3:0"])

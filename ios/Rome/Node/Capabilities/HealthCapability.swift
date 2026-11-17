@@ -24,9 +24,9 @@ struct HealthCapability: NodeCapability {
     var examples: [CapabilityExample] {
         [
             CapabilityExample(
-                symbol: "figure.run", title: "Plan fat-loss workouts",
-                request: "Plan my workouts so I lose 3 kg by March.",
-                reply: "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan."
+                symbol: "heart.text.square", title: "Daily health summary",
+                request: "Summarize my health daily.",
+                reply: "Every morning at 9, I'll send your sleep, steps and resting heart rate, and flag anything unusual."
             ),
             CapabilityExample(
                 symbol: "bed.double", title: "Understand your sleep",
