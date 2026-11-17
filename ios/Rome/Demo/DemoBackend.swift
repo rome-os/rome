@@ -676,6 +676,49 @@ final class DemoBackend: RomeBackend {
         ])
     }()
 
+    /// An agent card: Rome's own widget whose look the Concierge wrote.
+    private static func agentCard(_ id: String, text: String, _ components: [JSONValue]) -> JSONValue {
+        .object([
+            "type": .string("widget"), "toolUseId": .string(id), "appId": .string("core"),
+            "text": .string(text), "ui": .object(["components": .array(components)]),
+        ])
+    }
+
+    private static func component(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
+        .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
+    }
+
+    static let agentItinerary: JSONValue = {
+        let c = DemoBackend.component
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        let stops = [("9:00", "浅草寺，早去人少"), ("11:30", "上野公园，午饭在阿美横町"), ("14:00", "秋叶原"), ("18:30", "新宿思出横丁晚饭")]
+        var components = [
+            c("root", "Column", ["children": ids(["title", "steps"])]),
+            c("title", "Text", ["text": .string("周六东京一日"), "variant": .string("h3")]),
+            c("steps", "List", ["children": ids(stops.indices.map { "s\($0)" })]),
+        ]
+        for (i, stop) in stops.enumerated() {
+            components.append(c("s\(i)", "Row", ["children": ids(["t\(i)", "p\(i)"])]))
+            components.append(c("t\(i)", "Text", ["text": .string(stop.0), "variant": .string("caption")]))
+            components.append(c("p\(i)", "Text", ["text": .string(stop.1)]))
+        }
+        return DemoBackend.agentCard("agent-itinerary", text: "周六东京一日：9:00 浅草寺；11:30 上野公园；14:00 秋叶原；18:30 新宿晚饭。", components)
+    }()
+
+    static let agentNumbers: JSONValue = {
+        let c = DemoBackend.component
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        return DemoBackend.agentCard("agent-numbers", text: "本月已花 3,180 元，预算 3,500 元（91%）。房租 2,400，吃饭 620，交通 160。", [
+            c("root", "Column", ["children": ids(["title", "stats", "budget"])]),
+            c("title", "Text", ["text": .string("本月开销"), "variant": .string("h3")]),
+            c("stats", "Row", ["children": ids(["rent", "food", "transport"])]),
+            c("rent", "Stat", ["label": .string("房租"), "value": .string("2,400"), "unit": .string("元")]),
+            c("food", "Stat", ["label": .string("吃饭"), "value": .string("620"), "unit": .string("元")]),
+            c("transport", "Stat", ["label": .string("交通"), "value": .string("160"), "unit": .string("元")]),
+            c("budget", "Progress", ["value": .number(3180), "max": .number(3500), "label": .string("预算 3,500 元，已花 3,180 元")]),
+        ])
+    }()
+
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)
     }
@@ -912,10 +955,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
             ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
+            ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1161,6 +1205,14 @@ final class DemoBackend: RomeBackend {
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
             // Photos alone, with a mark: the badge sits on the photos' corner.
             marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
+        ]
+        // Cards the Concierge composed itself: Rome's own, every value
+        // written out, with no `bind`.
+        messages["topic-cards"] = [
+            user("ac1", "周六在东京怎么安排？", at: at(10, 0), session: "topic-cards"),
+            parts([Self.agentItinerary], at: at(10, 1), session: "topic-cards"),
+            user("ac2", "这个月花了多少？", at: at(10, 5), session: "topic-cards"),
+            parts([Self.agentNumbers], at: at(10, 6), session: "topic-cards"),
         ]
         // A narrow table, and one wider than the bubble that scrolls inside it.
         messages["topic-table"] = [

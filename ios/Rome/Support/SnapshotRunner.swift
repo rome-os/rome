@@ -398,6 +398,8 @@ enum SnapshotRunner {
                 store.retryHold = .seconds(1)
             }
             await capture("57-widget-ui-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-meals")) }
+            // Cards the Concierge composed itself, with no `bind`.
+            await capture("57-agent-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-cards")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.
