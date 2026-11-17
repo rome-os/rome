@@ -447,6 +447,12 @@
     "sendWhileRunningTitle": "Send while agent is working",
     "stopGenerating": "Stop generating"
   },
+  "agentCard": {
+    "usual": "Usual {{range}}",
+    "normal": "Normal",
+    "high": "High",
+    "low": "Low"
+  },
   "questionCard": {
     "sent": "Sent",
     "optional": "optional",

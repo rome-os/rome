@@ -317,4 +317,91 @@ describe("a widget described as data", () => {
     pending[1](Response.json({ calories: 1, goal: 2, meals: [{ name: "Newest" }] }));
     expect(await screen.findByText("Newest")).toBeTruthy();
   });
+
+  it("draws a stat against its range, a bar chart, a callout and rows that open links", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch");
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                {
+                  type: "widget",
+                  toolUseId: "w-health",
+                  appId: "core",
+                  text: "Resting HR 64, over 56–60.",
+                  ui: {
+                    components: [
+                      {
+                        id: "root",
+                        component: "Column",
+                        children: ["rhr", "sleep", "week", "tip", "stop", "page"],
+                      },
+                      {
+                        id: "rhr",
+                        component: "Stat",
+                        label: "Resting HR",
+                        value: 64,
+                        unit: "bpm",
+                        range: { low: 56, high: 60 },
+                        icon: "heart",
+                      },
+                      {
+                        id: "sleep",
+                        component: "Stat",
+                        label: "Sleep",
+                        value: 7.2,
+                        unit: "h",
+                        range: { low: 7, high: 7.7 },
+                      },
+                      {
+                        id: "week",
+                        component: "Chart",
+                        kind: "bar",
+                        points: [
+                          { label: "Mon", value: 8100 },
+                          { label: "Today", value: 4210, highlight: "accent" },
+                        ],
+                        unit: "steps",
+                      },
+                      { id: "tip", component: "Text", text: "Rest tonight.", tone: "info" },
+                      {
+                        id: "stop",
+                        component: "Row",
+                        children: ["stop-name"],
+                        href: "maps://?q=Belem+Tower",
+                      },
+                      { id: "stop-name", component: "Text", text: "Belém Tower" },
+                      {
+                        id: "page",
+                        component: "Text",
+                        text: "Opening hours",
+                        href: "https://example.com/hours",
+                      },
+                    ],
+                  },
+                },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+    // The reader, not the card, says where each value sits.
+    expect(await screen.findByText("Usual 56–60 bpm")).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText("Normal")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Mon 8,100 steps, Today 4,210 steps" })).toBeTruthy();
+    expect(screen.getByText("Rest tonight.")).toBeTruthy();
+    // A place opens in Apple Maps, a page as itself; neither is an event.
+    expect(screen.getByRole("link", { name: "Belém Tower" }).getAttribute("href")).toBe(
+      "https://maps.apple.com/?q=Belem+Tower",
+    );
+    expect(screen.getByRole("link", { name: "Opening hours" }).getAttribute("href")).toBe(
+      "https://example.com/hours",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

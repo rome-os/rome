@@ -23,6 +23,56 @@ describe("agent card", () => {
     });
   });
 
+  it("takes a chart, a callout, a stat's range, icons and links", () => {
+    const ui = {
+      components: [
+        { id: "root", component: "Column", children: ["hr", "week", "tip", "stop"] },
+        {
+          id: "hr",
+          component: "Stat",
+          label: "Resting HR",
+          value: 64,
+          unit: "bpm",
+          range: { low: 56, high: 60 },
+          icon: "heart",
+        },
+        {
+          id: "week",
+          component: "Chart",
+          kind: "bar",
+          points: [
+            { label: "Mon", value: 8100 },
+            { label: "Today", value: 4210, highlight: "accent" },
+          ],
+        },
+        { id: "tip", component: "Text", text: "An early night helps.", tone: "info" },
+        {
+          id: "stop",
+          component: "Text",
+          text: "Belém Tower",
+          icon: "map-pin",
+          href: "maps://?q=Belem",
+        },
+      ],
+    };
+    expect(checkAgentCard(ui, "Resting HR 64, over 56–60")).toEqual([]);
+  });
+
+  it("refuses a range on a value that is not a plain number", () => {
+    const ui = {
+      components: [
+        {
+          id: "root",
+          component: "Stat",
+          label: "Sleep",
+          value: "6h 05m",
+          range: { low: 7, high: 7.7 },
+        },
+      ],
+    };
+    expect(checkAgentCard(ui, "Sleep 6h 05m").join("\n")).toContain("plain number");
+  });
+
   it.each([
     "Button",
     "ChoicePicker",

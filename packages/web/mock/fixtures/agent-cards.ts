@@ -3,6 +3,14 @@
 
 import type { TranscriptPart } from "@rome/api-types/chat";
 
+const STOPS: [string, string, string][] = [
+  ["9:00", "浅草寺，早去人少", "maps://?q=Senso-ji"],
+  ["11:30", "上野公园，午饭在阿美横町", "maps://?q=Ueno+Park"],
+  ["14:00", "秋叶原", "maps://?q=Akihabara"],
+  ["18:30", "新宿思出横丁晚饭", "https://www.omoide-yokocho.com"],
+];
+
+/** An itinerary whose stops open in Maps, and the last one's page. */
 export const AGENT_CARD_ITINERARY = {
   type: "widget",
   toolUseId: "mock-agent-card-itinerary",
@@ -10,37 +18,42 @@ export const AGENT_CARD_ITINERARY = {
   text: "周六东京一日：9:00 浅草寺；11:30 上野公园；14:00 秋叶原；18:30 新宿晚饭。",
   ui: {
     components: [
-      { id: "root", component: "Column", children: ["title", "steps"] },
+      { id: "root", component: "Column", children: ["title", "subtitle", "steps"] },
       { id: "title", component: "Text", text: "周六东京一日", variant: "h3" },
-      { id: "steps", component: "List", children: ["s1", "s2", "s3", "s4"] },
-      { id: "s1", component: "Row", children: ["t1", "p1"] },
-      { id: "t1", component: "Text", text: "9:00", variant: "caption" },
-      { id: "p1", component: "Text", text: "浅草寺，早去人少" },
-      { id: "s2", component: "Row", children: ["t2", "p2"] },
-      { id: "t2", component: "Text", text: "11:30", variant: "caption" },
-      { id: "p2", component: "Text", text: "上野公园，午饭在阿美横町" },
-      { id: "s3", component: "Row", children: ["t3", "p3"] },
-      { id: "t3", component: "Text", text: "14:00", variant: "caption" },
-      { id: "p3", component: "Text", text: "秋叶原" },
-      { id: "s4", component: "Row", children: ["t4", "p4"] },
-      { id: "t4", component: "Text", text: "18:30", variant: "caption" },
-      { id: "p4", component: "Text", text: "新宿思出横丁晚饭" },
+      { id: "subtitle", component: "Text", text: "点一站在地图里打开", variant: "caption" },
+      { id: "steps", component: "List", children: STOPS.map((_, i) => `s${i}`) },
+      ...STOPS.flatMap(([time, place, href], i) => [
+        { id: `s${i}`, component: "Row", children: [`t${i}`, `p${i}`], href },
+        { id: `t${i}`, component: "Text", text: time, variant: "caption" },
+        { id: `p${i}`, component: "Text", text: place },
+      ]),
     ],
   },
 } as TranscriptPart;
 
-/** A routine's daily health summary, the case agent cards are for. */
+const WEEK: [string, number, ("accent" | "warning")?][] = [
+  ["Mon", 8120],
+  ["Tue", 9340],
+  ["Wed", 7650],
+  ["Thu", 10210],
+  ["Fri", 8890],
+  ["Sat", 2980, "warning"],
+  ["Today", 4210, "accent"],
+];
+
+/** A routine's daily health summary, the case agent cards are for: each
+ *  number against its usual range, the week's steps, and one line to act on. */
 export const AGENT_CARD_HEALTH = {
   type: "widget",
   toolUseId: "mock-agent-card-health",
   appId: "core",
-  text: "Today's health against your last 14 days: sleep 7h 12m, 8,432 steps, 512 active kcal, 38 exercise minutes, resting heart rate 58 bpm. A short walk after dinner gets you to 10,000 steps.",
+  text: "Today's health against your last 14 days: sleep 7.2 h (usual 7–7.7), 4,210 steps (usual 8,000–10,000), 512 active kcal (usual 450–600), 12 exercise minutes (usual 30–45), resting heart rate 64 bpm (usual 56–60). A 30-minute walk this evening covers most of today's steps gap.",
   ui: {
     components: [
       {
         id: "root",
         component: "Column",
-        children: ["title", "subtitle", "stats", "goal", "advice"],
+        children: ["title", "subtitle", "stats", "week", "advice"],
       },
       { id: "title", component: "Text", text: "Today's health", variant: "h4" },
       { id: "subtitle", component: "Text", text: "Against your last 14 days", variant: "caption" },
@@ -49,39 +62,62 @@ export const AGENT_CARD_HEALTH = {
         id: "sleep",
         component: "Stat",
         label: "Sleep",
-        value: "7h 12m",
-        caption: "Usual 6h 40m–7h 50m",
+        value: 7.2,
+        unit: "h",
+        range: { low: 7, high: 7.7 },
+        icon: "moon",
       },
-      { id: "steps", component: "Stat", label: "Steps", value: 8432, caption: "Usual 6,900–9,800" },
+      {
+        id: "steps",
+        component: "Stat",
+        label: "Steps",
+        value: 4210,
+        range: { low: 8000, high: 10000 },
+        icon: "steps",
+      },
       {
         id: "kcal",
         component: "Stat",
         label: "Active",
         value: 512,
         unit: "kcal",
-        caption: "Usual 380–560",
+        range: { low: 450, high: 600 },
+        icon: "flame",
       },
       {
         id: "exercise",
         component: "Stat",
         label: "Exercise",
-        value: 38,
+        value: 12,
         unit: "min",
-        caption: "Usual 20–45",
+        range: { low: 30, high: 45 },
+        icon: "run",
       },
       {
         id: "rhr",
         component: "Stat",
         label: "Resting HR",
-        value: 58,
+        value: 64,
         unit: "bpm",
-        caption: "Usual 55–61",
+        range: { low: 56, high: 60 },
+        icon: "heart",
       },
-      { id: "goal", component: "Progress", value: 8432, max: 10000, label: "Steps goal" },
+      {
+        id: "week",
+        component: "Chart",
+        kind: "bar",
+        points: WEEK.map(([label, value, highlight]) => ({
+          label,
+          value,
+          ...(highlight ? { highlight } : {}),
+        })),
+        caption: "Steps, last 7 days",
+      },
       {
         id: "advice",
         component: "Text",
-        text: "A short walk after dinner gets you to 10,000 steps.",
+        text: "A 30-minute walk this evening covers most of today's steps gap.",
+        tone: "info",
       },
     ],
   },

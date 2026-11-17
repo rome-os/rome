@@ -57,6 +57,9 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+    /// A chart's plain bars, beside the highlighted ones.
+    static let chartBar = dynamic(0xE3DBCF, 0x45403B)
+    static let successSoft = dynamic(rgba: (0x5B7A4A, 0.12), (0x4AC06C, 0.14))
     /// Apple's Health pink (system pink): only the heart on the Apple Health page wears it.
     static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 

@@ -2061,6 +2061,16 @@
         }
       }
     },
+    "High" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏高"
+          }
+        }
+      }
+    },
     "History" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2455,6 +2465,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已共享位置 · ±%@"
+          }
+        }
+      }
+    },
+    "Low" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏低"
           }
         }
       }
@@ -2915,6 +2935,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂无用量数据"
+          }
+        }
+      }
+    },
+    "Normal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正常"
           }
         }
       }
@@ -5487,6 +5517,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用法"
+          }
+        }
+      }
+    },
+    "Usual %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通常 %@"
           }
         }
       }

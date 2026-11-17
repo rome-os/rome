@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { checkWidgetUi, type WidgetUi } from "./widget-ui.js";
+import { checkWidgetUi, type WidgetUi, widgetStatTone } from "./widget-ui.js";
 
 const mealCard: WidgetUi = {
   components: [
@@ -107,6 +107,78 @@ describe("checkWidgetUi", () => {
     for (const url of ["/api/settings", "http://example.com/a.png", "photo.png", "data:x"]) {
       expect(checkWidgetUi(card(url))).not.toEqual([]);
     }
+  });
+
+  it("takes a stat's range, a callout, a bar chart, icons and links", () => {
+    const ui = {
+      components: [
+        { id: "root", component: "Column", children: ["sleep", "week", "tip", "stop", "place"] },
+        {
+          id: "sleep",
+          component: "Stat",
+          label: "Sleep",
+          value: 6.1,
+          unit: "h",
+          range: { low: 7, high: 7.7 },
+          icon: "moon",
+        },
+        {
+          id: "week",
+          component: "Chart",
+          kind: "bar",
+          points: [
+            { label: "Mon", value: 7.2 },
+            { label: "Today", value: 6.1, highlight: "accent" },
+          ],
+          unit: "h",
+        },
+        { id: "tip", component: "Text", text: "An early night helps.", tone: "info" },
+        {
+          id: "stop",
+          component: "Text",
+          text: "Belém Tower",
+          icon: "map-pin",
+          href: "maps://?q=Belem+Tower",
+        },
+        { id: "place", component: "Row", children: ["tip2"], href: "https://example.com/a" },
+        { id: "tip2", component: "Text", text: "Opening hours" },
+      ],
+    };
+    expect(checkWidgetUi(ui)).toEqual([]);
+  });
+
+  it("refuses an unknown icon, a link of another scheme, a reversed range and a long chart", () => {
+    const one = (c: Record<string, unknown>) => ({ components: [{ id: "root", ...c }] });
+    expect(checkWidgetUi(one({ component: "Text", text: "a", icon: "rocket" }))).not.toEqual([]);
+    for (const href of ["http://example.com", "javascript:alert(1)", "/api/apps", "tel:123"]) {
+      expect(checkWidgetUi(one({ component: "Text", text: "a", href }))).not.toEqual([]);
+    }
+    expect(
+      checkWidgetUi(one({ component: "Stat", label: "a", value: 1, range: { low: 5, high: 2 } })),
+    ).not.toEqual([]);
+    const points = Array.from({ length: 15 }, (_, i) => ({ label: `${i}`, value: i }));
+    expect(checkWidgetUi(one({ component: "Chart", kind: "bar", points }))).not.toEqual([]);
+    expect(
+      checkWidgetUi(one({ component: "Chart", kind: "line", points: points.slice(0, 3) })),
+    ).not.toEqual([]);
+    // A link and an icon are a Row's, not a Column's.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Column", children: ["a"], href: "https://example.com" },
+          { id: "a", component: "Text", text: "a" },
+        ],
+      }),
+    ).not.toEqual([]);
+  });
+
+  it("says where a value sits against its usual range", () => {
+    const range = { low: 56, high: 60 };
+    expect(widgetStatTone(64, range)).toBe("high");
+    expect(widgetStatTone(52, range)).toBe("low");
+    expect(widgetStatTone(56, range)).toBe("normal");
+    expect(widgetStatTone("58", range)).toBe("normal");
+    expect(widgetStatTone("6h 05m", range)).toBeNull();
   });
 
   it("refuses fields no reader draws", () => {

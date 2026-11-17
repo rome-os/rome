@@ -299,6 +299,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 - A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event. An agent card is the exception: it shows what it held when the agent showed it.
 - People do two things with a widget. An **edit**, such as picking an option or typing an answer, changes only what the widget shows on the screen in front of them. An **event**, such as pressing Send or a button that logs a glass of water, asks Rome to act, and carries the edits it needs. An edit never leaves the screen on its own.
 - Every event goes to the widget's owner, which alone says what it means: an app's widget calls its app, and Rome's question answers the agent waiting on it. A widget accepts only the events it names, and only from someone who may open its chat.
+- A row of a widget may open a link, a web page or a place in Maps. Opening it is not an event: it reaches no owner, and the agent never hears of it.
 - What the agent reads of an answer is written by Rome from the widget and the event. Anything the owner app adds reads as the app's, never as the words of the person who acted.
 
 ## Location share
@@ -319,8 +320,9 @@ Rome's own widget that asks the guardian for where they are right now, once, for
 
 Rome's own widget whose look the agent composes, to show structured content laid out: an itinerary, options compared, a few key numbers.
 
-- Rome owns it. The agent writes how it looks, from the display components of the widget catalog (text, numbers, lists, rows, columns, images, progress), and gives its plain-text line with it.
-- It only shows something. It holds nothing anyone can press, pick or type, since no owner would handle the event. To ask, the agent uses the question.
+- Rome owns it. The agent writes how it looks, from the display components of the widget catalog (text, numbers, bar charts, lists, rows, columns, images, progress), and gives its plain-text line with it.
+- A number may carry its usual range. The reader, never the agent, says whether it is normal, high or low, so a card cannot misjudge its own numbers.
+- It only shows something. It holds nothing that sends an event, no button, pick or field, since no owner would handle it. To ask, the agent uses the question. A row may open a link, a web page or a place in Maps, which tells nobody.
 - Its content lives in its message, a snapshot of the card as shown. It reads nothing from anywhere when drawn, and never changes afterwards.
 - The plain-text line is the card for every reader that cannot draw it: a text-only platform, the lock screen, and the agent itself reading the chat later.
 - An agent shows one only where the place draws cards. Anywhere else it sends the content as a message.

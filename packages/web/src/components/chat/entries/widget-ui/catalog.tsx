@@ -1,8 +1,9 @@
 // Rome's A2UI catalog: the components a card described as data may use
 // (`WIDGET_UI_COMPONENTS` in @rome-os/app-runtime), drawn with the dashboard's
 // own tokens. The components from A2UI's basic catalog keep its schemas, so
-// a card reads as A2UI; `Stat`, `Progress` and `Markdown` are Rome's, and
-// `TextField` adds Rome's `placeholder`.
+// a card reads as A2UI; `Stat`, `Progress`, `Chart` and `Markdown` are
+// Rome's, `TextField` adds Rome's `placeholder`, `Text` Rome's `tone`, `icon`
+// and `href`, and `Row` Rome's `icon` and `href`.
 import {
   ButtonApi,
   Catalog,
@@ -20,7 +21,35 @@ import {
   TextFieldApi,
 } from "@a2ui/web_core/v0_9";
 import { createComponentImplementation } from "@a2ui/react/v0_9";
+import {
+  isWidgetHref,
+  WIDGET_UI_CHART_MAX_POINTS,
+  type WidgetUiIcon,
+  widgetStatTone,
+} from "@rome/api-types/chat";
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  Calendar,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  Clock,
+  Flame,
+  Footprints,
+  Heart,
+  Info,
+  type LucideIcon,
+  MapPin,
+  Moon,
+  TriangleAlert,
+} from "lucide-react";
 import { createContext, type ReactNode, useContext } from "react";
+import { useTranslation } from "react-i18next";
+// web_core reads its schemas as zod 3 (by type name), so Rome's literal
+// fields are written with zod 3 too.
+import { z as z3 } from "zod/v3";
 import Markdown from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,15 +62,80 @@ export const ROME_WIDGET_CATALOG_ID = "https://rome.app/a2ui/catalogs/chat-widge
 // the zod instance the binder reads.
 const Base = TextApi.schema.omit({ text: true, variant: true });
 
+/** `schema` with Rome's literal `fields`. The call is untyped on purpose:
+ *  the binder's zod 3 types and these nest past what tsc follows, so each
+ *  component types its extra props apart (`TextExtras` and the like). */
+function withFields<T>(schema: T, fields: Record<string, unknown>): T {
+  return (schema as unknown as { extend(f: object): { strict(): T } }).extend(fields).strict();
+}
+
+const IconSchema = z3.string().optional();
+const HrefSchema = z3.string().optional();
+
+const TextWithToneApi = {
+  name: "Text",
+  schema: withFields(TextApi.schema, {
+    tone: z3.enum(["info", "warning", "success"]).optional(),
+    icon: IconSchema,
+    href: HrefSchema,
+  }),
+};
+
+interface TextExtras {
+  tone?: "info" | "warning" | "success";
+  icon?: string;
+  href?: string;
+}
+
+const RowWithLinkApi = {
+  name: "Row",
+  schema: withFields(RowApi.schema, { icon: IconSchema, href: HrefSchema }),
+};
+
+const StatShape = Base.extend({
+  label: CommonSchemas.DynamicString,
+  value: CommonSchemas.DynamicValue,
+  unit: CommonSchemas.DynamicString.optional(),
+  caption: CommonSchemas.DynamicString.optional(),
+}).strict();
+
 const StatApi = {
   name: "Stat",
-  schema: Base.extend({
-    label: CommonSchemas.DynamicString,
-    value: CommonSchemas.DynamicValue,
-    unit: CommonSchemas.DynamicString.optional(),
-    caption: CommonSchemas.DynamicString.optional(),
-  }).strict(),
+  schema: withFields(StatShape, {
+    range: z3.object({ low: z3.number(), high: z3.number() }).optional(),
+    icon: IconSchema,
+  }),
 };
+
+interface StatExtras {
+  range?: { low: number; high: number };
+  icon?: string;
+}
+
+const ChartShape = Base.extend({
+  unit: CommonSchemas.DynamicString.optional(),
+  caption: CommonSchemas.DynamicString.optional(),
+}).strict();
+
+const ChartApi = {
+  name: "Chart",
+  schema: withFields(ChartShape, {
+    kind: z3.literal("bar"),
+    points: z3.array(
+      z3.object({
+        label: z3.string(),
+        value: z3.number(),
+        highlight: z3.enum(["accent", "warning"]).optional(),
+      }),
+    ),
+  }),
+};
+
+interface ChartPoint {
+  label: string;
+  value: number;
+  highlight?: "accent" | "warning";
+}
 
 const MarkdownApi = {
   name: "Markdown",
@@ -144,14 +238,97 @@ function children(list: Child[] | undefined, build: (id: string, basePath?: stri
  *  button's fill, rather than the card's. */
 const InButtonContext = createContext(false);
 
-const Text = createComponentImplementation(TextApi, ({ props }) => {
-  const inButton = useContext(InButtonContext);
+const ICONS: Record<WidgetUiIcon, LucideIcon> = {
+  moon: Moon,
+  heart: Heart,
+  steps: Footprints,
+  flame: Flame,
+  run: Activity,
+  "map-pin": MapPin,
+  clock: Clock,
+  calendar: Calendar,
+  info: Info,
+  alert: CircleAlert,
+};
+
+/** The glyph a card names, or nothing for a name this reader does not know. */
+function CardIcon({ name, className }: { name: unknown; className?: string }) {
+  const Glyph = typeof name === "string" ? ICONS[name as WidgetUiIcon] : undefined;
+  return Glyph ? <Glyph aria-hidden className={cn("size-4 shrink-0", className)} /> : null;
+}
+
+/** Where a press on a card's link goes. A browser opens no `maps://`, so a
+ *  place opens in Apple Maps on the web, which reads the same query. */
+export function cardHref(href: unknown): string | undefined {
+  if (typeof href !== "string" || !isWidgetHref(href)) return undefined;
+  return href.startsWith("maps://")
+    ? `https://maps.apple.com/${href.slice("maps://".length)}`
+    : href;
+}
+
+/** A row a press opens: its content, then a map pin for a place or a
+ *  chevron for a page. */
+function CardLink({ href, children }: { href: unknown; children: ReactNode }) {
+  const url = cardHref(href);
+  if (!url) return <>{children}</>;
+  const place = typeof href === "string" && href.startsWith("maps://");
   return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="-mx-2 flex min-w-0 items-center gap-2 rounded-8 px-2 text-foreground hover:bg-muted"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">{children}</span>
+      {place ? (
+        <MapPin aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      )}
+    </a>
+  );
+}
+
+const TONE_ICON = { info: Info, warning: TriangleAlert, success: CircleCheck } as const;
+
+const toneClass = {
+  // Blue in every theme (`running`), where a theme's `info` may be its accent.
+  info: "bg-running/10 text-running",
+  warning: "bg-warning/10 text-warning",
+  success: "bg-success/10 text-success",
+} as const;
+
+const Text = createComponentImplementation(TextWithToneApi, ({ props }) => {
+  const inButton = useContext(InButtonContext);
+  const extras = props as unknown as TextExtras;
+  const tone = extras.tone;
+  if (tone && TONE_ICON[tone] && !inButton) {
+    // A callout: a tinted strip, its icon in the tone's colour.
+    const Glyph = ICONS[extras.icon as WidgetUiIcon] ?? TONE_ICON[tone];
+    return (
+      <div className={cn("flex min-w-0 items-start gap-2 rounded-8 px-3 py-2", toneClass[tone])}>
+        <span className="flex h-5 shrink-0 items-center">
+          <Glyph aria-hidden className="size-4" />
+        </span>
+        <span className="min-w-0 text-ui text-foreground">{shown(props.text)}</span>
+      </div>
+    );
+  }
+  const text = (
     <span
       className={cn("min-w-0", !inButton && "text-foreground", textClass[props.variant ?? "body"])}
     >
       {shown(props.text)}
     </span>
+  );
+  if (inButton || (!extras.icon && !extras.href)) return text;
+  return (
+    <CardLink href={extras.href}>
+      <span className="flex min-w-0 items-center gap-2">
+        <CardIcon name={extras.icon} className="text-muted-foreground" />
+        {text}
+      </span>
+    </CardLink>
   );
 });
 
@@ -161,12 +338,47 @@ const Text = createComponentImplementation(TextApi, ({ props }) => {
  *  stay on one line in a half-width tile. */
 const STAT_LONG_VALUE = 9;
 
+/** The usual range and where the value sits in it, in the tone's colour:
+ *  the reader decides normal, high or low, never the card's author. */
+function StatRange({ value, range, unit }: { value: unknown; range: unknown; unit?: string }) {
+  const { t } = useTranslation("chat");
+  const r = range as { low?: unknown; high?: unknown } | undefined;
+  if (typeof r?.low !== "number" || typeof r.high !== "number") return null;
+  const tone = widgetStatTone(value, { low: r.low, high: r.high });
+  const span = `${r.low.toLocaleString()}–${r.high.toLocaleString()}${unit ? ` ${unit}` : ""}`;
+  const Arrow = tone === "high" ? ArrowUp : tone === "low" ? ArrowDown : null;
+  return (
+    // The verdict always sits on its own line under the range, so every
+    // tile reads the same.
+    <span className="flex min-w-0 flex-col items-start gap-1 text-aux">
+      <span className="line-clamp-2 text-muted-foreground">
+        {t("agentCard.usual", { range: span })}
+      </span>
+      {tone ? (
+        <span
+          className={cn(
+            "flex shrink-0 items-center gap-1",
+            tone === "normal" ? "text-success" : "text-warning",
+          )}
+        >
+          {Arrow ? <Arrow aria-hidden className="size-3" /> : null}
+          {t(`agentCard.${tone}`)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 const Stat = createComponentImplementation(StatApi, ({ props }) => {
+  const extras = props as unknown as StatExtras;
   const value = shown(props.value);
   const long = value.length + (props.unit ? props.unit.length + 1 : 0) > STAT_LONG_VALUE;
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2">
-      <span className="truncate text-aux text-muted-foreground">{shown(props.label)}</span>
+      <span className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+        <CardIcon name={extras.icon} className="size-3.5" />
+        <span className="truncate">{shown(props.label)}</span>
+      </span>
       {/* One line: a long value takes a smaller step, then an ellipsis. */}
       <span
         className={cn(
@@ -182,7 +394,68 @@ const Stat = createComponentImplementation(StatApi, ({ props }) => {
       {props.caption ? (
         <span className="line-clamp-2 text-aux text-muted-foreground">{props.caption}</span>
       ) : null}
+      {extras.range ? (
+        <StatRange value={props.value} range={extras.range} unit={props.unit ?? undefined} />
+      ) : null}
     </div>
+  );
+});
+
+/** Bars, each labelled under it: today (`accent`) in the primary colour, an
+ *  outlier (`warning`) in the warning colour, the rest muted. */
+const CHART_HEIGHT = 96;
+
+const Chart = createComponentImplementation(ChartApi, ({ props }) => {
+  const points = ((props as unknown as { points?: ChartPoint[] }).points ?? [])
+    .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
+    .slice(0, WIDGET_UI_CHART_MAX_POINTS);
+  if (points.length === 0) return null;
+  const top = Math.max(...points.map((p) => p.value), 0) || 1;
+  const fill = (h?: string) =>
+    h === "accent" ? "fill-primary" : h === "warning" ? "fill-warning" : "fill-border";
+  const describe = points
+    .map((p) => `${p.label} ${p.value.toLocaleString()}${props.unit ? ` ${props.unit}` : ""}`)
+    .join(", ");
+  return (
+    <figure className="flex min-w-0 flex-col gap-2">
+      <svg
+        role="img"
+        aria-label={describe}
+        viewBox={`0 0 ${points.length * 10} ${CHART_HEIGHT}`}
+        preserveAspectRatio="none"
+        className="h-24 w-full"
+      >
+        {points.map((p, i) => {
+          const h = Math.max((Math.max(p.value, 0) / top) * CHART_HEIGHT, 1);
+          return (
+            <rect
+              key={i}
+              x={i * 10 + 2}
+              y={CHART_HEIGHT - h}
+              width={6}
+              height={h}
+              rx={1.5}
+              className={fill(p.highlight)}
+            />
+          );
+        })}
+      </svg>
+      <div
+        className="grid text-center text-aux text-muted-foreground"
+        style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
+      >
+        {points.map((p, i) => (
+          <span key={i} className={cn("truncate", p.highlight === "accent" && "text-foreground")}>
+            {p.label}
+          </span>
+        ))}
+      </div>
+      {props.caption || props.unit ? (
+        <figcaption className="text-aux text-muted-foreground">
+          {shown(props.caption ?? props.unit)}
+        </figcaption>
+      ) : null}
+    </figure>
   );
 });
 
@@ -277,7 +550,7 @@ function childIdsOf(context: {
   return Array.isArray(named) ? named.filter((id): id is string => typeof id === "string") : [];
 }
 
-const Row = createComponentImplementation(RowApi, ({ props, buildChild, context }) => {
+const Row = createComponentImplementation(RowWithLinkApi, ({ props, buildChild, context }) => {
   const ids = childIdsOf(context);
   // Numbers side by side read as an even two-column grid.
   if (ids.length > 1 && ids.every((id) => typeOf(context, id) === "Stat")) {
@@ -287,7 +560,7 @@ const Row = createComponentImplementation(RowApi, ({ props, buildChild, context 
       </div>
     );
   }
-  return (
+  const row = (
     <div
       className={cn(
         "flex min-w-0 flex-row flex-wrap gap-3",
@@ -297,6 +570,16 @@ const Row = createComponentImplementation(RowApi, ({ props, buildChild, context 
     >
       {children(props.children as Child[], buildChild)}
     </div>
+  );
+  const extras = props as unknown as TextExtras;
+  if (!extras.icon && !extras.href) return row;
+  return (
+    <CardLink href={extras.href}>
+      <span className="flex min-w-0 items-center gap-2">
+        <CardIcon name={extras.icon} className="text-muted-foreground" />
+        <span className="min-w-0 flex-1">{row}</span>
+      </span>
+    </CardLink>
   );
 });
 
@@ -487,6 +770,7 @@ export const romeWidgetCatalog = new Catalog(
     Text,
     CardMarkdown,
     Stat,
+    Chart,
     Progress,
     Image,
     Row,
