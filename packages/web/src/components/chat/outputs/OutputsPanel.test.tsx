@@ -5,7 +5,11 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { ChatOutputDto } from "@rome/api-types/chat-outputs";
+import { chatTasksTopicName } from "@rome/api-types/live-events";
+import { TASK_LIST_CHANGED_EVENT } from "@rome/api-types/task-list";
 import i18n from "@/i18n";
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { OutputsPanel, outputTitle, outputTypeOf, previewOf, readPrefix } from "./OutputsPanel";
 import { outputOfLink } from "./chat-outputs";
@@ -64,15 +68,17 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
-function renderPanel(props: { selectedId?: string } = {}) {
+function renderPanel(props: { selectedId?: string; taskChats?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <MemoryRouter>
-          <OutputsPanel chatId="chat-1" {...props} />
-        </MemoryRouter>
-      </ThemeProvider>
+      <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <OutputsPanel chatId="chat-1" {...props} />
+          </MemoryRouter>
+        </ThemeProvider>
+      </LiveEventsClientContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -178,6 +184,23 @@ describe("OutputsPanel", () => {
     renderPanel();
     expect(await screen.findByText("Still finding earlier files.")).toBeTruthy();
     expect(screen.queryByText("No outputs yet")).toBeNull();
+  });
+
+  it("reads again when a Concierge chat's task list changes, as a task chat's turn ends", async () => {
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    renderPanel({ taskChats: true });
+    await screen.findByRole("list", { name: "Today" });
+    outputs = [
+      output("report", { name: "report.md", from: { chatId: "task-1", name: "Report" } }),
+      ...outputs,
+    ];
+    acceptLatestSocket().receive({
+      type: "event",
+      topic: chatTasksTopicName("chat-1"),
+      event: TASK_LIST_CHANGED_EVENT,
+      data: { chatId: "chat-1" },
+    });
+    expect(await screen.findByRole("button", { name: "Report" })).toBeTruthy();
   });
 
   it("says so when the chat has no outputs", async () => {

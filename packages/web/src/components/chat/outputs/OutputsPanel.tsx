@@ -25,7 +25,7 @@ import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { type ChatOutput, useChatOutputs } from "./chat-outputs";
+import { type ChatOutput, useChatOutputs, useTaskChatOutputs } from "./chat-outputs";
 
 /** The most text a preview shows, so a large log cannot stall the tab. */
 export const PREVIEW_CHARS = 200_000;
@@ -126,6 +126,8 @@ interface OutputsPanelProps {
   onNavigate?: () => void;
   /** Whether the panel names itself, where nothing around it does. */
   heading?: boolean;
+  /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
+  taskChats?: boolean;
 }
 
 /**
@@ -138,9 +140,11 @@ export function OutputsPanel({
   selectionSeq = 0,
   onNavigate,
   heading = true,
+  taskChats = false,
 }: OutputsPanelProps) {
   const { t, i18n } = useTranslation("chat");
   const outputs = useChatOutputs(chatId);
+  useTaskChatOutputs(chatId, taskChats);
   const [chosen, setChosen] = useState<string | null>(selectedId);
   const [filter, setFilter] = useState<Filter>("all");
   // A link opened on an output opens that one.

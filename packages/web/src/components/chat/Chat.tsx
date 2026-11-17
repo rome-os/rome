@@ -2573,7 +2573,7 @@ export function Chat({
   // from a message's link to one of them. docs/domains/chats.md#outputs
   // Every chat has them, from the menu on its header's badge.
   const outputsChatId = mainSessionId ?? null;
-  const outputsPane = useOutputsPane(outputsChatId);
+  const outputsPane = useOutputsPane(outputsChatId, { taskChats: concierge });
   useEffect(() => {
     if (outputsPane.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [outputsPane.sheetOpen, composerRef]);

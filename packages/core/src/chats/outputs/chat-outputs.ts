@@ -19,7 +19,7 @@ export interface OutputChat {
 export interface ChatOutputsDeps {
   repo: Pick<
     ChatOutputsRepository,
-    "listFor" | "get" | "backfill" | "notBackfilled" | "subagentRoots"
+    "listFor" | "get" | "backfill" | "needingBackfill" | "recordingSince" | "subagentRoots"
   >;
   /** A chat's stored messages, its traces included, read once to back fill its outputs. */
   messages: (id: string) => Promise<readonly BackfillMessage[]>;
@@ -59,7 +59,12 @@ interface Located {
  * docs/domains/chats.md#outputs
  */
 export class ChatOutputs {
-  constructor(private deps: ChatOutputsDeps) {}
+  /** When outputs began to be recorded as they happen; chats made since need no reading back. */
+  private readonly since: Date;
+
+  constructor(private deps: ChatOutputsDeps) {
+    this.since = deps.repo.recordingSince();
+  }
 
   private get projectsRoot() {
     return this.deps.roots?.projects ?? getProjectsRoot();
@@ -82,7 +87,7 @@ export class ChatOutputs {
    */
   async list(chatId: string, taskChats: readonly ChatOutputSource[] = []): Promise<OutputsList> {
     const { sessionIds, fromTask } = await this.sessionsOf(chatId, taskChats);
-    const waiting = this.deps.repo.notBackfilled(sessionIds);
+    const waiting = this.deps.repo.needingBackfill(sessionIds, this.since);
     this.scheduleBackfill(waiting);
     const rows = await this.deps.repo.listFor(sessionIds);
     const chats = new Map<string, OutputChat | null>();

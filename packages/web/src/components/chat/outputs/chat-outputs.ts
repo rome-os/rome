@@ -1,4 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { chatTasksTopicName } from "@rome/api-types/live-events";
+import { TASK_LIST_CHANGED_EVENT } from "@rome/api-types/task-list";
+import { z } from "zod";
+import { useLiveEvents } from "@/hooks/use-live-events";
 import { createContext, useContext } from "react";
 import type { ChatOutputDto, ChatOutputsResponse } from "@rome/api-types/chat-outputs";
 import { fetchJson } from "@/lib/fetch-json";
@@ -44,6 +48,30 @@ export function outputOfLink(
   if (!outputs) return undefined;
   const bare = path.split(/[?#]/)[0] ?? path;
   return outputs.find((output) => output.link !== null && output.link === bare);
+}
+
+const taskListChangedSchema = z.object({ chatId: z.string() });
+
+/**
+ * Reads Concierge chat `chatId`'s outputs again whenever its task list
+ * changes, as when a task chat's turn ends, so a file a task chat made shows
+ * up without the Concierge chat's own turn.
+ */
+export function useTaskChatOutputs(chatId: string, enabled: boolean) {
+  const queryClient = useQueryClient();
+  useLiveEvents(
+    {
+      topic: chatTasksTopicName(chatId),
+      sseUrl: `/api/chats/${encodeURIComponent(chatId)}/tasks/events`,
+    },
+    {
+      [TASK_LIST_CHANGED_EVENT]: {
+        schema: taskListChangedSchema,
+        fn: () => void queryClient.invalidateQueries({ queryKey: chatOutputsKey(chatId) }),
+      },
+    },
+    { enabled },
+  );
 }
 
 /** What a message link in a chat asks of the chat's outputs. */

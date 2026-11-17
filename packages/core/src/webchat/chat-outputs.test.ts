@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatOutputDto } from "@rome/api-types/chat-outputs";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
-import { romeAgentTraceBlocks } from "../db/schema.js";
+import { eq } from "drizzle-orm";
+import { romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import type { WebChatRepository } from "./repository.js";
@@ -300,6 +301,11 @@ describe("ChatOutputs", () => {
       "t0",
     );
 
+    // The chat was made before outputs were recorded as they happen.
+    await testDb.db
+      .update(romeSessions)
+      .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+      .where(eq(romeSessions.id, "chat-1"));
     // The first list answers at once, says earlier outputs are still being
     // read back, and reads them back after it.
     const pending = await outputs.list("chat-1");
@@ -312,6 +318,27 @@ describe("ChatOutputs", () => {
     // Read again, and with the trace recorded since: still one record each.
     expect((await outputs.list("chat-1")).indexing).toBe(false);
     expect(await repo.listFor(["chat-1"])).toHaveLength(2);
+  });
+
+  it("reads back nothing for a chat made since outputs were recorded as they happen", async () => {
+    const asset = `${ID_A}.png`;
+    writeFileSync(join(assets, asset), "png");
+    // A link the reply holds, with no show call recorded for it.
+    await chats.addMessage(
+      "reply",
+      "chat-1",
+      "assistant",
+      JSON.stringify([{ type: "text", content: `![plot.png](/api/assets/${asset})` }]),
+      "t0",
+    );
+    expect(await outputs.list("chat-1")).toEqual({ outputs: [], indexing: false });
+    await outputs.backfillsSettled();
+    expect(await repo.listFor(["chat-1"])).toEqual([]);
+  });
+
+  it("keeps when recording began across restarts", () => {
+    const first = repo.recordingSince(new Date("2026-11-01T00:00:00Z"));
+    expect(repo.recordingSince(new Date("2026-12-01T00:00:00Z"))).toEqual(first);
   });
 
   it("finds a relative path in the chat's project folder", async () => {

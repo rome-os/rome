@@ -41,7 +41,7 @@ import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
-import { ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
+import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
@@ -209,6 +209,7 @@ export function ToolWorkspace({
     outputId: string | null;
     /** Counts each opening, so opening the same output again chooses it again. */
     seq: number;
+    taskChats: boolean;
   } | null>(null);
   const outputsOpen = outputsTarget !== null;
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -302,15 +303,19 @@ export function ToolWorkspace({
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
     [tasksActive, open, compact, showTasks, hideTasks],
   );
-  const showOutputs = useCallback((chatId: string, outputId?: string) => {
-    if (latest.current.view.collapsed) setHoldsOpen(true);
-    setOutputsTarget((prev) => ({
-      chatId,
-      outputId: outputId ?? null,
-      seq: (prev?.seq ?? 0) + 1,
-    }));
-    setSelected("outputs");
-  }, []);
+  const showOutputs = useCallback(
+    (chatId: string, outputId?: string, options?: OutputsTabOptions) => {
+      if (latest.current.view.collapsed) setHoldsOpen(true);
+      setOutputsTarget((prev) => ({
+        chatId,
+        outputId: outputId ?? null,
+        seq: (prev?.seq ?? 0) + 1,
+        taskChats: options?.taskChats === true,
+      }));
+      setSelected("outputs");
+    },
+    [],
+  );
   const hideOutputs = useCallback(() => {
     setOutputsTarget(null);
     setSelected((current) => (current === "outputs" ? null : current));
@@ -690,6 +695,7 @@ export function ToolWorkspace({
                   chatId={outputsTarget.chatId}
                   selectedId={outputsTarget.outputId}
                   selectionSeq={outputsTarget.seq}
+                  taskChats={outputsTarget.taskChats}
                 />
               </TabsContent>
             )}

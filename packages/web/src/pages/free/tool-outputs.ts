@@ -19,9 +19,15 @@ export interface ToolOutputsHost {
    * `outputId` when one is given. A collapsed pane shows it without saving a
    * change to its state.
    */
-  show: (chatId: string, outputId?: string) => void;
+  show: (chatId: string, outputId?: string, options?: OutputsTabOptions) => void;
   /** Removes the tab. */
   hide: () => void;
+}
+
+/** What the Outputs tab needs to know about its chat. */
+export interface OutputsTabOptions {
+  /** A Concierge chat, whose list also grows as its task chats work. */
+  taskChats?: boolean;
 }
 
 export const ToolOutputsContext = createContext<ToolOutputsHost | null>(null);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { createLogger } from "../../logger.js";
 import {
@@ -7,6 +7,7 @@ import {
   chatOutputs,
   romeAgentTraceBlocks,
   romeSessions,
+  settings,
 } from "../../db/schema.js";
 import {
   assetUrlsIn,
@@ -21,6 +22,9 @@ import {
 const log = createLogger("chat-outputs");
 
 export type ChatOutputRow = typeof chatOutputs.$inferSelect;
+
+/** The setting that holds when outputs began to be recorded as they happen. */
+const RECORDING_SINCE_KEY = "chatOutputs.recordingSince";
 
 /** A stored message of a chat, as its transcript reads it. */
 export interface BackfillMessage {
@@ -205,6 +209,45 @@ export class ChatOutputsRepository {
 
   async get(id: string): Promise<ChatOutputRow | null> {
     return (await this.db.select().from(chatOutputs).where(eq(chatOutputs.id, id)))[0] ?? null;
+  }
+
+  /**
+   * When Rome began recording outputs as they happen, kept once: the first
+   * call stores `now`, every later one answers what it stored. Only a chat
+   * made before then has earlier outputs to read back.
+   */
+  recordingSince(now = new Date()): Date {
+    this.db
+      .insert(settings)
+      .values({ key: RECORDING_SINCE_KEY, value: now.toISOString(), updatedAt: now })
+      .onConflictDoNothing({ target: settings.key })
+      .run();
+    const row = this.db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, RECORDING_SINCE_KEY))
+      .get();
+    const stored = typeof row?.value === "string" ? new Date(row.value) : now;
+    return Number.isNaN(stored.getTime()) ? now : stored;
+  }
+
+  /**
+   * Which of chats `sessionIds` still need reading back, in two queries: not
+   * read back yet, and made before outputs were recorded as they happen
+   * (`since`). A chat made later has every output recorded already.
+   */
+  needingBackfill(sessionIds: readonly string[], since: Date): string[] {
+    const waiting = this.notBackfilled(sessionIds);
+    if (waiting.length === 0) return [];
+    const older = new Set(
+      this.db
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(and(inArray(romeSessions.id, waiting), lt(romeSessions.createdAt, since)))
+        .all()
+        .map((row) => row.id),
+    );
+    return waiting.filter((id) => older.has(id));
   }
 
   /** Which of chats `sessionIds` have not been read back yet, in one query. */
