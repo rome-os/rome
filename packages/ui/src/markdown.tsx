@@ -179,8 +179,9 @@ export interface MarkdownProps {
   /**
    * Draws only what never opens or loads anything: text, lists, quotes,
    * tables and code. A link shows as its text and an image as its alt text,
-   * raw HTML is dropped, and math and diagram fences stay code. Overrides
-   * `linkComponent` and `imageComponent`.
+   * raw HTML shows as its source, math and diagram fences stay code, and tables and
+   * code get no copy, download or fullscreen buttons. Overrides
+   * `linkComponent`, `imageComponent` and `controls`.
    */
   inert?: boolean;
 }
@@ -294,8 +295,8 @@ const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
   rehypeTrimListItemWhitespace,
 ];
 
-// Inert Markdown leaves raw HTML out rather than trusting the sanitizer with
-// it, so the only elements that could load or open something are the `a`
+// Inert Markdown shows raw HTML as its source rather than trusting the
+// sanitizer with it, so the only elements that could load or open something are the `a`
 // and `img` that Markdown itself makes.
 const INERT_REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
   ...Object.entries(defaultRehypePlugins)
@@ -632,7 +633,7 @@ function MarkdownImpl({
       <Streamdown
         className={wrapperClass}
         components={components}
-        controls={controls}
+        controls={inert ? false : controls}
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={plugins}

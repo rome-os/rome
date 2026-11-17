@@ -126,6 +126,8 @@ describe("a widget described as data", () => {
                           "```mermaid",
                           'flowchart LR\n  A@{ img: "https://example.com/p.png" }\n  click A "https://example.com/open"',
                           "```",
+                          "| Day | Hours |\n| --- | --- |\n| Mon | 7h |",
+                          "```\nconst x = 1;\n```",
                         ].join("\n\n"),
                       },
                     ],
@@ -147,6 +149,9 @@ describe("a widget described as data", () => {
     expect(await screen.findByText(/click A/)).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(document.querySelector("img, image, svg a, a[href]")).toBeNull();
+    // Tables and code get no copy, download or fullscreen buttons.
+    expect(screen.getByText("Mon")).toBeTruthy();
+    expect(document.querySelector("button")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 

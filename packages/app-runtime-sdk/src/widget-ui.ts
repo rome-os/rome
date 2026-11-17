@@ -104,8 +104,9 @@ export type WidgetUiComponent =
       /**
        * Markdown text: paragraphs, headings, lists, quotes, code and tables,
        * with bold, italics and inline code. Lists are one level deep. Readers
-       * draw a link as its text and an image as its description, and draw
-       * no raw HTML, math or diagrams, so it never opens or loads anything.
+       * draw a link as its text and an image as its description, and show raw
+       * HTML, math and diagrams as their source, so it never opens or loads
+       * anything.
        */
       component: "Markdown";
       text: WidgetUiString;
