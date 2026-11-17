@@ -58,7 +58,7 @@ export function ThreadPills({
           type="button"
           data-thread-pill={root}
           onClick={() => onPick(root)}
-          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-surface/95 py-1 pr-3 pl-2 text-aux whitespace-nowrap text-foreground shadow-4 backdrop-blur-md outline-1 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+          className="flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-border bg-surface/95 py-1 pr-3 pl-2 text-aux whitespace-nowrap text-foreground shadow-4 backdrop-blur-md outline-1 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
         >
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
           <AgentAvatar size="sm" className="data-[size=sm]:size-4" />

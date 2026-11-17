@@ -87,7 +87,7 @@ function StackView({ stack, onOpen }: { stack: Stack; onOpen: () => void }) {
         <AgentAvatar size="sm" className="data-[size=sm]:size-[18px]" />
         <span className="min-w-0 flex-1 truncate">{preview}</span>
         {stack.unread > 0 ? (
-          <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-badge text-primary-foreground tabular-nums">
+          <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-badge text-primary-foreground tabular-nums">
             {count}
           </span>
         ) : (
