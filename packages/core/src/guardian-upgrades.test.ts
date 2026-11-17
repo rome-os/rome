@@ -10,7 +10,7 @@ import { attachTerminalServer } from "./terminal-server.js";
 import { attachVoiceInputServer, type VoiceInputSource } from "./voice-input/index.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
-import { createSession } from "./access/auth.js";
+import { createSession, createVisitorSession } from "./access/auth.js";
 import { createNodeConfig } from "@rome-os/node-core/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,11 +43,15 @@ const silentSource: VoiceInputSource = {
   open: async () => ({ ok: false, reason: "service-unavailable" }),
 };
 
-function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
+function attachAll(
+  server: ReturnType<typeof createServer>,
+  db: TestDb["db"],
+  dashboardAccess = new DashboardAccessState(),
+) {
   const handlers = [
-    attachDesktopProxy(server, db),
-    attachTerminalServer(server, db),
-    attachLiveEventsServer(server, db, new DashboardAccessState(), noSources),
+    attachDesktopProxy(server, db, dashboardAccess),
+    attachTerminalServer(server, db, dashboardAccess),
+    attachLiveEventsServer(server, db, dashboardAccess, noSources),
     attachNodeConsoleServer(server, db, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
     ),
@@ -195,6 +199,47 @@ describe("guardian WebSocket upgrade handlers", () => {
         }),
       ).toBe(101);
       expect(upstreamConnections).toBe(1);
+    } finally {
+      handlers.close();
+      await close(server);
+      await close(upstream);
+      testDb.close();
+      if (previousPort === undefined) delete process.env.ROME_NOVNC_PORT;
+      else process.env.ROME_NOVNC_PORT = previousPort;
+    }
+  });
+
+  it("admits a dashboard allow-list visitor to the desktop and the Claude sign-in, but not the node console", async () => {
+    const testDb = createTestDb();
+    const upstream = createServer();
+    upstream.on("upgrade", (_req, socket) => {
+      socket.end(
+        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+      );
+    });
+    const upstreamPort = await listen(upstream);
+    const previousPort = process.env.ROME_NOVNC_PORT;
+    process.env.ROME_NOVNC_PORT = String(upstreamPort);
+    const dashboardAccess = new DashboardAccessState();
+    dashboardAccess.setCloudEmailAccess(["admin@example.com"]);
+    const server = createServer();
+    const handlers = attachAll(server, testDb.db, dashboardAccess);
+    const as = (email: string) => ({
+      cookie: `rome_visitor=${createVisitorSession("account-1", email)}`,
+      origin: "http://rome.example",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+    });
+
+    try {
+      const port = await listen(server);
+      expect(await upgrade(port, "/desktop-proxy/websockify", as("admin@example.com"))).toBe(101);
+      // Past the gate, an unknown preset is refused without spawning anything.
+      expect(await upgrade(port, "/ws/terminal?preset=none", as("admin@example.com"))).toBe(400);
+      expect(await upgrade(port, "/ws/node", as("admin@example.com"))).toBe(401);
+      for (const path of ["/desktop-proxy/websockify", "/ws/terminal?preset=none"]) {
+        expect(await upgrade(port, path, as("stranger@example.com"))).toBe(401);
+      }
     } finally {
       handlers.close();
       await close(server);

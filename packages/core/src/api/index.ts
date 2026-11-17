@@ -377,11 +377,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, deps.db, {
-        onAuthCommandExit: () => {
-          void deps.modelAccounts.refresh().catch(() => {});
+      const terminalServer = attachTerminalServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          onAuthCommandExit: () => {
+            void deps.modelAccounts.refresh().catch(() => {});
+          },
         },
-      });
+      );
       const liveEvents = attachLiveEventsServer(
         server as Server,
         deps.db,
@@ -407,7 +412,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
-      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       const voiceInput = attachVoiceInputServer(
         server as Server,
