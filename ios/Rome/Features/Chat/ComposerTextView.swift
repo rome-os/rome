@@ -64,12 +64,11 @@ struct ComposerTextView: UIViewRepresentable {
         if view.textContainerInset.top != inset {
             view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         }
-        // A redraw of the composer alone (its measure changed on a key) can carry the
-        // binding from before the latest keys. Writing that back would drop them and
-        // send the caret to the end, so text the field itself produced is never written.
-        let behind = context.coordinator.isBehind(text, shown: view.text)
         // While voice input listens, the view shows the words before the binding has them.
-        if editable, !behind, view.text != text { view.text = text }
+        if editable, view.text != text {
+            // Only the guardian's typing can put the field ahead of the binding.
+            if view.isFirstResponder { context.coordinator.showBinding(in: view) } else { view.text = text }
+        }
         view.named = named
         if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
@@ -77,8 +76,14 @@ struct ComposerTextView: UIViewRepresentable {
         view.onReturn = onReturn
         handle?.view = view
         if view.isEditable != editable { view.isEditable = editable }
-        if let committedText, !behind, view.markedTextRange == nil, committedText.wrappedValue != text {
-            DispatchQueue.main.async { committedText.wrappedValue = text }
+        if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
+            // Read when it runs: the text here may be from before the latest keys.
+            let coordinator = context.coordinator
+            DispatchQueue.main.async {
+                if view.markedTextRange == nil, committedText.wrappedValue != coordinator.parent.text {
+                    committedText.wrappedValue = coordinator.parent.text
+                }
+            }
         }
         // Disabled (a blank chat while it is being created): focus goes now,
         // through UIKit. A disabled field loses focus silently otherwise and
@@ -151,26 +156,28 @@ struct ComposerTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ComposerTextView
 
-        /// The field's text when the binding last matched it, then what each of the
-        /// guardian's edits put in the field since: a binding holding one of these
-        /// is behind, not new.
-        private var passed: [String] = []
+        private var showing = false
 
         init(parent: ComposerTextView) { self.parent = parent }
 
-        /// Whether `text` is an earlier state of the guardian's typing that the
-        /// field has since moved past, rather than text the app set.
-        func isBehind(_ text: String, shown: String) -> Bool {
-            if text == shown {
-                passed = [shown]
-                return false
+        /// Puts the binding's text in the field a turn later. While the guardian
+        /// types, a redraw of the composer alone (its measure changed on a key)
+        /// hands the field the binding from before the latest keys; written then,
+        /// it dropped them and sent the caret to the end. Once the update is over
+        /// the binding reads as it is now: still different only when the app set
+        /// the text.
+        func showBinding(in view: PastingTextView) {
+            guard !showing else { return }
+            showing = true
+            DispatchQueue.main.async { [weak view] in
+                self.showing = false
+                guard let view, self.parent.editable, view.text != self.parent.text else { return }
+                view.text = self.parent.text
+                view.invalidateIntrinsicContentSize()
             }
-            return passed.contains(text)
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            passed.append(textView.text)
-            if passed.count > 64 { passed.removeFirst(passed.count - 64) }
             parent.text = textView.text
             parent.committedText?.wrappedValue = Self.committed(in: textView)
             parent.onEdit()
