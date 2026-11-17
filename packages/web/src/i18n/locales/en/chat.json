@@ -745,5 +745,25 @@
       "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
       "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
     }
+  },
+  "outputs": {
+    "title": "Outputs",
+    "open": "Outputs",
+    "close": "Close outputs",
+    "list": "Files the agent produced",
+    "loading": "Loading outputs",
+    "loadFailed": "Failed to load outputs",
+    "emptyTitle": "No outputs yet",
+    "emptyDescription": "Files the agent writes or shows in this chat are listed here.",
+    "written": "Written",
+    "shown": "Shown",
+    "from": "from {{name}}",
+    "missing": "Moved or deleted",
+    "pick": "Choose a file to preview it.",
+    "download": "Download",
+    "noPreview": "This file has no preview.",
+    "unavailable": "This file cannot be opened here.",
+    "previewFailed": "Failed to load the file",
+    "truncated": "Showing the first {{count}} characters."
   }
 }

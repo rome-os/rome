@@ -5,6 +5,7 @@ import {
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
 import { ownerOf } from "../../webchat/owner.js";
+import { chatOutputsRoutes } from "./chat-outputs.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -2788,6 +2789,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
   app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
   app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
+  // After the gates: a chat's outputs are as private as the chat.
+  app.route("/", chatOutputsRoutes(deps));
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");

@@ -3,6 +3,7 @@ import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
+import { ChatOutputsRepository, recordTraceOutputs } from "../chats/outputs/repository.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -1283,6 +1284,7 @@ export class WebChatRepository {
       .where(inArray(romeAgentMessagePlatformIds.sessionId, ids))
       .run();
     tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, ids)).run();
+    ChatOutputsRepository.deleteIn(tx, ids);
     tx.delete(webchatWorkspaceLayouts).where(inArray(webchatWorkspaceLayouts.sessionId, ids)).run();
     // Kill the chat's public shares too. They're keyed by sessionId and only
     // discoverable via listSharedChatsBySession, so leaving them behind would
@@ -2436,6 +2438,12 @@ export class WebChatRepository {
       insertTranscriptMessages(
         transcriptMessages.filter((message) => message.role === "assistant"),
       );
+      recordTraceOutputs(
+        tx,
+        { sessionId: input.sessionId, turnId: input.turnId ?? null, messageId: input.messageId },
+        input.blocks,
+        now,
+      );
     });
   }
 
@@ -3306,6 +3314,7 @@ export class WebChatRepository {
       tx.delete(romeAgentMessagePlatformIds)
         .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
         .run();
+      ChatOutputsRepository.deleteIn(tx, [sessionId]);
     });
   }
 

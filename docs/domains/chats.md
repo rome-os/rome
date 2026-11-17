@@ -329,6 +329,19 @@ Rome's own widget whose look the agent composes, to show structured content laid
 - Any agent may show one: the Concierge in its chats, and every other agent in its chat or task chat, such as a routine's daily summary. Only Rome's own card tool shows one. Anything else that looks like one, such as an app's action, a command's output or another tool with the same name, is not a card.
 - The agent uses one only for content with a real structure, at most one per reply, and its messages around the card never repeat it.
 
+## Outputs
+
+The files a chat's agent produced: those it wrote, and those it showed in the chat. The dashboard labels them Outputs, "产出" in Chinese.
+
+- Only what the agent produced is an output. A file the agent wrote is **written**, and a file it showed is **shown**. A helper agent working for the chat's agent produces for the chat too. A file the owner attached, a picture they sent, a web picture the agent linked and an agent card are not outputs.
+- Rome records an output when it happens: a write once it succeeds, and a show once the file is copied into the chat. A write that failed or was refused records nothing.
+- A file is one output however often it was written or shown, and it reads as the latest time: its kind, its time and the chat it came from are that time's. A file written and then shown is one output, shown.
+- A written file can move or go after it was written. Rome does not follow it: the output stays, marked moved or deleted, and nothing can be opened from it.
+- A [Concierge chat](#concierge-chat)'s outputs hold its own and those of every [task chat](#task-chat) it started, each of a task chat's named after that task chat. A task chat lists its own.
+- Outputs are as private as their chat, and go when the chat is deleted.
+- A chat from before outputs were recorded is read back once, the first time its outputs are listed: the files its stored traces still show it wrote, and the files its agent's messages link from the chat's own store, except one the owner attached. A trace that was archived is not read back, so an old chat can miss a write.
+- The dashboard opens a chat's outputs from a button in its header, into a tab of the side panel beside Trace and Tasks, which previews the chosen one under the list: a picture as a picture, Markdown rendered, other text as text, and anything else as a download. Nothing in it runs. Opening a link to a file in a message opens that file there when it is one of the chat's outputs. Nothing marks a new output.
+
 ## Client
 
 One of the apps a person uses to reach a [platform](#platform): the dashboard in a browser and the Rome app on a phone are two clients of the dashboard.
@@ -435,6 +448,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.
+- **"Artifacts" for a chat's outputs.** Artifacts already names an app's agents, actions and skills, so one word would name two things.
 - **The Concierge setting 👀 itself.** The rule of #2191. 👀 then meant only that the model remembered to set and clear it: a failed turn showed nothing, and a missed clear left 👀 for good. Rome derives it, so it holds whatever the prompt says (#2209).
 - **👀 as soon as a turn takes a message.** A "thanks" flashed 👀 before its ❤️. Working starts once a working tool call has run half a second, or at the turn's second working tool call.
 - **Working after 5 seconds without an answer.** A reply that took long to write flashed 👀 just before it landed, and a "thanks" that joined a busy turn could show 👀 by its own timer before its 🙏. Working comes only from real work ([status](#status)).

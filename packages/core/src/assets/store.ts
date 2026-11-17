@@ -130,17 +130,15 @@ export interface StoreAssetFromPathOptions extends StoreAssetOptions {
 }
 
 /**
- * Copy a local file into the asset store, as `core:show_file` does. The path
- * must be absolute and, once its links are resolved, inside the projects
- * folder, the memory folder or the assets folder, and not a sensitive file.
- * The resolved path is opened once without following links and the bytes are
- * copied from that descriptor, so the file cannot be swapped after the check.
+ * The real path of local file `path` when chat may show it: absolute and,
+ * once its links are resolved, inside the projects folder, the memory folder
+ * or the assets folder, and not a sensitive file. Throws
+ * {@link AssetSourceError} saying why not.
  */
-export async function storeAssetFromPath(
+export async function resolveShowablePath(
   path: string,
-  options: StoreAssetFromPathOptions = {},
-): Promise<StoredAsset> {
-  const maxBytes = options.maxBytes ?? MAX_ASSET_BYTES;
+  roots: string[] = [getProjectsRoot(), getProfileMemoryDir(), getAssetsDir()],
+): Promise<string> {
   if (!isAbsolute(path)) throw new AssetSourceError("Path must be an absolute path");
 
   let resolved: string;
@@ -150,13 +148,9 @@ export async function storeAssetFromPath(
     throw new AssetSourceError(`File not found: ${path}`);
   }
 
-  const roots = await Promise.all(
-    (options.roots ?? [getProjectsRoot(), getProfileMemoryDir(), getAssetsDir()]).map((root) =>
-      realpath(root).catch(() => null),
-    ),
-  );
+  const realRoots = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
   let inside: string[] | null = null;
-  for (const root of roots) {
+  for (const root of realRoots) {
     if (!root) continue;
     const rel = relative(root, resolved);
     if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
@@ -167,13 +161,28 @@ export async function storeAssetFromPath(
   if (!inside) {
     throw new AssetSourceError("File is outside the folders chat can show (projects, memory)");
   }
-  const name = basename(resolved);
   if (
     inside.some((part) => SENSITIVE_DIRECTORIES.has(part.toLowerCase())) ||
-    isSensitiveName(name)
+    isSensitiveName(basename(resolved))
   ) {
     throw new AssetSourceError(`Refused: ${basename(path)} looks like a sensitive file`);
   }
+  return resolved;
+}
+
+/**
+ * Copy a local file into the asset store, as `core:show_file` does, when
+ * {@link resolveShowablePath} allows it. The resolved path is opened once
+ * without following links and the bytes are copied from that descriptor, so
+ * the file cannot be swapped after the check.
+ */
+export async function storeAssetFromPath(
+  path: string,
+  options: StoreAssetFromPathOptions = {},
+): Promise<StoredAsset> {
+  const maxBytes = options.maxBytes ?? MAX_ASSET_BYTES;
+  const resolved = await resolveShowablePath(path, options.roots);
+  const name = basename(resolved);
 
   // O_NONBLOCK so that a FIFO cannot hang the open; fstat then refuses it.
   const handle = await open(

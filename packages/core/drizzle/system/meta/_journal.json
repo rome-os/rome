@@ -1009,6 +1009,13 @@
       "when": 1794923184484,
       "tag": "0144_message_read_at",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "6",
+      "when": 1794951787296,
+      "tag": "0145_chat_outputs",
+      "breakpoints": true
     }
   ]
 }

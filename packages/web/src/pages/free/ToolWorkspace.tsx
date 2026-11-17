@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ExternalLink,
+  FileOutput,
   LayoutGrid,
   ListChecks,
   ListTree,
@@ -39,6 +40,8 @@ import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
+import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
+import { ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
@@ -60,8 +63,10 @@ const SEPARATOR_WIDTH = 1;
 const TRACE_TAB_ID = "__trace__";
 // Tab value of the Tasks tab, likewise.
 const TASKS_TAB_ID = "__tasks__";
+// Tab value of the Outputs tab, likewise.
+const OUTPUTS_TAB_ID = "__outputs__";
 
-type BuiltinTab = "trace" | "tasks";
+type BuiltinTab = "trace" | "tasks" | "outputs";
 
 function readRatio() {
   const value = Number(readStored(WIDTH_KEY));
@@ -162,6 +167,7 @@ export function ToolWorkspace({
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
   const { t: tActivity } = useTranslation("activity");
+  const { t: tChat } = useTranslation("chat");
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
@@ -198,6 +204,14 @@ export function ToolWorkspace({
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
+  // The chat whose outputs the tab shows, and the output it was opened on.
+  const [outputsTarget, setOutputsTarget] = useState<{
+    chatId: string;
+    outputId: string | null;
+    /** Counts each opening, so opening the same output again chooses it again. */
+    seq: number;
+  } | null>(null);
+  const outputsOpen = outputsTarget !== null;
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -253,7 +267,7 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const builtinOpen = trace !== null || tasksOpen;
+  const builtinOpen = trace !== null || tasksOpen || outputsOpen;
   // The hold ends with the last built-in tab: the pane falls back to the
   // session's stored state.
   useEffect(() => {
@@ -267,7 +281,8 @@ export function ToolWorkspace({
 
   const traceActive = trace !== null && selected === "trace";
   const tasksActive = tasksOpen && selected === "tasks";
-  const builtinActive = traceActive || tasksActive;
+  const outputsActive = outputsOpen && selected === "outputs";
+  const builtinActive = traceActive || tasksActive || outputsActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
@@ -287,6 +302,23 @@ export function ToolWorkspace({
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
     [tasksActive, open, compact, showTasks, hideTasks],
+  );
+  const showOutputs = useCallback((chatId: string, outputId?: string) => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setOutputsTarget((prev) => ({
+      chatId,
+      outputId: outputId ?? null,
+      seq: (prev?.seq ?? 0) + 1,
+    }));
+    setSelected("outputs");
+  }, []);
+  const hideOutputs = useCallback(() => {
+    setOutputsTarget(null);
+    setSelected((current) => (current === "outputs" ? null : current));
+  }, []);
+  const outputsHost = useMemo<ToolOutputsHost>(
+    () => ({ active: outputsActive && open, compact, show: showOutputs, hide: hideOutputs }),
+    [outputsActive, open, compact, showOutputs, hideOutputs],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -328,9 +360,16 @@ export function ToolWorkspace({
   const tabIds = [
     ...(trace ? [TRACE_TAB_ID] : []),
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...(outputsOpen ? [OUTPUTS_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
-  const builtinTabId = traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : null;
+  const builtinTabId = traceActive
+    ? TRACE_TAB_ID
+    : tasksActive
+      ? TASKS_TAB_ID
+      : outputsActive
+        ? OUTPUTS_TAB_ID
+        : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
@@ -361,6 +400,15 @@ export function ToolWorkspace({
               icon={<ListChecks className="size-3.5" />}
               active={tasksActive}
               onClose={hideTasks}
+            />
+          )}
+          {outputsOpen && shownIds.has(OUTPUTS_TAB_ID) && (
+            <ToolTab
+              id={OUTPUTS_TAB_ID}
+              label={tChat("outputs.title")}
+              icon={<FileOutput className="size-3.5" />}
+              active={outputsActive}
+              onClose={hideOutputs}
             />
           )}
           {sorted
@@ -430,6 +478,12 @@ export function ToolWorkspace({
                 {t("chat.tasksTab")}
               </DropdownMenuItem>
             )}
+            {outputsOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(OUTPUTS_TAB_ID)}>
+                <FileOutput className="size-3.5" />
+                {tChat("outputs.title")}
+              </DropdownMenuItem>
+            )}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -463,6 +517,7 @@ export function ToolWorkspace({
   function pickTab(id: string) {
     if (id === TRACE_TAB_ID) return setSelected("trace");
     if (id === TASKS_TAB_ID) return setSelected("tasks");
+    if (id === OUTPUTS_TAB_ID) return setSelected("outputs");
     setSelected(null);
     selectTool(id);
   }
@@ -515,7 +570,11 @@ export function ToolWorkspace({
             flexShrink: 0,
           }}
         >
-          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
+          <ToolTasksContext.Provider value={tasksHost}>
+            <ToolOutputsContext.Provider value={outputsHost}>
+              {children}
+            </ToolOutputsContext.Provider>
+          </ToolTasksContext.Provider>
         </div>
         {open && !compact && (
           <div
@@ -616,6 +675,23 @@ export function ToolWorkspace({
                     <TaskList chatId={tasksChatId} />
                   </div>
                 ) : null}
+              </TabsContent>
+            )}
+            {outputsTarget && (
+              <TabsContent
+                value={OUTPUTS_TAB_ID}
+                forceMount
+                inert={!outputsActive}
+                aria-hidden={!outputsActive}
+                style={{ display: outputsActive ? undefined : "none" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <OutputsPanel
+                  key={outputsTarget.chatId}
+                  chatId={outputsTarget.chatId}
+                  selectedId={outputsTarget.outputId}
+                  selectionSeq={outputsTarget.seq}
+                />
               </TabsContent>
             )}
           </div>

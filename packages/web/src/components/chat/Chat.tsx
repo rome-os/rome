@@ -28,6 +28,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ChevronLeft,
+  FileOutput,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -153,6 +154,14 @@ import {
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useTaskList } from "@/components/concierge/TaskListPane";
+import { useOutputsPane } from "./outputs/OutputsPane";
+import {
+  chatOutputsKey,
+  OutputLinksContext,
+  type OutputLinks,
+  outputOfLink,
+  useChatOutputs,
+} from "./outputs/chat-outputs";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
@@ -2552,6 +2561,34 @@ export function Chat({
   useEffect(() => {
     if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [taskList.sheetOpen, composerRef]);
+  // The files the chat's agent produced, opened from the header's button or
+  // from a message's link to one of them. docs/domains/chats.md#outputs
+  const outputsPane = useOutputsPane(mainSessionId ?? null);
+  const chatOutputs = useChatOutputs(mainSessionId ?? null);
+  useEffect(() => {
+    if (outputsPane.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [outputsPane.sheetOpen, composerRef]);
+  // A finished turn may have written or shown a file.
+  useEffect(() => {
+    if (turnEnds > 0 && mainSessionId) {
+      void queryClient.invalidateQueries({ queryKey: chatOutputsKey(mainSessionId) });
+    }
+  }, [turnEnds, mainSessionId, queryClient]);
+  // Read through a ref, so the context stays the same object and the
+  // memoized transcript does not draw again when the list or pane changes.
+  const outputsLatest = useRef({ outputs: chatOutputs.data, open: outputsPane.open });
+  outputsLatest.current = { outputs: chatOutputs.data, open: outputsPane.open };
+  const outputLinks = useMemo<OutputLinks>(
+    () => ({
+      open: (path) => {
+        const output = outputOfLink(outputsLatest.current.outputs, path);
+        if (!output) return false;
+        outputsLatest.current.open(output.id);
+        return true;
+      },
+    }),
+    [],
+  );
   // A Concierge chat's header buttons sit on round badges like its pill, except
   // in the Mac app's title bar, where they are any chat's.
   const floating = concierge && !navbarSlot;
@@ -2607,6 +2644,15 @@ export function Chat({
 
   const navbarActions = (
     <>
+      {mainSessionId && !blankTopicChat && (
+        <IconButton
+          size={floating ? "md" : "sm"}
+          label={t("outputs.open")}
+          icon={<FileOutput />}
+          className={actionBadge}
+          onClick={() => outputsPane.open()}
+        />
+      )}
       {mainSessionId && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -3156,7 +3202,12 @@ export function Chat({
       <MessageSharingContext.Provider value={shareMessageTurn}>
         <LiveReactionsProvider value={liveReactions}>
           <LiveMessageStatusesProvider value={liveStatuses}>
-            <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
+            <LiveTaskCardsProvider value={liveCards}>
+              <OutputLinksContext.Provider value={outputLinks}>
+                {page}
+                {outputsPane.sheet}
+              </OutputLinksContext.Provider>
+            </LiveTaskCardsProvider>
           </LiveMessageStatusesProvider>
         </LiveReactionsProvider>
       </MessageSharingContext.Provider>

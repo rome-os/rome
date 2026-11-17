@@ -9,6 +9,7 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 import { parseAssetHref } from "@/lib/asset-links";
 import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
+import { useOutputLinks } from "./outputs/chat-outputs";
 import { ThreadLink } from "./reply/ThreadLink";
 import { threadOfLink } from "./reply/thread-link";
 
@@ -149,13 +150,21 @@ function WorkspaceLink({
 // is the file itself, never a route: a react-router `<Link>` would navigate the
 // SPA to it. A video or audio file plays in place, anything else is a chip.
 function AssetLink({ children, href }: MarkdownLinkProps) {
+  const outputs = useOutputLinks();
   const asset = parseAssetHref(href);
   if (!href || !asset) return null;
   const label = linkText(children) || href.split("/").at(-1) || href;
   if (asset.kind === "video" || asset.kind === "audio") {
     return <ChatMedia src={asset.path} kind={asset.kind} label={label} />;
   }
-  return <FileChip href={href} label={label} />;
+  // A file the chat's agent showed opens in its Outputs tab; any other one saves.
+  return (
+    <FileChip
+      href={href}
+      label={label}
+      onOpen={outputs ? () => outputs.open(asset.path) : undefined}
+    />
+  );
 }
 
 function linkText(children: ReactNode): string {
@@ -179,6 +188,7 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   // just degrades to the default react-router link.
   const store = useContext(WorkspaceStoreContext);
   const eventBus = useWorkspaceEventBus();
+  const outputs = useOutputLinks();
   const href = props.href;
 
   const thread = threadOfLink(href);
@@ -193,6 +203,9 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
           {...props}
           onActivate={() => {
             const path = decodeProjectsHref(projectsHref) ?? projectsHref;
+            // A file the chat's agent wrote opens in its Outputs tab. A folder
+            // and any other file follow in the Projects panel.
+            if (outputs?.open(path)) return;
             // `force` bypasses the user's manual close of the panel — an
             // explicit click is an explicit request to see the file.
             eventBus?.emit("projects:opened", { paths: [path], force: true });

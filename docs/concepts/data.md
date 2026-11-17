@@ -45,6 +45,7 @@ A file shown in a dashboard chat is a copy in the profile's `assets` folder unde
 - An attached file's message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
 - `core:show_file` takes an absolute path to a regular file of at most 100 MB under the projects, memory or assets folder, with links resolved first. It refuses keys, credentials, `.env` files, databases and the insides of `.git`, `.ssh` and similar folders. It returns the URL and the Markdown that shows the file.
 - Only images, audio, video, and PDFs open in the browser. Every other type downloads.
+- A chat's [outputs](../domains/chats.md#outputs) read a file the agent wrote where it lies, not from a copy. They serve it only from the projects, memory or assets folder, with the same refusals as `core:show_file`, so an output can list a file it cannot open.
 - In chat, pictures show as thumbnails that zoom, video and audio play in place (a file the browser cannot play becomes a chip), and other files appear as a chip that saves the file under its own name. The server sends no file name, so the name the chat asks for is the one used.
 
 ## Routines
