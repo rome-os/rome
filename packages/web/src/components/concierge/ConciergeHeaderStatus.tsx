@@ -30,14 +30,6 @@ export const FLOATING_SURFACE =
  * The phone's leading buttons (back to the chat list, the menu), which the
  * shell moves into a Concierge chat's floating header while it shows one.
  */
-/**
- * The badge's and name tag's surface: the floating header's, quieter, so they
- * read as the chat's mark rather than buttons. Hovering brings it back toward
- * full strength.
- */
-const QUIET_SURFACE =
-  "border border-border/30 bg-surface/60 backdrop-blur-md supports-[backdrop-filter]:bg-surface/45 hover:border-border/60 hover:bg-surface/95";
-
 export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
 
 /**
@@ -135,8 +127,8 @@ export function ConciergeHeaderStatus({
         data-concierge-header-badge
         {...trigger(props)}
         className={cn(
-          "peer/badge group/badge pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full transition-colors",
-          QUIET_SURFACE,
+          "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+          FLOATING_SURFACE,
           props && focusRing,
         )}
       >
@@ -144,11 +136,8 @@ export function ConciergeHeaderStatus({
           // About 60% of the badge, so the bob and the squash keep inside it.
           <RomeMascot
             alive={busy && activity.kind !== "needsYou"}
-            // Muted at rest; full strength while the badge is hovered or focused.
-            className={cn(
-              "h-6.5 w-auto opacity-75 transition-opacity group-hover/badge:opacity-100 group-focus-visible/badge:opacity-100",
-              props && "cursor-pointer",
-            )}
+            // A touch lighter than the text it sits beside.
+            className={cn("h-6.5 w-auto text-foreground/80", props && "cursor-pointer")}
           />
         )}
       </Badge>
@@ -165,16 +154,15 @@ export function ConciergeHeaderStatus({
           props && focusRing,
           badge ? "row-start-2 -mt-1" : "row-start-1",
           // Above the badge, so the tag covers the badge's edge, not the reverse.
-          "group/name pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2 transition-colors peer-hover/badge:border-border/60 peer-hover/badge:bg-surface/95 peer-hover/badge:*:text-foreground",
-          QUIET_SURFACE,
+          "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
+          FLOATING_SURFACE,
         )}
       >
         {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
         {/* A chat title runs to about twice that, and never into the side buttons. */}
         <span
           className={cn(
-            // The secondary colour at rest, the foreground while the badge or the tag is hovered.
-            "truncate text-aux font-medium text-muted-foreground transition-colors group-hover/name:text-foreground",
+            "truncate text-aux font-medium text-muted-foreground",
             showsActivity ? "max-w-[8em]" : "max-w-[min(16em,calc(100cqw-16rem))]",
           )}
         >
