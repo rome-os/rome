@@ -79,7 +79,7 @@ export function ProfileMenu() {
             <Avatar>
               {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
               <AvatarFallback className="bg-primary/15 text-primary">
-                {initial || <UserRound className="size-5" aria-hidden />}
+                {initial || <UserRound className="size-4" aria-hidden />}
               </AvatarFallback>
             </Avatar>
           </button>

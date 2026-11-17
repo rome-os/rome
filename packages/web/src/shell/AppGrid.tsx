@@ -154,7 +154,7 @@ function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
       aria-hidden
     >
       <Icon
-        className={`h-5 w-5 shrink-0 ${entry.id === "projects" ? "stroke-[1.5]" : ""}`}
+        className={`h-4 w-4 shrink-0 ${entry.id === "projects" ? "stroke-[1.5]" : ""}`}
         aria-hidden
       />
     </span>
@@ -497,7 +497,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 className={`${labelled ? "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-full bg-surface-muted px-[var(--row-px)] text-left text-ui font-normal transition outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 hover:bg-surface-hover" : `${tileClass} ${IDLE_CLASS}`} text-muted-foreground hover:text-foreground`}
               >
                 <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-                  <Search className="h-5 w-5 shrink-0" />
+                  <Search className="h-4 w-4 shrink-0" />
                 </span>
                 {labelled ? (
                   <>

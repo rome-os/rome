@@ -419,13 +419,7 @@ export function RomeShellLayout() {
           size="sm"
           label={railNamesLabel}
           title={railNamesLabel}
-          icon={
-            railNames ? (
-              <ChevronsLeft className="size-5" aria-hidden />
-            ) : (
-              <ChevronsRight className="size-5" aria-hidden />
-            )
-          }
+          icon={railNames ? <ChevronsLeft aria-hidden /> : <ChevronsRight aria-hidden />}
           onClick={() => setRailNamesPersisted(!railNames)}
           className={`text-subtle-foreground hover:text-foreground ${railNames ? "order-last" : ""}`}
         />
@@ -466,7 +460,7 @@ export function RomeShellLayout() {
             size="sm"
             label={t("nav.collapseSidebar")}
             title={t("nav.collapseSidebarShortcut", { shortcut: sidebarShortcut })}
-            icon={<PanelLeftClose className="size-5" aria-hidden />}
+            icon={<PanelLeftClose aria-hidden />}
             onClick={toggleCollapsed}
             className="text-subtle-foreground hover:text-foreground"
           />
@@ -482,7 +476,7 @@ export function RomeShellLayout() {
           size="sm"
           label={t("nav.expandSidebar")}
           title={t("nav.expandSidebarShortcut", { shortcut: sidebarShortcut })}
-          icon={<PanelLeftOpen className="size-5" aria-hidden />}
+          icon={<PanelLeftOpen aria-hidden />}
           onClick={toggleCollapsed}
           className="text-subtle-foreground hover:text-foreground"
         />

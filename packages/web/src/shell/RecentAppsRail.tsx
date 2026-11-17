@@ -35,7 +35,7 @@ export function RailAppIcon({ app }: { app: RecentSidebarApp }) {
         className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-foreground transition-colors"
         aria-hidden
       >
-        <BuiltinIcon className="h-5 w-5 shrink-0" aria-hidden />
+        <BuiltinIcon className="h-4 w-4 shrink-0" aria-hidden />
       </span>
     );
   }
@@ -45,13 +45,13 @@ export function RailAppIcon({ app }: { app: RecentSidebarApp }) {
         <img
           src={app.iconUrl}
           alt=""
-          className="h-5 w-5 max-w-none shrink-0 rounded-4 object-contain"
+          className="h-4 w-4 max-w-none shrink-0 rounded-4 object-contain"
           onError={(e) => {
             (e.target as HTMLImageElement).style.display = "none";
           }}
         />
       ) : (
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
           {app.displayName.charAt(0).toUpperCase()}
         </span>
       )}
@@ -143,7 +143,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                   className={`${tileClass} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
                 >
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-                    <Ellipsis className="h-5 w-5 shrink-0" />
+                    <Ellipsis className="h-4 w-4 shrink-0" />
                   </span>
                   {labelled ? <RailLabel>{t("sidebar.more")}</RailLabel> : null}
                 </button>

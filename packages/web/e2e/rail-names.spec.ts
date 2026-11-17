@@ -26,7 +26,7 @@ test.describe("desktop", () => {
     const apps = page.locator('aside a[href="/apps"]');
     await expect(apps).toHaveText("Apps", { timeout: 30_000 });
     expect(await railWidth(page)).toBe(192);
-    // The 20px glyph stays centred in the 16px slot at x=18; the bare rail
+    // The 16px glyph stays centred in the 16px slot at x=18; the bare rail
     // centres its 40px tiles in 64px.
     expect(await iconCenter(page, "/apps")).toBe(26);
 

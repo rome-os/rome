@@ -395,7 +395,7 @@ function NewChatRow({
         className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
         aria-hidden
       >
-        <Plus className="size-5 shrink-0" />
+        <Plus className="size-4 shrink-0" />
       </span>
       <span className="flex-1 truncate">{label}</span>
       {shortcut ? (
@@ -971,9 +971,9 @@ export function RecentChats({
           aria-hidden
         >
           {collapsed ? (
-            <Folder className="size-5 shrink-0" />
+            <Folder className="size-4 shrink-0" />
           ) : (
-            <FolderOpen className="size-5 shrink-0" />
+            <FolderOpen className="size-4 shrink-0" />
           )}
         </span>
         <span className="truncate">{label}</span>
@@ -1142,7 +1142,7 @@ export function RecentChats({
               className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
               aria-hidden
             >
-              <ListChecks className="size-5 shrink-0" />
+              <ListChecks className="size-4 shrink-0" />
             </span>
             <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
             {running > 0 ? (

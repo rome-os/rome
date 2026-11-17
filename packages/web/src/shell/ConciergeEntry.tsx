@@ -131,7 +131,7 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
               {label}
             </Badge>
           ) : (
-            <RomeLogo className="size-5 shrink-0" aria-hidden />
+            <RomeLogo className="size-4 shrink-0" aria-hidden />
           )}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
@@ -283,7 +283,7 @@ function ConciergeTopicEntry({
               {label}
             </Badge>
           ) : (
-            <Hash aria-hidden className="size-5 shrink-0" />
+            <Hash aria-hidden className="size-4 shrink-0" />
           )}
         </span>
         {/* The menu button floats over the row's end, so the name keeps clear
@@ -299,7 +299,7 @@ function ConciergeTopicEntry({
           <IconButton
             size="sm"
             label={t("recentChats.topicChatActions", { name })}
-            icon={<Ellipsis className="size-5" aria-hidden />}
+            icon={<Ellipsis aria-hidden />}
             className="touch-show absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>

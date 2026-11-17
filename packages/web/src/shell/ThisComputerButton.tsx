@@ -65,7 +65,7 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
                   <span className="relative inline-flex">
                     <Laptop
                       aria-hidden
-                      className={`size-5 ${state === "disabled" ? "opacity-45" : ""}`}
+                      className={state === "disabled" ? "opacity-45" : undefined}
                     />
                     {/* Centered on the base's bottom-right corner in the Laptop path's 24-unit viewBox:
                         x = 21.386 (the corner arc's rightmost point), y = 20. Percentages of the
