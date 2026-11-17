@@ -140,8 +140,8 @@ export function renderMarkdown(report) {
         `| ${s.rule ?? "?"} | ${s.chat ?? "?"} | ${s.questionId} | ${s.status} | ${s.scored ? "yes, fails its rule" : `no${s.kind === "statement" ? ", not a question" : ""}`} | ${cell(s.reply)} | ${cell(s.reason)} |`,
       );
   }
-  const cost = report.results.find((r) => r.rule === "A3")?.cost;
-  if (cost) lines.push(...costLines(cost));
+  const a3 = report.results.find((r) => r.rule === "A3");
+  if (a3?.cost) lines.push(...costLines(a3.cost, a3.fastCost));
   if (report.romeEvents.length > 0) {
     lines.push(
       "",
@@ -157,10 +157,23 @@ export function renderMarkdown(report) {
   return `${lines.join("\n")}\n`;
 }
 
-function costLines(cost) {
+function costLines(cost, fastCost) {
+  const lines = costBlock(cost, "## A3 replay cost");
+  if (fastCost)
+    lines.push(
+      ...costBlock(fastCost, "### The same replay, 1 s apart").map((l) =>
+        l.startsWith("Reported for")
+          ? "Cost only, never scored: the same 100 messages replayed again 1 s apart, after A3 was scored, to show what batching saves."
+          : l,
+      ),
+    );
+  return lines;
+}
+
+function costBlock(cost, heading) {
   const lines = [
     "",
-    "## A3 replay cost",
+    heading,
     "",
     "Reported for Ouou's decision on a judging step before the turn; not scored.",
     "",
@@ -168,7 +181,7 @@ function costLines(cost) {
   if (cost.notMeasured) return [...lines, `Not measured: ${cost.notMeasured}.`];
   const n = (x) => x.toLocaleString("en-GB");
   lines.push(
-    `- Agent turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
+    `${cost.pacing ? `- Pacing: ${cost.pacing}.\n` : ""}- Agent turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
     `- Tokens: ${n(cost.tokens.input)} input, ${n(cost.tokens.output)} output, ${n(cost.tokens.cacheRead)} cache read, ${n(cost.tokens.cacheWrite)} cache write.`,
     `- Cost: ${cost.costUsd} USD.`,
     ...(cost.envoy

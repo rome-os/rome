@@ -88,58 +88,72 @@ const sumOf = (turns, field) => turns.reduce((s, t) => s + (Number(t[field]) || 
 const chatsOf = (messages) => [...new Set(messages.map((m) => m.chat))];
 const readArgs = (chat) => (chat.startsWith("dm-") ? { dm: chat.slice(3) } : { chat });
 
+/**
+ * Posts the replay, pausing `after` ms after each message, or keeping `apart` ms between the
+ * starts of two messages, waits the reply wait for
+ * late replies, and resolves to `{ posted, from, to }`, each posted message with its time.
+ */
+async function replayOnce(ctx, replay, { after = 0, apart }) {
+  const { env } = ctx;
+  const from = new Date().toISOString();
+  const posted = [];
+  for (const m of replay) {
+    const started = Date.now();
+    const id = m.chat.startsWith("dm-")
+      ? await env.dm({ as: m.as, text: m.text })
+      : await env.post({ as: m.as, chat: m.chat, mentionAgent: Boolean(m.mention), text: m.text });
+    posted.push({ id, chat: m.chat, mention: Boolean(m.mention) });
+    const left = apart === undefined ? after : apart - (Date.now() - started);
+    if (left > 0) await sleep(left);
+  }
+  // Late replies count too: wait the reply wait after the last message.
+  await sleep(ctx.waits.replyMs);
+  const to = new Date().toISOString();
+  const agentMessages = [];
+  for (const chat of chatsOf(replay)) {
+    for (const m of await env.read({ ...readArgs(chat), since: posted[0].id })) {
+      if (m.author === env.agentAuthor) agentMessages.push({ ...m, chat });
+      const p = posted.find((x) => x.id === m.id);
+      if (p) p.time = m.time;
+    }
+  }
+  agentMessages.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  return { posted, from, to, agentMessages };
+}
+
+async function costOf(ctx, { posted, from, to }) {
+  try {
+    return replayCost(
+      await ctx.env.usage(from),
+      posted.filter((p) => p.time),
+      from,
+      to,
+    );
+  } catch (error) {
+    return { notMeasured: error.message };
+  }
+}
+
+/** The pacing of the second, cost-only replay: 1 s between messages (planner, 2026-11-17). */
+const FAST_GAP_MS = 1000;
+
 export default {
   rule: "A3",
   title: "Silent by default",
   phase: 2,
   async run(ctx) {
-    const { env } = ctx;
     const replay = loadReplay();
-    const from = new Date().toISOString();
-    const posted = [];
-    for (const m of replay) {
-      const id = m.chat.startsWith("dm-")
-        ? await env.dm({ as: m.as, text: m.text })
-        : await env.post({
-            as: m.as,
-            chat: m.chat,
-            mentionAgent: Boolean(m.mention),
-            text: m.text,
-          });
-      posted.push({ id, chat: m.chat, mention: Boolean(m.mention) });
-      if (ctx.waits.gapMs) await sleep(ctx.waits.gapMs);
-    }
-    // Late replies count too: wait the reply wait after the last message.
-    await sleep(ctx.waits.replyMs);
-    const to = new Date().toISOString();
-
+    const scored = await replayOnce(ctx, replay, { after: ctx.waits.gapMs ?? 0 });
+    const { posted, agentMessages } = scored;
     const first = posted[0].id;
-    const agentMessages = [];
-    for (const chat of chatsOf(replay)) {
-      for (const m of await env.read({ ...readArgs(chat), since: first })) {
-        if (m.author === env.agentAuthor) agentMessages.push({ ...m, chat });
-        const p = posted.find((x) => x.id === m.id);
-        if (p) p.time = m.time;
-      }
-    }
-    agentMessages.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
     const mentions = posted.filter((p) => p.mention);
     const { answers, unprompted } = sortReplies(agentMessages, mentions);
     if (ctx.answered) {
       ctx.answered.sent += mentions.length;
       ctx.answered.answered += answers.size;
     }
-
-    try {
-      ctx.memo.A3cost = replayCost(
-        await env.usage(from),
-        posted.filter((p) => p.time),
-        from,
-        to,
-      );
-    } catch (error) {
-      ctx.memo.A3cost = { notMeasured: error.message };
-    }
+    const cost = await costOf(ctx, scored);
+    cost.pacing = `${(ctx.waits.gapMs ?? 0) / 1000} s after each message is posted`;
 
     // A private chat stands in for a direct message, which is addressed to the agent, so A3
     // scores only the shared chats and reports replies in private chats apart.
@@ -147,13 +161,13 @@ export default {
     const ordinary = posted.filter((p) => !p.mention && !isPrivate(p.chat)).length;
     const shared = unprompted.filter((m) => !isPrivate(m.chat));
     const inPrivate = unprompted.length - shared.length;
-    const A3_LIMIT = a3Limit(ctx.phase ?? 1);
+    const limit = a3Limit(ctx.phase ?? 1);
     const evidence = [first, posted.at(-1).id, ...shared.map((m) => m.id)];
     const result = ruleResult([
       {
         ...check(
-          `at most ${A3_LIMIT} replies to ${ordinary} messages in shared chats that did not mention it`,
-          shared.length <= A3_LIMIT ? "pass" : "fail",
+          `at most ${limit} replies to ${ordinary} messages in shared chats that did not mention it${limit === 2 ? "" : " (2 from a later phase)"}`,
+          shared.length <= limit ? "pass" : "fail",
           `${shared.length} replies${shared.length ? `: ${shared.map((m) => `${m.chat} ${m.id}`).join(", ")}` : ""}; answered ${answers.size} of ${mentions.length} mentions; not scored: ${inPrivate} replies in private chats standing in for direct messages${
             inPrivate
               ? ` (${unprompted
@@ -167,9 +181,16 @@ export default {
         quote: shared.map((m) => m.text).join("\n---\n") || undefined,
       },
     ]);
+
+    // Cost only, never scored: the same replay 1 s apart, to show what batching saves.
+    const fast = await replayOnce(ctx, replay, { apart: FAST_GAP_MS });
+    const fastCost = await costOf(ctx, fast);
+    fastCost.pacing = `${FAST_GAP_MS / 1000} s from one message to the next`;
+
     return {
       ...result,
-      cost: ctx.memo.A3cost,
+      cost,
+      fastCost,
       replies: { shared: shared.length, private: inPrivate },
     };
   },
