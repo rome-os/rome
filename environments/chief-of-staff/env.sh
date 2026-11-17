@@ -32,10 +32,9 @@ STATE_FILE="$RUN_DIR/state.json"
 BUILD_FILE="$RUN_DIR/build.json"
 ROME_ENV_FILE="$RUN_DIR/rome.env"
 OWNER_FILE="$RUN_DIR/owner"
-# How many days ahead of the devbox Rome's clock runs, when `cos-env clock`
-# moved it. Absent means Rome runs on the real time.
+# How many hours `cos-env clock` has moved the app's history back. Absent
+# means none.
 CLOCK_FILE="$RUN_DIR/clock"
-FAKETIME_LIB=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
 
 IMAGE="rome-env-${NAME}:latest"
 ROME="rome-env-${NAME}-rome"
@@ -300,9 +299,6 @@ build_rome_image() {
       --build-arg "ROME_BUILD_TIME=$(date -u +%FT%TZ)" \
       .docker/rome-runtime-workspace >/dev/null
   )
-  # libfaketime, for `cos-env clock`. It does nothing until start_rome preloads it.
-  printf 'FROM %s\nRUN apt-get update -qq && apt-get install -y -qq --no-install-recommends libfaketime >/dev/null && rm -rf /var/lib/apt/lists/*\n' "$IMAGE" |
-    docker build --quiet --tag "$IMAGE" - >/dev/null
   git -C "$REPO_ROOT" worktree remove --force "$BUILD_TREE" 2>/dev/null || true
   # agent.commit is the first ref, the agent's own; merged lists every ref in
   # the build, and tree the commit the image was built from.
@@ -369,13 +365,6 @@ start_rome() {
   save_rome_logs
   stop_watch
   docker rm -f "$ROME" >/dev/null 2>&1 || true
-  local clock=()
-  if [ -s "$CLOCK_FILE" ]; then
-    # Only the wall clock moves. The monotonic clock stays real, so timers run
-    # at their normal pace.
-    clock=(-e "LD_PRELOAD=$FAKETIME_LIB" -e "FAKETIME=+$(cat "$CLOCK_FILE")h"
-      -e FAKETIME_DONT_FAKE_MONOTONIC=1 -e FAKETIME_DONT_RESET=1)
-  fi
   # The devbox runs many Romes at once. The cap keeps this one, and the Chrome
   # the image runs inside it, from taking the box down; Chrome dies with the
   # container on reset and down.
@@ -383,7 +372,7 @@ start_rome() {
   # rather than the host journal, which drops old entries.
   docker run -d --name "$ROME" --restart unless-stopped --memory 6g \
     --log-driver json-file --log-opt max-size=100m --log-opt max-file=10 \
-    --env-file "$ROME_ENV_FILE" "${clock[@]}" \
+    --env-file "$ROME_ENV_FILE" \
     -v "$HOME_VOLUME:/home/rome" -v "$MEMORY_VOLUME:/app/memory" -v "$USER_VOLUME:/home/user" \
     --cap-add SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined \
     "$IMAGE" >/dev/null
@@ -600,7 +589,6 @@ cmd_up() {
   load_secrets
   save_settings
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
-  rm -f "$CLOCK_FILE"
   log "reading the bots and chats on Discord ..."
   write_discord_state
   write_rome_env
@@ -676,6 +664,7 @@ cmd_reset() {
     fs.writeFileSync(f, JSON.stringify(s) + "\n", { mode: 0o600 });' "$STATE_FILE"
   log "wiping Rome's home, memory and chats ..."
   remove_rome
+  rm -f "$CLOCK_FILE"
   cmd_up --no-build
 }
 
@@ -796,42 +785,59 @@ bring_rome_back() {
   done
 }
 
-# `cos-env clock forward <hours>` moves Rome's wall clock that many hours
-# further ahead of the devbox's, `cos-env clock reset` back to the real time,
-# and `cos-env clock` prints how far ahead it is and Rome's time. A move starts
-# Rome again with libfaketime preloaded. Discord stamps messages with the real
-# time, so a message said before a move of 24 hours reads to Rome as said
-# yesterday.
+# `cos-env clock forward <hours>` makes everything the app has heard that many
+# hours older, `cos-env clock reset` undoes every move, and `cos-env clock`
+# prints the hours moved. Test only: it rewrites the times in the app's own
+# tables (the messages it heard, its queued events and its notes), because no
+# clock can be moved for the whole of Rome: libfaketime hangs Claude Code at
+# start. Rome and the model keep the real time, so after `forward 24` a message
+# said before the move reads as said yesterday. Discord and the agent's
+# earlier turns keep the real times.
 # shellcheck disable=SC2120 # cos-env passes the arguments.
 cos_clock() {
-  local hours
+  local moved hours
+  moved="$(cat "$CLOCK_FILE" 2>/dev/null || echo 0)"
   case "${1:-}" in
     "")
-      printf '{"hoursAhead":%s,"romeNow":"%s"}\n' "$(cat "$CLOCK_FILE" 2>/dev/null || echo 0)" \
-        "$(docker exec "$ROME" node -e 'process.stdout.write(new Date().toISOString())')"
+      printf '{"hoursAhead":%s}\n' "$moved"
       return
       ;;
     forward)
       [[ "${2:-}" =~ ^[0-9]+$ ]] || die "usage: cos-env clock forward <hours>"
-      hours=$(($(cat "$CLOCK_FILE" 2>/dev/null || echo 0) + $2))
+      hours="$2"
       ;;
-    reset) hours=0 ;;
+    reset) hours=$((-moved)) ;;
     *) die "usage: cos-env clock [forward <hours> | reset]" ;;
   esac
-  docker run --rm --entrypoint test "$IMAGE" -f "$FAKETIME_LIB" ||
-    die "this image has no libfaketime. Run env.sh up to rebuild it."
   claim_ownership
-  load_secrets
-  if [ "$hours" = 0 ]; then rm -f "$CLOCK_FILE"; else echo "$hours" >"$CLOCK_FILE"; fi
-  log "starting Rome again with its clock $hours hours ahead ..."
-  local since attempts=0
-  since="$(date -u +%FT%T.%NZ)"
-  start_rome
-  until docker logs --since "$since" "$ROME" 2>&1 | grep -q '"discord client ready"'; do
-    attempts=$((attempts + 1))
-    [ "$attempts" -lt 180 ] || die "Rome's Discord client never became ready. Inspect: docker logs $ROME"
-    sleep 1
-  done
+  log "moving what the app has heard $hours hours into the past (test only) ..."
+  docker exec -i -u rome "$ROME" node - "$hours" <<'JS' || die "could not move the app's times"
+const Database = require("/app/node_modules/better-sqlite3");
+const db = new Database("/home/rome/.rome/default/rome.db", { timeout: 10000 });
+const ms = Number(process.argv[2]) * 3600 * 1000;
+const back = (iso) => (iso ? new Date(Date.parse(iso) - ms).toISOString() : iso);
+db.transaction(() => {
+  const messages = db.prepare("select number, said_at, recorded_at from chief_of_staff__messages").all();
+  const setMessage = db.prepare("update chief_of_staff__messages set said_at = ?, recorded_at = ? where number = ?");
+  for (const m of messages) setMessage.run(back(m.said_at), back(m.recorded_at), m.number);
+  const events = db.prepare("select seq, body, added_at from chief_of_staff__events").all();
+  const setEvent = db.prepare("update chief_of_staff__events set body = ?, added_at = ? where seq = ?");
+  for (const e of events) {
+    let body = e.body;
+    try {
+      const b = JSON.parse(body);
+      if (b && typeof b.saidAt === "string") body = JSON.stringify({ ...b, saidAt: back(b.saidAt) });
+    } catch {}
+    setEvent.run(body, e.added_at == null ? null : e.added_at - ms, e.seq);
+  }
+  const notes = db.prepare("select path, updated_at from chief_of_staff__notes").all();
+  const setNote = db.prepare("update chief_of_staff__notes set updated_at = ? where path = ?");
+  for (const n of notes) setNote.run(back(n.updated_at), n.path);
+  process.stderr.write(`moved ${messages.length} messages, ${events.length} events, ${notes.length} notes\n`);
+})();
+JS
+  moved=$((moved + hours))
+  if [ "$moved" = 0 ]; then rm -f "$CLOCK_FILE"; else echo "$moved" >"$CLOCK_FILE"; fi
   cos_clock
 }
 
@@ -888,6 +894,19 @@ cos_offline() {
   trap - EXIT
   log "starting Rome again ..."
   bring_rome_back start
+}
+
+# Prints the roster or the goals document exactly as the app holds it, read
+# through the app's own API, where `seed` writes them.
+cos_doc() {
+  local name="${1:-}"
+  [ "$name" = roster ] || [ "$name" = goals ] || die "usage: cos-env doc roster|goals"
+  api GET "/apps/$COS_AGENT_APP/state" | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const doc = (JSON.parse(s).documents ?? []).find((d) => d.name === process.argv[1]);
+      if (!doc) { process.stderr.write(`cos-env: the app holds no ${process.argv[1]} document\n`); process.exit(1); }
+      process.stdout.write(doc.body);
+    });' "$name"
 }
 
 cos_rome() {
