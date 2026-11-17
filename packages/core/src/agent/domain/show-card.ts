@@ -51,12 +51,26 @@ export function checkShowCard(ui: unknown): string[] {
       );
     }
   }
-  // A component no other one names is never drawn, so the text version and
-  // the card would say different things.
-  const named = new Set(card.components.flatMap(childIds));
+  // The card is a tree drawn once per component: a data model, a child drawn
+  // once per array element, or a child two components name would let a short
+  // card draw far more than its components, since a reader repeats a shared
+  // child under each parent.
+  if (card.data !== undefined) problems.push("the card may not have a data model");
+  const parents = new Map<string, number>();
   for (const c of card.components) {
-    if (c.id !== "root" && !named.has(c.id)) {
+    if ("children" in c && !Array.isArray(c.children)) {
+      problems.push(`"${c.id}" draws a child per array element; list its children by id`);
+    }
+    for (const child of childIds(c)) parents.set(child, (parents.get(child) ?? 0) + 1);
+  }
+  for (const c of card.components) {
+    const count = parents.get(c.id) ?? 0;
+    // A component no other one names is never drawn, so the text version and
+    // the card would say different things.
+    if (c.id !== "root" && count === 0) {
       problems.push(`"${c.id}" is not a child of any component, so it would not show`);
+    } else if (count > 1 || (c.id === "root" && count > 0)) {
+      problems.push(`"${c.id}" is named as a child more than once; give each its own id`);
     }
   }
   return problems;
@@ -100,8 +114,9 @@ export function showCardToolOutput(ui: WidgetUi, text: string, widgetsShow: bool
     ui,
     text,
     message:
-      "The card is shown in your message. Your text need not repeat what the card shows, " +
-      "but a conclusion or summary you are asked to write still gives the key figures, since " +
-      "it may be read without the card.",
+      "The card is shown in your message. Still end your reply with text, at least one short " +
+      "sentence, such as what stands out or the sources. It need not repeat what the card " +
+      "shows, but a conclusion or summary you are asked to write still gives the key figures, " +
+      "since it may be read without the card.",
   };
 }

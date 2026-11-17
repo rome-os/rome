@@ -50,6 +50,33 @@ describe("checkShowCard", () => {
     ]);
   });
 
+  // A shared child is drawn once under each parent, so 13 components naming
+  // the next one twice would draw thousands.
+  it("refuses a child named twice, which would draw it once per parent", () => {
+    const ui = {
+      components: [
+        { id: "root", component: "Column", children: ["a", "a"] },
+        { id: "a", component: "Text", text: "x" },
+      ],
+    };
+    expect(checkShowCard(ui)).toEqual([
+      '"a" is named as a child more than once; give each its own id',
+    ]);
+  });
+
+  it("refuses a child drawn once per array element, and a data model", () => {
+    const ui = {
+      data: { items: [1, 2, 3] },
+      components: [
+        { id: "root", component: "List", children: { componentId: "item", path: "/items" } },
+        { id: "item", component: "Text", text: "x" },
+      ],
+    };
+    const problems = checkShowCard(ui).join();
+    expect(problems).toContain("may not have a data model");
+    expect(problems).toContain("list its children by id");
+  });
+
   it("refuses a card that is too big", () => {
     const items = Array.from({ length: SHOW_CARD_MAX_COMPONENTS }, (_, i) => `t${i}`);
     const ui = {
