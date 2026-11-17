@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { type CheckInput, fridayOnly } from "./baseline-checks.js";
+import {
+  type BaselineScenario,
+  type CheckInput,
+  cardRules,
+  fridayOnly,
+} from "./baseline-checks.js";
 import {
   chineseStyle,
   emojiCount,
@@ -8,6 +13,8 @@ import {
   oneEmoji,
   thanksWithoutEyes,
 } from "./baseline-rules.js";
+import { CARD_SCENARIOS } from "./baseline-scenarios-cards.js";
+import type { TimedTurn } from "./timing.js";
 import { LONG_SCENARIOS, renovationLog } from "./baseline-scenarios-long.js";
 
 describe("oneEmoji", () => {
@@ -62,6 +69,7 @@ const input = (saidAfter: string[][]): CheckInput => ({
   steps: saidAfter.map(() => null),
   turns: [],
   saidAfter,
+  cardsAfter: saidAfter.map(() => []),
   reactions: saidAfter.map(() => null),
   said: saidAfter.flat(),
   tasks: [],
@@ -98,5 +106,41 @@ describe("fridayOnly", () => {
     expect(fridayOnly(["11月20日（周五）下午 3:30。"])).toEqual([]);
     expect(fridayOnly(["Thursday, Nov 20 at 15:30."])).toHaveLength(1);
     expect(fridayOnly(["11月20日（星期四）下午 3:30。"])).toHaveLength(1);
+  });
+});
+
+describe("cards", () => {
+  const withCards = (cardsAfter: string[][]): CheckInput => ({
+    ...input(cardsAfter.map(() => ["ok."])),
+    cardsAfter,
+  });
+  const scenario = (row: "chat" | "cards"): BaselineScenario => ({
+    id: "x",
+    row,
+    lang: "en",
+    about: "",
+    steps: [],
+    check: () => [],
+    rubric: "",
+  });
+
+  it("flags a card for a greeting, and more than one card in a reply", () => {
+    expect(cardRules(scenario("chat"), withCards([["Morning"]]))).toEqual([
+      "card: 1 card(s) in a chat scenario",
+    ]);
+    expect(cardRules(scenario("cards"), withCards([["a", "b"]]))).toEqual([
+      "card: 2 cards after step 1",
+    ]);
+    expect(cardRules(scenario("cards"), withCards([["a"]]))).toEqual([]);
+  });
+
+  it("fails a card scenario answered without a card", () => {
+    const itinerary = CARD_SCENARIOS.find((s) => s.id === "card-itinerary");
+    const plain = input([["Day 1: Belém. Day 2: Alfama."]]);
+    expect(itinerary?.check(plain)).toContain("step 1: no card");
+    // A card alone answers the step.
+    const carded = withCards([["Day 1: Belém. Day 2: Alfama."]]);
+    const turn = { tools: {} } as unknown as TimedTurn;
+    expect(itinerary?.check({ ...carded, steps: [turn], saidAfter: [[]], said: [] })).toEqual([]);
   });
 });

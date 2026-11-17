@@ -113,6 +113,7 @@ const RULE_KINDS = [
   ["zh:", "Chinese style"],
   ["drift:", "Length drift"],
   ["effort:", "Effort mismatch"],
+  ["card:", "Card use"],
 ] as const;
 
 const isRuleNote = (note: string) => RULE_KINDS.some(([prefix]) => note.startsWith(prefix));
@@ -234,6 +235,7 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     "",
     ...overview(runs),
     ...ruleNotes(runs),
+    ...cardUse(runs),
   ];
   const scenarios = [...new Set(runs.map((r) => r.id))];
   for (const id of scenarios) {
@@ -278,6 +280,35 @@ export function baselineMarkdown(runs: ScenarioRun[]): string {
     out.push("");
   }
   return out.join("\n");
+}
+
+/**
+ * How often each configuration showed a card, by whether the scenario expects
+ * one: the `cards` row should, the chat and simple-question rows never, and
+ * the rest may. Runs from before cards were counted are left out.
+ */
+export function cardUse(runs: ScenarioRun[]): string[] {
+  const counted = runs.filter((r) => typeof r.measures?.cards === "number");
+  if (!counted.length) return [];
+  const expect = (r: ScenarioRun) =>
+    r.row === "cards" ? "should" : r.row === "chat" || r.row === "simple-qa" ? "never" : "may";
+  const rate = (rs: ScenarioRun[]) =>
+    rs.length ? `${rs.filter((r) => (r.measures?.cards ?? 0) > 0).length}/${rs.length}` : "–";
+  const out = [
+    "## Card use",
+    "",
+    "Runs that showed at least one card, by what the scenario expects.",
+    "",
+    "| Config | Should card | Never | May |",
+    "|---|---|---|---|",
+  ];
+  for (const config of [...new Set(counted.map((r) => r.config))].sort()) {
+    const ofConfig = counted.filter((r) => r.config === config);
+    const by = (e: string) => rate(ofConfig.filter((r) => expect(r) === e));
+    out.push(`| ${config} | ${by("should")} | ${by("never")} | ${by("may")} |`);
+  }
+  out.push("");
+  return out;
 }
 
 /** The task path of each run: where a delegated task's time went, in seconds. */

@@ -14,12 +14,13 @@ import {
   tool,
 } from "./baseline-checks.js";
 import { thanksWithoutEyes } from "./baseline-rules.js";
+import { CARD_SCENARIOS } from "./baseline-scenarios-cards.js";
 import { LONG_SCENARIOS } from "./baseline-scenarios-long.js";
 import { ZH_SCENARIOS } from "./baseline-scenarios-zh.js";
 
 export type { BaselineScenario, CheckInput } from "./baseline-checks.js";
 
-export const BASELINE_VERSION = 5;
+export const BASELINE_VERSION = 6;
 
 const VOICE =
   "Voice: short and direct, like a capable assistant texting its owner; no preamble, no filler such as 'Got it' or 'Let me check', no closing offers.";
@@ -228,4 +229,5 @@ export const BASELINE_SCENARIOS: BaselineScenario[] = [
   ...EN_SCENARIOS,
   ...ZH_SCENARIOS,
   ...LONG_SCENARIOS,
+  ...CARD_SCENARIOS,
 ];
