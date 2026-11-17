@@ -13,6 +13,8 @@ import type {
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { getSession } from "@/lib/chat-api";
+import { readChatListMode, readLastConciergeChatId } from "@/lib/chat-list-mode";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
 import {
@@ -193,7 +195,12 @@ export function ChatComponent({
         onSessionNotFound();
         return;
       }
-      navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+      // A Concierge chat that is gone lands on the main chat, so the list stays
+      // in Agent mode; any other missing chat lands on a blank one.
+      const concierge =
+        readChatListMode() === "concierge" || readLastConciergeChatId() === missingSessionId;
+      const home = concierge ? MAIN_CHAT_PATH : "/chat";
+      navigate(hideSidebar ? `${home}?hideSidebar=1` : home, { replace: true });
     },
     [sessionId, onSessionNotFound, navigate, hideSidebar],
   );
