@@ -26,9 +26,9 @@ test.describe("desktop", () => {
     const apps = page.locator('aside a[href="/apps"]');
     await expect(apps).toHaveText("Apps", { timeout: 30_000 });
     expect(await railWidth(page)).toBe(192);
-    // A named row's icon is in the sidebar's icon column (x=18, 16px wide); the
-    // bare rail centres its 40px tiles in 64px.
-    expect(await iconCenter(page, "/apps")).toBe(26);
+    // The 16px glyph stays centred in the 16px slot at x=20; the bare rail
+    // centres its 40px tiles in 64px.
+    expect(await iconCenter(page, "/apps")).toBe(28);
 
     const edge = (await page.locator("[data-rail-edge]").boundingBox())!;
     const x = edge.x + edge.width / 2;
@@ -57,13 +57,85 @@ test.describe("desktop", () => {
     await page.goto("/chat/mock-chat-build-app");
     const tile = page.locator('aside nav a[aria-label="Chat"]');
     // The tile lights on any chat.
-    await expect(tile).toHaveClass(/shadow-1/, { timeout: 30_000 });
+    await expect(tile).toHaveAttribute("aria-current", "page", { timeout: 30_000 });
     // A common chat puts the chat list in Chat mode, whose tile returns to the last ordinary chat.
     await expect(tile).toHaveAttribute("href", "/chat/mock-chat-build-app");
+
+    const chatLink = page.locator('[data-chat-row] a[href="/chat/mock-chat-build-app"]');
+    await chatLink.focus();
+    await expect(chatLink).toBeFocused();
+    expect(
+      await chatLink.evaluate((link) => {
+        const row = link.closest("[data-chat-row]")!;
+        return getComputedStyle(link).borderRadius === getComputedStyle(row).borderRadius;
+      }),
+    ).toBe(true);
+
+    const tree = await chatLink.evaluate((link) => {
+      const group = link.closest("[data-project-group]")!;
+      const column = group.closest(".overflow-y-auto")!.getBoundingClientRect();
+      const guide = group.querySelector("[data-tree-guide]")!.getBoundingClientRect();
+      const marker = group.querySelector("[data-tree-indicator]")!.getBoundingClientRect();
+      const folder = group.querySelector("button > span")!.getBoundingClientRect();
+      return {
+        textX: link.children[0].getBoundingClientRect().left - column.left,
+        guideX: guide.left - column.left,
+        folderCenterX: folder.left + folder.width / 2 - column.left,
+        markerDelta: Math.abs(marker.left + marker.width / 2 - guide.left - guide.width / 2),
+      };
+    });
+    expect(tree.textX).toBe(48);
+    expect(tree.guideX).toBe(tree.folderCenterX);
+    expect(tree.markerDelta).toBeLessThanOrEqual(0.5);
 
     // The main chat puts it in Concierge mode, whose tile opens the main chat.
     await page.goto("/message");
     await expect(tile).toHaveAttribute("href", "/message", { timeout: 30_000 });
+  });
+
+  test("named navigation and topic chats share row heights and text columns", async ({ page }) => {
+    await page.goto("/message");
+    const topic = page.locator('[data-concierge-topic="mock-topic-travel"] > a');
+    await expect(topic).toBeVisible({ timeout: 30_000 });
+    const geometry = await page.evaluate(() => {
+      const nav = document.querySelector('aside a[href="/apps"]')!;
+      const newTopic = document.querySelector('[data-new-chat-row="topic"]')!;
+      const main = document.querySelector('[data-concierge-section] a[href="/message"]')!;
+      const topic = document.querySelector('[data-concierge-topic="mock-topic-travel"] > a')!;
+      const search = document.querySelector("aside nav button.rounded-full")!;
+      const app = document.querySelector('aside nav a[href^="/apps/"]')!;
+      return [nav, newTopic, main, topic, search, app].map((row) => {
+        const column = row.closest(".overflow-y-auto") ?? row.closest("aside")!;
+        const box = row.getBoundingClientRect();
+        const icon = row.children[0].getBoundingClientRect();
+        const text = row.children[1].getBoundingClientRect();
+        return {
+          height: box.height,
+          iconX: icon.left - column.getBoundingClientRect().left,
+          textX: text.left - column.getBoundingClientRect().left,
+          inset: icon.left - box.left,
+          gap: text.left - icon.right,
+          weight: getComputedStyle(row).fontWeight,
+        };
+      });
+    });
+    expect(geometry).toEqual(
+      Array(6).fill({ height: 36, iconX: 20, textX: 48, inset: 12, gap: 12, weight: "400" }),
+    );
+
+    const tasksHeading = page.locator("#recent-chats-tasks-heading button");
+    await tasksHeading.click();
+    const tasks = await tasksHeading.evaluate((heading) => {
+      const card = heading.closest("[data-tasks-section]")!;
+      const column = card.parentElement!.getBoundingClientRect();
+      const name = card.querySelector("[data-chat-row] a > span")!;
+      return {
+        iconX: heading.children[0].getBoundingClientRect().left - column.left,
+        headingTextX: heading.children[1].getBoundingClientRect().left - column.left,
+        chatTextX: name.getBoundingClientRect().left - column.left,
+      };
+    });
+    expect(tasks).toEqual({ iconX: 20, headingTextX: 48, chatTextX: 48 });
   });
 });
 

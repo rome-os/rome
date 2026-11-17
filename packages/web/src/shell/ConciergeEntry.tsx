@@ -111,30 +111,30 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0
             ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
             : undefined
         }
       >
-        <span
-          className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-          aria-hidden
-        >
-          <RomeLogo className="size-4 shrink-0" aria-hidden />
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <RomeLogo className="size-4 shrink-0" aria-hidden />
+          )}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
     </div>
   );
@@ -265,32 +265,34 @@ function ConciergeTopicEntry({
       <Link
         to={`/chat/${chat.id}`}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        {/* A topic has no icon of its own; the # keeps its name in the text column. */}
-        <Hash aria-hidden className="rome-sidebar-icon size-4 shrink-0 text-subtle-foreground" />
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <Hash aria-hidden className="size-4 shrink-0" />
+          )}
+        </span>
         {/* The menu button floats over the row's end, so the name keeps clear
-            of it: the badge holds that room when there is one. */}
+            of it. */}
         <span
-          className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""} ${
-            count > 0 ? "" : "pr-[var(--control-h-sm)]"
-          }`}
+          className={`flex-1 truncate pr-[var(--control-h-sm)] ${chat.archived ? "text-subtle-foreground" : ""}`}
         >
           {name}
         </span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums group-hover/topic:invisible"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -298,7 +300,7 @@ function ConciergeTopicEntry({
             size="sm"
             label={t("recentChats.topicChatActions", { name })}
             icon={<Ellipsis aria-hidden />}
-            className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
+            className="touch-show absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent

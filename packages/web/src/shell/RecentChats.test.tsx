@@ -315,17 +315,17 @@ describe("RecentChats", () => {
       (await screen.findByRole("link", { name: new RegExp(`^${name}`) })).closest<HTMLElement>(
         "[data-chat-row]",
       )!;
-    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("My own chat")).className).toContain("shadow-4");
     await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
-    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
-    expect((await rowOf("My own chat")).className).not.toContain("bg-surface shadow-1");
+    expect((await rowOf("Find flights")).className).toContain("shadow-4");
+    expect((await rowOf("My own chat")).className).not.toContain("shadow-4");
     expect(screen.getByTestId("location-path").textContent).toBe("/chat/mine");
 
     // A click back on the open chat before the other one renders: the mark
     // returns to it.
     await userEvent.setup().click(await screen.findByRole("link", { name: /^My own chat/ }));
-    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
-    expect((await rowOf("Find flights")).className).not.toContain("bg-surface shadow-1");
+    expect((await rowOf("My own chat")).className).toContain("shadow-4");
+    expect((await rowOf("Find flights")).className).not.toContain("shadow-4");
 
     // Opening the other chat again, and letting it render.
     await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
@@ -333,7 +333,7 @@ describe("RecentChats", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location-path").textContent).toBe("/chat/task-1"),
     );
-    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("Find flights")).className).toContain("shadow-4");
   });
 
   it("applies the status filter to task chats like any other chat", async () => {
@@ -424,8 +424,16 @@ describe("RecentChats", () => {
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
       expect(entry.getAttribute("href")).toBe("/chat/topic-1");
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
+      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
       // The main chat is the Concierge entry, not a row of its own.
       expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
+
+      await userEvent.setup().click(entry);
+      const opened = await screen.findByRole("link", { name: "Calendar", exact: true });
+      expect(opened.getAttribute("aria-current")).toBe("page");
+      expect(opened.querySelector("[data-concierge-unread]")).toBeNull();
+      expect(opened.firstElementChild?.querySelector("svg.lucide-hash")).toBeTruthy();
     });
 
     it("opens a blank topic chat from the New topic row, creating nothing yet", async () => {
@@ -616,9 +624,9 @@ describe("RecentChats", () => {
       server.unread = 3;
       mockConcierge();
       renderRecentChats();
-      expect(
-        await screen.findByRole("link", { name: "Main chat, 3 unread messages" }),
-      ).toBeTruthy();
+      const entry = await screen.findByRole("link", { name: "Main chat, 3 unread messages" });
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
+      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
     });
 
     it("says Main chat, not the name the guardian gave their agent", async () => {
@@ -637,12 +645,12 @@ describe("RecentChats", () => {
       const view = renderRecentChats("/message");
       const entry = await screen.findByRole("link", { name: "Main chat" });
       expect(entry.getAttribute("href")).toBe("/message");
-      expect(entry.className).toContain("shadow-1");
+      expect(entry.className).toContain("shadow-4");
       view.unmount();
 
       renderRecentChats("/chat/open-chat");
       expect((await screen.findByRole("link", { name: /^Main chat, 3/ })).className).not.toContain(
-        "shadow-1",
+        "shadow-4",
       );
     });
 
@@ -653,6 +661,9 @@ describe("RecentChats", () => {
       await act(async () => {});
       expect(await screen.findByRole("link", { name: "Main chat" })).toBeTruthy();
       expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+      expect(
+        screen.getByRole("link", { name: "Main chat" }).firstElementChild?.querySelector("svg"),
+      ).toBeTruthy();
     });
 
     it("caps the count at 99+", async () => {

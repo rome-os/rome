@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -275,8 +276,8 @@ function ChatRowLink({
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? (onCard ? "pl-4" : "pl-[var(--row-child-pl)]") : "pl-2"
+          className={`flex h-full min-w-0 flex-1 items-center ${onCard ? "rounded-8" : "rounded-12"} border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+            nested ? (onCard ? "pl-[var(--row-card-text-pl)]" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -292,7 +293,7 @@ function ChatRowLink({
 }
 
 /** The folded Tasks card: its heading row, the card's padding and border. */
-const TASKS_FOLDED_HEIGHT = "h-[calc(max(2rem,var(--control-min-h))_+_0.5rem_+_2px)]";
+const TASKS_FOLDED_HEIGHT = "h-[calc(max(var(--row-h),var(--control-min-h))_+_0.5rem_+_2px)]";
 
 // Rows fade out over the bottom padding, so a list that runs on under its
 // edge shows it, and the last row clears the fade once scrolled to the end.
@@ -339,7 +340,7 @@ function ChatModeSwitch({
       onValueChange={onChange}
       // The kit's selected pill is the canvas colour, which on a dark track is
       // barely lighter than the track. Dark lifts it with the foreground.
-      className="shrink-0 [&_[role=radio]]:px-[var(--row-seg-px)] dark:[&_[aria-checked=true]]:bg-foreground/20"
+      className="shrink-0 dark:[&_[aria-checked=true]]:bg-foreground/20"
       options={[
         {
           value: "chat",
@@ -390,10 +391,22 @@ function NewChatRow({
       data-new-chat-row={kind}
       className={`${LINK_CLASS} ${IDLE_CLASS} mb-[var(--row-gap)]`}
     >
-      <Plus className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+      <span
+        className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+        aria-hidden
+      >
+        <Plus className="size-4 shrink-0" />
+      </span>
       <span className="flex-1 truncate">{label}</span>
       {shortcut ? (
-        <kbd className="shrink-0 font-sans text-aux text-subtle-foreground">{shortcut}</kbd>
+        <Badge
+          asChild
+          variant="muted"
+          shape="square"
+          className="shrink-0 border-border font-sans font-normal"
+        >
+          <kbd>{shortcut}</kbd>
+        </Badge>
       ) : null}
     </Link>
   );
@@ -835,15 +848,13 @@ export function RecentChats({
       <div
         key={session.id}
         data-chat-row
-        className={`group relative flex ${
-          inGroup ? "ml-[var(--row-child-ml)] h-[var(--row-h)]" : "h-8"
-        } items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
-          inGroup && isActive ? "font-medium" : ""
-        } ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
+        className={`group relative flex h-[var(--row-h)] ${
+          inGroup ? "ml-[var(--row-child-ml)]" : ""
+        } items-center gap-1 ${onCard ? "rounded-8" : "rounded-12"} text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
           isActive
             ? onCard
-              ? "bg-surface-hover"
-              : "bg-surface shadow-1 dark:bg-surface-hover"
+              ? "bg-surface-hover ring-1 ring-border/70"
+              : ACTIVE_CLASS
             : onCard
               ? "hover:bg-surface-hover"
               : "hover:bg-surface-hover dark:hover:bg-surface"
@@ -864,7 +875,11 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? (onCard ? "ml-4" : "ml-3") : "ml-2"
+              nested
+                ? onCard
+                  ? "ml-[var(--row-card-rename-ml)]"
+                  : "ml-[var(--row-child-rename-ml)]"
+                : "ml-2"
             }`}
           />
         ) : (
@@ -955,11 +970,16 @@ export function RecentChats({
     const remainingCount = Math.max(items.length - visibleCount, 0);
     const projectLabel = (
       <>
-        {collapsed ? (
-          <Folder className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        ) : (
-          <FolderOpen className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        )}
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+          aria-hidden
+        >
+          {collapsed ? (
+            <Folder className="size-4 shrink-0" />
+          ) : (
+            <FolderOpen className="size-4 shrink-0" />
+          )}
+        </span>
         <span className="truncate">{label}</span>
         {/* Where the group works: another computer, or Rome Cloud once any
             chat lives on a device. Only the icon opens the tooltip: on the
@@ -1015,14 +1035,14 @@ export function RecentChats({
             : undefined
         }
         title={deviceFolder ? undefined : label}
-        className="flex h-full min-w-0 flex-1 items-center gap-[var(--row-icon-gap)] rounded-8 border border-transparent pl-[var(--row-link-px)] pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="flex h-full min-w-0 flex-1 items-center gap-[var(--row-icon-gap)] rounded-12 border border-transparent pl-[var(--row-link-px)] pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
       >
         {projectLabel}
       </button>
     );
     return (
       <div key={key} data-project-group={key}>
-        <div className="group/project flex h-[var(--row-h)] items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="group/project flex h-[var(--row-h)] items-center min-h-[var(--control-min-h)] gap-1 rounded-12 text-ui font-normal text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
             <button
@@ -1100,13 +1120,13 @@ export function RecentChats({
         aria-labelledby="recent-chats-tasks-heading"
         data-tasks-section
         data-expanded={tasksExpanded}
-        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:border-border-subtle dark:shadow-none ${
+        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border-strong bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:shadow-none ${
           tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
         }`}
       >
         <h2
           id="recent-chats-tasks-heading"
-          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border after:transition-opacity ${
+          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border-strong after:transition-opacity ${
             tasksExpanded && tasksScrolled ? "after:opacity-100" : "after:opacity-0"
           }`}
         >
@@ -1120,9 +1140,14 @@ export function RecentChats({
                 : t("recentChats.sectionTasks")
             }
             onClick={() => setTasksExpanded((open) => !open)}
-            className="flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-[var(--row-icon-gap)] rounded-8 border border-transparent px-[var(--row-card-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
-            <ListChecks className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+            <span
+              className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+              aria-hidden
+            >
+              <ListChecks className="size-4 shrink-0" />
+            </span>
             <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
             {running > 0 ? (
               <span
@@ -1165,7 +1190,7 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[var(--row-switcher-pl)]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
+          className={`flex shrink-0 items-center justify-between pl-[var(--row-px-sm)] pr-3 ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
         >
           <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}

@@ -33,19 +33,21 @@ describe("typography policy", () => {
     ]);
   });
 
-  it("keeps stylesheet font sizes on the role tokens", () => {
+  it("keeps stylesheet sizes on role tokens or the approved unread-count token", () => {
     // The two checks around this one read utilities and inline styles, so a
     // size written in a plain stylesheet would pass both unseen.
     const declarations = sourceFiles(sourceRoot)
       .filter((path) => extname(path) === ".css")
       .flatMap((path) => {
         const source = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-        return [...source.matchAll(/font-size:\s*([^;}]+)/g)]
+        return [...source.matchAll(/(?<![\w-])font-size:\s*([^;}]+)/g)]
           .filter((match) => !match[1].trim().startsWith("var(--text-"))
           .map((match) => `${relative(sourceRoot, path)}:${match[0].trim()}`);
       });
 
-    expect(declarations).toEqual([]);
+    // The compact guardian count is an approved host-only exception in
+    // docs/ui/component-roles.md. Every other stylesheet size uses a role.
+    expect(declarations).toEqual(["globals.css:font-size: var(--row-count-font-size)"]);
   });
 
   it("binds JavaScript font sizes to a role unless the API is numeric-only", () => {

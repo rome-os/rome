@@ -114,6 +114,7 @@ Inline content sits inside a line of text or a table cell. It answers to the tex
 - The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
 - Typography is `text-aux` or smaller, never `text-ui`. `[mech]`
+- The guardian sidebar's unread count is a compact `Badge`: a 16px-high pill with 11px/16px type. Its inset, typography, and ink read host-owned `--row-count-*` tokens. Its ink mixes 60% primary with foreground in OKLab, preserving the accent hue with AA contrast on its tint. `[human]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
 
 > Prefer: a dismissible `Badge` at `--badge-h`, 22px tall in a table cell, carrying a focus edge.
