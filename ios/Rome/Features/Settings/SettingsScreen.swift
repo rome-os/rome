@@ -238,19 +238,22 @@ struct SettingsScreen: View {
                         }
                         .buttonStyle(RowPressStyle())
                     }
-                    // Only while Rome Cloud cannot serve voice input: why.
-                    if workspace.voiceInput.available, let problem = workspace.voiceInput.info?.problemText {
-                        SettingsRow(systemImage: "mic", title: "Voice input") {
-                            Text(verbatim: problem)
-                                .romeFont(15)
-                                .foregroundStyle(Palette.sub)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                    if workspace.voiceInput.available {
+                        // Only while Rome Cloud cannot serve voice input: why.
+                        if let problem = workspace.voiceInput.info?.problemText {
+                            SettingsRow(systemImage: "mic", title: "Voice input") {
+                                Text(verbatim: problem)
+                                    .romeFont(15)
+                                    .foregroundStyle(Palette.sub)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Voice input")
+                            .accessibilityValue(Text(verbatim: problem))
+                            .accessibilityIdentifier("voice-input-place")
                         }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Voice input")
-                        .accessibilityValue(Text(verbatim: problem))
-                        .accessibilityIdentifier("voice-input-place")
+                        MicrophoneRow()
                     }
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)
