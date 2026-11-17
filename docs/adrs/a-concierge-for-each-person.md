@@ -5,13 +5,13 @@
 
 ## Context
 
-Every chat on the dashboard is open to every dashboard user, and a visitor on the dashboard allow-list reads and edits the guardian's memory and settings. The Concierge was the guardian's alone: one main chat, one list of follows, one digest, one set of quiet hours.
+Every chat on the dashboard is open to every dashboard user, and a dashboard admin reads and edits the guardian's memory and settings. The Concierge was the guardian's alone: one main chat, one list of follows, one digest, one set of quiet hours.
 
 A visitor who uses the dashboard wants a Concierge of their own, one that follows their things and tells them, not the guardian. The guardian wants their alerts, tasks and conversations with the Concierge kept from visitors, and a visitor wants the same. Memory and connections are the instance's, so splitting them would mean a second memory and a second set of grants per person.
 
 ## Decision
 
-When the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge: their own main and topic chats, follows, task list, digest times, quiet hours and time zone. Each person's Concierge chats and the task chats it starts are private to them, the guardian included. Memory and connections stay shared. Approvals stay with the guardian.
+When the Concierge is on, the guardian and every dashboard admin each have their own Concierge: their own main and topic chats, follows, task list, digest times, quiet hours and time zone. Each person's Concierge chats and the task chats it starts are private to them, the guardian included. Memory and connections stay shared. Approvals stay with the guardian.
 
 ## Alternatives
 

@@ -269,7 +269,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives an allow-listed dashboard visitor every topic but the app catalog", async () => {
+  it("gives a dashboard admin every topic but the app catalog", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",

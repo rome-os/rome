@@ -111,7 +111,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=1` | Opens built-in demo data: every task state, an approval, a question, a failed task. Also available by long-pressing "Rome" on the sign-in screen. |
 | `ROME_DEMO=update` | Opens the demo data on a Rome below the app's minimum version, so the update page covers the app; "Update now" finishes after a few seconds. |
 | `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
-| `ROME_DEMO=visitor` | Opens the demo data as a dashboard visitor of a shared Rome. |
+| `ROME_DEMO=visitor` | Opens the demo data as a dashboard admin of a shared Rome. |
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
 | `ROME_PERF=<scenario>` | With `ROME_DEMO=long-chat`: runs one scenario for about 20 s and logs frame hitches and how often rows, screens and parses ran (`PerfProbe`). Scenarios: `idle`, `idle-apps`, `stream`, `stream-apps`, `taskstream`, `sections`, `settings`, `scroll`, `chats`, `paging`, twelve flings up through older pages, and `pagingdown`, ten flings back down after paging past 520 messages (add `ROME_DEMO_PAIRS=300`, a deeper chat with pictures and cards). Both report `holdDriftPt`, how far a row mid-screen moved while each fling rested, and the time each older page took to go in. The result is in the log (category `Perf`) and in `tmp/perf-<scenario>.txt` in the app's container. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |

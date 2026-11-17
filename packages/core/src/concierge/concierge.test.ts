@@ -4143,7 +4143,7 @@ describe("Concierge chat", () => {
     expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
       '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
     );
-    // A visitor is served while on the dashboard allow-list, the guardian always.
+    // A dashboard admin is served while on the allow-list, the guardian always.
     expect(await service.isServed("visitor:acct-ann")).toBe(true);
     expect(await service.isServed("visitor:acct-unknown")).toBe(false);
     allowed.clear();

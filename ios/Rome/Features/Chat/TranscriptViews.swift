@@ -13,7 +13,7 @@ extension EnvironmentValues {
     /// Opens a link tapped in chat text; the shell sets it so app and
     /// instance links stay in the app.
     @Entry var chatLinkOpener: ShellAction<URL, OpenURLAction.Result>? = nil
-    /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
+    /// A dashboard admin, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
     /// Opens a task chat in this window, over the page the row is on.
     @Entry var openTaskChat: ShellAction<(chatId: String, title: String), Void>? = nil

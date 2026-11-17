@@ -4,7 +4,7 @@
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
-// guardian gets every topic, and a visitor on the dashboard allow-list gets
+// guardian gets every topic, and a dashboard admin gets
 // every topic but `apps.catalog`. `concierge.tasks` and `concierge.activity`
 // carry the caller's own Concierge rows and chats, `chat.tasks:<id>` only the
 // caller's own Concierge chat, and another owner's Concierge or task chat is

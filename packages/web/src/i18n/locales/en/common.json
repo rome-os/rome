@@ -157,7 +157,7 @@
   },
   "profile": {
     "menuLabel": "Account",
-    "visitor": "Visitor",
+    "visitor": "Dashboard admin",
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."
   },

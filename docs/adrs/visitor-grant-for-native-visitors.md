@@ -8,13 +8,13 @@
 
 Rome Cloud has two grants an instance redeems. The owner grant (`/oauth2/authorize` and `/oauth2/token`) yields a signed identity assertion, and the instance turns it into a guardian credential. The visitor grant (`/instance/authorize` and `/api/account/session`) yields an account identity. The instance turns that into a visitor credential once its own allow-list names the account's email.
 
-The native app signs the owner in through the owner grant. It also has to sign in a [visitor](../concepts/people.md#visitor) on the instance's dashboard allow-list.
+The native app signs the owner in through the owner grant. It also has to sign in a [dashboard admin](../concepts/people.md#dashboard-admin) of the instance.
 
 Instances update on their own schedule and can be rolled back to an older build. Every instance build that exists takes any code from the owner grant as the owner's. Builds before the native owner sign-in checked the guardian seat also bound the seat to whatever account signed in.
 
 ## Decision
 
-The native app signs a dashboard visitor in through the visitor grant, the one the browser visitor flow uses. Rome Cloud issues a visitor-grant code for the phone. The instance redeems it at the account session endpoint and returns the visitor credential as JSON. The owner grant stays owner-only and carries no role.
+The native app signs a dashboard admin in through the visitor grant, the one the browser visitor flow uses. Rome Cloud issues a visitor-grant code for the phone. The instance redeems it at the account session endpoint and returns the visitor credential as JSON. The owner grant stays owner-only and carries no role.
 
 ## Alternatives
 

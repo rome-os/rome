@@ -46,7 +46,7 @@ struct DrawerView: View {
                 DrawerItem(title: "Chat", selected: section == .chat, action: { onSection(.chat) }) {
                     Image(systemName: "bubble.left")
                 }
-                // A dashboard visitor has the whole dashboard, Apps and New app included.
+                // A dashboard admin has the whole dashboard, Apps and New app included.
                 DrawerItem(title: "Apps", selected: section == .apps, action: { onSection(.apps) }) {
                     Image(systemName: "square.grid.2x2")
                 }

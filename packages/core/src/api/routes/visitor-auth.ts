@@ -359,7 +359,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
     }
   });
 
-  // The phone's dashboard visitor sign-in. It asks for the same PKCE-bound
+  // The phone's dashboard admin sign-in. It asks for the same PKCE-bound
   // request the browser flow sends to Rome Cloud, has Rome Cloud issue the code
   // for it, and brings the code back to `/auth/visitor/native/complete`.
   app.post("/auth/visitor/native/start", (c) => {
