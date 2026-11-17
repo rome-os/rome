@@ -17,7 +17,8 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
-import { Session } from "../../agent/index.js";
+import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
+import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
@@ -4725,6 +4726,50 @@ describe("Webchat API", () => {
       expect(await status(visitor, "fork-turn")).toBe(404);
       expect(await status(guardian, "fork-turn")).toBe(404);
       expect(await status(visitor, "channel-turn")).toBe(200);
+    });
+
+    it("opens a Concierge turn with its unchanged headers in one run, so the session drops them, then the time", async () => {
+      const { sentTurns } = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      deps.concierge = {
+        deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
+        switchIfExhausted: async () => null,
+        conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
+        turnHeader: async () =>
+          '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="guardian"/>',
+        nowLine: async () => "<now>Fri 20/11/2026 09:30 (Europe/Berlin)</now>",
+        stoppedRequestLines: async () => "",
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const workspace = { builtins: [{ kind: "desktop", line: "a window" }], apps: [] };
+      for (const text of ["one", "two"]) {
+        const sent = await app.request(`/chat/sessions/topic-1/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, workspace }),
+        });
+        expect(sent.status).toBe(200);
+        await drainTurn(app, sent);
+      }
+      const [first, second] = sentTurns.map((turn) => turn.prompt as string);
+      expect(first).toMatch(
+        /^<concierge_chat [^\n]+\/>\n<concierge_owner [^\n]+\/>\n<workspace_context>[\s\S]+<\/workspace_context>\n<chat_thread [^\n]+\/>\n<now>Fri 20\/11\/2026 09:30 \(Europe\/Berlin\)<\/now>\n\none$/,
+      );
+      // What the session sends of the second input: no unchanged header, the time kept.
+      const { headers } = withoutRepeatedHeaders(first as string, STICKY_HEADERS, new Map());
+      const resent = withoutRepeatedHeaders(second as string, STICKY_HEADERS, headers).prompt;
+      expect(resent).not.toContain("workspace_context");
+      expect(resent).not.toContain("<concierge_chat");
+      expect(resent).toMatch(/^<chat_thread [^\n]+\/>\n<now>[^\n]+<\/now>\n\ntwo$/);
     });
 
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
