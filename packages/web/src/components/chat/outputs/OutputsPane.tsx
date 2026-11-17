@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetTitle } from "@/components/ui/sheet";
@@ -40,7 +40,11 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
         </SheetTitle>
         <IconButton size="sm" label={t("outputs.close")} icon={<X />} onClick={close} />
       </div>
-      <div className="min-h-0 flex-1">
+      {/* The sheet's surface, which a scrolling row's edge fades from. */}
+      <div
+        className="min-h-0 flex-1"
+        style={{ "--scroll-edge-bg": "var(--color-surface)" } as CSSProperties}
+      >
         <OutputsPanel
           chatId={chatId}
           selectedId={sheet?.outputId ?? null}

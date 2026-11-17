@@ -10,7 +10,7 @@ import {
   FileText,
   Sheet,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
@@ -223,19 +223,23 @@ export function OutputsPanel({
 
   return (
     <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-col gap-4 p-4 max-md:px-3">
         {heading && (
           <h2 className="flex items-baseline gap-2 text-title text-foreground">
             {t("outputs.title")}
             <span className="text-ui tabular-nums text-muted-foreground">{list.length}</span>
           </h2>
         )}
-        <FilterChipGroup<Filter>
-          aria-label={t("outputs.filterLabel")}
-          value={filter}
-          onValueChange={setFilter}
-          options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
-        />
+        {/* Chips a step tighter than the kit's touch spacing, so the four fit a
+            phone's sheet and scroll only in a narrower pane. */}
+        <div style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}>
+          <FilterChipGroup<Filter>
+            aria-label={t("outputs.filterLabel")}
+            value={filter}
+            onValueChange={setFilter}
+            options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
+          />
+        </div>
         {indexingNote}
         {shown.length === 0 ? (
           <p className="px-1 text-ui text-muted-foreground">{t("outputs.noneOfType")}</p>
