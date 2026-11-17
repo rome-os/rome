@@ -788,7 +788,8 @@ bring_rome_back() {
 # `cos-env clock forward <hours>` makes everything the app has heard that many
 # hours older, `cos-env clock reset` undoes every move, and `cos-env clock`
 # prints the hours moved. Test only: it rewrites the times in the app's own
-# tables (the messages it heard, its queued events and its notes), because no
+# tables (the messages it heard, its queued events, its notes when a build has
+# them) and the memory folder's file times, because no
 # clock can be moved for the whole of Rome: libfaketime hangs Claude Code at
 # start. Rome and the model keep the real time, so after `forward 24` a message
 # said before the move reads as said yesterday. Discord and the agent's
@@ -816,25 +817,53 @@ const Database = require("/app/node_modules/better-sqlite3");
 const db = new Database("/home/rome/.rome/default/rome.db", { timeout: 10000 });
 const ms = Number(process.argv[2]) * 3600 * 1000;
 const back = (iso) => (iso ? new Date(Date.parse(iso) - ms).toISOString() : iso);
+// Each table only when this build of the app has it.
+const has = (t) => !!db.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(t);
+const moved = {};
 db.transaction(() => {
-  const messages = db.prepare("select number, said_at, recorded_at from chief_of_staff__messages").all();
-  const setMessage = db.prepare("update chief_of_staff__messages set said_at = ?, recorded_at = ? where number = ?");
-  for (const m of messages) setMessage.run(back(m.said_at), back(m.recorded_at), m.number);
-  const events = db.prepare("select seq, body, added_at from chief_of_staff__events").all();
-  const setEvent = db.prepare("update chief_of_staff__events set body = ?, added_at = ? where seq = ?");
-  for (const e of events) {
-    let body = e.body;
-    try {
-      const b = JSON.parse(body);
-      if (b && typeof b.saidAt === "string") body = JSON.stringify({ ...b, saidAt: back(b.saidAt) });
-    } catch {}
-    setEvent.run(body, e.added_at == null ? null : e.added_at - ms, e.seq);
+  if (has("chief_of_staff__messages")) {
+    const rows = db.prepare("select number, said_at, recorded_at from chief_of_staff__messages").all();
+    const set = db.prepare("update chief_of_staff__messages set said_at = ?, recorded_at = ? where number = ?");
+    for (const m of rows) set.run(back(m.said_at), back(m.recorded_at), m.number);
+    moved.messages = rows.length;
   }
-  const notes = db.prepare("select path, updated_at from chief_of_staff__notes").all();
-  const setNote = db.prepare("update chief_of_staff__notes set updated_at = ? where path = ?");
-  for (const n of notes) setNote.run(back(n.updated_at), n.path);
-  process.stderr.write(`moved ${messages.length} messages, ${events.length} events, ${notes.length} notes\n`);
+  if (has("chief_of_staff__events")) {
+    const rows = db.prepare("select seq, body, added_at from chief_of_staff__events").all();
+    const set = db.prepare("update chief_of_staff__events set body = ?, added_at = ? where seq = ?");
+    for (const e of rows) {
+      let body = e.body;
+      try {
+        const b = JSON.parse(body);
+        if (b && typeof b.saidAt === "string") body = JSON.stringify({ ...b, saidAt: back(b.saidAt) });
+      } catch {}
+      set.run(body, e.added_at == null ? null : e.added_at - ms, e.seq);
+    }
+    moved.events = rows.length;
+  }
+  if (has("chief_of_staff__notes")) {
+    const rows = db.prepare("select path, updated_at from chief_of_staff__notes").all();
+    const set = db.prepare("update chief_of_staff__notes set updated_at = ? where path = ?");
+    for (const n of rows) set.run(back(n.updated_at), n.path);
+    moved.notes = rows.length;
+  }
 })();
+// The memory folder's files, whose modified times the agent can see.
+const fs = require("fs");
+const path = require("path");
+const walk = (dir) =>
+  fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(dir, e.name);
+        return e.isDirectory() ? walk(p) : e.isFile() ? [p] : [];
+      })
+    : [];
+const files = walk("/home/rome/.rome/default/apps/data/chief-of-staff/memory");
+for (const f of files) {
+  const st = fs.statSync(f);
+  fs.utimesSync(f, new Date(st.atimeMs - ms), new Date(st.mtimeMs - ms));
+}
+moved.memoryFiles = files.length;
+process.stderr.write(`moved ${JSON.stringify(moved)}\n`);
 JS
   moved=$((moved + hours))
   if [ "$moved" = 0 ]; then rm -f "$CLOCK_FILE"; else echo "$moved" >"$CLOCK_FILE"; fi
