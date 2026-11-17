@@ -383,6 +383,7 @@ enum SnapshotRunner {
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
+            await capture("59-markdown-lists", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-lists")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
             // The load-error bar: Retry, then its spinner while an attempt runs.
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),

@@ -36,6 +36,103 @@ import UIKit
         ])
     }
 
+    @Test func aNestedBulletSitsUnderItsItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - a1
+          - a2
+        - b
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["a1", "a2"])]),
+                "b",
+            ]),
+        ])
+    }
+
+    @Test func listsNestThreeLevelsAndStepBackOut() {
+        let blocks = MarkdownParser.parse("""
+        - a
+            - b
+                - c
+            - d
+        - e
+        """)
+        let c = ListItem(text: "b", children: [.list(ordered: false, start: 1, items: ["c"])])
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: [c, "d"])]),
+                "e",
+            ]),
+        ])
+    }
+
+    @Test func orderedAndBulletListsNestInEachOther() {
+        let blocks = MarkdownParser.parse("""
+        1. Pack
+           - passport
+           - charger
+        2. Leave
+           3. taxi
+           4. train
+        """)
+        #expect(blocks == [
+            .list(ordered: true, start: 1, items: [
+                ListItem(text: "Pack", children: [.list(ordered: false, start: 1, items: ["passport", "charger"])]),
+                ListItem(text: "Leave", children: [.list(ordered: true, start: 3, items: ["taxi", "train"])]),
+            ]),
+        ])
+    }
+
+    @Test func aTabNestsAnItem() {
+        #expect(MarkdownParser.parse("- a\n\t- b") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])])]),
+        ])
+    }
+
+    @Test func theOtherMarkerUnderAnItemStartsASecondNestedList() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+          1. c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [
+                    .list(ordered: false, start: 1, items: ["b"]),
+                    .list(ordered: true, start: 1, items: ["c"]),
+                ]),
+            ]),
+        ])
+    }
+
+    @Test func aContinuationJoinsTheInnermostItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+            more
+        - c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b more"])]),
+                "c",
+            ]),
+        ])
+    }
+
+    @Test func aListThatStartsIndentedStaysOneLevel() {
+        #expect(MarkdownParser.parse("  - a\n  - b") == [.list(ordered: false, start: 1, items: ["a", "b"])])
+    }
+
+    @Test func blankLinesBetweenItemsKeepTheListAndItsNesting() {
+        #expect(MarkdownParser.parse("- a\n\n  - b\n\n- c\n\nAfter") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])]), "c"]),
+            .paragraph("After"),
+        ])
+    }
+
     @Test func aCommentLineShowsNothingAndSeparatesBlocks() {
         let blocks = MarkdownParser.parse("""
         Details.
@@ -943,5 +1040,11 @@ final class StubBackend: RomeBackend {
         // The top-left pixel, drawn into a 1×1 context.
         context.draw(cgImage, in: CGRect(x: 0, y: -CGFloat(cgImage.height - 1), width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
         #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[3] > 200, "top-left pixel \(pixel)")
+    }
+}
+
+extension ListItem: ExpressibleByStringLiteral {
+    public init(stringLiteral text: String) {
+        self.init(text: text)
     }
 }
