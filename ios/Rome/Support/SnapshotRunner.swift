@@ -302,6 +302,9 @@ enum SnapshotRunner {
             await capture("43c-connect-sheet-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet(health) }
             await capture("43d-connect-sheet-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet("device") }
             model.debugCommand = .connectSheet(nil)
+            // The next command in the same pass would hide this one from the
+            // shell, and the sheet would stay over every later screen.
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
@@ -548,6 +551,8 @@ enum SnapshotRunner {
                     model.update.debugShowUpdated(target)
                 }
             }
+            // Said once: the dark pass's Chat would show it again otherwise.
+            model.update.clearUpdated()
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }

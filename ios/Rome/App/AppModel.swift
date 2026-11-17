@@ -747,6 +747,10 @@ final class AppModel {
     private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
     private var foreground = ForegroundGate()
+    /// Nothing over the whole app hides its pages: it is on screen, with no
+    /// device connect sheet or stacking game over it. A line said once (the
+    /// "updated" notice) waits while it is false.
+    var pagesUncovered: Bool { !foreground.isInBackground && connections.request == nil && stackGame == nil }
 
     /// The pictures the open workspace loaded; `shared` in the app.
     private let images: StoredImageCache

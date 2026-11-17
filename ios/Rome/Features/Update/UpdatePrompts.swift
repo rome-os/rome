@@ -134,12 +134,19 @@ struct UpdatedNotice: View {
 
     private var updater: InstanceUpdater { model.update }
 
+    /// Whether the line shows, and so is used up: only on the chat in front,
+    /// with nothing over the whole app. A hidden composer leaves it for the
+    /// next one the guardian sees.
+    static func shows(chatInFront: Bool, pagesUncovered: Bool) -> Bool {
+        chatInFront && pagesUncovered
+    }
+
     var body: some View {
         // Part of the fixed bar with the composer: it comes and goes in place,
         // with no motion of its own, so the space under the transcript never
         // changes on its own schedule.
         Group {
-            if visible, let version = updater.updatedInBackgroundTo {
+            if Self.shows(chatInFront: visible, pagesUncovered: model.pagesUncovered), let version = updater.updatedInBackgroundTo {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle")
                         .romeFont(14, .semibold)
