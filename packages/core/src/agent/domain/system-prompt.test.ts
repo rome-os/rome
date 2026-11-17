@@ -149,6 +149,9 @@ describe("buildSystemPrompt", () => {
     });
     expect(prompt.startsWith("Fixed.\n\nSuffix.\n\n---\n\n# Diagrams\n\n")).toBe(true);
     expect(prompt).toContain("```mermaid");
+    // Cards, restrained: structured content only, one per reply.
+    expect(prompt).toContain("# Cards");
+    expect(prompt).toContain("At most one card per reply");
   });
 
   it("gives diagrams to no app's agent, no agent that delegates, and nothing that draws plain text", () => {

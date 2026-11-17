@@ -208,7 +208,20 @@ describe("romeToolPorts sessionTools", () => {
       "connect_card",
       "propose_routine",
       "share_location",
+      "show_card",
     ]);
+  });
+
+  it("serves no second show_card where the session's own tools show an agent card", async () => {
+    const ownCard = {
+      name: "show_card",
+      description: "",
+      inputSchema: {},
+      handler: async () => ({ content: [] }),
+    };
+    const { sessionTools } = ports(rs.fn(async () => [ownCard]));
+    const tools = await sessionTools.forTurn(turn(), true);
+    expect(tools.filter((tool) => tool.name === "show_card")).toEqual([ownCard]);
   });
 
   it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
@@ -229,6 +242,7 @@ describe("romeToolPorts sessionTools", () => {
       "propose_routine",
       "connect_account",
       "share_location",
+      "show_card",
     ]);
     const connect = tools.find((tool) => tool.name === "connect_account")!;
     const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
@@ -251,6 +265,7 @@ describe("romeToolPorts sessionTools", () => {
       "propose_routine",
       "connect_account",
       "share_location",
+      "show_card",
     ]);
     expect(provided).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -261,21 +276,26 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine, connect_account and share_location to a turn with no speaker", async () => {
+  it("serves only propose_routine, connect_account, share_location and show_card to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
     expect(tools.map((tool) => tool.name)).toEqual([
       "propose_routine",
       "connect_account",
       "share_location",
+      "show_card",
     ]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves only connect_account and share_location where cards draw as plain text", async () => {
+  it("serves only connect_account, share_location and show_card, each refusing, where cards draw as plain text", async () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
-    expect(tools.map((tool) => tool.name)).toEqual(["connect_account", "share_location"]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "connect_account",
+      "share_location",
+      "show_card",
+    ]);
   });
 });
 

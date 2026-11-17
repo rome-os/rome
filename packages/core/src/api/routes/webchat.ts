@@ -154,6 +154,7 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { agentCardPart, isShowCardTool } from "../../chats/agent-card.js";
 import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
 import {
   locationAnswerPrompt,
@@ -557,6 +558,21 @@ function trustedWidget(
 ): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
+  // An agent card is Rome's own: trusted only from core's `show_card`, and
+  // checked again here, since the stored part is drawn on every load
+  // (docs/domains/chats.md#agent-card). No other tool may show a core card.
+  if (widget.appId === "core") {
+    const card =
+      isShowCardTool(msg.tool) && actionName === undefined && "ui" in widget && !widget.bind
+        ? agentCardPart(widget.ui, widget.text, msg.toolUseId)
+        : null;
+    if (card && "part" in card) return card.part;
+    log.warn("rejected widget: a core card not shown by show_card, or not a valid agent card", {
+      sessionId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+    });
+    return null;
+  }
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
   if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
     log.warn("rejected widget: not shown by an action its app owns", {

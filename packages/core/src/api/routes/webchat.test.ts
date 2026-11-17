@@ -5915,6 +5915,114 @@ describe("Webchat API", () => {
       });
     });
 
+    // docs/domains/chats.md#agent-card
+    describe("an agent card", () => {
+      const HEALTH = {
+        components: [
+          { id: "root", component: "Column", children: ["title", "stats"] },
+          { id: "title", component: "Text", text: "Today's health", variant: "h4" },
+          { id: "stats", component: "Row", children: ["sleep", "steps"] },
+          { id: "sleep", component: "Stat", label: "Sleep", value: "7h 12m" },
+          { id: "steps", component: "Stat", label: "Steps", value: 8432 },
+        ],
+      };
+      const cardOutput = (ui: unknown) => [
+        {
+          type: "text",
+          text: JSON.stringify({
+            showWidget: true,
+            appId: "core",
+            ui,
+            text: "Sleep 7h 12m, 8,432 steps.",
+          }),
+        },
+      ];
+      const playCard = async (events: () => AsyncGenerator<unknown>) => {
+        const ctl = mockScriptedManager();
+        ctl.setEvents(events as never);
+        const app = createWebchatRuntime(deps).routes;
+        const sessionId = await newSession(app);
+        await drainTurn(
+          app,
+          await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "how did I do today?" }),
+          }),
+        );
+        return (await assistantPartsIn(sessionId)).filter((p) => p.type === "widget");
+      };
+
+      it("is stored from show_card as Rome's own widget", async () => {
+        const widgets = await playCard(async function* () {
+          yield { type: "tool_use", id: "tu-card", tool: "show_card", input: {} };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-card",
+            tool: "show_card",
+            output: cardOutput(HEALTH),
+          };
+          yield { type: "result", content: "" };
+        });
+        expect(widgets).toEqual([
+          {
+            type: "widget",
+            toolUseId: "tu-card",
+            appId: "core",
+            ui: HEALTH,
+            text: "Sleep 7h 12m, 8,432 steps.",
+          },
+        ]);
+      });
+
+      it("is not stored when another tool prints the same output", async () => {
+        registerAppAction("show_today", "meals");
+        const widgets = await playCard(async function* () {
+          yield { type: "tool_use", id: "tu-bash", tool: "Bash", input: {} };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-bash",
+            tool: "Bash",
+            output: cardOutput(HEALTH),
+          };
+          yield {
+            type: "tool_use",
+            id: "tu-action",
+            tool: "execute_action",
+            input: { action_name: "show_today" },
+          };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-action",
+            tool: "execute_action",
+            output: cardOutput(HEALTH),
+          };
+          yield { type: "result", content: "" };
+        });
+        expect(widgets).toEqual([]);
+      });
+
+      it("is checked again: a card with a button is not stored, even from show_card", async () => {
+        const ui = {
+          components: [
+            { id: "root", component: "Button", child: "go", action: { event: { name: "go" } } },
+            { id: "go", component: "Text", text: "Go" },
+          ],
+        };
+        const widgets = await playCard(async function* () {
+          yield { type: "tool_use", id: "tu-card", tool: "show_card", input: {} };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-card",
+            tool: "show_card",
+            output: cardOutput(ui),
+          };
+          yield { type: "result", content: "" };
+        });
+        expect(widgets).toEqual([]);
+      });
+    });
+
     it("stores a described card the agent waits on as a pending interaction, which an answer resolves", async () => {
       registerAppAction("show_today", "meals");
       const ui = {

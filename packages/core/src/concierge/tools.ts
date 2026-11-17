@@ -12,9 +12,10 @@ import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/ap
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import {
-  AGENT_CARD_MAX_TEXT_CHARS,
-  AGENT_CARD_MAX_UI_CHARS,
   agentCardPart,
+  SHOW_CARD_INPUT_SCHEMA,
+  SHOW_CARD_TOOL,
+  showCardDescription,
 } from "../chats/agent-card.js";
 import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
@@ -1656,34 +1657,11 @@ export async function buildConciergeTools(
         }),
     },
     {
-      name: "show_card",
-      description:
-        "Show the guardian structured content as a card you compose: steps or an itinerary, options compared, or a few key numbers. It only shows; nobody answers it, and you go on after it. " +
-        "`ui` is an A2UI card: a flat list of components, each with an `id`, naming its children by id, drawn from the one whose id is `root`. Components: " +
-        "Text {text, variant?: h1|h2|h3|h4|h5|body|caption}; Stat {label, value, unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row and Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
-        "Write every value out: no `data`, `bind` or `{ path }`. No Button, ChoicePicker or TextField: to ask the guardian something, use the question card. " +
-        `\`ui\` stays under ${AGENT_CARD_MAX_UI_CHARS} characters of JSON. ` +
-        "`text` is the same content as plain text: the chat's line for the card, what a lock screen shows, and what you read back later. " +
-        "A refused card says why: fix it once, or say the content with `say` instead. Where cards cannot show, the answer says so: say it with `say`.",
-      inputSchema: {
-        type: "object",
-        required: ["ui", "text"],
-        properties: {
-          ui: {
-            type: "object",
-            required: ["components"],
-            properties: {
-              components: { type: "array", items: { type: "object" } },
-            },
-          },
-          text: {
-            type: "string",
-            description: `The card's content as plain text, at most ${AGENT_CARD_MAX_TEXT_CHARS} characters.`,
-          },
-        },
-      },
+      name: SHOW_CARD_TOOL,
+      description: showCardDescription("say the content with `say`"),
+      inputSchema: SHOW_CARD_INPUT_SCHEMA,
       handler: (input, call) =>
-        runTool("show_card", input, async (args) => {
+        runTool(SHOW_CARD_TOOL, input, async (args) => {
           const { chatId, turnId } = currentTurn();
           if (context.widgets !== "card") {
             throw new Error(

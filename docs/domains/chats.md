@@ -324,6 +324,7 @@ Rome's own widget whose look the agent composes, to show structured content laid
 - Its content lives in its message, a snapshot of the card as shown. It reads nothing from anywhere when drawn, and never changes afterwards.
 - The plain-text line is the card for every reader that cannot draw it: a text-only platform, the lock screen, and the agent itself reading the chat later.
 - An agent shows one only where the place draws cards. Anywhere else it sends the content as a message.
+- Any agent may show one: the Concierge in its chats, and every other agent in its chat or task chat, such as a routine's daily summary. Only Rome's own card tool shows one. Anything else that looks like one, such as an app's action or a command's output, is not a card.
 - The agent uses one only for content with a real structure, at most one per reply, and its messages around the card never repeat it.
 
 ## Client

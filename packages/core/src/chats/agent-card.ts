@@ -24,6 +24,49 @@ export const AGENT_CARD_MAX_UI_CHARS = 8000;
 /** The most an agent card's plain-text line may hold. */
 export const AGENT_CARD_MAX_TEXT_CHARS = 2000;
 
+/** The name of the tool that shows an agent card, for the Concierge and for every other agent. */
+export const SHOW_CARD_TOOL = "show_card";
+
+/** Whether `tool` is the tool that shows an agent card. A provider may drop
+ *  the `mcp__<server>__` prefix, so a prefixed name matches too. */
+export function isShowCardTool(tool: unknown): boolean {
+  return (
+    typeof tool === "string" && (tool === SHOW_CARD_TOOL || tool.endsWith(`__${SHOW_CARD_TOOL}`))
+  );
+}
+
+/** What the model reads of `show_card`. `sayInstead` names how this agent
+ *  sends plain text, for a card it cannot show. */
+export function showCardDescription(sayInstead: string): string {
+  return (
+    "Show the guardian structured content as a card you compose: steps or an itinerary, options compared, or a few key numbers. It only shows; nobody answers it, and you go on after it. " +
+    "`ui` is an A2UI card: a flat list of components, each with an `id`, naming its children by id, drawn from the one whose id is `root`. Components: " +
+    "Text {text, variant?: h1|h2|h3|h4|h5|body|caption}; Stat {label, value, unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row and Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
+    "A heading Text with a caption Text under it reads as the card's title and subtitle. Stats in one Row show as a grid. " +
+    "Write every value out: no `data`, `bind` or `{ path }`. No Button, ChoicePicker or TextField: to ask the guardian something, use the question card. " +
+    `\`ui\` stays under ${AGENT_CARD_MAX_UI_CHARS} characters of JSON. ` +
+    "`text` is the same content as plain text: the chat's line for the card, what a lock screen or a text-only chat shows, and what you read back later. " +
+    `A refused card says why: fix it once, or ${sayInstead} instead. Where cards cannot show, the answer says so: ${sayInstead}.`
+  );
+}
+
+/** The input `show_card` takes. */
+export const SHOW_CARD_INPUT_SCHEMA = {
+  type: "object",
+  required: ["ui", "text"],
+  properties: {
+    ui: {
+      type: "object",
+      required: ["components"],
+      properties: { components: { type: "array", items: { type: "object" } } },
+    },
+    text: {
+      type: "string",
+      description: `The card's content as plain text, at most ${AGENT_CARD_MAX_TEXT_CHARS} characters.`,
+    },
+  },
+} as const;
+
 type AgentCardPart = Extract<MessagePart, { type: "widget" }> & { ui: WidgetUi };
 
 /** Where a value reads the card's data model, which an agent card has none of. */
