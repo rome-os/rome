@@ -4153,13 +4153,17 @@ describe("Concierge chat", () => {
     try {
       rs.setSystemTime(new Date("2026-11-19T17:00:00Z"));
       const shanghai = new ConciergeService({
-        settingsRepo: { get: async (key: string) => (key === "guardianTimezone" ? "Asia/Shanghai" : null) },
-        webchatRepo: { getSession: async (id: string) => ({ id, agentName: CONCIERGE_AGENT_ID, ownerKey: null }) },
+        settingsRepo: {
+          get: async (key: string) => (key === "guardianTimezone" ? "Asia/Shanghai" : null),
+        },
+        webchatRepo: {
+          getSession: async (id: string) => ({ id, agentName: CONCIERGE_AGENT_ID, ownerKey: null }),
+        },
         owners,
       } as unknown as ConciergeDeps);
-      expect(await shanghai.turnHeader({ id: "concierge", name: "Concierge", main: true })).toContain(
-        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
-      );
+      expect(
+        await shanghai.turnHeader({ id: "concierge", name: "Concierge", main: true }),
+      ).toContain("<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>");
     } finally {
       rs.useRealTimers();
     }
