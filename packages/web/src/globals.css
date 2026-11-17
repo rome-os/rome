@@ -765,9 +765,11 @@ button.rome-upgrade-row:hover {
     --row-gap: 0.125rem;
     --row-child-pl: 2.4375rem;
     --row-trail-mr: 0.375rem;
-    /* The chat list's switcher sits a little left of the icon column, since its
-       icon is centred in a segment. */
-    --row-switcher-pl: 0.1875rem;
+    /* The chat list's switcher: its icon sits 11px inside its left edge (4px
+       track + 7px segment inset), so with a 7px edge the icon is at x=18,
+       and each segment stays 28px wide. */
+    --row-switcher-pl: 0.4375rem;
+    --row-seg-px: 0.375rem;
     /* A Concierge chat's floating header, centred on the sidebar's 56px top bar. */
     --control-header-pt: 0.375rem;
     /* A Concierge chat's floating header: the mascot's badge, the name tag

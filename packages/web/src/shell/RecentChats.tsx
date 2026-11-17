@@ -333,7 +333,7 @@ function ChatModeSwitch({
       onValueChange={onChange}
       // The kit's selected pill is the canvas colour, which on a dark track is
       // barely lighter than the track. Dark lifts it with the foreground.
-      className="shrink-0 dark:[&_[aria-checked=true]]:bg-foreground/20"
+      className="shrink-0 [&_[role=radio]]:px-[var(--row-seg-px)] dark:[&_[aria-checked=true]]:bg-foreground/20"
       options={[
         {
           value: "chat",
