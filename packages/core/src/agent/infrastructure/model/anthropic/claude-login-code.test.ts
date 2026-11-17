@@ -92,6 +92,15 @@ describe("extractClaudeLoginCode", () => {
     );
   });
 
+  it("rejects a code that would open a prompt mode in the CLI", () => {
+    const [left, right] = CODE.split("#");
+    for (const lead of ["!", "/", "#", "&"]) {
+      expect(() => extractClaudeLoginCode(`${lead}${left}#${right}`)).toThrow(
+        ClaudeLoginCodeValidationError,
+      );
+    }
+  });
+
   it("rejects callback URLs without a code parameter", () => {
     expect(() => extractClaudeLoginCode("https://platform.claude.com/oauth/code/callback")).toThrow(
       ClaudeLoginCodeValidationError,

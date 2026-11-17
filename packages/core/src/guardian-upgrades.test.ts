@@ -46,7 +46,7 @@ const silentSource: VoiceInputSource = {
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
   const handlers = [
     attachDesktopProxy(server, db),
-    attachTerminalServer(server, db),
+    attachTerminalServer(server, db, new DashboardAccessState()),
     attachLiveEventsServer(server, db, new DashboardAccessState(), noSources),
     attachNodeConsoleServer(server, db, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),

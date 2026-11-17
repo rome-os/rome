@@ -3,7 +3,8 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import * as pty from "node-pty";
 import type { DrizzleDb } from "./db/index.js";
-import { gateGuardianUpgrade } from "./access/ws-guardian-gate.js";
+import type { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { gateUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";
@@ -68,9 +69,15 @@ export interface TerminalServerOptions {
   onAuthCommandExit?: (preset: string) => void;
 }
 
+/**
+ * Admits the guardian and visitors on the dashboard allow-list, who may already
+ * connect model accounts in Settings. The PTY takes no keystrokes: only a
+ * validated sign-in code reaches it, so the socket cannot be used as a shell.
+ */
 export function attachTerminalServer(
   httpServer: Server,
   db: DrizzleDb,
+  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   options: TerminalServerOptions = {},
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
@@ -85,9 +92,9 @@ export function attachTerminalServer(
 
     socket.on("error", () => socket.destroy());
 
-    void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
-        if (!allowed || socket.destroyed) return;
+    void gateUpgrade(req, socket, db, dashboardAccess)
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
         const preset = url.searchParams.get("preset");
         if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
           rejectUpgrade(socket, 400, "Bad Request");
@@ -166,8 +173,8 @@ export function attachTerminalServer(
     // the first-run wizard's theme and Claude AI login by writing Enter back to
     // the PTY, and forwards the sign-in URL and code-rejected errors to the
     // client. Runs for every preset — it only matches the Claude login output, so
-    // logout sessions stay silent. The raw `output` stream is always sent too, so
-    // a parser miss degrades to the terminal escape hatch rather than a stuck UI.
+    // logout sessions stay silent. The raw `output` stream is always sent too, for
+    // diagnosing a parser miss.
     const loginWatcher = createClaudeLoginWatcher(
       (event) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -207,9 +214,9 @@ export function attachTerminalServer(
     ws.on("message", (raw: Buffer | string) => {
       try {
         const msg = JSON.parse(typeof raw === "string" ? raw : raw.toString());
-        if (msg.type === "input" && typeof msg.data === "string") {
-          ptyProcess.write(msg.data);
-        } else if (msg.type === "submit_code" && typeof msg.code === "string") {
+        // There is no raw `input` message: after sign-in the CLI stays in its
+        // agent prompt, where typed text runs commands on the host.
+        if (msg.type === "submit_code" && typeof msg.code === "string") {
           // Native code box → the CLI's "Paste code here" prompt. Trim stray
           // whitespace the user may have copied around the code, extract the
           // `code=` value if the browser copied a callback URL, then send the

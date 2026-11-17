@@ -31,7 +31,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. `/ws/terminal` also admits such a visitor, who can already manage model accounts in Settings. It runs only the Claude sign-in preset and takes no keystrokes, only a validated sign-in code, so it is not a shell. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

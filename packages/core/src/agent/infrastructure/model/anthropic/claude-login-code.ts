@@ -53,6 +53,10 @@ function validateClaudeLoginCode(code: string): string {
   const parts = normalized.split("#");
   if (parts.length !== 2) invalidCode();
   const [left, right] = parts;
+  // Codes start with a letter or digit. After sign-in the CLI keeps its agent
+  // prompt open, where a leading `!`, `/` or `#` would run a shell command, a
+  // slash command or a memory write.
+  if (!/^[A-Za-z0-9]/.test(left)) invalidCode();
   if (
     left.length < MIN_CLAUDE_LOGIN_CODE_PART_LENGTH ||
     right.length < MIN_CLAUDE_LOGIN_CODE_PART_LENGTH

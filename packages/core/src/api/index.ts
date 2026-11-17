@@ -377,11 +377,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, deps.db, {
-        onAuthCommandExit: () => {
-          void deps.modelAccounts.refresh().catch(() => {});
+      const terminalServer = attachTerminalServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          onAuthCommandExit: () => {
+            void deps.modelAccounts.refresh().catch(() => {});
+          },
         },
-      });
+      );
       const liveEvents = attachLiveEventsServer(
         server as Server,
         deps.db,
