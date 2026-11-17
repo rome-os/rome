@@ -63,6 +63,8 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
+import { guardianNow } from "./alerts.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 
 import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
@@ -216,6 +218,8 @@ export interface ConciergeDashboard {
 export interface ConciergeDeps {
   skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
+  /** The guardian's local time, as each turn names it. Absent, the clock in the guardian's time zone. */
+  localNow?: () => Promise<string>;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;
   webchatRepo: Pick<
@@ -531,15 +535,21 @@ export class ConciergeService {
   }
 
   /**
-   * What every turn in a Concierge chat opens with: the chat it runs in, and
-   * the person it serves, who may not be the guardian.
+   * What every turn in a Concierge chat opens with: the chat it runs in, the
+   * person it serves, who may not be the guardian, and the guardian's local
+   * date, weekday and time. The model's own date line names no weekday and
+   * follows the container's clock, which runs in UTC; this one rides each
+   * turn, so the cached system prompt never changes with the clock.
    */
   async turnHeader(chat: ConciergeChatRef): Promise<string> {
     // A chat whose owner cannot be found serves no one: never the guardian by default.
     const ownerKey = await this.ownerOfChat(chat.id);
     if (ownerKey === null) throw new Error(`No Concierge chat ${chat.id}`);
     const owner = await this.owners.profileOf(ownerKey);
-    return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
+    const now = this.deps.localNow
+      ? await this.deps.localNow()
+      : guardianNow(Date.now(), await resolveGuardianTimezone(this.deps.settingsRepo));
+    return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}\n<now>${now}</now>`;
   }
 
   /** Whether a chat is its owner's main Concierge chat. */

@@ -135,9 +135,11 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
   };
 }
 
-/** The line that opens every Concierge turn's input in the main chat. */
-const MAIN_LINE =
-  '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n\n';
+/** The guardian's local time every harness turn names. */
+const LOCAL_NOW = "Fri 20/11/2026 09:30 (Europe/Berlin)";
+
+/** The lines that open every Concierge turn's input in the main chat. */
+const MAIN_LINE = `<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n<now>${LOCAL_NOW}</now>\n\n`;
 
 /** What the Concierge has already said in its running turn, unless a test says it has not. */
 const ACKNOWLEDGEMENT: Row = {
@@ -285,6 +287,7 @@ function setup(
     skillCatalog: {
       find: (name: string) => (name === "coding:app_creation" ? { name } : undefined),
     },
+    localNow: async () => LOCAL_NOW,
     settingsRepo: {
       get: async () => {
         if (options.settingsDelayMs)
@@ -4137,12 +4140,29 @@ describe("Concierge chat", () => {
       },
       owners,
     } as unknown as ConciergeDeps);
-    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toBe(
-      `<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
+    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toMatch(
+      new RegExp(
+        `^<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n<now>\\w{3} \\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2} \\(.+\\)</now>$`,
+      ),
     );
-    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
-      '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
+    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toMatch(
+      /^<concierge_chat id="concierge" name="Concierge" main="true"\/>\n<concierge_owner role="guardian" name="Eric"\/>\n<now>/,
     );
+    // The weekday and date are the guardian's own, not the container's UTC day.
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2026-11-19T17:00:00Z"));
+      const shanghai = new ConciergeService({
+        settingsRepo: { get: async (key: string) => (key === "guardianTimezone" ? "Asia/Shanghai" : null) },
+        webchatRepo: { getSession: async (id: string) => ({ id, agentName: CONCIERGE_AGENT_ID, ownerKey: null }) },
+        owners,
+      } as unknown as ConciergeDeps);
+      expect(await shanghai.turnHeader({ id: "concierge", name: "Concierge", main: true })).toContain(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
     // A dashboard admin is served while on the allow-list, the guardian always.
     expect(await service.isServed("visitor:acct-ann")).toBe(true);
     expect(await service.isServed("visitor:acct-unknown")).toBe(false);
