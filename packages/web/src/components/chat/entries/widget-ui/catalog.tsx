@@ -96,6 +96,7 @@ function clearValue(
   dataContext.set(path, list ? [] : "");
 }
 
+// One type scale, two weights: headings medium, everything else regular.
 const textClass: Record<string, string> = {
   h1: "text-title",
   h2: "text-title",
@@ -105,6 +106,8 @@ const textClass: Record<string, string> = {
   caption: "text-aux text-muted-foreground",
   body: "text-ui",
 };
+
+const HEADINGS = new Set(["h1", "h2", "h3", "h4", "h5"]);
 
 const justifyClass: Record<string, string> = {
   start: "justify-start",
@@ -152,8 +155,10 @@ const Text = createComponentImplementation(TextApi, ({ props }) => {
   );
 });
 
+// A tile on a subtle fill: the label above, the value below it with its
+// unit, and an optional caption such as the usual range.
 const Stat = createComponentImplementation(StatApi, ({ props }) => (
-  <div className="flex min-w-0 flex-col">
+  <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2.5">
     <span className="text-aux text-muted-foreground">{shown(props.label)}</span>
     <span className="text-title text-foreground tabular-nums">
       {shown(props.value)}
@@ -173,20 +178,24 @@ const CardMarkdown = createComponentImplementation(MarkdownApi, ({ props }) => (
   </Markdown>
 ));
 
+// The label on the left and the share on the right, above a thin track.
 const Progress = createComponentImplementation(ProgressApi, ({ props }) => {
   const max = typeof props.max === "number" && props.max > 0 ? props.max : 1;
   const value = typeof props.value === "number" ? props.value : 0;
   const share = Math.max(0, Math.min(1, value / max));
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      {props.label ? <span className="text-aux text-muted-foreground">{props.label}</span> : null}
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3 text-aux">
+        <span className="min-w-0 text-foreground">{props.label ?? ""}</span>
+        <span className="text-muted-foreground tabular-nums">{Math.round(share * 100)}%</span>
+      </div>
       <div
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={max}
         aria-valuenow={value}
         aria-label={props.label ?? undefined}
-        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        className="h-1.5 w-full overflow-hidden rounded-full bg-border"
       >
         <div className="h-full rounded-full bg-primary" style={{ width: `${share * 100}%` }} />
       </div>
@@ -225,46 +234,118 @@ const Image = createComponentImplementation(ImageApi, ({ props }) =>
   ),
 );
 
-const Row = createComponentImplementation(RowApi, ({ props, buildChild }) => (
-  <div
-    className={cn(
-      "flex min-w-0 flex-row flex-wrap gap-3",
-      justifyClass[props.justify ?? "start"],
-      alignClass[props.align ?? "center"],
-    )}
-  >
-    {children(props.children as Child[], buildChild)}
-  </div>
-));
+/** The type of the component with id `id`, or undefined. */
+function typeOf(
+  context: { surfaceComponents: { get(id: string): { type: string } | undefined } },
+  id: string,
+) {
+  return context.surfaceComponents.get(id)?.type;
+}
 
-const Column = createComponentImplementation(ColumnApi, ({ props, buildChild }) => (
-  <div
-    className={cn(
-      "flex min-w-0 flex-col gap-2",
-      justifyClass[props.justify ?? "start"],
-      alignClass[props.align ?? "stretch"],
-    )}
-  >
-    {children(props.children as Child[], buildChild)}
-  </div>
-));
+function variantOf(
+  context: {
+    surfaceComponents: { get(id: string): { properties: Record<string, unknown> } | undefined };
+  },
+  id: string,
+) {
+  const variant = context.surfaceComponents.get(id)?.properties.variant;
+  return typeof variant === "string" ? variant : undefined;
+}
 
-const List = createComponentImplementation(ListApi, ({ props, buildChild }) => (
-  <div
-    role="list"
-    className={cn(
-      "flex min-w-0 gap-1",
-      props.direction === "horizontal" ? "flex-row overflow-x-auto" : "flex-col",
-      alignClass[props.align ?? "stretch"],
-    )}
-  >
-    {children(props.children as Child[], buildChild).map((node, i) => (
-      <div role="listitem" key={i} className="min-w-0">
-        {node}
+/** The component ids a Row or Column names as its children, as the card
+ *  wrote them; the resolved `children` prop holds the renderer's node ids. */
+function childIdsOf(context: {
+  componentModel: { properties: Record<string, unknown> };
+}): string[] {
+  const named = context.componentModel.properties.children;
+  return Array.isArray(named) ? named.filter((id): id is string => typeof id === "string") : [];
+}
+
+const Row = createComponentImplementation(RowApi, ({ props, buildChild, context }) => {
+  const ids = childIdsOf(context);
+  // Numbers side by side read as an even two-column grid.
+  if (ids.length > 1 && ids.every((id) => typeOf(context, id) === "Stat")) {
+    return (
+      <div className="grid min-w-0 grid-cols-2 gap-2.5">
+        {children(props.children as Child[], buildChild)}
       </div>
-    ))}
-  </div>
-));
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 flex-row flex-wrap gap-3",
+        justifyClass[props.justify ?? "start"],
+        alignClass[props.align ?? "center"],
+      )}
+    >
+      {children(props.children as Child[], buildChild)}
+    </div>
+  );
+});
+
+// Children 12 apart, except a caption right under a heading, which is its
+// subtitle and sits 4 under it.
+const Column = createComponentImplementation(ColumnApi, ({ props, buildChild, context }) => {
+  const ids = childIdsOf(context);
+  const subtitle = (i: number) =>
+    i > 0 &&
+    typeOf(context, ids[i] ?? "") === "Text" &&
+    variantOf(context, ids[i] ?? "") === "caption" &&
+    typeOf(context, ids[i - 1] ?? "") === "Text" &&
+    HEADINGS.has(variantOf(context, ids[i - 1] ?? "") ?? "");
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 flex-col",
+        justifyClass[props.justify ?? "start"],
+        alignClass[props.align ?? "stretch"],
+      )}
+    >
+      {children(props.children as Child[], buildChild).map((node, i) => (
+        <div
+          key={i}
+          className={cn("flex min-w-0 flex-col", i > 0 && (subtitle(i) ? "mt-1" : "mt-3"))}
+        >
+          {node}
+        </div>
+      ))}
+    </div>
+  );
+});
+
+// Rows with a hairline between them, none after the last.
+const List = createComponentImplementation(ListApi, ({ props, buildChild }) =>
+  props.direction === "horizontal" ? (
+    <div
+      role="list"
+      className={cn(
+        "flex min-w-0 flex-row gap-2 overflow-x-auto",
+        alignClass[props.align ?? "stretch"],
+      )}
+    >
+      {children(props.children as Child[], buildChild).map((node, i) => (
+        <div role="listitem" key={i} className="min-w-0">
+          {node}
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div
+      role="list"
+      className={cn(
+        "flex min-w-0 flex-col divide-y divide-border",
+        alignClass[props.align ?? "stretch"],
+      )}
+    >
+      {children(props.children as Child[], buildChild).map((node, i) => (
+        <div role="listitem" key={i} className="min-w-0 py-2.5 first:pt-0 last:pb-0">
+          {node}
+        </div>
+      ))}
+    </div>
+  ),
+);
 
 const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => {
   const locked = useContext(WidgetLockedContext);

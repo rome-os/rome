@@ -705,17 +705,22 @@ final class DemoBackend: RomeBackend {
         return DemoBackend.agentCard("agent-itinerary", text: "周六东京一日：9:00 浅草寺；11:30 上野公园；14:00 秋叶原；18:30 新宿晚饭。", components)
     }()
 
-    static let agentNumbers: JSONValue = {
+    /// A routine's daily health summary, the case agent cards are for.
+    static let agentHealth: JSONValue = {
         let c = DemoBackend.component
         let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
-        return DemoBackend.agentCard("agent-numbers", text: "本月已花 3,180 元，预算 3,500 元（91%）。房租 2,400，吃饭 620，交通 160。", [
-            c("root", "Column", ["children": ids(["title", "stats", "budget"])]),
-            c("title", "Text", ["text": .string("本月开销"), "variant": .string("h3")]),
-            c("stats", "Row", ["children": ids(["rent", "food", "transport"])]),
-            c("rent", "Stat", ["label": .string("房租"), "value": .string("2,400"), "unit": .string("元")]),
-            c("food", "Stat", ["label": .string("吃饭"), "value": .string("620"), "unit": .string("元")]),
-            c("transport", "Stat", ["label": .string("交通"), "value": .string("160"), "unit": .string("元")]),
-            c("budget", "Progress", ["value": .number(3180), "max": .number(3500), "label": .string("预算 3,500 元，已花 3,180 元")]),
+        return DemoBackend.agentCard("agent-health", text: "今天的健康，对比最近 14 天：睡眠 7 小时 12 分，8,432 步，活动 512 千卡，锻炼 38 分钟，静息心率 58。晚饭后散步一会儿就能到一万步。", [
+            c("root", "Column", ["children": ids(["title", "subtitle", "stats", "goal", "advice"])]),
+            c("title", "Text", ["text": .string("今天的健康"), "variant": .string("h4")]),
+            c("subtitle", "Text", ["text": .string("对比最近 14 天"), "variant": .string("caption")]),
+            c("stats", "Row", ["children": ids(["sleep", "steps", "kcal", "exercise", "rhr"])]),
+            c("sleep", "Stat", ["label": .string("睡眠"), "value": .string("7 小时 12 分"), "caption": .string("通常 6:40–7:50")]),
+            c("steps", "Stat", ["label": .string("步数"), "value": .number(8432), "caption": .string("通常 6,900–9,800")]),
+            c("kcal", "Stat", ["label": .string("活动"), "value": .number(512), "unit": .string("千卡"), "caption": .string("通常 380–560")]),
+            c("exercise", "Stat", ["label": .string("锻炼"), "value": .number(38), "unit": .string("分钟"), "caption": .string("通常 20–45")]),
+            c("rhr", "Stat", ["label": .string("静息心率"), "value": .number(58), "unit": .string("次/分"), "caption": .string("通常 55–61")]),
+            c("goal", "Progress", ["value": .number(8432), "max": .number(10000), "label": .string("步数目标")]),
+            c("advice", "Text", ["text": .string("晚饭后散步一会儿，就能到一万步。")]),
         ])
     }()
 
@@ -1211,8 +1216,8 @@ final class DemoBackend: RomeBackend {
         messages["topic-cards"] = [
             user("ac1", "周六在东京怎么安排？", at: at(10, 0), session: "topic-cards"),
             parts([Self.agentItinerary], at: at(10, 1), session: "topic-cards"),
-            user("ac2", "这个月花了多少？", at: at(10, 5), session: "topic-cards"),
-            parts([Self.agentNumbers], at: at(10, 6), session: "topic-cards"),
+            user("ac2", "今天身体怎么样？", at: at(10, 5), session: "topic-cards"),
+            parts([Self.agentHealth], at: at(10, 6), session: "topic-cards"),
         ]
         // A narrow table, and one wider than the bubble that scrolls inside it.
         messages["topic-table"] = [

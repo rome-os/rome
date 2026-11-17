@@ -55,7 +55,11 @@ import { appKeysHandlers } from "./app-keys";
 import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
 import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
-import { AGENT_CARD_ITINERARY, AGENT_CARD_NUMBERS } from "../fixtures/agent-cards";
+import {
+  AGENT_CARD_HEALTH,
+  AGENT_CARD_ITINERARY,
+  CONNECT_CARD_A2UI,
+} from "../fixtures/agent-cards";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -628,8 +632,11 @@ const transcripts: Record<string, ChatMessage[]> = {
     afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
     afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
     // Cards the Concierge composed itself, each a message of its own.
-    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-07T14:25:00.000Z", "How did October go?", [
-      AGENT_CARD_NUMBERS,
+    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-07T14:24:00.000Z", "Open an issue in the repo", [
+      CONNECT_CARD_A2UI,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-07T14:25:00.000Z", "How did I do today?", [
+      AGENT_CARD_HEALTH,
     ]),
     ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-07T14:30:00.000Z", "周六在东京怎么安排？", [
       AGENT_CARD_ITINERARY,
