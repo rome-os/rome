@@ -9,9 +9,11 @@ import {
   type ChatListMode,
   chatListModeForRoute,
   readChatListMode,
+  readLastConciergeChatId,
   readLastOrdinaryChatId,
   subscribeChatListMode,
   writeChatListMode,
+  writeLastConciergeChatId,
   writeLastOrdinaryChatId,
 } from "@/lib/chat-list-mode";
 import { activeSessionFromPath, type ChatKind, chatKind, isChatPath } from "@/lib/chat-session";
@@ -21,6 +23,11 @@ export function useStoredChatListMode(): ChatListMode | null {
   return useSyncExternalStore(subscribeChatListMode, readChatListMode, () => null);
 }
 
+/** The Concierge chat last opened on this device (the main chat's id for the main chat), or null. */
+export function useLastConciergeChatId(): string | null {
+  return useSyncExternalStore(subscribeChatListMode, readLastConciergeChatId, () => null);
+}
+
 /** The ordinary chat last opened on this device, or null. */
 export function useLastOrdinaryChatId(): string | null {
   return useSyncExternalStore(subscribeChatListMode, readLastOrdinaryChatId, () => null);
@@ -28,8 +35,7 @@ export function useLastOrdinaryChatId(): string | null {
 
 /**
  * Moves the mode to the open chat's, once per navigation, and keeps the last
- * ordinary chat. The page the tab loaded on is no navigation: a refresh keeps
- * the stored mode, whatever chat it reopens. Call it once, from the shell, which stays mounted while the
+ * ordinary chat. Call it once, from the shell, which stays mounted while the
  * chat list comes and goes: a second caller would apply the same navigation
  * again and undo a switch the guardian made since. A guardian's own switch
  * between navigations stands.
@@ -69,26 +75,23 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
   });
   const applied = useRef<string | null>(null);
   const routeKey = `${location.key}:${location.pathname}`;
-  // The page this tab loaded on. It keeps the stored mode: a refresh or a first
-  // load never derives the mode from the address, only a later navigation does.
-  const loadedOn = useRef<string | null>(routeKey);
   const mode = route?.mode;
   const ordinaryChatId = route?.ordinaryChatId;
+  const conciergeChatId = route?.conciergeChatId;
   const onChatPage = isChatPath(location.pathname);
   useEffect(() => {
     // Leaving the chat pages forgets the last navigation, so Back to the same
     // history entry applies its mode again.
     if (!onChatPage) {
       applied.current = null;
-      loadedOn.current = null;
       return;
     }
     if (!mode || applied.current === routeKey) return;
     applied.current = routeKey;
-    if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
-    if (loadedOn.current === routeKey) return;
     writeChatListMode(mode);
-  }, [mode, ordinaryChatId, routeKey, onChatPage]);
+    if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
+    if (conciergeChatId) writeLastConciergeChatId(conciergeChatId);
+  }, [mode, ordinaryChatId, conciergeChatId, routeKey, onChatPage]);
 }
 
 /**

@@ -216,7 +216,48 @@ describe("the Chat / Concierge switch", () => {
       await screen.findByRole("link", { name: "Main chat" });
       expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
       expect(stored()).toBe("concierge");
-      // The open chat is an ordinary one, and a switch is not a navigation.
+      // The switch opens a chat of the mode it picks: the main chat.
+      expect(screen.getByTestId("path").textContent).toBe("/message");
+    });
+
+    it("opens the last ordinary chat on Chat, and a blank chat without one", async () => {
+      seedChatListMode({ mode: "concierge", lastChat: "mine" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/message");
+      await screen.findByRole("link", { name: "Main chat" });
+      await user.click(radio("Chat"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+    });
+
+    it("opens a blank chat on Chat when no ordinary chat was opened", async () => {
+      seedChatListMode({ mode: "concierge" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/message");
+      await screen.findByRole("link", { name: "Main chat" });
+      await user.click(radio("Chat"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat");
+    });
+
+    it("opens the last Concierge chat on Agent, else the main chat", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "topic-1" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/topic-1");
+    });
+
+    it("does nothing when the selected segment is clicked", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "topic-1" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Chat"));
       expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
     });
   });

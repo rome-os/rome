@@ -49,16 +49,22 @@ import {
   activeSessionFromPath,
   chatKind,
   isProjectChat,
+  chatPath,
   MAIN_CHAT_PATH,
   sessionActivityTime,
 } from "@/lib/chat-session";
 import {
   type ChatListMode,
   newChatShortcutForPlatform,
+  railChatHref,
   writeChatListMode,
 } from "@/lib/chat-list-mode";
-import { useStoredChatListMode } from "@/hooks/use-chat-list-mode";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
+import {
+  useLastConciergeChatId,
+  useLastOrdinaryChatId,
+  useStoredChatListMode,
+} from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist, useChatSessions } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   CONCIERGE_CHATS_QUERY_KEY,
@@ -464,6 +470,23 @@ export function RecentChats({
   );
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
   const storedMode = useStoredChatListMode();
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const lastConciergeChatId = useLastConciergeChatId();
+  // The switch opens a chat of the mode it picks, and the open chat sets the
+  // mode: the last Concierge chat opened, else the main chat; the last ordinary
+  // chat, else a blank one. Choosing the mode already showing does nothing.
+  const switchMode = (next: ChatListMode) => {
+    if (next === mode) return;
+    writeChatListMode(next);
+    navigate(
+      next === "concierge"
+        ? lastConciergeChatId
+          ? chatPath(lastConciergeChatId, conciergeChatId)
+          : MAIN_CHAT_PATH
+        : railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists),
+    );
+  };
   // A device with no stored mode starts in Chat.
   // While the Concierge is still being asked, the switcher shows at the stored
   // mode: it is open to everyone, so no chat is the rare answer.
@@ -1140,7 +1163,7 @@ export function RecentChats({
             {showSwitcher ? (
               <ChatModeSwitch
                 mode={mode}
-                onChange={writeChatListMode}
+                onChange={switchMode}
                 conciergeUnread={conciergeUnread}
                 chatReplying={chatReplying}
               />
