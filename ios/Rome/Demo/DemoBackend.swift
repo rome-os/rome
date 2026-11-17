@@ -1234,6 +1234,10 @@ final class DemoBackend: RomeBackend {
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
             // Photos alone, with a mark: the badge sits on the photos' corner.
             marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
+            // Two messages in a row, the second marked: its badge sits over
+            // the bubble above, never under it.
+            user("er7", "还有一件事。", at: at(13, 12), session: "topic-errors"),
+            marked(user("er8", "明早 8 点叫我起床。", at: at(13, 12), session: "topic-errors"), "👀", status: "working"),
         ]
         // Cards the Concierge composed itself: Rome's own, every value
         // written out, with no `bind`.

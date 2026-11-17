@@ -782,6 +782,13 @@ private final class TranscriptCell: UICollectionViewCell {
         taken = 0
     }
 
+    /// A newer row draws over an older one: a bubble's mark sits half over
+    /// its top edge, into the row above, and must not slip under that row.
+    override func apply(_ layoutAttributes: UICollectionViewLayoutAttributes) {
+        super.apply(layoutAttributes)
+        layer.zPosition = CGFloat(layoutAttributes.zIndex) * 100_000 + CGFloat(layoutAttributes.indexPath.item)
+    }
+
     override func preferredLayoutAttributesFitting(_ attributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
         guard let fitted = attributes.copy() as? UICollectionViewLayoutAttributes else { return attributes }
         let started = CACurrentMediaTime()
