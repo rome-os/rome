@@ -5,7 +5,12 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import type { InitialEntry } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { readChatListMode, readLastOrdinaryChatId, writeChatListMode } from "@/lib/chat-list-mode";
-import { LAST_CHAT_KEY, MODE_KEY, seedChatListMode } from "@/test/chat-list-mode";
+import {
+  LAST_CHAT_KEY,
+  LAST_CONCIERGE_KEY,
+  MODE_KEY,
+  seedChatListMode,
+} from "@/test/chat-list-mode";
 import "@/i18n";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 
@@ -131,6 +136,16 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
     act(() => go("/chat/topic"));
     await waitFor(() => expect(readChatListMode()).toBe("concierge"));
     expect(localStorage.getItem(LAST_CHAT_KEY)).toBe("mine");
+  });
+
+  it("remembers the last Concierge chat opened, the main chat's id for the main chat", async () => {
+    openShell("/chat/topic");
+    await waitFor(() => expect(localStorage.getItem(LAST_CONCIERGE_KEY)).toBe("topic"));
+    act(() => go("/chat/mine"));
+    await waitFor(() => expect(readChatListMode()).toBe("chat"));
+    expect(localStorage.getItem(LAST_CONCIERGE_KEY)).toBe("topic");
+    act(() => go("/message"));
+    await waitFor(() => expect(localStorage.getItem(LAST_CONCIERGE_KEY)).toBe("concierge"));
   });
 
   it("asks nothing for a chat a loaded chat list holds", async () => {

@@ -32,9 +32,9 @@ describe("modeOfChatKind", () => {
 
 describe("chatListModeForRoute", () => {
   it("puts the main chat's page in Concierge mode, with or without its id known", () => {
-    expect(route("/message")).toEqual({ mode: "concierge" });
+    expect(route("/message")).toEqual({ mode: "concierge", conciergeChatId: "main" });
     expect(route("/message", null, null)).toEqual({ mode: "concierge" });
-    expect(route("/chat/main")).toEqual({ mode: "concierge" });
+    expect(route("/chat/main")).toEqual({ mode: "concierge", conciergeChatId: "main" });
   });
 
   it("puts a blank chat in Chat mode, and a blank topic chat in Concierge mode", () => {
@@ -44,8 +44,8 @@ describe("chatListModeForRoute", () => {
   });
 
   it("follows the kind of the open chat, and names an ordinary one", () => {
-    expect(route("/chat/topic")).toEqual({ mode: "concierge" });
-    expect(route("/chat/task")).toEqual({ mode: "concierge" });
+    expect(route("/chat/topic")).toEqual({ mode: "concierge", conciergeChatId: "topic" });
+    expect(route("/chat/task")).toEqual({ mode: "concierge", conciergeChatId: "task" });
     expect(route("/chat/mine")).toEqual({ mode: "chat", ordinaryChatId: "mine" });
     expect(route("/chat/fork")).toEqual({ mode: "chat", ordinaryChatId: "fork" });
   });

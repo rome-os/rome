@@ -16,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -200,6 +201,11 @@ import {
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
 import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
+
+// What a click inside the scroller does not count as blank for: the composer
+// floor, the header, and anything clickable or editable (a message is judged apart).
+const THREAD_FOCUS_KEEP =
+  "[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -2103,10 +2109,25 @@ export function Chat({
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData, {
+          const accepted = await postSessionTurn(sendingSessionId, formData, {
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
+          // A reply the server took, sent inside a thread in focus, leaves the
+          // focus for the whole chat. A send the server turns down (a result
+          // that is not ok, or a thrown one) keeps the thread, so a retry still
+          // replies into it. Another thread opened meanwhile stays. The close is at once, then the view
+          // returns to the end of the chat.
+          if (
+            accepted.ok &&
+            snapshot.chatThread &&
+            focusRef.current?.root === snapshot.chatThread
+          ) {
+            await closeFocusRef.current(true);
+            scrollToBottom("auto");
+            if (!coarsePointer) composerRef.current?.focus();
+          }
+          return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
@@ -2128,6 +2149,8 @@ export function Chat({
       startSession,
       notifySessionsChanged,
       concierge,
+      scrollToBottom,
+      coarsePointer,
     ],
   );
 
@@ -2560,6 +2583,22 @@ export function Chat({
     </>
   );
 
+  // A click on the blank of a thread in focus goes back to the whole chat. A
+  // message, anything clickable, the composer and a text selection stay.
+  const leaveFocusOnBlankClick = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target as Element | null;
+    // A click in a menu or popover opened from a message bubbles here through
+    // its React parent, though it is not in the scroller.
+    if (!target?.closest || !event.currentTarget.contains(target)) return;
+    // A message's own box spans the column, so only what is inside it is the
+    // message: the box itself, beside its bubble, is blank.
+    const entry = target.closest("[data-thread-entry]");
+    if (entry && entry !== target) return;
+    if (target.closest(THREAD_FOCUS_KEEP)) return;
+    if (window.getSelection()?.toString()) return;
+    void closeFocus();
+  };
+
   // While a chat thread is in focus, the header's left corner shows the way
   // back to the whole chat, named for the task.
   const threadBack = focus ? (
@@ -2589,7 +2628,7 @@ export function Chat({
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
-      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-[var(--control-header-pt)]"
     >
       <ChatEdgeBlur edge="top" />
       {/* The phone shell's back and menu buttons move in here, and its bar
@@ -2709,6 +2748,7 @@ export function Chat({
                 query MUST match ChatTimelineRail's visibility gate. */}
               <div
                 ref={attachScroller}
+                onClick={focus ? leaveFocusOnBlankClick : undefined}
                 className={cn(
                   "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
                   // Concierge has no timeline rail, so no lane for it. Its

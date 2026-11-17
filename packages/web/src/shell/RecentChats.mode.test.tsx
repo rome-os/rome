@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -13,6 +13,8 @@ import { RecentChats } from "./RecentChats";
 
 const concierge = rs.hoisted(() => ({
   chatId: "concierge" as string | null,
+  // The Concierge's availability is still being asked.
+  loading: false,
   chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
   // Reads the Concierge's chats from the server, so a refetch shows.
   fromServer: false,
@@ -20,6 +22,12 @@ const concierge = rs.hoisted(() => ({
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChat: () => ({
+    chatId: concierge.chatId,
+    loading: concierge.loading,
+    failed: false,
+    retry: () => {},
+  }),
   useConciergeChats: () =>
     concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));
@@ -35,6 +43,7 @@ afterEach(() => {
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   concierge.chatId = "concierge";
+  concierge.loading = false;
   concierge.chats = [];
   concierge.fromServer = false;
 });
@@ -130,15 +139,29 @@ describe("the Chat / Concierge switch", () => {
     expect(second.querySelector("svg")).toBeTruthy();
   });
 
-  it("sits on the header's right, just before the list menu", async () => {
+  it("sits on the header's left, with the list menu on the right and no title beside it", async () => {
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
     await screen.findByRole("link", { name: "My chat" });
     const group = screen.getByRole("radiogroup", { name: "Chat list mode" });
     const menu = screen.getByRole("button", { name: "List settings" });
-    expect(group.parentElement).toBe(menu.parentElement);
-    expect(group.nextElementSibling).toBe(menu);
-    expect(group.parentElement?.contains(document.querySelector(".text-section"))).toBe(false);
+    expect(group.parentElement).not.toBe(menu.parentElement);
+    expect(group.parentElement?.nextElementSibling).toBe(menu.parentElement);
+    expect(document.querySelector(".text-section")).toBeNull();
+  });
+
+  it("shows the switcher at the stored mode while the Concierge is still being asked, and no title", async () => {
+    seedChatListMode({ mode: "concierge" });
+    concierge.chatId = null;
+    concierge.loading = true;
+    serve([chat("mine", "My chat")]);
+    open("/chat/mine");
+    expect((await screen.findByRole("radio", { name: "Agent" })).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.queryByText("Chats")).toBeNull();
+    // The project list does not flash under the Agent tab.
+    expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
   });
 
   it("is absent without a Concierge, and the list keeps task chats under their project", async () => {
@@ -155,6 +178,18 @@ describe("the Chat / Concierge switch", () => {
   });
 
   describe("which mode shows", () => {
+    // The switch opens a chat only where the sidebar is a column; a phone's list is a screen over the chat.
+    const screenWidth = (wide: boolean) =>
+      rs.stubGlobal("matchMedia", (query: string) => ({
+        matches: wide && query === "(min-width: 48rem)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }));
+    beforeEach(() => {
+      screenWidth(true);
+    });
+
     it("starts on Chat on a device that has not shown a mode", async () => {
       serve([mainChat(), chat("mine", "My chat")]);
       open("/chat/unlisted");
@@ -193,7 +228,88 @@ describe("the Chat / Concierge switch", () => {
       await screen.findByRole("link", { name: "Main chat" });
       expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
       expect(stored()).toBe("concierge");
-      // The open chat is an ordinary one, and a switch is not a navigation.
+      // The switch opens a chat of the mode it picks: the main chat.
+      expect(screen.getByTestId("path").textContent).toBe("/message");
+    });
+
+    it("opens the last ordinary chat on Chat, and a blank chat without one", async () => {
+      seedChatListMode({ mode: "concierge", lastChat: "mine" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/message");
+      await screen.findByRole("link", { name: "Main chat" });
+      await user.click(radio("Chat"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+    });
+
+    it("opens a blank chat on Chat when no ordinary chat was opened", async () => {
+      seedChatListMode({ mode: "concierge" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/message");
+      await screen.findByRole("link", { name: "Main chat" });
+      await user.click(radio("Chat"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat");
+    });
+
+    it("opens the last Concierge chat on Agent, else the main chat", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "topic-1" });
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 0 },
+      ];
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/topic-1");
+    });
+
+    it("opens the main chat on Agent when the remembered Concierge chat is gone", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "deleted-topic" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/message");
+    });
+
+    it("opens a remembered archived topic chat on Agent, which only the full session list holds", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "old-topic" });
+      serve([
+        mainChat(),
+        chat("mine", "My chat"),
+        { ...topic("old-topic", "Old plans"), archivedAt: "2026-11-01T00:00:00Z" },
+      ]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/chat/old-topic");
+    });
+
+    it("only changes the list on a phone, where the list is a screen over the chat", async () => {
+      screenWidth(false);
+      seedChatListMode({ mode: "chat" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      await screen.findByRole("link", { name: "Main chat" });
+      expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
+    });
+
+    it("does nothing when the selected segment is clicked", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "topic-1" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Chat"));
       expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
     });
   });
@@ -315,11 +431,13 @@ describe("Chat mode", () => {
     expect(screen.getByTestId("state").textContent).toBe("null");
   });
 
-  it("titles the list Chats", async () => {
+  it("labels the list by the switcher alone, which keeps its accessible names", async () => {
     seedChatListMode({ mode: "chat" });
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
-    expect(await screen.findByText("Chats")).toBeTruthy();
+    expect(await screen.findByRole("radio", { name: "Chat" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Agent" })).toBeTruthy();
+    expect(screen.queryByText("Chats")).toBeNull();
   });
 
   it("shows the shortcut hint where there is a wide window and a fine pointer, and not on touch", async () => {
@@ -377,12 +495,12 @@ describe("Concierge mode", () => {
     expect(screen.getByTestId("state").textContent).toBe('{"conciergeTopic":true}');
   });
 
-  it("titles the list Agent, not the name the guardian gave their agent", async () => {
+  it("shows no title in Agent mode, and not the name the guardian gave their agent", async () => {
     seedChatListMode({ mode: "concierge" });
     serve([mainChat()], { agentName: "Milo" });
     open("/chat/unlisted");
     await screen.findByRole("link", { name: "Main chat" });
-    expect(document.querySelector(".text-section")?.textContent).toBe("Agent");
+    expect(document.querySelector(".text-section")).toBeNull();
     expect(screen.queryByText("Milo")).toBeNull();
   });
 

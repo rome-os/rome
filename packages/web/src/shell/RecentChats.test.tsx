@@ -31,6 +31,12 @@ const concierge = rs.hoisted(() => ({
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChat: () => ({
+    chatId: concierge.chatId,
+    loading: concierge.loading,
+    failed: false,
+    retry: () => {},
+  }),
   useConciergeChats: () =>
     concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));

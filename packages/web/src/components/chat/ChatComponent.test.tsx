@@ -6,6 +6,7 @@ import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeNewsConfig } from "@/config/quick-entries";
+import { LAST_CONCIERGE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
@@ -414,6 +415,16 @@ describe("ChatComponent missing sessions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
 
     expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
+  });
+
+  it("lands a missing Concierge chat on the main chat, so Agent mode stays", () => {
+    seedChatListMode({ mode: "concierge", lastConcierge: "session-1" });
+    renderChatComponent({ sessionId: "session-1" }, undefined, "/chat/session-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(screen.getByTestId("chat-location").textContent).toBe("/message REPLACE");
+    expect(localStorage.getItem(LAST_CONCIERGE_KEY)).toBe("session-1");
   });
 
   it("keeps the chat open when another session is missing", () => {

@@ -1057,6 +1057,23 @@ const transcripts: Record<string, ChatMessage[]> = {
   ],
 };
 
+// The Concierge's topic chats, each with a short exchange, so opening one loads
+// like a real chat rather than answering its messages with a 404.
+transcripts["mock-topic-travel"] = turn(
+  "mock-topic-travel",
+  1,
+  "2026-08-04T09:00:00.000Z",
+  "Where should we stay in Lisbon?",
+  [text("Alfama is walkable and quiet at night. I can compare three places if you like.")],
+);
+transcripts["mock-topic-news"] = turn(
+  "mock-topic-news",
+  1,
+  "2026-08-03T07:30:00.000Z",
+  "Send me a weekly news digest.",
+  [text("Done. Every Monday at 7:30 I will send the week's top stories.")],
+);
+
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
 const session = (

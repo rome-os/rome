@@ -353,7 +353,7 @@ export function RomeShellLayout() {
       data-rail-labelled={railNames ? "" : undefined}
     >
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center ${railNames ? (titlebar ? "justify-start px-2 pt-2" : "h-14 justify-start px-2") : `flex-col gap-1 pb-4 ${titlebar ? "pt-2" : "pt-5"}`}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
