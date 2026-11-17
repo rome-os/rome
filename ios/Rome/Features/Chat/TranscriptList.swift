@@ -240,6 +240,25 @@ private final class CellContext {
     var footer: AnyView?
     /// Cards' surfaces, kept while their cells are reused for other rows.
     @ObservationIgnored let surfaces = WidgetSurfaces()
+    /// Keeps a row's top where it is on screen while it changes height.
+    @ObservationIgnored let topHold = RowTopHold()
+}
+
+/// Asked by a row about to change its own height, such as a long reply
+/// unfolding: the list keeps the row's top where it is, so the row opens
+/// downward instead of pushing what is above it up. One per list, so the
+/// environment value never changes and no row redraws for it.
+@MainActor
+final class RowTopHold {
+    fileprivate var action: ((String) -> Void)?
+
+    func hold(_ rowID: String) { action?(rowID) }
+}
+
+extension EnvironmentValues {
+    @Entry var rowTopHold: RowTopHold? = nil
+    /// The transcript row a view is drawn in.
+    @Entry var transcriptRowID: String? = nil
 }
 
 private struct ChatCollection<Row: View>: UIViewRepresentable {
@@ -317,6 +336,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     func makeView() -> UICollectionView {
         layout.delegate = self
+        cells.topHold.action = { [weak self] id in self?.holdTop(of: id) }
         layout.settings.estimatedItemSize = CGSize(width: 300, height: Self.estimate)
         // Updates keep what is on screen anchored to the bottom of the
         // visible area: a page above, or a row above that grows, moves
@@ -489,6 +509,32 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         guard let view, !items.isEmpty else { return }
         view.layoutIfNeeded()
         layout.restoreContentOffset(with: ChatLayoutPositionSnapshot(indexPath: IndexPath(item: items.count - 1, section: 0), edge: .bottom))
+    }
+
+    // MARK: Holding a row's top
+
+    /// When the list goes back to holding its bottom.
+    private var holdUntil: ContinuousClock.Instant?
+    /// As long as a fold's spring takes to settle, with a margin.
+    private static var holdTime: Duration { .milliseconds(600) }
+
+    /// Lets a row change height with its top, and every row above it, where
+    /// they are: the list otherwise keeps its bottom still, so a row that
+    /// grows pushes what is above it up. For a moment it stops compensating
+    /// for size changes, then holds its bottom again.
+    func holdTop(of id: String) {
+        guard items.contains(id) else { return }
+        transcriptScrollLog.debug("holding a row's top while it changes height")
+        layout.keepContentOffsetAtBottomOnBatchUpdates = false
+        let until = ContinuousClock.now + Self.holdTime
+        holdUntil = until
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(until: until)
+            guard let self, self.holdUntil == until else { return }
+            self.holdUntil = nil
+            self.layout.keepContentOffsetAtBottomOnBatchUpdates = true
+            self.readScroll()
+        }
     }
 
     // MARK: ChatLayoutDelegate
@@ -693,6 +739,9 @@ private struct RowHost: View {
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
             .environment(\.widgetSurfaces, cells.surfaces.row(box.row.id))
+            // Inside the list's environment, which replaces the whole set.
+            .environment(\.rowTopHold, cells.topHold)
+            .environment(\.transcriptRowID, box.row.id)
             .environment(\.self, cells.environment)
     }
 }

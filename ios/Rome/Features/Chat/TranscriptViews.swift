@@ -370,6 +370,8 @@ struct AgentBubble: View {
     /// characters on a line than English, so characters cannot tell.
     @State private var fullHeight: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.rowTopHold) private var rowTopHold
+    @Environment(\.transcriptRowID) private var rowID
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
@@ -445,7 +447,7 @@ struct AgentBubble: View {
         Button(action: toggle) {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
-                .foregroundStyle(Palette.sub)
+                .foregroundStyle(Palette.sub.opacity(0.6))
                 .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
                 .background {
                     if !expanded {
@@ -459,6 +461,9 @@ struct AgentBubble: View {
     }
 
     private func toggle() {
+        // The bubble opens downward and closes upward: its top, and every
+        // row above it, stay where they are.
+        if let rowID { rowTopHold?.hold(rowID) }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
     }
 }
