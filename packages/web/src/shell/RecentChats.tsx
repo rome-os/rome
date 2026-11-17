@@ -786,6 +786,8 @@ export function RecentChats({
   // with the hover tone instead of the raised one.
   const renderChatRow = (session: ChatSession, nested = false, onCard = false) => {
     const isActive = activeSessionId === session.id;
+    // A chat under a project folder; the Tasks card's rows are nested but not in a group.
+    const inGroup = nested && !onCard;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
     const isEditing = rename.editingId === session.id;
@@ -801,9 +803,11 @@ export function RecentChats({
       <div
         key={session.id}
         data-chat-row
-        className={`group flex ${nested && !onCard ? "h-9" : "h-8"} items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
-          session.archivedAt ? "text-subtle-foreground" : "text-foreground"
-        } ${
+        className={`group relative flex ${
+          inGroup ? "ml-[var(--row-child-ml)] h-[var(--row-h)]" : "h-8"
+        } items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
+          inGroup && isActive ? "font-medium" : ""
+        } ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
           isActive
             ? onCard
               ? "bg-surface-hover"
@@ -813,6 +817,14 @@ export function RecentChats({
               : "hover:bg-surface-hover dark:hover:bg-surface"
         }`}
       >
+        {/* The selected child's mark on the folder's guide line. */}
+        {inGroup && isActive ? (
+          <span
+            aria-hidden
+            data-tree-indicator
+            className="pointer-events-none absolute inset-y-[var(--row-indicator-inset)] right-full mr-[var(--row-indicator-mr)] w-[3px] rounded-full bg-muted-foreground"
+          />
+        ) : null}
         {isEditing ? (
           <input
             {...rename.inputProps}
@@ -820,14 +832,14 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? (onCard ? "ml-4" : "ml-9") : "ml-2"
+              nested ? (onCard ? "ml-4" : "ml-3") : "ml-2"
             }`}
           />
         ) : (
           <ChatRowLink id={session.id} name={session.name} nested={nested} onCard={onCard} />
         )}
         <span
-          className={`relative ${nested && !onCard ? "mr-[var(--row-px)]" : "mr-2"} flex h-4 w-4 shrink-0 items-center justify-center ${
+          className={`relative ${inGroup ? "mr-[var(--row-px)]" : "mr-2"} flex h-4 w-4 shrink-0 items-center justify-center ${
             isEditing ? "hidden" : ""
           }`}
         >
@@ -978,7 +990,7 @@ export function RecentChats({
     );
     return (
       <div key={key} data-project-group={key}>
-        <div className="group/project flex h-9 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="group/project flex h-[var(--row-h)] items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
             <button
@@ -1033,7 +1045,7 @@ export function RecentChats({
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-[var(--row-child-pl)] rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="ml-[var(--row-load-ml)] rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>
@@ -1224,7 +1236,7 @@ export function RecentChats({
               <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
                 <h2
                   id="recent-chats-projects-heading"
-                  className="mt-3 flex h-7 items-center px-[var(--row-px)] text-aux text-subtle-foreground"
+                  className="mb-[var(--row-gap)] flex h-[var(--row-h)] items-end px-[var(--row-px)] pb-1 text-aux text-subtle-foreground"
                 >
                   {t("recentChats.sectionProjects")}
                 </h2>
