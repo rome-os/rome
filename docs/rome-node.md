@@ -558,7 +558,7 @@ URL (WS only to loopback in a Debug build against a local Cloud). The backoff is
 does. The phone speaks text envelopes only and ignores binary frames, so its
 `system.info` has no `frameVersion` or `transferVersion`.
 
-The phone's capabilities, Apple Health and Device (`device.status`), are each a
+The phone's capabilities, Apple Health, Calendar & Reminders and Device (`device.status`), are each a
 [device connection](domains/connections.md#device-connection) with its own
 **Live access** switch under **Settings → Connections → This iPhone**, one per
 phone, since a live request does not say which Rome sent it. Each is off until
@@ -585,7 +585,8 @@ guardian's personal data (Health is, Device is not). The phone routes an action
 by its prefix, the text before the first dot. An action whose Live access is off
 fails with `live_off`, and one iOS has not given access to with `not_connected`.
 Both are recorded in the audit log, and the message tells the agent that the user
-must change it on the phone. The actions are read-only:
+must change it on the phone. Health and Device only read. Calendar & Reminders
+also writes, and its write operations are reported with access `write`:
 
 - `health.stats` — aggregates over a window: `types` (or `type`), `start`, `end`
   (ISO 8601 with or without an offset, where no offset means the phone's time
@@ -607,6 +608,19 @@ must change it on the phone. The actions are read-only:
   `expensive`, `constrained`, `thermalState`, `osVersion` and `appVersion`. It
   reads no Wi-Fi name, which would need location access. It needs no iOS
   permission and does not sync.
+- `calendar.events`, `calendar.free_busy`, `calendar.reminders`, `calendar.lists`
+  — reads of every calendar and reminders list on the phone, whichever account
+  each comes from: events in a window (each occurrence of a repeating one on its
+  own, with its `id` and `occurrence`), busy spans merged with the free time
+  between them, open reminders, and the calendars and lists with whether each is
+  writable.
+- `calendar.create_event`, `calendar.update_event`, `calendar.create_reminder`,
+  `calendar.complete_reminder` — writes, which an agent runs only when the
+  guardian asked for the change. There is no delete. A write answers with the
+  item as saved, and the phone then syncs the change to the Rome open on it.
+  Calendar & Reminders asks iOS for full access to calendars and to reminders,
+  and works while either is allowed; an operation on the other fails with
+  `permission_denied`.
 
 ```sh
 rome-node device run <iphone> health.stats --args '{"types":["stepCount","sleep","restingHeartRate","workouts"]}'

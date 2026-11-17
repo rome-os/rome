@@ -1516,7 +1516,7 @@ export const personalDataPoints = sqliteTable(
     value: real("value"),
     unit: text("unit"),
     fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
-    metadata: text("metadata", { mode: "json" }).$type<Record<string, string>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
     dedupeKey: text("dedupe_key").notNull(),
     // A hash of the stored fields: an upsert with the same hash changes nothing.
     contentHash: text("content_hash").notNull(),

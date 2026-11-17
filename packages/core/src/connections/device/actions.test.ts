@@ -192,6 +192,56 @@ describe("device actions", () => {
     ]);
   });
 
+  it("runs a write operation only in a private turn", async () => {
+    const calendar: DeviceReport["connections"][number] = {
+      capability: "lights",
+      title: "Lights",
+      prefix: "lights",
+      personal: false,
+      operations: [{ name: "lights.set", access: "write", description: "Turns a light on." }],
+      permission: "not_needed",
+      live: true,
+    };
+    devices.report(report("dev-1", "iPhone", [calendar]), NOW);
+    const shared = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "lights.set", args: { on: true } },
+      { audience: "shared" },
+    );
+    expect(shared).toMatchObject({ status: "error" });
+    expect((shared as { error: string }).error).toMatch(/^write_private_only:/);
+    expect(calls).toEqual([]);
+    const own = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "lights.set", args: { on: true } },
+      { audience: "private" },
+    );
+    expect(own).toMatchObject({ status: "ok" });
+    expect(calls).toEqual([{ deviceId: "dev-1", action: "lights.set", args: { on: true } }]);
+  });
+
+  it("says a write did nothing when the device does not answer", async () => {
+    devices.report(
+      report("dev-1", "iPhone", [
+        {
+          ...deviceConnection(true),
+          operations: [{ name: "device.ring", access: "write", description: "Rings it." }],
+        },
+      ]),
+      NOW,
+    );
+    answer = { ok: false, code: "target_unavailable", message: "offline" };
+    const result = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.ring" },
+      { audience: "private" },
+    );
+    const error = (result as { error: string }).error;
+    expect(error).toMatch(/^target_unavailable:/);
+    expect(error).toContain("opens the Rome app");
+    expect(error).toContain("Nothing was changed.");
+  });
+
   it("refuses a personal capability in a shared turn and calls no device", async () => {
     devices.report(report("dev-1", "iPhone", [healthConnection(true)]), NOW);
     for (const audience of ["shared", undefined] as const) {

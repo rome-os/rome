@@ -1,5 +1,24 @@
 import SwiftUI
 
+/// A personal-data source's Sync with Rome, as its connection page and Sync
+/// history read it: Apple Health's, or Calendar & Reminders'.
+@MainActor
+protocol SourceSyncing: AnyObject {
+    var instance: HealthInstance? { get }
+    var isEnabled: Bool { get }
+    var canSync: Bool { get }
+    var status: HealthSyncStatus { get }
+    var activity: SyncActivity { get }
+    var history: [SyncLogEntry] { get }
+    @discardableResult func setEnabled(_ on: Bool) -> Task<Void, Never>
+    @discardableResult func syncNow() -> Task<Void, Never>
+    func deleteUploaded() async -> Bool
+    func reloadHistory() async
+}
+
+extension HealthSettings: SourceSyncing {}
+extension CalendarSync: SourceSyncing {}
+
 /// The line under Sync with Rome, and the text button at its end: Sync
 /// now while all is well, Retry or Sign in when a sync failed.
 struct HealthStatusLine: Equatable {
@@ -10,7 +29,7 @@ struct HealthStatusLine: Equatable {
     let failed: Bool
 
     /// `rome`: the open Rome's name, which the line says it syncs to.
-    init(_ status: HealthSyncStatus, rome: String? = nil, device: DeviceKind = .iPhone, now: Date = Date(), locale: Locale = .current) {
+    init(_ status: HealthSyncStatus, rome: String? = nil, device: DeviceKind = .iPhone, isHealth: Bool = true, now: Date = Date(), locale: Locale = .current) {
         func to(_ text: String) -> String { rome.map { String(localized: "\(text) · to \($0)") } ?? text }
         switch status {
         case .off:
@@ -27,7 +46,8 @@ struct HealthStatusLine: Equatable {
         case .locked:
             text = String(localized: "Can't sync while \(device.name) is locked"); action = nil; failed = false
         case .needsSignIn:
-            text = String(localized: "Sign in again to keep Health syncing"); action = .signIn; failed = true
+            text = isHealth ? String(localized: "Sign in again to keep Health syncing") : String(localized: "Sign in again to keep syncing")
+            action = .signIn; failed = true
         case .failed:
             text = String(localized: "Last sync failed"); action = .retry; failed = true
         }
@@ -43,25 +63,26 @@ struct HealthStatusLine: Equatable {
     }
 }
 
-/// Apple Health's Sync, on its connection page: the open Rome's switch and
-/// its history in one group, then one line on how it stands, and a second
-/// only when the data has gone stale. A visitor's Rome has none: Health
+/// A source's Sync, on its connection page: the open Rome's switch and its
+/// history in one group, then one line on how it stands, and for Health a
+/// second only when the data has gone stale. A visitor's Rome has none: data
 /// syncs only to a Rome the guardian owns.
-struct HealthSyncSection: View {
+struct SourceSyncSection: View {
+    let sync: any SourceSyncing
+    let source: String
     let onHistory: () -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let health = model.health
-        if health.instance?.isVisitor != true {
-            let line = HealthStatusLine(health.status, device: model.node.device)
+        if sync.instance?.isVisitor != true {
+            let line = HealthStatusLine(sync.status, device: model.node.device, isHealth: source == HealthSettings.sourceId)
             VStack(alignment: .leading, spacing: 8) {
                 SettingsGroup {
                     PlainRow(title: "Sync with Rome", last: false) {
-                        Toggle("Sync with Rome", isOn: Binding(get: { health.isEnabled }, set: { on in health.setEnabled(on) }))
+                        Toggle("Sync with Rome", isOn: Binding(get: { sync.isEnabled }, set: { on in sync.setEnabled(on) }))
                             .labelsHidden()
                             .tint(Palette.primary)
-                            .disabled(!health.canSync)
+                            .disabled(!sync.canSync)
                     }
                     .accessibilityElement(children: .combine)
                     Button(action: onHistory) {
@@ -74,9 +95,9 @@ struct HealthSyncSection: View {
                     .buttonStyle(RowPressStyle())
                 }
                 if let text = line.text {
-                    HealthStatusRow(line: line, text: text, running: health.activity.running)
+                    HealthStatusRow(sync: sync, line: line, text: text, running: sync.activity.running)
                 }
-                if health.isEnabled, health.freshness().stale {
+                if let health = sync as? HealthSettings, health.isEnabled, health.freshness().stale {
                     Text("No new Health data for 3 days. Health access may be off: Health app → your picture → Apps → Rome.")
                         .romeFont(13)
                         .foregroundStyle(Palette.destructive)
@@ -90,6 +111,7 @@ struct HealthSyncSection: View {
 
 /// The sync's status under the switch, with Sign in or Retry when it needs one.
 struct HealthStatusRow: View {
+    let sync: any SourceSyncing
     let line: HealthStatusLine
     let text: String
     var running = false
@@ -104,12 +126,12 @@ struct HealthStatusRow: View {
             Spacer(minLength: 8)
             switch line.action {
             case .syncNow?:
-                action("Sync now") { model.health.syncNow() }
+                action("Sync now") { sync.syncNow() }
                     .disabled(running)
             case .signIn?:
                 action("Sign in") { Task { await model.reauthenticate() } }
             case .retry?:
-                action("Retry") { model.health.syncNow() }
+                action("Retry") { sync.syncNow() }
             case nil:
                 EmptyView()
             }

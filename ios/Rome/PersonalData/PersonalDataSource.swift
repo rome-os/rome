@@ -32,6 +32,12 @@ struct SyncChunk: Sendable {
     var itemCount: Int { upserts.count + deletes.count }
 }
 
+/// A source could not read the phone, with the code its sync history shows,
+/// such as `calendar_denied`.
+struct SourceReadFailure: Error, Equatable {
+    let code: String
+}
+
 protocol PersonalDataSource: Sendable {
     /// The Rome's name for it: `apple_health`.
     var id: String { get }

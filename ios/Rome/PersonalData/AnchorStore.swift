@@ -25,6 +25,18 @@ struct SyncProgress: Codable, Equatable, Sendable {
     var deltaThrough: Date?
     /// Types this Rome refused as unknown: not sent again until it updates.
     var unsupported: Set<String> = []
+    /// For a source of entries (Calendar): what the Rome holds of each entry
+    /// this phone sent, by key, so a sync sends only what changed and deletes
+    /// what is gone. Optional, so progress saved before it still decodes.
+    var entries: [String: SentEntry]?
+
+    struct SentEntry: Codable, Equatable, Sendable {
+        /// A hash of the item as sent.
+        var hash: String
+        /// When it ends: an event that has aged out of the window is
+        /// forgotten here, and the Rome keeps it.
+        var end: Date
+    }
 
     struct Backfill: Codable, Equatable, Sendable {
         /// When sync was turned on: the backfill reads back from here.

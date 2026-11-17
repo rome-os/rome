@@ -369,7 +369,10 @@ export class PersonalDataRepository {
     range: {
       from: number;
       to: number;
-      by?: "start" | "end";
+      /** `overlap`: every point that overlaps the window, as entries are read. */
+      by?: "start" | "end" | "overlap";
+      /** Only points whose metadata (an entry's content) holds this text, any case. */
+      search?: string;
       resolution?: Resolution;
       after?: { startAt: number; id: number };
       limit?: number;
@@ -388,6 +391,7 @@ export class PersonalDataRepository {
         value: personalDataPoints.value,
         fields: personalDataPoints.fields,
         metadata: personalDataPoints.metadata,
+        key: personalDataPoints.dedupeKey,
       })
       .from(personalDataPoints)
       .where(
@@ -396,11 +400,10 @@ export class PersonalDataRepository {
           eq(personalDataPoints.type, type),
           range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
           eq(personalDataPoints.origin, origin),
-          gte(
-            range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt,
-            range.from,
-          ),
-          lt(range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt, range.to),
+          ...windowFilter(range),
+          range.search
+            ? sql`lower(${personalDataPoints.metadata}) like ${`%${escapeLike(range.search.toLowerCase())}%`} escape '\\'`
+            : undefined,
           after
             ? or(
                 gt(personalDataPoints.startAt, after.startAt),
@@ -496,6 +499,24 @@ export class PersonalDataRepository {
         errorCode: row.errorCode,
       }));
   }
+}
+
+/** The points a window reads: by when they start or end, or every one that overlaps it. */
+function windowFilter(range: { from: number; to: number; by?: "start" | "end" | "overlap" }) {
+  if (range.by === "overlap") {
+    // An entry that starts in the window, or began before it and is still
+    // going, such as a holiday; one with no length counts where it starts.
+    return [
+      lt(personalDataPoints.startAt, range.to),
+      or(gt(personalDataPoints.endAt, range.from), gte(personalDataPoints.startAt, range.from)),
+    ];
+  }
+  const at = range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt;
+  return [gte(at, range.from), lt(at, range.to)];
+}
+
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
 function typeOfItem(raw: unknown): string | undefined {

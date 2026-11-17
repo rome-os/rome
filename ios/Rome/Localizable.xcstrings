@@ -219,6 +219,40 @@
         }
       }
     },
+    "%lld events" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld event"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld events"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld 个事件"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld hours ago" : {
       "localizations" : {
         "en" : {
@@ -243,6 +277,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 小时前"
+          }
+        }
+      }
+    },
+    "%lld items" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld 项"
+                }
+              }
+            }
           }
         }
       }
@@ -337,6 +405,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条记录"
+          }
+        }
+      }
+    },
+    "%lld reminders" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld reminder"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld reminders"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld 个提醒事项"
+                }
+              }
+            }
           }
         }
       }
@@ -491,6 +593,16 @@
         }
       }
     },
+    "Add it for you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮你添加"
+          }
+        }
+      }
+    },
     "Add photos" : {
       "localizations" : {
         "zh-Hans" : {
@@ -507,6 +619,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加自己的选项…"
+          }
+        }
+      }
+    },
+    "Added Lunch with Sam, Friday 12:30 to 1:30, to your calendar." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在你的日历添加「和 Sam 吃午饭」，周五 12:30 到 1:30。"
+          }
+        }
+      }
+    },
+    "Added a reminder" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加了提醒事项"
+          }
+        }
+      }
+    },
+    "Added an event" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加了事件"
           }
         }
       }
@@ -547,6 +689,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "马上好了…"
+          }
+        }
+      }
+    },
+    "Am I free tomorrow afternoon?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我明天下午有空吗？"
           }
         }
       }
@@ -911,6 +1063,26 @@
         }
       }
     },
+    "Calendar & Reminders" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历与提醒事项"
+          }
+        }
+      }
+    },
+    "Calendars and lists" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历和列表"
+          }
+        }
+      }
+    },
     "Can't find where the new messages start" : {
       "localizations" : {
         "zh-Hans" : {
@@ -977,6 +1149,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在此连接"
+          }
+        }
+      }
+    },
+    "Changed an event" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改了事件"
           }
         }
       }
@@ -1187,6 +1369,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "对比一下 $300 以内最好的降噪耳机。"
+          }
+        }
+      }
+    },
+    "Completed a reminder" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成了提醒事项"
           }
         }
       }
@@ -1461,6 +1653,16 @@
         }
       }
     },
+    "Couldn't read Calendar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取日历"
+          }
+        }
+      }
+    },
     "Couldn't read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1671,6 +1873,16 @@
         }
       }
     },
+    "Delete all calendar and reminders data this %@ sent to your Rome?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这台%@发送到你的 Rome 的全部日历和提醒事项数据？"
+          }
+        }
+      }
+    },
     "Delete this chat?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1841,6 +2053,26 @@
         }
       }
     },
+    "Events" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "事件"
+          }
+        }
+      }
+    },
+    "Every morning at 8, I'll send today's schedule, what's due, and anything that needs you first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上 8 点，我会发给你当天的日程、到期的事项，以及需要你先处理的事。"
+          }
+        }
+      }
+    },
     "Every weekday at 8am, send me a brief of today's calendar and important emails." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1911,6 +2143,16 @@
         }
       }
     },
+    "Find free time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找空闲时间"
+          }
+        }
+      }
+    },
     "Finding your location…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1947,6 +2189,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关注 %@ · %@"
+          }
+        }
+      }
+    },
+    "Free and busy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忙闲时间"
           }
         }
       }
@@ -2809,6 +3061,16 @@
         }
       }
     },
+    "No access to Calendar or Reminders" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无权访问日历或提醒事项"
+          }
+        }
+      }
+    },
     "No access to Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3469,6 +3731,16 @@
         }
       }
     },
+    "Put lunch with Sam on Friday at 12:30." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "周五 12:30 加一个和 Sam 吃午饭。"
+          }
+        }
+      }
+    },
     "Puts it in the message box." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3585,6 +3857,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出门前提醒我充电。"
+          }
+        }
+      }
+    },
+    "Reminders" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提醒事项"
           }
         }
       }
@@ -4113,6 +4395,16 @@
         }
       }
     },
+    "Summarize my day every morning." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上给我总结一下当天。"
+          }
+        }
+      }
+    },
     "Sends this message" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4279,6 +4571,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新登录以继续同步健康数据"
+          }
+        }
+      }
+    },
+    "Sign in again to keep syncing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新登录以继续同步"
           }
         }
       }
@@ -5861,6 +6163,16 @@
         }
       }
     },
+    "You're free from 2 to 4. Design review runs 4 to 5." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你 2 点到 4 点有空。设计评审是 4 点到 5 点。"
+          }
+        }
+      }
+    },
     "Your AI model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5987,6 +6299,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 读取这台手机的电量和网络。"
+          }
+        }
+      }
+    },
+    "Your Rome reads your calendars and reminders, and adds or changes them when you ask." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 会读取你的日历和提醒事项，并在你要求时添加或修改。"
           }
         }
       }
@@ -6203,6 +6525,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每日健康总结"
+          }
+        }
+      }
+    },
+    "Daily summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日摘要"
           }
         }
       }

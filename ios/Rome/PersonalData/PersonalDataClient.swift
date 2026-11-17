@@ -8,7 +8,7 @@ import os
 
 /// One reading as the ingest takes it.
 struct PersonalDataPoint: Codable, Equatable, Sendable {
-    enum Shape: String, Codable, Sendable { case bucket, sample, record }
+    enum Shape: String, Codable, Sendable { case bucket, sample, record, entry }
 
     /// Stable per reading, so a second send replaces the first.
     let key: String
@@ -26,6 +26,8 @@ struct PersonalDataPoint: Codable, Equatable, Sendable {
     var fields: [String: Double]?
     /// Strings only, allow-listed by the Rome: a workout's `activity`, a sample's `sourceApp`.
     var metadata: [String: String]?
+    /// An entry's words, such as an event's title, as its type declares them.
+    var content: [String: JSONValue]?
 }
 
 struct PersonalDataEnvelope: Encodable, Sendable {

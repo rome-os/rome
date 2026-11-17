@@ -250,6 +250,9 @@ actor SyncEngine {
             entry.outcome = .interrupted
         } catch let failure as PersonalDataFailure {
             fail(&entry, failure, trigger: trigger)
+        } catch let failure as SourceReadFailure {
+            entry.outcome = .error
+            entry.errorCode = failure.code
         } catch HealthReadError.locked {
             entry.outcome = .skipped
             entry.errorCode = "locked"

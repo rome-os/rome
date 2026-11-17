@@ -2,8 +2,22 @@
 // unit and a rollup rule. A source's table is data, not logic. Concept:
 // docs/personal-data.md.
 
-/** How a type's readings are stored. A source joins the store only with these. */
-export type Shape = "bucket" | "sample" | "record";
+/**
+ * How a type's items are stored. A source joins the store only with these.
+ * `entry` is a document with a time, such as a calendar event or a reminder:
+ * its words are its content, it is listed and never aggregated.
+ */
+export type Shape = "bucket" | "sample" | "record" | "entry";
+
+/** The kind of one content field of an entry type. */
+export type ContentKind = "text" | "flag" | "number" | "texts";
+
+/** One content field an entry type keeps. Others are dropped. */
+export interface ContentField {
+  kind: ContentKind;
+  /** The longest text kept, longer is cut. Default 200. For `texts`, per item. */
+  maxLength?: number;
+}
 
 /** The width of a bucket. */
 export type Resolution = "hour" | "day";
@@ -36,6 +50,13 @@ export interface TypeSpec {
   conversions?: readonly UnitConversion[];
   /** A short line for the Agent. */
   note?: string;
+  /** For an entry type: the content fields it keeps, by name. */
+  content?: Readonly<Record<string, ContentField>>;
+  /**
+   * How many days past Rome's clock an item may end. Default 1, since a
+   * reading is never in the future; an entry such as a calendar event is.
+   */
+  aheadDays?: number;
 }
 
 export interface SourceSpec {

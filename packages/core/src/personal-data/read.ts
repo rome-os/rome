@@ -55,7 +55,7 @@ export interface QueryAnswer {
 
 interface ListedRecords {
   type: string;
-  unit: string;
+  unit?: string;
   records: ReturnType<typeof listedRecord>[];
   nextCursor?: string;
 }
@@ -143,7 +143,13 @@ export function queryPersonalData(
 }
 
 function emptyResult(spec: TypeSpec, plan: QueryPlan): TypeResult | ListedRecords {
-  if (plan.records) return { type: spec.type, unit: plan.unit ?? spec.unit, records: [] };
+  if (plan.records) {
+    return {
+      type: spec.type,
+      ...(spec.shape === "entry" ? {} : { unit: plan.unit ?? spec.unit }),
+      records: [],
+    };
+  }
   return rollUp(spec, plan, []);
 }
 
@@ -155,13 +161,14 @@ function resultFor(
   plan: QueryPlan,
   now: number,
 ): { result: TypeResult | ListedRecords; hoursOnly: boolean } {
-  const by = spec.bucketBy ?? "start";
+  const by = spec.shape === "entry" ? "overlap" : (spec.bucketBy ?? "start");
   const read = (range: Parameters<PersonalDataRepository["points"]>[3]) =>
     repo.points(source.source, origin, spec.type, { by, ...range });
   if (plan.records) {
     const rows = read({
       from: plan.start,
       to: plan.end,
+      ...(plan.search ? { search: plan.search } : {}),
       ...(plan.records.after ? { after: plan.records.after } : {}),
       limit: plan.records.limit + 1,
     });
@@ -170,7 +177,7 @@ function resultFor(
     return {
       result: {
         type: spec.type,
-        unit: plan.unit ?? spec.unit,
+        ...(spec.shape === "entry" ? {} : { unit: plan.unit ?? spec.unit }),
         records: page.map((point) => listedRecord(spec, plan, point)),
         ...(rows.length > page.length && last ? { nextCursor: encodeCursor(last) } : {}),
       },
