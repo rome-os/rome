@@ -19,6 +19,31 @@ const run = (version: number, config = "opus-low"): ScenarioRun => ({
   transcript: [],
 });
 
+const guardianTurn = (turnId: string, firstSayMs: number) => ({
+  chatId: "c",
+  turnId,
+  trigger: "guardian" as const,
+  model: null,
+  effort: null,
+  session: "warm" as const,
+  startMs: null,
+  workingMs: null,
+  reactedMs: null,
+  firstSayMs,
+  ackMs: firstSayMs,
+  durationMs: firstSayMs,
+  modelCalls: 1,
+  toolCalls: 1,
+  tools: { say: 1 },
+  contextTokens: 80_000,
+  inputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  outputTokens: 0,
+  failed: false,
+  at: "",
+});
+
 describe("baselineMarkdown", () => {
   it("keeps runs of a changed scenario apart, and says so", () => {
     const md = baselineMarkdown([run(1), run(2)]);
@@ -28,37 +53,13 @@ describe("baselineMarkdown", () => {
   });
 
   it("counts rule notes apart from the checks, and times no setup turn", () => {
-    const turn = (turnId: string, firstSayMs: number) => ({
-      chatId: "c",
-      turnId,
-      trigger: "guardian" as const,
-      model: null,
-      effort: null,
-      session: "warm" as const,
-      startMs: null,
-      workingMs: null,
-      reactedMs: null,
-      firstSayMs,
-      ackMs: firstSayMs,
-      durationMs: firstSayMs,
-      modelCalls: 1,
-      toolCalls: 1,
-      tools: { say: 1 },
-      contextTokens: 80_000,
-      inputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      outputTokens: 0,
-      failed: false,
-      at: "",
-    });
     const md = baselineMarkdown([
       {
         ...run(4),
         id: "long-context",
         row: "long-context",
         lang: "en",
-        turns: [turn("setup", 60_000), turn("asked", 2_000)],
+        turns: [guardianTurn("setup", 60_000), guardianTurn("asked", 2_000)],
         setupTurnIds: ["setup"],
         notes: ['rule: 2 emoji in "x"'],
         measures: { contextTokens: 80_000 },
@@ -71,6 +72,20 @@ describe("baselineMarkdown", () => {
     expect(md).toContain('- opus-low r1 long-context: 2 emoji in "x"');
     expect(md).toContain("| opus-low | 1 | 80000 |");
     expect(md).not.toContain("60.0");
+  });
+
+  it("gives each scenario version its own overview row, and times no hand-off as inline", () => {
+    const md = baselineMarkdown([
+      {
+        ...run(4),
+        row: "reasoning",
+        turns: [{ ...guardianTurn("t1", 9_000), tools: { chat_start: 1 } }],
+      },
+      { ...run(5), row: "simple-qa", turns: [guardianTurn("t2", 2_000)] },
+    ]);
+    expect(md).toContain("| opus-low (v4) | 1 | 1/1 | 0 | 0 | 0 | 5.00 (1) | – | – / – |");
+    expect(md).toContain("| opus-low (v5) | 1 | 1/1 | 0 | 0 | 0 | 5.00 (1) | – | 2.0 / 2.0 |");
+    expect(md).toContain("The runs span scenario versions 4, 5");
   });
 
   it("labels nothing when every run has one version", () => {

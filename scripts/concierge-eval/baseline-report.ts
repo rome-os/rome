@@ -142,21 +142,31 @@ function overview(runs: ScenarioRun[]): string[] {
     "Long-context first say p50/p95 s",
     "Send→task result p50/p95 s",
   ];
-  const configs = [...new Set(runs.map((r) => r.config))].sort();
+  // Runs of a changed scenario never pool: each configuration gets a row per
+  // scenario version, labelled when there is more than one.
+  const version = (r: ScenarioRun) => r.version ?? 1;
+  const versions = [...new Set(runs.map(version))].sort((a, b) => a - b);
+  const groups = [...new Set(runs.map((r) => `${r.config}\u0000${version(r)}`))].sort();
   const judged = (rs: ScenarioRun[]) => {
     const scores = rs.flatMap((r) => (r.verdict ? [r.verdict.score] : []));
     return scores.length ? `${fixed(mean(scores), 2)} (${scores.length})` : "–";
   };
   const notesOf = (rs: ScenarioRun[], prefix: string) =>
     rs.reduce((n, r) => n + r.notes.filter((note) => note.startsWith(prefix)).length, 0);
-  const rows = configs.map((config) => {
-    const rs = runs.filter((r) => r.config === config);
+  const rows = groups.map((group) => {
+    const [config, v] = group.split("\u0000") as [string, string];
+    const rs = runs.filter((r) => r.config === config && String(version(r)) === v);
     const passed = rs.filter((r) => r.notes.every(isRuleNote)).length;
-    const inline = guardianTurns(rs.filter((r) => INLINE_ROWS.has(r.row)));
+    // A play that handed work to a task is no inline answer, whatever its row.
+    const inline = guardianTurns(
+      rs.filter(
+        (r) => INLINE_ROWS.has(r.row) && !r.turns.some((t) => (t.tools.chat_start ?? 0) > 0),
+      ),
+    );
     const long = guardianTurns(rs.filter((r) => r.row === "long-context"));
     const tasks = rs.filter((r) => r.resultMs !== null);
     return `| ${[
-      config,
+      versions.length > 1 ? `${config} (v${v})` : config,
       String(rs.length),
       `${passed}/${rs.length}`,
       String(notesOf(rs, "rule:")),
@@ -172,11 +182,17 @@ function overview(runs: ScenarioRun[]): string[] {
   return [
     "## Overview",
     "",
-    "Checks passed counts plays whose scenario checks all passed; the standing rules are counted in their own columns. Judge columns give the mean score and the number of scores.",
+    "Checks passed counts plays whose scenario checks all passed; the standing rules are counted in their own columns. Judge columns give the mean score and the number of scores. Inline first say leaves out plays that handed work to a task.",
     "",
     `| ${head.join(" | ")} |`,
     `|${head.map(() => "---").join("|")}|`,
     ...rows,
+    ...(versions.length > 1
+      ? [
+          "",
+          `⚠️ The runs span scenario versions ${versions.join(", ")}: compare rows of one version only.`,
+        ]
+      : []),
     "",
   ];
 }

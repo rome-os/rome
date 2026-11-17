@@ -164,9 +164,13 @@ async function playScenario(
   const messages = await api.messages(chat.id);
 
   const { lines, saidAfter, reactions } = transcriptOf(messages);
-  // A pasted preload would bury the answers the judge scores.
+  // A pasted preload would bury the answers the judge scores, so a setup
+  // message is cut short; every other line, each answer included, stays whole.
+  const setupLines = new Set(
+    scenario.steps.filter((step) => step.setup).map((step) => `OWNER: ${step.text.trim()}`),
+  );
   const transcript = lines.map((line) =>
-    line.length > 2000
+    setupLines.has(line)
       ? `${line.slice(0, 600)} …[${line.length - 600} more characters of the pasted text]`
       : line,
   );
