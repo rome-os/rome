@@ -6167,7 +6167,7 @@
         }
       }
     },
-    "Summarize my health for me every day." : {
+    "Summarize my health daily." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

@@ -25,7 +25,7 @@ struct HealthCapability: NodeCapability {
         [
             CapabilityExample(
                 symbol: "heart.text.square", title: "Daily health summary",
-                request: "Summarize my health for me every day.",
+                request: "Summarize my health daily.",
                 reply: "Every morning at 9, I'll send your sleep, steps and resting heart rate, and flag anything unusual."
             ),
             CapabilityExample(
