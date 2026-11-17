@@ -784,10 +784,11 @@ export function Chat({
   );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
   // The unread divider goes before a message the main line shows: the replies of
-  // a thread are in its stack.
+  // a thread are in its stack. A thread in focus hides the main line, so it
+  // has no divider and no pill: the thread's own messages are read one by one.
   const unread = useMemo(
     () =>
-      unreadAtOpen
+      unreadAtOpen && !threadFocus.shown
         ? summarizeUnread(
             chatThreads.stacked.size > 0
               ? displayMessages.filter((message) => !chatThreads.stacked.has(message.id))
@@ -796,7 +797,7 @@ export function Chat({
             olderRemains,
           )
         : null,
-    [displayMessages, chatThreads.stacked, unreadAtOpen, olderRemains],
+    [displayMessages, chatThreads.stacked, unreadAtOpen, olderRemains, threadFocus.shown],
   );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
