@@ -5164,7 +5164,11 @@ describe("AgentRunner", () => {
       ]);
       const runner = createRunner(provider);
       const first = await collectMessages(
-        runner.run({ agentName: "test-main", prompt: "Watch CI", channelThreadKey: "webchat:task-low" }),
+        runner.run({
+          agentName: "test-main",
+          prompt: "Watch CI",
+          channelThreadKey: "webchat:task-low",
+        }),
       );
       const start = first.find((message) => message.type === "turn_start");
       const wake = await deferredWake(

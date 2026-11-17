@@ -2053,7 +2053,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
-          reasoningEffort: await resolveRequestedReasoningEffort(undefined),
+          // The source session stays live for the chat's next message, and
+          // Claude fixes effort at open, so it opens at the chat's own.
+          reasoningEffort: await chatReasoningEffort(input.session, undefined),
         },
       );
       heldSource = source;
@@ -2300,6 +2302,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       requested ?? (await deps.settingsRepo.get<string>(WEBCHAT_REASONING_EFFORT_SETTING_KEY)),
     );
   };
+
+  /**
+   * The effort a turn of `session` opens at. A Concierge chat runs at its own
+   * effort, the chat's or else its agent's (undefined), whatever the composer
+   * sends: its owner sets nothing. Elsewhere a turn that names no effort runs
+   * at the chat's own, as a task chat's do, else the dashboard's.
+   */
+  const chatReasoningEffort = async (
+    session: StoredWebchatSession,
+    requested: unknown,
+  ): Promise<ModelReasoningEffort | undefined> =>
+    isConciergeChat(session)
+      ? ((session.reasoningEffort as ModelReasoningEffort | null) ?? undefined)
+      : resolveRequestedReasoningEffort(requested ?? session.reasoningEffort ?? undefined);
 
   const resolveStoredModelSelection = (stored: unknown): ModelSelection | null => {
     if (stored === null || stored === undefined) {
@@ -4522,14 +4538,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             messageCount,
             body.largeModelSelection,
           );
-    // A Concierge chat runs at its own effort, the chat's or else its agent's,
-    // whatever the composer sends: its owner sets nothing. Elsewhere a message
-    // that names no effort runs at the chat's own, as a task chat's do.
-    const reasoningEffort = isConciergeChat(session)
-      ? ((session.reasoningEffort as ModelReasoningEffort | null) ?? undefined)
-      : await resolveRequestedReasoningEffort(
-          body.reasoningEffort ?? session.reasoningEffort ?? undefined,
-        );
+    const reasoningEffort = await chatReasoningEffort(session, body.reasoningEffort);
     const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we

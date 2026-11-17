@@ -62,6 +62,7 @@ import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
+import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -7158,6 +7159,30 @@ describe("Webchat API", () => {
       // The sidebar list contains it immediately, with no query change.
       const listed = (await (await app.request("/chat/sessions")).json()) as Array<{ id: string }>;
       expect(listed.map((s) => s.id)).toContain("branch-fork-session");
+    });
+
+    it("opens a branch's source session at the chat's saved effort, as its next message runs", async () => {
+      // The source stays live for the chat's next message, and Claude fixes
+      // effort at open, so it must not open at the dashboard's.
+      await deps.settingsRepo.set(WEBCHAT_REASONING_EFFORT_SETTING_KEY, "xhigh");
+      await deps.webchatRepo.updateSessionReasoningEffort(SESSION_ID, "low");
+      const open = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
+        sessionId: "live-source-session",
+      } as AgentSession);
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
+      const app = createWebchatRuntime(deps).routes;
+
+      await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "What about the other approach?" }),
+      });
+
+      expect(open).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reasoningEffort: "low" }),
+      );
     });
 
     it("refuses a follow-up until the branch thread exists", async () => {
