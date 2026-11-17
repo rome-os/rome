@@ -759,6 +759,12 @@ button.rome-upgrade-row:hover {
     --row-px: 0.625rem;
     --row-link-px: 0.5625rem;
     --row-icon-gap: 0.875rem;
+    /* The gap between rows, a child chat's text start (text column x=48 less
+       the row's edge and 1px border), and a trailing button's right margin
+       (icon inset 18 from the column edge). */
+    --row-gap: 0.125rem;
+    --row-child-pl: 2.4375rem;
+    --row-trail-mr: 0.375rem;
     /* The chat list's switcher sits a little left of the icon column, since its
        icon is centred in a segment. */
     --row-switcher-pl: 0.1875rem;

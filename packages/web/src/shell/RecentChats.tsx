@@ -233,7 +233,17 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  onCard,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  onCard: boolean;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -260,7 +270,7 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
           className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? "pl-4" : "pl-2"
+            nested ? (onCard ? "pl-4" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -372,7 +382,7 @@ function NewChatRow({
       to="/chat"
       state={kind === "topic" ? { conciergeTopic: true } : undefined}
       data-new-chat-row={kind}
-      className={`${LINK_CLASS} ${IDLE_CLASS} mb-1`}
+      className={`${LINK_CLASS} ${IDLE_CLASS} mb-[var(--row-gap)]`}
     >
       <Plus className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
       <span className="flex-1 truncate">{label}</span>
@@ -791,7 +801,7 @@ export function RecentChats({
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
+        className={`group flex ${nested && !onCard ? "h-9" : "h-8"} items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
           session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
@@ -810,14 +820,14 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? "ml-4" : "ml-2"
+              nested ? (onCard ? "ml-4" : "ml-9") : "ml-2"
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} onCard={onCard} />
         )}
         <span
-          className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
+          className={`relative ${nested && !onCard ? "mr-[var(--row-px)]" : "mr-2"} flex h-4 w-4 shrink-0 items-center justify-center ${
             isEditing ? "hidden" : ""
           }`}
         >
@@ -961,14 +971,14 @@ export function RecentChats({
             : undefined
         }
         title={deviceFolder ? undefined : label}
-        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="flex h-full min-w-0 flex-1 items-center gap-[var(--row-icon-gap)] rounded-8 border border-transparent pl-[var(--row-link-px)] pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
       >
         {projectLabel}
       </button>
     );
     return (
-      <div key={key} className="mb-1" data-project-group={key}>
-        <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+      <div key={key} data-project-group={key}>
+        <div className="group/project flex h-9 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
             <button
@@ -987,7 +997,7 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInFolder")}
               title={t("recentChats.newChatInFolder")}
-              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-[var(--row-trail-mr)] shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -1002,7 +1012,7 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInProject")}
               title={t("recentChats.newChatInProject")}
-              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-[var(--row-trail-mr)] shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -1010,12 +1020,20 @@ export function RecentChats({
         </div>
         {collapsed ? null : (
           <>
-            {visibleItems.map((session) => renderChatRow(session, true))}
+            {/* A guide line down the folder icon's centre ties the chats to it. */}
+            <div className="relative mt-[var(--row-gap)] flex flex-col gap-[var(--row-gap)]">
+              <span
+                aria-hidden
+                data-tree-guide
+                className="pointer-events-none absolute inset-y-0 left-[calc(var(--row-px)+0.5rem)] w-px bg-border"
+              />
+              {visibleItems.map((session) => renderChatRow(session, true))}
+            </div>
             {remainingCount > 0 ? (
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="ml-[var(--row-child-pl)] rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>
@@ -1203,14 +1221,10 @@ export function RecentChats({
                 />
               ) : null
             ) : (
-              <section
-                aria-labelledby="recent-chats-projects-heading"
-                data-projects-section
-                className="px-1"
-              >
+              <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
                 <h2
                   id="recent-chats-projects-heading"
-                  className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+                  className="mt-3 flex h-7 items-center px-[var(--row-px)] text-aux text-subtle-foreground"
                 >
                   {t("recentChats.sectionProjects")}
                 </h2>
@@ -1221,7 +1235,7 @@ export function RecentChats({
                     <Skeleton className="h-8 w-3/5" />
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="flex flex-col gap-[var(--row-gap)]">
                     {projectGroups.map(renderProjectGroup)}
                     {/* Only with nothing to show: a refetch that fails while the
                     list already has rows keeps the rows rather than blanking them. */}

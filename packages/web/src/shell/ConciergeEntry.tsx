@@ -107,7 +107,7 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="mb-1 flex items-center">
+    <div className="mb-[var(--row-gap)] flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
@@ -258,7 +258,10 @@ function ConciergeTopicEntry({
     );
   }
   return (
-    <div className="group/topic relative mb-1 flex items-center" data-concierge-topic={chat.id}>
+    <div
+      className="group/topic relative mb-[var(--row-gap)] flex items-center"
+      data-concierge-topic={chat.id}
+    >
       <Link
         to={`/chat/${chat.id}`}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}

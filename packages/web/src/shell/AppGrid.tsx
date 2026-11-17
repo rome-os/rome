@@ -469,7 +469,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     // Without hoverable content, leaving the trigger closes the tooltip.
     <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
-        className={`flex shrink-0 flex-col gap-1 pb-2 ${labelled ? "items-stretch px-2 pt-2" : "items-center px-3"}`}
+        className={`flex shrink-0 flex-col gap-[var(--row-gap)] pb-2 ${labelled ? "items-stretch px-2 pt-2" : "items-center px-3"}`}
       >
         {onSearch ? (
           <Tooltip>
