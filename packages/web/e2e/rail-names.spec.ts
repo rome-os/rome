@@ -26,9 +26,9 @@ test.describe("desktop", () => {
     const apps = page.locator('aside a[href="/apps"]');
     await expect(apps).toHaveText("Apps", { timeout: 30_000 });
     expect(await railWidth(page)).toBe(192);
-    // The 16px glyph stays centred in the 16px slot at x=18; the bare rail
+    // The 16px glyph stays centred in the 16px slot at x=20; the bare rail
     // centres its 40px tiles in 64px.
-    expect(await iconCenter(page, "/apps")).toBe(26);
+    expect(await iconCenter(page, "/apps")).toBe(28);
 
     const edge = (await page.locator("[data-rail-edge]").boundingBox())!;
     const x = edge.x + edge.width / 2;
@@ -71,6 +71,23 @@ test.describe("desktop", () => {
       }),
     ).toBe(true);
 
+    const tree = await chatLink.evaluate((link) => {
+      const group = link.closest("[data-project-group]")!;
+      const column = group.closest(".overflow-y-auto")!.getBoundingClientRect();
+      const guide = group.querySelector("[data-tree-guide]")!.getBoundingClientRect();
+      const marker = group.querySelector("[data-tree-indicator]")!.getBoundingClientRect();
+      const folder = group.querySelector("button > span")!.getBoundingClientRect();
+      return {
+        textX: link.children[0].getBoundingClientRect().left - column.left,
+        guideX: guide.left - column.left,
+        folderCenterX: folder.left + folder.width / 2 - column.left,
+        markerDelta: Math.abs(marker.left + marker.width / 2 - guide.left - guide.width / 2),
+      };
+    });
+    expect(tree.textX).toBe(48);
+    expect(tree.guideX).toBe(tree.folderCenterX);
+    expect(tree.markerDelta).toBeLessThanOrEqual(0.5);
+
     // The main chat puts it in Concierge mode, whose tile opens the main chat.
     await page.goto("/message");
     await expect(tile).toHaveAttribute("href", "/message", { timeout: 30_000 });
@@ -85,16 +102,40 @@ test.describe("desktop", () => {
       const newTopic = document.querySelector('[data-new-chat-row="topic"]')!;
       const main = document.querySelector('[data-concierge-section] a[href="/message"]')!;
       const topic = document.querySelector('[data-concierge-topic="mock-topic-travel"] > a')!;
-      return [nav, newTopic, main, topic].map((row) => {
+      const search = document.querySelector("aside nav button.rounded-full")!;
+      const app = document.querySelector('aside nav a[href^="/apps/"]')!;
+      return [nav, newTopic, main, topic, search, app].map((row) => {
         const column = row.closest(".overflow-y-auto") ?? row.closest("aside")!;
+        const box = row.getBoundingClientRect();
+        const icon = row.children[0].getBoundingClientRect();
+        const text = row.children[1].getBoundingClientRect();
         return {
-          height: row.getBoundingClientRect().height,
-          textX: row.children[1].getBoundingClientRect().left - column.getBoundingClientRect().left,
+          height: box.height,
+          iconX: icon.left - column.getBoundingClientRect().left,
+          textX: text.left - column.getBoundingClientRect().left,
+          inset: icon.left - box.left,
+          gap: text.left - icon.right,
           weight: getComputedStyle(row).fontWeight,
         };
       });
     });
-    expect(geometry).toEqual(Array(4).fill({ height: 36, textX: 48, weight: "400" }));
+    expect(geometry).toEqual(
+      Array(6).fill({ height: 36, iconX: 20, textX: 48, inset: 12, gap: 12, weight: "400" }),
+    );
+
+    const tasksHeading = page.locator("#recent-chats-tasks-heading button");
+    await tasksHeading.click();
+    const tasks = await tasksHeading.evaluate((heading) => {
+      const card = heading.closest("[data-tasks-section]")!;
+      const column = card.parentElement!.getBoundingClientRect();
+      const name = card.querySelector("[data-chat-row] a > span")!;
+      return {
+        iconX: heading.children[0].getBoundingClientRect().left - column.left,
+        headingTextX: heading.children[1].getBoundingClientRect().left - column.left,
+        chatTextX: name.getBoundingClientRect().left - column.left,
+      };
+    });
+    expect(tasks).toEqual({ iconX: 20, headingTextX: 48, chatTextX: 48 });
   });
 });
 

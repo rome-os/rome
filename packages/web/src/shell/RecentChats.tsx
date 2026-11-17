@@ -277,7 +277,7 @@ function ChatRowLink({
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
           className={`flex h-full min-w-0 flex-1 items-center rounded-12 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? (onCard ? "pl-4" : "pl-[var(--row-child-pl)]") : "pl-2"
+            nested ? (onCard ? "pl-[var(--row-card-text-pl)]" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -340,7 +340,7 @@ function ChatModeSwitch({
       onValueChange={onChange}
       // The kit's selected pill is the canvas colour, which on a dark track is
       // barely lighter than the track. Dark lifts it with the foreground.
-      className="shrink-0 [&_[role=radio]]:px-[var(--row-seg-px)] dark:[&_[aria-checked=true]]:bg-foreground/20"
+      className="shrink-0 dark:[&_[aria-checked=true]]:bg-foreground/20"
       options={[
         {
           value: "chat",
@@ -875,7 +875,11 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? (onCard ? "ml-4" : "ml-3") : "ml-2"
+              nested
+                ? onCard
+                  ? "ml-[calc(var(--row-card-text-pl)-var(--rome-space-1))]"
+                  : "ml-[calc(var(--row-child-pl)-var(--rome-space-1))]"
+                : "ml-2"
             }`}
           />
         ) : (
@@ -1136,7 +1140,7 @@ export function RecentChats({
                 : t("recentChats.sectionTasks")
             }
             onClick={() => setTasksExpanded((open) => !open)}
-            className="flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-[var(--row-icon-gap)] rounded-8 border border-transparent px-[var(--row-card-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             <span
               className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
@@ -1186,7 +1190,7 @@ export function RecentChats({
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pr-3 ${headerLeading ? "pl-2" : "pl-[var(--row-switcher-pl)]"} ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
+          className={`flex shrink-0 items-center justify-between pl-[var(--row-px-sm)] pr-3 ${belowTitlebar ? "pt-2 pb-3" : "h-14"}`}
         >
           <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}

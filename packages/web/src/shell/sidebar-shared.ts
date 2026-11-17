@@ -27,10 +27,8 @@ export const IDLE_CLASS = "hover:bg-surface-hover dark:hover:bg-surface";
 export const RAIL_LINK_CLASS =
   "rome-sidebar-link relative flex size-10 items-center justify-center rounded-12 border border-transparent text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
-// The rail's labelled row: the tile widened to the rail, its name beside the
-// icon. It has no border, unlike the tile, so its 10px left padding (8px of
-// rail padding beside it) puts the icon in the column at x=18, text at x=48,
-// the same two columns as the chat list's rows.
+// The labelled rail row shares the chat list's icon and text columns.
+// Its inset excludes a border; LINK_CLASS compensates for its own border.
 export const RAIL_ROW_CLASS =
   "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-12 pl-[var(--row-px)] pr-[var(--row-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
