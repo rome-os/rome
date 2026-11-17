@@ -59,7 +59,7 @@ import {
   fakeAccounts,
   RESTRICTED_PLAN,
 } from "../test/kit/model-accounts.js";
-import type { ModelAccountReports } from "../agent/index.js";
+import type { ModelAccountReports, WidgetDrawing } from "../agent/index.js";
 import {
   CONCLUSION_CLOSE,
   CONCLUSION_MAX_CHARS,
@@ -228,6 +228,7 @@ function setup(
     reportedTask: undefined as string | undefined,
     turnId: "concierge-turn-1",
     askingDeviceId: undefined as string | undefined,
+    widgets: "card" as WidgetDrawing,
   };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
@@ -444,6 +445,7 @@ function setup(
     channelThreadKey: `webchat:${here.chat}`,
     sessionId: "runtime-1",
     isSubagent: false,
+    widgets: here.widgets,
     getTurnId: () => here.turnId,
     getThreadContext: () =>
       withAskingDevice(
@@ -578,6 +580,10 @@ function setup(
     reportedTask: (taskId: string | undefined) => {
       here.reportedTask = taskId;
     },
+    /** The tools run where widgets draw this way from here on. */
+    drawWidgets: (widgets: WidgetDrawing) => {
+      here.widgets = widgets;
+    },
     /** The tools run in turn `turnId` from here on. */
     inTurn: (turnId: string) => {
       here.turnId = turnId;
@@ -643,6 +649,7 @@ describe("Concierge tools", () => {
       "chat_forward",
       "chat_card",
       "connect_card",
+      "show_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
@@ -5319,6 +5326,70 @@ describe("Concierge connect_card", () => {
 
     expect(result.isError).toBe(true);
     expect(cards(s)).toEqual([]);
+  });
+});
+
+describe("Concierge show_card", () => {
+  const ITINERARY = {
+    components: [
+      { id: "root", component: "Column", children: ["title", "steps"] },
+      { id: "title", component: "Text", text: "Saturday in Kyoto", variant: "h3" },
+      { id: "steps", component: "List", children: ["s1", "s2"] },
+      { id: "s1", component: "Text", text: "9:00 Fushimi Inari" },
+      { id: "s2", component: "Text", text: "13:00 Nishiki Market" },
+    ],
+  };
+  const TEXT = "Saturday in Kyoto: 9:00 Fushimi Inari, 13:00 Nishiki Market";
+
+  const rows = (s: ReturnType<typeof setup>) =>
+    (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
+
+  it("stores the card as a widget of Rome's own, with its plain-text line", async () => {
+    const s = setup();
+
+    const result = await s.tool("show_card", { ui: ITINERARY, text: TEXT });
+
+    expect(result.isError).toBeFalsy();
+    expect(rows(s)).toEqual([
+      [
+        {
+          type: "widget",
+          toolUseId: expect.any(String),
+          appId: "core",
+          text: TEXT,
+          ui: ITINERARY,
+        },
+      ],
+    ]);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({ messageId: "said-1" });
+  });
+
+  it("refuses a card with a button and says why, showing nothing", async () => {
+    const s = setup();
+    const ui = {
+      components: [
+        { id: "root", component: "Button", child: "label", action: { event: { name: "go" } } },
+        { id: "label", component: "Text", text: "Go" },
+      ],
+    };
+
+    const result = await s.tool("show_card", { ui, text: "Go" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Button");
+    expect(result.content[0].text).toContain("say");
+    expect(rows(s)).toEqual([]);
+  });
+
+  it("refuses a card where cards cannot show, and asks for the content as text", async () => {
+    const s = setup();
+    s.drawWidgets("plain_text");
+
+    const result = await s.tool("show_card", { ui: ITINERARY, text: TEXT });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("cannot show cards");
+    expect(rows(s)).toEqual([]);
   });
 });
 

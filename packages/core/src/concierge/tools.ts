@@ -1,14 +1,21 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
 // tools run its task chats and read its other Concierge chats, `topic_start`
-// starts a topic chat, `react` puts an emoji on a guardian message, and
-// `connect_card` shows a card that connects a service.
+// starts a topic chat, `react` puts an emoji on a guardian message,
+// `connect_card` shows a card that connects a service, and `show_card` shows
+// a card the Concierge composes itself.
 
+import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
+import {
+  AGENT_CARD_MAX_TEXT_CHARS,
+  AGENT_CARD_MAX_UI_CHARS,
+  agentCardPart,
+} from "../chats/agent-card.js";
 import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
 import type {
@@ -1645,6 +1652,52 @@ export async function buildConciergeTools(
             },
           ]);
           said(chatId, turnId, `Connect ${connector.label}`);
+          return { sent: "Shown; the guardian sees the card.", messageId: id };
+        }),
+    },
+    {
+      name: "show_card",
+      description:
+        "Show the guardian structured content as a card you compose: steps or an itinerary, options compared, or a few key numbers. It only shows; nobody answers it, and you go on after it. " +
+        "`ui` is an A2UI card: a flat list of components, each with an `id`, naming its children by id, drawn from the one whose id is `root`. Components: " +
+        "Text {text, variant?: h1|h2|h3|h4|h5|body|caption}; Stat {label, value, unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row and Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
+        "Write every value out: no `data`, `bind` or `{ path }`. No Button, ChoicePicker or TextField: to ask the guardian something, use the question card. " +
+        `\`ui\` stays under ${AGENT_CARD_MAX_UI_CHARS} characters of JSON. ` +
+        "`text` is the same content as plain text: the chat's line for the card, what a lock screen shows, and what you read back later. " +
+        "A refused card says why: fix it once, or say the content with `say` instead. Where cards cannot show, the answer says so: say it with `say`.",
+      inputSchema: {
+        type: "object",
+        required: ["ui", "text"],
+        properties: {
+          ui: {
+            type: "object",
+            required: ["components"],
+            properties: {
+              components: { type: "array", items: { type: "object" } },
+            },
+          },
+          text: {
+            type: "string",
+            description: `The card's content as plain text, at most ${AGENT_CARD_MAX_TEXT_CHARS} characters.`,
+          },
+        },
+      },
+      handler: (input, call) =>
+        runTool("show_card", input, async (args) => {
+          const { chatId, turnId } = currentTurn();
+          if (context.widgets !== "card") {
+            throw new Error(
+              "This chat cannot show cards. Nothing was shown: say the content with say instead.",
+            );
+          }
+          const card = agentCardPart(args.ui, args.text, call?.toolUseId ?? `card-${randomUUID()}`);
+          if ("problems" in card) {
+            throw new Error(
+              `The card was not shown: ${card.problems.join("; ")}. Fix it and call show_card once more, or say the content with say instead.`,
+            );
+          }
+          const id = await addMessage([card.part]);
+          said(chatId, turnId, card.part.text);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),
     },

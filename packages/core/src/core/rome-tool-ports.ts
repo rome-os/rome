@@ -214,6 +214,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             channelThreadKey: turn.continuityKey,
             sessionId: turn.sessionId,
             isSubagent: turn.isSubagent,
+            widgets: turn.widgets,
             getTurnId: turn.turnId,
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,

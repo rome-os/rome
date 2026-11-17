@@ -28,6 +28,7 @@ const ANSWER_TOOLS = new Set([
   "chat_forward",
   "chat_card",
   "connect_card",
+  "show_card",
   "toolsearch",
 ]);
 

@@ -288,7 +288,7 @@ How a message Rome sends stands with its platform: pending, sent or failed. Only
 
 Something shown in a chat that people can look at or act on: a question with choices, an approval request, a map from an app.
 
-- Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
+- Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add. The one exception is the [agent card](#agent-card), whose look and plain-text line the agent writes each time.
 - Each platform draws the kinds it can as its own cards, and sends the plain-text line for the rest. Feishu draws a question as a card. Email sends it as text.
 - A place's widget drawing is card or plain text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
@@ -296,7 +296,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 - A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
 - An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
 - A widget is a message of its own, and is known by that message. A message that holds a widget holds nothing else (zhangfan, 2026-11-12).
-- A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event.
+- A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event. An agent card is the exception: it shows what it held when the agent showed it.
 - People do two things with a widget. An **edit**, such as picking an option or typing an answer, changes only what the widget shows on the screen in front of them. An **event**, such as pressing Send or a button that logs a glass of water, asks Rome to act, and carries the edits it needs. An edit never leaves the screen on its own.
 - Every event goes to the widget's owner, which alone says what it means: an app's widget calls its app, and Rome's question answers the agent waiting on it. A widget accepts only the events it names, and only from someone who may open its chat.
 - What the agent reads of an answer is written by Rome from the widget and the event. Anything the owner app adds reads as the app's, never as the words of the person who acted.
@@ -314,6 +314,17 @@ Rome's own widget that asks the guardian for where they are right now, once, for
 - The client reads the position from its device and sends it with the share. It is the one event a client fills in itself.
 - The position reaches that answer only. The chat keeps how the share ended, never where the guardian was, and a location share is not a connection.
 - A coarse position, from a desktop's network or a VPN, reads as an area: the agent says "around" the city.
+
+## Agent card
+
+Rome's own widget whose look the agent composes, to show structured content laid out: an itinerary, options compared, a few key numbers.
+
+- Rome owns it. The agent writes how it looks, from the display components of the widget catalog (text, numbers, lists, rows, columns, images, progress), and gives its plain-text line with it.
+- It only shows something. It holds nothing anyone can press, pick or type, since no owner would handle the event. To ask, the agent uses the question.
+- Its content lives in its message, a snapshot of the card as shown. It reads nothing from anywhere when drawn, and never changes afterwards.
+- The plain-text line is the card for every reader that cannot draw it: a text-only platform, the lock screen, and the agent itself reading the chat later.
+- An agent shows one only where the place draws cards. Anywhere else it sends the content as a message.
+- The agent uses one only for content with a real structure, at most one per reply, and its messages around the card never repeat it.
 
 ## Client
 

@@ -65,6 +65,7 @@ for (const askingDeviceId of [undefined, "synthetic-device"] as const) {
       sessionId: "source-session",
       channelThreadKey: "webchat:source",
       isSubagent: false,
+      widgets: "card",
       getTurnId: () => "source-turn",
       getThreadContext: () => ({
         channel: "webchat",
