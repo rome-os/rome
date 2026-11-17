@@ -44,10 +44,11 @@ const linkPattern = /https?:\/\/\S+/i;
 
 /** The message ids that the links in `text` end in: a link to a message ends in its id. */
 export function linkedIds(text) {
-  return [...String(text ?? "").matchAll(/https?:\/\/\S+/g)]
+  // A link ends at markdown around it, such as `)_` after an italic note.
+  return [...String(text ?? "").matchAll(/https?:\/\/[^\s<>()[\]*_|]+/g)]
     .map((m) =>
       m[0]
-        .replace(/[)>\].,;]+$/, "")
+        .replace(/[.,;:]+$/, "")
         .split(/[/#?]/)
         .filter(Boolean),
     )

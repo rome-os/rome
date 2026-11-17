@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { cosEnv } from "../lib/cos-env.mjs";
 import { makeJudge, parseVerdict } from "../lib/judge.mjs";
-import { namesSource, presentedAsCurrent } from "../lib/checks.mjs";
+import { linkedIds, namesSource, presentedAsCurrent } from "../lib/checks.mjs";
 import { failureHistory, NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
 import { loadTeam } from "../lib/seed.mjs";
 
@@ -328,6 +328,14 @@ describe("failures across runs", () => {
 
     const { outDir } = await runAgainst("fail-K5", { rules: ["K5"] });
     assert.match(readFileSync(join(outDir, "report.md"), "utf8"), /\| K5 \| 1 \|/);
+  });
+});
+
+describe("message links", () => {
+  it("reads a message id from a link inside markdown", () => {
+    const text =
+      "| G2 | Marisol | 2026-12-11 | _(Changed: said so, https://discord.com/channels/1/2/1572040996605272106)_\n[here](https://discord.com/channels/1/2/42). And https://discord.com/channels/1/2/7.";
+    assert.deepEqual(linkedIds(text), ["1572040996605272106", "42", "7"]);
   });
 });
 
