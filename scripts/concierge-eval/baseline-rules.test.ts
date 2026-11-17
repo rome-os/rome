@@ -2,8 +2,10 @@ import { describe, expect, it } from "@rstest/core";
 import {
   type BaselineScenario,
   type CheckInput,
+  answeredInline,
   cardRules,
   fridayOnly,
+  shownAfter,
 } from "./baseline-checks.js";
 import {
   chineseStyle,
@@ -72,6 +74,7 @@ const input = (saidAfter: string[][]): CheckInput => ({
   cardsAfter: saidAfter.map(() => []),
   reactions: saidAfter.map(() => null),
   said: saidAfter.flat(),
+  shown: saidAfter.flat(),
   tasks: [],
 });
 
@@ -142,5 +145,20 @@ describe("cards", () => {
     const carded = withCards([["Day 1: Belém. Day 2: Alfama."]]);
     const turn = { tools: {} } as unknown as TimedTurn;
     expect(itinerary?.check({ ...carded, steps: [turn], saidAfter: [[]], said: [] })).toEqual([]);
+  });
+
+  it("counts a card's plain text as the answer in the generic checks", () => {
+    const turn = { tools: {} } as unknown as TimedTurn;
+    const cardOnly: CheckInput = {
+      ...input([[]]),
+      steps: [turn],
+      cardsAfter: [["Closed on Tuesday"]],
+      shown: ["Closed on Tuesday"],
+    };
+    expect(answeredInline(cardOnly, 0)).toEqual([]);
+    expect(answeredInline({ ...cardOnly, cardsAfter: [[]], shown: [] }, 0)).toEqual([
+      "step 1: no answer",
+    ]);
+    expect(shownAfter(cardOnly, 0)).toEqual(["Closed on Tuesday"]);
   });
 });

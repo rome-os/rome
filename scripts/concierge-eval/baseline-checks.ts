@@ -33,6 +33,8 @@ export interface CheckInput {
   reactions: (string | null)[];
   /** Every Concierge text message. */
   said: string[];
+  /** Everything the Concierge showed: its text messages and its cards' plain text. */
+  shown: string[];
   /** The chat's tasks, as the Tasks panel lists them. */
   tasks: { status: string; endReason: string | null }[];
 }
@@ -81,12 +83,18 @@ export function answeredInline(input: CheckInput, step: number, maxSearches = 0)
   if (tool(turn, "chat_start") > 0) notes.push(`step ${step + 1}: started a task`);
   const searches = tool(turn, "websearch");
   if (searches > maxSearches) notes.push(`step ${step + 1}: ${searches} web searches`);
-  if ((input.saidAfter[step] ?? []).length === 0 && !turn?.reactedMs) {
+  if (shownAfter(input, step).length === 0 && !turn?.reactedMs) {
     notes.push(`step ${step + 1}: no answer`);
   }
   notes.push(...noTrailingOffer(input.saidAfter[step] ?? [], step));
   return notes;
 }
+
+/** What the Concierge showed after a step: its messages and its cards' plain text. */
+export const shownAfter = (input: CheckInput, step: number): string[] => [
+  ...(input.saidAfter[step] ?? []),
+  ...(input.cardsAfter[step] ?? []),
+];
 
 /** The length of what the Concierge said after a step, in characters. */
 export const saidLength = (input: CheckInput, step: number) =>

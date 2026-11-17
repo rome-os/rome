@@ -182,6 +182,7 @@ async function playScenario(
     cardsAfter,
     reactions,
     said: saidAfter.flat(),
+    shown: [...saidAfter.flat(), ...cardsAfter.flat()],
     tasks: driven.tasks,
   };
   const notes = [...scenario.check(input), ...standingRules(scenario, input)];

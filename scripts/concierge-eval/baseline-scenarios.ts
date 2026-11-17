@@ -10,6 +10,7 @@ import {
   delegated,
   fridayOnly,
   matches,
+  shownAfter,
   noFiller,
   tool,
 } from "./baseline-checks.js";
@@ -54,7 +55,7 @@ const EN_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "What's the difference between a flat white and a latte?", settleS: 6 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /milk|foam|microfoam/i, "the milk"),
+      ...matches(i.shown, /milk|foam|microfoam/i, "the milk"),
       ...noFiller(i.said),
     ],
     rubric: `Correct answer: a flat white has less milk and a thin layer of velvety microfoam, so it tastes stronger of coffee and is usually smaller; a latte has more steamed milk and a thicker foam layer. Often a flat white uses a double shot/ristretto. Score correctness and brevity (2-4 sentences is ideal). ${VOICE}`,
@@ -67,7 +68,7 @@ const EN_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "How much is 72°F in Celsius?", settleS: 6 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /22[.,]2/, "22.2 °C"),
+      ...matches(i.shown, /22[.,]2/, "22.2 °C"),
       ...noFiller(i.said),
     ],
     rubric: `Correct answer: about 22.2 °C. One line is ideal. ${VOICE}`,
@@ -93,8 +94,8 @@ const EN_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "When is my dentist appointment again?", settleS: 8 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /(nov(ember)?\.? ?20|20(th)? ?nov|11\/20|11月20)/i, "November 20"),
-      ...matches(i.said, /15:30|3:30|3\.30|下午三点半/i, "15:30"),
+      ...matches(i.shown, /(nov(ember)?\.? ?20|20(th)? ?nov|11\/20|11月20)/i, "November 20"),
+      ...matches(i.shown, /15:30|3:30|3\.30|下午三点半/i, "15:30"),
       ...fridayOnly(i.said),
       ...noFiller(i.said),
     ],
@@ -113,7 +114,7 @@ const EN_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /11[:.]30/, "11:30"),
+      ...matches(i.shown, /11[:.]30/, "11:30"),
       ...noFiller(i.said),
     ],
     rubric: `Correct answer: 11:30. Arrive by 12:35; a drive inside the 11:00-13:00 window takes 65 minutes, so leave at 11:30 (the whole drive falls in the window). Leaving at 11:45 with a 50-minute drive is wrong. Score 1 for a wrong time, 3 for right time with muddled reasoning, 5 for right time with one short line of reasoning. ${VOICE}`,
@@ -160,7 +161,7 @@ const EN_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
+      ...matches(i.shown, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
       ...noFiller(i.said),
     ],
     rubric: `The relayed result should give the Louvre's opening hours (around 9:00-18:00, with late opening on some evenings, e.g. Wednesday/Friday until 21:00) and say it is closed on Tuesdays, in about two lines. Score the final relayed result, not the hand-off line. ${VOICE}`,
@@ -179,7 +180,7 @@ const EN_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
+      ...matches(i.shown, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
       ...noFiller(i.said),
     ],
     rubric: `The relayed result should give the Louvre's opening hours (around 9:00-18:00, with late opening on some evenings, e.g. Wednesday/Friday until 21:00) and say it is closed on Tuesdays, in about two lines. Score the final relayed result, not the hand-off line. ${VOICE}`,
@@ -197,8 +198,8 @@ const EN_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /heat pump|wärmepumpe|热泵/i, "the heat pump"),
-      ...matches(i.said, /€|eur/i, "costs in euros"),
+      ...matches(i.shown, /heat pump|wärmepumpe|热泵/i, "the heat pump"),
+      ...matches(i.shown, /€|eur/i, "costs in euros"),
     ],
     rubric: `The relayed result should compare the three systems on install cost, yearly running cost and 2026 subsidies (e.g. the German BEG/KfW heating subsidy for heat pumps and pellets, none or little for gas), with plausible numbers, and end in a clear recommendation with a reason. Judge the reasoning and plausibility, and whether the relay is a usable summary (3-6 sentences or a compact table) rather than a wall of text. ${VOICE}`,
   },
@@ -217,8 +218,8 @@ const EN_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...answeredInline(i, 2),
-      ...matches(i.saidAfter[2] ?? [], /porto/i, "Porto"),
-      ...matches(i.saidAfter[2] ?? [], /design/i, "the design studio"),
+      ...matches(shownAfter(i, 2), /porto/i, "Porto"),
+      ...matches(shownAfter(i, 2), /design/i, "the design studio"),
       ...noFiller(i.said),
     ],
     rubric: `The last answer must say Porto and a job at a design studio, in one line. The first reply should acknowledge the news briefly (a reaction or one line), and the gift answer should be short and practical. ${VOICE}`,
