@@ -183,18 +183,44 @@ function costBlock(cost, heading) {
   lines.push(
     `${cost.pacing ? `- Pacing: ${cost.pacing}.\n` : ""}- Agent turns started: ${cost.turns}, for ${cost.messages} replayed messages (${cost.messagesPerTurn ?? "no"} messages per turn on average).`,
     `- Tokens: ${n(cost.tokens.input)} input, ${n(cost.tokens.output)} output, ${n(cost.tokens.cacheRead)} cache read, ${n(cost.tokens.cacheWrite)} cache write.`,
-    `- Cost: ${cost.costUsd} USD.`,
+    ...modelLines(cost.models),
+    `- Cost: ${usd(cost.costUsd)}, from ${cost.usdSource ?? "Rome's recorded cost"}.`,
+    ...(cost.recordedSource
+      ? [`- As Rome recorded it: ${usd(cost.recordedUsd)}, from ${cost.recordedSource}.`]
+      : []),
     ...(cost.envoy
       ? [
-          `- The envoy's reviews of replies, not counted above: ${cost.envoy.turns} turns, ${n(cost.envoy.tokens.input)} input, ${n(cost.envoy.tokens.output)} output, ${n(cost.envoy.tokens.cacheRead)} cache read, ${n(cost.envoy.tokens.cacheWrite)} cache write tokens, ${cost.envoy.costUsd} USD.`,
+          `- The envoy's reviews of replies, not counted above: ${cost.envoy.turns} turns, ${n(cost.envoy.tokens.input)} input, ${n(cost.envoy.tokens.output)} output, ${n(cost.envoy.tokens.cacheRead)} cache read, ${n(cost.envoy.tokens.cacheWrite)} cache write tokens, ${usd(cost.envoy.costUsd)} at Rome's rates.`,
         ]
       : []),
     "",
-    "| Turn | Started | Replayed messages since the turn before |",
-    "| --- | --- | --- |",
-    ...cost.perTurn.map((t) => `| ${t.turnId} | ${t.start} | ${t.messagesBefore} |`),
+    "| Turn | Started | Replayed messages since the turn before | Model | USD at Rome's rates | USD as recorded |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...cost.perTurn.map(
+      (t) =>
+        `| ${t.turnId} | ${t.start} | ${t.messagesBefore} | ${t.model ?? "unknown"}${t.modelFrom === "setting" ? " (setting)" : ""} | ${usd(t.pricedUsd, 6)} | ${usd(t.recordedUsd, 6)} |`,
+    ),
   );
   return lines;
+}
+
+const usd = (x, digits = 4) =>
+  x === null || x === undefined ? "unknown" : `${Number(x).toFixed(digits)} USD`;
+
+/** Which model served the turns, and whether that is the turn's record or the setting. */
+function modelLines(models = []) {
+  if (models.length === 0) return [];
+  const turns = models
+    .map(
+      (m) =>
+        `${m.model} for ${m.turns} turns${m.from === "setting" ? "" : ", from Rome's record of the session that ran each turn"}`,
+    )
+    .join("; ");
+  return models.some((m) => m.from === "setting")
+    ? [
+        `- Model: ${turns}. The environment does not record each turn's model, so this is the environment's model setting, not per-turn evidence.`,
+      ]
+    : [`- Model: ${turns}.`];
 }
 
 function failureLines({ earlierRuns, counts, limit }) {

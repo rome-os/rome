@@ -235,6 +235,8 @@ export async function verify({
     k5Questions: loadK5Questions(),
     waits,
     phase: phase ?? 1,
+    // The environment's model setting, for turns whose own model the environment does not record.
+    model: version.model?.name ?? null,
     memo: {},
     log,
     answered,

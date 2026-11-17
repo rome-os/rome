@@ -11,6 +11,7 @@ import { makeJudge, parseVerdict } from "../lib/judge.mjs";
 import { linkedIds, namesSource, presentedAsCurrent } from "../lib/checks.mjs";
 import { failureHistory, NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
 import { loadTeam } from "../lib/seed.mjs";
+import { turnCosts } from "../lib/cost.mjs";
 import { a3Limit } from "../scenarios/a3-silent.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
@@ -435,5 +436,45 @@ else { writeFileSync(seen, ""); console.log("- item: match"); }`,
       reasons: "missing Priya",
     });
     assert.equal(parseVerdict("no json here").verdict, "error");
+  });
+});
+
+describe("turn costs", () => {
+  // Rome records the SDK's total_cost_usd, the session's running total; values from run 2.
+  const turn = (start, sessionId, costUsd, extra = {}) => ({
+    start,
+    turnId: start,
+    sessionId,
+    inputTokens: 2,
+    outputTokens: 100,
+    cacheReadTokens: 20_000,
+    cacheWriteTokens: 0,
+    costUsd,
+    ...extra,
+  });
+  const turns = [
+    turn("2026-11-17T01:00:00Z", "s1", 0.0009),
+    turn("2026-11-17T01:00:10Z", "s1", 0.00154),
+    turn("2026-11-17T01:00:20Z", "s2", 0.0005),
+    turn("2026-11-17T01:00:30Z", "s1", 0.0018),
+    turn("2026-11-17T01:00:40Z", "s1", 0.0002, { model: "claude-sonnet-5-5" }),
+  ];
+
+  it("takes each turn's recorded cost as the rise over its session's turn before", () => {
+    const got = turnCosts(turns, "claude-haiku-5-5").map((t) => +t.recordedUsd.toFixed(5));
+    // A total lower than the one before starts a new session.
+    assert.deepEqual(got, [0.0009, 0.00064, 0.0005, 0.00026, 0.0002]);
+  });
+
+  it("prices tokens at the turn's model, else the setting, and says which", () => {
+    const got = turnCosts(turns, "claude-haiku-5-5");
+    assert.equal(
+      +got[0].pricedUsd.toFixed(6),
+      +((2 * 0.1 + 100 * 0.5 + 20_000 * 0.01) / 1e6).toFixed(6),
+    );
+    assert.equal(got[0].modelFrom, "setting");
+    assert.equal(got[4].model, "claude-sonnet-5-5");
+    assert.equal(got[4].modelFrom, "turn");
+    assert.equal(turnCosts(turns, "some-unpriced-model")[0].pricedUsd, null);
   });
 });

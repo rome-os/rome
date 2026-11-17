@@ -44,16 +44,19 @@ function add({ chat, thread = null, author, text, delaySeconds = 3, mentionsAgen
 }
 
 function agentTurn(message, catchUp = false) {
+  // As Rome records it: the SDK's running total for the session, not the turn's own cost.
+  const total = (state.turns ?? []).at(-1)?.costUsd ?? 0;
   state.turns = [
     ...(state.turns ?? []),
     {
       start: new Date().toISOString(),
       turnId: `turn-${(state.turns ?? []).length + 1}`,
+      sessionId: "server",
       inputTokens: 1000,
       outputTokens: 50,
       cacheReadTokens: 800,
       cacheWriteTokens: 0,
-      costUsd: 0.001,
+      costUsd: +(total + 0.001).toFixed(6),
     },
   ];
   const out = respond({ agent, state, message, catchUp });

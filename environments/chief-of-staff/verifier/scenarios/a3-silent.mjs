@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
+import { RATES_SOURCE, turnCosts } from "../lib/cost.mjs";
 import { sleep } from "../lib/hearing.mjs";
-import { check, ruleResult } from "../lib/scenario.mjs";
+import { ask, check, ruleResult } from "../lib/scenario.mjs";
+import { K2_QUESTION } from "./k2-goals.mjs";
 
 /**
  * At most this many replies to the replayed messages that did not mention the agent: the
@@ -35,19 +37,18 @@ export function sortReplies(agentMessages, mentions) {
 
 /**
  * What the replay cost: the agent's turns started from the first replayed message until the
- * quiet wait ended, the replayed messages that arrived before each turn started, and the
- * tokens. Reported, never scored. Null when the environment keeps no record of turns.
+ * quiet wait ended, the replayed messages that arrived before each turn started, the tokens,
+ * the model per turn, and the USD both from the tokens at Rome's rates and from what Rome
+ * recorded. Reported, never scored. `turns` is every turn the environment holds, so each
+ * turn's recorded cost can be told from its session's running total.
  */
-export function replayCost(turns, posted, from, to) {
-  const all = turns.filter(
+export function replayCost(turns, posted, from, to, fallbackModel) {
+  const all = turnCosts(turns, fallbackModel).filter(
     (t) => Date.parse(t.start) >= Date.parse(from) && Date.parse(t.start) <= Date.parse(to),
   );
   // The envoy reviews replies in turns of its own; they cost tokens but read no messages.
   const envoy = all.filter((t) => String(t.session ?? "").startsWith("envoy"));
-  const inWindow = all
-    .filter((t) => !envoy.includes(t))
-    .filter((t) => Date.parse(t.start) >= Date.parse(from) && Date.parse(t.start) <= Date.parse(to))
-    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  const inWindow = all.filter((t) => !envoy.includes(t));
   let before = Date.parse(from) - 1;
   const perTurn = inWindow.map((t) => {
     const start = Date.parse(t.start);
@@ -55,32 +56,62 @@ export function replayCost(turns, posted, from, to) {
       (p) => Date.parse(p.time) > before && Date.parse(p.time) <= start,
     ).length;
     before = start;
-    return { turnId: t.turnId, start: t.start, messagesBefore: count };
+    return {
+      turnId: t.turnId,
+      start: t.start,
+      messagesBefore: count,
+      model: t.model,
+      modelFrom: t.modelFrom,
+      pricedUsd: t.pricedUsd,
+      recordedUsd: t.recordedUsd,
+    };
   });
-  const sum = (field) => sumOf(inWindow, field);
   return {
     turns: inWindow.length,
     messages: posted.length,
     messagesPerTurn: inWindow.length ? +(posted.length / inWindow.length).toFixed(1) : null,
     perTurn,
-    tokens: {
-      input: sum("inputTokens"),
-      output: sum("outputTokens"),
-      cacheRead: sum("cacheReadTokens"),
-      cacheWrite: sum("cacheWriteTokens"),
-    },
-    costUsd: +sum("costUsd").toFixed(4),
+    models: modelsOf(inWindow),
+    tokens: tokensOf(inWindow),
+    costUsd: usdOf(inWindow, "pricedUsd"),
+    recordedUsd: usdOf(inWindow, "recordedUsd"),
+    usdSource: RATES_SOURCE,
+    recordedSource:
+      "Rome's recorded cost_usd (the SDK's total_cost_usd, a running total per session), taken as each turn's rise over the session's turn before",
     envoy: {
       turns: envoy.length,
-      tokens: {
-        input: sumOf(envoy, "inputTokens"),
-        output: sumOf(envoy, "outputTokens"),
-        cacheRead: sumOf(envoy, "cacheReadTokens"),
-        cacheWrite: sumOf(envoy, "cacheWriteTokens"),
-      },
-      costUsd: +sumOf(envoy, "costUsd").toFixed(4),
+      models: modelsOf(envoy),
+      tokens: tokensOf(envoy),
+      costUsd: usdOf(envoy, "pricedUsd"),
+      recordedUsd: usdOf(envoy, "recordedUsd"),
     },
   };
+}
+
+/** Each model with its turn count, and whether the model came from the turn or the setting. */
+function modelsOf(turns) {
+  const counts = new Map();
+  for (const t of turns) {
+    const k = `${t.model ?? "unknown"}|${t.modelFrom}`;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts].map(([k, turns]) => {
+    const [model, from] = k.split("|");
+    return { model, from, turns };
+  });
+}
+
+const tokensOf = (turns) => ({
+  input: sumOf(turns, "inputTokens"),
+  output: sumOf(turns, "outputTokens"),
+  cacheRead: sumOf(turns, "cacheReadTokens"),
+  cacheWrite: sumOf(turns, "cacheWriteTokens"),
+});
+
+/** The sum of a USD field, or null when a turn lacks it. */
+function usdOf(turns, field) {
+  if (turns.some((t) => t[field] === null)) return null;
+  return +sumOf(turns, field).toFixed(4);
 }
 
 const sumOf = (turns, field) => turns.reduce((s, t) => s + (Number(t[field]) || 0), 0);
@@ -123,15 +154,48 @@ async function replayOnce(ctx, replay, { after = 0, apart }) {
 
 async function costOf(ctx, { posted, from, to }) {
   try {
+    // Every turn since the run's reset, so each session's running total has its start.
     return replayCost(
-      await ctx.env.usage(from),
+      await ctx.env.usage(new Date(0).toISOString()),
       posted.filter((p) => p.time),
       from,
       to,
+      ctx.model,
     );
   } catch (error) {
     return { notMeasured: error.message };
   }
+}
+
+/** How many unmentioned messages come before the ping that must still be answered. */
+const BEFORE_PING = 60;
+
+/**
+ * Planner, on Ouou's phase 2 scope (2026-11-17, the agent answers only when pinged): after 60
+ * messages that do not mention the agent, one that does is still answered.
+ */
+async function pingAfterQuiet(ctx, replay) {
+  const quiet = replay.filter((m) => !m.mention && !m.chat.startsWith("dm-")).slice(0, BEFORE_PING);
+  const ids = [];
+  for (const m of quiet) {
+    ids.push(await ctx.env.post({ as: m.as, chat: m.chat, text: m.text }));
+    if (ctx.waits.gapMs) await sleep(ctx.waits.gapMs);
+  }
+  const { questionId, reply } = await ask(ctx, {
+    as: ctx.team.members[0].account,
+    chat: "general",
+    text: K2_QUESTION,
+  });
+  if (ctx.answered) {
+    ctx.answered.sent += 1;
+    ctx.answered.answered += reply ? 1 : 0;
+  }
+  return check(
+    `a ping after ${quiet.length} messages that did not mention it is answered`,
+    reply ? "pass" : "fail",
+    reply ? `answered in ${reply.id}` : "no reply within the reply wait",
+    [ids[0], ids.at(-1), questionId, reply?.id],
+  );
 }
 
 /** The pacing of the second, cost-only replay: 1 s between messages (planner, 2026-11-17). */
@@ -163,7 +227,9 @@ export default {
     const inPrivate = unprompted.length - shared.length;
     const limit = a3Limit(ctx.phase ?? 1);
     const evidence = [first, posted.at(-1).id, ...shared.map((m) => m.id)];
+    const ping = await pingAfterQuiet(ctx, replay);
     const result = ruleResult([
+      ping,
       {
         ...check(
           `at most ${limit} replies to ${ordinary} messages in shared chats that did not mention it${limit === 2 ? "" : " (2 from a later phase)"}`,
