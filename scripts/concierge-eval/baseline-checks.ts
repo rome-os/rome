@@ -89,6 +89,16 @@ export function answeredInline(input: CheckInput, step: number, maxSearches = 0)
 export const saidLength = (input: CheckInput, step: number) =>
   (input.saidAfter[step] ?? []).join("\n").length;
 
+/** A weekday other than Friday, in English or Chinese. */
+const NOT_FRIDAY =
+  /\b(monday|tuesday|wednesday|thursday|saturday|sunday)\b|(周|星期|礼拜)[一二三四六日天]/i;
+
+/** Every weekday the answer names for 2026-11-20 is Friday. */
+export function fridayOnly(said: string[]): string[] {
+  const wrong = said.find((t) => NOT_FRIDAY.test(t));
+  return wrong ? [`names the wrong weekday: "${wrong.slice(0, 80)}"`] : [];
+}
+
 export function matches(said: string[], pattern: RegExp, what: string): string[] {
   return said.some((t) => pattern.test(t)) ? [] : [`no answer names ${what}`];
 }

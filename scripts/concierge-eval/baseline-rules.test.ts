@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { CheckInput } from "./baseline-checks.js";
+import { type CheckInput, fridayOnly } from "./baseline-checks.js";
 import {
   chineseStyle,
   emojiCount,
@@ -89,5 +89,14 @@ describe("renovationLog", () => {
     expect(renovationLog(0, 5000)).toContain("Jonas Brandt");
     expect(renovationLog(1, 5000)).not.toContain("Jonas Brandt");
     expect(renovationLog(2, 45_000).length).toBeGreaterThanOrEqual(45_000);
+  });
+});
+
+describe("fridayOnly", () => {
+  it("flags any weekday but Friday for the dentist's day", () => {
+    expect(fridayOnly(["Friday, Nov 20 at 15:30 with Dr. Weber."])).toEqual([]);
+    expect(fridayOnly(["11月20日（周五）下午 3:30。"])).toEqual([]);
+    expect(fridayOnly(["Thursday, Nov 20 at 15:30."])).toHaveLength(1);
+    expect(fridayOnly(["11月20日（星期四）下午 3:30。"])).toHaveLength(1);
   });
 });
