@@ -60,7 +60,7 @@ final class DemoBackend: RomeBackend {
     /// `updateRequired`: the full data on a Rome below the app's minimum, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
     /// `manyApps`: the full data with a screenful of apps.
-    /// `visitor`: the full demo, seen by a dashboard visitor of the shared Rome.
+    /// `visitor`: the full demo, seen by a dashboard admin of the shared Rome.
     /// `updateOffered`: a Rome behind its latest release but new enough for
     /// the app, which offers the update instead of requiring it.
     /// `longChat`: the full data with a main chat long enough to page, ending

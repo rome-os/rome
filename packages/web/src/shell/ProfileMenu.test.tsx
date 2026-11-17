@@ -101,7 +101,7 @@ describe("ProfileMenu", () => {
     expect(screen.queryByText("Guardian")).toBeNull();
   });
 
-  it("shows a dashboard visitor's email", async () => {
+  it("shows a dashboard admin's email", async () => {
     mockIdentity({
       kind: "visitor",
       accountId: "acc-1",
@@ -113,7 +113,7 @@ describe("ProfileMenu", () => {
     await waitFor(() => expect(screen.getByText("F")).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: "Account" }));
     expect(await screen.findByText("friend@example.com")).toBeTruthy();
-    expect(screen.getByText("Visitor")).toBeTruthy();
+    expect(screen.getByText("Admin")).toBeTruthy();
   });
 
   it("navigates to /settings from the menu", async () => {

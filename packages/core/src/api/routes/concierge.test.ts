@@ -116,7 +116,7 @@ describe("GET /concierge/session", () => {
     expect(body.unread).toBe(CONCIERGE_UNREAD_CAP);
   });
 
-  it("answers a dashboard visitor with their own main chat, and nobody else", async () => {
+  it("answers a dashboard admin with their own main chat, and nobody else", async () => {
     await expect((await app().request("/concierge/session", asAnn())).json()).resolves.toEqual({
       id: "concierge-visitor-acct-ann",
       unread: 0,

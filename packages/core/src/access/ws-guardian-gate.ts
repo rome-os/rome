@@ -14,7 +14,7 @@ const log = createLogger("ws-guardian-gate");
 /** Who an accepted upgrade belongs to. */
 export type UpgradeCaller =
   | { kind: "guardian" }
-  | { kind: "dashboard-visitor"; accountId: string; email: string };
+  | { kind: "dashboard-admin"; accountId: string; email: string };
 
 function hasLoopbackHostname(origin: string): boolean {
   try {
@@ -86,7 +86,7 @@ export async function gateUpgrade(
         rejectUpgrade(socket, 403, "Forbidden");
         return null;
       }
-      return { kind: "dashboard-visitor", accountId: visitor.accountId, email: visitor.email };
+      return { kind: "dashboard-admin", accountId: visitor.accountId, email: visitor.email };
     }
     rejectUpgrade(socket, 401, "Unauthorized");
     return null;

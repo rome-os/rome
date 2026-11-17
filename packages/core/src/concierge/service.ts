@@ -525,7 +525,7 @@ export class ConciergeService {
     return this.deps.owners ?? ALL_OWNERS_SERVED;
   }
 
-  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a visitor while on the dashboard allow-list. */
+  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a dashboard admin while on the allow-list. */
   isServed(owner: ConciergeOwner): Promise<boolean> {
     return this.owners.isServed(owner);
   }

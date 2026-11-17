@@ -148,7 +148,7 @@ describe("UpgradeIndicator", () => {
     expect(screen.queryByRole("button", { name: OFFER })).toBeNull();
   });
 
-  it("offers a dashboard visitor the same row and confirmation", async () => {
+  it("offers a dashboard admin the same row and confirmation", async () => {
     const backend = mockBackend({
       identity: { kind: "visitor", accountId: "a", email: "v@example.com", avatarUrl: null },
       check: [available("1.1.0", "1.2.0")],

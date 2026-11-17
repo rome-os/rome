@@ -798,11 +798,11 @@ enum RomeDate {
 
 /// Who is signed in, as `GET /auth/me` names them, read the way the web
 /// dashboard's profile menu reads it: the guardian's display name, else
-/// "Guardian"; a visitor's email; the Rome Cloud picture when there is one.
+/// "Guardian"; a dashboard admin's email; the Rome Cloud picture when there is one.
 struct AccountIdentity: Equatable, Sendable {
     let name: String
     let avatarURL: URL?
-    /// The instance's guardian, not an allow-listed visitor.
+    /// The instance's guardian, not a dashboard admin.
     let isGuardian: Bool
 
     init(name: String, avatarURL: URL? = nil, isGuardian: Bool = true) {

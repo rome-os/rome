@@ -74,7 +74,7 @@ async function startDashboardLogin(app: Hono): Promise<string> {
 }
 
 describe("/api/auth/visitor dashboard access", () => {
-  it("does not start dashboard visitor auth without a dashboard allow-list", async () => {
+  it("does not start dashboard admin auth without a dashboard allow-list", async () => {
     const app = await buildRoute(new DashboardAccessState());
     const res = await app.request("/api/auth/visitor/start", {
       method: "POST",
@@ -342,7 +342,7 @@ describe("/api/auth/visitor/native", () => {
     expect(new Date(body.expires_at).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("returns a visitor session for an allow-listed visitor without setting a cookie", async () => {
+  it("returns a visitor session for a dashboard admin without setting a cookie", async () => {
     const cloud = recordingAccountSession("Ada@Example.com");
     const app = await buildRoute(allowList("ada@example.com"), { fetchImpl: cloud.fetchImpl });
     const { visitor_authorization_request: request } = await nativeStart(app);

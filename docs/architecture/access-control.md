@@ -7,7 +7,7 @@ How a Rome instance decides who is on the other end of a request and what that r
 Two policies decide reach, each held as its own setting:
 
 - **App access** — per app: private (the default), link-public, or restricted to an email allow-list of visitors.
-- **Dashboard access** — one email allow-list that grants approved visitors the full dashboard.
+- **Dashboard access** — one email allow-list. Each visitor on it is a [dashboard admin](../concepts/people.md#dashboard-admin) with the full dashboard.
 
 ### Invariants
 
@@ -29,9 +29,9 @@ browser ──every request──► edge proxy ──consults──► verify p
                        backend route ──app-API dispatch──► app handler (caller re-derived)
 ```
 
-The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
+The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/people.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/desktop-proxy/*`, `/ws/terminal` and `/ws/events` also admit a visitor on the dashboard allow-list, the way the edge admits them to the rest of the dashboard. On `/ws/events` they get the chat topics but not the app catalog, as on the matching SSE routes. `/ws/node` stays guardian-only. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/desktop-proxy/*`, `/ws/terminal` and `/ws/events` also admit a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` they get the chat topics but not the app catalog, as on the matching SSE routes. `/ws/node` stays guardian-only. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 
@@ -52,6 +52,6 @@ A visitor gets their credential by signing in to their [Rome Cloud](../concepts/
 - The callback keeps the visitor's profile only after a sign-in succeeds. A refused sign-in leaves no record.
 - The instance normalizes the post-sign-in redirect: an app-scoped sign-in returns only into that app, and a dashboard sign-in never lands on an API path.
 - An account that does not own the instance can never leave the flow holding a guardian credential. The refusal downgrades to a visitor credential or an error, never upgrades.
-- The native app signs a dashboard visitor in through the same visitor grant, with the same re-check. It gets the same visitor credential as JSON instead of a cookie, so a native visitor reaches exactly what a browser visitor reaches ([decision](../adrs/visitor-grant-for-native-visitors.md)).
+- The native app signs a dashboard admin in through the same visitor grant, with the same re-check. It gets the same visitor credential as JSON instead of a cookie, so a native visitor reaches exactly what a browser visitor reaches ([decision](../adrs/visitor-grant-for-native-visitors.md)).
 - A browser attempt finishes only at the browser callback, and a native attempt only at the native endpoint.
 - Rome Cloud's copy of the dashboard allow-list decides only which instances a visitor sees listed. The instance's own allow-list decides every sign-in and every request ([decision](../adrs/instance-syncs-visitor-allow-list-to-rome-cloud.md)).

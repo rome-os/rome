@@ -474,7 +474,7 @@ enum SnapshotRunner {
                 }
             }
             model.dynamicTypeOverride = nil
-            // A dashboard visitor of the shared Rome: the drawer footer, Settings and the instance list.
+            // A dashboard admin of the shared Rome: the drawer footer, Settings and the instance list.
             model.openDemo(.visitor)
             try? await Task.sleep(for: .seconds(2))
             await capture("45-visitor-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
