@@ -175,6 +175,8 @@ private struct AppsGrid: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+                // Match the fixed-size app tiles in this home-screen grid.
+                .dynamicTypeSize(.large)
                 .frame(maxWidth: .infinity)
             }
         }
