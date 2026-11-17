@@ -150,16 +150,18 @@ describe("the Chat / Concierge switch", () => {
     expect(document.querySelector(".text-section")).toBeNull();
   });
 
-  it("shows neither the switcher nor the title while the Concierge is still being asked", async () => {
+  it("shows the switcher at the stored mode while the Concierge is still being asked, and no title", async () => {
+    seedChatListMode({ mode: "concierge" });
     concierge.chatId = null;
     concierge.loading = true;
     serve([chat("mine", "My chat")]);
     open("/chat/mine");
-    await screen.findByRole("link", { name: "My chat" });
-    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect((await screen.findByRole("radio", { name: "Agent" })).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     expect(screen.queryByText("Chats")).toBeNull();
-    // The right side keeps its place, so the row does not jump when the answer comes.
-    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+    // The project list does not flash under the Agent tab.
+    expect(screen.queryByRole("link", { name: "My chat" })).toBeNull();
   });
 
   it("is absent without a Concierge, and the list keeps task chats under their project", async () => {

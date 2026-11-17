@@ -455,7 +455,10 @@ export function RecentChats({
   const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
   const storedMode = useStoredChatListMode();
   // A device with no stored mode starts in Chat.
-  const mode: ChatListMode = hasConcierge ? (storedMode ?? "chat") : "chat";
+  // While the Concierge is still being asked, the switcher shows at the stored
+  // mode: it is open to everyone, so no chat is the rare answer.
+  const showSwitcher = hasConcierge || conciergeLoading;
+  const mode: ChatListMode = showSwitcher ? (storedMode ?? "chat") : "chat";
   // The router renders a navigation as a transition, so the location stays
   // on the old chat until the new one has rendered, which takes a moment
   // when the old one is long. The row a click opens is marked at once, as an
@@ -1104,16 +1107,16 @@ export function RecentChats({
         >
           <div className="flex h-10 min-w-0 items-center gap-1">
             {headerLeading}
-            {hasConcierge ? (
+            {showSwitcher ? (
               <ChatModeSwitch
                 mode={mode}
                 onChange={writeChatListMode}
                 conciergeUnread={conciergeUnread}
                 chatReplying={chatReplying}
               />
-            ) : conciergeLoading ? null : (
-              // Neither shows while the Concierge is still being asked, so the
-              // title does not flash before the switcher. The row keeps its height.
+            ) : (
+              // Only once the Concierge is known to be absent: the server has
+              // none (404), or this caller has no chat (401).
               <span className="truncate text-section text-foreground">
                 {t("recentChats.title")}
               </span>
@@ -1189,13 +1192,16 @@ export function RecentChats({
               label={t(mode === "concierge" ? "recentChats.newTopic" : "recentChats.newChat")}
               shortcut={wideWindow && !coarsePointer ? newChatShortcutForPlatform() : null}
             />
-            {mode === "concierge" && conciergeChatId ? (
-              <ConciergeChats
-                mainChatId={conciergeChatId}
-                activeSessionId={activeSessionId}
-                statusFilter={statusFilter}
-                topicSessions={conciergeTopicSessions}
-              />
+            {mode === "concierge" ? (
+              // Nothing until the chat's id arrives, rather than the project list flashing.
+              conciergeChatId ? (
+                <ConciergeChats
+                  mainChatId={conciergeChatId}
+                  activeSessionId={activeSessionId}
+                  statusFilter={statusFilter}
+                  topicSessions={conciergeTopicSessions}
+                />
+              ) : null
             ) : (
               <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
                 <h2
