@@ -786,6 +786,18 @@ struct SyncRig {
         func stop() { stops += 1 }
     }
 
+    /// Sync history reads every retained sync: with dozens of background syncs
+    /// a day folded away, a cap would cut the 30 days short.
+    @Test func theHistoryHoldsEveryRetainedSync() async {
+        let rig = Rig()
+        let settings = rig.make()
+        for minute in 0..<600 {
+            _ = await rig.log.append(SyncLogEntry(seq: 0, time: Date(timeIntervalSinceNow: -Double(600 - minute) * 60), trigger: .observer, outcome: .ok))
+        }
+        await settings.reloadHistory()
+        #expect(settings.history.count == 600)
+    }
+
     @Test func syncIsOffByDefaultAndKept() async {
         let rig = Rig()
         let settings = rig.make()
