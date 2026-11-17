@@ -778,6 +778,8 @@ button.rome-upgrade-row:hover {
     --row-load-ml: calc(var(--row-text-offset) - 1px);
     --row-card-px: calc(var(--row-link-px) - var(--rome-space-1) - 1px);
     --row-card-text-pl: calc(var(--row-text-offset) - var(--rome-space-1) - 2px);
+    --row-child-rename-ml: calc(var(--row-child-pl) - var(--rome-space-1));
+    --row-card-rename-ml: calc(var(--row-card-text-pl) - var(--rome-space-1));
     /* The selected child's marker on the guide: 3px wide, inset from the row's
        top and bottom, centred on the guide. */
     --row-indicator-inset: var(--row-py-md);

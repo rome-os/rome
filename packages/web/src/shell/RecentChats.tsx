@@ -276,7 +276,7 @@ function ChatRowLink({
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-12 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+          className={`flex h-full min-w-0 flex-1 items-center ${onCard ? "rounded-8" : "rounded-12"} border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
             nested ? (onCard ? "pl-[var(--row-card-text-pl)]" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
@@ -850,7 +850,7 @@ export function RecentChats({
         data-chat-row
         className={`group relative flex h-[var(--row-h)] ${
           inGroup ? "ml-[var(--row-child-ml)]" : ""
-        } items-center gap-1 rounded-12 text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
+        } items-center gap-1 ${onCard ? "rounded-8" : "rounded-12"} text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
           isActive
             ? onCard
               ? "bg-surface-hover ring-1 ring-border/70"
@@ -877,8 +877,8 @@ export function RecentChats({
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
               nested
                 ? onCard
-                  ? "ml-[calc(var(--row-card-text-pl)-var(--rome-space-1))]"
-                  : "ml-[calc(var(--row-child-pl)-var(--rome-space-1))]"
+                  ? "ml-[var(--row-card-rename-ml)]"
+                  : "ml-[var(--row-child-rename-ml)]"
                 : "ml-2"
             }`}
           />
