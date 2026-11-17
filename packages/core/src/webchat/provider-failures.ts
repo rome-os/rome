@@ -69,6 +69,8 @@ export interface ChatTurnFailure {
   agentName: string;
   /** The runtime session the turn ran in, when one opened. */
   sessionId?: string;
+  /** The failed turn, so the card shows with it. */
+  turnId?: string;
   /** A failed turn, or a turn the model resolver refused before it ran. */
   failure:
     | { kind: "turn"; failure: AgentTurnFailure }
@@ -100,8 +102,14 @@ type Classified =
     };
 
 export interface ProviderFailures {
-  /** Decides what a failed turn in a dashboard chat shows. */
+  /** Decides what a failed turn in a dashboard chat shows, writing the card itself. */
   failed(turn: ChatTurnFailure): Promise<void>;
+  /**
+   * For a turn the resolver refused before it ran, whose error message the
+   * caller writes: the card to write beside the error, or null when the chat
+   * shows none (unattended chats join the outage notice instead).
+   */
+  cardFor(turn: ChatTurnFailure): Promise<ProviderFailurePart | null>;
   /** Runs the chat's stopped request again, as the card's actions do after a change. */
   resend(chatId: string, agentName: string, providerOverride?: AccountedProviderId): Promise<void>;
   /** The guardian ran an outage's waiting chats on `provider` now, for one turn each. */
@@ -247,9 +255,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     }
   };
 
-  const cardIn = async (turn: ChatTurnFailure, failed: Extract<Classified, { kind: "card" }>) => {
+  const cardPart = async (
+    turn: ChatTurnFailure,
+    failed: Extract<Classified, { kind: "card" }>,
+  ): Promise<ProviderFailurePart | null> => {
     const chat = await deps.webchatRepo.getSession(turn.chatId);
-    if (!chat) return;
+    if (!chat) return null;
     const provider = named(failed.provider);
     const part: ProviderFailurePart = {
       type: "provider_failure",
@@ -260,7 +271,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       alternatives: alternatives(provider),
       chatId: turn.chatId,
     };
-    await deps.webchatRepo.addBackendMessage(turn.chatId, uuidv7(), [part]);
+    return part;
+  };
+
+  const cardIn = async (turn: ChatTurnFailure, failed: Extract<Classified, { kind: "card" }>) => {
+    const part = await cardPart(turn, failed);
+    if (part)
+      await deps.webchatRepo.addBackendMessage(turn.chatId, turn.turnId ?? uuidv7(), [part]);
   };
 
   const noticePart = (outage: ProviderOutage, resolvedAt?: string): ProviderOutagePart => ({
@@ -368,6 +385,18 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       }
       if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) await groupIn(turn, classified);
       else await cardIn(turn, classified);
+    },
+    async cardFor(turn) {
+      if (stopped) return null;
+      const classified = classify(turn.failure);
+      if (classified?.kind !== "card") return null;
+      const chat = await deps.webchatRepo.getSession(turn.chatId);
+      if (!chat) return null;
+      if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) {
+        await groupIn(turn, classified);
+        return null;
+      }
+      return cardPart(turn, classified);
     },
     resend,
     async runOutageOn(outageId, provider) {

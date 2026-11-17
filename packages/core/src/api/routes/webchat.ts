@@ -4696,11 +4696,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         }
+        // The chat shows why, and what the guardian can do, beside the error,
+        // which older clients read.
+        const card = await deps.providerFailures
+          ?.cardFor({
+            chatId: sessionId,
+            agentName,
+            turnId,
+            failure: { kind: "resolution", payload: modelError },
+          })
+          .catch((error: unknown) => {
+            log.warn("provider failure card failed", { sessionId, error: String(error) });
+            return null;
+          });
         await deps.webchatRepo.addMessage(
           randomUUID(),
           sessionId,
           "assistant",
-          JSON.stringify([{ type: "error", ...modelError }]),
+          JSON.stringify([{ type: "error", ...modelError }, ...(card ? [card] : [])]),
           turnId,
         );
         // Keep this as a real failed turn on the standard trace wire. The
@@ -4735,16 +4748,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           turn: createAgentTurnRef({ sessionId, turnId, agentName, threadContext }),
           error: modelError.error,
         });
-        // The chat shows why, and what the guardian can do.
-        void deps.providerFailures
-          ?.failed({
-            chatId: sessionId,
-            agentName,
-            failure: { kind: "resolution", payload: modelError },
-          })
-          .catch((error: unknown) =>
-            log.warn("provider failure card failed", { sessionId, error: String(error) }),
-          );
 
         return answer({ turnId, sessionId, startedAt: stream.startedAt, content: userContent });
       }

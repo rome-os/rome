@@ -374,8 +374,13 @@ export function renderSingleEntry(
 // that store MessagePart[] (text + approval_card) directly, and for the trace
 // drawer's run blocks. Pairs ordinary tool and first-class subagent lifecycle
 // blocks into one expandable row per invocation.
-export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptions = {}) {
+export function renderFlatEntries(allBlocks: ChatEntry[], options: RenderEntryOptions = {}) {
   const { live = false } = options;
+  // A provider failure card says why the turn did not run and what to do, so
+  // it takes the place of the error it is written beside.
+  const blocks = allBlocks.some((block) => block.type === "provider_failure")
+    ? allBlocks.filter((block) => block.type !== "error")
+    : allBlocks;
   // Index results by provider tool-use ID (or ordinary tool name as a legacy
   // fallback) so each paired step renders once.
   const resultsByUseId = new Map<string, ToolResultEntry>();

@@ -1491,7 +1491,10 @@ async function main() {
     settings: settingsRepo,
     mainChatId: () => concierge.findChatId(),
     runtimeOf: async (chatId, agentName) =>
-      (await sessionRepository.current(webchatSessionKey(chatId), agentName))?.id ?? null,
+      (await sessionRepository.current(webchatSessionKey(chatId), agentName))?.id ??
+      // A chat whose first turn never ran has no session yet: open it as
+      // its first message would have.
+      (await concierge.dashboard.chats.openSession(chatId).catch(() => null)),
     runner: backendTurnRunner,
     notify: notifyClient,
   });
@@ -1505,6 +1508,7 @@ async function main() {
           chatId: thread.threadId,
           agentName: event.turn.agentName,
           sessionId: event.turn.sessionId,
+          turnId: event.turn.turnId,
           failure: { kind: "turn", failure: event.output.failure },
         })
         .catch((error: unknown) =>
