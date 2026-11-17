@@ -78,6 +78,7 @@ export function ConciergeHeaderStatus({
   badge = true,
   avatar,
   menu,
+  showsActivity = true,
 }: {
   name: ReactNode;
   /** What the Concierge is doing; an ordinary chat leaves it idle. */
@@ -87,6 +88,11 @@ export function ConciergeHeaderStatus({
   /** What the badge holds; the Concierge's mascot when not given. */
   avatar?: ReactNode;
   menu?: HeaderMenu;
+  /**
+   * Whether the activity capsule shows under the name: the Concierge's. An
+   * ordinary chat's header has none, and its name tag may run longer.
+   */
+  showsActivity?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
@@ -152,7 +158,15 @@ export function ConciergeHeaderStatus({
         )}
       >
         {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
-        <span className="max-w-[8em] truncate text-aux font-medium text-foreground">{name}</span>
+        {/* A chat title runs to about twice that, and never into the side buttons. */}
+        <span
+          className={cn(
+            "truncate text-aux font-medium text-foreground",
+            showsActivity ? "max-w-[8em]" : "max-w-[min(16em,calc(100cqw-16rem))]",
+          )}
+        >
+          {name}
+        </span>
       </NameTag>
     );
   };
@@ -174,26 +188,28 @@ export function ConciergeHeaderStatus({
       ) : (
         nameEl(null)
       )}
-      <div
-        data-concierge-header-activity
-        aria-live="polite"
-        className={cn(
-          badge ? "row-start-3" : "row-start-2",
-          "col-span-3 col-start-1 mt-1 flex h-6 min-w-0 max-w-[70%] items-center justify-self-center rounded-full px-3",
-          status ? cn("pointer-events-auto", FLOATING_SURFACE) : "sr-only",
-        )}
-      >
-        <span
+      {showsActivity ? (
+        <div
+          data-concierge-header-activity
+          aria-live="polite"
           className={cn(
-            "min-w-0 truncate text-aux text-muted-foreground",
-            // A light band sweeps the line while work is under way; a
-            // question waiting on the owner and idle stay still.
-            WORKING.has(activity.kind) && "shimmer",
+            badge ? "row-start-3" : "row-start-2",
+            "col-span-3 col-start-1 mt-1 flex h-6 min-w-0 max-w-[70%] items-center justify-self-center rounded-full px-3",
+            status ? cn("pointer-events-auto", FLOATING_SURFACE) : "sr-only",
           )}
         >
-          {status ?? t("concierge.activity.idle")}
-        </span>
-      </div>
+          <span
+            className={cn(
+              "min-w-0 truncate text-aux text-muted-foreground",
+              // A light band sweeps the line while work is under way; a
+              // question waiting on the owner and idle stay still.
+              WORKING.has(activity.kind) && "shimmer",
+            )}
+          >
+            {status ?? t("concierge.activity.idle")}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

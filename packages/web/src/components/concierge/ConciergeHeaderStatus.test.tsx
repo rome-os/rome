@@ -225,3 +225,15 @@ describe("ConciergeHeaderStatus quick menu", () => {
     expect(document.activeElement?.textContent).toBe("Tasks");
   });
 });
+
+describe("ConciergeHeaderStatus in an ordinary chat", () => {
+  it("shows the mascot and a longer title, with no activity capsule", () => {
+    const { container } = render(
+      <ConciergeHeaderStatus name="Plan the whole lake trip" showsActivity={false} />,
+    );
+    expect(container.querySelector("[data-concierge-header-badge] .rome-mascot")).not.toBeNull();
+    expect(container.querySelector("[data-concierge-header-activity]")).toBeNull();
+    const title = container.querySelector("[data-concierge-header-name] span")!;
+    expect(title.className).toContain("max-w-[min(16em,calc(100cqw-16rem))]");
+  });
+});

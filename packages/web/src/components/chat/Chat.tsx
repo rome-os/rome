@@ -57,7 +57,6 @@ import { extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { useFileDropArea } from "@/hooks/use-file-drop-area";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { modelDisplayName } from "@/lib/model-display";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
@@ -2700,10 +2699,9 @@ export function Chat({
     <ConciergeHeaderStatus
       // Nothing while the chat's name loads, so "New chat" never flashes first.
       name={sessionLoading ? null : sessionName?.trim() || t("sidebar.newChat")}
-      avatar={
-        <AgentAvatar iconUrl={pinnedAgentMention?.iconUrl} label={pinnedAgentMention?.appLabel} />
-      }
+      // The same mascot as the Concierge's; the tag names the chat instead.
       menu={headerMenu}
+      showsActivity={false}
     />
   );
 

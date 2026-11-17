@@ -2897,7 +2897,9 @@ describe("Chat Concierge empty state", () => {
       return found;
     });
     expect(name.textContent).toBe("Plan the launch");
-    expect(document.querySelector("[data-concierge-header-badge] .rome-mascot")).toBeNull();
+    // The same mascot as the Concierge's, and no status capsule under the name.
+    expect(document.querySelector("[data-concierge-header-badge] .rome-mascot")).not.toBeNull();
+    expect(document.querySelector("[data-concierge-header-activity]")).toBeNull();
     expect(screen.getByRole("button", { name: "navbar.more" }).className).toContain("rounded-full");
   });
 
