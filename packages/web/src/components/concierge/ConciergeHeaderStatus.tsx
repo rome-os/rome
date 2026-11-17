@@ -61,6 +61,7 @@ export function ConciergeHeaderStatus({
   onOpenTasks,
   onOpenOutputs,
   onOpenMemory,
+  menuOnClick = false,
 }: {
   name: ReactNode;
   activity: ConciergeActivity;
@@ -75,6 +76,8 @@ export function ConciergeHeaderStatus({
   onOpenOutputs?: () => void;
   /** Opens the memory browser. */
   onOpenMemory?: () => void;
+  /** A click shows the quick menu rather than opening Tasks, as at phone width. */
+  menuOnClick?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
@@ -104,7 +107,7 @@ export function ConciergeHeaderStatus({
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
       {badge ? (
         quickMenu ? (
-          <QuickMenu items={quickMenu}>
+          <QuickMenu items={quickMenu} clickShowsMenu={menuOnClick}>
             {(menuProps) => (
               <Badge
                 data-concierge-header-badge
@@ -223,9 +226,11 @@ type BadgeMenuProps = {
  */
 function QuickMenu({
   items,
+  clickShowsMenu,
   children,
 }: {
   items: { tasks: () => void; outputs: () => void; memory: () => void };
+  clickShowsMenu: boolean;
   children: (props: BadgeMenuProps) => ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -261,7 +266,7 @@ function QuickMenu({
     },
     onClick: (event) => {
       // A tap shows the menu: there is no hover to show it.
-      if (touched.current) {
+      if (touched.current || clickShowsMenu) {
         touched.current = false;
         event.preventDefault();
         setOpen((was) => !was);

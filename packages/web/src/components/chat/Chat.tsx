@@ -2620,6 +2620,8 @@ export function Chat({
         onOpenTasks={taskList.open}
         onOpenOutputs={() => outputsPane.open()}
         onOpenMemory={openMemory}
+        // Where the pane would cover the chat, a click shows the menu too.
+        menuOnClick={Boolean(toolTasksHost?.compact)}
       />
     ) : null;
 

@@ -229,3 +229,24 @@ describe("ConciergeHeaderStatus quick menu", () => {
     expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
   });
 });
+
+describe("ConciergeHeaderStatus quick menu at phone width", () => {
+  it("shows the menu on a click, instead of opening Tasks", () => {
+    const opened: string[] = [];
+    const { container } = render(
+      <ConciergeHeaderStatus
+        name="Yo"
+        activity={{ kind: "idle" }}
+        onOpenTasks={() => opened.push("tasks")}
+        onOpenOutputs={() => opened.push("outputs")}
+        onOpenMemory={() => opened.push("memory")}
+        menuOnClick
+      />,
+    );
+    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    fireEvent.pointerDown(badge, { pointerType: "mouse" });
+    fireEvent.click(badge);
+    expect(opened).toEqual([]);
+    expect(screen.getAllByRole("menuitem")).toHaveLength(3);
+  });
+});
