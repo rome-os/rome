@@ -691,36 +691,51 @@ final class DemoBackend: RomeBackend {
     static let agentItinerary: JSONValue = {
         let c = DemoBackend.component
         let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
-        let stops = [("9:00", "浅草寺，早去人少"), ("11:30", "上野公园，午饭在阿美横町"), ("14:00", "秋叶原"), ("18:30", "新宿思出横丁晚饭")]
+        // Each stop opens in Maps; the last opens the restaurant's page.
+        let stops = [
+            ("9:00", "浅草寺，早去人少", "maps://?q=Senso-ji"),
+            ("11:30", "上野公园，午饭在阿美横町", "maps://?q=Ueno+Park"),
+            ("14:00", "秋叶原", "maps://?q=Akihabara"),
+            ("18:30", "新宿思出横丁晚饭", "https://www.omoide-yokocho.com"),
+        ]
         var components = [
-            c("root", "Column", ["children": ids(["title", "steps"])]),
+            c("root", "Column", ["children": ids(["title", "subtitle", "steps"])]),
             c("title", "Text", ["text": .string("周六东京一日"), "variant": .string("h3")]),
+            c("subtitle", "Text", ["text": .string("点一站在地图里打开"), "variant": .string("caption")]),
             c("steps", "List", ["children": ids(stops.indices.map { "s\($0)" })]),
         ]
         for (i, stop) in stops.enumerated() {
-            components.append(c("s\(i)", "Row", ["children": ids(["t\(i)", "p\(i)"])]))
+            components.append(c("s\(i)", "Row", ["children": ids(["t\(i)", "p\(i)"]), "href": .string(stop.2)]))
             components.append(c("t\(i)", "Text", ["text": .string(stop.0), "variant": .string("caption")]))
             components.append(c("p\(i)", "Text", ["text": .string(stop.1)]))
         }
         return DemoBackend.agentCard("agent-itinerary", text: "周六东京一日：9:00 浅草寺；11:30 上野公园；14:00 秋叶原；18:30 新宿晚饭。", components)
     }()
 
-    /// A routine's daily health summary, the case agent cards are for.
+    /// A routine's daily health summary, the case agent cards are for: each
+    /// number against its usual range, the week's steps, and one line to act on.
     static let agentHealth: JSONValue = {
         let c = DemoBackend.component
         let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
-        return DemoBackend.agentCard("agent-health", text: "今天的健康，对比最近 14 天：睡眠 7 小时 12 分，8,432 步，活动 512 千卡，锻炼 38 分钟，静息心率 58。晚饭后散步一会儿就能到一万步。", [
-            c("root", "Column", ["children": ids(["title", "subtitle", "stats", "goal", "advice"])]),
+        let range = { (low: Double, high: Double) in JSONValue.object(["low": .number(low), "high": .number(high)]) }
+        let week: [(String, Double, String?)] = [("一", 8120, nil), ("二", 9340, nil), ("三", 7650, nil), ("四", 10210, nil), ("五", 8890, nil), ("六", 2980, "warning"), ("今天", 4210, "accent")]
+        let points = JSONValue.array(week.map { day in
+            var point: [String: JSONValue] = ["label": .string(day.0), "value": .number(day.1)]
+            if let highlight = day.2 { point["highlight"] = .string(highlight) }
+            return .object(point)
+        })
+        return DemoBackend.agentCard("agent-health", text: "今天的健康，对比最近 14 天：睡眠 7.2 小时（通常 7–7.7），4,210 步（通常 8,000–10,000），活动 512 千卡（通常 450–600），锻炼 12 分钟（通常 30–45），静息心率 64（通常 56–60）。今晚散步 30 分钟能补上大半步数。", [
+            c("root", "Column", ["children": ids(["title", "subtitle", "stats", "week", "advice"])]),
             c("title", "Text", ["text": .string("今天的健康"), "variant": .string("h4")]),
             c("subtitle", "Text", ["text": .string("对比最近 14 天"), "variant": .string("caption")]),
             c("stats", "Row", ["children": ids(["sleep", "steps", "kcal", "exercise", "rhr"])]),
-            c("sleep", "Stat", ["label": .string("睡眠"), "value": .string("7 小时 12 分"), "caption": .string("通常 6:40–7:50")]),
-            c("steps", "Stat", ["label": .string("步数"), "value": .number(8432), "caption": .string("通常 6,900–9,800")]),
-            c("kcal", "Stat", ["label": .string("活动"), "value": .number(512), "unit": .string("千卡"), "caption": .string("通常 380–560")]),
-            c("exercise", "Stat", ["label": .string("锻炼"), "value": .number(38), "unit": .string("分钟"), "caption": .string("通常 20–45")]),
-            c("rhr", "Stat", ["label": .string("静息心率"), "value": .number(58), "unit": .string("次/分"), "caption": .string("通常 55–61")]),
-            c("goal", "Progress", ["value": .number(8432), "max": .number(10000), "label": .string("步数目标")]),
-            c("advice", "Text", ["text": .string("晚饭后散步一会儿，就能到一万步。")]),
+            c("sleep", "Stat", ["label": .string("睡眠"), "value": .number(7.2), "unit": .string("小时"), "range": range(7, 7.7), "icon": .string("moon")]),
+            c("steps", "Stat", ["label": .string("步数"), "value": .number(4210), "range": range(8000, 10000), "icon": .string("steps")]),
+            c("kcal", "Stat", ["label": .string("活动"), "value": .number(512), "unit": .string("千卡"), "range": range(450, 600), "icon": .string("flame")]),
+            c("exercise", "Stat", ["label": .string("锻炼"), "value": .number(12), "unit": .string("分钟"), "range": range(30, 45), "icon": .string("run")]),
+            c("rhr", "Stat", ["label": .string("静息心率"), "value": .number(64), "unit": .string("次/分"), "range": range(56, 60), "icon": .string("heart")]),
+            c("week", "Chart", ["kind": .string("bar"), "points": points, "caption": .string("最近 7 天步数")]),
+            c("advice", "Text", ["text": .string("今晚散步 30 分钟，能补上大半步数。"), "tone": .string("info")]),
         ])
     }()
 
@@ -961,10 +976,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
             ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
+            ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1221,6 +1237,10 @@ final class DemoBackend: RomeBackend {
         ]
         // Cards the Concierge composed itself: Rome's own, every value
         // written out, with no `bind`.
+        messages["topic-itinerary"] = [
+            user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),
+            parts([Self.agentItinerary], at: at(9, 1), session: "topic-itinerary"),
+        ]
         messages["topic-cards"] = [
             user("ac1", "周六在东京怎么安排？", at: at(10, 0), session: "topic-cards"),
             parts([Self.agentItinerary], at: at(10, 1), session: "topic-cards"),

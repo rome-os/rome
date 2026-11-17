@@ -13,8 +13,16 @@ export type {
 } from "@rome-os/app-runtime";
 
 // The check core runs before it stores a described card, so a reader can run
-// it again on the stored part before drawing it or calling the app.
-export { checkWidgetUi, isWidgetAppPath } from "@rome-os/app-runtime";
+// it again on the stored part before drawing it or calling the app, and the
+// rules every reader draws a card by.
+export {
+  checkWidgetUi,
+  isWidgetAppPath,
+  isWidgetHref,
+  WIDGET_UI_CHART_MAX_POINTS,
+  type WidgetUiIcon,
+  widgetStatTone,
+} from "@rome-os/app-runtime";
 
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { checkWidgetUi, type WidgetUi } from "./widget-ui.js";
+import { checkWidgetUi, type WidgetUi, widgetStatTone } from "./widget-ui.js";
 
 const mealCard: WidgetUi = {
   components: [
@@ -107,6 +107,152 @@ describe("checkWidgetUi", () => {
     for (const url of ["/api/settings", "http://example.com/a.png", "photo.png", "data:x"]) {
       expect(checkWidgetUi(card(url))).not.toEqual([]);
     }
+  });
+
+  it("takes a stat's range, a callout, a bar chart, icons and links", () => {
+    const ui = {
+      components: [
+        { id: "root", component: "Column", children: ["sleep", "week", "tip", "stop", "place"] },
+        {
+          id: "sleep",
+          component: "Stat",
+          label: "Sleep",
+          value: 6.1,
+          unit: "h",
+          range: { low: 7, high: 7.7 },
+          icon: "moon",
+        },
+        {
+          id: "week",
+          component: "Chart",
+          kind: "bar",
+          points: [
+            { label: "Mon", value: 7.2 },
+            { label: "Today", value: 6.1, highlight: "accent" },
+          ],
+          unit: "h",
+        },
+        { id: "tip", component: "Text", text: "An early night helps.", tone: "info" },
+        {
+          id: "stop",
+          component: "Text",
+          text: "Belém Tower",
+          icon: "map-pin",
+          href: "maps://?q=Belem+Tower",
+        },
+        { id: "place", component: "Row", children: ["tip2"], href: "https://example.com/a" },
+        { id: "tip2", component: "Text", text: "Opening hours" },
+      ],
+    };
+    expect(checkWidgetUi(ui)).toEqual([]);
+  });
+
+  it("refuses an unknown icon, a link of another scheme, a reversed range and a long chart", () => {
+    const one = (c: Record<string, unknown>) => ({ components: [{ id: "root", ...c }] });
+    expect(checkWidgetUi(one({ component: "Text", text: "a", icon: "rocket" }))).not.toEqual([]);
+    for (const href of ["http://example.com", "javascript:alert(1)", "/api/apps", "tel:123"]) {
+      expect(checkWidgetUi(one({ component: "Text", text: "a", href }))).not.toEqual([]);
+    }
+    expect(
+      checkWidgetUi(one({ component: "Stat", label: "a", value: 1, range: { low: 5, high: 2 } })),
+    ).not.toEqual([]);
+    const points = Array.from({ length: 15 }, (_, i) => ({ label: `${i}`, value: i }));
+    expect(checkWidgetUi(one({ component: "Chart", kind: "bar", points }))).not.toEqual([]);
+    expect(
+      checkWidgetUi(one({ component: "Chart", kind: "line", points: points.slice(0, 3) })),
+    ).not.toEqual([]);
+    // A link and an icon are a Row's, not a Column's.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Column", children: ["a"], href: "https://example.com" },
+          { id: "a", component: "Text", text: "a" },
+        ],
+      }),
+    ).not.toEqual([]);
+  });
+
+  it("never lets one press both open a link and send an event", () => {
+    const button = {
+      id: "go",
+      component: "Button",
+      child: "go-label",
+      action: { event: { name: "go" } },
+    };
+    // A linked Row that holds a control.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Row", children: ["go"], href: "https://example.com" },
+          button,
+          { id: "go-label", component: "Text", text: "Go" },
+        ],
+      }).join("\n"),
+    ).toContain("holds a control or another link");
+    // A linked Row that holds a linked Text.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Row", children: ["t"], href: "https://example.com/a" },
+          { id: "t", component: "Text", text: "a", href: "https://example.com/b" },
+        ],
+      }),
+    ).not.toEqual([]);
+    // A Button whose label holds a link, directly or deeper.
+    for (const label of [
+      [{ id: "go-label", component: "Text", text: "Go", href: "https://example.com" }],
+      [
+        { id: "go-label", component: "Row", children: ["t"], href: "maps://?q=x" },
+        { id: "t", component: "Text", text: "Go" },
+      ],
+    ]) {
+      expect(
+        checkWidgetUi({ components: [{ ...button, id: "root" }, ...label] }).join("\n"),
+      ).toContain("label holds an href");
+    }
+  });
+
+  it("judges a range only against a number, or a path to one, and takes signed chart values", () => {
+    const stat = (value: unknown) => ({
+      components: [
+        { id: "root", component: "Stat", label: "HR", value, range: { low: 56, high: 60 } },
+      ],
+    });
+    expect(checkWidgetUi(stat("64")).join("\n")).toContain("plain number");
+    expect(checkWidgetUi(stat(64))).toEqual([]);
+    expect(checkWidgetUi(stat({ path: "/today/hr" }))).toEqual([]);
+    const points = [
+      { label: "Mon", value: -10 },
+      { label: "Tue", value: -100 },
+      { label: "Wed", value: 50 },
+    ];
+    expect(
+      checkWidgetUi({ components: [{ id: "root", component: "Chart", kind: "bar", points }] }),
+    ).toEqual([]);
+  });
+
+  it("checks a card whose components share children in linear time", () => {
+    // Each Column names the next one twice: 2^30 paths, 31 components.
+    const depth = 30;
+    const components: unknown[] = [
+      { id: "root", component: "Row", children: ["c0"], href: "https://example.com" },
+    ];
+    for (let i = 0; i < depth; i++) {
+      components.push({ id: `c${i}`, component: "Column", children: [`c${i + 1}`, `c${i + 1}`] });
+    }
+    components.push({ id: `c${depth}`, component: "Text", text: "leaf" });
+    const started = performance.now();
+    checkWidgetUi({ components });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("says where a value sits against its usual range", () => {
+    const range = { low: 56, high: 60 };
+    expect(widgetStatTone(64, range)).toBe("high");
+    expect(widgetStatTone(52, range)).toBe("low");
+    expect(widgetStatTone(56, range)).toBe("normal");
+    expect(widgetStatTone("58", range)).toBeNull();
+    expect(widgetStatTone("6h 05m", range)).toBeNull();
   });
 
   it("refuses fields no reader draws", () => {

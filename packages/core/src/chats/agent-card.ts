@@ -4,7 +4,13 @@
 // keeps it as it was shown. Vocabulary: docs/domains/chats.md#agent-card.
 
 import { randomUUID } from "node:crypto";
-import { checkWidgetUi, type MessagePart, type WidgetUi } from "@rome-os/app-runtime";
+import {
+  checkWidgetUi,
+  type MessagePart,
+  WIDGET_UI_CHART_MAX_POINTS,
+  WIDGET_UI_ICONS,
+  type WidgetUi,
+} from "@rome-os/app-runtime";
 
 /** The components an agent card may use: display only. A button, a picker or
  *  a text field would need an owner to handle its events, and an agent card
@@ -17,6 +23,7 @@ export const AGENT_CARD_COMPONENTS = [
   "Column",
   "Image",
   "Progress",
+  "Chart",
 ] as const;
 
 /** The most an agent card's `ui` may hold, as JSON characters. */
@@ -43,8 +50,12 @@ export function showCardDescription(sayInstead: string): string {
     "Show the guardian structured content as a card you compose. It only shows; nobody answers it, and you go on after it. " +
     "Use it only when the content has a real structure that reads better laid out: a few key numbers (such as a daily summary against a usual range), three or more steps or an itinerary, or options compared side by side. Never for a greeting, small talk, a short answer or a single fact. At most one card per reply. Text around the card may add what it does not hold, but never repeats what the card shows. " +
     "`ui` is an A2UI card: a flat list of components, each with an `id`, naming its children by id, drawn from the one whose id is `root`. Components: " +
-    "Text {text, variant?: h1|h2|h3|h4|h5|body|caption}; Stat {label, value, unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row and Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
-    "A heading Text with a caption Text under it reads as the card's title and subtitle. Stats in one Row show as a grid. " +
+    "Text {text, variant?: h1|h2|h3|h4|h5|body|caption, tone?: info|warning|success, icon?, href?}; Stat {label, value, unit?, caption?, range?: {low, high}, icon?}; Chart {kind: bar, points: [{label, value, highlight?: accent|warning}], unit?, caption?}; Progress {value, max?, label?}; Image {url (https only), description?, variant?: icon|avatar|smallFeature|mediumFeature|largeFeature|header}; Row {children: [ids], justify?, align?, icon?, href?}; Column {children: [ids], justify?, align?}; List {children: [ids], direction?: vertical|horizontal}. " +
+    "A heading Text with a caption Text under it reads as the card's title and subtitle. Put every Stat of a group in one Row, however many: it lays out as an even two-column grid. Never split a group across several Rows, which leaves a tile alone on its line. " +
+    "A Stat's `range` is the usual range in the value's unit, with `value` a plain number in that unit (sleep as 6.1 with unit h, not \"6h 05m\"): the card itself shows the range and whether the value is normal, high or low, so never write that verdict in its caption. State each number against its range and stop there: never guess at causes, and never give a medical diagnosis. " +
+    `A Chart draws bars, at most ${WIDGET_UI_CHART_MAX_POINTS}, such as a week of one number; highlight today with accent and an outlier with warning. ` +
+    "A Text with a `tone` is a callout strip: at most one, for the one thing to act on or keep in mind. " +
+    `\`icon\` is one of ${WIDGET_UI_ICONS.join(", ")}. \`href\` (https: or maps://, such as maps://?q=Belém+Tower) makes a list row or Row open that link when pressed. ` +
     "Write every value out: no `data`, `bind` or `{ path }`. No Button, ChoicePicker or TextField: to ask the guardian something, use the question card. " +
     `\`ui\` stays under ${AGENT_CARD_MAX_UI_CHARS} characters of JSON. ` +
     "`text` is the same content as plain text: the chat's line for the card, what a lock screen or a text-only chat shows, and what you read back later. " +
