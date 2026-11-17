@@ -21,21 +21,21 @@ const iconCenter = (page: Page, href: string) =>
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test("names show by default, and the edge hides and shows them without moving an icon", async ({
-    page,
-  }) => {
+  test("names show by default, and the edge hides and shows them", async ({ page }) => {
     await page.goto("/memory");
     const apps = page.locator('aside a[href="/apps"]');
     await expect(apps).toHaveText("Apps", { timeout: 30_000 });
     expect(await railWidth(page)).toBe(192);
-    const named = await iconCenter(page, "/apps");
+    // A named row's icon is in the sidebar's icon column (x=18, 16px wide); the
+    // bare rail centres its 40px tiles in 64px.
+    expect(await iconCenter(page, "/apps")).toBe(26);
 
     const edge = (await page.locator("[data-rail-edge]").boundingBox())!;
     const x = edge.x + edge.width / 2;
     await page.mouse.click(x, 400);
     await expect.poll(() => railWidth(page)).toBe(64);
     await expect(apps).toHaveText("");
-    expect(await iconCenter(page, "/apps")).toBe(named);
+    expect(await iconCenter(page, "/apps")).toBe(32);
 
     // A drag snaps to the other width once it has travelled far enough.
     const bare = (await page.locator("[data-rail-edge]").boundingBox())!;
