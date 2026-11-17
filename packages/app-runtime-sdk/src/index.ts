@@ -2223,6 +2223,15 @@ export interface ChannelMessageHookDeps {
    * that passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /**
+   * Whether the app that installed an agent decides when it wakes, which the
+   * agent declares with `wokenByApp: true`. That app hears the messages on the
+   * accounts linked to the agent and runs its turns, so no other hook answers
+   * them. Pass a canonical agent id, as `accountAgentOf` answers. A host that
+   * predates it passes none, and every agent is woken by the hook that answers
+   * its account.
+   */
+  wokenByApp?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }

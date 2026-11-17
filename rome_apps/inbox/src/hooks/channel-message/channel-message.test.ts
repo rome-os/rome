@@ -462,7 +462,10 @@ describe("ChannelMessageHook", () => {
     beforeEach(async () => {
       linked = "sales:agent";
       accountAgentOf.mockClear();
-      harness = createHarness({ accountAgentOf });
+      harness = createHarness({
+        accountAgentOf,
+        wokenByApp: (agent) => agent === "chief-of-staff:chief-of-staff",
+      });
       harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
       await harness.hook.register();
       harness.get.mockImplementation(async ({ connectionId, chatId }) =>
@@ -539,6 +542,19 @@ describe("ChannelMessageHook", () => {
       expect(harness.run).toHaveBeenCalledWith(
         ...passed({ channel: "feishu-2", accountAgentName: "sales:agent" }),
       );
+    });
+
+    it("answers nothing on an account whose agent its own app wakes", async () => {
+      linked = "chief-of-staff:chief-of-staff";
+
+      await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
+
+      expect(harness.run).not.toHaveBeenCalled();
+      expect(harness.send).not.toHaveBeenCalled();
+
+      linked = "sales:agent";
+      await harness.emit(FEISHU_2_ID, message({ messageId: "m-2" }));
+      expect(harness.run).toHaveBeenCalledWith(...passed({ accountAgentName: "sales:agent" }));
     });
 
     it("still stops a running turn on an account that is now unlinked", async () => {

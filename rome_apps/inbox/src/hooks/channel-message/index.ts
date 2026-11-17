@@ -50,6 +50,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
+      wokenByApp?: ChannelMessageHookDeps["wokenByApp"];
       messagesSaid?: MessagesSaid;
     } = {},
   ) {}
@@ -198,6 +199,15 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     if (accountAgent === null) {
       log.debug("account has no agent; not answering", {
         service,
+        messageId: message.messageId,
+      });
+      return;
+    }
+    // Its own app hears the account and runs the agent's turns.
+    if (accountAgent && this.options.wokenByApp?.(accountAgent)) {
+      log.debug("account's agent is woken by its app; not answering", {
+        service,
+        agent: accountAgent,
         messageId: message.messageId,
       });
       return;
@@ -393,6 +403,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.channels,
     {
       accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf),
+      ...(deps.wokenByApp ? { wokenByApp: deps.wokenByApp } : {}),
       ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
     },
   );

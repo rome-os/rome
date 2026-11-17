@@ -125,6 +125,9 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
+    // Its own app decides when it wakes on the accounts linked to it, so the
+    // Inbox app answers none of their messages.
+    wokenByApp: z.boolean().optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
     policy: z

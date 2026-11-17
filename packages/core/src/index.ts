@@ -1977,6 +1977,7 @@ async function main() {
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
+      wokenByApp: (agent) => agentLoader.find(agent)?.definition.wokenByApp === true,
     },
     mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
     onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),
