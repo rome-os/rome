@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.12](https://github.com/rome-os/rome/compare/ui-v0.3.11...ui-v0.3.12) (2026-11-17)
+
+
+### Features
+
+* **ui:** add progressive blur to web chat chrome ([#2287](https://github.com/rome-os/rome/issues/2287)) ([f044239](https://github.com/rome-os/rome/commit/f044239cc9847cbe9191347d5ce38f4102007a12))
+* **ui:** leave Enter and Escape to an input method while it composes ([#2251](https://github.com/rome-os/rome/issues/2251)) ([4b73e01](https://github.com/rome-os/rome/commit/4b73e0121b9da641b60a0ab34537184916d0ac51))
+
+
+### Bug Fixes
+
+* **ui:** stop a long first cell from taking a Markdown table's width ([#2235](https://github.com/rome-os/rome/issues/2235)) ([1820656](https://github.com/rome-os/rome/commit/1820656c7068b12f8b897c62180a89741b4d8311))
+
 ## [0.3.11](https://github.com/rome-os/rome/compare/ui-v0.3.10...ui-v0.3.11) (2026-11-15)
 
 

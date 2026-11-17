@@ -1,5 +1,15 @@
 # @rome-os/app-runtime
 
+## [0.11.5](https://github.com/rome-os/rome/compare/app-runtime-v0.11.4...app-runtime-v0.11.5) (2026-11-17)
+
+
+### Features
+
+* **app-runtime:** add a test-only back door that keeps Inbox off the chief of staff's accounts ([#2312](https://github.com/rome-os/rome/issues/2312)) ([fc9e079](https://github.com/rome-os/rome/commit/fc9e0799c67e10267132c05720c5b4f03341493c))
+* **app-runtime:** name who said each message an app's hook hears ([#2262](https://github.com/rome-os/rome/issues/2262)) ([3dea170](https://github.com/rome-os/rome/commit/3dea170796ffa88ccda4d8770827f290b9c4b65a))
+* basic vault for guardian-entered secrets held by the signer ([#2239](https://github.com/rome-os/rome/issues/2239)) ([6a6fd88](https://github.com/rome-os/rome/commit/6a6fd88106f29f730fc607ade6d3de98a62e6121))
+* **concierge:** make a chat thread the reply chain, separate from tasks ([#2285](https://github.com/rome-os/rome/issues/2285)) ([a5bab5d](https://github.com/rome-os/rome/commit/a5bab5d6a354603ec23047ed6b6cd322a1ced0dc))
+
 ## [0.11.4](https://github.com/rome-os/rome/compare/app-runtime-v0.11.3...app-runtime-v0.11.4) (2026-11-15)
 
 
