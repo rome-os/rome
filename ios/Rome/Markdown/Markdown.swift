@@ -662,7 +662,7 @@ struct MarkdownText: View {
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            MarkdownList(ordered: ordered, start: start, items: items, depth: 0, fontSize: fontSize, lineSpacing: lineSpacing)
+            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
@@ -701,12 +701,11 @@ struct MarkdownText: View {
 }
 
 /// A list in the bubble. A nested list sits under its item's text, so each
-/// level steps in by one marker's width, and its bullets change shape by depth.
+/// level steps in by one marker's width. Every level uses the same filled dot.
 struct MarkdownList: View {
     let ordered: Bool
     let start: Int
     let items: [ListItem]
-    let depth: Int
     let fontSize: CGFloat
     let lineSpacing: CGFloat
 
@@ -714,7 +713,7 @@ struct MarkdownList: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: ordered ? "\(start + index)." : Self.bullet(depth: depth))
+                    Text(verbatim: ordered ? "\(start + index)." : "•")
                         .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
                         .foregroundStyle(Palette.sub)
                         .frame(minWidth: 12, alignment: .trailing)
@@ -725,21 +724,14 @@ struct MarkdownList: View {
                             .fixedSize(horizontal: false, vertical: true)
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             if case .list(let ordered, let start, let items) = child {
-                                MarkdownList(ordered: ordered, start: start, items: items, depth: depth + 1, fontSize: fontSize, lineSpacing: lineSpacing)
+                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing)
                             }
                         }
                     }
                 }
             }
         }
-    }
-
-    /// A filled dot, then a ring, then a small square, repeating.
-    static func bullet(depth: Int) -> String {
-        // U+FE0E keeps the square a text glyph; without it iOS draws an emoji.
-        ["•", "◦", "▪\u{FE0E}"][depth % 3]
-    }
-}
+    }}
 
 /// A Markdown table in the bubble: the header in medium weight, hairlines
 /// between rows, no borders or fills. Wider than the bubble, it scrolls
