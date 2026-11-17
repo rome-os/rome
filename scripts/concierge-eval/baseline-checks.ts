@@ -16,7 +16,8 @@ export type PolicyRow =
   | "heavy-task"
   | "recall"
   | "multi-turn"
-  | "long-context";
+  | "long-context"
+  | "cards";
 
 /** What a scenario's checks read: the guardian turns by step, every turn, and what was said. */
 export interface CheckInput {
@@ -26,10 +27,14 @@ export interface CheckInput {
   turns: TimedTurn[];
   /** The Concierge's text messages after each step, in step order. */
   saidAfter: string[][];
+  /** The plain-text lines of the cards the Concierge composed after each step, in step order. */
+  cardsAfter: string[][];
   /** The Concierge's reaction to each step's message, in step order; null for none. */
   reactions: (string | null)[];
   /** Every Concierge text message. */
   said: string[];
+  /** Everything the Concierge showed: its text messages and its cards' plain text. */
+  shown: string[];
   /** The chat's tasks, as the Tasks panel lists them. */
   tasks: { status: string; endReason: string | null }[];
 }
@@ -78,12 +83,18 @@ export function answeredInline(input: CheckInput, step: number, maxSearches = 0)
   if (tool(turn, "chat_start") > 0) notes.push(`step ${step + 1}: started a task`);
   const searches = tool(turn, "websearch");
   if (searches > maxSearches) notes.push(`step ${step + 1}: ${searches} web searches`);
-  if ((input.saidAfter[step] ?? []).length === 0 && !turn?.reactedMs) {
+  if (shownAfter(input, step).length === 0 && !turn?.reactedMs) {
     notes.push(`step ${step + 1}: no answer`);
   }
   notes.push(...noTrailingOffer(input.saidAfter[step] ?? [], step));
   return notes;
 }
+
+/** What the Concierge showed after a step: its messages and its cards' plain text. */
+export const shownAfter = (input: CheckInput, step: number): string[] => [
+  ...(input.saidAfter[step] ?? []),
+  ...(input.cardsAfter[step] ?? []),
+];
 
 /** The length of what the Concierge said after a step, in characters. */
 export const saidLength = (input: CheckInput, step: number) =>
@@ -117,11 +128,44 @@ export function delegated(input: CheckInput, step = 0): string[] {
   return notes;
 }
 
-/** The rules every scenario keeps, whatever it asks: emoji, task results, and Chinese style. */
+/**
+ * The step was answered in its own turn with a card, with at most
+ * `maxSearches` web searches, and any message beside it ends on the answer.
+ * A card alone answers the step.
+ */
+export function shownCard(input: CheckInput, step: number, maxSearches = 3): string[] {
+  const turn = input.steps[step] ?? null;
+  const notes: string[] = [];
+  if (!turn) notes.push(`step ${step + 1}: no timed turn`);
+  if (tool(turn, "chat_start") > 0) notes.push(`step ${step + 1}: started a task`);
+  const searches = tool(turn, "websearch");
+  if (searches > maxSearches) notes.push(`step ${step + 1}: ${searches} web searches`);
+  if ((input.cardsAfter[step] ?? []).length === 0) notes.push(`step ${step + 1}: no card`);
+  notes.push(...noTrailingOffer(input.saidAfter[step] ?? [], step));
+  return notes;
+}
+
+/** The rows whose answers are too short or too light for a card. */
+const NO_CARD_ROWS: readonly PolicyRow[] = ["chat", "simple-qa"];
+
+/** At most one card per reply, and none for a greeting or a short answer. */
+export function cardRules(scenario: BaselineScenario, input: CheckInput): string[] {
+  const notes = input.cardsAfter.flatMap((cards, step) =>
+    cards.length > 1 ? [`card: ${cards.length} cards after step ${step + 1}`] : [],
+  );
+  const shown = input.cardsAfter.flat().length;
+  if (shown > 0 && NO_CARD_ROWS.includes(scenario.row)) {
+    notes.push(`card: ${shown} card(s) in a ${scenario.row} scenario`);
+  }
+  return notes;
+}
+
+/** The rules every scenario keeps, whatever it asks: emoji, task results, cards, and Chinese style. */
 export function standingRules(scenario: BaselineScenario, input: CheckInput): string[] {
   return [
     ...oneEmoji(input.said),
     ...noTaskChatPointer(input.said),
-    ...(scenario.lang === "zh" ? chineseStyle(input.said) : []),
+    ...cardRules(scenario, input),
+    ...(scenario.lang === "zh" ? chineseStyle([...input.said, ...input.cardsAfter.flat()]) : []),
   ];
 }

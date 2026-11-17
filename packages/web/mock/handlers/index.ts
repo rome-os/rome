@@ -55,6 +55,11 @@ import { appKeysHandlers } from "./app-keys";
 import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
 import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import {
+  AGENT_CARD_HEALTH,
+  AGENT_CARD_ITINERARY,
+  CONNECT_CARD_A2UI,
+} from "../fixtures/agent-cards";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -464,6 +469,17 @@ const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
   [CONCIERGE_CHAT_ID]: [
+    // Cards the Concierge composed itself, each a message of its own. They come
+    // first, so the later turns the layout checks wait for stay in view.
+    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-04T19:00:00.000Z", "Open an issue in the repo", [
+      CONNECT_CARD_A2UI,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-04T19:05:00.000Z", "How did I do today?", [
+      AGENT_CARD_HEALTH,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-04T19:10:00.000Z", "周六在东京怎么安排？", [
+      AGENT_CARD_ITINERARY,
+    ]),
     ...turn(
       CONCIERGE_CHAT_ID,
       1,

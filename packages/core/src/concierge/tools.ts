@@ -1,14 +1,22 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
 // tools run its task chats and read its other Concierge chats, `topic_start`
-// starts a topic chat, `react` puts an emoji on a guardian message, and
-// `connect_card` shows a card that connects a service.
+// starts a topic chat, `react` puts an emoji on a guardian message,
+// `connect_card` shows a card that connects a service, and `show_card` shows
+// a card the Concierge composes itself.
 
+import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
+import {
+  agentCardPart,
+  SHOW_CARD_INPUT_SCHEMA,
+  SHOW_CARD_TOOL,
+  showCardDescription,
+} from "../chats/agent-card.js";
 import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
 import type {
@@ -1646,6 +1654,41 @@ export async function buildConciergeTools(
           ]);
           said(chatId, turnId, `Connect ${connector.label}`);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
+        }),
+    },
+    {
+      name: SHOW_CARD_TOOL,
+      description: showCardDescription("say the content with `say`"),
+      inputSchema: SHOW_CARD_INPUT_SCHEMA,
+      handler: (input, call) =>
+        runTool(SHOW_CARD_TOOL, input, async (args) => {
+          const { chatId, turnId } = currentTurn();
+          if (context.widgets !== "card") {
+            throw new Error(
+              "This chat cannot show cards. Nothing was shown: say the content with say instead.",
+            );
+          }
+          const card = agentCardPart(args.ui, args.text, call?.toolUseId ?? `card-${randomUUID()}`);
+          if ("problems" in card) {
+            throw new Error(
+              `The card was not shown: ${card.problems.join("; ")}. Fix it and call show_card once more, or say the content with say instead.`,
+            );
+          }
+          // A card joins the thread a threaded follow-up was said in, as a
+          // `say` does, but shows no quote: a card stands alone in its message.
+          const replyTo = await defaultReplyTarget();
+          const { id } = await webchatRepo.addBackendMessage(
+            chatId,
+            turnId,
+            [card.part],
+            replyTo ? { replyTo } : {},
+          );
+          said(chatId, turnId, card.part.text);
+          await settleAnswered(replyTo, undefined);
+          return {
+            sent: "Shown; the guardian sees the card. Send nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
+            messageId: id,
+          };
         }),
     },
   ];

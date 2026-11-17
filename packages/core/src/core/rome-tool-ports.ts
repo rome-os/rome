@@ -30,6 +30,7 @@ import { connectAccountTools } from "./connect-account-tool.js";
 import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
+import { showCardTools } from "./show-card-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
 import { sameActor } from "../agent/index.js";
@@ -214,6 +215,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             channelThreadKey: turn.continuityKey,
             sessionId: turn.sessionId,
             isSubagent: turn.isSubagent,
+            widgets: turn.widgets,
             getTurnId: turn.turnId,
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
@@ -300,6 +302,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           hasSpeaker,
           privateTurn: deps.privateTurn,
         }),
+        // A session whose own tools already show an agent card (the
+        // Concierge's `show_card`) keeps that one.
+        ...(provided.some((tool) => tool.name === "show_card")
+          ? []
+          : showCardTools({ widgets: turn.widgets, hasSpeaker })),
       ];
     },
   };

@@ -170,7 +170,8 @@ private struct WidgetCardBody: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardPadding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)

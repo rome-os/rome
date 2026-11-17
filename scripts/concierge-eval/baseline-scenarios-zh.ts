@@ -8,6 +8,7 @@ import {
   delegated,
   fridayOnly,
   matches,
+  shownAfter,
   noFiller,
   tool,
 } from "./baseline-checks.js";
@@ -56,7 +57,7 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "馥芮白和拿铁有什么区别？", settleS: 6 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /奶|奶泡|microfoam/i, "the milk"),
+      ...matches(i.shown, /奶|奶泡|microfoam/i, "the milk"),
       ...noFiller(i.said),
     ],
     rubric: `正确答案：馥芮白（flat white）奶更少，只有一层薄而细腻的微奶泡，咖啡味更浓，杯量通常更小；拿铁蒸奶更多，奶泡层更厚。馥芮白常用双份或 ristretto。评正确性和简洁（2-4 句最好）。${VOICE}`,
@@ -69,7 +70,7 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "72 华氏度是多少摄氏度？", settleS: 6 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /22[.,]2/, "22.2 °C"),
+      ...matches(i.shown, /22[.,]2/, "22.2 °C"),
       ...noFiller(i.said),
     ],
     rubric: `正确答案：约 22.2 °C。一行最好。${VOICE}`,
@@ -95,8 +96,8 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: "我的牙医预约是哪天来着？", settleS: 8 }],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /(11 ?月 ?20|nov(ember)?\.? ?20|11\/20)/i, "November 20"),
-      ...matches(i.said, /15:30|15：30|3:30|下午三点半|下午 ?3 ?点半/i, "15:30"),
+      ...matches(i.shown, /(11 ?月 ?20|nov(ember)?\.? ?20|11\/20)/i, "November 20"),
+      ...matches(i.shown, /15:30|15：30|3:30|下午三点半|下午 ?3 ?点半/i, "15:30"),
       ...fridayOnly(i.said),
       ...noFiller(i.said),
     ],
@@ -115,7 +116,7 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...answeredInline(i, 0),
-      ...matches(i.said, /11[:.：]30|11 ?点半/, "11:30"),
+      ...matches(i.shown, /11[:.：]30|11 ?点半/, "11:30"),
       ...noFiller(i.said),
     ],
     rubric: `正确答案：11:30。要在 12:35 前到达；在 11:00-13:00 时段内开车需 65 分钟，所以 11:30 出发（整段车程都在拥堵时段内）。答 11:45、按 50 分钟算是错的。时间错误给 1 分，时间对但推理混乱给 3 分，时间对且只用一句话说明推理给 5 分。${VOICE}`,
@@ -146,7 +147,7 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: `做成任务：${LOUVRE}`, settleS: 20 }],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
+      ...matches(i.shown, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
       ...noFiller(i.said),
     ],
     rubric: `${LOUVRE_RUBRIC}${VOICE}`,
@@ -159,7 +160,7 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     steps: [{ text: `做成任务，用强模型、高 effort：${LOUVRE}`, settleS: 20 }],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
+      ...matches(i.shown, /tuesday|周二|星期二/i, "the closing day (Tuesday)"),
       ...noFiller(i.said),
     ],
     rubric: `${LOUVRE_RUBRIC}${VOICE}`,
@@ -177,8 +178,8 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...delegated(i),
-      ...matches(i.said, /热泵|heat pump|wärmepumpe/i, "the heat pump"),
-      ...matches(i.said, /€|欧元|eur/i, "costs in euros"),
+      ...matches(i.shown, /热泵|heat pump|wärmepumpe/i, "the heat pump"),
+      ...matches(i.shown, /€|欧元|eur/i, "costs in euros"),
     ],
     rubric: `转达的结果应在安装费用、每年运行费用和 2026 年补贴（例如德国 BEG/KfW 供暖补贴，热泵和颗粒燃料有，燃气很少或没有）三方面比较这三种系统，数字合理，并以一个带理由的明确建议结尾。评推理和合理性，以及转达是否是可用的总结（3-6 句或一张紧凑的表），而不是一大段文字。主人问到的每一项都要有答案。${VOICE}`,
   },
@@ -197,8 +198,8 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
     ],
     check: (i) => [
       ...answeredInline(i, 2),
-      ...matches(i.saidAfter[2] ?? [], /波尔图|porto/i, "Porto"),
-      ...matches(i.saidAfter[2] ?? [], /设计|design/i, "the design studio"),
+      ...matches(shownAfter(i, 2), /波尔图|porto/i, "Porto"),
+      ...matches(shownAfter(i, 2), /设计|design/i, "the design studio"),
       ...noFiller(i.said),
     ],
     rubric: `最后一个回答必须说出波尔图和在设计工作室上班，一行即可。第一条回复应简短回应这个消息（一个表情回应或一句话），礼物的回答应简短实用。${VOICE}`,

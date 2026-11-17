@@ -154,6 +154,7 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { claimAgentCard, isShowCardTool } from "../../chats/agent-card.js";
 import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
 import {
   locationAnswerPrompt,
@@ -557,6 +558,21 @@ function trustedWidget(
 ): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
+  // An agent card is Rome's own: stored only as the card core's `show_card`
+  // kept under the token in its output, never as the output prints it, since
+  // any tool can be named `show_card` (docs/domains/chats.md#agent-card).
+  if (widget.appId === "core") {
+    const card =
+      isShowCardTool(msg.tool) && actionName === undefined
+        ? claimAgentCard(toolOutputObject(msg.output)?.cardToken, msg.toolUseId)
+        : null;
+    if (card) return card;
+    log.warn("rejected widget: a core card core's show_card did not issue", {
+      sessionId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+    });
+    return null;
+  }
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
   if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
     log.warn("rejected widget: not shown by an action its app owns", {
@@ -990,12 +1006,21 @@ interface ActiveWebchatStream {
   timing?: ConciergeTurnTiming;
 }
 
-/** Whether a message's stored parts carry text: a say or a forwarded result, not a card alone. */
-function carriesText(content: string): boolean {
+/** Whether a message's stored parts say something to read: a say, a forwarded
+ *  result, or an agent card the agent composed. A card that asks or connects
+ *  something is not one. */
+function carriesWords(content: string): boolean {
   try {
     const parts = JSON.parse(content) as unknown;
     return (
-      Array.isArray(parts) && parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
+      Array.isArray(parts) &&
+      parts.some((p) => {
+        const part = p as { type?: unknown; appId?: unknown; ui?: unknown } | null;
+        return (
+          part?.type === "text" ||
+          (part?.type === "widget" && part.appId === "core" && part.ui !== undefined)
+        );
+      })
     );
   } catch {
     return false;
@@ -1220,7 +1245,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (message.role !== "assistant") return;
     // A message times only the turn that said it: another turn may be queued
     // or still finishing in the same chat.
-    if (carriesText(message.content)) {
+    if (carriesWords(message.content)) {
       for (const stream of streamsOfTurn(message.sessionId, message.turnId)) {
         stream.timing?.said();
       }

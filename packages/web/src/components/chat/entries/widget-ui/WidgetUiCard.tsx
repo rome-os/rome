@@ -375,7 +375,7 @@ export function WidgetUiCard({
   return (
     <div
       tabIndex={waiting ? -1 : undefined}
-      className="flex w-full max-w-md flex-col gap-2 rounded-16 border border-border bg-surface px-4 py-3"
+      className="flex w-full max-w-md flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3"
       aria-busy={busy}
       data-widget-app={appId}
       data-chat-pending-card={waiting && !locked ? "" : undefined}

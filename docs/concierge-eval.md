@@ -87,6 +87,7 @@ The log line adds the time until the model turn started (session acquire, open a
 - Each of those scenarios also runs in Chinese, `zh-` before its id, with a Chinese rubric ([`baseline-scenarios-zh.ts`](../scripts/concierge-eval/baseline-scenarios-zh.ts)).
 - `multi-turn` and `zh-multi-turn` are chats of twelve messages. The same kind of quick sum comes early, midway and late, so a late answer that grows counts as drift, and the second-to-last message asks for facts from the first two.
 - `long-context` first pastes four long parts of a diary, about 45,000 tokens in all, then times a few simple turns, which is the tail of the latency spread. The pasted messages are setup: their turns stay out of the timings, and the judge sees only their first lines.
+- The `cards` row ([`baseline-scenarios-cards.ts`](../scripts/concierge-eval/baseline-scenarios-cards.ts)) asks for an itinerary, a comparison and a few key numbers, in English and in Chinese. Each should get one [agent card](domains/chats.md#agent-card), answered in the owner's turn.
 
 ```bash
 pnpm concierge:baseline --config opus-low --model claude-opus-5-5 --effort low --runs 3
@@ -99,7 +100,7 @@ The `lookup-memory` scenario asks for a fact from the Concierge's memory. Run `s
 
 Each scenario reads its timed turns from the stack's log and checks what they did: answered inline or started a task as the scenario expects, searched the web at most three times, said no filler, and named the expected fact. The standing rules below are checked as well. A judge model then scores the answers from 1 to 5 against the scenario's written rubric. The judge runs through the Claude Code CLI on the host, `claude -p` on `--judge-model` (Opus 5.5 by default), and may search the web to check a fact. `--no-judge` skips it.
 
-Results go to `.concierge-eval/baseline/<config>/run-N.json`, with the machine's load average before and after each run. `--report` writes `.concierge-eval/baseline/report.md`. It opens with one row for each configuration over every scenario: checks passed, rule regressions, Chinese style and drift notes, the judge's mean in English and in Chinese, and the first say of inline, long-context and task turns. Then it lists each rule note, and gives a table for each scenario, with a row for each configuration, giving p50 and p95 of each timing, the mean model calls, tool calls and cache tokens, how many runs passed their checks, and the judge's mean score.
+Results go to `.concierge-eval/baseline/<config>/run-N.json`, with the machine's load average before and after each run. `--report` writes `.concierge-eval/baseline/report.md`. It opens with one row for each configuration over every scenario: checks passed, rule regressions, Chinese style and drift notes, the judge's mean in English and in Chinese, and the first say of inline, long-context and task turns. Then it lists each rule note, how many runs showed a card where the scenario expects one, where it expects none and where either is fine, and gives a table for each scenario, with a row for each configuration, giving p50 and p95 of each timing, the mean model calls, tool calls and cache tokens, how many runs passed their checks, and the judge's mean score.
 
 ### Rules
 
@@ -110,3 +111,4 @@ Results go to `.concierge-eval/baseline/<config>/run-N.json`, with the machine's
 | `rule:` | A thanks gets no 👀, neither the working status nor a reaction. A message carries at most one emoji. A task's result never sends the owner to the task chat. A simple answer ends on the answer, with no question back and no offer of more. |
 | `zh:` | A Chinese chat gets Chinese answers with full-width punctuation. |
 | `drift:` | In a long chat, a late quick answer is at most twice as long as its early twin, or 150 characters longer. |
+| `card:` | A reply shows at most one card, and a greeting or a simple question gets none. |

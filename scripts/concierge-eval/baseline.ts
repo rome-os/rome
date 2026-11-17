@@ -163,7 +163,7 @@ async function playScenario(
   const turns = timedTurns(logsSince(startedAtIso)).filter((t) => t.chatId === chat.id);
   const messages = await api.messages(chat.id);
 
-  const { lines, saidAfter, reactions } = transcriptOf(messages);
+  const { lines, saidAfter, cardsAfter, reactions } = transcriptOf(messages);
   // A pasted preload would bury the answers the judge scores, so a setup
   // message is cut short; every other line, each answer included, stays whole.
   const setupLines = new Set(
@@ -179,8 +179,10 @@ async function playScenario(
     steps: scenario.steps.map((_, i) => guardian[i] ?? null),
     turns,
     saidAfter,
+    cardsAfter,
     reactions,
     said: saidAfter.flat(),
+    shown: [...saidAfter.flat(), ...cardsAfter.flat()],
     tasks: driven.tasks,
   };
   const notes = [...scenario.check(input), ...standingRules(scenario, input)];
@@ -237,7 +239,8 @@ async function playScenario(
     turns,
     setupTurnIds,
     notes,
-    measures: scenario.measure?.(input),
+    // Every scenario counts its cards, so the rate shows where none is expected too.
+    measures: { cards: cardsAfter.flat().length, ...scenario.measure?.(input) },
     verdict,
     transcript,
     taskPath: path,

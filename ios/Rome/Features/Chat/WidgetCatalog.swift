@@ -41,19 +41,7 @@ enum WidgetCatalog {
         name: "Stat",
         schema: schema(["label": "DynamicString", "value": "DynamicValue", "unit": "DynamicString", "caption": "DynamicString"], required: ["label", "value"])
     ) { node in
-        VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(verbatim: shown(node, "value")).romeFont(22, .semibold, monospacedDigits: true).foregroundStyle(Palette.fg)
-                if let unit = node.string(for: "unit") {
-                    Text(verbatim: unit).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                }
-            }
-            if let caption = node.string(for: "caption") {
-                Text(verbatim: caption).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        WidgetStat(node: node)
     }
 
     private static let progress = ComponentImplementation(
@@ -72,11 +60,11 @@ enum WidgetCatalog {
     }
 
     private static let column = ComponentImplementation(api: BasicCatalogComponents.column) { node in
-        WidgetStack(node: node, spacing: 8)
+        WidgetStack(node: node)
     }
 
     private static let list = ComponentImplementation(api: BasicCatalogComponents.list) { node in
-        WidgetStack(node: node, spacing: 4)
+        WidgetStack(node: node)
     }
 
     private static let button = ComponentImplementation(api: BasicCatalogComponents.button) { node in
@@ -159,6 +147,11 @@ struct WidgetClearsKey: EnvironmentKey {
     static let defaultValue = WidgetClears()
 }
 
+/// Set inside a grid of tiles, so each tile takes its row's height.
+private struct WidgetInTileGridKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 /// Set while a button's request runs: every button is disabled, so a press is sent once.
 struct WidgetBusyKey: EnvironmentKey {
     static let defaultValue = false
@@ -180,6 +173,11 @@ extension EnvironmentValues {
         set { self[WidgetClearsKey.self] = newValue }
     }
 
+    fileprivate var widgetInTileGrid: Bool {
+        get { self[WidgetInTileGridKey.self] }
+        set { self[WidgetInTileGridKey.self] = newValue }
+    }
+
     var widgetBusy: Bool {
         get { self[WidgetBusyKey.self] }
         set { self[WidgetBusyKey.self] = newValue }
@@ -193,9 +191,9 @@ private struct WidgetText: View {
     var body: some View {
         let variant = node.string(for: "variant")
         let (size, weight): (CGFloat, Font.Weight) = switch variant {
-        case "h1", "h2": (20, .semibold)
-        case "h3", "h4": (CardScale.title, .semibold)
-        case "h5": (CardScale.title, .medium)
+        // One type scale, two weights: headings medium, everything else regular.
+        case "h1", "h2": (20, .medium)
+        case "h3", "h4", "h5": (CardScale.title, .medium)
         case "caption": (CardScale.caption, .regular)
         default: (CardScale.body, .regular)
         }
@@ -210,18 +208,63 @@ private struct WidgetText: View {
     }
 }
 
+/// A tile on a subtle fill: the label above, the value below it with its
+/// unit, and an optional caption such as the usual range. In a row of tiles
+/// it takes the row's height.
+private struct WidgetStat: View {
+    let node: Node
+    @Environment(\.widgetInTileGrid) private var inGrid
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.label).foregroundStyle(Palette.sub)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(verbatim: WidgetCatalog.shown(node, "value")).romeFont(20, .medium, monospacedDigits: true).foregroundStyle(Palette.fg)
+                if let unit = node.string(for: "unit") {
+                    Text(verbatim: unit).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                }
+            }
+            // The value stays on one line: a long one shrinks to fit.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            if let caption = node.string(for: "caption") {
+                Text(verbatim: caption).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: inGrid ? .infinity : nil, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The label on the left and the share on the right, above a thin track.
 private struct WidgetProgress: View {
     let node: Node
 
     var body: some View {
         let max = node.double(for: "max").flatMap { $0 > 0 ? $0 : nil } ?? 1
-        let value = node.double(for: "value") ?? 0
-        VStack(alignment: .leading, spacing: 4) {
-            if let label = node.string(for: "label") {
-                Text(verbatim: label).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
+        let share = Swift.min(Swift.max((node.double(for: "value") ?? 0) / max, 0), 1)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.caption).foregroundStyle(Palette.fg)
+                Spacer(minLength: 12)
+                Text(verbatim: "\(Int((share * 100).rounded()))%")
+                    .romeFont(CardScale.caption, monospacedDigits: true).foregroundStyle(Palette.sub)
             }
-            ProgressView(value: Swift.min(Swift.max(value, 0), max), total: max).tint(Palette.primary)
+            Capsule().fill(Palette.fill).frame(height: 6)
+                .overlay(alignment: .leading) {
+                    GeometryReader { proxy in
+                        Capsule().fill(Palette.primary).frame(width: proxy.size.width * share)
+                    }
+                }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(node.string(for: "label") ?? "")
+        .accessibilityValue("\(Int((share * 100).rounded()))%")
     }
 }
 
@@ -264,6 +307,24 @@ private struct WidgetRow: View {
 
     var body: some View {
         let kids = node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
+        // Numbers side by side read as an even two-column grid.
+        if kids.count > 1, kids.allSatisfy({ $0.type == "Stat" }) {
+            let rows = stride(from: 0, to: kids.count, by: 2).map { Array(kids[$0 ..< Swift.min($0 + 2, kids.count)]) }
+            // A Grid, not a lazy one, so the tiles of a row share its height.
+            Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 10) {
+                ForEach(rows, id: \.first?.id) { pair in
+                    GridRow {
+                        ForEach(pair) { kid in ComponentNodeView(node: kid).environment(\.widgetInTileGrid, true) }
+                        if pair.count == 1 { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                    }
+                }
+            }
+        } else {
+            row(kids)
+        }
+    }
+
+    @ViewBuilder private func row(_ kids: [Node]) -> some View {
         // A2UI's `justify` as spacers: before the first child, between
         // children, and after the last.
         let justify = node.string(for: "justify") ?? "start"
@@ -295,17 +356,29 @@ private struct WidgetRow: View {
 }
 
 /// A `Column`, or a `List` (vertical or horizontal), as the dashboard lays them out.
+/// A Column's children sit 12 apart, except a caption right under a heading,
+/// its subtitle, 4 under it. A List's rows have a hairline between them.
 private struct WidgetStack: View {
     let node: Node
-    let spacing: CGFloat
     @Environment(\.a2uiCatalogs) private var catalogs
     @Environment(\.a2uiDefaultCatalogID) private var defaultCatalogID
 
+    private static let headings: Set<String> = ["h1", "h2", "h3", "h4", "h5"]
+
+    private func isSubtitle(_ kids: [Node], _ index: Int) -> Bool {
+        guard index > 0 else { return false }
+        let kid = kids[index], above = kids[index - 1]
+        return kid.type == "Text" && kid.string(for: "variant") == "caption"
+            && above.type == "Text" && Self.headings.contains(above.string(for: "variant") ?? "")
+    }
+
     var body: some View {
         let kids = node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
-        let items = ForEach(kids) { kid in ComponentNodeView(node: kid) }
-        if node.type == "List" && node.string(for: "direction") == "horizontal" {
-            ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { items } }
+        let isList = node.type == "List"
+        if isList && node.string(for: "direction") == "horizontal" {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { ForEach(kids) { kid in ComponentNodeView(node: kid) } }
+            }
         } else {
             let align: HorizontalAlignment = switch node.string(for: "align") {
             case "center": .center
@@ -313,8 +386,23 @@ private struct WidgetStack: View {
             default: .leading
             }
             let frame: Alignment = align == .center ? .center : align == .trailing ? .trailing : .leading
-            VStack(alignment: align, spacing: spacing) { items }
-                .frame(maxWidth: .infinity, alignment: frame)
+            VStack(alignment: align, spacing: 0) {
+                ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
+                    if isList {
+                        ComponentNodeView(node: kid)
+                            .frame(maxWidth: .infinity, alignment: frame)
+                            .padding(.top, index == 0 ? 0 : 10)
+                            .padding(.bottom, index == kids.count - 1 ? 0 : 10)
+                            .overlay(alignment: .bottom) {
+                                if index < kids.count - 1 { Rectangle().fill(Palette.hair).frame(height: 1) }
+                            }
+                    } else {
+                        ComponentNodeView(node: kid)
+                            .padding(.top, index == 0 ? 0 : isSubtitle(kids, index) ? 4 : 12)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: frame)
         }
     }
 }
