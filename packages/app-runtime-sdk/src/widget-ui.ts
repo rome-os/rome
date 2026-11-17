@@ -521,14 +521,24 @@ export function checkWidgetUi(
 
 const INTERACTIVE = new Set(["Button", "ChoicePicker", "TextField"]);
 
-/** Whether `id`'s subtree, itself included, holds a component `test` matches. */
-function subtreeHas(
-  id: string,
+/** Whether a component's subtree, itself included, holds one `test`
+ *  matches. A child may sit under several parents, so each id is answered
+ *  once and remembered: the walk stays linear in the components, never in
+ *  the paths. Cycles are refused before it runs. */
+function subtreeFinder(
   byId: Map<string, WidgetUiComponent>,
   test: (c: WidgetUiComponent) => boolean,
-): boolean {
-  const c = byId.get(id);
-  return !!c && (test(c) || childIds(c).some((child) => subtreeHas(child, byId, test)));
+): (id: string) => boolean {
+  const known = new Map<string, boolean>();
+  const has = (id: string): boolean => {
+    const seen = known.get(id);
+    if (seen !== undefined) return seen;
+    const c = byId.get(id);
+    const found = !!c && (test(c) || childIds(c).some(has));
+    known.set(id, found);
+    return found;
+  };
+  return has;
 }
 
 const hasHref = (c: WidgetUiComponent) =>
@@ -545,16 +555,15 @@ function linkProblems(
   byId: Map<string, WidgetUiComponent>,
 ): string[] {
   const problems: string[] = [];
+  const holdsPressable = subtreeFinder(byId, (k) => INTERACTIVE.has(k.component) || hasHref(k));
+  const holdsLink = subtreeFinder(byId, hasHref);
   for (const c of components) {
-    if (
-      hasHref(c) &&
-      childIds(c).some((id) => subtreeHas(id, byId, (k) => INTERACTIVE.has(k.component)))
-    ) {
+    if (hasHref(c) && childIds(c).some(holdsPressable)) {
       problems.push(
-        `"${c.id}" has an href and holds a control: a press would both open the link and send an event`,
+        `"${c.id}" has an href and holds a control or another link: a press would do two things`,
       );
     }
-    if (c.component === "Button" && subtreeHas(c.child, byId, hasHref)) {
+    if (c.component === "Button" && holdsLink(c.child)) {
       problems.push(
         `"${c.id}" is a Button whose label holds an href: a press would both send an event and open the link`,
       );

@@ -417,7 +417,8 @@ const Chart = createComponentImplementation(ChartApi, ({ props }) => {
   const top = Math.max(...points.map((p) => p.value), 0);
   const bottom = Math.min(...points.map((p) => p.value), 0);
   const span = top - bottom || 1;
-  const zero = (top / span) * CHART_HEIGHT;
+  // All zeros: the line sits at the bottom, under a row of flat bars.
+  const zero = top === 0 && bottom === 0 ? CHART_HEIGHT : (top / span) * CHART_HEIGHT;
   const fill = (h?: string) =>
     h === "accent" ? "fill-primary" : h === "warning" ? "fill-warning" : "fill-border";
   const describe = points

@@ -472,4 +472,23 @@ describe("a widget described as data", () => {
     expect(bars[1]?.h).toBeCloseTo(bars[0]!.h * 10);
     expect(bars[1]?.h).toBeCloseTo(bars[2]!.h * 2);
   });
+
+  it("draws a chart of all zeros as flat bars on the baseline", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      {
+        id: "root",
+        component: "Chart",
+        kind: "bar",
+        points: [
+          { label: "Mon", value: 0 },
+          { label: "Tue", value: 0 },
+        ],
+      },
+    ]);
+    const chart = await screen.findByRole("img", { name: "Mon 0, Tue 0" });
+    for (const rect of chart.querySelectorAll("rect")) {
+      expect(Number(rect.getAttribute("y"))).toBeGreaterThanOrEqual(0);
+    }
+  });
 });

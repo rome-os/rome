@@ -188,7 +188,16 @@ describe("checkWidgetUi", () => {
           { id: "go-label", component: "Text", text: "Go" },
         ],
       }).join("\n"),
-    ).toContain("holds a control");
+    ).toContain("holds a control or another link");
+    // A linked Row that holds a linked Text.
+    expect(
+      checkWidgetUi({
+        components: [
+          { id: "root", component: "Row", children: ["t"], href: "https://example.com/a" },
+          { id: "t", component: "Text", text: "a", href: "https://example.com/b" },
+        ],
+      }),
+    ).not.toEqual([]);
     // A Button whose label holds a link, directly or deeper.
     for (const label of [
       [{ id: "go-label", component: "Text", text: "Go", href: "https://example.com" }],
@@ -220,6 +229,21 @@ describe("checkWidgetUi", () => {
     expect(
       checkWidgetUi({ components: [{ id: "root", component: "Chart", kind: "bar", points }] }),
     ).toEqual([]);
+  });
+
+  it("checks a card whose components share children in linear time", () => {
+    // Each Column names the next one twice: 2^30 paths, 31 components.
+    const depth = 30;
+    const components: unknown[] = [
+      { id: "root", component: "Row", children: ["c0"], href: "https://example.com" },
+    ];
+    for (let i = 0; i < depth; i++) {
+      components.push({ id: `c${i}`, component: "Column", children: [`c${i + 1}`, `c${i + 1}`] });
+    }
+    components.push({ id: `c${depth}`, component: "Text", text: "leaf" });
+    const started = performance.now();
+    checkWidgetUi({ components });
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it("says where a value sits against its usual range", () => {
