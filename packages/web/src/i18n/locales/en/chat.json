@@ -178,10 +178,8 @@
       "endedAt": "Ended {{when}}"
     },
     "menu": {
-      "label": "Open",
       "tasks": "Tasks",
-      "outputs": "Outputs",
-      "memory": "Memory"
+      "outputs": "Outputs"
     }
   },
   "reply": {
@@ -788,5 +786,10 @@
       "file": "File"
     },
     "indexing": "Still finding earlier files."
+  },
+  "chatHeader": {
+    "menu": "Chat menu",
+    "project": "Project · {{name}}",
+    "lastModel": "Last answered by {{model}}"
   }
 }

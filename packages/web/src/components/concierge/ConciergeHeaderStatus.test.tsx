@@ -44,37 +44,28 @@ describe("ConciergeHeaderStatus", () => {
     expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
   });
 
-  it("opens the task list from the badge, with a pointer, or from the name tag without a badge", () => {
-    let opened = 0;
-    const open = () => {
-      opened += 1;
+  it("shows its menu from the badge, or from the name tag without a badge, and opens nothing itself", () => {
+    const opened: string[] = [];
+    const menu = {
+      items: [{ key: "tasks", icon: null, label: "Tasks", run: () => opened.push("tasks") }],
     };
     const { container, rerender } = render(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} onOpenTasks={open} />,
+      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} menu={menu} />,
     );
-    const badge = screen.getByRole("button", { name: "Open tasks" });
+    const badge = screen.getByRole("button", { name: "Chat menu" });
     expect(badge.hasAttribute("data-concierge-header-badge")).toBe(true);
-    expect(badge.className).toContain("cursor-pointer");
-    expect(container.querySelector(".rome-mascot")?.getAttribute("class")).toContain(
-      "cursor-pointer",
-    );
-    // Only one opener: the name tag stays a plain box beside the badge.
+    // Only one trigger: the name tag stays a plain box beside the badge.
     expect(container.querySelector("[data-concierge-header-name]")?.tagName).toBe("DIV");
     fireEvent.click(badge);
-    expect(opened).toBe(1);
+    expect(opened).toEqual([]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Tasks"]);
 
     rerender(
-      <ConciergeHeaderStatus
-        name="Milo"
-        activity={{ kind: "idle" }}
-        badge={false}
-        onOpenTasks={open}
-      />,
+      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} badge={false} menu={menu} />,
     );
-    const tag = screen.getByRole("button", { name: "Open tasks" });
-    expect(tag.hasAttribute("data-concierge-header-name")).toBe(true);
-    fireEvent.click(tag);
-    expect(opened).toBe(2);
+    expect(
+      screen.getByRole("button", { name: "Chat menu" }).hasAttribute("data-concierge-header-name"),
+    ).toBe(true);
   });
 
   it("lifts the name tag and the status a row when the badge is left out", () => {
@@ -178,15 +169,19 @@ describe("ConciergeHeaderStatus", () => {
 });
 
 describe("ConciergeHeaderStatus quick menu", () => {
-  function renderWithMenu() {
+  function renderWithMenu(caption?: string) {
     const opened: string[] = [];
+    const item = (key: string, label: string) => ({
+      key,
+      icon: null,
+      label,
+      run: () => opened.push(key),
+    });
     const { container } = render(
       <ConciergeHeaderStatus
         name="Yo"
         activity={{ kind: "idle" }}
-        onOpenTasks={() => opened.push("tasks")}
-        onOpenOutputs={() => opened.push("outputs")}
-        onOpenMemory={() => opened.push("memory")}
+        menu={{ items: [item("tasks", "Tasks"), item("outputs", "Outputs")], caption }}
       />,
     );
     const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
@@ -194,82 +189,39 @@ describe("ConciergeHeaderStatus quick menu", () => {
   }
   const items = () => screen.queryAllByRole("menuitem").map((item) => item.textContent);
 
-  it("shows Tasks, Outputs and Memory on hover, with no counts, and opens each one's tab", () => {
+  it("shows its items on hover, with no counts, and runs the one chosen", () => {
     const { opened, badge } = renderWithMenu();
     expect(items()).toEqual([]);
     fireEvent.pointerEnter(badge, { pointerType: "mouse" });
-    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
+    expect(items()).toEqual(["Tasks", "Outputs"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Outputs" }));
     expect(opened).toEqual(["outputs"]);
     expect(items()).toEqual([]);
-    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Memory" }));
-    expect(opened).toEqual(["outputs", "memory"]);
   });
 
-  it("still opens Tasks on a click of the badge", () => {
+  it("shows the menu on a click or a tap of the badge, and opens no tab from it", () => {
     const { opened, badge } = renderWithMenu();
-    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
-    fireEvent.pointerDown(badge, { pointerType: "mouse" });
     fireEvent.click(badge);
-    expect(opened).toEqual(["tasks"]);
-  });
-
-  it("shows the menu on a tap, where nothing hovers, instead of opening Tasks", () => {
-    const { opened, badge } = renderWithMenu();
-    fireEvent.pointerDown(badge, { pointerType: "touch" });
-    fireEvent.click(badge);
+    expect(items()).toEqual(["Tasks", "Outputs"]);
     expect(opened).toEqual([]);
-    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
   });
 
-  it("shows the menu from the keyboard with Arrow Down", () => {
-    const { badge } = renderWithMenu();
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
-    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
+  it("names the model that answered last at its foot, as text only", () => {
+    renderWithMenu("Opus 5.5");
+    fireEvent.click(screen.getByRole("button", { name: "Chat menu" }));
+    const caption = document.querySelector("[data-concierge-menu-caption]");
+    expect(caption?.textContent).toBe("Opus 5.5");
+    expect(caption?.querySelector("button, a")).toBeNull();
   });
-});
 
-describe("ConciergeHeaderStatus quick menu at phone width", () => {
-  it("shows the menu on a click, instead of opening Tasks", () => {
-    const opened: string[] = [];
-    const { container } = render(
-      <ConciergeHeaderStatus
-        name="Yo"
-        activity={{ kind: "idle" }}
-        onOpenTasks={() => opened.push("tasks")}
-        onOpenOutputs={() => opened.push("outputs")}
-        onOpenMemory={() => opened.push("memory")}
-        menuOnClick
-      />,
-    );
-    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
-    fireEvent.pointerDown(badge, { pointerType: "mouse" });
-    fireEvent.click(badge);
-    expect(opened).toEqual([]);
-    expect(screen.getAllByRole("menuitem")).toHaveLength(3);
-  });
-});
-
-describe("ConciergeHeaderStatus quick menu from the keyboard", () => {
   it("moves focus into the menu on Arrow Down, and between its items", async () => {
-    const { container } = render(
-      <ConciergeHeaderStatus
-        name="Yo"
-        activity={{ kind: "idle" }}
-        onOpenTasks={() => {}}
-        onOpenOutputs={() => {}}
-        onOpenMemory={() => {}}
-      />,
-    );
-    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    const { badge } = renderWithMenu();
     badge.focus();
     fireEvent.keyDown(badge, { key: "ArrowDown" });
     await waitFor(() => expect(document.activeElement?.textContent).toBe("Tasks"));
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect(document.activeElement?.textContent).toBe("Outputs");
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    expect(document.activeElement?.textContent).toBe("Memory");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement?.textContent).toBe("Tasks");
   });
 });

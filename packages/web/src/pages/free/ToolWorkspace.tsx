@@ -1,6 +1,5 @@
 import {
   ChevronDown,
-  BrainCircuit,
   ExternalLink,
   FileOutput,
   LayoutGrid,
@@ -43,8 +42,6 @@ import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
 import { ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
-import { ToolMemoryContext, type ToolMemoryHost } from "./tool-memory";
-import { MemoryBrowser } from "@/pages/MemoryPage";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import {
@@ -68,10 +65,7 @@ const TRACE_TAB_ID = "__trace__";
 const TASKS_TAB_ID = "__tasks__";
 // Tab value of the Outputs tab, likewise.
 const OUTPUTS_TAB_ID = "__outputs__";
-// Tab value of the Memory tab, likewise.
-const MEMORY_TAB_ID = "__memory__";
-
-type BuiltinTab = "trace" | "tasks" | "outputs" | "memory";
+type BuiltinTab = "trace" | "tasks" | "outputs";
 
 function readRatio() {
   const value = Number(readStored(WIDTH_KEY));
@@ -217,7 +211,6 @@ export function ToolWorkspace({
     seq: number;
   } | null>(null);
   const outputsOpen = outputsTarget !== null;
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -273,7 +266,7 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const builtinOpen = trace !== null || tasksOpen || outputsOpen || memoryOpen;
+  const builtinOpen = trace !== null || tasksOpen || outputsOpen;
   // The hold ends with the last built-in tab: the pane falls back to the
   // session's stored state.
   useEffect(() => {
@@ -288,8 +281,7 @@ export function ToolWorkspace({
   const traceActive = trace !== null && selected === "trace";
   const tasksActive = tasksOpen && selected === "tasks";
   const outputsActive = outputsOpen && selected === "outputs";
-  const memoryActive = memoryOpen && selected === "memory";
-  const builtinActive = traceActive || tasksActive || outputsActive || memoryActive;
+  const builtinActive = traceActive || tasksActive || outputsActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
@@ -326,19 +318,6 @@ export function ToolWorkspace({
   const outputsHost = useMemo<ToolOutputsHost>(
     () => ({ active: outputsActive && open, compact, show: showOutputs, hide: hideOutputs }),
     [outputsActive, open, compact, showOutputs, hideOutputs],
-  );
-  const showMemory = useCallback(() => {
-    if (latest.current.view.collapsed) setHoldsOpen(true);
-    setMemoryOpen(true);
-    setSelected("memory");
-  }, []);
-  const hideMemory = useCallback(() => {
-    setMemoryOpen(false);
-    setSelected((current) => (current === "memory" ? null : current));
-  }, []);
-  const memoryHost = useMemo<ToolMemoryHost>(
-    () => ({ compact, show: showMemory, hide: hideMemory }),
-    [compact, showMemory, hideMemory],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -381,7 +360,6 @@ export function ToolWorkspace({
     ...(trace ? [TRACE_TAB_ID] : []),
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
     ...(outputsOpen ? [OUTPUTS_TAB_ID] : []),
-    ...(memoryOpen ? [MEMORY_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
   const builtinTabId = traceActive
@@ -390,9 +368,7 @@ export function ToolWorkspace({
       ? TASKS_TAB_ID
       : outputsActive
         ? OUTPUTS_TAB_ID
-        : memoryActive
-          ? MEMORY_TAB_ID
-          : null;
+        : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
@@ -432,15 +408,6 @@ export function ToolWorkspace({
               icon={<FileOutput className="size-3.5" />}
               active={outputsActive}
               onClose={hideOutputs}
-            />
-          )}
-          {memoryOpen && shownIds.has(MEMORY_TAB_ID) && (
-            <ToolTab
-              id={MEMORY_TAB_ID}
-              label={tChat("concierge.menu.memory")}
-              icon={<BrainCircuit className="size-3.5" />}
-              active={memoryActive}
-              onClose={hideMemory}
             />
           )}
           {sorted
@@ -516,12 +483,6 @@ export function ToolWorkspace({
                 {tChat("outputs.title")}
               </DropdownMenuItem>
             )}
-            {memoryOpen && (
-              <DropdownMenuItem onSelect={() => pickTab(MEMORY_TAB_ID)}>
-                <BrainCircuit className="size-3.5" />
-                {tChat("concierge.menu.memory")}
-              </DropdownMenuItem>
-            )}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -556,7 +517,6 @@ export function ToolWorkspace({
     if (id === TRACE_TAB_ID) return setSelected("trace");
     if (id === TASKS_TAB_ID) return setSelected("tasks");
     if (id === OUTPUTS_TAB_ID) return setSelected("outputs");
-    if (id === MEMORY_TAB_ID) return setSelected("memory");
     setSelected(null);
     selectTool(id);
   }
@@ -611,7 +571,7 @@ export function ToolWorkspace({
         >
           <ToolTasksContext.Provider value={tasksHost}>
             <ToolOutputsContext.Provider value={outputsHost}>
-              <ToolMemoryContext.Provider value={memoryHost}>{children}</ToolMemoryContext.Provider>
+              {children}
             </ToolOutputsContext.Provider>
           </ToolTasksContext.Provider>
         </div>
@@ -731,18 +691,6 @@ export function ToolWorkspace({
                   selectedId={outputsTarget.outputId}
                   selectionSeq={outputsTarget.seq}
                 />
-              </TabsContent>
-            )}
-            {memoryOpen && (
-              <TabsContent
-                value={MEMORY_TAB_ID}
-                forceMount
-                inert={!memoryActive}
-                aria-hidden={!memoryActive}
-                style={{ display: memoryActive ? undefined : "none" }}
-                className="absolute inset-0 overflow-hidden"
-              >
-                <MemoryBrowser embedded />
               </TabsContent>
             )}
           </div>

@@ -8,7 +8,6 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
-import { useToolMemory } from "./tool-memory";
 import { useToolOutputs } from "./tool-outputs";
 import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
@@ -27,10 +26,6 @@ rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
       Outputs body {chatId} {selectedId ?? "none"}
     </p>
   ),
-}));
-
-rs.mock("@/pages/MemoryPage", () => ({
-  MemoryBrowser: () => <p>Memory browser body</p>,
 }));
 
 let viewportWidth = 1200;
@@ -979,7 +974,6 @@ function OutputsOwner() {
       <button type="button" onClick={() => pane?.show("chat-1", "out-2")}>
         Open output
       </button>
-      <MemoryOwner />
       <output data-testid="outputs-host">{JSON.stringify({ active: pane?.active })}</output>
     </>
   );
@@ -1027,27 +1021,5 @@ describe("ToolWorkspace Outputs tab", () => {
     await user.click(screen.getByRole("button", { name: "Close Outputs" }));
     expect(tabNames()).toEqual(["desktop", "projects"]);
     expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe("true");
-  });
-});
-
-function MemoryOwner() {
-  const pane = useToolMemory();
-  return (
-    <button type="button" onClick={() => pane?.show()}>
-      Show memory
-    </button>
-  );
-}
-
-describe("ToolWorkspace Memory tab", () => {
-  it("adds a Memory tab with the memory browser, and goes with its close button", async () => {
-    const user = userEvent.setup();
-    render(<OutputsHarness />);
-    await user.click(screen.getByRole("button", { name: "Show memory" }));
-    expect(tabNames()).toEqual(["Memory", "desktop", "projects"]);
-    expect(screen.getByRole("tab", { name: "Memory" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText("Memory browser body")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Close Memory" }));
-    expect(tabNames()).toEqual(["desktop", "projects"]);
   });
 });

@@ -1,4 +1,3 @@
-import { BrainCircuit, FileOutput, ListChecks } from "lucide-react";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -38,14 +37,32 @@ export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
  */
 export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
 
+/** One entry of the header's quick menu: what it opens, never a count or a mark. */
+export interface HeaderMenuItem {
+  key: string;
+  icon: ReactNode;
+  label: string;
+  run: () => void;
+}
+
+/** The header's quick menu, opened from its badge. */
+export interface HeaderMenu {
+  items: HeaderMenuItem[];
+  /** A quiet line at the menu's foot, such as the model that last answered. */
+  caption?: ReactNode;
+}
+
 /**
- * The middle of a Concierge chat's floating header, centred top to bottom: the
- * mascot in a round badge, a small name tag overlapping the badge's lower
- * edge, and under it, a capsule with what the Concierge is doing right now.
- * The name and the status are separate, so a short name stays under the
- * mascot whatever the status's length. Idle, the status capsule is gone, and
+ * The middle of a chat's floating header, centred top to bottom: the agent in
+ * a round badge, a small name tag overlapping the badge's lower edge, and, in
+ * a Concierge chat, a capsule under it with what the Concierge is doing right
+ * now. The name and the status are separate, so a short name stays under the
+ * badge whatever the status's length. Idle, the status capsule is gone, and
  * the mascot only blinks. The status line is a live region, so a screen
  * reader hears it change; idle, it stays in the page, read but not drawn.
+ *
+ * The badge is no action of its own: hovering it, or a click or tap, shows its
+ * `menu`. Without the badge, the name tag shows it.
  *
  * Its root lays out as `contents`: the pieces are items of the header's grid.
  * The badge takes the first row, where the side buttons centre on it, and
@@ -56,101 +73,58 @@ export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
  */
 export function ConciergeHeaderStatus({
   name,
-  activity,
+  activity = { kind: "idle" },
   badge = true,
-  onOpenTasks,
-  onOpenOutputs,
-  onOpenMemory,
-  menuOnClick = false,
+  avatar,
+  menu,
 }: {
   name: ReactNode;
-  activity: ConciergeActivity;
-  /** Whether the mascot's badge shows. Without it the name tag takes the badge's row. */
+  /** What the Concierge is doing; an ordinary chat leaves it idle. */
+  activity?: ConciergeActivity;
+  /** Whether the badge shows. Without it the name tag takes the badge's row. */
   badge?: boolean;
-  /**
-   * Opens the chat's task list. The badge is its button, or the name tag
-   * while the badge is gone.
-   */
-  onOpenTasks?: () => void;
-  /** Opens the chat's outputs. With it and `onOpenMemory`, the badge has a quick menu. */
-  onOpenOutputs?: () => void;
-  /** Opens the memory browser. */
-  onOpenMemory?: () => void;
-  /** A click shows the quick menu rather than opening Tasks, as at phone width. */
-  menuOnClick?: boolean;
+  /** What the badge holds; the Concierge's mascot when not given. */
+  avatar?: ReactNode;
+  menu?: HeaderMenu;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
   const busy = activity.kind !== "idle";
-  const openLabel = t("concierge.taskList.open");
-  // The badge opens the task list, or the name tag while the badge is gone.
-  const opensFromBadge = Boolean(onOpenTasks) && badge;
-  const opensFromName = Boolean(onOpenTasks) && !badge;
-  const quickMenu =
-    opensFromBadge && onOpenOutputs && onOpenMemory
-      ? { tasks: onOpenTasks!, outputs: onOpenOutputs, memory: onOpenMemory }
-      : null;
-  const Badge = opensFromBadge ? "button" : "div";
-  const NameTag = opensFromName ? "button" : "div";
-  const opener = (here: boolean) =>
-    here
-      ? {
-          type: "button" as const,
-          onClick: onOpenTasks,
-          "aria-label": openLabel,
-          title: openLabel,
-        }
-      : {};
+  const menuLabel = t("chatHeader.menu");
   const focusRing =
     "cursor-pointer outline-none outline-2 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
-  return (
-    <div data-concierge-header-status data-activity={activity.kind} className="contents">
-      {badge ? (
-        quickMenu ? (
-          <QuickMenu items={quickMenu} clickShowsMenu={menuOnClick}>
-            {(menuProps) => (
-              <Badge
-                data-concierge-header-badge
-                {...opener(opensFromBadge)}
-                {...menuProps}
-                // The menu names what the badge opens, so no tooltip covers it.
-                title={undefined}
-                className={cn(
-                  "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
-                  FLOATING_SURFACE,
-                  focusRing,
-                )}
-              >
-                <RomeMascot
-                  alive={busy && activity.kind !== "needsYou"}
-                  className="h-6.5 w-auto cursor-pointer"
-                />
-              </Badge>
-            )}
-          </QuickMenu>
-        ) : (
-          <Badge
-            data-concierge-header-badge
-            {...opener(opensFromBadge)}
-            className={cn(
-              "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
-              FLOATING_SURFACE,
-              opensFromBadge && focusRing,
-            )}
-          >
-            {/* About 60% of the badge, so the bob and the squash keep inside it. */}
-            <RomeMascot
-              alive={busy && activity.kind !== "needsYou"}
-              className={cn("h-6.5 w-auto", opensFromBadge && "cursor-pointer")}
-            />
-          </Badge>
-        )
-      ) : null}
+  const trigger = (props: BadgeMenuProps | null) =>
+    props ? { type: "button" as const, "aria-label": menuLabel, ...props } : {};
+  const badgeEl = (props: BadgeMenuProps | null) => {
+    const Badge = props ? "button" : "div";
+    return (
+      <Badge
+        data-concierge-header-badge
+        {...trigger(props)}
+        className={cn(
+          "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+          FLOATING_SURFACE,
+          props && focusRing,
+        )}
+      >
+        {avatar ?? (
+          // About 60% of the badge, so the bob and the squash keep inside it.
+          <RomeMascot
+            alive={busy && activity.kind !== "needsYou"}
+            className={cn("h-6.5 w-auto", props && "cursor-pointer")}
+          />
+        )}
+      </Badge>
+    );
+  };
+  const nameEl = (props: BadgeMenuProps | null) => {
+    const NameTag = props ? "button" : "div";
+    return (
       <NameTag
         data-concierge-header-name
-        {...opener(opensFromName)}
+        {...trigger(props)}
         className={cn(
-          opensFromName && focusRing,
+          props && focusRing,
           badge ? "row-start-2 -mt-1" : "row-start-1",
           // Above the badge, so the tag covers the badge's edge, not the reverse.
           "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
@@ -160,6 +134,12 @@ export function ConciergeHeaderStatus({
         {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
         <span className="max-w-[8em] truncate text-aux font-medium text-foreground">{name}</span>
       </NameTag>
+    );
+  };
+  return (
+    <div data-concierge-header-status data-activity={activity.kind} className="contents">
+      {badge ? menu ? <QuickMenu menu={menu}>{badgeEl}</QuickMenu> : badgeEl(null) : null}
+      {!badge && menu ? <QuickMenu menu={menu}>{nameEl}</QuickMenu> : nameEl(null)}
       <div
         data-concierge-header-activity
         aria-live="polite"
@@ -210,7 +190,6 @@ const LEAVE_DELAY_MS = 150;
 
 type BadgeMenuProps = {
   onClick: (event: MouseEvent<HTMLElement>) => void;
-  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
   onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
   onPointerLeave: (event: PointerEvent<HTMLElement>) => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
@@ -219,24 +198,22 @@ type BadgeMenuProps = {
 };
 
 /**
- * The badge's quick menu: Tasks, Outputs and Memory, each opening its tab in
- * the side pane. Hovering the badge shows it, a tap shows it where nothing
- * hovers, and Arrow Down shows it from the keyboard. A click on the badge
- * itself still opens Tasks. It holds no counts or marks.
+ * The badge's quick menu, to the right of the badge, each item opening its
+ * tab in the side pane. Hovering the badge shows it, and a click or a tap
+ * shows it too, where nothing hovers; the badge opens nothing itself. Arrow
+ * Down shows it from the keyboard and moves into it. It holds no counts or
+ * marks.
  */
 function QuickMenu({
-  items,
-  clickShowsMenu,
+  menu,
   children,
 }: {
-  items: { tasks: () => void; outputs: () => void; memory: () => void };
-  clickShowsMenu: boolean;
+  menu: HeaderMenu;
   children: (props: BadgeMenuProps) => ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const leaveTimer = useRef<number | null>(null);
-  const touched = useRef(false);
   // Set when the keyboard opened the menu, which then takes focus.
   const fromKeyboard = useRef(false);
   const cancelLeave = () => {
@@ -248,16 +225,13 @@ function QuickMenu({
     leaveTimer.current = window.setTimeout(() => setOpen(false), LEAVE_DELAY_MS);
   };
   useEffect(() => cancelLeave, []);
-  const choose = (open: () => void) => {
+  const choose = (run: () => void) => {
     setOpen(false);
-    open();
+    run();
   };
   const badgeProps: BadgeMenuProps = {
     "aria-haspopup": "menu",
     "aria-expanded": open,
-    onPointerDown: (event) => {
-      touched.current = event.pointerType === "touch";
-    },
     onPointerEnter: (event) => {
       if (event.pointerType !== "mouse") return;
       cancelLeave();
@@ -266,16 +240,13 @@ function QuickMenu({
     onPointerLeave: (event) => {
       if (event.pointerType === "mouse") leave();
     },
+    // A hover has shown it already; a click keeps it, and a tap toggles it.
     onClick: (event) => {
-      // A tap shows the menu: there is no hover to show it.
-      if (touched.current || clickShowsMenu) {
-        touched.current = false;
-        event.preventDefault();
-        setOpen((was) => !was);
-        return;
-      }
-      setOpen(false);
-      items.tasks();
+      event.preventDefault();
+      cancelLeave();
+      setOpen((was) =>
+        (event.nativeEvent as globalThis.PointerEvent).pointerType === "mouse" ? true : !was,
+      );
     },
     onKeyDown: (event) => {
       if (event.key === "ArrowDown") {
@@ -285,22 +256,12 @@ function QuickMenu({
       }
     },
   };
-  const entries = [
-    { key: "tasks", icon: <ListChecks />, label: t("concierge.menu.tasks"), run: items.tasks },
-    {
-      key: "outputs",
-      icon: <FileOutput />,
-      label: t("concierge.menu.outputs"),
-      run: items.outputs,
-    },
-    { key: "memory", icon: <BrainCircuit />, label: t("concierge.menu.memory"), run: items.memory },
-  ];
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
       <PopoverAnchor asChild>{children(badgeProps)}</PopoverAnchor>
       <PopoverContent
         role="menu"
-        aria-label={t("concierge.menu.label")}
+        aria-label={t("chatHeader.menu")}
         side="right"
         align="start"
         sideOffset={8}
@@ -322,21 +283,29 @@ function QuickMenu({
         onPointerLeave={(event) => {
           if (event.pointerType === "mouse") leave();
         }}
-        className="w-auto min-w-40 gap-1 p-1"
+        className="w-auto max-w-64 min-w-40 gap-1 p-1"
       >
-        {entries.map((entry) => (
+        {menu.items.map((item) => (
           <button
-            key={entry.key}
+            key={item.key}
             type="button"
             role="menuitem"
-            data-concierge-menu-item={entry.key}
-            onClick={() => choose(entry.run)}
-            className="flex h-[var(--control-h-md)] w-full cursor-pointer items-center gap-2 rounded-8 px-2 text-left text-ui text-foreground outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
+            data-concierge-menu-item={item.key}
+            onClick={() => choose(item.run)}
+            className="flex h-[var(--control-h-md)] w-full min-w-0 cursor-pointer items-center gap-2 rounded-8 px-2 text-left text-ui text-foreground outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
           >
-            {entry.icon}
-            {entry.label}
+            {item.icon}
+            <span className="min-w-0 truncate">{item.label}</span>
           </button>
         ))}
+        {menu.caption ? (
+          <div
+            data-concierge-menu-caption
+            className="flex min-w-0 items-center gap-2 border-t border-border-subtle px-2 pt-2 pb-1 text-aux text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0"
+          >
+            {menu.caption}
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

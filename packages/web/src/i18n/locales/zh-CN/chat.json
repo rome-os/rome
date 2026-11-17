@@ -178,10 +178,8 @@
       "endedAt": "结束于 {{when}}"
     },
     "menu": {
-      "label": "打开",
       "tasks": "任务",
-      "outputs": "产出",
-      "memory": "记忆"
+      "outputs": "产出"
     }
   },
   "reply": {
@@ -788,5 +786,10 @@
       "file": "文件"
     },
     "indexing": "还在查找更早的文件。"
+  },
+  "chatHeader": {
+    "menu": "聊天菜单",
+    "project": "项目 · {{name}}",
+    "lastModel": "上次回答：{{model}}"
   }
 }
