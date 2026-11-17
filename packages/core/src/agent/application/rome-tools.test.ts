@@ -77,6 +77,21 @@ describe("ask_question", () => {
     expect(text).toContain("Which city?");
   });
 
+  it("names the message its card replies to only for an agent whose cards reply", () => {
+    const properties = (overrides: Partial<RomeToolsOptions>) =>
+      Object.keys(
+        (
+          tools(overrides)
+            .listTools("ask_user")
+            .find((tool) => tool.name === "ask_question")?.inputSchema as {
+            properties: object;
+          }
+        ).properties,
+      );
+    expect(properties({})).toEqual(["questions"]);
+    expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
+  });
+
   it("relays defaults and option descriptions as readable prose", async () => {
     const input = {
       questions: [

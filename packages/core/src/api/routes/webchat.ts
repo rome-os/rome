@@ -6,7 +6,12 @@ import {
 } from "../../concierge/turn-timing.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
-import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import {
+  canOpenChat,
+  type ConciergeService,
+  isConciergeChat,
+  isMainConciergeChat,
+} from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
   ChatPendingChecksResponse,
@@ -414,16 +419,24 @@ async function persistRoutineDraftCard(
 // RESULT: the agent-session executeAction shim returns
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
+//
+// A Concierge chat's card replies as its messages do: to the message the
+// `ask_question` call named, else to the turn's default.
 async function persistCard(
   webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
   turnId: string,
   part: Extract<MessagePart, { type: "pending_interaction" | "widget" }>,
+  replies?: CardReplies,
 ): Promise<void> {
   try {
     // Push live (message_insert) so the card appears in the transcript as the
     // turn streams, not only on the post-turn reload. `addMessage` is silent.
-    await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    if (replies) {
+      await replies.concierge.addCard(sessionId, turnId, part, replies.named.get(part.toolUseId));
+    } else {
+      await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    }
   } catch (err) {
     log.warn("failed to persist card", {
       sessionId,
@@ -433,6 +446,17 @@ async function persistCard(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** How a Concierge chat's cards reply: the message each `ask_question` call named, by tool-use id. */
+type CardReplies = { concierge: ConciergeService; named: Map<string, string> };
+
+/** The message an `ask_question` call names for its card to reply to, if it names one. */
+function askedReplyTo(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  const named = (msg.input as { replyTo?: unknown } | undefined)?.replyTo;
+  return typeof named === "string" && named.trim() && /(^|__)ask_question$/.test(msg.tool)
+    ? named.trim()
+    : undefined;
 }
 
 /** A suspension pulled from an action's tool_result: an inline component the
@@ -4859,6 +4883,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // The action each `execute_action` call of this turn names, by tool
           // call id, so a widget is stored only for the app that owns it.
           const executeActionCalls = new Map<string, string>();
+          const cardReplies: CardReplies | undefined =
+            deps.concierge && isConciergeChat(session)
+              ? { concierge: deps.concierge, named: new Map() }
+              : undefined;
           const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
             persistRoutineDraftCard(
               deps.webchatRepo,
@@ -5013,6 +5041,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               if (msg.type === "tool_use") {
                 const actionName = executedActionName(msg);
                 if (actionName) executeActionCalls.set(msg.id, actionName);
+                const named = askedReplyTo(msg);
+                if (named) cardReplies?.named.set(msg.id, named);
               }
               if (
                 msg.type === "tool_use" &&
@@ -5053,7 +5083,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // there is no owning app to validate.
                   const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
-                    await persistCard(deps.webchatRepo, sessionId, turnId, card);
+                    await persistCard(deps.webchatRepo, sessionId, turnId, card, cardReplies);
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
@@ -5073,17 +5103,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       componentId: suspension.componentId,
                     });
                   } else {
-                    await persistCard(deps.webchatRepo, sessionId, turnId, {
-                      type: "pending_interaction",
-                      toolUseId: msg.toolUseId,
-                      appId: suspension.appId,
-                      render: {
-                        kind: "inline",
-                        componentId: suspension.componentId,
-                        props: suspension.props,
-                        ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                    await persistCard(
+                      deps.webchatRepo,
+                      sessionId,
+                      turnId,
+                      {
+                        type: "pending_interaction",
+                        toolUseId: msg.toolUseId,
+                        appId: suspension.appId,
+                        render: {
+                          kind: "inline",
+                          componentId: suspension.componentId,
+                          props: suspension.props,
+                          ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                        },
                       },
-                    });
+                      cardReplies,
+                    );
                   }
                 }
                 // A widget that does not wait: stored as its own part of a
@@ -5094,7 +5130,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   deps,
                   sessionId,
                 );
-                if (widget) await persistCard(deps.webchatRepo, sessionId, turnId, widget);
+                if (widget) {
+                  await persistCard(deps.webchatRepo, sessionId, turnId, widget, cardReplies);
+                }
                 // Fire-and-forget widget placement: an action that returned
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
@@ -5429,6 +5467,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const backendCards: Array<PendingInteractionPart | WidgetPart> = [];
     // As in a foreground turn: the action each `execute_action` call names.
     const executeActionCalls = new Map<string, string>();
+    const cardReplies: CardReplies | undefined =
+      deps.concierge && isConciergeChat(session)
+        ? { concierge: deps.concierge, named: new Map() }
+        : undefined;
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -5514,6 +5556,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (msg.type === "tool_use") {
         const actionName = executedActionName(msg);
         if (actionName) executeActionCalls.set(msg.id, actionName);
+        const named = askedReplyTo(msg);
+        if (named) cardReplies?.named.set(msg.id, named);
       }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
@@ -5524,7 +5568,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (card && recorded) {
           const cardTurnId = recordedTurnId ?? syntheticTurnId;
           recordedCardWrites = recordedCardWrites.then(() =>
-            persistCard(deps.webchatRepo, sessionId, cardTurnId, card),
+            persistCard(deps.webchatRepo, sessionId, cardTurnId, card, cardReplies),
           );
         } else if (card) {
           backendCards.push(card);
@@ -5540,7 +5584,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
       for (const card of backendCards) {
-        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
+        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card, cardReplies);
       }
       // Persist + push the reply before the stream emits `done`, so a
       // late-attached subscriber's reload-on-done also sees it. The push

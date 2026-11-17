@@ -13,7 +13,7 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import { eq, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
@@ -6325,6 +6325,82 @@ describe("Webchat API", () => {
         appId: "ask-user",
         render: { kind: "inline", componentId: "question-card" },
       });
+    });
+
+    it("stores a Concierge's question card as a reply to the message its ask_question names, and no other chat's", async () => {
+      const ctl = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      const addCard = rs.fn(async () => "card-1");
+      deps.concierge = {
+        switchIfExhausted: async () => null,
+        conciergeChat: async () => null,
+        addCard,
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const questions = [{ id: "q1", question: "Which day?", type: "text" }];
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: "tu-ask",
+          tool: "ask_question",
+          input: { questions, replyTo: "m-start" },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask",
+          tool: "ask_question",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "question-card",
+              props: { questions },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const ask = async (sessionId: string) =>
+        drainTurn(
+          app,
+          await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "ask me something" }),
+          }),
+        );
+
+      await ask("topic-1");
+      expect(addCard).toHaveBeenCalledTimes(1);
+      expect(addCard).toHaveBeenCalledWith(
+        "topic-1",
+        expect.any(String),
+        expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-ask" }),
+        "m-start",
+      );
+
+      // Another chat's card is written as it always was: replying to nothing.
+      const plain = await newSession(app);
+      await ask(plain);
+      expect(await findCard(plain, "tu-ask")).toBeDefined();
+      expect(addCard).toHaveBeenCalledTimes(1);
+      const cards = testDb.db
+        .select({ replyTo: chatMessages.replyToMessageId, root: chatMessages.rootMessageId })
+        .from(chatMessages)
+        .where(like(chatMessages.parts, "%tu-ask%"))
+        .all();
+      expect(cards).toEqual([{ replyTo: null, root: null }]);
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {

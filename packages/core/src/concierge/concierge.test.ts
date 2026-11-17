@@ -858,6 +858,49 @@ describe("Concierge tools", () => {
       expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
     });
 
+    describe("a card it shows", () => {
+      const question = {
+        type: "pending_interaction",
+        toolUseId: "tu-ask",
+        appId: "core",
+        render: { kind: "inline", componentId: "question-card", builtin: true },
+      } as const;
+
+      it("replies like its messages do: into the thread the guardian wrote in", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
+        guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
+        const card = await s.service.addCard(CONCIERGE_CHAT, "concierge-turn-1", question);
+        expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+        expect(partsOf(s, card)).toEqual([
+          { type: "reply_to", messageId: "g1", author: "guardian", text: "Add Osaka" },
+          question,
+        ]);
+      });
+
+      it("replies to the message it names, a task's start message in a turn with no guardian message", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, { id: "g0", turnId: "older" }, "Book flights");
+        const task = await taskStartedAt(s, "g0");
+        const named = await s.service.addCard(
+          CONCIERGE_CHAT,
+          "concierge-turn-1",
+          question,
+          await startKeyOf(s, task.id),
+        );
+        expect([replyOf(s, named), threadOf(s, named)]).toEqual(["g0", "g0"]);
+        // A name that is no message of the chat is dropped: the card still shows, replying to nothing.
+        const dropped = await s.service.addCard(
+          CONCIERGE_CHAT,
+          "concierge-turn-1",
+          question,
+          "elsewhere",
+        );
+        expect(replyOf(s, dropped)).toBeUndefined();
+        expect(partsOf(s, dropped)).toEqual([question]);
+      });
+    });
+
     it("quotes an automation's message as the automation's", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "a1", senderId: "automated::0::routine:daily" }, "Daily digest");
