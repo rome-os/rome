@@ -27,6 +27,8 @@ export interface ScenarioRun {
   setupTurnIds?: string[];
   /** Failed hard checks; empty when all passed. */
   notes: string[];
+  /** The host's 1-minute load average when the play started and ended. */
+  load?: { before: number; after: number };
   /** The scenario's own figures, such as answer lengths. */
   measures?: Record<string, number | null>;
   verdict: Verdict | null;

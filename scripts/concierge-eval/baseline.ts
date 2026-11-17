@@ -30,6 +30,7 @@ pnpm concierge:baseline --rejudge id,id   score the saved runs of these scenario
 Options:
   --only id,id         play some scenarios only
   --concurrency N      scenarios played at once (default 1: timings stay clean)
+  --max-load N         wait before each scenario until the 1-minute load average is below N
   --name <snapshot>    restore this snapshot before each run (pnpm concierge:eval --snapshot)
   --no-restore         keep the stack as it is between runs
   --no-judge           skip the judge's scores
@@ -48,6 +49,7 @@ const { values: args } = parseArgs({
     runs: { type: "string", default: "1" },
     only: { type: "string" },
     concurrency: { type: "string", default: "1" },
+    "max-load": { type: "string" },
     name: { type: "string", default: "frozen" },
     "no-restore": { type: "boolean" },
     "no-judge": { type: "boolean" },
@@ -85,6 +87,21 @@ function logsSince(sinceIso: string): string {
 /** Where a turn's first message landed, epoch ms, from its log line's time. */
 const firstSayAt = (t: TimedTurn) =>
   t.firstSayMs === null ? null : Date.parse(t.at) - t.durationMs + t.firstSayMs;
+
+/** Waits until the machine's 1-minute load is under `--max-load`, so a busy host skews no timing. */
+async function belowMaxLoad(id: string): Promise<void> {
+  const max = Number(args["max-load"]);
+  if (!max) return;
+  let waited = 0;
+  while ((loadavg()[0] as number) >= max) {
+    if (waited % 60_000 === 0) {
+      console.log(`[${id}] waiting: load ${(loadavg()[0] as number).toFixed(1)} >= ${max}`);
+    }
+    await sleep(10_000);
+    waited += 10_000;
+  }
+  if (waited) console.log(`[${id}] load fell below ${max} after ${waited / 1000}s`);
+}
 
 async function playScenario(
   api: Api,
@@ -321,9 +338,12 @@ async function main(): Promise<void> {
     await api.checkGuardian();
     const loadBefore = loadavg();
     const startedAt = new Date().toISOString();
-    const results = await pool(scenarios, Number(args.concurrency), (s) =>
-      playScenario(api, s, run),
-    );
+    const results = await pool(scenarios, Number(args.concurrency), async (s) => {
+      await belowMaxLoad(s.id);
+      const before = loadavg()[0] as number;
+      const played = await playScenario(api, s, run);
+      return { ...played, load: { before, after: loadavg()[0] as number } };
+    });
     writeFileSync(
       join(dir, `run-${run}.json`),
       JSON.stringify(
