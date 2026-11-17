@@ -8344,6 +8344,7 @@ describe("Webchat API", () => {
           return null;
         },
         restoreTaskChat: async () => undefined,
+        restoreChat: async () => undefined,
       } as never;
       const topic = (id: string) =>
         deps.webchatRepo.createSession(
@@ -8424,6 +8425,59 @@ describe("Webchat API", () => {
       // A chat that is not a topic chat has nothing to end.
       expect((await del("plain-chat", "?followsAndTasks=stop")).status).toBe(200);
       expect(calls).toEqual(["retire topic-a", "retire topic-b", "end topic-c", "retire topic-c"]);
+    });
+
+    it("ends a topic chat's follows and tasks before archiving it only when asked to, and moves follows back on restore only when asked to", async () => {
+      const calls: string[] = [];
+      deps.concierge = {
+        endChatWork: async (chatId: string) => void calls.push(`end ${chatId}`),
+        retireChat: async (chatId: string) => {
+          calls.push(`retire ${chatId}`);
+          return "concierge";
+        },
+        endTaskChat: async (chatId: string) => {
+          await deps.webchatRepo.archiveSession(chatId);
+          return null;
+        },
+        restoreTaskChat: async () => undefined,
+        restoreChat: async (chatId: string, moveBack: boolean) =>
+          void calls.push(`restore ${chatId} ${moveBack ? "moving back" : "keeping"}`),
+      } as never;
+      const make = (id: string, agent?: string) =>
+        deps.webchatRepo.createSession(id, id, undefined, undefined, null, undefined, agent);
+      await make("topic-a", "core:concierge");
+      await make("topic-b", "core:concierge");
+      await make("plain-chat");
+      const app = createWebchatRuntime(deps).routes;
+      const archive = (id: string, body: Record<string, unknown>) =>
+        app.request(`/chat/sessions/${id}/archive`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      // Without the option an archive only retires the chat, as before.
+      expect((await archive("topic-a", { archived: true })).status).toBe(200);
+      expect((await archive("topic-b", { archived: true, followsAndTasks: "stop" })).status).toBe(
+        200,
+      );
+      // A chat that is not a topic chat has nothing to end or move back.
+      expect(
+        (await archive("plain-chat", { archived: true, followsAndTasks: "stop" })).status,
+      ).toBe(200);
+      expect((await archive("topic-a", { archived: false })).status).toBe(200);
+      expect((await archive("topic-b", { archived: false, follows: "moveBack" })).status).toBe(200);
+      expect((await archive("plain-chat", { archived: false, follows: "moveBack" })).status).toBe(
+        200,
+      );
+      expect(calls).toEqual([
+        "retire topic-a",
+        "end topic-b",
+        "retire topic-b",
+        "restore topic-a keeping",
+        "restore topic-b moving back",
+      ]);
+      expect(await deps.webchatRepo.getSession("topic-b")).toMatchObject({ archivedAt: null });
     });
 
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {

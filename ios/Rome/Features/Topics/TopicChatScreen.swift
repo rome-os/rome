@@ -27,7 +27,10 @@ struct TopicChatScreen: View {
     @State private var renaming = false
     /// The delete alert, once the chat's follows and open tasks are read.
     @State private var deleting: TopicDeletePrompt?
-    /// Set while that read runs, so a second tap on Delete starts no other.
+    /// The archive alert, once the chat's follows and open tasks are read
+    /// and there is something to ask about.
+    @State private var archiving: TopicArchivePrompt?
+    /// Set while that read runs, so a second tap on Delete or Archive starts no other.
     @State private var readingWork = false
     @State private var newName = ""
     @State private var composerFocused = false
@@ -66,7 +69,7 @@ struct TopicChatScreen: View {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } },
+                onArchive: { title in askToArchive(title) },
                 onDelete: { title in askToDelete(title) }
             )
             .accessibilityHidden(store?.thread != nil)
@@ -93,6 +96,9 @@ struct TopicChatScreen: View {
         }
         .deleteTopicChatAlert($deleting) { id, stoppingWork in
             Task { if await workspace.deleteTopic(id, stoppingWork: stoppingWork) { onArchived() } }
+        }
+        .archiveTopicChatAlert($archiving) { id, stoppingWork in
+            archive(id, stoppingWork: stoppingWork)
         }
         .pageBackground()
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
@@ -204,9 +210,25 @@ struct TopicChatScreen: View {
         }
     }
 
-    private func archive(_ id: String) {
+    /// Reads what the archive would move, then asks; with nothing to ask
+    /// about, or when it cannot be read, it archives at once, as before.
+    private func askToArchive(_ name: String) {
+        guard let chatId, !readingWork else { return }
+        readingWork = true
         Task {
-            if await workspace.archiveTopic(id) { onArchived() }
+            let work = await workspace.topicWork(chatId)
+            readingWork = false
+            if let work, !work.isEmpty {
+                archiving = TopicArchivePrompt(id: chatId, name: name, work: work)
+            } else {
+                archive(chatId)
+            }
+        }
+    }
+
+    private func archive(_ id: String, stoppingWork: Bool = false) {
+        Task {
+            if await workspace.archiveTopic(id, stoppingWork: stoppingWork) { onArchived() }
         }
     }
 
@@ -294,7 +316,8 @@ private struct TopicChatHeader: View {
     let onAgent: () -> Void
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
-    let onArchive: (() -> Void)?
+    /// Archive, with the chat's current title.
+    let onArchive: (String) -> Void
     /// Delete, with the chat's current title.
     let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
@@ -313,7 +336,7 @@ private struct TopicChatHeader: View {
             zoomSource: AgentZoom.source(chatId ?? draftKey),
             // A blank chat has nothing to rename, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
-            onArchive: onArchive,
+            onArchive: chatId == nil ? nil : { onArchive(title) },
             onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)

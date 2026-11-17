@@ -114,10 +114,11 @@ export function conciergeRoutes(
     if (!chat || chat.main || (await concierge.ownerOfChat(chatId)) !== owner) {
       return c.json({ error: "No such topic chat" }, 404);
     }
-    const { follows, openTasks } = await concierge.followsAndTasksOf(chatId, owner);
+    const { follows, openTasks, movedFollows } = await concierge.followsAndTasksOf(chatId, owner);
     return c.json({
       follows,
       openTasks: openTasks.map(({ id, title }) => ({ id, title })),
+      movedFollows,
     } satisfies ConciergeChatWorkResponse);
   });
 

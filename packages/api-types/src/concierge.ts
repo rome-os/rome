@@ -108,13 +108,20 @@ export interface ConciergeChatStartRequest {
 }
 
 /**
- * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what deleting the
- * caller's topic chat moves to the main chat or, when they choose so, stops.
+ * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what archiving or
+ * deleting the caller's topic chat moves to the main chat or, when they
+ * choose so, stops.
  */
 export interface ConciergeChatWorkResponse {
   /** `label` names the source as the connectors list does. */
   follows: { source: string; label: string; target: string }[];
   openTasks: { id: string; title: string }[];
+  /**
+   * While the chat is archived: the follows its archive moved to the main
+   * chat that still report there, which restoring it can move back. Absent
+   * from an older instance.
+   */
+  movedFollows?: { source: string; label: string; target: string }[];
 }
 
 /** How many days of finished task rows the Concierge reads by default. */

@@ -276,6 +276,7 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
           return {
             follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
             openTasks: [{ id: "t-1", title: "Fix login", sessionId: "task-1" }],
+            movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
           };
         },
       } as unknown as ConciergeService,
@@ -287,12 +288,13 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
   });
   afterEach(() => testDb.close());
 
-  it("answers the caller's own topic chat's follows and open tasks, without the task chat", async () => {
+  it("answers the caller's own topic chat's follows, open tasks and moved follows, without the task chat", async () => {
     const res = await app().request("/concierge/chats/topic-1/follows-and-tasks", guardian);
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
       openTasks: [{ id: "t-1", title: "Fix login" }],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
     });
     expect(asked).toEqual([["topic-1", "guardian"]]);
   });

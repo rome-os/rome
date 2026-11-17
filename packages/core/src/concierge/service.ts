@@ -642,9 +642,11 @@ export class ConciergeService {
   }
 
   /**
-   * What deleting topic chat `chatId` of `owner` moves to the main chat: the
-   * follows that report to it, and its open tasks, counted as
-   * {@link retireChat} counts them (status is not `ended`).
+   * What archiving or deleting topic chat `chatId` of `owner` moves to the
+   * main chat: the follows that report to it, and its open tasks, counted as
+   * {@link retireChat} counts them (status is not `ended`). While it is
+   * archived, `movedFollows` are the follows its archive moved that still
+   * report to the main chat, which restoring it can move back.
    */
   async followsAndTasksOf(
     chatId: string,
@@ -652,8 +654,15 @@ export class ConciergeService {
   ): Promise<{
     follows: { source: string; label: string; target: string }[];
     openTasks: { id: string; title: string; sessionId: string | null }[];
+    movedFollows: { source: string; label: string; target: string }[];
   }> {
     const follows = (await this.attachedFollowing?.followsOfChat(chatId, owner)) ?? [];
+    const movedFollows =
+      (await this.attachedFollowing?.followsMovedFrom(
+        chatId,
+        storedChatId(mainChatIdOf(owner)),
+        owner,
+      )) ?? [];
     const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date())).map(
       (task) => task.row,
     );
@@ -661,7 +670,7 @@ export class ConciergeService {
     const openTasks = rows
       .filter((row) => status.get(row.id)?.status !== "ended")
       .map(({ id, title, sessionId }) => ({ id, title, sessionId }));
-    return { follows, openTasks };
+    return { follows, openTasks, movedFollows };
   }
 
   /**
@@ -680,7 +689,7 @@ export class ConciergeService {
     const owner = ownerOf(chat);
     const { follows, openTasks } = await this.followsAndTasksOf(chatId, owner);
     const failed = (what: string, error: unknown) =>
-      log.warn(`failed to end a deleted chat's ${what}`, {
+      log.warn(`failed to end a retired chat's ${what}`, {
         chatId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -725,7 +734,12 @@ export class ConciergeService {
     if (!chat || !isConciergeChat(chat)) return null;
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
-    const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
+    const follows =
+      (await this.attachedFollowing?.moveToMainChat(
+        chatId,
+        storedChatId(main),
+        how === "archived",
+      )) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
     // none is moved.
     const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
@@ -749,6 +763,22 @@ export class ConciergeService {
       }),
     );
     return main;
+  }
+
+  /**
+   * Topic chat `chatId` is restored. The follows its archive moved to the
+   * main chat, and that still report there, move back to it when its owner
+   * chose so, and stay otherwise. Its task rows read as its own again without
+   * moving, so they need nothing.
+   */
+  async restoreChat(chatId: string, moveFollowsBack: boolean): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || !isConciergeChat(chat) || this.isMainChat(chat)) return;
+    const owner = ownerOf(chat);
+    const main = storedChatId(mainChatIdOf(owner));
+    const moved =
+      (await this.attachedFollowing?.restoreToChat(chatId, main, owner, moveFollowsBack)) ?? 0;
+    if (moved > 0) log.info("concierge chat restored", { chatId, follows: moved });
   }
 
   /**

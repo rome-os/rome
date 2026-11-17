@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import {
   DropdownMenu,
@@ -235,11 +236,14 @@ function ConciergeTopicEntry({
       emitSessionsChanged();
     },
   });
-  const retire = async (how: "archive" | "unarchive" | "delete", stopWork = false) => {
+  // `choice` stops the follows and open tasks of a delete or an archive, and
+  // moves an unarchived chat's follows back.
+  const retire = async (how: "archive" | "unarchive" | "delete", choice = false) => {
     try {
-      if (how === "delete")
-        await deleteSession(chat.id, stopWork ? { followsAndTasks: "stop" } : {});
-      else await archiveSession(chat.id, how === "archive");
+      if (how === "delete") await deleteSession(chat.id, choice ? { followsAndTasks: "stop" } : {});
+      else if (how === "archive")
+        await archiveSession(chat.id, true, choice ? { followsAndTasks: "stop" } : {});
+      else await archiveSession(chat.id, false, choice ? { follows: "moveBack" } : {});
     } catch {
       toast.error(t("recentChats.topicChatRetireFailed"));
     }
@@ -248,6 +252,13 @@ function ConciergeTopicEntry({
     // An unarchived chat stays open where it is.
     if (how !== "unarchive") onGone();
   };
+  const archiving = useTopicChatArchive({
+    chatId: chat.id,
+    name,
+    topic: true,
+    onArchive: (stopWork) => void retire("archive", stopWork),
+    onUnarchive: (moveBack) => void retire("unarchive", moveBack),
+  });
   if (rename.editingId === chat.id) {
     return (
       <input
@@ -314,12 +325,12 @@ function ConciergeTopicEntry({
             {t("recentChats.rename")}
           </DropdownMenuItem>
           {chat.archived ? (
-            <DropdownMenuItem onSelect={() => void retire("unarchive")}>
+            <DropdownMenuItem onSelect={() => void archiving.unarchive()}>
               <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.unarchive")}
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem onSelect={() => void retire("archive")}>
+            <DropdownMenuItem onSelect={() => void archiving.archive()}>
               <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.archive")}
             </DropdownMenuItem>
@@ -341,6 +352,7 @@ function ConciergeTopicEntry({
           void retire("delete", stopWork);
         }}
       />
+      {archiving.dialog}
     </div>
   );
 }

@@ -153,7 +153,7 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - While the Concierge is on, the guardian and every dashboard admin each have their own Concierge. App users have none.
 - A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist. So is a fork or a subagent session of it, or of a task chat it started, from the moment it is made.
-- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's. Deleting it can instead stop them, when its owner chooses so.
+- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's. Archiving or deleting it can instead stop them, when its owner chooses so.
 - A dashboard admin dropped from the allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
 - Digest times, quiet hours and the time zone they are read in are each owner's own.
@@ -177,7 +177,8 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 - A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
 - One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
-- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows to its owner's main chat, and its tasks report there while it is archived or gone. The Concierge says so there. When it has follows or open tasks, the delete dialog lists them and asks what happens to them: they move to the main chat, which is the default, or the follows end and the tasks stop with the chat. Stopped this way, nothing moves and the main chat gets no notice. Archiving always moves them.
+- Its owner can **rename**, **archive**, **unarchive** and **delete** it. Archiving or deleting it moves its follows to its owner's main chat, and its tasks report there while it is archived or gone. The Concierge says so there. When it has follows or open tasks, the archive and delete dialogs list them and ask what happens to them: they move to the main chat, which is the default, or the follows end and the tasks stop with the chat. Stopped this way, nothing moves and the main chat gets no notice. With none, it is archived without a dialog.
+- Unarchiving it asks whether the follows its archive moved to the main chat move back to it, which is the default, or stay. Only those still in the main chat are listed: one its owner ended or moved elsewhere since is not. With none, it is unarchived without a dialog. Its tasks need no question: they read as its own again.
 - An owner may have any number of topic chats.
 
 ## Task

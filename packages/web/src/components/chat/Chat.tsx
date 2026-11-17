@@ -171,6 +171,7 @@ import {
   type OutputLinks,
   outputOfLink,
 } from "./outputs/chat-outputs";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
@@ -1351,26 +1352,46 @@ export function Chat({
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
   // the composer immediately; the sidebar reconciles via the changed event.
-  const handleArchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(true);
-    try {
-      // Archive mutation PATCHes and broadcasts the sessions-changed event.
-      await setArchived(mainSessionId, true);
-    } catch {
-      setArchivedOverride(false);
-    }
-  }, [mainSessionId, setArchived]);
-
-  const handleUnarchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(false);
-    try {
-      await setArchived(mainSessionId, false);
-    } catch {
+  // `stopWork` ends a topic chat's follows and open tasks instead of moving
+  // them to the main chat; `moveFollowsBack` moves back the follows its
+  // archive moved there.
+  const handleArchive = useCallback(
+    async (stopWork = false) => {
+      if (!mainSessionId) return;
       setArchivedOverride(true);
-    }
-  }, [mainSessionId, setArchived]);
+      try {
+        // Archive mutation PATCHes and broadcasts the sessions-changed event.
+        await setArchived(mainSessionId, true, stopWork ? { followsAndTasks: "stop" } : {});
+      } catch {
+        setArchivedOverride(false);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
+
+  const handleUnarchive = useCallback(
+    async (moveFollowsBack = false) => {
+      if (!mainSessionId) return;
+      setArchivedOverride(false);
+      try {
+        await setArchived(mainSessionId, false, moveFollowsBack ? { follows: "moveBack" } : {});
+      } catch {
+        setArchivedOverride(true);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
+
+  // A topic chat asks, as the sidebar does, what becomes of its follows and
+  // open tasks when it is archived, and of the follows that moved when it is
+  // unarchived.
+  const topicArchive = useTopicChatArchive({
+    chatId: mainSessionId ?? null,
+    name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
+    topic: concierge && !isMainChat,
+    onArchive: (stopWork) => void handleArchive(stopWork),
+    onUnarchive: (moveBack) => void handleUnarchive(moveBack),
+  });
 
   useEffect(() => {
     onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
@@ -2771,12 +2792,12 @@ export function Chat({
               {t("share.title", "Share chat")}
             </DropdownMenuItem>
             {isMainChat ? null : isArchived ? (
-              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+              <DropdownMenuItem onSelect={() => void topicArchive.unarchive()}>
                 <ArchiveRestore className="size-4" />
                 {t("navbar.unarchive")}
               </DropdownMenuItem>
             ) : (
-              <DropdownMenuItem onSelect={() => void handleArchive()}>
+              <DropdownMenuItem onSelect={() => void topicArchive.archive()}>
                 <Archive className="size-4" />
                 {t("navbar.archive")}
               </DropdownMenuItem>
@@ -3150,7 +3171,7 @@ export function Chat({
                             type="button"
                             size="sm"
                             variant="outline"
-                            onClick={() => void handleUnarchive()}
+                            onClick={() => void topicArchive.unarchive()}
                           >
                             <ArchiveRestore data-icon="inline-start" className="size-3.5" />
                             {t("archived.unarchive")}
@@ -3256,6 +3277,7 @@ export function Chat({
               })
             }
           />
+          {topicArchive.dialog}
           {/* A topic chat asks, as the sidebar does, what becomes of its
               follows and open tasks. */}
           {concierge && mainSessionId && !isMainChat ? (
