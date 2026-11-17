@@ -1879,6 +1879,59 @@ describe("Concierge tools", () => {
     expect(said[0].chatThread).toBe(said[1].chatThread);
   });
 
+  // A task chat as it stores a shown widget: the widget alone, then the answer.
+  const showCard = (s: ReturnType<typeof setup>, chatId: string, sleep: string) => {
+    const widget = {
+      type: "widget",
+      toolUseId: `tu-${chatId}`,
+      appId: "core",
+      text: `Sleep ${sleep}.`,
+      ui: { components: [{ id: "root", component: "Stat", label: "Sleep", value: sleep }] },
+    };
+    s.messages.get(chatId)?.push(
+      { role: "assistant", content: JSON.stringify([widget]) },
+      {
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: concluded(`Slept ${sleep}.`) }]),
+      },
+    );
+    return widget;
+  };
+
+  it("chat_forward keeps the widget and the conclusion in one thread when the start message is gone", async () => {
+    const s = setup();
+    const started = JSON.parse(
+      (await s.tool("chat_start", { title: "Health", brief: "Daily health summary" })).content[0]
+        .text,
+    ) as { taskId: string };
+    await s.taskRepo.upsertMany([{ id: started.taskId, sourceMessageId: null }]);
+    const widget = showCard(s, "task-1", "7h 25m");
+    await s.tool("chat_forward", { chatId: "task-1" });
+    const said = (s.messages.get(CONCIERGE_CHAT) ?? []).slice(-2);
+    expect(JSON.parse(said[0].content)).toEqual([widget]);
+    expect(JSON.parse(said[1].content)).toMatchObject([{ content: "Slept 7h 25m." }]);
+    expect(said[1].chatThread).toBeDefined();
+    expect(said[1].chatThread).toBe(said[0].chatThread ?? said[0].id);
+  });
+
+  it("chat_forward run twice at once keeps each widget just above its own conclusion", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+    await s.tool("chat_start", { title: "Partner", brief: "Partner's health summary" });
+    showCard(s, "task-1", "7h 25m");
+    showCard(s, "task-2", "6h 10m");
+    await Promise.all([
+      s.tool("chat_forward", { chatId: "task-1" }),
+      s.tool("chat_forward", { chatId: "task-2" }),
+    ]);
+    const said = (s.messages.get(CONCIERGE_CHAT) ?? [])
+      .map((row) => JSON.parse(row.content) as { type: string; text?: string; content?: string }[])
+      .map((parts) => parts.find((part) => part.type !== "reply_to"))
+      .map((part) => part?.text ?? part?.content)
+      .filter((line) => line?.includes("7h 25m") || line?.includes("6h 10m"));
+    expect(said).toEqual(["Sleep 7h 25m.", "Slept 7h 25m.", "Sleep 6h 10m.", "Slept 6h 10m."]);
+  });
+
   it("chat_forward without an intro stores the report alone", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
