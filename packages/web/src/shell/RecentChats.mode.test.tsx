@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -178,6 +178,18 @@ describe("the Chat / Concierge switch", () => {
   });
 
   describe("which mode shows", () => {
+    // The switch opens a chat only where the sidebar is a column; a phone's list is a screen over the chat.
+    const screenWidth = (wide: boolean) =>
+      rs.stubGlobal("matchMedia", (query: string) => ({
+        matches: wide && query === "(min-width: 48rem)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }));
+    beforeEach(() => {
+      screenWidth(true);
+    });
+
     it("starts on Chat on a device that has not shown a mode", async () => {
       serve([mainChat(), chat("mine", "My chat")]);
       open("/chat/unlisted");
@@ -243,12 +255,38 @@ describe("the Chat / Concierge switch", () => {
 
     it("opens the last Concierge chat on Agent, else the main chat", async () => {
       seedChatListMode({ mode: "chat", lastConcierge: "topic-1" });
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 0 },
+      ];
       serve([mainChat(), chat("mine", "My chat")]);
       const user = userEvent.setup();
       open("/chat/mine");
       await screen.findByRole("link", { name: "My chat" });
       await user.click(radio("Agent"));
       expect(screen.getByTestId("path").textContent).toBe("/chat/topic-1");
+    });
+
+    it("opens the main chat on Agent when the remembered Concierge chat is gone", async () => {
+      seedChatListMode({ mode: "chat", lastConcierge: "deleted-topic" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      expect(screen.getByTestId("path").textContent).toBe("/message");
+    });
+
+    it("only changes the list on a phone, where the list is a screen over the chat", async () => {
+      screenWidth(false);
+      seedChatListMode({ mode: "chat" });
+      serve([mainChat(), chat("mine", "My chat")]);
+      const user = userEvent.setup();
+      open("/chat/mine");
+      await screen.findByRole("link", { name: "My chat" });
+      await user.click(radio("Agent"));
+      await screen.findByRole("link", { name: "Main chat" });
+      expect(screen.getByTestId("path").textContent).toBe("/chat/mine");
     });
 
     it("does nothing when the selected segment is clicked", async () => {

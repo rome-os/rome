@@ -90,8 +90,12 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
     applied.current = routeKey;
     writeChatListMode(mode);
     if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
-    if (conciergeChatId) writeLastConciergeChatId(conciergeChatId);
-  }, [mode, ordinaryChatId, conciergeChatId, routeKey, onChatPage]);
+  }, [mode, ordinaryChatId, routeKey, onChatPage]);
+  // The Concierge chat last opened. Apart from the mode, because the main
+  // chat's id can arrive after the navigation was applied.
+  useEffect(() => {
+    if (onChatPage && conciergeChatId) writeLastConciergeChatId(conciergeChatId);
+  }, [conciergeChatId, routeKey, onChatPage]);
 }
 
 /**

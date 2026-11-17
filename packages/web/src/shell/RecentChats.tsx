@@ -476,12 +476,20 @@ export function RecentChats({
   // The switch opens a chat of the mode it picks, and the open chat sets the
   // mode: the last Concierge chat opened, else the main chat; the last ordinary
   // chat, else a blank one. Choosing the mode already showing does nothing.
+  // The remembered Concierge chat is only a hint: one no list holds any more
+  // (deleted elsewhere) opens the main chat. On a phone the list is a screen
+  // over the chat, so the switch only changes the list there.
   const switchMode = (next: ChatListMode) => {
     if (next === mode) return;
     writeChatListMode(next);
+    if (!wideWindow) return;
+    const rememberedExists =
+      lastConciergeChatId !== null &&
+      (conciergeChats.some((chat) => chat.id === lastConciergeChatId) ||
+        sessions.some((session) => session.id === lastConciergeChatId));
     navigate(
       next === "concierge"
-        ? lastConciergeChatId
+        ? rememberedExists
           ? chatPath(lastConciergeChatId, conciergeChatId)
           : MAIN_CHAT_PATH
         : railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists),

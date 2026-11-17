@@ -202,12 +202,13 @@ import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
 import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 
+// What a click inside the scroller does not count as blank for: the composer
+// floor, the header, and anything clickable or editable (a message is judged apart).
+const THREAD_FOCUS_KEEP =
+  "[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
+
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
-// What a click inside the scroller does not count as blank for: a message, the
-// composer floor, the header, and anything clickable or editable.
-const THREAD_FOCUS_KEEP =
-  "[data-thread-entry],[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
 const TIMELINE_JUMP_OFFSET_PX = 24;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
@@ -2078,8 +2079,6 @@ export function Chat({
           : []),
         { type: "text", content: optimisticText },
       ]);
-      // A reply sent inside a thread in focus leaves the focus, back to the whole chat.
-      if (snapshot.chatThread) void closeFocusRef.current();
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
@@ -2110,10 +2109,20 @@ export function Chat({
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData, {
+          const accepted = await postSessionTurn(sendingSessionId, formData, {
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
+          // A reply the server took, sent inside a thread in focus, leaves the
+          // focus for the whole chat. A send that fails keeps the thread, so a
+          // retry still replies into it. The close is at once, then the view
+          // returns to the end of the chat.
+          if (snapshot.chatThread) {
+            await closeFocusRef.current(true);
+            scrollToBottom("auto");
+            if (!coarsePointer) composerRef.current?.focus();
+          }
+          return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
@@ -2135,6 +2144,8 @@ export function Chat({
       startSession,
       notifySessionsChanged,
       concierge,
+      scrollToBottom,
+      coarsePointer,
     ],
   );
 
@@ -2571,7 +2582,14 @@ export function Chat({
   // message, anything clickable, the composer and a text selection stay.
   const leaveFocusOnBlankClick = (event: ReactMouseEvent<HTMLElement>) => {
     const target = event.target as Element | null;
-    if (!target?.closest || target.closest(THREAD_FOCUS_KEEP)) return;
+    // A click in a menu or popover opened from a message bubbles here through
+    // its React parent, though it is not in the scroller.
+    if (!target?.closest || !event.currentTarget.contains(target)) return;
+    // A message's own box spans the column, so only what is inside it is the
+    // message: the box itself, beside its bubble, is blank.
+    const entry = target.closest("[data-thread-entry]");
+    if (entry && entry !== target) return;
+    if (target.closest(THREAD_FOCUS_KEEP)) return;
     if (window.getSelection()?.toString()) return;
     void closeFocus();
   };

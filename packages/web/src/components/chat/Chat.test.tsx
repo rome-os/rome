@@ -319,7 +319,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-on-behalf={row.message?.sender?.onBehalfOf?.kind}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
-            {row.message?.content}
+            <span data-testid="user-text">{row.message?.content}</span>
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
@@ -3079,9 +3079,38 @@ describe("Chat Concierge empty state", () => {
         row.textContent?.includes("sent at once"),
       );
       expect(sent?.dataset.chatThread).toBe("u-2");
-      // Sending leaves the focus, back to the whole chat.
+      // The server has not taken it yet, so the thread stays in focus.
+      expect(composer().dataset.thread).toBe("u-2");
+    });
+
+    it("leaves the thread for the whole chat once the server takes the reply", async () => {
+      threaded();
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ turnId: "turn-new" } as never);
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+
       await waitFor(() => expect(composer().dataset.thread).toBe(""));
       expect(back()).toBeNull();
+    });
+
+    it("keeps the thread when the send fails, so a retry still replies into it", async () => {
+      threaded();
+      rs.mocked(postSessionTurn).mockRejectedValueOnce(new Error("network down"));
+      renderChat(concierge());
+      await screen.findAllByTestId("user-row");
+      fireEvent.click(screen.getByTestId("open-other-thread"));
+      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      await act(async () => {});
+      expect(composer().dataset.thread).toBe("u-2");
+      expect(back()).not.toBeNull();
     });
 
     describe("a click on the blank of the thread", () => {
@@ -3105,11 +3134,17 @@ describe("Chat Concierge empty state", () => {
         await focused();
         const link = document.createElement("a");
         blank().appendChild(link);
-        fireEvent.click(screen.getAllByTestId("user-row")[0]!);
+        fireEvent.click(screen.getAllByTestId("user-text")[0]!);
         fireEvent.click(link);
         fireEvent.click(composer());
         expect(composer().dataset.thread).toBe("u-1");
         expect(back()).not.toBeNull();
+      });
+
+      it("goes back on a click beside a message's bubble, inside its full-width box", async () => {
+        await focused();
+        fireEvent.click(screen.getAllByTestId("user-row")[0]!);
+        await waitFor(() => expect(composer().dataset.thread).toBe(""));
       });
 
       it("stays while text is selected", async () => {
