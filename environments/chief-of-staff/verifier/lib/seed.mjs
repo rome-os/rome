@@ -54,6 +54,18 @@ export function rosterSheet(team) {
     .join("\n");
 }
 
+/**
+ * K1's sheet: the roster, then the current goals as items an answer may also state. The
+ * planner (2026-11-17): true goals from the goals document do not count against K1; a wrong,
+ * dropped or misowned goal still fails it.
+ */
+export function teamSheet(team) {
+  return `${rosterSheet(team)}\n\n${MAY_ALSO}\n${goalsSheet(team)}`;
+}
+
+/** The heading a judge reads for sheet items an answer may state but need not. */
+const MAY_ALSO = "May also be stated, only exactly as the goals document has them (not required):";
+
 /** The K2 answer sheet as text a judge reads. */
 export function goalsSheet(team) {
   return team.goals.map((g) => `- "${g.title}", owner ${g.owner}, date ${g.date}`).join("\n");

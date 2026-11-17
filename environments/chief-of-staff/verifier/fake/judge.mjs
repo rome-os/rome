@@ -25,7 +25,8 @@ function sheetItems(sheet) {
 let verdict;
 switch (input.task) {
   case "matches-sheet": {
-    const items = sheetItems(input.sheet);
+    // Items under "May also be stated" need not appear (K1's goals).
+    const items = sheetItems(input.sheet.split("\n\nMay also be stated")[0]);
     const missing = items.flat().filter((piece) => !answer.includes(piece));
     const extra = answer.split("\n").filter((l) => l.startsWith("- ")).length - items.length;
     verdict =
@@ -45,6 +46,11 @@ switch (input.task) {
     verdict = /don't know|do not know|no record|nobody has/.test(answer)
       ? { verdict: "pass", reasons: "says it does not know" }
       : { verdict: "fail", reasons: "states an answer nobody gave" };
+    break;
+  case "declines-topic":
+    verdict = /holding off|not answering|stay(ing)? out/.test(answer)
+      ? { verdict: "pass", reasons: "declines" }
+      : { verdict: "fail", reasons: "does not decline" };
     break;
   case "same-facts":
     verdict =

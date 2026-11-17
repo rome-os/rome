@@ -124,7 +124,8 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.equal(report.summary.rules.of, 10, "K7 and A8 are left out of the score");
     assert.equal(report.memory.files.length, 0, "the memory folder is observed");
     const k5 = report.results.find((r) => r.rule === "K5");
-    assert.equal(k5.checks.find((c) => c.name === "a message source is linked").status, "pass");
+    assert.equal(k5.checks.length, 1, "phase 2 scores K5 on invention alone");
+    assert.match(k5.info[1], /a message source is linked: pass/);
     const cost = report.results.find((r) => r.rule === "A3").cost;
     assert.ok(cost.turns > 0, "A3 counts the turns the replay started");
     assert.ok(cost.tokens.input > 0, "A3 sums the turns' tokens");
@@ -180,15 +181,16 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.match(k4.info.at(-1), /reached the roster document/);
   });
 
-  it("counts A7 replies that answer apart from ones that decline", async () => {
+  it("counts A7 replies on the topic apart from ones that decline", async () => {
     const { report } = await runAgainst("fail-A7", { rules: ["A7"], phase: 2 });
     const a7 = report.results.find((r) => r.rule === "A7");
-    assert.deepEqual(a7.replies, { answered: 5, declined: 0 });
+    assert.deepEqual(a7.replies, { declined: 0, onTopic: 5 });
   });
 
-  it("scores K5's message links from phase 2, by the id of a cited message", async () => {
+  it("reports K5's message links in phase 2 without scoring them", async () => {
     const { report } = await runAgainst("fail-unlinked", { rules: ["K3", "K5"], phase: 2 });
-    assert.deepEqual(statuses(report), { K3: "pass", K5: "fail" });
+    assert.deepEqual(statuses(report), { K3: "pass", K5: "pass" });
+    assert.match(report.results[1].info[1], /a message source is linked: fail/);
   });
 
   it("leaves a K7 failure out of the score and the failures across runs in phase 2", async () => {

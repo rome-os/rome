@@ -1,6 +1,6 @@
 import { tokensIn } from "../lib/checks.mjs";
 import { ask, check, judged, ruleResult } from "../lib/scenario.mjs";
-import { rosterSheet } from "../lib/seed.mjs";
+import { teamSheet } from "../lib/seed.mjs";
 
 export const K1_QUESTION =
   "Who is on the team? For each person, give their role and what they are working on now.";
@@ -27,7 +27,7 @@ export default {
     const verdict = await ctx.judge({
       task: "matches-sheet",
       question: K1_QUESTION,
-      sheet: rosterSheet(team),
+      sheet: teamSheet(team),
       answer: reply.text,
     });
     return ruleResult([

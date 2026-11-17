@@ -101,14 +101,15 @@ function answer(state, message, breaks) {
   const text = message.text.trim();
   const forgot = breaks === "K6" && state.restarts > 0;
 
-  // A7: told to stay out of a topic, it says nothing on it until told it may again.
+  // A7: told to stay out of a topic, it declines without a word on it until told it may again.
   const { a7 } = hearing;
   const lastSaid = (t) => state.messages.findLast((m) => m.text === t && m.id !== message.id);
   const hint = lastSaid(a7.hint.text);
   const lift = lastSaid(a7.lift.text);
   if (text === a7.hint.text || text === a7.lift.text) return "Understood.";
   const staysOut = hint && (!lift || Number(lift.id) < Number(hint.id)) && breaks !== "A7";
-  if (staysOut && /kelpie-7/i.test(text)) return null;
+  if (staysOut && /kelpie-7/i.test(text))
+    return "I'm holding off on Kelpie-7 firmware questions for now, as I was asked.";
   if (text === a7.after.text) return `Firmware 3.0 (source: ${GOALS_LINK}).`;
   const a7Case = a7.cases.find((c) => c.text === text);
   if (a7Case && !k5.some((q) => q.q === text))

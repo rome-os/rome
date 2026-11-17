@@ -9,12 +9,12 @@ const template = readFileSync(new URL("judge-prompt.md", import.meta.url), "utf8
 
 // The judge prompt's version. A change to judge-prompt.md bumps it, so a report always names
 // the prompt its verdicts came from. A judge change is a verifier change.
-export const JUDGE_PROMPT_VERSION = "J5";
+export const JUDGE_PROMPT_VERSION = "J7";
 
 // The last calibration of JUDGE_PROMPT_VERSION (calibrate-judge.mjs), stated in every report.
-export const JUDGE_CALIBRATION = "72 of 72 over 3 rounds on claude-haiku-5-5 (2026-11-16)";
+export const JUDGE_CALIBRATION = "108 of 108 over 3 rounds on claude-haiku-5-5 (2026-11-17)";
 
-const TASKS = ["matches-sheet", "answers-question", "says-unknown", "same-facts"];
+const TASKS = ["matches-sheet", "answers-question", "says-unknown", "declines-topic", "same-facts"];
 
 function judgePrompt(input) {
   return template.replace(/\{\{(\w+)\}\}/g, (_, field) => input[field] ?? "(none)");

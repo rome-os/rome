@@ -90,7 +90,20 @@ export default {
             "every known answer links its source or names the document and entry",
             evidence,
           );
-    return ruleResult([{ ...inventionCheck, answers }, sourceCheck, messageLinkCheck(ctx)]);
+    const linkCheck = messageLinkCheck(ctx);
+    // Ouou (2026-11-17) deferred K5's sources to a later phase: from phase 2 K5 scores only
+    // invention, and both source checks are reported with their counts.
+    if ((ctx.phase ?? 1) >= 2) {
+      const known = answers.filter((a) => a.known).length;
+      return {
+        ...ruleResult([{ ...inventionCheck, answers }]),
+        info: [
+          `Not scored in phase 2: ${known - unsourced.length} of ${known} known answers name a source${unsourced.length ? ` (none in ${unsourced.join(", ")})` : ""}.`,
+          `Not scored in phase 2: a message source is linked: ${linkCheck.status}, ${linkCheck.detail}.`,
+        ],
+      };
+    }
+    return ruleResult([{ ...inventionCheck, answers }, sourceCheck, linkCheck]);
   },
 };
 

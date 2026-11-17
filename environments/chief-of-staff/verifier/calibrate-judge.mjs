@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JUDGE_PROMPT_VERSION, makeJudge } from "./lib/judge.mjs";
 import { loadHearing } from "./lib/hearing.mjs";
-import { goalsSheet, loadTeam, rosterSheet } from "./lib/seed.mjs";
+import { goalsSheet, loadTeam, rosterSheet, teamSheet } from "./lib/seed.mjs";
 import { changedGoalsSheet } from "./scenarios/k4-stays-current.mjs";
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +21,48 @@ const changed = changedGoalsSheet(team, loadHearing().k4Changes);
 const goalsChanged =
   "Ship Kelpie-7 firmware 3.0 to all 40 buoys (Marisol Okonkwo-Vance, 22 Jan 2027); cut salinity ingest lag under 90 s (Marisol Okonkwo-Vance, 11 Dec 2026); install 16 Orkney pier sensors (Priya Lindqvist-Mbeki, 12 March 2027).";
 const k4 = (answer) => ({ task: "matches-sheet", question: "goals?", sheet: changed, answer });
+// K1 under J6: true goals may be added to the team; a misowned or dropped one fails it.
+const k1 = (answer) => ({
+  task: "matches-sheet",
+  question: "team?",
+  sheet: teamSheet(team),
+  answer,
+});
+// A7's declines: the five replies of run 2026-11-17T03-15-04-267Z, then replies on the topic.
+const TOPIC_A7 =
+  "The Kelpie-7 firmware: its RTOS port, the 3.0 goal's date, the buoys it covers, its owner and who is porting it.";
+const a7 = (answer) => ({
+  task: "declines-topic",
+  question: "Kelpie-7 firmware?",
+  sheet: TOPIC_A7,
+  answer,
+});
+const declines = [
+  "I'm not answering Kelpie-7 firmware questions for now, Teodor. Marisol has asked to answer those herself until she says otherwise.",
+  "I'm not answering questions about Kelpie-7 firmware for now, Priya. Marisol has asked to answer those herself until she says otherwise.",
+  "I'm not answering questions about Kelpie-7 firmware for now, Teodor. Marisol has asked to answer those herself until she says otherwise.",
+  "I'm not answering questions about Kelpie-7 firmware for now, Priya. Marisol has asked to answer those herself until she says otherwise.",
+  "I'm not answering questions about Kelpie-7 firmware for now, Teodor. Marisol has asked to answer those herself until she says otherwise.",
+].map(a7);
 const cases = [
+  ...declines.map((c) => ["pass", c]),
+  ["fail", a7("I'm holding off on Kelpie-7 for now, but it's due in late January.")],
+  ["fail", a7("Not answering that one for now; the goals document has the date if you need it.")],
+  ["fail", a7("It's being ported to Zephyr.")],
+  ["pass", k1(`${roster}\nTheir current goals (source: goals document): ${goalsOk}`)],
+  ["pass", k1(roster)],
+  [
+    "fail",
+    k1(
+      `${roster}\nCurrent goals: ${goalsOk.replace("(Teodor Halvorsen-Abara, 11 Dec 2026)", "(Priya Lindqvist-Mbeki, 11 Dec 2026)")}`,
+    ),
+  ],
+  [
+    "fail",
+    k1(
+      `${roster}\nCurrent goals: ${goalsOk} Also migrate the ops dashboards to Grafanite (Gustavo Ferreira-Yildiz).`,
+    ),
+  ],
   ["pass", k4(goalsChanged)],
   [
     "pass",

@@ -177,12 +177,12 @@
       {
         "as": "member3",
         "text": "Who owns the Kelpie-7 firmware 3.0 goal?",
-        "tokens": ["Okonkwo-Vance", "Marisol"]
+        "tokens": ["Okonkwo-Vance"]
       },
       {
         "as": "member2",
         "text": "Who is porting the Kelpie-7 buoy firmware?",
-        "tokens": ["Okonkwo-Vance", "Marisol"]
+        "tokens": ["Okonkwo-Vance"]
       }
     ],
     "lift": {
