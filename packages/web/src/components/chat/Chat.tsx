@@ -2607,7 +2607,7 @@ export function Chat({
       data-concierge-header
       className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-[18px]"
     >
-      <ChatEdgeBlur edge="top" />
+      <ChatEdgeBlur edge="top" covers />
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. A thread in focus takes

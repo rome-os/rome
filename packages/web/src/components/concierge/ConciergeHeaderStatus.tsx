@@ -108,6 +108,8 @@ export function ConciergeHeaderStatus({
           // Above the badge, so the tag covers the badge's edge, not the reverse.
           "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
           FLOATING_SURFACE,
+          // Solid, so the name reads over whatever scrolls behind it.
+          "bg-chat-canvas supports-[backdrop-filter]:bg-chat-canvas",
         )}
       >
         {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
