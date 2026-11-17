@@ -262,7 +262,7 @@ export async function verify({
     runFrom: { dir: dirname(dirname(dirname(verifierDir))), commit: version.verifier.commit },
     waits,
     notes: [
-      "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. The real direct-message path is checked by hand in the live trial.",
+      "Direct messages use a private chat (dm-<member>) only the agent and that member can read, since a bot cannot send a bot a direct message. Rome sees that chat as a group chat, so a question there mentions the agent to ping it, as a real direct message would. The real direct-message path is checked by hand in the live trial.",
       ...notes,
     ],
     selection: rules ? { rules } : { phase: phase ?? 1 },

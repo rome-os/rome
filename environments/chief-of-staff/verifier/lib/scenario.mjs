@@ -14,7 +14,7 @@ export async function ask(ctx, { as, chat, thread, text, watch, timeoutMs, state
     const startedAt = await romeStartedAt(ctx.env);
     const questionId = chat
       ? await ctx.env.post({ as, chat, thread, mentionAgent: true, text })
-      : await ctx.env.dm({ as, text });
+      : await ctx.env.dm({ as, text, mentionAgent: true });
     const reply = await waitForAgent(ctx.env, {
       chats,
       since: questionId,

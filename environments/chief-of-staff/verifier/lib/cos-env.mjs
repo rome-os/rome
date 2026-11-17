@@ -33,8 +33,22 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
       args.push(text);
       return call(args);
     },
-    /** Sends the agent a direct message as a member and returns its id. */
-    async dm({ as, text }) {
+    /**
+     * Sends the agent a direct message as a member and returns its id. Rome sees the private
+     * chat standing in for a direct message as a group chat, so a message there pings the agent
+     * only with `mentionAgent`, which posts it in that chat with a mention.
+     */
+    async dm({ as, text, mentionAgent = false }) {
+      if (mentionAgent)
+        return call([
+          "post",
+          "--as",
+          as,
+          "--chat",
+          `dm-${as.split(":")[0]}`,
+          "--mention-agent",
+          text,
+        ]);
       return call(["dm", "--as", as, text]);
     },
     /**
