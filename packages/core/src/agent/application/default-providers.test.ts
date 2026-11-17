@@ -1,8 +1,17 @@
 import { describe, expect, it } from "@rstest/core";
 import type { DefaultProviderState } from "../domain/default-provider.js";
-import type { ModelAccountReports, ProviderId } from "../index.js";
-import { reportOf } from "../../test/kit/model-accounts.js";
+import type {
+  ModelAccountReport,
+  ModelAccountReports,
+  ProviderAvailabilityState,
+} from "../domain/model-account-report.js";
+import type { ProviderId } from "../domain/model-port.js";
 import { createDefaultProviders } from "./default-providers.js";
+
+const reportOf = (state: ProviderAvailabilityState): ModelAccountReport => ({
+  state,
+  account: { loggedIn: state !== "unauthorized" && state !== "expired" },
+});
 
 function keeper(
   reports: ModelAccountReports,
