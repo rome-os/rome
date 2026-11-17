@@ -911,10 +911,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
+            ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1182,6 +1183,24 @@ final class DemoBackend: RomeBackend {
             | Bose QC Ultra | 接近 Sony，人声压得更干净 | 最轻最松，适合长时间戴 | 一般 | 每天通勤、要戴一整天的人 |
             | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
             """, at: at(12, 2), session: "topic-table"),
+        ]
+        // Lists nested three deep, bullets and numbers mixed.
+        messages["topic-lists"] = [
+            user("ls1", "下周搬家，帮我列个清单。", at: at(11, 0), session: "topic-lists"),
+            agent("""
+            按时间排了一下：
+
+            1. 搬家前一周
+               - 预约搬家公司
+                 - 确认电梯能用
+                 - 问清楚大件家具怎么拆
+               - 办宽带移机
+            2. 搬家当天
+               1. 先搬易碎品
+               2. 拍下电表和水表读数
+            3. 搬完以后
+               - 改快递地址
+            """, at: at(11, 1), session: "topic-lists"),
         ]
         // A device connection's card, as core draws it: answered once the
         // phone connected Health, then a new one for Device.

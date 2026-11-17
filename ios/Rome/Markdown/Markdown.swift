@@ -6,7 +6,8 @@ import SwiftUI
 enum MarkdownBlock: Hashable {
     case paragraph(String)
     case heading(level: Int, text: String)
-    case list(ordered: Bool, start: Int, items: [String])
+    /// A list. An item's `children` hold the lists nested under it.
+    case list(ordered: Bool, start: Int, items: [ListItem])
     case quote(String)
     case code(language: String?, text: String)
     case rule
@@ -17,6 +18,12 @@ enum MarkdownBlock: Hashable {
     case table(header: [String], alignments: [TableAlignment], rows: [[String]])
     /// A ```` ```pictures ```` fence: one picture per line, laid out as a grid or a list.
     case pictures(layout: PictureLayout, items: [PictureItem])
+}
+
+/// One item of a list: its text, and the lists indented under it.
+struct ListItem: Hashable {
+    var text: String
+    var children: [MarkdownBlock] = []
 }
 
 /// How a `pictures` fence lays its pictures out: `pictures list` is a list,
@@ -52,9 +59,15 @@ enum MarkdownParser {
         PerfProbe.count("markdownParse")
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
-        var listItems: [String] = []
-        var listOrdered = false
-        var listStart = 1
+        // The lists open at this point, outermost first. A list ends up in
+        // the block list, or under the last item of the list before it.
+        struct OpenList {
+            let ordered: Bool
+            let start: Int
+            let indent: Int
+            var items: [ListItem] = []
+        }
+        var lists: [OpenList] = []
         var quote: [String] = []
         var code: [String]?
         var codeLanguage: String?
@@ -65,10 +78,29 @@ enum MarkdownParser {
                 paragraph = []
             }
         }
+        func closeList() {
+            let list = lists.removeLast()
+            let block = MarkdownBlock.list(ordered: list.ordered, start: list.start, items: list.items)
+            if lists.isEmpty {
+                blocks.append(block)
+            } else {
+                lists[lists.count - 1].items[lists[lists.count - 1].items.count - 1].children.append(block)
+            }
+        }
         func flushList() {
-            if !listItems.isEmpty {
-                blocks.append(.list(ordered: listOrdered, start: listStart, items: listItems))
-                listItems = []
+            while !lists.isEmpty { closeList() }
+        }
+        // An item at `indent`: a sibling in the open list at that indent, or
+        // the first item of a list nested under the last item when it is
+        // indented past that item's marker. A marker of the other kind at the
+        // same indent starts a new list.
+        func addItem(_ text: String, ordered: Bool, number: Int, indent: Int) {
+            while let last = lists.last, indent < last.indent, lists.count > 1 { closeList() }
+            if let last = lists.last, indent <= last.indent, last.ordered != ordered { closeList() }
+            if let last = lists.last, indent <= last.indent {
+                lists[lists.count - 1].items.append(ListItem(text: text))
+            } else {
+                lists.append(OpenList(ordered: ordered, start: number, indent: indent, items: [ListItem(text: text)]))
             }
         }
         func flushQuote() {
@@ -118,6 +150,14 @@ enum MarkdownParser {
                 trimmed = line.trimmingCharacters(in: .whitespaces)
             }
             if trimmed.isEmpty {
+                // A blank line between items, or before an indented line,
+                // keeps the list open, so a nested list after it still nests.
+                if !lists.isEmpty, let following = lines[next...].first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+                   following.hasPrefix(" ") || following.hasPrefix("\t") || isListItem(following.trimmingCharacters(in: .whitespaces)) {
+                    flushParagraph()
+                    flushQuote()
+                    continue
+                }
                 flushAll()
                 continue
             }
@@ -158,23 +198,19 @@ enum MarkdownParser {
             if let bullet = bulletItem(trimmed) {
                 flushParagraph()
                 flushQuote()
-                if !listItems.isEmpty && listOrdered { flushList() }
-                listOrdered = false
-                listItems.append(bullet)
+                addItem(bullet, ordered: false, number: 1, indent: indentation(line))
                 continue
             }
             if let numbered = orderedItem(trimmed) {
                 flushParagraph()
                 flushQuote()
-                if !listItems.isEmpty && !listOrdered { flushList() }
-                if listItems.isEmpty { listStart = numbered.number }
-                listOrdered = true
-                listItems.append(numbered.text)
+                addItem(numbered.text, ordered: true, number: numbered.number, indent: indentation(line))
                 continue
             }
-            if !listItems.isEmpty, line.hasPrefix("  ") || line.hasPrefix("\t") {
-                // A continuation line of the last list item.
-                listItems[listItems.count - 1] += " " + trimmed
+            if !lists.isEmpty, line.hasPrefix("  ") || line.hasPrefix("\t") {
+                // A continuation line of the innermost open item.
+                let last = lists.count - 1
+                lists[last].items[lists[last].items.count - 1].text += " " + trimmed
                 continue
             }
             flushList()
@@ -328,6 +364,19 @@ enum MarkdownParser {
               line[line.index(line.startIndex, offsetBy: level)] == " "
         else { return nil }
         return (level, String(line.dropFirst(level + 1)))
+    }
+
+    /// The width of a line's leading whitespace, a tab counting as four spaces.
+    private static func indentation(_ line: String) -> Int {
+        var width = 0
+        for character in line {
+            if character == " " { width += 1 } else if character == "\t" { width += 4 } else { break }
+        }
+        return width
+    }
+
+    private static func isListItem(_ line: String) -> Bool {
+        bulletItem(line) != nil || orderedItem(line) != nil
     }
 
     private static func bulletItem(_ line: String) -> String? {
@@ -613,20 +662,7 @@ struct MarkdownText: View {
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(verbatim: ordered ? "\(start + index)." : "•")
-                            .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
-                            .foregroundStyle(Palette.sub)
-                            .frame(minWidth: 12, alignment: .trailing)
-                        Text(MarkdownParser.inline(item))
-                            .romeFont(fontSize)
-                            .lineSpacing(lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+            MarkdownList(ordered: ordered, start: start, items: items, depth: 0, fontSize: fontSize, lineSpacing: lineSpacing)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
@@ -661,6 +697,47 @@ struct MarkdownText: View {
                 showViewer = true
             }
         }
+    }
+}
+
+/// A list in the bubble. A nested list sits under its item's text, so each
+/// level steps in by one marker's width, and its bullets change shape by depth.
+struct MarkdownList: View {
+    let ordered: Bool
+    let start: Int
+    let items: [ListItem]
+    let depth: Int
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(verbatim: ordered ? "\(start + index)." : Self.bullet(depth: depth))
+                        .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
+                        .foregroundStyle(Palette.sub)
+                        .frame(minWidth: 12, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(MarkdownParser.inline(item.text))
+                            .romeFont(fontSize)
+                            .lineSpacing(lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
+                            if case .list(let ordered, let start, let items) = child {
+                                MarkdownList(ordered: ordered, start: start, items: items, depth: depth + 1, fontSize: fontSize, lineSpacing: lineSpacing)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A filled dot, then a ring, then a small square, repeating.
+    static func bullet(depth: Int) -> String {
+        // U+FE0E keeps the square a text glyph; without it iOS draws an emoji.
+        ["•", "◦", "▪\u{FE0E}"][depth % 3]
     }
 }
 
