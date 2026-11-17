@@ -88,7 +88,10 @@ private struct WidgetCardBody: View {
             if let answered = autoShared ?? surface.autoSent {
                 // A quiet centered line, not a card. Until the stored answer
                 // arrives, the share just sent says it.
+                // The row keeps the card's right inset, so the same inset on
+                // the left centers the line across the full transcript width.
                 NoticeLine(text: LocationCard.outcome(answered))
+                    .padding(.leading, Metrics.bubbleInset)
             } else if surface.autoSharing, !surface.sendFailed, LocationCard.isLocationCard(part) {
                 // While the card shares by itself, nothing shows.
                 Color.clear.frame(height: 0)
