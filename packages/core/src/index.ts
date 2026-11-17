@@ -201,6 +201,9 @@ import {
   createModelAccounts,
   createModelResolver,
   createTierModelsSetting,
+  createDefaultProviders,
+  createDefaultProviderSetting,
+  type DefaultProvider,
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
@@ -1019,10 +1022,28 @@ async function main() {
     startRefresh: false,
     log: createLogger("model-accounts"),
   });
-  const stopCodexLoginChoice = startCodexLoginChoice({
+  // The default provider decides when Codex runs on Rome credits, and spendable
+  // credits count as a provider the default can be, so each reads the other.
+  let readDefaultProvider: () => DefaultProvider | null = () => null;
+  const codexLoginChoice = startCodexLoginChoice({
     accounts: modelAccounts,
     logins: codexAccountService,
+    defaultProvider: () => readDefaultProvider(),
     log: createLogger("codex-login"),
+  });
+  const stopCodexLoginChoice = () => codexLoginChoice.stop();
+  const defaultProviders = createDefaultProviders({
+    setting: createDefaultProviderSetting(settingsRepo),
+    accounts: modelAccounts,
+    providers: ["anthropic", "openai"],
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
+    log: createLogger("default-provider"),
+  });
+  readDefaultProvider = () => defaultProviders.current();
+  void defaultProviders.ready().then(() => codexLoginChoice.resync());
+  defaultProviders.onChanged(() => codexLoginChoice.resync());
+  codexLoginChoice.onCreditsChanged(() => {
+    void defaultProviders.reconcile().catch(() => undefined);
   });
   const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
@@ -1036,6 +1057,7 @@ async function main() {
     providers: [anthropicProvider, codexProvider],
     tierModels: createTierModelsSetting(settingsRepo),
     codexLogins: codexAccountService,
+    defaults: defaultProviders,
     log: createLogger("model-resolver"),
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);

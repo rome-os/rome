@@ -7,6 +7,7 @@ import type { ModelAccounts } from "./model-accounts.js";
 import type { AgentLog } from "../domain/agent-log.js";
 import type { AccountedProviderId } from "../domain/model-account-report.js";
 import type { CodexLogins } from "../domain/model-login.js";
+import type { DefaultProviders } from "./default-providers.js";
 import type { ModelProvider, ProviderId } from "../domain/model-port.js";
 import {
   resolveModel,
@@ -32,6 +33,10 @@ export interface ModelResolutionErrorPayload {
   code: ModelResolutionErrorCode;
   provider?: AccountedProviderId;
   reason: ModelResolutionErrorReason;
+  /** The turn followed the default provider rather than naming a model. */
+  followsDefault?: boolean;
+  /** When the provider's usage limit ends, for a quota failure. */
+  usageLimitUntil?: string;
 }
 
 /** A recoverable model-selection failure safe to expose over HTTP/SSE. */
@@ -39,6 +44,8 @@ export class ModelResolutionError extends Error {
   readonly code: ModelResolutionErrorCode;
   readonly provider?: AccountedProviderId;
   readonly reason: ModelResolutionErrorReason;
+  readonly followsDefault?: boolean;
+  readonly usageLimitUntil?: string;
 
   constructor(
     message: string,
@@ -46,6 +53,8 @@ export class ModelResolutionError extends Error {
       code: ModelResolutionErrorCode;
       provider?: AccountedProviderId;
       reason: ModelResolutionErrorReason;
+      followsDefault?: boolean;
+      usageLimitUntil?: string;
     },
   ) {
     super(message);
@@ -53,6 +62,8 @@ export class ModelResolutionError extends Error {
     this.code = details.code;
     this.provider = details.provider;
     this.reason = details.reason;
+    this.followsDefault = details.followsDefault;
+    this.usageLimitUntil = details.usageLimitUntil;
   }
 }
 
@@ -63,6 +74,8 @@ export function toModelResolutionErrorPayload(error: unknown): ModelResolutionEr
     code: error.code,
     ...(error.provider ? { provider: error.provider } : {}),
     reason: error.reason,
+    ...(error.followsDefault ? { followsDefault: true } : {}),
+    ...(error.usageLimitUntil ? { usageLimitUntil: error.usageLimitUntil } : {}),
   };
 }
 
@@ -81,6 +94,8 @@ export interface CreateModelResolverOptions {
   providers: ModelProvider[];
   tierModels?: TierModelsSetting;
   codexLogins?: Pick<CodexLogins, "login">;
+  /** Absent, a tier resolves in the order Rome used before the default existed. */
+  defaults?: Pick<DefaultProviders, "ready" | "current">;
   log?: AgentLog;
 }
 
@@ -112,6 +127,8 @@ function resolutionError(failure: ModelResolutionFailure): ModelResolutionError 
         code: "model_provider_unavailable",
         provider: failure.provider,
         reason: limited ? "quota_exhausted" : "not_logged_in",
+        ...(failure.followsDefault ? { followsDefault: true } : {}),
+        ...(failure.usageLimitUntil ? { usageLimitUntil: failure.usageLimitUntil } : {}),
       });
     }
     case "model_not_allowed":
@@ -164,6 +181,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       reports: options.accounts.read(),
       logins: { openai: options.codexLogins?.login() },
       tierModels,
+      ...(options.defaults ? { defaultProvider: options.defaults.current() } : {}),
     });
     if (!outcome.ok) {
       refreshAfterFailure(refreshScope(outcome.failure));
@@ -181,6 +199,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       // Tier models are read first, so the reports and the login this ask
       // reads are the ones current after the read.
       const tierModels = (await options.tierModels?.read()) ?? {};
+      await options.defaults?.ready();
       if (request.providerId) known(request.providerId);
       return decide(request, tierModels);
     },

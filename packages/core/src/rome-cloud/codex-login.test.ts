@@ -7,6 +7,7 @@ import {
   type CodexLoginChoice,
   type ModelAccountChange,
   type ModelAccountReports,
+  type DefaultProvider,
   type ProviderId,
 } from "../agent/index.js";
 import { reportOf } from "../test/kit/model-accounts.js";
@@ -24,15 +25,21 @@ const CREDITS: CodexLoginChoice = { kind: "rome_credits", credentialId: "romeins
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A running choice over fake accounts, recording each login it asks Codex to use that differs. */
-function choice(fetchCredits: () => Promise<RomeCreditsView | null> = async () => view()) {
-  const value: ModelAccountReports = { openai: reportOf("available") };
+function choice(
+  fetchCredits: () => Promise<RomeCreditsView | null> = async () => view(),
+  defaults: { provider: DefaultProvider | null } = { provider: null },
+) {
+  const value: ModelAccountReports = {
+    openai: reportOf("available"),
+    anthropic: reportOf("unauthorized"),
+  };
   const listeners = new Set<(provider: ProviderId, change: ModelAccountChange) => void>();
   let credentialListener = () => {};
   let credential: string | null = "romeinst_123";
   let romeCloud = true;
   let current: CodexLoginChoice = SUBSCRIPTION;
   const used: CodexLoginChoice[] = [];
-  const stop = startCodexLoginChoice({
+  const handle = startCodexLoginChoice({
     accounts: {
       read: () => value,
       onChanged: (listener) => {
@@ -50,17 +57,19 @@ function choice(fetchCredits: () => Promise<RomeCreditsView | null> = async () =
     getCredentialId: () => credential,
     hasRomeCloud: () => romeCloud,
     fetchRomeCredits: fetchCredits,
+    defaultProvider: () => defaults.provider,
     onCredentialChanged: (listener) => {
       credentialListener = listener;
       return () => {};
     },
   });
-  const accountChanged = async (change: ModelAccountChange) => {
-    for (const listener of listeners) listener("openai", change);
+  const accountChanged = async (change: ModelAccountChange, provider: ProviderId = "openai") => {
+    for (const listener of listeners) listener(provider, change);
     await flush();
   };
   return {
-    stop,
+    stop: () => handle.stop(),
+    handle,
     used,
     login: () => current,
     listeners,
@@ -68,6 +77,16 @@ function choice(fetchCredits: () => Promise<RomeCreditsView | null> = async () =
     authorization: async (state: Parameters<typeof reportOf>[0]) => {
       value.openai = reportOf(state);
       await accountChanged("authorization");
+    },
+    /** Claude's account now reads `state`. */
+    claude: async (state: Parameters<typeof reportOf>[0]) => {
+      value.anthropic = reportOf(state);
+      await accountChanged("authorization", "anthropic");
+    },
+    /** The default provider is now `provider`. */
+    setDefault: (provider: DefaultProvider | null) => {
+      defaults.provider = provider;
+      handle.resync();
     },
     /** A read of the account that changed nothing about the authorization. */
     accountRead: () => accountChanged("refreshed"),
@@ -84,32 +103,37 @@ function choice(fetchCredits: () => Promise<RomeCreditsView | null> = async () =
 
 describe("codexLoginFor", () => {
   const openai = reportOf("unauthorized");
+  const base = {
+    openai,
+    claudeSignedIn: false,
+    defaultProvider: null,
+    credentialId: "romeinst_123",
+    credits: view(),
+  };
 
-  it("uses Rome credits while ChatGPT is out, the instance is linked and credits can be spent", () => {
-    expect(codexLoginFor({ openai, credentialId: "romeinst_123", credits: view() })).toEqual(
-      CREDITS,
-    );
+  it("uses Rome credits when they are the only provider signed in", () => {
+    expect(codexLoginFor(base)).toEqual(CREDITS);
+    expect(codexLoginFor({ ...base, openai: reportOf("expired") })).toEqual(CREDITS);
+  });
+
+  it("uses Rome credits when they are the default, even with ChatGPT signed in", () => {
     expect(
-      codexLoginFor({
-        openai: reportOf("expired"),
-        credentialId: "romeinst_123",
-        credits: view(),
-      }),
+      codexLoginFor({ ...base, openai: reportOf("available"), defaultProvider: "rome_credits" }),
     ).toEqual(CREDITS);
   });
 
   it.each([
-    ["an authorized account", reportOf("available")],
-    ["a usage limit alone", reportOf("usage_limit_reached")],
-    ["an account not read yet", undefined],
-  ])("keeps the subscription login for %s", (_label, report) => {
-    expect(
-      codexLoginFor({ openai: report, credentialId: "romeinst_123", credits: view() }),
-    ).toEqual(SUBSCRIPTION);
+    ["an authorized account", { openai: reportOf("available") }],
+    ["a usage limit alone", { openai: reportOf("usage_limit_reached") }],
+    ["an account not read yet", { openai: undefined }],
+    ["a signed-in Claude", { claudeSignedIn: true }],
+    ["a Claude default", { claudeSignedIn: true, defaultProvider: "anthropic" as const }],
+  ])("keeps the subscription login for %s", (_label, over) => {
+    expect(codexLoginFor({ ...base, ...over })).toEqual(SUBSCRIPTION);
   });
 
   it("keeps the subscription login on an instance that is not linked", () => {
-    expect(codexLoginFor({ openai, credentialId: null, credits: view() })).toEqual(SUBSCRIPTION);
+    expect(codexLoginFor({ ...base, credentialId: null })).toEqual(SUBSCRIPTION);
   });
 
   it.each([
@@ -118,7 +142,9 @@ describe("codexLoginFor", () => {
     ["a used-up balance", view({ balanceMicros: "0", availableMicros: "0" })],
     ["an overrun", view({ balanceMicros: "-1200", availableMicros: "-1200" })],
   ])("keeps the subscription login for %s", (_label, credits) => {
-    expect(codexLoginFor({ openai, credentialId: "romeinst_123", credits })).toEqual(SUBSCRIPTION);
+    expect(codexLoginFor({ ...base, credits, defaultProvider: "rome_credits" })).toEqual(
+      SUBSCRIPTION,
+    );
   });
 });
 
@@ -134,11 +160,31 @@ describe("startCodexLoginChoice", () => {
     c.stop();
   });
 
-  it("does not read the credits while ChatGPT is in", async () => {
+  it("reads the credits while ChatGPT is in, and keeps its login", async () => {
     const fetch = rs.fn(async () => view());
     const c = choice(fetch);
     await c.accountRead();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalled();
+    expect(c.handle.creditsUsable()).toBe(true);
+    expect(c.used).toEqual([]);
+    c.stop();
+  });
+
+  it("does not spend credits when ChatGPT disconnects while Claude is signed in", async () => {
+    const c = choice();
+    await c.claude("available");
+    await c.authorization("unauthorized");
+    expect(c.login()).toEqual(SUBSCRIPTION);
+    c.stop();
+  });
+
+  it("moves to Rome credits when they become the default, and back", async () => {
+    const c = choice();
+    await flush();
+    c.setDefault("rome_credits");
+    expect(c.login()).toEqual(CREDITS);
+    c.setDefault("openai");
+    expect(c.login()).toEqual(SUBSCRIPTION);
     c.stop();
   });
 
@@ -148,7 +194,7 @@ describe("startCodexLoginChoice", () => {
     c.setRomeCloud(false);
     await c.authorization("unauthorized");
     expect(c.used).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(c.handle.creditsUsable()).toBe(false);
     c.stop();
   });
 
@@ -205,14 +251,12 @@ describe("startCodexLoginChoice", () => {
     c.stop();
   });
 
-  it("ignores a read that ChatGPT signing in overtook", async () => {
-    let answer: ((v: RomeCreditsView) => void) | undefined;
-    const c = choice(() => new Promise<RomeCreditsView>((resolve) => (answer = resolve)));
+  it("leaves Rome credits when ChatGPT signs in again", async () => {
+    const c = choice();
     await c.authorization("unauthorized");
+    expect(c.login()).toEqual(CREDITS);
     await c.authorization("available");
-    answer?.(view());
-    await flush();
-    expect(c.used).toEqual([]);
+    expect(c.login()).toEqual(SUBSCRIPTION);
     c.stop();
   });
 
@@ -312,8 +356,12 @@ describe("startCodexLoginChoice", () => {
       refreshIntervalMs: null,
       startRefresh: false,
     });
-    const stop = startCodexLoginChoice({
-      accounts,
+    const handle = startCodexLoginChoice({
+      // No Claude login, so credits are the only provider signed in.
+      accounts: {
+        read: () => ({ ...accounts.read(), anthropic: reportOf("unauthorized") }),
+        onChanged: (listener) => accounts.onChanged(listener),
+      },
       logins: account,
       getCredentialId: () => "romeinst_123",
       hasRomeCloud: () => true,
@@ -330,7 +378,7 @@ describe("startCodexLoginChoice", () => {
     expect(logins.slice(logins.indexOf(CREDITS))).not.toContainEqual(SUBSCRIPTION);
     expect(current).toEqual(CREDITS);
     expect(accounts.read().openai).toMatchObject({ state: "expired" });
-    stop();
+    handle.stop();
     accounts.close();
     account.close();
   });

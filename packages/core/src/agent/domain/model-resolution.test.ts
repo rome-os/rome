@@ -239,3 +239,72 @@ describe("resolveModel", () => {
     expect(outcome).toEqual({ ok: false, failure: { kind: "none_usable", allAtUsageLimit } });
   });
 });
+
+describe("resolveModel on the default provider", () => {
+  it("runs a tier on the default provider, even when another comes first in the old order", () => {
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel(large, given)).toEqual({
+      ok: true,
+      providerId: "anthropic",
+      model: "claude-opus-5-5[1m]",
+    });
+  });
+
+  it("keeps the session's model while it is on the default provider", () => {
+    const pin = { providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, pin }, given)).toEqual({
+      ok: true,
+      providerId: "anthropic",
+      model: "claude-sonnet-5-5",
+    });
+  });
+
+  it("drops a pin on another provider than the default", () => {
+    const pin = { providerId: "openai" as const, model: "gpt-6.1-sol" };
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, pin }, given)).toMatchObject({
+      ok: true,
+      providerId: "anthropic",
+    });
+  });
+
+  it("fails when the default cannot run, and never moves to another provider", () => {
+    const given = facts({ reports: reports(available, limited), defaultProvider: "anthropic" });
+    expect(resolveModel(large, given)).toEqual({
+      ok: false,
+      failure: {
+        kind: "provider_unavailable",
+        provider: "anthropic",
+        availability: "usage_limit_reached",
+        usageLimitUntil: "2026-11-07T12:00:00.000Z",
+        followsDefault: true,
+      },
+    });
+  });
+
+  it("runs one ask on the provider an override names", () => {
+    const given = facts({ reports: reports(available, limited), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, override: "openai" }, given)).toMatchObject({
+      ok: true,
+      providerId: "openai",
+    });
+  });
+
+  it("runs Codex on Rome credits when they are the default", () => {
+    const given = facts({
+      reports: reports(unauthorized, available),
+      logins: { openai: credits() },
+      defaultProvider: "rome_credits",
+    });
+    expect(resolveModel(large, given)).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("finds none usable with no default and nothing signed in", () => {
+    const given = facts({ reports: reports(unauthorized, unauthorized), defaultProvider: null });
+    expect(resolveModel(large, given)).toMatchObject({
+      ok: false,
+      failure: { kind: "none_usable" },
+    });
+  });
+});

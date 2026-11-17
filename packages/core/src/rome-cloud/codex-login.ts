@@ -1,5 +1,6 @@
-// Which login Codex runs on: Rome's setup decides it, from the ChatGPT
-// account's report, the instance credential and the account's Rome credits.
+// Which login Codex runs on: Rome's setup decides it, from the default
+// provider, the guardian's logins, the instance credential and the account's
+// Rome credits.
 // The agent context runs on what this picks (CodexLogins) and does not know
 // why. docs/concepts/rome-cloud.md states the rule.
 
@@ -14,7 +15,7 @@ import {
 } from "../agent/index.js";
 import { instanceCredentialId, onInstanceTokenChanged } from "../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
-import { fetchRomeCredits } from "../agent/index.js";
+import { fetchRomeCredits, type DefaultProvider } from "../agent/index.js";
 
 /** Credits are used only while the account can spend them. */
 function canSpend(view: RomeCreditsView | null): boolean {
@@ -22,59 +23,103 @@ function canSpend(view: RomeCreditsView | null): boolean {
 }
 
 /**
- * The login Codex should run on. The guardian's ChatGPT login wins: Rome
- * credits are used only while the account is unauthorized or expired, the
- * instance is linked, and the credits can be spent. Without a login that can
- * run, the answer is `subscription`, and availability says it cannot.
+ * The login Codex should run on. Rome credits are used only when the guardian
+ * made them the default provider, or when they are the only provider signed
+ * in: no ChatGPT login and no Claude login. A usage limit never brings them in.
+ * Credits need a linked instance and credits that can be spent. Otherwise the
+ * answer is `subscription`, and availability says whether it can run.
  */
 export function codexLoginFor(input: {
   openai: ModelAccountReport | undefined;
+  /** Claude is signed in, or Rome has not read it yet. */
+  claudeSignedIn: boolean;
+  defaultProvider: DefaultProvider | null;
   credentialId: string | null;
   credits: RomeCreditsView | null;
 }): CodexLoginChoice {
   const { openai, credentialId, credits } = input;
-  if (providerAuthorized(openai) || !credentialId || !canSpend(credits)) {
-    return { kind: "subscription" };
-  }
+  if (!credentialId || !canSpend(credits)) return { kind: "subscription" };
+  const onlyCredits = !providerAuthorized(openai) && !input.claudeSignedIn;
+  if (input.defaultProvider !== "rome_credits" && !onlyCredits) return { kind: "subscription" };
   return { kind: "rome_credits", credentialId };
 }
 
+export interface CodexLoginChoiceHandle {
+  stop(): void;
+  /** The last read found credits this instance can spend. False before a read. */
+  creditsUsable(): boolean;
+  /** Called when a read changes whether credits can be spent. */
+  onCreditsChanged(listener: () => void): () => void;
+  /** Decides the login again, as after the default provider changed. */
+  resync(): void;
+}
+
 /**
- * Keeps Codex on the right login until the returned stop is called. It reads
- * the credits when ChatGPT disconnects, when the credential changes, and after
- * each read of the account, one read at a time. A failed read keeps the login.
+ * Keeps Codex on the right login until stopped. On a linked instance it reads
+ * the credits when the credential changes and after each read of the ChatGPT
+ * account, one read at a time, and decides again when an authorization or the
+ * default changes. A failed read keeps the login.
  */
 export function startCodexLoginChoice(options: {
   accounts: Pick<ModelAccounts, "read" | "onChanged">;
   logins: Pick<CodexLogins, "login" | "useLogin">;
   log?: AgentLog;
+  /** The default provider; absent, none is set. */
+  defaultProvider?: () => DefaultProvider | null;
   /** The instance credential's stable id, or null when not linked. */
   getCredentialId?: () => string | null;
   hasRomeCloud?: () => boolean;
   fetchRomeCredits?: () => Promise<RomeCreditsView | null>;
   onCredentialChanged?: (listener: () => void) => () => void;
-}): () => void {
+}): CodexLoginChoiceHandle {
   const { accounts, logins, log } = options;
   const getCredentialId = options.getCredentialId ?? instanceCredentialId;
   const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
   const fetchCredits = options.fetchRomeCredits ?? (() => fetchRomeCredits());
   const onCredentialChanged = options.onCredentialChanged ?? onInstanceTokenChanged;
+  const defaultProvider = options.defaultProvider ?? (() => null);
   let credentialId = getCredentialId();
   let stopped = false;
-  // Whether ChatGPT is out and a credential could spend credits, as of the
-  // last sync. Reads happen only while it holds.
-  let eligible = false;
+  // Whether a credential could spend credits, as of the last sync. Reads
+  // happen only while it holds.
+  let linked = false;
+  // The last credits read, while linked.
+  let credits: RomeCreditsView | null = null;
   let inFlight: object | null = null;
+  const creditListeners = new Set<() => void>();
+
+  const choose = (): void => {
+    const reports = accounts.read();
+    const claude = reports.anthropic;
+    logins.useLogin(
+      codexLoginFor({
+        openai: reports.openai,
+        claudeSignedIn: claude === undefined || providerAuthorized(claude),
+        defaultProvider: defaultProvider(),
+        credentialId: linked ? credentialId : null,
+        credits,
+      }),
+    );
+  };
+
+  const setCredits = (next: RomeCreditsView | null): void => {
+    const was = canSpend(credits);
+    credits = next;
+    if (was !== canSpend(next)) {
+      for (const listener of creditListeners) listener();
+    }
+  };
 
   const readCredits = async (): Promise<void> => {
-    if (stopped || !eligible || inFlight) return;
+    if (stopped || !linked || inFlight) return;
     const read = {};
     inFlight = read;
     try {
-      const credits = await fetchCredits();
+      const view = await fetchCredits();
       // A sync since this read began changed what it would describe.
       if (inFlight !== read || stopped) return;
-      logins.useLogin(codexLoginFor({ openai: accounts.read().openai, credentialId, credits }));
+      setCredits(view);
+      choose();
     } catch (err) {
       log?.warn("Rome credits unavailable", {
         error: err instanceof Error ? err.message : String(err),
@@ -89,12 +134,13 @@ export function startCodexLoginChoice(options: {
     const next = getCredentialId();
     const credentialChanged = next !== credentialId;
     credentialId = next;
-    const wasEligible = eligible;
-    eligible = !providerAuthorized(accounts.read().openai) && Boolean(next) && hasRomeCloud();
+    const wasLinked = linked;
+    linked = Boolean(next) && hasRomeCloud();
     // Another credential can belong to another account, so a read still in
     // flight does not describe it.
-    if (credentialChanged || !eligible) inFlight = null;
-    if (!eligible) {
+    if (credentialChanged || !linked) inFlight = null;
+    if (!linked) {
+      setCredits(null);
       logins.useLogin({ kind: "subscription" });
       return;
     }
@@ -102,23 +148,34 @@ export function startCodexLoginChoice(options: {
     if (credentialChanged && next && logins.login().kind === "rome_credits") {
       logins.useLogin({ kind: "rome_credits", credentialId: next });
     }
-    if (credentialChanged || !wasEligible) void readCredits();
+    choose();
+    if (credentialChanged || !wasLinked) void readCredits();
   };
 
   const stopCredential = onCredentialChanged(sync);
-  // The Codex authorization drives the choice, and each settled read of the
-  // account re-reads the credits.
+  // An authorization decides the login again, and each settled read of the
+  // ChatGPT account re-reads the credits.
   const stopAccounts = accounts.onChanged((provider, change) => {
-    if (provider !== "openai") return;
     if (change === "authorization") sync();
-    else void readCredits();
+    else if (provider === "openai") void readCredits();
   });
   sync();
 
-  return () => {
-    stopped = true;
-    inFlight = null;
-    stopCredential();
-    stopAccounts();
+  return {
+    stop() {
+      stopped = true;
+      inFlight = null;
+      stopCredential();
+      stopAccounts();
+      creditListeners.clear();
+    },
+    creditsUsable: () => linked && canSpend(credits),
+    onCreditsChanged(listener) {
+      creditListeners.add(listener);
+      return () => creditListeners.delete(listener);
+    },
+    resync: () => {
+      if (!stopped && linked) choose();
+    },
   };
 }

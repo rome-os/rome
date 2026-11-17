@@ -153,6 +153,23 @@ export {
   type ProviderAvailabilityState,
 } from "./domain/model-account-report.js";
 export {
+  DEFAULT_PROVIDERS,
+  isDefaultProvider,
+  providerOfDefault,
+  type DefaultProvider,
+  type DefaultProviderNote,
+  type SignedInProviders,
+} from "./domain/default-provider.js";
+export {
+  createDefaultProviders,
+  type DefaultProviderChange,
+  type DefaultProviders,
+} from "./application/default-providers.js";
+export {
+  createDefaultProviderSetting,
+  DEFAULT_MODEL_PROVIDER_SETTING_KEY,
+} from "./infrastructure/settings/default-provider-setting.js";
+export {
   codexStrongSelection,
   selectionOfStrength,
   type ModelStrength,

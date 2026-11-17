@@ -23,17 +23,32 @@ describe("modelResolutionRequest", () => {
     ).toEqual({ kind: "exact", providerId: "anthropic", model: "future-model[1m]" });
   });
 
-  it("preserves the saved session provider and model over a changed agent config", () => {
+  it("keeps the saved model over a changed agent config on the same provider", () => {
+    const pin = { providerId: "openai" as const, model: "gpt-6.1-sol" };
+    expect(modelResolutionRequest(undefined, pin, config)).toEqual({ kind: "exact", ...pin });
+  });
+
+  it("drops a saved model on another provider than the agent's exact one", () => {
     expect(modelResolutionRequest(undefined, sessionPin, config)).toEqual({
       kind: "exact",
-      ...sessionPin,
+      providerId: "openai",
+      model: "gpt-5.3-codex-spark",
     });
   });
 
-  it("preserves the saved model over a tier default", () => {
+  it("carries the saved model on a tier ask, for the default provider to keep", () => {
     expect(modelResolutionRequest(undefined, sessionPin, { tier: "small" })).toEqual({
-      kind: "exact",
-      ...sessionPin,
+      kind: "tier",
+      tier: "small",
+      pin: sessionPin,
+    });
+  });
+
+  it("carries a one-off provider override on a tier ask", () => {
+    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, "openai")).toEqual({
+      kind: "tier",
+      tier: "large",
+      override: "openai",
     });
   });
 
@@ -57,11 +72,7 @@ describe("modelResolutionRequest", () => {
   });
 
   it.each(["large", "medium", "small"] as const)("preserves tier %s", (tier) => {
-    expect(modelResolutionRequest(undefined, undefined, { tier })).toEqual({
-      kind: "tier",
-      tier,
-      providerId: undefined,
-    });
+    expect(modelResolutionRequest(undefined, undefined, { tier })).toEqual({ kind: "tier", tier });
     expect(modelResolutionRequest(undefined, undefined, { tier, providerId: "anthropic" })).toEqual(
       { kind: "tier", tier, providerId: "anthropic" },
     );
