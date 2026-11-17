@@ -2091,16 +2091,6 @@
         }
       }
     },
-    "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我查看了你的步数、体能训练、静息心率和体重。这是一份 12 周计划。"
-          }
-        }
-      }
-    },
     "I turn bigger jobs into tasks and tell you when they're done." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3425,26 +3415,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
-          }
-        }
-      }
-    },
-    "Plan fat-loss workouts" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "规划减脂锻炼"
-          }
-        }
-      }
-    },
-    "Plan my workouts so I lose 3 kg by March." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
           }
         }
       }
@@ -6183,6 +6153,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
+          }
+        }
+      }
+    },
+    "Daily health summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日健康总结"
+          }
+        }
+      }
+    },
+    "Summarize my health for me every day." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我每天总结下我的健康情况"
+          }
+        }
+      }
+    },
+    "Every morning at 9, I'll send your sleep, steps and resting heart rate, and flag anything unusual." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上 9 点，我会把睡眠、步数和静息心率发给你，有异常会特别提醒。"
           }
         }
       }
