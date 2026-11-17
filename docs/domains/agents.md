@@ -157,7 +157,7 @@ Which provider and model a turn uses. An [exact selection](#exact-selection) or 
 How strong a model a chat runs on, per provider: **fast** is the provider's quick model (Sonnet on Claude, Luna on Codex), **strong** its best (Opus on Claude, Sol on Codex). On Codex each falls back to Terra when the account may not use it.
 
 - A Concierge chat runs the strong model of the default provider.
-- The Concierge picks fast or strong for each task chat it starts and stores it as the task chat's [selection](#model-selection), made by Rome, together with the task's reasoning effort. A selection Rome made follows the default provider at the same strength. When the Concierge chat's owner picked a model, the task runs on that model's provider. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
+- The Concierge picks fast or strong for each task chat it starts and stores it as the task chat's [selection](#model-selection), made by Rome, together with the task's reasoning effort. A selection Rome made follows the default provider at the same strength. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
 - In code it is `ModelStrength` and `followingSelection` in [`packages/core/src/agent/domain/model-strength.ts`](../../packages/core/src/agent/domain/model-strength.ts).
 
 ## Model selection

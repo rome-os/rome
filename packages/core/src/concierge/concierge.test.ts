@@ -1144,9 +1144,9 @@ describe("Concierge tools", () => {
     }
   });
 
-  it("chat_start runs a task on the strength and effort it names, on the provider its owner picked for the Concierge chat", async () => {
+  it("chat_start runs a task on the strength and effort it names, on the default provider whoever picked the Concierge chat's model", async () => {
     const s = setup();
-    s.service.deps.defaults = { current: () => "openai" };
+    s.service.deps.defaults = { current: () => "anthropic" };
     s.sessions.set(CONCIERGE_CHAT, {
       id: CONCIERGE_CHAT,
       largeModelSelection: "claude-opus-5-5",

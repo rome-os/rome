@@ -221,7 +221,7 @@ describe("agent model pins through Sessions", () => {
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
   });
 
-  it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {
+  it("moves a resumed session to the agent's new provider, and a new session too", async () => {
     const firstManager = createManager();
     const first = await firstManager.open(key, { workingDir: directory });
     await collect((await startAfter(first, { prompt: "establish pin" })).events());
@@ -232,18 +232,22 @@ describe("agent model pins through Sessions", () => {
     const resumed = await secondManager.open(key, { workingDir: directory });
     expect(resumed.sessionId).toBe(first.sessionId);
     await collect((await startAfter(resumed, { prompt: "resume" })).events());
-    expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
-    expect(anthropic.openSession).not.toHaveBeenCalled();
+    // The pin holds a model within one provider, never the session on another.
+    expect(openai.calls.map((call) => call.model)).toEqual([MODEL]);
+    expect(anthropic.calls.map((call) => call.model)).toEqual(["future-model[1m]"]);
 
     const fresh = await secondManager.open(
       { ...key, channelThreadKey: "webchat:new-model-pin-test" },
       { workingDir: directory },
     );
     await collect((await startAfter(fresh, { prompt: "new conversation" })).events());
-    expect(anthropic.calls.map((call) => call.model)).toEqual(["future-model[1m]"]);
+    expect(anthropic.calls.map((call) => call.model)).toEqual([
+      "future-model[1m]",
+      "future-model[1m]",
+    ]);
   });
 
-  it("allows a guardian override without a tier and persists the override on cold resume", async () => {
+  it("runs a guardian override, which a cold resume without the chat's saved pick leaves for the agent's model", async () => {
     const firstManager = createManager();
     const first = await firstManager.open(key, {
       workingDir: directory,
@@ -257,11 +261,10 @@ describe("agent model pins through Sessions", () => {
       { workingDir: directory },
     );
     await collect((await startAfter(resumed, { prompt: "continue" })).events());
-    expect(anthropic.calls.map((call) => call.model)).toEqual([
-      "claude-sonnet-5-5",
-      "claude-sonnet-5-5",
-    ]);
-    expect(openai.openSession).not.toHaveBeenCalled();
+    // The pick lives on the chat (webchat restores it); the pin does not carry
+    // it to another provider than the agent's.
+    expect(anthropic.calls.map((call) => call.model)).toEqual(["claude-sonnet-5-5"]);
+    expect(openai.calls.map((call) => call.model)).toEqual([MODEL]);
   });
 
   it("fails closed on a disconnected pinned provider even when another provider is healthy", async () => {

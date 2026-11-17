@@ -773,19 +773,13 @@ export class ConciergeService {
   }
 
   /**
-   * The model of `strength` for a task chat that Concierge chat `chatId`
-   * starts. It follows the default provider like the Concierge chat, unless
-   * that chat's owner picked a model, whose provider it then runs on.
+   * The model of `strength` for a task chat a Concierge chat starts: on the
+   * default provider, stored as Rome's choice, so the task follows the
+   * default like any chat. Null with no default.
    */
-  async taskModel(chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
-    const chat = await this.deps.webchatRepo.getSession(chatId);
-    const stored = chat?.largeModelSelection;
-    const own =
-      isModelSelectionId(stored) && chat?.largeModelSelectionBy === "owner"
-        ? MODEL_SELECTIONS[stored].providerId
-        : undefined;
-    const provider = own ?? this.defaultModelProvider();
-    if (provider !== "anthropic" && provider !== "openai") return null;
+  async taskModel(_chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
+    const provider = this.defaultModelProvider();
+    if (!provider) return null;
     return selectionOfStrength(provider, strength, this.deps.accounts.read().openai?.account);
   }
 
