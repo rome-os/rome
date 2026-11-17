@@ -2,7 +2,8 @@ import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import net from "node:net";
 import type { DrizzleDb } from "../db/index.js";
-import { gateGuardianUpgrade } from "../access/ws-guardian-gate.js";
+import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { desktopSlot } from "./desktops.js";
 import { createLogger } from "../logger.js";
@@ -56,7 +57,11 @@ function buildUpstreamUpgradeRequest(
   return lines.join("\r\n") + "\r\n\r\n";
 }
 
-export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close(): void } {
+export function attachDesktopProxy(
+  httpServer: Server,
+  db: DrizzleDb,
+  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+): { close(): void } {
   const host = "127.0.0.1";
   const upstreams = new Set<net.Socket>();
 
@@ -75,9 +80,9 @@ export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close()
     socket.on("error", teardown);
     socket.on("close", teardown);
 
-    void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
-        if (!allowed || socket.destroyed) return;
+    void gateUpgrade(req, socket, db, dashboardAccess)
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
         const target = desktopUpstream(rawUrl);
         if (!target) {
           rejectUpgrade(socket, 404, "Not Found");
