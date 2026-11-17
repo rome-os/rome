@@ -359,15 +359,13 @@ describe("defer", () => {
 describe("show_card", () => {
   const ui = { components: [{ id: "root", component: "Stat", label: "Steps", value: "5,673" }] };
 
-  const cardTurn = { ...TURN, widgets: "card" as const };
-
-  it("is served only where the place draws cards", () => {
+  it("is served only when asked for", () => {
     expect(askUserNames()).not.toContain("show_card");
-    expect(askUserNames({ turn: cardTurn })).toEqual(["ask_question", "show_card"]);
+    expect(askUserNames({ showCard: true })).toEqual(["ask_question", "show_card"]);
   });
 
   it("asks for the text where this turn shows no widget", async () => {
-    const res = await tools({ turn: cardTurn }).callTool("ask_user", "show_card", {
+    const res = await tools({ showCard: true }).callTool("ask_user", "show_card", {
       ui,
       text: "Steps: 5,673",
     });
@@ -375,7 +373,7 @@ describe("show_card", () => {
   });
 
   it("answers with the card for the chat to store", async () => {
-    const res = await tools({ turn: cardTurn, widgetsShow: true }).callTool(
+    const res = await tools({ showCard: true, widgetsShow: true }).callTool(
       "ask_user",
       "show_card",
       {
@@ -393,7 +391,7 @@ describe("show_card", () => {
   });
 
   it("fails with the reason when the card is not display only", async () => {
-    const res = await tools({ turn: cardTurn, widgetsShow: true }).callTool(
+    const res = await tools({ showCard: true, widgetsShow: true }).callTool(
       "ask_user",
       "show_card",
       {

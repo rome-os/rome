@@ -19,7 +19,7 @@ const DIAGRAMS_SECTION = [
 const CARDS_SECTION = [
   "# Cards",
   "",
-  "When a message reports several numbers the guardian will scan, such as a daily summary or a status roundup, show them with the `show_card` tool as metric tiles and a short list, then keep your text to what the card leaves out, such as sources. Answer a conversational question or a single fact in text.",
+  "When a message reports several numbers the guardian will scan, such as a daily summary or a status roundup, show them with the `show_card` tool as metric tiles and a short list, and put what the card leaves out, such as sources, in your text. A conclusion or summary you are asked to write still gives the key figures, since it may be read without the card. Answer a conversational question or a single fact in text.",
 ].join("\n");
 
 /** What a system prompt reads of an agent. */

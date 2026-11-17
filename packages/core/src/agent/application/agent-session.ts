@@ -1107,6 +1107,9 @@ function sessionSetupOf(
       // plain-text forms. Otherwise the tool result claims a card was shown
       // while nothing mounted and the fork dead-ends.
       widgetsShow: showsWidgets(widgets, session.hasSpeaker),
+      // As the prompt's cards section: an agent that hands its work to other
+      // chats sends text.
+      showCard: widgets === "card" && !policy.delegatesWork,
       log: deps.log,
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,

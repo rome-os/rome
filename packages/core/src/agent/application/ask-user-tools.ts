@@ -164,16 +164,19 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
   };
 }
 
-/** `ask_question`, then `show_card` where the place draws cards, then `defer` where a
+/** `ask_question`, then `show_card` where it is served, then `defer` where a
  *  thread can be woken, then the session tools. */
 export function askUserTools(input: {
   turn: TurnFacts;
   widgetsShow: boolean;
+  /** Serve `show_card`: the place draws cards and the agent answers itself
+   *  rather than handing its work to other chats. */
+  showCard?: boolean;
   defer?: DeferTool;
   sessionTools?: readonly RomeTool[];
   run: RomeToolRunner;
 }): RomeTool[] {
-  const { turn, widgetsShow, defer, sessionTools = [], run } = input;
+  const { turn, widgetsShow, showCard = false, defer, sessionTools = [], run } = input;
   // `ask_question` is served everywhere: where no widget shows, the handler
   // relays the questions as a plain message, so the model routes clarifying
   // questions through it wherever it runs.
@@ -255,10 +258,9 @@ export function askUserTools(input: {
         }),
     },
   ];
-  // A card is only worth its tokens where the place draws cards; elsewhere the
-  // model just writes the report as text. Served by the place, not by whether
-  // this turn shows widgets, so an exact fork keeps its source's tools.
-  if (turn.widgets === "card") tools.push(showCardTool(widgetsShow, run));
+  // Served by the place and the agent, not by whether this turn shows
+  // widgets, so an exact fork keeps its source's tools.
+  if (showCard) tools.push(showCardTool(widgetsShow, run));
   // `defer` injects an inbound message rather than drawing a widget, so it is
   // served wherever there is a live thread to wake.
   if (defer) tools.push(deferTool(defer, turn, run));

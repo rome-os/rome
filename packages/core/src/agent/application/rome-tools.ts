@@ -27,6 +27,8 @@ export interface RomeToolsOptions {
   skills: Pick<SkillCatalog, "list">;
   subagents: Subagents;
   widgetsShow: boolean;
+  /** Serve `show_card`. Absent: not served. */
+  showCard?: boolean;
   log: AgentLog;
   /** Absent for a session with no live thread to wake. */
   defer?: DeferTool;
@@ -39,13 +41,14 @@ function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): R
 }
 
 export function createRomeTools(options: RomeToolsOptions): RomeTools {
-  const { turn, actions, skills, subagents, widgetsShow, log, defer, sessionTools } = options;
+  const { turn, actions, skills, subagents, widgetsShow, showCard, log, defer, sessionTools } =
+    options;
   const run = romeToolRunner(log);
   const groups: Record<RomeToolGroup, RomeTool[]> = {
     actions: actionTools(actions, turn, widgetsShow, run, log),
     subagents: subagentTools(subagents, run),
     skills: skillTools(skills, run),
-    ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, run }),
+    ask_user: askUserTools({ turn, widgetsShow, showCard, defer, sessionTools, run }),
   };
 
   return {

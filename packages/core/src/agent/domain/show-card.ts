@@ -100,7 +100,8 @@ export function showCardToolOutput(ui: WidgetUi, text: string, widgetsShow: bool
     ui,
     text,
     message:
-      "The card is shown in your message. Don't repeat its numbers in your text: add only " +
-      "what the card leaves out, such as sources, or nothing.",
+      "The card is shown in your message. Your text need not repeat what the card shows, " +
+      "but a conclusion or summary you are asked to write still gives the key figures, since " +
+      "it may be read without the card.",
   };
 }
