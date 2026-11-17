@@ -669,7 +669,13 @@
   },
   "thread": {
     "back": "Back to the chat: {{title}}",
-    "replyPlaceholder": "Reply: {{title}}"
+    "replyPlaceholder": "Reply: {{title}}",
+    "untitled": "Thread",
+    "open": "Open the thread: {{title}}",
+    "stack": "Open the thread, newest: {{preview}}",
+    "stackCount_one": "{{count}} reply",
+    "stackCount_other": "{{count}} replies",
+    "newReplies": "New replies in \"{{title}}\""
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

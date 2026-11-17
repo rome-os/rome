@@ -30,7 +30,7 @@ export function UserMessageBubble({
   className?: string;
   /** Sits on the bubble's own surface, positioned against it, as a reaction does. Pass it, null included, to keep the bubble its anchor. */
   badge?: ReactNode;
-  /** Draws the quote the message carries. False where a connector stands in for it. */
+  /** Draws the quote the message carries. False for a reply right under what it answers. */
   quoted?: boolean;
 }) {
   const { t } = useTranslation("chat");

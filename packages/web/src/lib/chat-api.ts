@@ -447,6 +447,20 @@ export async function markSessionRead(
   );
 }
 
+/** Tells the server the owner has seen the messages `ids` of chat `sessionId`. */
+export async function markMessagesRead(
+  sessionId: string,
+  ids: readonly string[],
+): Promise<{ marked: number }> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages/read`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  return jsonOrThrow<{ marked: number }>(res);
+}
+
 export async function createProject(name: string): Promise<ProjectOption> {
   const res = await fetch("/api/chat/projects", {
     method: "POST",

@@ -155,9 +155,9 @@ const hidden = () =>
     .map((element) => element.dataset.threadEntry)
     .sort();
 const transcript = () => document.querySelector<HTMLElement>("[data-concierge-transcript]")!;
-/** The quote in reply `id`: pressing it focuses the thread the reply is in. */
-const quoteIn = (id: string) => entry(id).querySelector<HTMLElement>("[data-reply-quote]")!;
-const openKyoto = () => fireEvent.click(quoteIn("k2"));
+/** The stack under root `id`: pressing it focuses its thread. */
+const stackOf = (id: string) => document.querySelector<HTMLElement>(`[data-thread-stack="${id}"]`)!;
+const openKyoto = () => fireEvent.click(stackOf("k1"));
 const settled = () => act(async () => {});
 
 describe("focusing a thread", () => {
@@ -245,7 +245,9 @@ describe("focusing a thread", () => {
     expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
     expect(entry("f2").style.height).toBe("0px");
     await waitFor(() => expect(hidden()).toEqual([]), { timeout: 2000 });
-    expect(entry("f2").getAttribute("style") ?? "").toBe("");
+    // Back on the main line, the replies of Flights stand in its stack again.
+    expect(entry("f2")).toBeNull();
+    expect(stackOf("f1")).toBeTruthy();
   });
 
   it("closes at once even while the open motion still runs, leaving no blank or hidden row", async () => {
@@ -263,7 +265,7 @@ describe("focusing a thread", () => {
     expect(transcript().hasAttribute("data-thread-motion")).toBe(false);
     expect(screen.getByTestId("top-space").style.height).toBe("");
     expect(screen.getByTestId("bottom-space").style.height).toBe("");
-    expect(entry("f2").getAttribute("style") ?? "").toBe("");
+    expect(entry("f2")).toBeNull();
   });
 
   it("holds a message that arrives meanwhile hidden, or shown when it is the thread's", async () => {
@@ -294,7 +296,7 @@ describe("focusing a thread", () => {
     ];
     render(<Harness messages={plan} />);
 
-    fireEvent.click(quoteIn("r3"));
+    fireEvent.click(stackOf("r1"));
     await settled();
 
     expect(hidden()).toEqual(["x1", "x2"]);

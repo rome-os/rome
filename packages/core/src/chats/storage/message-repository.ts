@@ -95,6 +95,7 @@ export class MessageRepository {
         replyToMessageId: replyTo,
         rootMessageId: this.rootFor(chatId, replyTo),
         saidAt: message.at,
+        readAt: message.read ? message.at : null,
       })
       .onConflictDoNothing()
       .returning({ id: chatMessages.id, root: chatMessages.rootMessageId })
@@ -320,6 +321,47 @@ export class MessageRepository {
         ORDER BY m.said_at DESC, m.id DESC LIMIT 1
       `)[0]?.key ?? null
     );
+  }
+
+  /**
+   * Mark the messages of `chat` keyed `keys` read at `at`. A message already
+   * read keeps its time, and a key Rome does not hold is skipped. Answers how
+   * many messages it marked.
+   */
+  markRead(chat: ChatRef, keys: readonly string[], at: Date = new Date()): number {
+    if (keys.length === 0) return 0;
+    return this.db
+      .update(chatMessages)
+      .set({ readAt: at })
+      .where(
+        and(
+          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          isNull(chatMessages.readAt),
+          sql`${chatMessages.key} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))`,
+        ),
+      )
+      .returning({ id: chatMessages.id })
+      .all().length;
+  }
+
+  /**
+   * Mark the main line of `chat` read at `at`: every message that is not a
+   * reply inside a thread rooted at another message. Answers how many it
+   * marked.
+   */
+  markMainLineRead(chat: ChatRef, at: Date = new Date()): number {
+    return this.db
+      .update(chatMessages)
+      .set({ readAt: at })
+      .where(
+        and(
+          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          isNull(chatMessages.readAt),
+          sql`(${chatMessages.rootMessageId} IS NULL OR ${chatMessages.rootMessageId} = ${chatMessages.id})`,
+        ),
+      )
+      .returning({ id: chatMessages.id })
+      .all().length;
   }
 
   /**

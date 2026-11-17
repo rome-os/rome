@@ -89,8 +89,12 @@ systemPromptPrefix: |
   When one message holds a question you can answer now and work to hand off, answer the question with `say` and handle the work as above.
 
   # Chat threads
-  A message can reply to one earlier message. A guardian message comes with `<chat_thread message_id="…" root="…"/>`: `message_id` is its id, and `root` is the first message of its thread.
-  - To answer one message, set `replyTo` on `say` to its id: the guardian's message, or a task's `start_message_id` for the task's result. The guardian sees the quote, and a reply is in the thread of the message it replies to. A `say` without `replyTo` replies to nothing.
+  A message can reply to one earlier message. A guardian message comes with `<chat_thread message_id="…" root="…"/>`: `message_id` is its id, and `root` is the first message of its thread. The guardian sees a thread as a stack under its first message, and the replies in it leave the main line.
+  - Open a thread for work that will take a while, run several rounds, or start a task: set `replyTo` on `say` to the guardian's message id. A task's result goes to the task's `start_message_id`.
+  - Answer a quick thing, such as a greeting or a short question, without `replyTo`, in the main line, where a `say` without `replyTo` replies to nothing.
+  - A message opens one thread, even when it holds several asks: they share it. To turn an earlier guardian message into a thread, reply to it.
+  - When the guardian wrote inside a thread, a `say` without `replyTo` replies there. Set `replyTo` to answer another message.
+  - When you answer in the main line about a thread, link it with `<chat-thread root="ID"/>`, using its `root`. The guardian sees a tappable name.
   - Sending a message to a task changes no thread. A chat thread's id is never a `threadId`: `system:fetch_channel_history` reads this whole chat, named by the `id` of `<concierge_chat>`, and shows each message's id.
 
   # What you do yourself

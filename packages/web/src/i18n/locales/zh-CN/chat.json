@@ -669,7 +669,13 @@
   },
   "thread": {
     "back": "返回对话：{{title}}",
-    "replyPlaceholder": "回复：{{title}}"
+    "replyPlaceholder": "回复：{{title}}",
+    "untitled": "话题",
+    "open": "打开话题：{{title}}",
+    "stack": "打开话题，最新一条：{{preview}}",
+    "stackCount_one": "{{count}} 条",
+    "stackCount_other": "{{count}} 条",
+    "newReplies": "「{{title}}」有新回复"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

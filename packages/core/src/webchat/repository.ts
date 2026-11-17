@@ -91,6 +91,9 @@ export interface StoredWebchatMessage {
   chatThreadId?: string | null;
   /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
   reaction?: string | null;
+  /** Whether the chat's owner has seen the message
+   *  (docs/domains/chats.md#chat-thread). Absent for a line kept outside Chats. */
+  read?: boolean;
   createdAt: Date;
 }
 
@@ -896,6 +899,15 @@ export class WebChatRepository {
    *  `key` in chat `sessionId`, or null when the chat holds none. */
   async lastInChatThread(_sessionId: string, _key: string): Promise<string | null> {
     return null;
+  }
+
+  /**
+   * Mark the messages of chat `sessionId` keyed `keys` read, and answer how
+   * many were unread. A chat outside Chats keeps no read marks, so it
+   * marks none.
+   */
+  async markMessagesRead(_sessionId: string, _keys: readonly string[]): Promise<number> {
+    return 0;
   }
 
   /** Told when a session is renamed, from the dashboard or by its channel. */

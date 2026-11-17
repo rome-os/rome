@@ -2,6 +2,7 @@ import { REPLY_TO_TEXT_MAX_LENGTH } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { ReplyTarget } from "./reply-draft";
+import { withoutThreadLinks } from "./thread-link";
 
 /** What a Reply button quotes: one message, or the answer of one agent turn. */
 export interface ReplySource {
@@ -33,7 +34,7 @@ export interface ReplySource {
  * run together. The stored quote keeps the source text.
  */
 export function plainQuote(markdown: string): string {
-  return markdown
+  return withoutThreadLinks(markdown)
     .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/gm, "")
     .replace(/\*\*|__|`/g, "")
     .replace(/\s*\n\s*/g, " ")
@@ -64,9 +65,10 @@ export function isSettledUserMessage(message: ChatMessage): boolean {
 
 /** `text` cut to what core stores: at most {@link REPLY_TO_TEXT_MAX_LENGTH} characters, ending in an ellipsis when cut. */
 export function replyPreview(text: string): string {
-  return text.length <= REPLY_TO_TEXT_MAX_LENGTH
-    ? text
-    : `${text.slice(0, REPLY_TO_TEXT_MAX_LENGTH - 1)}…`;
+  const shown = withoutThreadLinks(text);
+  return shown.length <= REPLY_TO_TEXT_MAX_LENGTH
+    ? shown
+    : `${shown.slice(0, REPLY_TO_TEXT_MAX_LENGTH - 1)}…`;
 }
 
 /**

@@ -3166,6 +3166,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
+  // The owner has seen these messages, such as the ones of a thread they
+  // opened (docs/domains/chats.md#chat-thread). Answers how many were unread.
+  app.post("/chat/sessions/:id/messages/read", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const body = await c.req.json<unknown>().catch(() => undefined);
+    const ids = typeof body === "object" && body !== null ? (body as { ids?: unknown }).ids : null;
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
+      return c.json({ error: "ids must be an array of message ids" }, 400);
+    }
+    return c.json({ marked: await deps.webchatRepo.markMessagesRead(sessionId, ids) });
+  });
+
   app.get("/chat/sessions/:id", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getContinuableSession(c, sessionId);

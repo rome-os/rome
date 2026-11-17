@@ -44,45 +44,30 @@ const group = (sender: "guardian" | "agent", ...messages: ChatMessage[]): Concie
 const separator: ConciergeItem = { kind: "separator", key: "sep", at: "2026-11-09T10:00:00.000Z" };
 
 describe("adjacent replies", () => {
-  it("hooks a reply to the message right above it, whoever said either", () => {
+  it("counts a reply to the message right above it, whoever said either", () => {
     const items = [group("guardian", reply("q")), group("agent", reply("a", "q"))];
-    expect(adjacentReplies(items)).toEqual(new Map([["a", { kind: "hook" }]]));
+    expect([...adjacentReplies(items)]).toEqual(["a"]);
     // An owner reply to the agent's message above.
     const chain = [...items, group("guardian", reply("r", "a"))];
-    expect([...adjacentReplies(chain).keys()]).toEqual(["a", "r"]);
+    expect([...adjacentReplies(chain)]).toEqual(["a", "r"]);
   });
 
-  it("joins replies of one sender to the same message with a line after the first, which keeps its hook", () => {
+  it("counts replies to the same message that follow each other, across groups and senders", () => {
     const items = [
       group("guardian", reply("q")),
       group("agent", reply("a", "q"), reply("b", "q"), reply("c", "q")),
+      group("agent", reply("d", "q")),
     ];
-    expect(adjacentReplies(items)).toEqual(
-      new Map([
-        ["a", { kind: "hook" }],
-        ["b", { kind: "line", gap: 8 }],
-        ["c", { kind: "line", gap: 8 }],
-      ]),
-    );
-  });
-
-  it("spans the larger gap between two groups, and not a time line or another sender", () => {
-    const next = [
-      group("guardian", reply("q")),
-      group("agent", reply("a", "q")),
-      group("agent", reply("b", "q")),
-    ];
-    expect(adjacentReplies(next).get("b")).toEqual({ kind: "line", gap: 16 });
-    // A time line between the groups is no message, so the reply is still adjacent, but not joined by a line.
-    const split = [next[0]!, next[1]!, separator, next[2]!];
-    expect(adjacentReplies(split).get("b")).toEqual({ kind: "hook" });
-    // Another sender's reply to the same message sits on the other side.
+    expect([...adjacentReplies(items)]).toEqual(["a", "b", "c", "d"]);
+    // A time line between the groups is no message.
+    const split = [items[0]!, items[1]!, separator, items[2]!];
+    expect(adjacentReplies(split).has("d")).toBe(true);
     const across = [
       group("agent", reply("q")),
       group("guardian", reply("a", "q")),
       group("agent", reply("b", "q")),
     ];
-    expect(adjacentReplies(across).get("b")).toEqual({ kind: "hook" });
+    expect([...adjacentReplies(across)]).toEqual(["a", "b"]);
   });
 
   it("leaves a reply with a message between it and its target, and a message that replies to nothing, plain", () => {
@@ -100,6 +85,6 @@ describe("adjacent replies", () => {
       group("agent", reply("x")),
       group("agent", reply("a", "q")),
     ];
-    expect(adjacentReplies(items, new Set(["x"])).get("a")).toEqual({ kind: "hook" });
+    expect(adjacentReplies(items, new Set(["x"])).has("a")).toBe(true);
   });
 });

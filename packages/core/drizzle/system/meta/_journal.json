@@ -1002,6 +1002,13 @@
       "when": 1794865729862,
       "tag": "0143_chat-effort-and-model-provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "6",
+      "when": 1794923184484,
+      "tag": "0144_message_read_at",
+      "breakpoints": true
     }
   ]
 }

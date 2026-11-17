@@ -9,6 +9,8 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 import { parseAssetHref } from "@/lib/asset-links";
 import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
+import { ThreadLink } from "./reply/ThreadLink";
+import { threadOfLink } from "./reply/thread-link";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -179,6 +181,8 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   const eventBus = useWorkspaceEventBus();
   const href = props.href;
 
+  const thread = threadOfLink(href);
+  if (thread !== null) return <ThreadLink root={thread} />;
   if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {
