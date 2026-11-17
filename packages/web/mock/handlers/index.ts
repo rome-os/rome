@@ -469,6 +469,17 @@ const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
   [CONCIERGE_CHAT_ID]: [
+    // Cards the Concierge composed itself, each a message of its own. They come
+    // first, so the later turns the layout checks wait for stay in view.
+    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-04T19:00:00.000Z", "Open an issue in the repo", [
+      CONNECT_CARD_A2UI,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-04T19:05:00.000Z", "How did I do today?", [
+      AGENT_CARD_HEALTH,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-04T19:10:00.000Z", "周六在东京怎么安排？", [
+      AGENT_CARD_ITINERARY,
+    ]),
     ...turn(
       CONCIERGE_CHAT_ID,
       1,
@@ -631,16 +642,6 @@ const transcripts: Record<string, ChatMessage[]> = {
     afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
     afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
     afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
-    // Cards the Concierge composed itself, each a message of its own.
-    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-07T14:24:00.000Z", "Open an issue in the repo", [
-      CONNECT_CARD_A2UI,
-    ]),
-    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-07T14:25:00.000Z", "How did I do today?", [
-      AGENT_CARD_HEALTH,
-    ]),
-    ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-07T14:30:00.000Z", "周六在东京怎么安排？", [
-      AGENT_CARD_ITINERARY,
-    ]),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
