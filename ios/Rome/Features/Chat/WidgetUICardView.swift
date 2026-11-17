@@ -172,8 +172,8 @@ private struct WidgetCardBody: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .hairline(radius: 12)
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)
         .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
     }

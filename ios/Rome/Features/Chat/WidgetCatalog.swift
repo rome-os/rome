@@ -37,30 +37,11 @@ enum WidgetCatalog {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // A tile on a subtle fill: the label above, the value below it with its
-    // unit, and an optional caption such as the usual range.
     private static let stat = ComponentImplementation(
         name: "Stat",
         schema: schema(["label": "DynamicString", "value": "DynamicValue", "unit": "DynamicString", "caption": "DynamicString"], required: ["label", "value"])
     ) { node in
-        VStack(alignment: .leading, spacing: 4) {
-            Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.label).foregroundStyle(Palette.sub)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(verbatim: shown(node, "value")).romeFont(20, .medium, monospacedDigits: true).foregroundStyle(Palette.fg)
-                if let unit = node.string(for: "unit") {
-                    Text(verbatim: unit).romeFont(CardScale.label).foregroundStyle(Palette.sub)
-                }
-            }
-            if let caption = node.string(for: "caption") {
-                Text(verbatim: caption).romeFont(CardScale.label).foregroundStyle(Palette.sub)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .accessibilityElement(children: .combine)
+        WidgetStat(node: node)
     }
 
     private static let progress = ComponentImplementation(
@@ -166,6 +147,11 @@ struct WidgetClearsKey: EnvironmentKey {
     static let defaultValue = WidgetClears()
 }
 
+/// Set inside a grid of tiles, so each tile takes its row's height.
+private struct WidgetInTileGridKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 /// Set while a button's request runs: every button is disabled, so a press is sent once.
 struct WidgetBusyKey: EnvironmentKey {
     static let defaultValue = false
@@ -185,6 +171,11 @@ extension EnvironmentValues {
     var widgetClears: WidgetClears {
         get { self[WidgetClearsKey.self] }
         set { self[WidgetClearsKey.self] = newValue }
+    }
+
+    fileprivate var widgetInTileGrid: Bool {
+        get { self[WidgetInTileGridKey.self] }
+        set { self[WidgetInTileGridKey.self] = newValue }
     }
 
     var widgetBusy: Bool {
@@ -214,6 +205,39 @@ private struct WidgetText: View {
         } else {
             label.foregroundStyle(variant == "caption" ? Palette.sub : Palette.fg)
         }
+    }
+}
+
+/// A tile on a subtle fill: the label above, the value below it with its
+/// unit, and an optional caption such as the usual range. In a row of tiles
+/// it takes the row's height.
+private struct WidgetStat: View {
+    let node: Node
+    @Environment(\.widgetInTileGrid) private var inGrid
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.label).foregroundStyle(Palette.sub)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(verbatim: WidgetCatalog.shown(node, "value")).romeFont(20, .medium, monospacedDigits: true).foregroundStyle(Palette.fg)
+                if let unit = node.string(for: "unit") {
+                    Text(verbatim: unit).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                }
+            }
+            // The value stays on one line: a long one shrinks to fit.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            if let caption = node.string(for: "caption") {
+                Text(verbatim: caption).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: inGrid ? .infinity : nil, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -285,8 +309,15 @@ private struct WidgetRow: View {
         let kids = node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
         // Numbers side by side read as an even two-column grid.
         if kids.count > 1, kids.allSatisfy({ $0.type == "Stat" }) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], alignment: .leading, spacing: 10) {
-                ForEach(kids) { kid in ComponentNodeView(node: kid).frame(maxHeight: .infinity, alignment: .top) }
+            let rows = stride(from: 0, to: kids.count, by: 2).map { Array(kids[$0 ..< Swift.min($0 + 2, kids.count)]) }
+            // A Grid, not a lazy one, so the tiles of a row share its height.
+            Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 10) {
+                ForEach(rows, id: \.first?.id) { pair in
+                    GridRow {
+                        ForEach(pair) { kid in ComponentNodeView(node: kid).environment(\.widgetInTileGrid, true) }
+                        if pair.count == 1 { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                    }
+                }
             }
         } else {
             row(kids)

@@ -157,18 +157,34 @@ const Text = createComponentImplementation(TextApi, ({ props }) => {
 
 // A tile on a subtle fill: the label above, the value below it with its
 // unit, and an optional caption such as the usual range.
-const Stat = createComponentImplementation(StatApi, ({ props }) => (
-  <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2">
-    <span className="text-aux text-muted-foreground">{shown(props.label)}</span>
-    <span className="text-title text-foreground tabular-nums">
-      {shown(props.value)}
-      {props.unit ? (
-        <span className="ml-1 text-aux text-muted-foreground">{props.unit}</span>
+/** Characters past which a stat's value and unit drop a type step, so they
+ *  stay on one line in a half-width tile. */
+const STAT_LONG_VALUE = 9;
+
+const Stat = createComponentImplementation(StatApi, ({ props }) => {
+  const value = shown(props.value);
+  const long = value.length + (props.unit ? props.unit.length + 1 : 0) > STAT_LONG_VALUE;
+  return (
+    <div className="flex min-w-0 flex-col gap-1 rounded-8 bg-muted px-3 py-2">
+      <span className="truncate text-aux text-muted-foreground">{shown(props.label)}</span>
+      {/* One line: a long value takes a smaller step, then an ellipsis. */}
+      <span
+        className={cn(
+          "truncate whitespace-nowrap text-foreground tabular-nums",
+          long ? "text-section" : "text-title",
+        )}
+      >
+        {value}
+        {props.unit ? (
+          <span className="ml-1 text-aux text-muted-foreground">{props.unit}</span>
+        ) : null}
+      </span>
+      {props.caption ? (
+        <span className="line-clamp-2 text-aux text-muted-foreground">{props.caption}</span>
       ) : null}
-    </span>
-    {props.caption ? <span className="text-aux text-muted-foreground">{props.caption}</span> : null}
-  </div>
-));
+    </div>
+  );
+});
 
 // A card opens and loads nothing: inert Markdown shows a link as its text and
 // an image as its description, and draws no diagram or raw HTML.

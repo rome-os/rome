@@ -144,8 +144,8 @@ extension View {
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
     /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
     /// tinted message's tint goes on before the width, so it hugs the bubble.
-    func bubbleWidth() -> some View {
-        modifier(BubbleWidth())
+    func bubbleWidth(full: Bool = false) -> some View {
+        modifier(BubbleWidth(full: full))
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -162,13 +162,15 @@ extension View {
 }
 
 private struct BubbleWidth: ViewModifier {
+    /// The chat's whole width, as an agent card takes it, rather than a bubble's.
+    let full: Bool
     @Environment(\.rowTinted) private var tinted
 
     func body(content: Content) -> some View {
         content
             .tinted(tinted)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, Metrics.bubbleInset)
+            .padding(.trailing, full ? 0 : Metrics.bubbleInset)
     }
 }
 
