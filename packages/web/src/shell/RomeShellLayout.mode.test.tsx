@@ -69,9 +69,15 @@ afterEach(() => {
   seedChatListMode();
 });
 
-let go: (to: string | number) => void = () => {};
+let go: (to: InitialEntry | number) => void = () => {};
 function Navigator() {
-  go = useNavigate();
+  const navigate = useNavigate();
+  go = (to) =>
+    typeof to === "number"
+      ? navigate(to)
+      : typeof to === "string"
+        ? navigate(to)
+        : navigate(to.pathname ?? "/", { state: to.state });
   return null;
 }
 
@@ -108,24 +114,58 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
     ["a common chat", "/chat/mine", "chat", "mine"],
     ["a fork chat", "/chat/fork", "chat", "fork"],
   ];
-  it.each(cases)("opening %s, with no chat list loaded", async (_, entry, mode, last) => {
-    // The other mode, so the route has to move it.
+  it.each(
+    cases,
+  )("opening %s from another page, with no chat list loaded", async (_, entry, mode, last) => {
+    // The other mode, so the navigation has to move it.
     seedChatListMode({ mode: mode === "chat" ? "concierge" : "chat" });
-    openShell(entry);
+    openShell("/apps");
+    act(() => go(entry));
     await waitFor(() => expect(localStorage.getItem(MODE_KEY)).toBe(mode));
     expect(readChatListMode()).toBe(mode);
     expect(readLastOrdinaryChatId()).toBe(last);
   });
 
-  it("resolves a cold deep link through the chat's own session, and no other request", async () => {
+  it("keeps the stored mode on a refresh, whatever chat it reopens", async () => {
+    for (const entry of ["/message", "/chat/task", "/chat/topic"]) {
+      seedChatListMode({ mode: "chat" });
+      openShell(entry);
+      await act(async () => {});
+      expect(readChatListMode()).toBe("chat");
+      cleanup();
+    }
+    seedChatListMode({ mode: "concierge" });
+    openShell("/chat/mine");
+    await act(async () => {});
+    expect(readChatListMode()).toBe("concierge");
+  });
+
+  it("starts in Chat on a device with none stored, on a refresh at the main chat too", async () => {
+    openShell("/message");
+    await act(async () => {});
+    expect(readChatListMode()).toBeNull();
+  });
+
+  it("moves from Chat to Agent when a navigation goes into the Concierge", async () => {
     seedChatListMode({ mode: "chat" });
-    openShell("/chat/task");
+    openShell("/chat/mine");
+    await act(async () => {});
+    expect(readChatListMode()).toBe("chat");
+    act(() => go("/message"));
+    await waitFor(() => expect(readChatListMode()).toBe("concierge"));
+    expect(localStorage.getItem(MODE_KEY)).toBe("concierge");
+  });
+
+  it("resolves a cold navigation through the chat's own session, and no other request", async () => {
+    seedChatListMode({ mode: "chat" });
+    openShell("/apps");
+    act(() => go("/chat/task"));
     expect(readChatListMode()).toBe("chat");
     await waitFor(() => expect(readChatListMode()).toBe("concierge"));
     expect(fetched).toEqual(["/api/chat/sessions/task"]);
   });
 
-  it("remembers the last ordinary chat from a cold deep link, and not a Concierge chat", async () => {
+  it("remembers the last ordinary chat from a refresh, and not a Concierge chat", async () => {
     openShell("/chat/mine");
     await waitFor(() => expect(localStorage.getItem(LAST_CHAT_KEY)).toBe("mine"));
     act(() => go("/chat/topic"));
@@ -140,7 +180,8 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
       ["chat-sessions", "active", "mine"],
       [{ id: "listed-task", triggerKind: "concierge" }],
     );
-    openShell("/chat/listed-task", queryClient);
+    openShell("/apps", queryClient);
+    act(() => go("/chat/listed-task"));
     await waitFor(() => expect(readChatListMode()).toBe("concierge"));
     expect(fetched).toEqual([]);
   });
@@ -151,22 +192,25 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
     queryClient.setQueryData(["concierge-chats"], {
       chats: [{ id: "listed-topic", name: "Calendar", main: false, unread: 0 }],
     });
-    openShell("/chat/listed-topic", queryClient);
+    openShell("/apps", queryClient);
+    act(() => go("/chat/listed-topic"));
     await waitFor(() => expect(readChatListMode()).toBe("concierge"));
     expect(fetched).toEqual([]);
   });
 
   it("keeps the mode when the open chat does not exist", async () => {
     seedChatListMode({ mode: "chat" });
-    openShell("/chat/missing");
+    openShell("/apps");
+    act(() => go("/chat/missing"));
     await waitFor(() => expect(fetched).toEqual(["/api/chat/sessions/missing"]));
     await act(async () => {});
     expect(readChatListMode()).toBe("chat");
   });
 
   it("applies a navigation once: a switch made on the page stands", async () => {
+    seedChatListMode({ mode: "chat" });
     openShell("/chat/mine");
-    await waitFor(() => expect(readChatListMode()).toBe("chat"));
+    await act(async () => {});
     act(() => writeChatListMode("concierge"));
     await act(async () => {});
     expect(readChatListMode()).toBe("concierge");
@@ -178,8 +222,9 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
   });
 
   it("applies the open chat's mode again when Back returns to it from another page", async () => {
+    seedChatListMode({ mode: "chat" });
     openShell("/chat/mine");
-    await waitFor(() => expect(readChatListMode()).toBe("chat"));
+    await act(async () => {});
     act(() => writeChatListMode("concierge"));
     act(() => go("/apps"));
     await act(async () => {});

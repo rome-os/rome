@@ -28,7 +28,8 @@ export function useLastOrdinaryChatId(): string | null {
 
 /**
  * Moves the mode to the open chat's, once per navigation, and keeps the last
- * ordinary chat. Call it once, from the shell, which stays mounted while the
+ * ordinary chat. The page the tab loaded on is no navigation: a refresh keeps
+ * the stored mode, whatever chat it reopens. Call it once, from the shell, which stays mounted while the
  * chat list comes and goes: a second caller would apply the same navigation
  * again and undo a switch the guardian made since. A guardian's own switch
  * between navigations stands.
@@ -68,6 +69,9 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
   });
   const applied = useRef<string | null>(null);
   const routeKey = `${location.key}:${location.pathname}`;
+  // The page this tab loaded on. It keeps the stored mode: a refresh or a first
+  // load never derives the mode from the address, only a later navigation does.
+  const loadedOn = useRef<string | null>(routeKey);
   const mode = route?.mode;
   const ordinaryChatId = route?.ordinaryChatId;
   const onChatPage = isChatPath(location.pathname);
@@ -76,12 +80,14 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
     // history entry applies its mode again.
     if (!onChatPage) {
       applied.current = null;
+      loadedOn.current = null;
       return;
     }
     if (!mode || applied.current === routeKey) return;
     applied.current = routeKey;
-    writeChatListMode(mode);
     if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
+    if (loadedOn.current === routeKey) return;
+    writeChatListMode(mode);
   }, [mode, ordinaryChatId, routeKey, onChatPage]);
 }
 
