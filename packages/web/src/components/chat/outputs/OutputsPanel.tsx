@@ -96,7 +96,8 @@ export function OutputsPanel({
   // A link opened on another output chooses that one.
   useEffect(() => setChosen(selectedId), [selectedId, selectionSeq]);
   const list = outputs.data ?? [];
-  const current = list.find((output) => output.id === chosen) ?? null;
+  // Until one is chosen, the newest is previewed.
+  const current = list.find((output) => output.id === chosen) ?? list[0] ?? null;
   const now = Date.now();
 
   if (outputs.isPending) {
@@ -132,7 +133,14 @@ export function OutputsPanel({
       >
         <ul>
           {list.map((output) => (
-            <li key={output.id} className="flex min-w-0 items-center">
+            <li
+              key={output.id}
+              // The chosen row's fill spans its task chat's chip too.
+              className={cn(
+                "flex min-w-0 items-center",
+                output.id === current?.id && "bg-primary/10",
+              )}
+            >
               <ListRow asChild interactive selected={output.id === current?.id} className="flex-1">
                 <button
                   type="button"
@@ -174,11 +182,7 @@ export function OutputsPanel({
         </ul>
       </List>
       <div className="min-h-0 flex-1 overflow-auto pb-safe">
-        {current ? (
-          <OutputPreview key={current.id} output={current} />
-        ) : (
-          <p className="p-4 text-ui text-muted-foreground">{t("outputs.pick")}</p>
-        )}
+        {current && <OutputPreview key={current.id} output={current} />}
       </div>
     </div>
   );

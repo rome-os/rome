@@ -759,7 +759,6 @@
     "shown": "展示",
     "from": "来自 {{name}}",
     "missing": "已移动或删除",
-    "pick": "选择一个文件来预览。",
     "download": "下载",
     "noPreview": "这个文件没有预览。",
     "unavailable": "这个文件无法在这里打开。",

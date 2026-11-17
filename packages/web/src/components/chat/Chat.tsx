@@ -2574,6 +2574,11 @@ export function Chat({
       void queryClient.invalidateQueries({ queryKey: chatOutputsKey(mainSessionId) });
     }
   }, [turnEnds, mainSessionId, queryClient]);
+  // The phone header's Outputs button sits outside the chat, and asks through the bus.
+  useEffect(() => {
+    if (!workspaceEventBus) return;
+    return workspaceEventBus.on("outputs:open", () => outputsLatest.current.open());
+  }, [workspaceEventBus]);
   // Read through a ref, so the context stays the same object and the
   // memoized transcript does not draw again when the list or pane changes.
   const outputsLatest = useRef({ outputs: chatOutputs.data, open: outputsPane.open });

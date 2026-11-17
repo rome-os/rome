@@ -759,7 +759,6 @@
     "shown": "Shown",
     "from": "from {{name}}",
     "missing": "Moved or deleted",
-    "pick": "Choose a file to preview it.",
     "download": "Download",
     "noPreview": "This file has no preview.",
     "unavailable": "This file cannot be opened here.",

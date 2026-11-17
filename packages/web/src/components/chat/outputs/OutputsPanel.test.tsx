@@ -96,7 +96,8 @@ describe("OutputsPanel", () => {
     expect(rows[1].textContent).toContain("Shown");
     const chip = within(rows[1]).getByRole("link", { name: "from Draft the report" });
     expect(chip.getAttribute("href")).toBe("/chat/task-1");
-    expect(screen.getByText("Choose a file to preview it.")).toBeTruthy();
+    // The newest is previewed until another is chosen.
+    expect(rows[0].querySelector("[aria-current='true']")).not.toBeNull();
   });
 
   it("says a file that moved or went is gone, and offers nothing to open", async () => {
