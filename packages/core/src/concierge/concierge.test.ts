@@ -4167,7 +4167,9 @@ describe("Concierge chat", () => {
         "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
       );
       // Before following is attached, an admin's chat falls back to the guardian's zone.
-      expect(await shanghai.nowLine(annMain)).toBe("<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>");
+      expect(await shanghai.nowLine(annMain)).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
       shanghai.attachFollowing({
         timezone: async (owner: string) =>
           owner === "visitor:acct-ann" ? "America/Los_Angeles" : "Asia/Shanghai",
