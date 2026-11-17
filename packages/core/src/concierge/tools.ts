@@ -53,6 +53,7 @@ import {
   withoutMarkers,
 } from "./conclusion.js";
 import { automatedSource } from "../webchat/automated-source.js";
+import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { ownerOf } from "../webchat/owner.js";
 import {
   parseTaskSchedule,
@@ -623,13 +624,25 @@ export async function buildConciergeTools(
     return (own ?? (started.length === 1 ? started[0] : undefined))?.row.id;
   };
 
-  // Says `parts`, replying to `replyTo` (ConciergeService.addMessage).
-  const addMessage = (
+  // Says `parts`. A message that replies to `replyTo` shows its quote
+  // (docs/domains/chats.md#chat-thread), and joins its thread.
+  const addMessage = async (
     parts: Parameters<typeof webchatRepo.addBackendMessage>[2],
-    replyTo?: Parameters<typeof service.addMessage>[3],
+    replyTo?: { id: string; role: "user" | "assistant"; content: string; senderId?: string | null },
   ) => {
     const { chatId, turnId } = currentTurn();
-    return service.addMessage(chatId, turnId, parts, replyTo);
+    const quote = replyTo
+      ? await replyQuoteOf(replyTo, (card, waitedOn) =>
+          taskCardLine(service.taskCardSources(), card, waitedOn),
+        )
+      : null;
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      quote ? [quote, ...parts] : parts,
+      replyTo ? { replyTo: replyTo.id } : {},
+    );
+    return id;
   };
 
   // Points the task in task chat `taskChatId` to `messageId`, its panel's
@@ -1611,16 +1624,14 @@ export async function buildConciergeTools(
           if (connector.state === "working") {
             return { connected: true, note: "Already connected; no card shown." };
           }
-          const id = await addMessage([
-            {
-              type: "connect_card",
-              service: connector.service,
-              label: connector.label,
-              icon: connector.icon,
-              // A service with no entry can only be connected from Settings.
-              connect: connector.connect ?? { kind: "dashboard" },
-            },
-          ]);
+          const id = await service.addCard(chatId, turnId, {
+            type: "connect_card",
+            service: connector.service,
+            label: connector.label,
+            icon: connector.icon,
+            // A service with no entry can only be connected from Settings.
+            connect: connector.connect ?? { kind: "dashboard" },
+          });
           said(chatId, turnId, `Connect ${connector.label}`);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),

@@ -53,9 +53,8 @@ import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.j
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
-import { openCards, settledCard, taskCardLine, type TaskCardSources } from "./task-cards.js";
+import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import { defaultReplyTarget } from "./reply-target.js";
-import { replyQuoteOf } from "../webchat/reply-quote.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -1122,34 +1121,10 @@ export class ConciergeService {
   }
 
   /**
-   * Says `parts` as the Concierge in turn `turnId` of `chatId`. A message that
-   * replies to `replyTo` shows its quote (docs/domains/chats.md#chat-thread),
-   * and joins its thread. Answers the message's id.
-   */
-  async addMessage(
-    chatId: string,
-    turnId: string,
-    parts: Parameters<WebChatRepository["addBackendMessage"]>[2],
-    replyTo?: { id: string; role: "user" | "assistant"; content: string; senderId?: string | null },
-  ): Promise<string> {
-    const quote = replyTo
-      ? await replyQuoteOf(replyTo, (card, waitedOn) =>
-          taskCardLine(this.taskCardSources(), card, waitedOn),
-        )
-      : null;
-    const { id } = await this.deps.webchatRepo.addBackendMessage(
-      chatId,
-      turnId,
-      quote ? [quote, ...parts] : parts,
-      replyTo ? { replyTo: replyTo.id } : {},
-    );
-    return id;
-  }
-
-  /**
    * Says a card the Concierge shows, which replies as its messages do: to the
-   * message `named`, else to the turn's default (reply-target.ts). A name that is no message of
-   * the chat is dropped, not refused: the guardian was shown the card already.
+   * message `named`, else to the turn's default (reply-target.ts). A name that
+   * is no message of the chat is dropped, not refused: the guardian was shown
+   * the card already. A card is a message of its own, so it carries no quote.
    */
   async addCard(
     chatId: string,
@@ -1161,7 +1136,13 @@ export class ConciergeService {
     const target = named ? await webchatRepo.getReplyTarget(chatId, named) : null;
     const key = target ? undefined : await defaultReplyTarget(this, chatId, turnId);
     const replyTo = target ?? (key ? await webchatRepo.getReplyTarget(chatId, key) : null);
-    return this.addMessage(chatId, turnId, [part], replyTo ?? undefined);
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [part],
+      replyTo ? { replyTo: replyTo.id } : {},
+    );
+    return id;
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

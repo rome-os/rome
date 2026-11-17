@@ -13,7 +13,7 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import { eq, like, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
@@ -6327,14 +6327,17 @@ describe("Webchat API", () => {
       });
     });
 
-    it("stores a Concierge's question card as a reply to the message its ask_question names, and no other chat's", async () => {
+    it("stores a Concierge's question card, alone, in the thread of the message it replies to, and no other chat's", async () => {
       const ctl = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
-      const addCard = rs.fn(async () => "card-1");
+      // The real card write, on the real store.
+      const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
       deps.concierge = {
+        deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
         switchIfExhausted: async () => null,
         conciergeChat: async () => null,
-        addCard,
+        cardSettled: async () => {},
+        addCard: service.addCard.bind(service),
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",
@@ -6345,17 +6348,21 @@ describe("Webchat API", () => {
         undefined,
         "core:concierge",
       );
+      const start = await deps.webchatRepo.addBackendMessage("topic-1", "t0", [
+        { type: "text", content: "On it" },
+      ]);
       const questions = [{ id: "q1", question: "Which day?", type: "text" }];
+      let ask: { toolUseId: string; replyTo?: string } = { toolUseId: "tu-1" };
       ctl.setEvents(async function* () {
         yield {
           type: "tool_use",
-          id: "tu-ask",
+          id: ask.toolUseId,
           tool: "ask_question",
-          input: { questions, replyTo: "m-start" },
+          input: { questions, ...(ask.replyTo ? { replyTo: ask.replyTo } : {}) },
         };
         yield {
           type: "tool_result",
-          toolUseId: "tu-ask",
+          toolUseId: ask.toolUseId,
           tool: "ask_question",
           output: {
             pendingInteraction: true,
@@ -6371,36 +6378,51 @@ describe("Webchat API", () => {
         yield { type: "result", content: "" };
       });
       const app = createWebchatRuntime(deps).routes;
-      const ask = async (sessionId: string) =>
+      const send = async (sessionId: string, body: Record<string, unknown>) =>
         drainTurn(
           app,
           await app.request(`/chat/sessions/${sessionId}/turns`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: "ask me something" }),
+            body: JSON.stringify({ text: "ask me something", ...body }),
           }),
         );
+      const rows = () =>
+        testDb.db
+          .select({
+            id: chatMessages.id,
+            key: chatMessages.key,
+            replyTo: chatMessages.replyToMessageId,
+            root: chatMessages.rootMessageId,
+            parts: chatMessages.parts,
+          })
+          .from(chatMessages)
+          .all();
+      const cardOf = (toolUseId: string) => rows().find((row) => row.parts.includes(toolUseId))!;
+      const startRow = rows().find((row) => row.key === start.id)!;
 
-      await ask("topic-1");
-      expect(addCard).toHaveBeenCalledTimes(1);
-      expect(addCard).toHaveBeenCalledWith(
-        "topic-1",
-        expect.any(String),
-        expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-ask" }),
-        "m-start",
-      );
+      // The owner wrote inside the thread: the card replies there, with no name.
+      await send("topic-1", { replyToMessageId: start.id });
+      const inThread = cardOf("tu-1");
+      expect(inThread.replyTo).not.toBeNull();
+      expect(inThread.root).toBe(startRow.id);
+      expect(JSON.parse(inThread.parts)).toEqual([
+        expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-1" }),
+      ]);
+
+      // The owner wrote on the main line: the card replies to the message it names.
+      ask = { toolUseId: "tu-2", replyTo: start.id };
+      await send("topic-1", {});
+      const named = cardOf("tu-2");
+      expect([named.replyTo, named.root]).toEqual([startRow.id, startRow.id]);
+      expect(JSON.parse(named.parts)).toHaveLength(1);
 
       // Another chat's card is written as it always was: replying to nothing.
       const plain = await newSession(app);
-      await ask(plain);
-      expect(await findCard(plain, "tu-ask")).toBeDefined();
-      expect(addCard).toHaveBeenCalledTimes(1);
-      const cards = testDb.db
-        .select({ replyTo: chatMessages.replyToMessageId, root: chatMessages.rootMessageId })
-        .from(chatMessages)
-        .where(like(chatMessages.parts, "%tu-ask%"))
-        .all();
-      expect(cards).toEqual([{ replyTo: null, root: null }]);
+      ask = { toolUseId: "tu-3", replyTo: start.id };
+      await send(plain, {});
+      expect(await findCard(plain, "tu-3")).toBeDefined();
+      expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {
