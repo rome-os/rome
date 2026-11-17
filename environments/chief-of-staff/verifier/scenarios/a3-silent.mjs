@@ -2,8 +2,14 @@ import { readFileSync } from "node:fs";
 import { sleep } from "../lib/hearing.mjs";
 import { check, ruleResult } from "../lib/scenario.mjs";
 
-/** At most this many replies to the replayed messages that did not mention the agent. */
-const A3_LIMIT = 2;
+/**
+ * At most this many replies to the replayed messages that did not mention the agent: the
+ * rule's 2, loosened to 10 for phase 2 by Ouou (2026-11-17), who moved tuning the agent's
+ * silence to a later phase.
+ */
+export function a3Limit(phase) {
+  return phase === 2 ? 10 : 2;
+}
 
 /** The environment's replay of 100 ordinary messages with 3 mentions mixed in. */
 export function loadReplay() {
@@ -141,6 +147,7 @@ export default {
     const ordinary = posted.filter((p) => !p.mention && !isPrivate(p.chat)).length;
     const shared = unprompted.filter((m) => !isPrivate(m.chat));
     const inPrivate = unprompted.length - shared.length;
+    const A3_LIMIT = a3Limit(ctx.phase ?? 1);
     const evidence = [first, posted.at(-1).id, ...shared.map((m) => m.id)];
     const result = ruleResult([
       {

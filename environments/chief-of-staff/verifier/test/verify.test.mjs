@@ -11,6 +11,7 @@ import { makeJudge, parseVerdict } from "../lib/judge.mjs";
 import { linkedIds, namesSource, presentedAsCurrent } from "../lib/checks.mjs";
 import { failureHistory, NOT_ANSWERING, selectScenarios, verify } from "../lib/runner.mjs";
 import { loadTeam } from "../lib/seed.mjs";
+import { a3Limit } from "../scenarios/a3-silent.mjs";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
 const PHASE_1 = ["K1", "K2", "K3", "K5", "K6", "K7", "A1", "A5"];
@@ -336,6 +337,13 @@ describe("message links", () => {
     const text =
       "| G2 | Marisol | 2026-12-11 | _(Changed: said so, https://discord.com/channels/1/2/1572040996605272106)_\n[here](https://discord.com/channels/1/2/42). And https://discord.com/channels/1/2/7.";
     assert.deepEqual(linkedIds(text), ["1572040996605272106", "42", "7"]);
+  });
+});
+
+describe("A3's bar", () => {
+  it("allows 10 replies in phase 2 and the rule's 2 otherwise", () => {
+    assert.equal(a3Limit(2), 10);
+    assert.equal(a3Limit(3), 2);
   });
 });
 
