@@ -57,7 +57,7 @@
       "tokens": [["2,318", "2318"]]
     },
     {
-      "as": "member3",
+      "as": "member2",
       "chat": "leads",
       "text": "Our drill rental for the pier installs is from Tarbrax Plant Hire, collection reference TPH-58114.",
       "question": "What is the collection reference for the pier install drill rental?",
@@ -101,7 +101,7 @@
       "tokens": [["Driftwood"]]
     },
     {
-      "as": "member3",
+      "as": "member2",
       "chat": "leads",
       "text": "The pier install insurance certificate number is OIC-77310.",
       "question": "What is the pier install insurance certificate number?",

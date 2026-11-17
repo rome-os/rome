@@ -115,6 +115,12 @@ switch (command) {
     state.displayNames[values.as] = positionals.join(" ");
     break;
   case "post": {
+    // Strict like the real cos-env: a member posts only in chats they can read.
+    const readers = state.team?.chats?.[values.chat]?.readers;
+    if (readers && !readers.includes(values.as.split(":")[0])) {
+      console.error(`cos-env: ${values.as} is not in #${values.chat}`);
+      process.exit(2);
+    }
     // Stand in for an environment where only posting from a second account fails.
     if (values.as.includes(":") && process.env.COS_FAKE_NO_SECOND_ACCOUNT) {
       console.error("a second account is not available");

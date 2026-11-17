@@ -331,6 +331,16 @@ describe("failures across runs", () => {
   });
 });
 
+describe("the seeded messages", () => {
+  it("has each member say things only in chats they can read", () => {
+    const team = loadTeam();
+    const hearing = JSON.parse(readFileSync(join(here, "seed/hearing.json"), "utf8"));
+    const said = [...hearing.a2Facts, ...hearing.a8Facts, ...hearing.k4Changes, hearing.k4Proposal];
+    for (const m of said.filter((x) => team.chats[x.chat]))
+      assert.ok(team.chats[m.chat].readers.includes(m.as), `${m.as} cannot post in ${m.chat}`);
+  });
+});
+
 describe("reading the chat", () => {
   it("never calls cos-env read without a chat or a member", async () => {
     // The fake cos-env refuses such a read as the real one does, and the client names the call.
