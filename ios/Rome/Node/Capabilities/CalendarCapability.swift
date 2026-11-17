@@ -27,7 +27,7 @@ struct CalendarCapability: NodeCapability {
         [
             CapabilityExample(
                 symbol: "sun.horizon", title: "Daily summary",
-                request: "Summarize my day every morning.",
+                request: "Brief me every morning.",
                 reply: "Every morning at 8, I'll send today's schedule, what's due, and anything that needs you first."
             ),
             CapabilityExample(

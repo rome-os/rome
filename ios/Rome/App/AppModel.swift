@@ -868,6 +868,10 @@ final class AppModel {
            let user = environment["ROME_LOCAL_USER"],
            let password = environment["ROME_LOCAL_PASSWORD"] {
             await openLocal(origin: origin, user: user, password: password)
+            // `-RomeConnect <capability>`: the authorization Connect runs, with no tap.
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-RomeConnect"), ProcessInfo.processInfo.arguments.count > index + 1 {
+                await connect(ProcessInfo.processInfo.arguments[index + 1])
+            }
             if let request = CalendarSeed.nodeAction {
                 // Once the app has settled and its connections are on.
                 try? await Task.sleep(for: .seconds(3))

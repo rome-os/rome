@@ -7,6 +7,7 @@ import os
 /// events today and tomorrow, and two reminders. Debug builds only, and only
 /// with the launch argument `-RomeSeedCalendar`, once per install.
 ///
+/// `-RomeConnect <capability>` runs a connection's Connect with no tap, and
 /// `-RomeRunNodeAction <action> <json args>` then runs one device operation
 /// through the app's executor, as a Rome would over the Gateway, for a
 /// Simulator signed in to a local Rome, which has no Gateway to reach it.
