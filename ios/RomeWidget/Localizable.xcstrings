@@ -21,6 +21,16 @@
         }
       }
     },
+    "Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat"
+          }
+        }
+      }
+    },
     "Choose apps" : {
       "localizations" : {
         "zh-Hans" : {
@@ -51,12 +61,12 @@
         }
       }
     },
-    "Pick the apps to show. Spots left over show the apps you opened last." : {
+    "Pick the apps and shortcuts to show. Spots left over show the apps you opened last." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选出要显示的应用。剩下的位置显示你最近打开的应用。"
+            "value" : "选出要显示的应用和快捷方式。剩下的位置显示你最近打开的应用。"
           }
         }
       }

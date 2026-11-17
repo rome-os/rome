@@ -135,21 +135,63 @@ struct AppShelfStore: Sendable {
     }
 }
 
-/// Which apps fill the widget's slots.
+enum WidgetShortcut: String, CaseIterable, Sendable {
+    // Neither local app ids nor scoped App Store ids admit a colon.
+    case chat = "rome:chat"
+    case apps = "rome:apps"
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .chat: "Chat"
+        case .apps: "Apps"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .chat: "bubble.left.and.bubble.right.fill"
+        case .apps: "square.grid.2x2.fill"
+        }
+    }
+
+    var link: WidgetLink {
+        switch self {
+        case .chat: .chat
+        case .apps: .apps
+        }
+    }
+}
+
+enum WidgetSlot: Equatable, Sendable, Identifiable {
+    case app(ShelfApp)
+    case shortcut(WidgetShortcut)
+
+    var id: String {
+        switch self {
+        case .app(let app): app.id
+        case .shortcut(let shortcut): shortcut.rawValue
+        }
+    }
+}
+
 enum WidgetSlots {
     /// The small widget's 2×2 grid.
     static let small = 4
 
-    /// The apps the guardian picked, in their order, then the ones opened
-    /// last, then the rest of the list: each once, only apps the list still
-    /// has, at most `limit`.
-    static func choose(picked: [String], recent: [String], apps: [ShelfApp], limit: Int = small) -> [ShelfApp] {
+    /// Picks keep their order, then recent apps, then the list, each once up
+    /// to `limit`. Missing apps are skipped. Shortcuts fill only picked spots.
+    static func choose(picked: [String], recent: [String], apps: [ShelfApp], limit: Int = small) -> [WidgetSlot] {
         let byId = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let picks = picked.compactMap { id -> WidgetSlot? in
+            if let shortcut = WidgetShortcut(rawValue: id) { return .shortcut(shortcut) }
+            return byId[id].map { .app($0) }
+        }
+        let fill = (recent + apps.map(\.id)).compactMap { byId[$0].map { WidgetSlot.app($0) } }
         var seen = Set<String>()
-        var chosen: [ShelfApp] = []
-        for id in picked + recent + apps.map(\.id) where chosen.count < limit {
-            guard let app = byId[id], seen.insert(id).inserted else { continue }
-            chosen.append(app)
+        var chosen: [WidgetSlot] = []
+        for slot in picks + fill where chosen.count < limit {
+            guard seen.insert(slot.id).inserted else { continue }
+            chosen.append(slot)
         }
         return chosen
     }
@@ -159,12 +201,13 @@ enum WidgetSlots {
 enum WidgetLink: Equatable, Sendable {
     /// One app full screen, on its instance.
     case app(instanceId: String, appId: String)
+    case chat
     /// The Apps page.
     case apps
     /// Chat with "Make an app: " in the composer, unsent.
     case newApp
 
-    /// The instance the link is for; Apps and Make an app are for any.
+    /// Nil for shortcuts and Make an app, which open on any instance.
     var instanceId: String? {
         if case .app(let instanceId, _) = self { return instanceId }
         return nil
@@ -183,6 +226,8 @@ enum WidgetLink: Equatable, Sendable {
         case "app":
             guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
             self = .app(instanceId: parts[0], appId: parts[1])
+        case "chat" where path.isEmpty:
+            self = .chat
         case "apps" where parts.allSatisfy(\.isEmpty):
             self = .apps
         case "new-app" where parts.allSatisfy(\.isEmpty):
@@ -199,6 +244,8 @@ enum WidgetLink: Equatable, Sendable {
         case .app(let instanceId, let appId):
             components.host = "app"
             components.percentEncodedPath = "/" + [instanceId, appId].map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? $0 }.joined(separator: "/")
+        case .chat:
+            components.host = "chat"
         case .apps:
             components.host = "apps"
         case .newApp:
