@@ -232,7 +232,7 @@ import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
 import { deviceKinds, deviceKindState } from "./connections/connect-card.js";
 import { PERSONAL_DATA_SOURCES } from "./personal-data/sources/index.js";
-import { ConciergeService } from "./concierge/service.js";
+import { ConciergeService, GUARDIAN_LANGUAGE_SETTING_KEY } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
@@ -1327,6 +1327,10 @@ async function main() {
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
         deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+        guardianLanguage: async () => {
+          const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+          return typeof stored === "string" ? stored : null;
+        },
         deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
         // The turn's audience, narrowed by the chat's as it stands now, so a
         // chat that opens to visitors after the turn started is no longer private.

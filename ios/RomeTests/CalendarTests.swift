@@ -2,36 +2,24 @@ import Foundation
 import Testing
 @testable import Rome
 
-/// A calendar in memory: invented events and reminders, no real person's data.
+/// A calendar in memory: invented events, no real person's data.
 final class FakeCalendar: CalendarReading, @unchecked Sendable {
     private let lock = NSLock()
-    var accessState = CalendarAccess(events: .granted, reminders: .granted)
+    var accessState = CalendarAccessState.granted
     var events: [CalendarEventItem] = []
-    var reminders: [ReminderItem] = []
     var created: [EventDraft] = []
     var updated: [(id: String, occurrence: Date?, changes: EventChanges)] = []
-    var newReminders: [ReminderDraft] = []
-    var completed: [(String, Bool)] = []
 
-    func access() -> CalendarAccess { lock.withLock { accessState } }
+    func access() -> CalendarAccessState { lock.withLock { accessState } }
     func requestAccess() async {}
 
     func events(in window: DateInterval) async throws -> [CalendarEventItem] {
-        guard access().events == .granted else { throw CalendarFailure.denied(.events) }
+        guard access() == .granted else { throw CalendarFailure.denied }
         return lock.withLock { events.filter { $0.start < window.end && $0.end > window.start } }
     }
 
-    func reminders(completedSince: Date?) async throws -> [ReminderItem] {
-        guard access().reminders == .granted else { throw CalendarFailure.denied(.reminders) }
-        return lock.withLock {
-            reminders.filter { reminder in
-                !reminder.completed || completedSince.map { (reminder.completedAt ?? .distantPast) >= $0 } == true
-            }
-        }
-    }
-
     func lists() async -> [CalendarListItem] {
-        [CalendarListItem(id: "cal-1", title: "Home", kind: .events, account: "iCloud", writable: true, isDefault: true)]
+        [CalendarListItem(id: "cal-1", title: "Home", account: "iCloud", writable: true, isDefault: true)]
     }
 
     func createEvent(_ draft: EventDraft) async throws -> CalendarEventItem {
@@ -47,17 +35,6 @@ final class FakeCalendar: CalendarReading, @unchecked Sendable {
         return event
     }
 
-    func createReminder(_ draft: ReminderDraft) async throws -> ReminderItem {
-        lock.withLock { newReminders.append(draft) }
-        return ReminderItem(id: "rem-new", title: draft.title, list: "Reminders", listId: "list-1", completed: false, due: draft.due, dueAllDay: draft.dueAllDay)
-    }
-
-    func setCompleted(id: String, _ completed: Bool) async throws -> ReminderItem {
-        lock.withLock { self.completed.append((id, completed)) }
-        guard var reminder = lock.withLock({ reminders.first { $0.id == id } }) else { throw CalendarFailure.notFound(id) }
-        reminder.completed = completed
-        return reminder
-    }
 }
 
 enum CalendarFixtures {
@@ -167,27 +144,13 @@ enum CalendarFixtures {
         #expect(code == "not_found")
     }
 
-    @Test func remindersListOpenOnesAndCompleteOne() async throws {
+    @Test func aRefusalSaysWhereToAllowIt() async throws {
         let fake = FakeCalendar()
-        fake.reminders = [
-            ReminderItem(id: "r1", title: "Call the bank", list: "Reminders", listId: "l", completed: false, due: CalendarFixtures.tomorrow(10)),
-            ReminderItem(id: "r2", title: "Old", list: "Reminders", listId: "l", completed: true, completedAt: CalendarFixtures.now.addingTimeInterval(-3600)),
-        ]
-        let actions = CalendarFixtures.actions(fake)
-        let open = try result(await actions.run("calendar.reminders", args: nil))
-        #expect(open["reminders"]?.array?.map { $0["id"]?.string } == ["r1"])
-        let done = try result(await actions.run("calendar.complete_reminder", args: .object(["id": .string("r1")])))
-        #expect(done["reminder"]?["completed"]?.bool == true)
-        #expect(fake.completed.map(\.0) == ["r1"])
-    }
-
-    @Test func aKindIOSRefusesSaysWhereToAllowIt() async throws {
-        let fake = FakeCalendar()
-        fake.accessState = CalendarAccess(events: .granted, reminders: .denied)
-        let answer = await CalendarFixtures.actions(fake).run("calendar.reminders", args: nil)
+        fake.accessState = .denied
+        let answer = await CalendarFixtures.actions(fake).run("calendar.events", args: nil)
         guard case .failed(let code, let message) = answer else { throw Failure(answer) }
         #expect(code == "permission_denied")
-        #expect(message.contains("iOS Settings → Rome → Reminders"))
+        #expect(message.contains("iOS Settings → Rome → Calendars"))
     }
 }
 
@@ -205,17 +168,22 @@ enum CalendarFixtures {
         #expect(capability.personal)
     }
 
-    @Test func itIsConnectedWhileEitherKindIsAllowed() async {
+    @Test func itsStateFollowsTheCalendarPermission() async {
         let fake = FakeCalendar()
         let capability = CalendarCapability(actions: CalendarFixtures.actions(fake), live: NodeFlag(true))
-        fake.accessState = CalendarAccess(events: .denied, reminders: .granted)
         #expect(await capability.permission() == .granted)
         #expect(await capability.state() == .on)
-        fake.accessState = CalendarAccess(events: .denied, reminders: .denied)
+        fake.accessState = .denied
         #expect(await capability.permission() == .denied)
-        fake.accessState = CalendarAccess(events: .notAsked, reminders: .notAsked)
+        fake.accessState = .notAsked
         #expect(await capability.permission() == .unknown)
         #expect(await capability.state() == .needsPermission)
+    }
+
+    @Test func itOffersNoReminders() {
+        let capability = CalendarCapability(actions: CalendarFixtures.actions(FakeCalendar()), live: NodeFlag(true))
+        #expect(capability.actions.allSatisfy { !$0.name.contains("remind") })
+        #expect(capability.name == "Calendar")
     }
 
     @Test func itsExamplesStartWithTheDailySummary() {
@@ -238,14 +206,13 @@ enum CalendarFixtures {
     @Test func sendsOnlyWhatChangedAndDeletesWhatIsGone() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10), CalendarFixtures.event("b", 14, 15)]
-        fake.reminders = [ReminderItem(id: "r1", title: "Call", list: "Reminders", listId: "l", completed: false, created: CalendarFixtures.now.addingTimeInterval(-90 * 86_400))]
         let store = MemoryProgressStore()
         let source = source(fake, store)
 
         let first = try await run(source)
-        #expect(first.upserts.map(\.key) == ["events:a", "events:b", "reminders:r1"])
+        #expect(first.upserts.map(\.key) == ["events:a", "events:b"])
         #expect(first.upserts.allSatisfy { $0.shape == .entry })
-        #expect(first.marks.map(\.type) == ["events", "reminders"])
+        #expect(first.marks.map(\.type) == ["events"])
         await source.confirm(first, unsupported: [])
 
         let same = try await run(source)
@@ -254,10 +221,9 @@ enum CalendarFixtures {
 
         fake.events[0].title = "Moved"
         fake.events.remove(at: 1)
-        fake.reminders = []
         let next = try await run(source)
         #expect(next.upserts.map(\.key) == ["events:a"])
-        #expect(next.deletes == ["events:b", "reminders:r1"], "an old undated reminder that is gone is deleted too")
+        #expect(next.deletes == ["events:b"])
     }
 
     @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
@@ -272,22 +238,19 @@ enum CalendarFixtures {
         #expect(after.commit.entries?["events:a"] == nil)
     }
 
-    @Test func aKindIOSNoLongerAllowsDeletesNothing() async throws {
+    @Test func aRefusedBatchKeepsTheOldRecord() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10)]
-        fake.reminders = [ReminderItem(id: "r1", title: "Call", list: "Reminders", listId: "l", completed: false)]
-        let source = source(fake)
-        await source.confirm(try await run(source), unsupported: [])
-        fake.accessState = CalendarAccess(events: .granted, reminders: .denied)
-        let next = try await run(source)
-        #expect(next.deletes.isEmpty)
-        #expect(next.marks.map(\.type) == ["events"])
-        #expect(next.commit.entries?["reminders:r1"] != nil)
+        let store = MemoryProgressStore()
+        let source = source(fake, store)
+        await source.confirm(try await run(source), unsupported: ["events"])
+        let again = try await run(source)
+        #expect(again.upserts.map(\.key) == ["events:a"], "sent again after the Rome refused it")
     }
 
     @Test func noAccessAtAllFailsWithItsOwnCode() async {
         let fake = FakeCalendar()
-        fake.accessState = CalendarAccess(events: .denied, reminders: .notAsked)
+        fake.accessState = .denied
         await #expect(throws: SourceReadFailure(code: "calendar_denied")) {
             try await source(fake).beginRun(trigger: .manual, instanceId: "inst-1", now: CalendarFixtures.now)
         }
@@ -300,5 +263,25 @@ enum CalendarFixtures {
         #expect(point.key == "events:s@2026-11-18T01:00:00Z")
         #expect(point.content?["occurrence"]?.string == "2026-11-18T09:00:00+08:00")
         #expect(point.content?["recurring"]?.bool == true)
+    }
+}
+
+@Suite struct ConnectCardWordsTests {
+    @Test func eachConnectionReportsItsPageWordsInEveryLanguage() async throws {
+        let registry = NodeCapabilityRegistry(capabilities: [
+            CalendarCapability(actions: CalendarFixtures.actions(FakeCalendar()), live: NodeFlag(true)),
+        ])
+        let connection = try #require(await registry.connections().first)
+        #expect(connection.summary == "Your Rome reads your calendars, and adds or changes events when you ask.")
+        #expect(connection.labels?["en"]?.title == "Calendar")
+        let chinese = try #require(connection.labels?["zh-CN"])
+        #expect(chinese.title == "日历")
+        #expect(chinese.summary != connection.summary, "in Chinese, whatever the phone's language")
+    }
+
+    @Test func theDeviceCardsRomeStringsHaveWords() {
+        for name in ["connect", "notNow", "deviceConnectNote"] {
+            #expect(!WidgetPaths.hostString(name).isEmpty, "no words for \(name)")
+        }
     }
 }

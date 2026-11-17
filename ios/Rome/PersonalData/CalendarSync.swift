@@ -4,7 +4,7 @@ import Observation
 import os
 import UIKit
 
-/// Calendar & Reminders' Sync with Rome, per Rome, as Apple Health's is: each
+/// Calendar's Sync with Rome, per Rome, as Apple Health's is: each
 /// Rome has its own switch, progress, history and Delete, and only the Rome
 /// open now syncs. Calendar has no background delivery, so it syncs when the
 /// app comes to the front, after a live change, on Sync now, and from iOS's

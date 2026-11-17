@@ -1,11 +1,8 @@
 import Foundation
 
-/// Calendar & Reminders: one connection for both, since the guardian thinks
-/// of them as one schedule and EventKit serves both. It asks iOS for full
-/// access to each (two prompts), syncs events and reminders into the Rome's
-/// personal data (`CalendarSync`), and reads and writes them live
-/// (`CalendarActions`). It counts as connected while either kind is allowed;
-/// an operation on the other says how to allow it.
+/// Calendar: every calendar on the phone, through EventKit. It asks iOS for
+/// full access, syncs events into the Rome's personal data (`CalendarSync`),
+/// and reads and writes them live (`CalendarActions`).
 struct CalendarCapability: NodeCapability {
     static let id = "apple_calendar"
 
@@ -19,16 +16,16 @@ struct CalendarCapability: NodeCapability {
 
     var id: String { Self.id }
     let prefix = "calendar"
-    let name = "Calendar & Reminders"
-    var title: LocalizedStringResource { "Calendar & Reminders" }
+    let name = "Calendar"
+    var title: LocalizedStringResource { "Calendar" }
     let symbol = "calendar"
-    var summary: LocalizedStringResource { "Your Rome reads your calendars and reminders, and adds or changes them when you ask." }
+    var summary: LocalizedStringResource { "Your Rome reads your calendars, and adds or changes events when you ask." }
     var examples: [CapabilityExample] {
         [
             CapabilityExample(
                 symbol: "sun.horizon", title: "Daily summary",
                 request: "Brief me every morning.",
-                reply: "Every morning at 8, I'll send today's schedule, what's due, and anything that needs you first."
+                reply: "Every morning at 8, I'll send today's schedule and what needs you first."
             ),
             CapabilityExample(
                 symbol: "clock", title: "Find free time",
@@ -58,10 +55,11 @@ struct CalendarCapability: NodeCapability {
     }
 
     func permission() async -> NodePermission {
-        let access = actionsRunner.reader.access()
-        if access.any { return .granted }
-        if access.events == .denied, access.reminders == .denied { return .denied }
-        return .unknown
+        switch actionsRunner.reader.access() {
+        case .granted: return .granted
+        case .denied: return .denied
+        case .notAsked: return .unknown
+        }
     }
 
     func requestPermission() async {
@@ -78,12 +76,9 @@ struct CalendarCapability: NodeCapability {
         switch entry.action {
         case "calendar.events": return String(localized: "Events")
         case "calendar.free_busy": return String(localized: "Free and busy")
-        case "calendar.lists": return String(localized: "Calendars and lists")
-        case "calendar.reminders": return String(localized: "Reminders")
+        case "calendar.calendars": return String(localized: "Calendars")
         case "calendar.create_event": return String(localized: "Added an event")
         case "calendar.update_event": return String(localized: "Changed an event")
-        case "calendar.create_reminder": return String(localized: "Added a reminder")
-        case "calendar.complete_reminder": return String(localized: "Completed a reminder")
         default: return nil
         }
     }
@@ -94,9 +89,7 @@ struct CalendarCapability: NodeCapability {
             var parts = [formatter.window(entry, entry.argsValue)]
             if entry.action == "calendar.events", let count = entry.count { parts.append(String(localized: "\(count) events")) }
             return parts.joined(separator: " · ")
-        case "calendar.reminders":
-            return entry.count.map { String(localized: "\($0) reminders") }
-        case "calendar.lists":
+        case "calendar.calendars":
             return String(localized: "Read")
         default:
             return String(localized: "Done")

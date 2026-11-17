@@ -31,10 +31,7 @@ function batch(
     types:
       items.syncedThrough === undefined
         ? []
-        : [
-            { type: "events", syncedThrough: iso(items.syncedThrough) },
-            { type: "reminders", syncedThrough: iso(items.syncedThrough) },
-          ],
+        : [{ type: "events", syncedThrough: iso(items.syncedThrough) }],
     upserts: items.upserts ?? [],
     deletes: items.deletes ?? [],
   };

@@ -466,7 +466,10 @@
   },
   "deviceConnectCard": {
     "connected": "已连接",
-    "notConnected": "未连接"
+    "notConnected": "未连接",
+    "connect": "连接",
+    "notNow": "暂不",
+    "note": "让你的 Rome 读取你允许的数据。"
   },
   "locationCard": {
     "shared": "已共享位置 · ±{{accuracy}}",

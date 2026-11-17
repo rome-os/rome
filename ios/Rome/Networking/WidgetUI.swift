@@ -81,7 +81,8 @@ struct WidgetEventReply: Sendable, Equatable {
 }
 
 enum WidgetPaths {
-    /// Rome's own strings a card names with `{ string }`: the question card's labels.
+    /// Rome's own strings a card names with `{ string }`: the question card's
+    /// labels and the device connect card's.
     static func hostString(_ name: String) -> String {
         switch name {
         case "send": String(localized: "Send")
@@ -90,6 +91,9 @@ enum WidgetPaths {
         case "addOwn": String(localized: "Add your own…")
         case "typeAnswer": String(localized: "Type your answer…")
         case "optional": String(localized: "optional")
+        case "connect": String(localized: "Connect")
+        case "notNow": String(localized: "Not now")
+        case "deviceConnectNote": String(localized: "So your Rome can read the data you allow.")
         default: ""
         }
     }

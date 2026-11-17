@@ -108,7 +108,7 @@ struct SyncHistoryFormatter {
         case "network": return String(localized: "Couldn't reach your Rome")
         case "rate_limited": return String(localized: "Too many syncs, trying later")
         case "health_failed": return String(localized: "Couldn't read Health")
-        case "calendar_denied": return String(localized: "No access to Calendar or Reminders")
+        case "calendar_denied": return String(localized: "No access to Calendar")
         case "calendar_failed": return String(localized: "Couldn't read Calendar")
         default: return String(localized: "Your Rome couldn't take it")
         }
@@ -168,7 +168,7 @@ struct SyncHistoryScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task { await sync?.reloadHistory() }
-        .alert(isHealth ? "Delete all Apple Health data this \(model.node.device.name) sent to your Rome?" : "Delete all calendar and reminders data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
+        .alert(isHealth ? "Delete all Apple Health data this \(model.node.device.name) sent to your Rome?" : "Delete all calendar data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { delete() }
             Button("Cancel", role: .cancel) {}
         } message: {

@@ -1,8 +1,7 @@
 import Foundation
 
-// The live operations of Calendar & Reminders: reads of a window, free and
-// busy, and the writes the guardian asks for (create and edit an event,
-// create a reminder and complete one). No delete. Times on the wire are ISO
+// The live operations of Calendar: reads of a window, free and busy, and the
+// writes the guardian asks for (create and edit an event). No delete. Times on the wire are ISO
 // 8601 with the phone's offset, as Health's are (`HealthDates`).
 
 struct CalendarActions: Sendable {
@@ -11,8 +10,8 @@ struct CalendarActions: Sendable {
     var now: @Sendable () -> Date = { Date() }
     var calendar: @Sendable () -> Calendar = { Calendar.current }
 
-    static let reads = ["calendar.events", "calendar.free_busy", "calendar.lists", "calendar.reminders"]
-    static let writes = ["calendar.create_event", "calendar.update_event", "calendar.create_reminder", "calendar.complete_reminder"]
+    static let reads = ["calendar.events", "calendar.free_busy", "calendar.calendars"]
+    static let writes = ["calendar.create_event", "calendar.update_event"]
 
     /// The longest window a read takes.
     static let maxDays = 366
@@ -27,22 +26,17 @@ struct CalendarActions: Sendable {
         return [
             "calendar.events": "Events in a window, from every calendar on the \(name), each occurrence of a repeating one on its own. Args: \(window) search (words in title, location, notes or attendees), calendars (array of calendar titles or ids), limit (default \(defaultLimit)). Each event has id, occurrence (repeating only), title, start, end, allDay, location, notes, calendar, availability, status, attendees. Example: {\"start\":\"2026-11-18\",\"end\":\"2026-11-18\"}",
             "calendar.free_busy": "Busy and free times in a window. Args: \(window) dayStart, dayEnd (HH:mm, optional: free time only between them each day), includeTentative (default true). Busy counts events that are not free and not canceled; all-day events are listed apart in allDay, not as busy. Example: {\"start\":\"2026-11-18T12:00\",\"end\":\"2026-11-18T18:00\"}",
-            "calendar.lists": "The \(name)'s calendars and reminder lists: id, title, kind (events or reminders), account, writable, isDefault. No arguments.",
-            "calendar.reminders": "Reminders. Args: start, end (optional: only those due in the window), includeCompleted (default false: open only), list (a list's title or id), search. Each has id, title, notes, list, completed, completedAt, due, dueAllDay, priority. Example: {}",
-            "calendar.create_event": "Adds an event. \(writeRule) Args: title (required), start (required), end (default an hour after start), allDay, location, notes, url, calendar (a title or id from calendar.lists; default the \(name)'s default calendar). Returns the event. Example: {\"title\":\"Dentist\",\"start\":\"2026-11-20T15:00\",\"end\":\"2026-11-20T16:00\"}",
+            "calendar.calendars": "The \(name)'s calendars: id, title, account, writable, isDefault. No arguments.",
+            "calendar.create_event": "Adds an event. \(writeRule) Args: title (required), start (required), end (default an hour after start), allDay, location, notes, url, calendar (a title or id from calendar.calendars; default the \(name)'s default calendar). Returns the event. Example: {\"title\":\"Dentist\",\"start\":\"2026-11-20T15:00\",\"end\":\"2026-11-20T16:00\"}",
             "calendar.update_event": "Changes an event. \(writeRule) Args: id (required, from calendar.events or the synced events), occurrence (for one occurrence of a repeating event), and what changes: title, start, end (a new start alone keeps the length), allDay, location, notes (an empty string clears it), future (true: this and later occurrences). Example: {\"id\":\"…\",\"start\":\"2026-11-20T16:00\"}",
-            "calendar.create_reminder": "Adds a reminder. \(writeRule) Args: title (required), due (ISO time, or YYYY-MM-DD for a day with no time), notes, list (a title or id; default the \(name)'s default list), priority (1 high, 5 medium, 9 low). Example: {\"title\":\"Call the bank\",\"due\":\"2026-11-19T10:00\"}",
-            "calendar.complete_reminder": "Marks a reminder done, or open again with completed false. \(writeRule) Args: id (required), completed (default true). Example: {\"id\":\"…\"}",
         ]
     }
 
     static let examples: [String: [JSONValue]] = [
         "calendar.events": [.object(["start": .string("2026-11-18"), "end": .string("2026-11-18")])],
         "calendar.free_busy": [.object(["start": .string("2026-11-18T12:00"), "end": .string("2026-11-18T18:00")])],
-        "calendar.lists": [.object([:])],
-        "calendar.reminders": [.object([:])],
+        "calendar.calendars": [.object([:])],
         "calendar.create_event": [.object(["title": .string("Dentist"), "start": .string("2026-11-20T15:00"), "end": .string("2026-11-20T16:00")])],
-        "calendar.create_reminder": [.object(["title": .string("Call the bank"), "due": .string("2026-11-19T10:00")])],
     ]
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
@@ -50,12 +44,9 @@ struct CalendarActions: Sendable {
             switch action {
             case "calendar.events": return try await events(args)
             case "calendar.free_busy": return try await freeBusy(args)
-            case "calendar.lists": return try await lists(args)
-            case "calendar.reminders": return try await reminders(args)
+            case "calendar.calendars": return try await lists(args)
             case "calendar.create_event": return try await createEvent(args)
             case "calendar.update_event": return try await updateEvent(args)
-            case "calendar.create_reminder": return try await createReminder(args)
-            case "calendar.complete_reminder": return try await completeReminder(args)
             default: return .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")
             }
         } catch let failure as ActionFailure {
@@ -69,15 +60,14 @@ struct CalendarActions: Sendable {
 
     private func failed(_ failure: CalendarFailure) -> NodeActionResult {
         switch failure {
-        case .denied(let kind):
-            let what = kind == .events ? "Calendars" : "Reminders"
-            return .failed(code: "permission_denied", message: "iOS does not let Rome use \(what) on this \(device.name). Tell the user they can allow full access in iOS Settings → Rome → \(what).")
+        case .denied:
+            return .failed(code: "permission_denied", message: "iOS does not let Rome use Calendars on this \(device.name). Tell the user they can allow full access in iOS Settings → Rome → Calendars.")
         case .notFound(let id):
-            return .failed(code: "not_found", message: "No event or reminder has the id \"\(id)\". Read it again with calendar.events or calendar.reminders for its current id.")
+            return .failed(code: "not_found", message: "No event has the id \"\(id)\". Read it again with calendar.events for its current id.")
         case .readOnly(let title):
-            return .failed(code: "read_only", message: "\"\(title)\" cannot be changed from this \(device.name). Use a writable calendar from calendar.lists.")
+            return .failed(code: "read_only", message: "\"\(title)\" cannot be changed from this \(device.name). Use a writable calendar from calendar.calendars.")
         case .unknownList(let name):
-            return .failed(code: "invalid_args", message: name == "default" ? "The \(device.name) has no default calendar or list. Name one from calendar.lists." : "No calendar or list is named \"\(name)\". Use a title or id from calendar.lists.")
+            return .failed(code: "invalid_args", message: name == "default" ? "The \(device.name) has no default calendar. Name one from calendar.calendars." : "No calendar is named \"\(name)\". Use a title or id from calendar.calendars.")
         case .failed(let reason):
             return .failed(code: "calendar_failed", message: "The calendar refused the change: \(reason)")
         }
@@ -130,33 +120,11 @@ struct CalendarActions: Sendable {
         let lists = await reader.lists()
         let json = lists.map { list in
             JSONValue.object([
-                "id": .string(list.id), "title": .string(list.title), "kind": .string(list.kind.rawValue),
+                "id": .string(list.id), "title": .string(list.title),
                 "account": .string(list.account), "writable": .bool(list.writable), "isDefault": .bool(list.isDefault),
             ])
         }
-        return .ok(.object(["lists": .array(json)]), count: lists.count)
-    }
-
-    private func reminders(_ args: JSONValue?) async throws -> NodeActionResult {
-        let fields = try object(args, allowed: ["start", "end", "includeCompleted", "list", "search"])
-        let calendar = HealthDates.wire(self.calendar())
-        let completed = try flag(fields["includeCompleted"], "includeCompleted") ?? false
-        let list = try string(fields["list"], "list")
-        let search = try string(fields["search"], "search")
-        var window: DateInterval?
-        if fields["start"] != nil || fields["end"] != nil { window = try self.window(fields, calendar: calendar) }
-        // Completed ones from the last 30 days, or from the window's start.
-        let since = completed ? (window?.start ?? now().addingTimeInterval(-30 * 86_400)) : nil
-        var items = try await reader.reminders(completedSince: since)
-        if !completed { items = items.filter { !$0.completed } }
-        if let list { items = items.filter { $0.list.localizedCaseInsensitiveCompare(list) == .orderedSame || $0.listId == list } }
-        if let search { items = items.filter { [$0.title, $0.notes ?? ""].contains { $0.localizedCaseInsensitiveContains(search) } } }
-        if let window { items = items.filter { $0.due.map(window.contains) ?? false } }
-        items.sort { ($0.due ?? .distantFuture, $0.title) < ($1.due ?? .distantFuture, $1.title) }
-        var result: [String: JSONValue] = ["timeZoneIdentifier": .string(calendar.timeZone.identifier)]
-        if let window { result.merge(Self.envelope(window, calendar)) { $1 } }
-        result["reminders"] = .array(items.map { Self.json($0, calendar) })
-        return .ok(.object(result), count: items.count)
+        return .ok(.object(["calendars": .array(json)]), count: lists.count)
     }
 
     // MARK: Writes
@@ -197,28 +165,6 @@ struct CalendarActions: Sendable {
         guard changes != EventChanges(future: changes.future) else { throw ActionFailure.invalid("Send at least one field to change.") }
         let event = try await reader.updateEvent(id: id, occurrence: occurrence, changes: changes)
         return .ok(.object(["event": Self.json(event, calendar)]), count: 1)
-    }
-
-    private func createReminder(_ args: JSONValue?) async throws -> NodeActionResult {
-        let fields = try object(args, allowed: ["title", "due", "notes", "list", "priority"])
-        let calendar = HealthDates.wire(self.calendar())
-        guard let title = try string(fields["title"], "title") else { throw ActionFailure.invalid("title is required.") }
-        var draft = ReminderDraft(title: title, notes: try string(fields["notes"], "notes"), list: try string(fields["list"], "list"))
-        if let text = try string(fields["due"], "due") {
-            draft.due = try date(text, "due", endOfDay: false, calendar: calendar)
-            draft.dueAllDay = Self.isDate(text)
-        }
-        draft.priority = try integer(fields["priority"], "priority", in: 0...9)
-        let reminder = try await reader.createReminder(draft)
-        return .ok(.object(["reminder": Self.json(reminder, calendar)]), count: 1)
-    }
-
-    private func completeReminder(_ args: JSONValue?) async throws -> NodeActionResult {
-        let fields = try object(args, allowed: ["id", "completed"])
-        let calendar = HealthDates.wire(self.calendar())
-        guard let id = try string(fields["id"], "id") else { throw ActionFailure.invalid("id is required.") }
-        let reminder = try await reader.setCompleted(id: id, try flag(fields["completed"], "completed") ?? true)
-        return .ok(.object(["reminder": Self.json(reminder, calendar)]), count: 1)
     }
 
     // MARK: Arguments
@@ -327,21 +273,6 @@ struct CalendarActions: Sendable {
         if let notes = event.notes { fields["notes"] = .string(notes) }
         if !event.attendees.isEmpty { fields["attendees"] = .array(event.attendees.map(JSONValue.string)) }
         if let url = event.url { fields["url"] = .string(url) }
-        return .object(fields)
-    }
-
-    static func json(_ reminder: ReminderItem, _ calendar: Calendar) -> JSONValue {
-        var fields: [String: JSONValue] = [
-            "id": .string(reminder.id), "title": .string(reminder.title), "list": .string(reminder.list),
-            "completed": .bool(reminder.completed), "priority": .number(Double(reminder.priority)),
-        ]
-        if let notes = reminder.notes { fields["notes"] = .string(notes) }
-        if let due = reminder.due {
-            fields["due"] = .string(reminder.dueAllDay ? WireTime.day(due, calendar: calendar) : HealthDates.iso(due, calendar))
-            fields["dueAllDay"] = .bool(reminder.dueAllDay)
-        }
-        if let done = reminder.completedAt { fields["completedAt"] = .string(HealthDates.iso(done, calendar)) }
-        if let url = reminder.url { fields["url"] = .string(url) }
         return .object(fields)
     }
 

@@ -6,16 +6,16 @@ How stored data and live reads fit together: [Device connection](domains/connect
 
 ## Scope
 
-A source joins the store when each item is either a reading or an entry. A reading has a time range and a numeric value, and a query over a window aggregates it: Health readings fit, and so would location samples or screen time. An entry is a document with a time, such as a calendar event or a reminder: it has words and people, changes in place, is listed over a window it overlaps and found by its words, and is never aggregated. Entries keep the same personal-data mark, audience rule, origin and ingest log as readings, and never go into a reading's `fields`. Contacts and notes have no time, so neither shape fits them.
+A source joins the store when each item is either a reading or an entry. A reading has a time range and a numeric value, and a query over a window aggregates it: Health readings fit, and so would location samples or screen time. An entry is a document with a time, such as a calendar event: it has words and people, changes in place, is listed over a window it overlaps and found by its words, and is never aggregated. Entries keep the same personal-data mark, audience rule, origin and ingest log as readings, and never go into a reading's `fields`. Contacts and notes have no time, so neither shape fits them.
 
-Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. An entry type declares instead the content fields it keeps, each a text, a flag, a number or a list of texts, and how far past Rome's clock an entry may end. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts), and the iPhone's calendar and reminders are [`sources/apple-calendar.ts`](../packages/core/src/personal-data/sources/apple-calendar.ts).
+Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. An entry type declares instead the content fields it keeps, each a text, a flag, a number or a list of texts, and how far past Rome's clock an entry may end. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts), and the iPhone's calendar is [`sources/apple-calendar.ts`](../packages/core/src/personal-data/sources/apple-calendar.ts).
 
 | Shape | What one reading is | Example |
 | --- | --- | --- |
 | `bucket` | An hour or a day, with a sum or an average and its `min` and `max` | `stepCount`, `heartRate` |
 | `sample` | One reading at a time | `bodyMass`, `restingHeartRate` |
 | `record` | One span with what goes with it | `sleep` (one night), `workouts` |
-| `entry` | A document with a time, and its `content` as the type declares it | `events`, `reminders` |
+| `entry` | A document with a time, and its `content` as the type declares it | `events` |
 
 A new type or source needs a core release before a device sends it, because an ingest refuses a type it does not know.
 

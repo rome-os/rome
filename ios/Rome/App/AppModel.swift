@@ -721,7 +721,7 @@ final class AppModel {
     let node: NodeHost
     /// Apple Health's Sync with Rome.
     let health: HealthSettings
-    /// Calendar & Reminders' Sync with Rome.
+    /// Calendar's Sync with Rome.
     let calendarSync: CalendarSync
     /// This phone's device connections, reported to the open Rome.
     let connections: DeviceConnections

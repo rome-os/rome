@@ -77,22 +77,21 @@ enum HealthDemo {
     }
 }
 
-/// Calendar & Reminders' demo: syncs, and a read and a change an Agent made.
+/// Calendar's demo: syncs, and a read and a change an Agent made.
 enum CalendarDemo {
     static func history(now: Date) -> [SyncLogEntry] {
-        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, events: Int, reminders: Int) -> SyncLogEntry {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, events: Int) -> SyncLogEntry {
             let time = now.addingTimeInterval(-minutesAgo * 60)
             var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok)
             if events > 0 { entry.types["events"] = SyncTypeCount(items: events, start: time.addingTimeInterval(-7 * 86_400), end: time.addingTimeInterval(30 * 86_400)) }
-            if reminders > 0 { entry.types["reminders"] = SyncTypeCount(items: reminders, start: time, end: time) }
-            entry.inserted = events + reminders
+            entry.inserted = events
             return entry
         }
         return [
-            entry(4, minutesAgo: 6, .manual, events: 1, reminders: 0),
-            entry(3, minutesAgo: 40, .foreground, events: 2, reminders: 1),
-            entry(2, minutesAgo: 60 * 5, .observer, events: 1, reminders: 0),
-            entry(1, minutesAgo: 60 * 26, .manual, events: 48, reminders: 12),
+            entry(4, minutesAgo: 6, .manual, events: 1),
+            entry(3, minutesAgo: 40, .foreground, events: 3),
+            entry(2, minutesAgo: 60 * 5, .observer, events: 1),
+            entry(1, minutesAgo: 60 * 26, .manual, events: 48),
         ]
     }
 
@@ -316,7 +315,7 @@ enum SnapshotRunner {
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            // Calendar & Reminders: not connected, then connected with Sync on,
+            // Calendar: not connected, then connected with Sync on,
             // a read and a change it made, and its Sync history.
             let calendar = CalendarCapability.id
             model.calendarSync.showDemo([], enabled: false)

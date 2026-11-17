@@ -96,13 +96,42 @@ describe("connect_account for a device kind", () => {
     });
     expect(ui && checkWidgetUi(ui)).toEqual([]);
     expect(JSON.stringify(ui)).toContain('"context":{"kind":"apple_health","device":true}');
+    // A card stored before devices declared their words: the generic line.
     const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
     expect(texts).toEqual([
-      "Connect Apple Health",
-      "So your Rome can read the Apple Health data you allow.",
-      "Not now",
-      "Connect",
+      "Apple Health",
+      { string: "deviceConnectNote" },
+      { string: "notNow" },
+      { string: "connect" },
     ]);
     expect(deviceConnectToolOutput(device, false)).toContain("Rome app");
+  });
+
+  it("words the card as the capability's page does, in the guardian's language where the device has it", () => {
+    const device = {
+      kind: "apple_calendar",
+      label: "Calendar",
+      summary: "Your Rome reads your calendars.",
+      labels: {
+        en: { title: "Calendar", summary: "Your Rome reads your calendars." },
+        "zh-CN": { title: "日历", summary: "你的 Rome 会读取你的日历。" },
+      },
+    };
+    const props = (language: string | null) =>
+      (
+        deviceConnectToolOutput(device, true, undefined, language) as {
+          render: { props: Record<string, unknown> };
+        }
+      ).render.props;
+    expect(props("zh-CN")).toMatchObject({ title: "日历", summary: "你的 Rome 会读取你的日历。" });
+    expect(props("ja")).toMatchObject({
+      title: "Calendar",
+      summary: "Your Rome reads your calendars.",
+    });
+    expect(props(null)).toMatchObject({ title: "Calendar" });
+    const ui = connectCardUiFromProps(props("zh-CN"));
+    expect(ui && checkWidgetUi(ui)).toEqual([]);
+    const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
+    expect(texts.slice(0, 2)).toEqual(["日历", "你的 Rome 会读取你的日历。"]);
   });
 });

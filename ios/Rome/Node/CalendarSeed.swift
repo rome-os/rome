@@ -4,7 +4,7 @@ import Foundation
 import os
 
 /// Test data for the Simulator, whose calendar starts empty: a few invented
-/// events today and tomorrow, and two reminders. Debug builds only, and only
+/// events today and tomorrow. Debug builds only, and only
 /// with the launch argument `-RomeSeedCalendar`, once per install.
 ///
 /// `-RomeConnect <capability>` runs a connection's Connect with no tap, and
@@ -20,7 +20,6 @@ enum CalendarSeed {
         guard !UserDefaults.standard.bool(forKey: doneKey) else { return }
         let store = EKEventStore()
         guard (try? await store.requestFullAccessToEvents()) == true,
-              (try? await store.requestFullAccessToReminders()) == true,
               let calendar = store.defaultCalendarForNewEvents
         else {
             log.error("calendar seed: no access")
@@ -46,19 +45,10 @@ enum CalendarSeed {
             event.location = location
             try? store.save(event, span: .thisEvent, commit: false)
         }
-        if let list = store.defaultCalendarForNewReminders() {
-            for (title, due) in [("Buy milk", at(1, 18) as Date?), ("Renew passport", nil)] {
-                let reminder = EKReminder(eventStore: store)
-                reminder.calendar = list
-                reminder.title = title
-                if let due { reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due) }
-                try? store.save(reminder, commit: false)
-            }
-        }
         do {
             try store.commit()
             UserDefaults.standard.set(true, forKey: doneKey)
-            log.info("calendar seed: \(events.count) events, 2 reminders")
+            log.info("calendar seed: \(events.count) events")
         } catch {
             log.error("calendar seed failed: \(error.localizedDescription, privacy: .public)")
         }

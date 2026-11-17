@@ -56,6 +56,8 @@ export interface RomeToolPortsDeps {
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
   deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
+  /** The guardian's language (`en`, `zh-CN`), which a device connect card's words follow. */
+  guardianLanguage?: () => Promise<string | null>;
   /** Whether a turn is read by the guardian alone. When absent, none is. */
   privateTurn?: PrivateTurn;
 }
@@ -294,6 +296,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           devices: deps.deviceKinds?.(),
           deviceState: (kind) =>
             deps.deviceState?.(kind, { askingDeviceId: askingDeviceOf(turn.threadContext()) }),
+          language: deps.guardianLanguage,
           devicesOnly: provided.some((tool) => tool.name === "connect_card"),
         }),
         ...shareLocationTools({

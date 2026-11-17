@@ -1,9 +1,9 @@
 import EventKit
 import Foundation
 
-// The phone's calendars and reminders through EventKit, behind a protocol so
-// the actions and the sync are tested with a fake. Every calendar on the
-// phone counts, whichever account it comes from (iCloud, Google, Exchange).
+// The phone's calendars through EventKit, behind a protocol so the actions
+// and the sync are tested with a fake. Every calendar on the phone counts,
+// whichever account it comes from (iCloud, Google, Exchange).
 
 /// One event, or one occurrence of a repeating one.
 struct CalendarEventItem: Equatable, Sendable {
@@ -30,48 +30,21 @@ struct CalendarEventItem: Equatable, Sendable {
     var recurring: Bool { occurrence != nil }
 }
 
-struct ReminderItem: Equatable, Sendable {
-    /// EventKit's `calendarItemIdentifier`.
-    var id: String
-    var title: String
-    var notes: String?
-    var list: String
-    var listId: String
-    var completed: Bool
-    var completedAt: Date?
-    var due: Date?
-    /// The due date has no time of day.
-    var dueAllDay: Bool = false
-    /// 1 high to 9 low, 0 none.
-    var priority: Int = 0
-    var created: Date?
-    var url: String?
-}
-
-/// A calendar or a reminders list.
+/// One calendar on the phone.
 struct CalendarListItem: Equatable, Sendable {
-    enum Kind: String, Sendable { case events, reminders }
     var id: String
     var title: String
-    var kind: Kind
     /// The account it belongs to, such as iCloud or Gmail.
     var account: String
     var writable: Bool
     var isDefault: Bool
 }
 
-/// Whether iOS lets the app read one kind.
+/// Whether iOS lets the app read the calendars.
 enum CalendarAccessState: Equatable, Sendable {
     case granted
     case denied
     case notAsked
-}
-
-struct CalendarAccess: Equatable, Sendable {
-    var events: CalendarAccessState
-    var reminders: CalendarAccessState
-
-    var any: Bool { events == .granted || reminders == .granted }
 }
 
 struct EventDraft: Equatable, Sendable {
@@ -98,18 +71,8 @@ struct EventChanges: Equatable, Sendable {
     var future = false
 }
 
-struct ReminderDraft: Equatable, Sendable {
-    var title: String
-    var due: Date?
-    var dueAllDay = false
-    var notes: String?
-    /// A list's id or title; nil for the default list.
-    var list: String?
-    var priority: Int?
-}
-
 enum CalendarFailure: Error, Equatable {
-    case denied(CalendarListItem.Kind)
+    case denied
     case notFound(String)
     case readOnly(String)
     case unknownList(String)
@@ -117,29 +80,23 @@ enum CalendarFailure: Error, Equatable {
 }
 
 protocol CalendarReading: Sendable {
-    func access() -> CalendarAccess
-    /// iOS's own prompts, for each kind it never asked about.
+    func access() -> CalendarAccessState
+    /// iOS's own prompt, when it never asked.
     func requestAccess() async
     func events(in window: DateInterval) async throws -> [CalendarEventItem]
-    /// Every open reminder, and those completed since `completedSince`.
-    func reminders(completedSince: Date?) async throws -> [ReminderItem]
     func lists() async -> [CalendarListItem]
     func createEvent(_ draft: EventDraft) async throws -> CalendarEventItem
     func updateEvent(id: String, occurrence: Date?, changes: EventChanges) async throws -> CalendarEventItem
-    func createReminder(_ draft: ReminderDraft) async throws -> ReminderItem
-    func setCompleted(id: String, _ completed: Bool) async throws -> ReminderItem
 }
 
 /// EventKit, on one store. An actor, since `EKEventStore` is not thread-safe.
 actor LiveCalendar: CalendarReading {
     private let store = EKEventStore()
 
-    nonisolated func access() -> CalendarAccess {
-        CalendarAccess(events: Self.state(.event), reminders: Self.state(.reminder))
-    }
+    nonisolated func access() -> CalendarAccessState { Self.state() }
 
-    private nonisolated static func state(_ type: EKEntityType) -> CalendarAccessState {
-        switch EKEventStore.authorizationStatus(for: type) {
+    private nonisolated static func state() -> CalendarAccessState {
+        switch EKEventStore.authorizationStatus(for: .event) {
         case .fullAccess: return .granted
         case .notDetermined: return .notAsked
         // Write-only cannot read, which the sync and every read need.
@@ -148,58 +105,29 @@ actor LiveCalendar: CalendarReading {
     }
 
     func requestAccess() async {
-        if Self.state(.event) == .notAsked { _ = try? await store.requestFullAccessToEvents() }
-        if Self.state(.reminder) == .notAsked { _ = try? await store.requestFullAccessToReminders() }
+        if Self.state() == .notAsked { _ = try? await store.requestFullAccessToEvents() }
         // A store made before access sees no calendars until it is reset.
         store.reset()
     }
 
     func events(in window: DateInterval) throws -> [CalendarEventItem] {
-        guard Self.state(.event) == .granted else { throw CalendarFailure.denied(.events) }
+        guard Self.state() == .granted else { throw CalendarFailure.denied }
         let predicate = store.predicateForEvents(withStart: window.start, end: window.end, calendars: nil)
         return store.events(matching: predicate).compactMap(Self.item)
     }
 
-    func reminders(completedSince: Date?) async throws -> [ReminderItem] {
-        guard Self.state(.reminder) == .granted else { throw CalendarFailure.denied(.reminders) }
-        let open = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
-        var items = await fetch(open)
-        if let completedSince {
-            let done = store.predicateForCompletedReminders(withCompletionDateStarting: completedSince, ending: nil, calendars: nil)
-            items += await fetch(done)
-        }
-        return items
-    }
-
-    private func fetch(_ predicate: NSPredicate) async -> [ReminderItem] {
-        await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { reminders in
-                continuation.resume(returning: (reminders ?? []).map(Self.item))
-            }
-        }
-    }
-
     func lists() -> [CalendarListItem] {
-        var lists: [CalendarListItem] = []
-        if Self.state(.event) == .granted {
-            let main = store.defaultCalendarForNewEvents?.calendarIdentifier
-            lists += store.calendars(for: .event).map {
-                CalendarListItem(id: $0.calendarIdentifier, title: $0.title, kind: .events, account: $0.source?.title ?? "", writable: $0.allowsContentModifications, isDefault: $0.calendarIdentifier == main)
-            }
+        guard Self.state() == .granted else { return [] }
+        let main = store.defaultCalendarForNewEvents?.calendarIdentifier
+        return store.calendars(for: .event).map {
+            CalendarListItem(id: $0.calendarIdentifier, title: $0.title, account: $0.source?.title ?? "", writable: $0.allowsContentModifications, isDefault: $0.calendarIdentifier == main)
         }
-        if Self.state(.reminder) == .granted {
-            let main = store.defaultCalendarForNewReminders()?.calendarIdentifier
-            lists += store.calendars(for: .reminder).map {
-                CalendarListItem(id: $0.calendarIdentifier, title: $0.title, kind: .reminders, account: $0.source?.title ?? "", writable: $0.allowsContentModifications, isDefault: $0.calendarIdentifier == main)
-            }
-        }
-        return lists
     }
 
     func createEvent(_ draft: EventDraft) throws -> CalendarEventItem {
-        guard Self.state(.event) == .granted else { throw CalendarFailure.denied(.events) }
+        guard Self.state() == .granted else { throw CalendarFailure.denied }
         let event = EKEvent(eventStore: store)
-        event.calendar = try calendar(draft.calendar, for: .event)
+        event.calendar = try calendar(draft.calendar)
         event.title = draft.title
         event.startDate = draft.start
         event.endDate = draft.end
@@ -213,7 +141,7 @@ actor LiveCalendar: CalendarReading {
     }
 
     func updateEvent(id: String, occurrence: Date?, changes: EventChanges) throws -> CalendarEventItem {
-        guard Self.state(.event) == .granted else { throw CalendarFailure.denied(.events) }
+        guard Self.state() == .granted else { throw CalendarFailure.denied }
         guard let event = find(id: id, occurrence: occurrence) else { throw CalendarFailure.notFound(id) }
         guard event.calendar.allowsContentModifications else { throw CalendarFailure.readOnly(event.calendar.title) }
         if let title = changes.title { event.title = title }
@@ -244,40 +172,13 @@ actor LiveCalendar: CalendarReading {
             ?? store.event(withIdentifier: id)
     }
 
-    func createReminder(_ draft: ReminderDraft) throws -> ReminderItem {
-        guard Self.state(.reminder) == .granted else { throw CalendarFailure.denied(.reminders) }
-        let reminder = EKReminder(eventStore: store)
-        reminder.calendar = try calendar(draft.list, for: .reminder)
-        reminder.title = draft.title
-        reminder.notes = draft.notes
-        if let priority = draft.priority { reminder.priority = priority }
-        if let due = draft.due {
-            var units: Set<Calendar.Component> = [.year, .month, .day]
-            if !draft.dueAllDay { units.formUnion([.hour, .minute]) }
-            reminder.dueDateComponents = Calendar.current.dateComponents(units, from: due)
-            // A reminder with a time alerts then, as one made in Reminders does.
-            if !draft.dueAllDay { reminder.addAlarm(EKAlarm(absoluteDate: due)) }
-        }
-        do { try store.save(reminder, commit: true) } catch { throw CalendarFailure.failed(error.localizedDescription) }
-        return Self.item(reminder)
-    }
-
-    func setCompleted(id: String, _ completed: Bool) throws -> ReminderItem {
-        guard Self.state(.reminder) == .granted else { throw CalendarFailure.denied(.reminders) }
-        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { throw CalendarFailure.notFound(id) }
-        reminder.isCompleted = completed
-        do { try store.save(reminder, commit: true) } catch { throw CalendarFailure.failed(error.localizedDescription) }
-        return Self.item(reminder)
-    }
-
-    /// The calendar a new item goes in: one named by id or title, else the default.
-    private func calendar(_ name: String?, for type: EKEntityType) throws -> EKCalendar {
+    /// The calendar a new event goes in: one named by id or title, else the default.
+    private func calendar(_ name: String?) throws -> EKCalendar {
         guard let name, !name.isEmpty else {
-            let main = type == .event ? store.defaultCalendarForNewEvents : store.defaultCalendarForNewReminders()
-            guard let main else { throw CalendarFailure.unknownList("default") }
+            guard let main = store.defaultCalendarForNewEvents else { throw CalendarFailure.unknownList("default") }
             return main
         }
-        let all = store.calendars(for: type)
+        let all = store.calendars(for: .event)
         guard let match = all.first(where: { $0.calendarIdentifier == name })
             ?? all.first(where: { $0.title.localizedCaseInsensitiveCompare(name) == .orderedSame })
         else { throw CalendarFailure.unknownList(name) }
@@ -304,24 +205,6 @@ actor LiveCalendar: CalendarReading {
             status: status(event.status),
             attendees: (event.attendees ?? []).compactMap { $0.name?.nilIfEmpty },
             url: event.url?.absoluteString
-        )
-    }
-
-    private static func item(_ reminder: EKReminder) -> ReminderItem {
-        let components = reminder.dueDateComponents
-        return ReminderItem(
-            id: reminder.calendarItemIdentifier,
-            title: reminder.title ?? "",
-            notes: reminder.notes?.nilIfEmpty,
-            list: reminder.calendar?.title ?? "",
-            listId: reminder.calendar?.calendarIdentifier ?? "",
-            completed: reminder.isCompleted,
-            completedAt: reminder.completionDate,
-            due: components.flatMap { Calendar.current.date(from: $0) },
-            dueAllDay: components.map { $0.hour == nil } ?? false,
-            priority: reminder.priority,
-            created: reminder.creationDate,
-            url: reminder.url?.absoluteString
         )
     }
 

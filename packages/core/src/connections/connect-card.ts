@@ -7,12 +7,17 @@ import {
 } from "./oauth/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "./oauth/rome-cloud-oauth.js";
 import type { LivePointer, LiveTurn } from "./device/live-route.js";
+import type { DeviceLabel } from "./device/report.js";
 import type { DeviceConnection } from "./device/repository.js";
 
 /** A device connection kind the card connects: a capability a device reported. */
 export interface DeviceKind {
   kind: string;
   label: string;
+  /** What it lets Rome do, in English, as the device's page says. */
+  summary?: string;
+  /** Its name and summary by language, as the device has them. */
+  labels?: Record<string, DeviceLabel>;
   /** How it stands now, the best of the devices that report it. */
   state?: DeviceConnection["state"];
   /** The device that reports it, by name, when one does. */
@@ -53,8 +58,13 @@ export function deviceConnectPath(kind: string): string {
  * `api/routes/widget-events.ts`, which open the kind's authorization page and
  * answer the agent once the connection is working.
  */
-export function connectCardUi(kind: string, kindLabel: string, device = false): WidgetUi {
-  if (device) return deviceConnectCardUi(kind, kindLabel);
+export function connectCardUi(
+  kind: string,
+  kindLabel: string,
+  device = false,
+  words?: DeviceLabel,
+): WidgetUi {
+  if (device) return deviceConnectCardUi(kind, words ?? { title: kindLabel });
   const context = { kind };
   return {
     components: [
@@ -100,20 +110,24 @@ export function connectCardUi(kind: string, kindLabel: string, device = false): 
 }
 
 /**
- * The card for a device kind. The device's app runs the flow and sends
- * `check` itself when it ends, so the card offers no button for it, and core
- * takes that event without one (`CORE_UNSHOWN_EVENTS` in widget-events).
+ * The card for a device kind, in the words of the capability's own page: its
+ * name and what it lets Rome do, as the device declared them, and Rome's own
+ * strings for the buttons, which each reader shows in the guardian's
+ * language. A device that declared no summary gets a generic line. The
+ * device's app runs the flow and sends `check` itself when it ends, so the
+ * card offers no button for it, and core takes that event without one
+ * (`CORE_UNSHOWN_EVENTS` in widget-events).
  */
-function deviceConnectCardUi(kind: string, label: string): WidgetUi {
+function deviceConnectCardUi(kind: string, words: DeviceLabel): WidgetUi {
   const context = { kind, device: true };
   return {
     components: [
       { id: "root", component: "Column", children: ["title", "note", "actions"] },
-      { id: "title", component: "Text", text: `Connect ${label}`, variant: "h4" },
+      { id: "title", component: "Text", text: words.title, variant: "h4" },
       {
         id: "note",
         component: "Text",
-        text: `So your Rome can read the ${label} data you allow.`,
+        text: words.summary ?? { string: "deviceConnectNote" },
         variant: "caption",
       },
       { id: "actions", component: "Row", children: ["dismiss", "connect"], justify: "end" },
@@ -124,7 +138,7 @@ function deviceConnectCardUi(kind: string, label: string): WidgetUi {
         variant: "default",
         action: { event: { name: "dismiss", context } },
       },
-      { id: "dismiss-label", component: "Text", text: "Not now" },
+      { id: "dismiss-label", component: "Text", text: { string: "notNow" } },
       {
         id: "connect",
         component: "Button",
@@ -132,8 +146,21 @@ function deviceConnectCardUi(kind: string, label: string): WidgetUi {
         variant: "primary",
         action: { event: { name: "connect", context } },
       },
-      { id: "connect-label", component: "Text", text: "Connect" },
+      { id: "connect-label", component: "Text", text: { string: "connect" } },
     ],
+  };
+}
+
+/** A device kind's name and summary in the guardian's language, else in English. */
+export function deviceWords(device: DeviceKind, language?: string | null): DeviceLabel {
+  const local = (language && device.labels?.[language]) || undefined;
+  if (local) return local;
+  const english = device.labels?.en;
+  return {
+    title: english?.title ?? device.label,
+    ...((english?.summary ?? device.summary)
+      ? { summary: english?.summary ?? device.summary }
+      : {}),
   };
 }
 
@@ -157,6 +184,10 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
     kinds.set(connection.capability, {
       kind: connection.capability,
       label: known?.label ?? connection.title,
+      ...(connection.summary ? { summary: connection.summary } : {}),
+      ...(connection.labels && Object.keys(connection.labels).length > 0
+        ? { labels: connection.labels }
+        : {}),
       state: connection.state,
       ...(connection.device.name ? { device: connection.device.name } : {}),
     });
@@ -193,7 +224,10 @@ export function deviceConnectToolOutput(
   widgetsShow: boolean,
   /** The device the guardian asks from: the card's checks read its connection alone. */
   askingDeviceId?: string,
+  /** The guardian's language (`en`, `zh-CN`): the card's words follow it where the device has them. */
+  language?: string | null,
 ): unknown {
+  const words = deviceWords(device, language);
   if (!widgetsShow) {
     return (
       "This conversation cannot show the connect card. Ask the guardian, in a message, " +
@@ -209,6 +243,8 @@ export function deviceConnectToolOutput(
       props: {
         kind: device.kind,
         label: device.label,
+        title: words.title,
+        ...(words.summary ? { summary: words.summary } : {}),
         device: true,
         ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
       },
@@ -258,13 +294,19 @@ export function connectAccountToolOutput(kind: OAuthProvider, widgetsShow: boole
 /** The connect card described as data, for the connection kind a stored
  *  card's props name, or null when they name none Rome connects. */
 export function connectCardUiFromProps(props: unknown): WidgetUi | null {
-  const { kind, label, device } = (props ?? {}) as {
+  const { kind, label, title, summary, device } = (props ?? {}) as {
     kind?: unknown;
     label?: unknown;
+    title?: unknown;
+    summary?: unknown;
     device?: unknown;
   };
   if (device === true && typeof kind === "string" && typeof label === "string") {
-    return connectCardUi(kind, label, true);
+    // A card stored before the words came from the device names only its label.
+    return connectCardUi(kind, label, true, {
+      title: typeof title === "string" && title ? title : label,
+      ...(typeof summary === "string" && summary ? { summary } : {}),
+    });
   }
   if (typeof kind !== "string" || !isOAuthProvider(kind)) return null;
   return connectCardUi(kind, OAUTH_PROVIDER_DESCRIPTORS[kind].label);

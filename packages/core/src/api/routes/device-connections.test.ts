@@ -80,6 +80,8 @@ describe("/device-connections routes", () => {
         permission: "unknown",
         live: true,
         feeds: "apple_health",
+        summary: null,
+        labels: {},
         state: "working",
         lastSeenAt: new Date(NOW).toISOString(),
       },
@@ -90,6 +92,20 @@ describe("/device-connections routes", () => {
         feeds: null,
       }),
     ]);
+  });
+
+  it("keeps the words a device declares for its card, in each language it has them", async () => {
+    const labels = { en: { title: "Apple Health" }, "zh-CN": { title: "Apple 健康" } };
+    await put(
+      report("dev-1", [{ ...health, summary: "Reads the Health data you allow.", labels }]),
+    );
+    expect(await list()).toEqual([
+      expect.objectContaining({ summary: "Reads the Health data you allow.", labels }),
+    ]);
+    const tooMany = Object.fromEntries(
+      ["en", "fr", "de", "es", "it", "ja", "ko", "pt", "ru"].map((l) => [l, { title: "x" }]),
+    );
+    expect((await put(report("dev-1", [{ ...health, labels: tooMany }]))).status).toBe(400);
   });
 
   it("replaces only the reporting device's rows, and is the same when sent twice", async () => {

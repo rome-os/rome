@@ -6,6 +6,7 @@ import type { DrizzleDb } from "../../db/index.js";
 import { deviceConnections } from "../../db/schema/system.js";
 import {
   type DeviceConnectionState,
+  type DeviceLabel,
   type DeviceOperation,
   type DeviceReport,
   deviceConnectionId,
@@ -28,6 +29,10 @@ export interface DeviceConnection {
   live: boolean;
   /** What the capability also syncs to, as the device names it, or null. */
   feeds: string | null;
+  /** What it lets Rome do, in English, as its page says, or null. */
+  summary: string | null;
+  /** Its name and summary by language, as the device has them. */
+  labels: Record<string, DeviceLabel>;
   state: DeviceConnectionState;
   lastSeenAt: string;
 }
@@ -68,6 +73,8 @@ export class DeviceConnectionsRepository {
           permission: connection.permission,
           live: connection.live,
           feeds: connection.feeds ?? null,
+          summary: connection.summary ?? null,
+          labels: connection.labels ?? null,
           originId: report.device.originId ?? null,
           lastSeenAt: now,
         };
@@ -152,6 +159,8 @@ function toConnection(row: Row): DeviceConnection {
     permission: row.permission as Permission,
     live: row.live,
     feeds: row.feeds,
+    summary: row.summary,
+    labels: row.labels ?? {},
     state: deviceConnectionState(row),
     lastSeenAt: new Date(row.lastSeenAt).toISOString(),
   };

@@ -397,34 +397,6 @@
         }
       }
     },
-    "%lld reminders" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld reminder"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld reminders"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 个提醒事项"
-          }
-        }
-      }
-    },
     "%lld selected" : {
       "localizations" : {
         "zh-Hans" : {
@@ -611,16 +583,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已在你的日历添加「和 Sam 吃午饭」，周五 12:30 到 1:30。"
-          }
-        }
-      }
-    },
-    "Added a reminder" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "添加了提醒事项"
           }
         }
       }
@@ -1045,22 +1007,22 @@
         }
       }
     },
-    "Calendar & Reminders" : {
+    "Calendar" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "日历与提醒事项"
+            "value" : "日历"
           }
         }
       }
     },
-    "Calendars and lists" : {
+    "Calendars" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "日历和列表"
+            "value" : "日历列表"
           }
         }
       }
@@ -1351,16 +1313,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "对比一下 $300 以内最好的降噪耳机。"
-          }
-        }
-      }
-    },
-    "Completed a reminder" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完成了提醒事项"
           }
         }
       }
@@ -1855,12 +1807,12 @@
         }
       }
     },
-    "Delete all calendar and reminders data this %@ sent to your Rome?" : {
+    "Delete all calendar data this %@ sent to your Rome?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除这台%@发送到你的 Rome 的全部日历和提醒事项数据？"
+            "value" : "删除这台%@发送到你的 Rome 的全部日历数据？"
           }
         }
       }
@@ -2045,12 +1997,12 @@
         }
       }
     },
-    "Every morning at 8, I'll send today's schedule, what's due, and anything that needs you first." : {
+    "Every morning at 8, I'll send today's schedule and what needs you first." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每天早上 8 点，我会发给你当天的日程、到期的事项，以及需要你先处理的事。"
+            "value" : "每天早上 8 点，我会发给你当天的日程，以及需要你先处理的事。"
           }
         }
       }
@@ -3043,12 +2995,12 @@
         }
       }
     },
-    "No access to Calendar or Reminders" : {
+    "No access to Calendar" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无权访问日历或提醒事项"
+            "value" : "无权访问日历"
           }
         }
       }
@@ -3839,16 +3791,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出门前提醒我充电。"
-          }
-        }
-      }
-    },
-    "Reminders" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提醒事项"
           }
         }
       }
@@ -4743,6 +4685,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "睡眠"
+          }
+        }
+      }
+    },
+    "So your Rome can read the data you allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让你的 Rome 读取你允许的数据。"
           }
         }
       }
@@ -6285,12 +6237,12 @@
         }
       }
     },
-    "Your Rome reads your calendars and reminders, and adds or changes them when you ask." : {
+    "Your Rome reads your calendars, and adds or changes events when you ask." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的 Rome 会读取你的日历和提醒事项，并在你要求时添加或修改。"
+            "value" : "你的 Rome 会读取你的日历，并在你要求时添加或修改事件。"
           }
         }
       }

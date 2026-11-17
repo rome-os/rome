@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A personal-data source's Sync with Rome, as its connection page and Sync
-/// history read it: Apple Health's, or Calendar & Reminders'.
+/// history read it: Apple Health's, or Calendar's.
 @MainActor
 protocol SourceSyncing: AnyObject {
     var instance: HealthInstance? { get }

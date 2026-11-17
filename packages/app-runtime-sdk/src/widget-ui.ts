@@ -29,7 +29,8 @@ export const WIDGET_UI_COMPONENTS = [
 ] as const;
 
 /** Rome's own strings a card may name with `{ string }`. Each reader shows
- *  them in the guardian's language. */
+ *  them in the guardian's language. `connect`, `notNow` and
+ *  `deviceConnectNote` are the device connect card's. */
 export const WIDGET_UI_STRINGS = [
   "send",
   "dismiss",
@@ -37,6 +38,9 @@ export const WIDGET_UI_STRINGS = [
   "addOwn",
   "typeAnswer",
   "optional",
+  "connect",
+  "notNow",
+  "deviceConnectNote",
 ] as const;
 
 /** The icons a card may name: a `Stat`'s label, or a `Text` or `Row`, such

@@ -26,6 +26,20 @@ export const deviceOperationSchema = z.object({
 
 export type DeviceOperation = z.infer<typeof deviceOperationSchema>;
 
+/** A language code as Rome names the guardian's, such as `en` or `zh-CN`. */
+const language = z.string().regex(/^[a-z]{2}(-[A-Za-z0-9]{2,4})?$/);
+
+/**
+ * The words the guardian reads for a capability, in one language: its name
+ * and what it lets Rome do, as its page on the device says them.
+ */
+export const deviceLabelSchema = z.object({
+  title: z.string().min(1).max(100),
+  summary: z.string().min(1).max(300).optional(),
+});
+
+export type DeviceLabel = z.infer<typeof deviceLabelSchema>;
+
 /** One device's full list of connections, as `PUT /api/device-connections` takes it. */
 export const deviceReportSchema = z.object({
   version: z.literal(1),
@@ -50,6 +64,15 @@ export const deviceReportSchema = z.object({
         // What the capability also syncs to, such as `apple_health`. Opaque
         // to connections.
         feeds: identifier.optional(),
+        // What it lets Rome do, in English, as its page says. Optional: older
+        // apps send none.
+        summary: z.string().min(1).max(300).optional(),
+        // Its name and summary in each language the device has them, so a
+        // connect card reads in the guardian's language.
+        labels: z
+          .record(language, deviceLabelSchema)
+          .refine((labels) => Object.keys(labels).length <= 8, "at most 8 languages")
+          .optional(),
       }),
     )
     .max(50)

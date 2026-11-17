@@ -27,6 +27,8 @@ export function connectAccountTools(input: {
    * device the guardian asks from, when the turn has one, never on another.
    */
   deviceState?: (kind: string) => DeviceKindState | undefined;
+  /** The guardian's language, which a device card's words follow. */
+  language?: () => Promise<string | null>;
   devicesOnly?: boolean;
 }): RomeTool[] {
   const widgetsShow = input.widgets === "card";
@@ -77,7 +79,12 @@ export function connectAccountTools(input: {
           }
         }
         const output = parsed.device
-          ? deviceConnectToolOutput(parsed.device, widgetsShow, now?.askingDeviceId)
+          ? deviceConnectToolOutput(
+              parsed.device,
+              widgetsShow,
+              now?.askingDeviceId,
+              await input.language?.(),
+            )
           : connectAccountToolOutput(parsed.kind, widgetsShow);
         return {
           content: [

@@ -48,7 +48,7 @@ export interface WidgetUiCardProps {
 }
 
 // Rome's own strings a card names with `{ string }`, shown in the guardian's
-// language. They are the question card's labels.
+// language: the question card's labels and the device connect card's.
 const HOST_STRINGS: Record<string, string> = {
   send: "questionCard.send",
   dismiss: "questionCard.dismiss",
@@ -56,6 +56,9 @@ const HOST_STRINGS: Record<string, string> = {
   addOwn: "questionCard.addOwn",
   typeAnswer: "questionCard.typeAnswer",
   optional: "questionCard.optional",
+  connect: "deviceConnectCard.connect",
+  notNow: "deviceConnectCard.notNow",
+  deviceConnectNote: "deviceConnectCard.note",
 };
 
 /** The card's components with each `{ string }` replaced by its translation,

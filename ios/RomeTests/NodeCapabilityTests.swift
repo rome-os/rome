@@ -107,12 +107,16 @@ extension DeviceStatus {
         #expect(list[0] == .init(
             capability: "apple_health", title: "Apple Health", prefix: "health", personal: true,
             operations: healthActions.map(\.reportedOperation),
-            feeds: "apple_health", permission: "unknown", live: true
+            feeds: "apple_health", permission: "unknown", live: true,
+            summary: list[0].summary, labels: list[0].labels
         ), "HealthKit hides read access: always unknown")
+        #expect(list[0].summary == "Your Rome reads the Health data you allow.")
+        #expect(list[0].labels?["zh-CN"]?.title == "Apple 健康", "the card's words in each language")
         #expect(list[0].operations.map(\.name) == ["health.stats", "health.samples"])
         #expect(list[1] == .init(
             capability: "device", title: "Device", prefix: "device", personal: false,
-            operations: deviceActions.map(\.reportedOperation), permission: "not_needed", live: false
+            operations: deviceActions.map(\.reportedOperation), permission: "not_needed", live: false,
+            summary: list[1].summary, labels: list[1].labels
         ))
         #expect(list[1].operations.map(\.name) == ["device.status"])
         // Each operation carries its usage and examples, so the Rome lists it from the report alone.

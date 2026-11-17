@@ -4,7 +4,7 @@
 
 /**
  * How a type's items are stored. A source joins the store only with these.
- * `entry` is a document with a time, such as a calendar event or a reminder:
+ * `entry` is a document with a time, such as a calendar event:
  * its words are its content, it is listed and never aggregated.
  */
 export type Shape = "bucket" | "sample" | "record" | "entry";

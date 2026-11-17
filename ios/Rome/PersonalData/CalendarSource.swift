@@ -1,17 +1,14 @@
 import CryptoKit
 import Foundation
 
-// Calendar & Reminders as a personal-data source: each run reads the phone's
-// events from 7 days ago to 30 days ahead, its open reminders and those
-// completed in the last 7 days, and sends what changed since the Rome last
-// had it, with a delete for each one that is gone. An event that has aged out
-// of the window is forgotten here and stays on the Rome; a reminder that has
-// left the set (deleted, or completed long ago) is deleted there.
+// Calendar as a personal-data source: each run reads the phone's events from
+// 7 days ago to 30 days ahead and sends what changed since the Rome last had
+// it, with a delete for each one that is gone. An event that has aged out of
+// the window is forgotten here and stays on the Rome as history.
 
 struct CalendarSource: PersonalDataSource {
     static let pastDays = 7
     static let aheadDays = 30
-    static let completedDays = 7
     /// Notes are cut here: the Rome keeps at most 1,000 characters.
     static let notesLength = 1000
     static let maxAttendees = 20
@@ -26,24 +23,11 @@ struct CalendarSource: PersonalDataSource {
     func beginRun(trigger: SyncTrigger, instanceId: String, now: Date) async throws {
         var progress = await store.load()
         if progress.instanceId != instanceId { progress = SyncProgress(instanceId: instanceId) }
-        let access = reader.access()
-        guard access.any else { throw SourceReadFailure(code: "calendar_denied") }
+        guard reader.access() == .granted else { throw SourceReadFailure(code: "calendar_denied") }
         let calendar = calendar()
         let window = Self.window(now: now, calendar: calendar)
-        var items: [PersonalDataPoint] = []
-        var readTypes: Set<String> = []
-        if access.events == .granted {
-            items += try await read { try await reader.events(in: window) }.map { Self.point($0, calendar: calendar) }
-            readTypes.insert("events")
-        }
-        if access.reminders == .granted {
-            let since = now.addingTimeInterval(-Double(Self.completedDays) * 86_400)
-            items += try await read { try await reader.reminders(completedSince: since) }
-                .filter { !$0.completed || ($0.completedAt ?? .distantPast) >= since }
-                .map { Self.point($0, now: now, calendar: calendar) }
-            readTypes.insert("reminders")
-        }
-        let chunk = Self.chunk(items, read: readTypes, progress: progress, window: window, now: now)
+        let items = try await read { try await reader.events(in: window) }.map { Self.point($0, calendar: calendar) }
+        let chunk = Self.chunk(items, progress: progress, window: window, now: now)
         await pending.set(chunk)
     }
 
@@ -63,17 +47,9 @@ struct CalendarSource: PersonalDataSource {
     }
 
     func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
-        var progress = chunk.commit
-        // A type the Rome refused keeps what it had: it is sent again next time.
-        if !unsupported.isEmpty {
-            let old = await store.load().entries ?? [:]
-            var entries = progress.entries ?? [:]
-            for key in entries.keys where unsupported.contains(Self.type(of: key)) { entries[key] = old[key] }
-            for (key, entry) in old where unsupported.contains(Self.type(of: key)) { entries[key] = entry }
-            progress.entries = entries
-            progress.unsupported = unsupported
-        }
-        await store.save(progress)
+        // A Rome that refused events keeps nothing new: they are sent again next time.
+        guard unsupported.isEmpty else { return }
+        await store.save(chunk.commit)
     }
 
     func reset() async { await store.removeAll() }
@@ -90,10 +66,9 @@ struct CalendarSource: PersonalDataSource {
         return DateInterval(start: start, end: end)
     }
 
-    /// What changed against what the Rome holds: new and changed items, and
-    /// deletes for the ones that are gone. `read`: the types this run could
-    /// read; a type iOS no longer allows deletes nothing and keeps its record.
-    static func chunk(_ items: [PersonalDataPoint], read: Set<String>, progress: SyncProgress, window: DateInterval, now: Date) -> SyncChunk {
+    /// What changed against what the Rome holds: new and changed events, and
+    /// deletes for the ones that are gone.
+    static func chunk(_ items: [PersonalDataPoint], progress: SyncProgress, window: DateInterval, now: Date) -> SyncChunk {
         let old = progress.entries ?? [:]
         var next: [String: SyncProgress.SentEntry] = [:]
         var upserts: [PersonalDataPoint] = []
@@ -114,17 +89,11 @@ struct CalendarSource: PersonalDataSource {
         }
         var deletes: [String] = []
         for (key, entry) in old where next[key] == nil {
-            let type = type(of: key)
-            if !read.contains(type) {
-                next[key] = entry
-            } else if type == "events", entry.end < window.start {
-                // Aged out: the Rome keeps it as history, and nothing here tracks it.
-                continue
-            } else {
-                deletes.append(key)
-                let count = counts[type] ?? SyncTypeCount(items: 0, start: nil, end: nil)
-                counts[type] = SyncTypeCount(items: count.items + 1, start: count.start, end: count.end)
-            }
+            // Aged out: the Rome keeps it as history, and nothing here tracks it.
+            if entry.end < window.start { continue }
+            deletes.append(key)
+            let count = counts["events"] ?? SyncTypeCount(items: 0, start: nil, end: nil)
+            counts["events"] = SyncTypeCount(items: count.items + 1, start: count.start, end: count.end)
         }
         var commit = progress
         commit.entries = next
@@ -133,14 +102,10 @@ struct CalendarSource: PersonalDataSource {
             kind: .delta,
             upserts: upserts.sorted { $0.key < $1.key },
             deletes: deletes.sorted(),
-            marks: read.sorted().map { .init(type: $0, syncedThrough: through) },
+            marks: [.init(type: "events", syncedThrough: through)],
             counts: counts,
             commit: commit
         )
-    }
-
-    static func type(of key: String) -> String {
-        String(key.prefix { $0 != ":" })
     }
 
     static func hash(_ point: PersonalDataPoint) -> String {
@@ -173,23 +138,6 @@ struct CalendarSource: PersonalDataSource {
         )
     }
 
-    /// At its due time; one with no due date at when it was made.
-    static func point(_ reminder: ReminderItem, now: Date, calendar: Calendar) -> PersonalDataPoint {
-        let at = reminder.due ?? reminder.created ?? now
-        var content: [String: JSONValue] = [
-            "id": .string(reminder.id), "title": .string(reminder.title), "list": .string(reminder.list),
-            "completed": .bool(reminder.completed), "hasDueDate": .bool(reminder.due != nil),
-            "priority": .number(Double(reminder.priority)),
-        ]
-        if let notes = reminder.notes { content["notes"] = .string(String(notes.prefix(notesLength))) }
-        if let done = reminder.completedAt { content["completedAt"] = .string(HealthDates.iso(done, calendar)) }
-        if let url = reminder.url { content["url"] = .string(String(url.prefix(500))) }
-        let time = WireTime.string(at)
-        return PersonalDataPoint(
-            key: String("reminders:\(reminder.id)".prefix(200)), type: "reminders", shape: .entry,
-            start: time, end: time, tz: calendar.timeZone.identifier, content: content
-        )
-    }
 }
 
 /// The one chunk a run sends, held between `beginRun` and `nextChunk`.
