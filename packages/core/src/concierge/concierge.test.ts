@@ -4140,15 +4140,14 @@ describe("Concierge chat", () => {
       },
       owners,
     } as unknown as ConciergeDeps);
-    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toMatch(
-      new RegExp(
-        `^<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n<now>\\w{3} \\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2} \\(.+\\)</now>$`,
-      ),
+    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toBe(
+      `<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
     );
-    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toMatch(
-      /^<concierge_chat id="concierge" name="Concierge" main="true"\/>\n<concierge_owner role="guardian" name="Eric"\/>\n<now>/,
+    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
+      '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
     );
-    // The weekday and date are the guardian's own, not the container's UTC day.
+    // The weekday and date are the chat owner's own, not the container's UTC
+    // day: the guardian's zone, or a dashboard admin's own once reported.
     rs.useFakeTimers();
     try {
       rs.setSystemTime(new Date("2026-11-19T17:00:00Z"));
@@ -4157,13 +4156,28 @@ describe("Concierge chat", () => {
           get: async (key: string) => (key === "guardianTimezone" ? "Asia/Shanghai" : null),
         },
         webchatRepo: {
-          getSession: async (id: string) => ({ id, agentName: CONCIERGE_AGENT_ID, ownerKey: null }),
+          getSession: async (id: string) =>
+            id === annMain
+              ? { id, agentName: CONCIERGE_AGENT_ID, ownerKey: "visitor:acct-ann" }
+              : { id, agentName: CONCIERGE_AGENT_ID, ownerKey: null },
         },
         owners,
       } as unknown as ConciergeDeps);
-      expect(
-        await shanghai.turnHeader({ id: "concierge", name: "Concierge", main: true }),
-      ).toContain("<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>");
+      expect(await shanghai.nowLine("concierge")).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
+      // Before following is attached, an admin's chat falls back to the guardian's zone.
+      expect(await shanghai.nowLine(annMain)).toBe("<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>");
+      shanghai.attachFollowing({
+        timezone: async (owner: string) =>
+          owner === "visitor:acct-ann" ? "America/Los_Angeles" : "Asia/Shanghai",
+      } as never);
+      expect(await shanghai.nowLine(annMain)).toBe(
+        "<now>Thu 19/11/2026 09:00 (America/Los_Angeles)</now>",
+      );
+      expect(await shanghai.nowLine("concierge")).toBe(
+        "<now>Fri 20/11/2026 01:00 (Asia/Shanghai)</now>",
+      );
     } finally {
       rs.useRealTimers();
     }

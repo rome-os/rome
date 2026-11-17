@@ -218,7 +218,7 @@ export interface ConciergeDashboard {
 export interface ConciergeDeps {
   skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
-  /** The guardian's local time, as each turn names it. Absent, the clock in the guardian's time zone. */
+  /** The owner's local time, as each turn names it. Absent, the clock in the owner's time zone. */
   localNow?: () => Promise<string>;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;
@@ -535,21 +535,32 @@ export class ConciergeService {
   }
 
   /**
-   * What every turn in a Concierge chat opens with: the chat it runs in, the
-   * person it serves, who may not be the guardian, and the guardian's local
-   * date, weekday and time. The model's own date line names no weekday and
-   * follows the container's clock, which runs in UTC; this one rides each
-   * turn, so the cached system prompt never changes with the clock.
+   * What every turn in a Concierge chat opens with: the chat it runs in, and
+   * the person it serves, who may not be the guardian.
    */
   async turnHeader(chat: ConciergeChatRef): Promise<string> {
     // A chat whose owner cannot be found serves no one: never the guardian by default.
     const ownerKey = await this.ownerOfChat(chat.id);
     if (ownerKey === null) throw new Error(`No Concierge chat ${chat.id}`);
     const owner = await this.owners.profileOf(ownerKey);
-    const now = this.deps.localNow
-      ? await this.deps.localNow()
-      : guardianNow(Date.now(), await resolveGuardianTimezone(this.deps.settingsRepo));
-    return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}\n<now>${now}</now>`;
+    return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
+  }
+
+  /**
+   * The chat owner's local weekday, date and time, which each Concierge turn
+   * names after its opening headers. The model's own date line names no
+   * weekday and follows the container's clock, which runs in UTC. This rides
+   * each turn, so the cached system prompt never changes with the clock. The
+   * zone is the owner's, as their follows and scheduled tasks use it.
+   */
+  async nowLine(chatId: string): Promise<string> {
+    if (this.deps.localNow) return `<now>${await this.deps.localNow()}</now>`;
+    const owner = (await this.ownerOfChat(chatId)) ?? GUARDIAN_OWNER;
+    const guardianZone = () => resolveGuardianTimezone(this.deps.settingsRepo);
+    const zone = this.attachedFollowing
+      ? await this.attachedFollowing.timezone(owner).catch(guardianZone)
+      : await guardianZone();
+    return `<now>${guardianNow(Date.now(), zone)}</now>`;
   }
 
   /** Whether a chat is its owner's main Concierge chat. */
@@ -935,9 +946,11 @@ export class ConciergeService {
     // current one, and its note carries what it needs.
     const sessionId = (await this.runtimeOf(chatId)) || params.sessionId;
     const chat = await this.conciergeChat(chatId);
+    const opens = !!chat && !params.prompt.startsWith("<concierge_chat ");
     const opening = [
-      chat && !params.prompt.startsWith("<concierge_chat ") ? await this.turnHeader(chat) : "",
+      opens ? await this.turnHeader(chat) : "",
       chat ? await this.stoppedRequestLines(chatId) : "",
+      opens ? await this.nowLine(chatId) : "",
     ].filter(Boolean);
     const prompt = opening.length > 0 ? `${opening.join("\n")}\n\n${params.prompt}` : params.prompt;
     const reportedTask = await this.reportedTaskOf(this.taskIdsOf(params), chatId);

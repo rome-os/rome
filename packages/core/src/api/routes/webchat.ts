@@ -4652,7 +4652,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Messages the owner stopped before an answer are named once, so this
       // turn does not pick them up from the history.
       const stopped = (await deps.concierge?.stoppedRequestLines(sessionId)) ?? "";
-      promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
+      // The headers a session sends again only when they change open the
+      // input in one run, the chat, its owner and the workspace, so the
+      // per-turn lines after them never hide an unchanged one.
+      const sticky = workspaceSection ? `${conciergeHeader}\n${workspaceSection}` : conciergeHeader;
+      const now = (await deps.concierge?.nowLine?.(sessionId)) ?? "";
+      const body = automated
+        ? `${automatedMessageNotice(automated)}\n\n${repliedPrompt}`
+        : repliedPrompt;
+      promptText = `${sticky}\n${stopped ? `${stopped}\n` : ""}${line}${now ? `\n${now}` : ""}\n\n${body}`;
     }
 
     // Whether the chat's session was still open: a turn on it starts warm.
