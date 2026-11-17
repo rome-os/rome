@@ -200,14 +200,12 @@ export function aiToolsRoutes(
   app.post("/ai-tools/provider-outages/:id/run", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { provider?: unknown } | null;
     const provider = body?.provider;
-    if (provider !== "anthropic" && provider !== "openai" && provider !== "rome_credits") {
-      return c.json({ error: "Unknown provider" }, 400);
+    // Rome credits run only as the default, so a one-off turn cannot use them.
+    if (provider !== "anthropic" && provider !== "openai") {
+      return c.json({ error: "Only Claude or ChatGPT can run a turn now" }, 400);
     }
     if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
-    const ran = await deps.providerFailures.runOutageOn(
-      c.req.param("id"),
-      provider === "anthropic" ? "anthropic" : "openai",
-    );
+    const ran = await deps.providerFailures.runOutageOn(c.req.param("id"), provider);
     return c.json({ ran });
   });
 

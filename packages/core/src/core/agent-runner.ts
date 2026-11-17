@@ -240,6 +240,8 @@ export class AgentRunner {
       threadContext,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
+      // A cold session opens on the provider the turn is told to run on.
+      ...(params.providerOverride ? { providerOverride: params.providerOverride } : {}),
     };
     const session = explicitSessionId
       ? await this.agentSessionManager.resume(

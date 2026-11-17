@@ -167,6 +167,11 @@ export interface SessionOpening {
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
   /**
+   * The provider the open resolves on, for a turn run alone on another
+   * provider than the default (`AgentTurnInput.providerOverride`).
+   */
+  providerOverride?: AccountedProviderId;
+  /**
    * Optional exact model selection, used by the WebChat model selector. On a
    * session that is already open, a value replaces its selection from the next
    * turn and null clears it; undefined leaves it as it is.
@@ -1991,7 +1996,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.resolve(
-      modelResolutionRequest(selectionId, sessionPin, config),
+      modelResolutionRequest(selectionId, sessionPin, config, init.providerOverride),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =

@@ -286,6 +286,23 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       await deps.webchatRepo.addBackendMessage(turn.chatId, turn.turnId ?? uuidv7(), [part]);
   };
 
+  /** Runs each of an outage's chats again; one that cannot run does not stop the rest. */
+  const resendAll = async (
+    outage: ProviderOutage,
+    provider?: AccountedProviderId,
+  ): Promise<number> => {
+    let ran = 0;
+    for (const chat of outage.chats) {
+      try {
+        await resend(chat.chatId, chat.agentName, provider);
+        ran += 1;
+      } catch (error) {
+        log.warn("outage chat resend failed", { chatId: chat.chatId, error: String(error) });
+      }
+    }
+    return ran;
+  };
+
   const noticePart = (outage: ProviderOutage, resolvedAt?: string): ProviderOutagePart => ({
     type: "provider_outage",
     outageId: outage.id,
@@ -370,10 +387,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     if (change !== "refreshed" || succeeded === false) return;
     if (provider !== "anthropic" && provider !== "openai") return;
     if (deps.accounts.read()[provider]?.state !== "available") return;
-    // The usage-limit continuation resumes the waiting chats themselves.
     void resolve(
       (outage) => (outage.provider === "anthropic" ? "anthropic" : "openai") === provider,
-    );
+    ).then(async (ended) => {
+      // The usage-limit continuation resumes chats a limit stopped. Chats that
+      // waited for a sign-in run again here.
+      for (const outage of ended) if (outage.reason !== "quota") await resendAll(outage);
+    });
   });
 
   return {
@@ -381,11 +401,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (stopped) return;
       const classified = classify(turn.failure);
       if (!classified) return;
+      // Checked before any wait, so a retry that already ended is still known.
+      const retried = retrying.has(turn.chatId);
       const chat = await deps.webchatRepo.getSession(turn.chatId);
       if (!chat) return;
       if (classified.kind === "temporary") {
         // The Concierge retries its own chats; a retry is never retried.
-        if (isConciergeChat(chat) || retrying.has(turn.chatId)) return;
+        if (isConciergeChat(chat) || retried) return;
         await retryOnce(turn);
         return;
       }
@@ -408,8 +430,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     async runOutageOn(outageId, provider) {
       const [outage] = await resolve((candidate) => candidate.id === outageId);
       if (!outage) return 0;
-      for (const chat of outage.chats) await resend(chat.chatId, chat.agentName, provider);
-      return outage.chats.length;
+      return await resendAll(outage, provider);
     },
     outages: readOutages,
     stop() {

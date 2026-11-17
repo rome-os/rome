@@ -24,8 +24,11 @@ describe("legacyDefault", () => {
     expect(legacyDefault(none, signedInProviders(none, false))).toBeNull();
   });
 
-  it("counts a provider at its usage limit as signed in", () => {
+  it("counts a provider at its usage limit, or whose sign-in expired, as signed in", () => {
     expect(signedInProviders({ anthropic: limited }, false).anthropic).toBe(true);
+    const expired: ModelAccountReport = { state: "expired", account: { loggedIn: false } };
+    expect(signedInProviders({ anthropic: expired }, false).anthropic).toBe(true);
+    expect(signedInProviders({ anthropic: out }, false).anthropic).toBe(false);
   });
 });
 

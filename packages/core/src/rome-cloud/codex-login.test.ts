@@ -113,7 +113,10 @@ describe("codexLoginFor", () => {
 
   it("uses Rome credits when they are the only provider signed in", () => {
     expect(codexLoginFor(base)).toEqual(CREDITS);
-    expect(codexLoginFor({ ...base, openai: reportOf("expired") })).toEqual(CREDITS);
+  });
+
+  it("keeps the subscription login when ChatGPT's sign-in expired, so the chat shows a card", () => {
+    expect(codexLoginFor({ ...base, openai: reportOf("expired") })).toEqual(SUBSCRIPTION);
   });
 
   it("uses Rome credits when they are the default, even with ChatGPT signed in", () => {
@@ -322,7 +325,7 @@ describe("startCodexLoginChoice", () => {
     expect(c.listeners.size).toBe(0);
   });
 
-  it("holds Rome credits when Codex rejects the saved ChatGPT login", async () => {
+  it("holds Rome credits as the default when Codex rejects the saved ChatGPT login", async () => {
     // Codex hides an unusable ChatGPT login on the subscription login, and on
     // Rome credits it hides every OpenAI account.
     let current: CodexLoginChoice = SUBSCRIPTION;
@@ -366,6 +369,7 @@ describe("startCodexLoginChoice", () => {
       getCredentialId: () => "romeinst_123",
       hasRomeCloud: () => true,
       fetchRomeCredits: async () => view(),
+      defaultProvider: () => "rome_credits",
       onCredentialChanged: () => () => {},
     });
 

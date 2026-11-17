@@ -25,6 +25,7 @@ import {
 import type { ModelTier } from "./model-tier.js";
 import { providerAvailability } from "./provider-availability.js";
 import { providerOfDefault, type DefaultProvider } from "./default-provider.js";
+import { followingSelection } from "./model-strength.js";
 
 /**
  * What a run asks for. `providerId` on a tier restricts it to that provider's
@@ -291,7 +292,9 @@ export function modelResolutionRequest(
   override?: AccountedProviderId,
 ): ModelResolutionRequest {
   if (selectionId) {
-    const { providerId, model } = MODEL_SELECTIONS[selectionId];
+    // A one-off override runs the selection's strength on that provider.
+    const id = override ? followingSelection(selectionId, override) : selectionId;
+    const { providerId, model } = MODEL_SELECTIONS[id];
     return { kind: "exact", providerId, model };
   }
   if (agent.modelId !== undefined) {

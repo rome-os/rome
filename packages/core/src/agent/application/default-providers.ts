@@ -44,7 +44,13 @@ export interface CreateDefaultProvidersOptions {
   accounts: Pick<ModelAccounts, "read" | "onChanged">;
   /** The providers whose accounts must be read before the default can move. */
   providers: readonly AccountedProviderId[];
-  creditsUsable: () => boolean;
+  /** Whether Rome credits count as signed in; undefined until Rome knows. */
+  creditsSignedIn: () => boolean | undefined;
+  /**
+   * The provider an upgrade starts from when one is signed in, ahead of the
+   * old order: the provider the Concierge main chat already runs on.
+   */
+  seed?: () => Promise<DefaultProvider | null>;
   log?: AgentLog;
   now?: () => Date;
 }
@@ -73,7 +79,13 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
       });
     });
 
-  const signedIn = () => signedInProviders(accounts.read(), options.creditsUsable());
+  // Credits Rome has not read yet keep a default that is them, and are not
+  // picked as a new one.
+  const signedIn = () =>
+    signedInProviders(
+      accounts.read(),
+      options.creditsSignedIn() ?? state.provider === "rome_credits",
+    );
 
   const store = async (next: DefaultProviderState, change?: DefaultProviderChange) => {
     await setting.write(next);
@@ -98,10 +110,11 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
       // A provider Rome has not read yet may still be signed in.
       if (options.providers.some((provider) => reports[provider] === undefined)) return;
       const now_ = signedIn();
+      const seeded = state.provider === null ? await options.seed?.().catch(() => null) : null;
       const { provider, moved } = reconciledDefault(
         state.provider,
         now_,
-        legacyDefault(reports, now_),
+        seeded && now_[seeded] ? seeded : legacyDefault(reports, now_),
       );
       if (!provider || provider === state.provider) return;
       const from = state.provider;

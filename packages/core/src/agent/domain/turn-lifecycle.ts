@@ -75,7 +75,12 @@ export function endedTurn(
       accounting: terminal.accounting,
       failure: {
         message: terminal.error,
-        provider,
+        // A refusal by the model resolver names the provider it refused,
+        // which may not be the one the session ran on before.
+        provider:
+          "provider" in terminal && typeof terminal.provider === "string"
+            ? terminal.provider
+            : provider,
         ...(terminal.code ? { code: terminal.code } : {}),
         ...(terminal.reason ? { reason: terminal.reason } : {}),
         ...(terminal.httpStatus ? { httpStatus: terminal.httpStatus } : {}),

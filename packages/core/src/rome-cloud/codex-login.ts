@@ -6,7 +6,6 @@
 
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import {
-  providerAuthorized,
   type AgentLog,
   type CodexLoginChoice,
   type CodexLogins,
@@ -25,13 +24,14 @@ function canSpend(view: RomeCreditsView | null): boolean {
 /**
  * The login Codex should run on. Rome credits are used only when the guardian
  * made them the default provider, or when they are the only provider signed
- * in: no ChatGPT login and no Claude login. A usage limit never brings them in.
+ * in: no ChatGPT login and no Claude login. A usage limit or an expired
+ * sign-in never brings them in: the chat shows a card instead.
  * Credits need a linked instance and credits that can be spent. Otherwise the
  * answer is `subscription`, and availability says whether it can run.
  */
 export function codexLoginFor(input: {
   openai: ModelAccountReport | undefined;
-  /** Claude is signed in, or Rome has not read it yet. */
+  /** Claude has a login, perhaps expired, or Rome has not read it yet. */
   claudeSignedIn: boolean;
   defaultProvider: DefaultProvider | null;
   credentialId: string | null;
@@ -39,7 +39,7 @@ export function codexLoginFor(input: {
 }): CodexLoginChoice {
   const { openai, credentialId, credits } = input;
   if (!credentialId || !canSpend(credits)) return { kind: "subscription" };
-  const onlyCredits = !providerAuthorized(openai) && !input.claudeSignedIn;
+  const onlyCredits = openai?.state === "unauthorized" && !input.claudeSignedIn;
   if (input.defaultProvider !== "rome_credits" && !onlyCredits) return { kind: "subscription" };
   return { kind: "rome_credits", credentialId };
 }
@@ -48,6 +48,12 @@ export interface CodexLoginChoiceHandle {
   stop(): void;
   /** The last read found credits this instance can spend. False before a read. */
   creditsUsable(): boolean;
+  /**
+   * Whether Rome credits count as a signed-in provider: the instance is
+   * linked and its account has credits enabled, spendable or used up.
+   * Undefined until the first read settles while linked.
+   */
+  creditsSignedIn(): boolean | undefined;
   /** Called when a read changes whether credits can be spent. */
   onCreditsChanged(listener: () => void): () => void;
   /** Decides the login again, as after the default provider changed. */
@@ -83,8 +89,9 @@ export function startCodexLoginChoice(options: {
   // Whether a credential could spend credits, as of the last sync. Reads
   // happen only while it holds.
   let linked = false;
-  // The last credits read, while linked.
+  // The last credits read, while linked, and whether one has settled.
   let credits: RomeCreditsView | null = null;
+  let creditsRead = false;
   let inFlight: object | null = null;
   const creditListeners = new Set<() => void>();
 
@@ -94,7 +101,7 @@ export function startCodexLoginChoice(options: {
     logins.useLogin(
       codexLoginFor({
         openai: reports.openai,
-        claudeSignedIn: claude === undefined || providerAuthorized(claude),
+        claudeSignedIn: claude === undefined || claude.state !== "unauthorized",
         defaultProvider: defaultProvider(),
         credentialId: linked ? credentialId : null,
         credits,
@@ -102,10 +109,12 @@ export function startCodexLoginChoice(options: {
     );
   };
 
-  const setCredits = (next: RomeCreditsView | null): void => {
-    const was = canSpend(credits);
+  const setCredits = (next: RomeCreditsView | null, read = true): void => {
+    const was = [canSpend(credits), creditsRead && credits?.enabled === true];
     credits = next;
-    if (was !== canSpend(next)) {
+    creditsRead = read;
+    const now = [canSpend(next), read && next?.enabled === true];
+    if (was[0] !== now[0] || was[1] !== now[1]) {
       for (const listener of creditListeners) listener();
     }
   };
@@ -140,7 +149,7 @@ export function startCodexLoginChoice(options: {
     // flight does not describe it.
     if (credentialChanged || !linked) inFlight = null;
     if (!linked) {
-      setCredits(null);
+      setCredits(null, true);
       logins.useLogin({ kind: "subscription" });
       return;
     }
@@ -170,6 +179,10 @@ export function startCodexLoginChoice(options: {
       creditListeners.clear();
     },
     creditsUsable: () => linked && canSpend(credits),
+    creditsSignedIn: () => {
+      if (!linked) return false;
+      return creditsRead ? credits?.enabled === true : undefined;
+    },
     onCreditsChanged(listener) {
       creditListeners.add(listener);
       return () => creditListeners.delete(listener);

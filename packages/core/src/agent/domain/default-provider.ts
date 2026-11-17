@@ -3,11 +3,7 @@
 // Rome credits count as one of their own. docs/domains/agents.md carries the
 // language.
 
-import {
-  providerAuthorized,
-  type AccountedProviderId,
-  type ModelAccountReports,
-} from "./model-account-report.js";
+import { type AccountedProviderId, type ModelAccountReports } from "./model-account-report.js";
 
 /** A provider the guardian can make the default. Rome credits run Codex. */
 export type DefaultProvider = "anthropic" | "openai" | "rome_credits";
@@ -55,19 +51,21 @@ export interface SignedInProviders {
 }
 
 /**
- * Signed in, as the default reads it: a provider at its usage limit is still
- * signed in, and one Rome has not read yet is not.
+ * Signed in, as the default reads it: only a provider with no login is out.
+ * One at its usage limit, or whose sign-in expired, is still signed in, so the
+ * chat shows a card rather than the default moving. One Rome has not read yet
+ * is not signed in.
  */
 export function signedInProviders(
   reports: ModelAccountReports,
-  creditsUsable: boolean,
+  creditsSignedIn: boolean,
 ): SignedInProviders {
   const signedIn = (id: AccountedProviderId) =>
-    reports[id] !== undefined && providerAuthorized(reports[id]);
+    reports[id] !== undefined && reports[id].state !== "unauthorized";
   return {
     anthropic: signedIn("anthropic"),
     openai: signedIn("openai"),
-    rome_credits: creditsUsable,
+    rome_credits: creditsSignedIn,
   };
 }
 

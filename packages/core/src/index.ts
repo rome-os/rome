@@ -206,6 +206,8 @@ import {
   createDefaultProviders,
   createDefaultProviderSetting,
   followingSelection,
+  isModelSelectionId,
+  MODEL_SELECTIONS,
   type DefaultProvider,
   DrizzleSessionRepository,
   codexLoginKind,
@@ -1039,7 +1041,17 @@ async function main() {
     setting: createDefaultProviderSetting(settingsRepo),
     accounts: modelAccounts,
     providers: ["anthropic", "openai"],
-    creditsUsable: () => codexLoginChoice.creditsUsable(),
+    creditsSignedIn: () => codexLoginChoice.creditsSignedIn(),
+    // An upgrade keeps the Concierge where it runs: the provider of the model
+    // Rome chose for the guardian's main chat, when it has one.
+    seed: async () => {
+      const chatId = await concierge.findChatId();
+      const chat = chatId ? await webchatRepo.getSession(chatId) : null;
+      const stored = chat?.largeModelSelection;
+      if (chat?.largeModelSelectionBy !== "auto" || !isModelSelectionId(stored)) return null;
+      const provider = MODEL_SELECTIONS[stored].providerId;
+      return provider === "anthropic" || provider === "openai" ? provider : null;
+    },
     log: createLogger("default-provider"),
   });
   readDefaultProvider = () => defaultProviders.current();

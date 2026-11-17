@@ -181,7 +181,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       reports: options.accounts.read(),
       logins: { openai: options.codexLogins?.login() },
       tierModels,
-      ...(options.defaults ? { defaultProvider: options.defaults.current() } : {}),
+      // Before any default is set, as on the first boot after an upgrade
+      // before the accounts are read, the old order decides.
+      ...(options.defaults?.current() ? { defaultProvider: options.defaults.current() } : {}),
     });
     if (!outcome.ok) {
       refreshAfterFailure(refreshScope(outcome.failure));

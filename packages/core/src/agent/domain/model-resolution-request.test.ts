@@ -44,6 +44,16 @@ describe("modelResolutionRequest", () => {
     });
   });
 
+  it("runs a selection's strength on the provider a one-off override names", () => {
+    expect(modelResolutionRequest("claude-sonnet", undefined, { tier: "large" }, "openai")).toEqual(
+      {
+        kind: "exact",
+        providerId: "openai",
+        model: "gpt-6-luna",
+      },
+    );
+  });
+
   it("carries a one-off provider override on a tier ask", () => {
     expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, "openai")).toEqual({
       kind: "tier",
