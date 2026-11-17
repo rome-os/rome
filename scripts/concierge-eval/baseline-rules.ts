@@ -4,18 +4,20 @@
 // from a scenario's own checks. Pure, so they are tested apart from a stack.
 // docs/concierge-eval.md#rules
 
-/** One emoji, with its variation selector and any joined emoji that make it one glyph. */
-const EMOJI = /\p{Extended_Pictographic}\u{FE0F}?(\u{200D}\p{Extended_Pictographic}\u{FE0F}?)*/gu;
-
-export function emojiCount(text: string): number {
-  return text.match(EMOJI)?.length ?? 0;
-}
-
-/** At most one emoji in each message. */
-export function oneEmoji(said: string[]): string[] {
-  return said
-    .filter((t) => emojiCount(t) > 1)
-    .map((t) => `rule: ${emojiCount(t)} emoji in "${t.slice(0, 60)}"`);
+/**
+ * One sign on each owner message: never both 👀 working and a reaction, the
+ * product's "one emoji per message" (docs/domains/chats.md). `steps[s]` is the
+ * turn step `s` started, `reactions[s]` the Concierge's reaction to its message.
+ */
+export function oneSign(
+  steps: ({ workingMs: number | null } | null)[],
+  reactions: (string | null)[],
+): string[] {
+  return steps.flatMap((turn, s) =>
+    turn?.workingMs != null && reactions[s] != null
+      ? [`rule: step ${s + 1} shows both 👀 working and a ${reactions[s]} reaction`]
+      : [],
+  );
 }
 
 /** A message that sends the owner to the task chat instead of carrying the result. */
@@ -30,7 +32,7 @@ export function noTaskChatPointer(said: string[]): string[] {
 
 /** An offer of more help or a question to the owner, as an answer's last sentence. */
 const OFFER =
-  /\b(want me to|shall i|should i|would you like|do you want|let me know if|if you('d| would)? like|happy to|i can also|need (anything|help) else|anything else)\b|需要我|要不要我|要我(帮|再)|如果(你|您)(需要|想)|随时(告诉|找)我|我(也)?可以(帮|再)|还有(什么|别的)/i;
+  /\b(want me to|shall i|should i|would you like|do you want|let me know if|i'?d be happy to|i'?m happy to|i can also|need (anything|help) else|anything else)\b|需要我|要不要我|要我(帮|再)|如果(你|您)(需要|想)|随时(告诉|找)我|我(也)?可以(帮|再)|还有(什么|别的)(需要|要)/i;
 
 /** The last sentence of `text`. */
 function lastSentence(text: string): string {

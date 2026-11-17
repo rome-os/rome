@@ -2,7 +2,7 @@
 // long scenarios: the types, the checks a scenario picks from, and the
 // standing rules every scenario runs. docs/concierge-eval.md#baseline
 
-import { chineseStyle, noTaskChatPointer, noTrailingOffer, oneEmoji } from "./baseline-rules.js";
+import { chineseStyle, noTaskChatPointer, noTrailingOffer, oneSign } from "./baseline-rules.js";
 import type { Step } from "./scenarios.js";
 import type { TimedTurn } from "./timing.js";
 
@@ -117,10 +117,10 @@ export function delegated(input: CheckInput, step = 0): string[] {
   return notes;
 }
 
-/** The rules every scenario keeps, whatever it asks: emoji, task results, and Chinese style. */
+/** The rules every scenario keeps, whatever it asks: one sign per message, task results, and Chinese style. */
 export function standingRules(scenario: BaselineScenario, input: CheckInput): string[] {
   return [
-    ...oneEmoji(input.said),
+    ...oneSign(input.steps, input.reactions),
     ...noTaskChatPointer(input.said),
     ...(scenario.lang === "zh" ? chineseStyle(input.said) : []),
   ];

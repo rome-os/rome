@@ -83,8 +83,8 @@ let memoryNotes: string | null = null;
 function snapshotMemory(): string {
   memoryNotes ??= (() => {
     try {
-      const notes = stack.memoryFacts(args.name);
-      return notes.length > 12_000 ? `${notes.slice(0, 12_000)}\n…` : notes;
+      // Whole: a note left out would let the judge call a fact from it invented.
+      return stack.memoryFacts(args.name);
     } catch {
       return "";
     }

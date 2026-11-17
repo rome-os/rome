@@ -2,20 +2,19 @@ import { describe, expect, it } from "@rstest/core";
 import { type CheckInput, fridayOnly } from "./baseline-checks.js";
 import {
   chineseStyle,
-  emojiCount,
   noTaskChatPointer,
   noTrailingOffer,
-  oneEmoji,
+  oneSign,
   thanksWithoutEyes,
 } from "./baseline-rules.js";
 import { LONG_SCENARIOS, renovationLog } from "./baseline-scenarios-long.js";
 
-describe("oneEmoji", () => {
-  it("counts a joined or varied emoji as one, and flags a second", () => {
-    expect(emojiCount("Done ✅")).toBe(1);
-    expect(emojiCount("❤️ and 👩‍💻")).toBe(2);
-    expect(emojiCount("22.2 °C, 11:30 → fine")).toBe(0);
-    expect(oneEmoji(["Morning! ☀️", "Done ✅ 🎉"])).toEqual(['rule: 2 emoji in "Done ✅ 🎉"']);
+describe("oneSign", () => {
+  it("flags an owner message that shows both 👀 working and a reaction", () => {
+    expect(oneSign([{ workingMs: null }, { workingMs: 900 }], ["❤️", null])).toEqual([]);
+    expect(oneSign([{ workingMs: 900 }, null], ["👍", null])).toEqual([
+      "rule: step 1 shows both 👀 working and a 👍 reaction",
+    ]);
   });
 });
 
@@ -37,6 +36,8 @@ describe("noTrailingOffer", () => {
     expect(noTrailingOffer(["约 22.2 °C。需要我再换算别的吗？"], 0)).toHaveLength(1);
     expect(noTrailingOffer(["Is it raining? Bring a coat."], 0)).toEqual([]);
     expect(noTrailingOffer([], 0)).toEqual([]);
+    expect(noTrailingOffer(["Chiado is central; Alfama if you like hills."], 0)).toEqual([]);
+    expect(noTrailingOffer(["西湖边还有别的小吃如片儿川。"], 0)).toEqual([]);
   });
 });
 
