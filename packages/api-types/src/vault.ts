@@ -13,9 +13,19 @@ export interface VaultSecretDto {
   grantedUntil?: string;
 }
 
+/** Whether the vault has a PIN, and until when wrong guesses lock it (null when not locked). */
+export interface VaultPinState {
+  set: boolean;
+  lockedUntil: string | null;
+}
+
 export interface VaultListResponse {
   secrets: VaultSecretDto[];
+  pin: VaultPinState;
 }
+
+/** The PIN is exactly six digits. The signer enforces the same pattern. */
+export const VAULT_PIN_PATTERN = /^\d{6}$/;
 
 export const VAULT_MAX_VALUE_LENGTH = 32768;
 export const VAULT_MAX_DESCRIPTION_LENGTH = 200;

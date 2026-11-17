@@ -326,6 +326,8 @@
       "nameHint": "Uppercase letters, digits, and underscores.",
       "valueField": "Secret value",
       "valueHint": "Rome does not show this value again. To change it, retype it.",
+      "showValue": "Show value",
+      "hideValue": "Hide value",
       "valueRequired": "Enter the secret value.",
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
@@ -380,7 +382,22 @@
       "save": "Save",
       "inputMethod": "How to add secrets",
       "singleKey": "Single secret",
-      "back": "Back to the vault"
+      "back": "Back to the vault",
+      "pin": "PIN",
+      "confirmPin": "Confirm PIN",
+      "newPin": "New PIN",
+      "pinMismatch": "The PINs do not match."
+    },
+    "pinStep": {
+      "setTitle": "Set PIN",
+      "enterTitle": "Enter PIN",
+      "continue": "Continue"
+    },
+    "forgotPin": "Forgot PIN?",
+    "reset": {
+      "title_one": "Delete {{count}} secret? This cannot be undone.",
+      "title_other": "Delete all {{count}} secrets? This cannot be undone.",
+      "confirm": "Reset"
     },
     "saved": "Saved {{name}}.",
     "batchSaved_one": "Saved {{count}} secret.",

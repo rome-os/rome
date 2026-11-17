@@ -208,7 +208,7 @@ export function buildApp(
   api.route("/", personalDataRoutes(deps));
   api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
-  api.route("/", vaultRoutes());
+  api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", peopleRoutes(deps));

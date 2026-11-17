@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { secretNamesText } from "@/components/chat/approval/secret-names";
 
 /** An answer short enough to repeat on a folded card. */
 const SHORT_ANSWER = 24;
@@ -58,16 +59,17 @@ export function approvalOutcome(
  */
 export function secretAccessOutcome(
   t: TFunction<"chat">,
-  preview: { name: string; ttlMinutes: number },
+  preview: { name: string; names?: string[]; ttlMinutes: number },
   status: string,
   resolvedBy: string | null | undefined,
 ): string {
   if (resolvedBy?.startsWith("rome:") || status === "failed") {
     return approvalOutcome(t, status, resolvedBy);
   }
+  const name = secretNamesText(t, preview);
   return status === "rejected"
-    ? t("approvals.secretAccess.rejected", { name: preview.name })
-    : t("approvals.secretAccess.allowed", { name: preview.name, minutes: preview.ttlMinutes });
+    ? t("approvals.secretAccess.rejected", { name })
+    : t("approvals.secretAccess.allowed", { name, minutes: preview.ttlMinutes });
 }
 
 const CARD =

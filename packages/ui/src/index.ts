@@ -3,10 +3,10 @@
 // consumers can avoid pulling the whole kit into a bundle.
 //
 // Components backed by optional peers are deliberately absent. Re-exporting
-// Markdown (Streamdown), Calendar (react-day-picker), Command (cmdk), or Sonner
-// would make every barrel import — `import { Button } from "@rome-os/ui"` — fail
-// to resolve for a consumer that never installed those peers. They remain
-// subpath-only.
+// Markdown (Streamdown), Calendar (react-day-picker), Command (cmdk), InputOTP
+// (input-otp), or Sonner would make every barrel import — `import { Button }
+// from "@rome-os/ui"` — fail to resolve for a consumer that never installed
+// those peers. They remain subpath-only.
 export { cn, type ClassValue } from "./cn.js";
 export { ProgressiveBlur, type ProgressiveBlurProps } from "./progressive-blur.js";
 export { Alert, AlertDescription, AlertTitle, type AlertProps } from "./alert.js";
