@@ -176,3 +176,56 @@ describe("ConciergeHeaderStatus", () => {
     expect(mascot(container).hasAttribute("data-poked")).toBe(true);
   });
 });
+
+describe("ConciergeHeaderStatus quick menu", () => {
+  function renderWithMenu() {
+    const opened: string[] = [];
+    const { container } = render(
+      <ConciergeHeaderStatus
+        name="Yo"
+        activity={{ kind: "idle" }}
+        onOpenTasks={() => opened.push("tasks")}
+        onOpenOutputs={() => opened.push("outputs")}
+        onOpenMemory={() => opened.push("memory")}
+      />,
+    );
+    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    return { opened, badge };
+  }
+  const items = () => screen.queryAllByRole("menuitem").map((item) => item.textContent);
+
+  it("shows Tasks, Outputs and Memory on hover, with no counts, and opens each one's tab", () => {
+    const { opened, badge } = renderWithMenu();
+    expect(items()).toEqual([]);
+    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
+    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Outputs" }));
+    expect(opened).toEqual(["outputs"]);
+    expect(items()).toEqual([]);
+    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Memory" }));
+    expect(opened).toEqual(["outputs", "memory"]);
+  });
+
+  it("still opens Tasks on a click of the badge", () => {
+    const { opened, badge } = renderWithMenu();
+    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
+    fireEvent.pointerDown(badge, { pointerType: "mouse" });
+    fireEvent.click(badge);
+    expect(opened).toEqual(["tasks"]);
+  });
+
+  it("shows the menu on a tap, where nothing hovers, instead of opening Tasks", () => {
+    const { opened, badge } = renderWithMenu();
+    fireEvent.pointerDown(badge, { pointerType: "touch" });
+    fireEvent.click(badge);
+    expect(opened).toEqual([]);
+    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
+  });
+
+  it("shows the menu from the keyboard with Arrow Down", () => {
+    const { badge } = renderWithMenu();
+    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    expect(items()).toEqual(["Tasks", "Outputs", "Memory"]);
+  });
+});

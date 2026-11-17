@@ -176,6 +176,12 @@
       },
       "created": "创建于 {{when}}",
       "endedAt": "结束于 {{when}}"
+    },
+    "menu": {
+      "label": "打开",
+      "tasks": "任务",
+      "outputs": "产出",
+      "memory": "记忆"
     }
   },
   "reply": {
@@ -748,9 +754,7 @@
   },
   "outputs": {
     "title": "产出",
-    "open": "产出",
     "close": "关闭产出",
-    "list": "Agent 产出的文件",
     "loading": "正在加载产出",
     "loadFailed": "无法加载产出",
     "emptyTitle": "还没有产出",
@@ -763,6 +767,25 @@
     "noPreview": "这个文件没有预览。",
     "unavailable": "这个文件无法在这里打开。",
     "previewFailed": "无法加载文件",
-    "truncated": "只显示前 {{count}} 个字符。"
+    "truncated": "只显示前 {{count}} 个字符。",
+    "back": "返回产出",
+    "filterLabel": "显示",
+    "noneOfType": "还没有这类产出。",
+    "today": "今天",
+    "earlier": "更早",
+    "filters": {
+      "all": "全部",
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面"
+    },
+    "types": {
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面",
+      "image": "图片",
+      "code": "代码",
+      "file": "文件"
+    }
   }
 }

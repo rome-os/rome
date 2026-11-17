@@ -1,6 +1,5 @@
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
-  FileOutput,
   Chrome,
   FolderKanban,
   LayoutGrid,
@@ -518,16 +517,6 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
                     </span>
                   )}
                 </div>
-              )}
-              {chatSessionId && (
-                // The chat's outputs, which the chat opens in a sheet here.
-                <IconButton
-                  size="md"
-                  label={t("outputs.open", { ns: "chat" })}
-                  icon={<FileOutput />}
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => eventBus.emit("outputs:open", {})}
-                />
               )}
               <MobileChatMenu
                 chatSessionId={chatSessionId}

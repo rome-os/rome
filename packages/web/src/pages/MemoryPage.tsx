@@ -112,18 +112,28 @@ export function MemoryFolderPanel() {
   );
 }
 
-export default function MemoryPage() {
+/**
+ * The memory browser: the Memory page's body, or a tool pane's Memory tab
+ * when `embedded`.
+ */
+export function MemoryBrowser({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation("files");
   return (
     <FileBrowserPage
       apiBasePath="/api/memory"
       autoSave={getMemoryAutoSavePolicy}
+      embedded={embedded}
       folderPanel={() => <MemoryFolderPanel />}
       initialSelectedFolderPath="memory"
       logicalRootPath="memory"
       rootLabel={t("memory.rootLabel")}
+      rootPanelTrigger={embedded}
       searchPlaceholder={t("memory.searchPlaceholder")}
       sidebarHeading={t("memory.sidebarHeading")}
     />
   );
+}
+
+export default function MemoryPage() {
+  return <MemoryBrowser />;
 }

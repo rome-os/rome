@@ -1,21 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  AppWindow,
+  ChevronLeft,
   Download,
   File as FileIcon,
-  FileArchive,
-  FileAudio,
   FileCode,
   FileImage,
   FileOutput,
-  FileSpreadsheet,
   FileText,
-  FileVideo,
+  Sheet,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
@@ -23,15 +21,9 @@ import {
   EmptyStateIcon,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
-import {
-  List,
-  ListRow,
-  ListRowContent,
-  ListRowDescription,
-  ListRowTitle,
-} from "@/components/ui/list-row";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
+import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatTaskTime } from "@/components/concierge/tasks";
 import { cn } from "@/lib/utils";
 import { type ChatOutput, useChatOutputs } from "./chat-outputs";
 
@@ -54,63 +46,131 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
   return "file";
 }
 
-function OutputIcon({ output, className }: { output: ChatOutput; className?: string }) {
-  const type = output.mimeType ?? "";
-  const props = {
-    className: cn("size-4 shrink-0 text-muted-foreground", className),
-    "aria-hidden": true,
-  };
-  if (type.startsWith("image/")) return <FileImage {...props} />;
-  if (type.startsWith("video/")) return <FileVideo {...props} />;
-  if (type.startsWith("audio/")) return <FileAudio {...props} />;
-  if (/zip|tar|gzip|compressed/.test(type)) return <FileArchive {...props} />;
-  if (/csv|spreadsheet|excel/.test(type)) return <FileSpreadsheet {...props} />;
-  if (CODE_EXTENSIONS.test(output.name)) return <FileCode {...props} />;
-  if (type.startsWith("text/") || type === "application/pdf") return <FileText {...props} />;
-  return <FileIcon {...props} />;
+/** What an output is, as the list names it and filters it. */
+export type OutputType = "document" | "spreadsheet" | "page" | "image" | "code" | "file";
+
+export function outputTypeOf(output: Pick<ChatOutput, "name" | "mimeType">): OutputType {
+  const extension = /\.([a-z0-9]+)$/i.exec(output.name)?.[1]?.toLowerCase() ?? "";
+  if (["md", "markdown", "txt", "pdf", "docx", "doc"].includes(extension)) return "document";
+  if (["csv", "tsv", "xlsx", "xls"].includes(extension)) return "spreadsheet";
+  if (["html", "htm"].includes(extension)) return "page";
+  if ((output.mimeType ?? "").startsWith("image/")) return "image";
+  if (CODE_EXTENSIONS.test(output.name)) return "code";
+  return "file";
+}
+
+/** A file name as a title: no extension, words for dashes and underscores, a capital first. */
+export function outputTitle(name: string): string {
+  const words = name
+    .replace(/\.[a-z0-9]{1,8}$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+  if (!words) return name;
+  return words.charAt(0).toLocaleUpperCase() + words.slice(1);
+}
+
+const FILTERS = ["all", "document", "spreadsheet", "page"] as const;
+type Filter = (typeof FILTERS)[number];
+
+const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
+  document: { icon: <FileText />, tint: "bg-primary/10 text-primary" },
+  spreadsheet: { icon: <Sheet />, tint: "bg-success-bg text-success-fg" },
+  page: { icon: <AppWindow />, tint: "bg-info-bg text-info-fg" },
+  image: { icon: <FileImage />, tint: "bg-brand/15 text-brand" },
+  code: { icon: <FileCode />, tint: "bg-surface-muted text-muted-foreground" },
+  file: { icon: <FileIcon />, tint: "bg-surface-muted text-muted-foreground" },
+};
+
+function TypeIcon({ type }: { type: OutputType }) {
+  const { icon, tint } = TYPE_ICON[type];
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center rounded-8 [&_svg]:size-4",
+        tint,
+      )}
+    >
+      {icon}
+    </span>
+  );
+}
+
+function sameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** The time today, the date earlier, and the year only when it is not this one. */
+function whenLabel(at: Date, now: Date, locale: string): string {
+  if (sameDay(at, now)) {
+    return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(at);
+  }
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    ...(at.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  }).format(at);
 }
 
 interface OutputsPanelProps {
   chatId: string;
-  /** The output to preview first, as the tab was opened on it. */
+  /** The output to open first, as the tab was opened on it. */
   selectedId?: string | null;
-  /** Changes each time the tab is opened on an output, so the same one is chosen again. */
+  /** Changes each time the tab is opened on an output, so the same one opens again. */
   selectionSeq?: number;
   /** Leaves the panel, as opening a task chat does from a sheet. */
   onNavigate?: () => void;
+  /** Whether the panel names itself, where nothing around it does. */
+  heading?: boolean;
 }
 
 /**
- * A chat's outputs, newest first, with a preview of the chosen one under the
- * list. docs/domains/chats.md#outputs
+ * A chat's outputs: a filtered list grouped by day, and one output's preview
+ * in its place. docs/domains/chats.md#outputs
  */
 export function OutputsPanel({
   chatId,
   selectedId = null,
   selectionSeq = 0,
   onNavigate,
+  heading = true,
 }: OutputsPanelProps) {
   const { t, i18n } = useTranslation("chat");
   const outputs = useChatOutputs(chatId);
   const [chosen, setChosen] = useState<string | null>(selectedId);
-  // A link opened on another output chooses that one.
+  const [filter, setFilter] = useState<Filter>("all");
+  // A link opened on an output opens that one.
   useEffect(() => setChosen(selectedId), [selectedId, selectionSeq]);
   const list = outputs.data ?? [];
-  // Until one is chosen, the newest is previewed.
-  const current = list.find((output) => output.id === chosen) ?? list[0] ?? null;
-  const now = Date.now();
+  const current = list.find((output) => output.id === chosen) ?? null;
 
   if (outputs.isPending) {
     return (
-      <div className="flex flex-col gap-2 p-3" aria-label={t("outputs.loading")} role="status">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-2/3" />
+      <div className="flex flex-col gap-2 p-4" aria-label={t("outputs.loading")} role="status">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
       </div>
     );
   }
   if (outputs.isError) {
     return <p className="p-4 text-ui text-muted-foreground">{t("outputs.loadFailed")}</p>;
+  }
+  if (current) {
+    return (
+      <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
+        <OutputPreview
+          key={current.id}
+          output={current}
+          onBack={() => setChosen(null)}
+          onNavigate={onNavigate}
+        />
+      </div>
+    );
   }
   if (list.length === 0) {
     return (
@@ -124,71 +184,135 @@ export function OutputsPanel({
     );
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="chat-outputs">
-      <List
-        asChild
-        aria-label={t("outputs.list")}
-        className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border"
-      >
-        <ul>
-          {list.map((output) => (
-            <li
+  const now = new Date();
+  const shown = list.filter((output) => filter === "all" || outputTypeOf(output) === filter);
+  const today = shown.filter((output) => sameDay(new Date(output.at), now));
+  const earlier = shown.filter((output) => !sameDay(new Date(output.at), now));
+  const group = (key: "today" | "earlier", items: ChatOutput[]) =>
+    items.length === 0 ? null : (
+      <section key={key} className="flex flex-col gap-2">
+        <h3 className="px-1 text-aux text-muted-foreground">{t(`outputs.${key}`)}</h3>
+        <ul
+          aria-label={t(`outputs.${key}`)}
+          className="divide-y divide-border-subtle overflow-hidden rounded-12 border border-border bg-surface"
+        >
+          {items.map((output) => (
+            <OutputRow
               key={output.id}
-              // The chosen row's fill spans its task chat's chip too.
-              className={cn(
-                "flex min-w-0 items-center",
-                output.id === current?.id && "bg-primary/10",
-              )}
-            >
-              <ListRow asChild interactive selected={output.id === current?.id} className="flex-1">
-                <button
-                  type="button"
-                  aria-current={output.id === current?.id ? "true" : undefined}
-                  onClick={() => setChosen(output.id)}
-                >
-                  <OutputIcon output={output} />
-                  <ListRowContent>
-                    <ListRowTitle
-                      className={cn("truncate", output.missing && "text-muted-foreground")}
-                      title={output.path}
-                    >
-                      {output.name}
-                    </ListRowTitle>
-                    <ListRowDescription className="truncate">
-                      {[
-                        output.missing ? t("outputs.missing") : t(`outputs.${output.kind}`),
-                        formatTaskTime(Date.parse(output.at), now, i18n.language),
-                      ].join(" · ")}
-                    </ListRowDescription>
-                  </ListRowContent>
-                </button>
-              </ListRow>
-              {output.from && (
-                <Badge asChild variant="muted" className="mr-3 max-w-[40%] shrink-0">
-                  <Link
-                    to={`/chat/${encodeURIComponent(output.from.chatId)}`}
-                    onClick={onNavigate}
-                    title={t("outputs.from", { name: output.from.name })}
-                  >
-                    <span className="truncate">
-                      {t("outputs.from", { name: output.from.name })}
-                    </span>
-                  </Link>
-                </Badge>
-              )}
-            </li>
+              output={output}
+              when={whenLabel(new Date(output.at), now, i18n.language)}
+              onOpen={() => setChosen(output.id)}
+              onNavigate={onNavigate}
+            />
           ))}
         </ul>
-      </List>
-      <div className="min-h-0 flex-1 overflow-auto pb-safe">
-        {current && <OutputPreview key={current.id} output={current} />}
+      </section>
+    );
+
+  return (
+    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
+      <div className="flex flex-col gap-4 p-4">
+        {heading && (
+          <h2 className="flex items-baseline gap-2 text-title text-foreground">
+            {t("outputs.title")}
+            <span className="text-ui tabular-nums text-muted-foreground">{list.length}</span>
+          </h2>
+        )}
+        <FilterChipGroup<Filter>
+          aria-label={t("outputs.filterLabel")}
+          value={filter}
+          onValueChange={setFilter}
+          options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
+        />
+        {shown.length === 0 ? (
+          <p className="px-1 text-ui text-muted-foreground">{t("outputs.noneOfType")}</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {group("today", today)}
+            {group("earlier", earlier)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function OutputPreview({ output }: { output: ChatOutput }) {
+/** Where an output came from, a task chat's link or how this chat's agent made it. */
+function SourceText({
+  output,
+  onNavigate,
+  className,
+}: {
+  output: ChatOutput;
+  onNavigate?: () => void;
+  className?: string;
+}) {
+  const { t } = useTranslation("chat");
+  if (output.missing) return <span className={className}>{t("outputs.missing")}</span>;
+  if (!output.from) return <span className={className}>{t(`outputs.${output.kind}`)}</span>;
+  return (
+    <Link
+      to={`/chat/${encodeURIComponent(output.from.chatId)}`}
+      onClick={onNavigate}
+      className={cn(
+        "relative z-10 min-w-0 truncate hover:text-foreground hover:underline",
+        className,
+      )}
+    >
+      {t("outputs.from", { name: output.from.name })}
+    </Link>
+  );
+}
+
+function OutputRow({
+  output,
+  when,
+  onOpen,
+  onNavigate,
+}: {
+  output: ChatOutput;
+  when: string;
+  onOpen: () => void;
+  onNavigate?: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const type = outputTypeOf(output);
+  return (
+    <li className="relative flex min-w-0 items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover">
+      <TypeIcon type={type} />
+      <div className="min-w-0 flex-1">
+        {/* The whole row opens the output; the task chat's link sits above it. */}
+        <button
+          type="button"
+          onClick={onOpen}
+          title={output.name}
+          className={cn(
+            "block w-full cursor-pointer truncate text-left text-ui outline-none after:absolute after:inset-0 after:rounded-[inherit] after:outline-1 after:-outline-offset-1 after:outline-transparent focus-visible:after:outline-solid focus-visible:after:outline-ring/50",
+            output.missing ? "text-muted-foreground" : "text-foreground",
+          )}
+        >
+          {outputTitle(output.name)}
+        </button>
+        <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+          <span className="shrink-0">{t(`outputs.types.${type}`)}</span>
+          <span aria-hidden>·</span>
+          <SourceText output={output} />
+        </div>
+      </div>
+      <span className="shrink-0 text-aux tabular-nums text-muted-foreground">{when}</span>
+    </li>
+  );
+}
+
+function OutputPreview({
+  output,
+  onBack,
+  onNavigate,
+}: {
+  output: ChatOutput;
+  onBack: () => void;
+  onNavigate?: () => void;
+}) {
   const { t } = useTranslation("chat");
   const kind = previewOf(output);
   const url = output.contentUrl;
@@ -203,29 +327,41 @@ function OutputPreview({ output }: { output: ChatOutput }) {
     enabled: textual && Boolean(url),
   });
 
-  if (!url) {
-    return (
-      <p className="p-4 text-ui text-muted-foreground">
-        {output.missing ? t("outputs.missing") : t("outputs.unavailable")}
-      </p>
-    );
-  }
-  const download = (
+  const download = url ? (
     <Button asChild variant="outline" size="sm">
       <a href={url} download={output.name}>
         <Download data-icon="inline-start" />
         {t("outputs.download")}
       </a>
     </Button>
-  );
+  ) : null;
   const header = (
-    <div className="flex items-center gap-2 px-4 pt-3">
-      <span className="min-w-0 flex-1 truncate text-ui text-foreground" title={output.path}>
-        {output.name}
-      </span>
+    <div className="flex items-center gap-2 pt-2 pr-4 pl-2">
+      <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-ui text-foreground" title={output.path}>
+          {output.name}
+        </div>
+        <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+          <span className="shrink-0">{t(`outputs.types.${outputTypeOf(output)}`)}</span>
+          <span aria-hidden>·</span>
+          <SourceText output={output} onNavigate={onNavigate} />
+        </div>
+      </div>
       {download}
     </div>
   );
+
+  if (!url) {
+    return (
+      <div className="flex flex-col gap-3">
+        {header}
+        <p className="px-4 text-ui text-muted-foreground">
+          {output.missing ? t("outputs.missing") : t("outputs.unavailable")}
+        </p>
+      </div>
+    );
+  }
 
   if (kind === "image") {
     return (

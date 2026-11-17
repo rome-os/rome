@@ -28,7 +28,6 @@ import {
   ArchiveRestore,
   ArrowDown,
   ChevronLeft,
-  FileOutput,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -155,6 +154,7 @@ import {
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useTaskList } from "@/components/concierge/TaskListPane";
 import { useOutputsPane } from "./outputs/OutputsPane";
+import { useToolMemory } from "@/pages/free/tool-memory";
 import {
   chatOutputsKey,
   OutputLinksContext,
@@ -2563,22 +2563,24 @@ export function Chat({
   }, [taskList.sheetOpen, composerRef]);
   // The files the chat's agent produced, opened from the header's button or
   // from a message's link to one of them. docs/domains/chats.md#outputs
-  const outputsPane = useOutputsPane(mainSessionId ?? null);
-  const chatOutputs = useChatOutputs(mainSessionId ?? null);
+  // Only a Concierge chat has them, from its mascot's menu, for now.
+  const outputsChatId = concierge ? (mainSessionId ?? null) : null;
+  const outputsPane = useOutputsPane(outputsChatId);
+  const chatOutputs = useChatOutputs(outputsChatId);
+  const memoryPane = useToolMemory();
+  const openMemory = () => {
+    if (!memoryPane || memoryPane.compact) navigate("/memory");
+    else memoryPane.show();
+  };
   useEffect(() => {
     if (outputsPane.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [outputsPane.sheetOpen, composerRef]);
   // A finished turn may have written or shown a file.
   useEffect(() => {
-    if (turnEnds > 0 && mainSessionId) {
-      void queryClient.invalidateQueries({ queryKey: chatOutputsKey(mainSessionId) });
+    if (turnEnds > 0 && outputsChatId) {
+      void queryClient.invalidateQueries({ queryKey: chatOutputsKey(outputsChatId) });
     }
-  }, [turnEnds, mainSessionId, queryClient]);
-  // The phone header's Outputs button sits outside the chat, and asks through the bus.
-  useEffect(() => {
-    if (!workspaceEventBus) return;
-    return workspaceEventBus.on("outputs:open", () => outputsLatest.current.open());
-  }, [workspaceEventBus]);
+  }, [turnEnds, outputsChatId, queryClient]);
   // Read through a ref, so the context stays the same object and the
   // memoized transcript does not draw again when the list or pane changes.
   const outputsLatest = useRef({ outputs: chatOutputs.data, open: outputsPane.open });
@@ -2616,6 +2618,8 @@ export function Chat({
         // A chat with no messages yet draws its own large mascot.
         badge={!conciergeEmpty}
         onOpenTasks={taskList.open}
+        onOpenOutputs={() => outputsPane.open()}
+        onOpenMemory={openMemory}
       />
     ) : null;
 
@@ -2649,15 +2653,6 @@ export function Chat({
 
   const navbarActions = (
     <>
-      {mainSessionId && !blankTopicChat && (
-        <IconButton
-          size={floating ? "md" : "sm"}
-          label={t("outputs.open")}
-          icon={<FileOutput />}
-          className={actionBadge}
-          onClick={() => outputsPane.open()}
-        />
-      )}
       {mainSessionId && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -3208,7 +3203,7 @@ export function Chat({
         <LiveReactionsProvider value={liveReactions}>
           <LiveMessageStatusesProvider value={liveStatuses}>
             <LiveTaskCardsProvider value={liveCards}>
-              <OutputLinksContext.Provider value={outputLinks}>
+              <OutputLinksContext.Provider value={concierge ? outputLinks : null}>
                 {page}
                 {outputsPane.sheet}
               </OutputLinksContext.Provider>

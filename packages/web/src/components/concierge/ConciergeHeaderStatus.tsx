@@ -1,5 +1,15 @@
-import type { ReactNode } from "react";
+import { BrainCircuit, FileOutput, ListChecks } from "lucide-react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { RomeMascot } from "./RomeMascot";
@@ -49,6 +59,8 @@ export function ConciergeHeaderStatus({
   activity,
   badge = true,
   onOpenTasks,
+  onOpenOutputs,
+  onOpenMemory,
 }: {
   name: ReactNode;
   activity: ConciergeActivity;
@@ -59,6 +71,10 @@ export function ConciergeHeaderStatus({
    * while the badge is gone.
    */
   onOpenTasks?: () => void;
+  /** Opens the chat's outputs. With it and `onOpenMemory`, the badge has a quick menu. */
+  onOpenOutputs?: () => void;
+  /** Opens the memory browser. */
+  onOpenMemory?: () => void;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
@@ -67,6 +83,10 @@ export function ConciergeHeaderStatus({
   // The badge opens the task list, or the name tag while the badge is gone.
   const opensFromBadge = Boolean(onOpenTasks) && badge;
   const opensFromName = Boolean(onOpenTasks) && !badge;
+  const quickMenu =
+    opensFromBadge && onOpenOutputs && onOpenMemory
+      ? { tasks: onOpenTasks!, outputs: onOpenOutputs, memory: onOpenMemory }
+      : null;
   const Badge = opensFromBadge ? "button" : "div";
   const NameTag = opensFromName ? "button" : "div";
   const opener = (here: boolean) =>
@@ -83,21 +103,45 @@ export function ConciergeHeaderStatus({
   return (
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
       {badge ? (
-        <Badge
-          data-concierge-header-badge
-          {...opener(opensFromBadge)}
-          className={cn(
-            "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
-            FLOATING_SURFACE,
-            opensFromBadge && focusRing,
-          )}
-        >
-          {/* About 60% of the badge, so the bob and the squash keep inside it. */}
-          <RomeMascot
-            alive={busy && activity.kind !== "needsYou"}
-            className={cn("h-6.5 w-auto", opensFromBadge && "cursor-pointer")}
-          />
-        </Badge>
+        quickMenu ? (
+          <QuickMenu items={quickMenu}>
+            {(menuProps) => (
+              <Badge
+                data-concierge-header-badge
+                {...opener(opensFromBadge)}
+                {...menuProps}
+                // The menu names what the badge opens, so no tooltip covers it.
+                title={undefined}
+                className={cn(
+                  "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+                  FLOATING_SURFACE,
+                  focusRing,
+                )}
+              >
+                <RomeMascot
+                  alive={busy && activity.kind !== "needsYou"}
+                  className="h-6.5 w-auto cursor-pointer"
+                />
+              </Badge>
+            )}
+          </QuickMenu>
+        ) : (
+          <Badge
+            data-concierge-header-badge
+            {...opener(opensFromBadge)}
+            className={cn(
+              "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+              FLOATING_SURFACE,
+              opensFromBadge && focusRing,
+            )}
+          >
+            {/* About 60% of the badge, so the bob and the squash keep inside it. */}
+            <RomeMascot
+              alive={busy && activity.kind !== "needsYou"}
+              className={cn("h-6.5 w-auto", opensFromBadge && "cursor-pointer")}
+            />
+          </Badge>
+        )
       ) : null}
       <NameTag
         data-concierge-header-name
@@ -155,4 +199,125 @@ function statusText(
         ? t("concierge.activity.tasksMore", { title: activity.title, count: activity.more })
         : t("concierge.activity.tasks", { title: activity.title });
   }
+}
+
+// How long the pointer may be off both the badge and the menu before it closes,
+// so it can cross the gap between them.
+const LEAVE_DELAY_MS = 150;
+
+type BadgeMenuProps = {
+  onClick: (event: MouseEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
+  onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
+  onPointerLeave: (event: PointerEvent<HTMLElement>) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  "aria-haspopup": "menu";
+  "aria-expanded": boolean;
+};
+
+/**
+ * The badge's quick menu: Tasks, Outputs and Memory, each opening its tab in
+ * the side pane. Hovering the badge shows it, a tap shows it where nothing
+ * hovers, and Arrow Down shows it from the keyboard. A click on the badge
+ * itself still opens Tasks. It holds no counts or marks.
+ */
+function QuickMenu({
+  items,
+  children,
+}: {
+  items: { tasks: () => void; outputs: () => void; memory: () => void };
+  children: (props: BadgeMenuProps) => ReactNode;
+}) {
+  const { t } = useTranslation("chat");
+  const [open, setOpen] = useState(false);
+  const leaveTimer = useRef<number | null>(null);
+  const touched = useRef(false);
+  const cancelLeave = () => {
+    if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
+    leaveTimer.current = null;
+  };
+  const leave = () => {
+    cancelLeave();
+    leaveTimer.current = window.setTimeout(() => setOpen(false), LEAVE_DELAY_MS);
+  };
+  useEffect(() => cancelLeave, []);
+  const choose = (open: () => void) => {
+    setOpen(false);
+    open();
+  };
+  const badgeProps: BadgeMenuProps = {
+    "aria-haspopup": "menu",
+    "aria-expanded": open,
+    onPointerDown: (event) => {
+      touched.current = event.pointerType === "touch";
+    },
+    onPointerEnter: (event) => {
+      if (event.pointerType !== "mouse") return;
+      cancelLeave();
+      setOpen(true);
+    },
+    onPointerLeave: (event) => {
+      if (event.pointerType === "mouse") leave();
+    },
+    onClick: (event) => {
+      // A tap shows the menu: there is no hover to show it.
+      if (touched.current) {
+        touched.current = false;
+        event.preventDefault();
+        setOpen((was) => !was);
+        return;
+      }
+      setOpen(false);
+      items.tasks();
+    },
+    onKeyDown: (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setOpen(true);
+      }
+    },
+  };
+  const entries = [
+    { key: "tasks", icon: <ListChecks />, label: t("concierge.menu.tasks"), run: items.tasks },
+    {
+      key: "outputs",
+      icon: <FileOutput />,
+      label: t("concierge.menu.outputs"),
+      run: items.outputs,
+    },
+    { key: "memory", icon: <BrainCircuit />, label: t("concierge.menu.memory"), run: items.memory },
+  ];
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal={false}>
+      <PopoverAnchor asChild>{children(badgeProps)}</PopoverAnchor>
+      <PopoverContent
+        role="menu"
+        aria-label={t("concierge.menu.label")}
+        side="right"
+        align="start"
+        sideOffset={8}
+        // Hover opens it, so focus stays where it was; Arrow Down moves in.
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onPointerEnter={cancelLeave}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "mouse") leave();
+        }}
+        className="w-auto min-w-40 gap-0.5 p-1"
+      >
+        {entries.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            role="menuitem"
+            data-concierge-menu-item={entry.key}
+            onClick={() => choose(entry.run)}
+            className="flex h-[var(--control-h-md)] w-full cursor-pointer items-center gap-2 rounded-8 px-2 text-left text-ui text-foreground outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
+          >
+            {entry.icon}
+            {entry.label}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
 }

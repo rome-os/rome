@@ -46,6 +46,7 @@ export function useOutputsPane(chatId: string | null) {
           selectedId={sheet?.outputId ?? null}
           selectionSeq={sheet?.seq}
           onNavigate={close}
+          heading={false}
         />
       </div>
     </Sheet>

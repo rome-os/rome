@@ -176,6 +176,12 @@
       },
       "created": "Created {{when}}",
       "endedAt": "Ended {{when}}"
+    },
+    "menu": {
+      "label": "Open",
+      "tasks": "Tasks",
+      "outputs": "Outputs",
+      "memory": "Memory"
     }
   },
   "reply": {
@@ -748,9 +754,7 @@
   },
   "outputs": {
     "title": "Outputs",
-    "open": "Outputs",
     "close": "Close outputs",
-    "list": "Files the agent produced",
     "loading": "Loading outputs",
     "loadFailed": "Failed to load outputs",
     "emptyTitle": "No outputs yet",
@@ -763,6 +767,25 @@
     "noPreview": "This file has no preview.",
     "unavailable": "This file cannot be opened here.",
     "previewFailed": "Failed to load the file",
-    "truncated": "Showing the first {{count}} characters."
+    "truncated": "Showing the first {{count}} characters.",
+    "back": "Back to outputs",
+    "filterLabel": "Show",
+    "noneOfType": "No outputs of this kind yet.",
+    "today": "Today",
+    "earlier": "Earlier",
+    "filters": {
+      "all": "All",
+      "document": "Documents",
+      "spreadsheet": "Spreadsheets",
+      "page": "Pages"
+    },
+    "types": {
+      "document": "Document",
+      "spreadsheet": "Spreadsheet",
+      "page": "Page",
+      "image": "Picture",
+      "code": "Code",
+      "file": "File"
+    }
   }
 }
