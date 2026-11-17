@@ -324,21 +324,6 @@ struct TranscriptBanners: View {
     }
 }
 
-/// A quiet centered line in the transcript, such as the chat moving to
-/// another model.
-struct NoticeLine: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .romeFont(13)
-            .foregroundStyle(Palette.sub)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
-    }
-}
-
 /// Rome's status on a guardian message (docs/domains/chats.md#status): it is
 /// being worked on, or that work failed. It shows over the message's reaction.
 enum MessageStatus: String, Hashable, Sendable {

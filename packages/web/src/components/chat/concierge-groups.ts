@@ -9,7 +9,7 @@ import type { LivePreview } from "@/components/chat/MessageList";
 /** Messages from the same sender closer than this share one group. */
 const GROUP_GAP_MS = 5 * 60_000;
 /** A gap of at least this long, or a change of local day, gets a time separator. */
-const SEPARATOR_GAP_MS = 15 * 60_000;
+const SEPARATOR_GAP_MS = 60 * 60_000;
 
 /** The sources that label a reply: someone else made the Concierge speak. */
 const LABELLED_SOURCES: ReadonlySet<SystemInputSource["type"]> = new Set([

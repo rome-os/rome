@@ -1021,6 +1021,14 @@ final class DemoBackend: RomeBackend {
                 "status": .string("declined"), "dismissed": .bool(true),
             ])])], at: at(9, 31), session: location, role: "user"),
             agent("好的。你从哪里出发？告诉我地点就能算。", at: at(9, 31).addingTimeInterval(3), session: location),
+            // A share the app made by itself shows as one centered line.
+            user("l2b", "晚上会降温吗？", at: at(9, 45), session: location),
+            parts([Self.locationCard("loc-night", reason: "查你所在地晚上的气温")], at: at(9, 45).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-night"), "output": .object([
+                "status": .string("shared"), "auto": .bool(true), "latitude": .number(31.2), "longitude": .number(121.4),
+                "accuracyMeters": .number(37), "fixedAt": .string("2026-11-14T01:45:00.000Z"),
+            ])])], at: at(9, 46), session: location, role: "user"),
+            agent("晚上降到 12 度左右，加件外套。", at: at(9, 46).addingTimeInterval(3), session: location),
             user("l3", "附近有什么好的咖啡馆？", at: at(10, 5), session: location),
             parts([Self.locationCard("loc-coffee", reason: "找你附近的咖啡馆")], at: at(10, 5).addingTimeInterval(2), session: location),
         ]

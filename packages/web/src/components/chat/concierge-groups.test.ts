@@ -129,15 +129,15 @@ describe("buildConciergeItems", () => {
     expect(shape(build(exact))).toEqual(["sep", "G:u1", "G:u2"]);
   });
 
-  it("splits a group without a separator for a gap between five and fifteen minutes", () => {
+  it("splits a group without a separator for a gap between five minutes and an hour", () => {
     const rows = [userRow(guardian("u1", 0)), userRow(guardian("u2", 10 * MIN))];
     expect(shape(build(rows))).toEqual(["sep", "G:u1", "G:u2"]);
   });
 
-  it("adds a separator at fifteen minutes and not before", () => {
-    const under = [userRow(guardian("u1", 0)), userRow(guardian("u2", 15 * MIN - 1))];
+  it("adds a separator at an hour and not before", () => {
+    const under = [userRow(guardian("u1", 0)), userRow(guardian("u2", 60 * MIN - 1))];
     expect(shape(build(under))).toEqual(["sep", "G:u1", "G:u2"]);
-    const exact = [userRow(guardian("u1", 0)), userRow(guardian("u2", 15 * MIN))];
+    const exact = [userRow(guardian("u1", 0)), userRow(guardian("u2", 60 * MIN))];
     expect(shape(build(exact))).toEqual(["sep", "G:u1", "sep", "G:u2"]);
   });
 
@@ -264,7 +264,7 @@ describe("buildConciergeItems unread divider", () => {
   });
 
   it("goes after the time separator that introduces the first unread message", () => {
-    const rows = [agentRow(say("a1", 0)), agentRow(say("a2", 20 * MIN))];
+    const rows = [agentRow(say("a1", 0)), agentRow(say("a2", 70 * MIN))];
     expect(withDivider(rows, "a2")).toEqual(["sep", "A:a1", "sep", "new", "A:a2"]);
   });
 
@@ -316,8 +316,8 @@ describe("buildConciergeItems unread divider", () => {
   it("draws one divider only", () => {
     const rows = [
       agentRow(say("a1", 0)),
-      agentRow(say("a2", 20 * MIN)),
-      agentRow(say("a3", 40 * MIN)),
+      agentRow(say("a2", 70 * MIN)),
+      agentRow(say("a3", 140 * MIN)),
     ];
     expect(withDivider(rows, "a2").filter((entry) => entry === "new")).toHaveLength(1);
   });
@@ -338,8 +338,8 @@ describe("buildConciergeItems reference stability", () => {
     guardian("u1", 0),
     say("a1", 10_000, "t1"),
     // A quarter of an hour on: a new separator and a new group.
-    guardian("u2", 20 * MIN),
-    say("a2", 20 * MIN + 10_000, "t2"),
+    guardian("u2", 70 * MIN),
+    say("a2", 70 * MIN + 10_000, "t2"),
   ];
   const rowsOf = (messages: ChatMessage[]): ChatRow[] =>
     messages.map((message) => (message.role === "user" ? userRow(message) : agentRow(message)));
@@ -355,7 +355,7 @@ describe("buildConciergeItems reference stability", () => {
 
   it("renews only what a new message touches", () => {
     const before = build(rowsOf(history));
-    const after = build(rowsOf([...history, say("a3", 20 * MIN + 20_000, "t3")]));
+    const after = build(rowsOf([...history, say("a3", 70 * MIN + 20_000, "t3")]));
 
     // The first stretch and the separators are the same objects.
     expect(shape(after)).toEqual(["sep", "G:u1", "A:a1", "sep", "G:u2", "A:a2,a3"]);
@@ -587,8 +587,8 @@ describe("focusHidden", () => {
   it("hides a time separator with no message of the thread under it, and keeps the others", () => {
     const rows = [
       userRow(guardian("ga", 0)),
-      agentRow(say("b1", 20 * MIN, "t1")),
-      agentRow(say("a2", 40 * MIN, "t2")),
+      agentRow(say("b1", 70 * MIN, "t1")),
+      agentRow(say("a2", 140 * MIN, "t2")),
     ];
     const items = buildConciergeItems(rows, { typing: false });
     expect(items.filter((item) => item.kind === "separator")).toHaveLength(3);
@@ -599,7 +599,7 @@ describe("focusHidden", () => {
   });
 
   it("hides the unread divider, and a separator whose only messages are hidden with it", () => {
-    const rows = [userRow(guardian("g0", 0)), agentRow(say("a1", 20 * MIN, "t1"))];
+    const rows = [userRow(guardian("g0", 0)), agentRow(say("a1", 70 * MIN, "t1"))];
     const items = buildConciergeItems(rows, { typing: false, unreadFrom: "g0" });
     const hidden = focusHidden(items, "A", threadOf);
     expect(hidden.has("unread-divider")).toBe(true);

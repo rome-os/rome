@@ -86,13 +86,9 @@ private struct WidgetCardBody: View {
         // keep one task while the branch inside changes.
         VStack(spacing: 0) {
             if let answered = autoShared ?? surface.autoSent {
-                // In the thread label's style: a quiet line, not a card. Until
-                // the stored answer arrives, the share just sent says it.
-                Text(verbatim: LocationCard.outcome(answered))
-                    .romeFont(12)
-                    .foregroundStyle(Palette.sub.opacity(0.75))
-                    .padding(.horizontal, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // A quiet centered line, not a card. Until the stored answer
+                // arrives, the share just sent says it.
+                NoticeLine(text: LocationCard.outcome(answered))
             } else if surface.autoSharing, !surface.sendFailed, LocationCard.isLocationCard(part) {
                 // While the card shares by itself, nothing shows.
                 Color.clear.frame(height: 0)
