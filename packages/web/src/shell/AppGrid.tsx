@@ -1,4 +1,13 @@
-import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
+import {
+  AppWindow,
+  ExternalLink,
+  Info,
+  MessageCircle,
+  MessageSquare,
+  Pin,
+  PinOff,
+  Search,
+} from "lucide-react";
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -137,13 +146,14 @@ function writeLocalApps(apps: InstalledAppCard[]): void {
 }
 
 function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
+  const Icon = entry.id === "chat" ? MessageSquare : entry.Icon;
   return (
     <span
       className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-foreground transition-colors"
       data-motion={entry.sidebarIconMotion}
       aria-hidden
     >
-      <entry.Icon
+      <Icon
         className={`h-5 w-5 shrink-0 ${entry.id === "projects" ? "stroke-[1.5]" : ""}`}
         aria-hidden
       />

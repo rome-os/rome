@@ -61,6 +61,16 @@ test.describe("desktop", () => {
     // A common chat puts the chat list in Chat mode, whose tile returns to the last ordinary chat.
     await expect(tile).toHaveAttribute("href", "/chat/mock-chat-build-app");
 
+    const chatLink = page.locator('[data-chat-row] a[href="/chat/mock-chat-build-app"]');
+    await chatLink.focus();
+    await expect(chatLink).toBeFocused();
+    expect(
+      await chatLink.evaluate((link) => {
+        const row = link.closest("[data-chat-row]")!;
+        return getComputedStyle(link).borderRadius === getComputedStyle(row).borderRadius;
+      }),
+    ).toBe(true);
+
     // The main chat puts it in Concierge mode, whose tile opens the main chat.
     await page.goto("/message");
     await expect(tile).toHaveAttribute("href", "/message", { timeout: 30_000 });

@@ -276,7 +276,7 @@ function ChatRowLink({
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+          className={`flex h-full min-w-0 flex-1 items-center rounded-12 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
             nested ? (onCard ? "pl-4" : "pl-[var(--row-child-pl)]") : "pl-2"
           }`}
         >
