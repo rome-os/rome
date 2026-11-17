@@ -13,5 +13,6 @@ final class ChatActions {
     func remove(_ rowId: String) { store?.removePending(rowId) }
     func reply(to messageId: String) { store?.reply(to: messageId) }
     func share(fromRow rowId: String) { store?.share.begin(fromRow: rowId) }
+    func openThread(_ root: String) { store?.openChatThread(root) }
     func quote(reply replyId: String, original: String) { store?.quoteAction(reply: replyId, original: original)?() }
 }

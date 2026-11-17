@@ -130,6 +130,8 @@ private func message(
         backend.stored = [
             message("u1", role: "user", "hi", turn: "t1", at: 0),
             message("a1", "sunny", turn: "t1", at: 5),
+            // Something between, so the reply below is not right under what it answers.
+            message("a2", "anything else?", turn: "t1", at: 7),
             message("u2", role: "user", at: 10, parts: [
                 ["type": "reply_to", "messageId": "a1", "author": "agent", "text": "sunny"],
                 ["type": "text", "content": "and tomorrow?"]
@@ -146,7 +148,7 @@ private func message(
         #expect(!info("u2:1").canShare)
         #expect(!info("u1:0").isPending)
         #expect(info("a1:0").canShare)
-        // A quote leads to its original when the chat holds it.
+        // A quote leads to its original when the chat holds it; right under it, a reply shows none.
         #expect(info("u2:1").quote?.messageId == "a1")
         #expect(info("u2:1").quoteLeads)
         #expect(info("u3:1").quote?.messageId == "gone")

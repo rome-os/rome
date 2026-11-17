@@ -70,6 +70,8 @@ struct ChatScreen: View {
                 VStack(spacing: 10) {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatedNotice(agentName: workspace.agentName, visible: visible)
+                    // One pill for each thread with replies the guardian has not seen.
+                    ThreadPills(store: store)
                     if store.showsQuoteBar {
                         QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -84,7 +86,7 @@ struct ChatScreen: View {
                         if store.send(draft, images: attachments.images, fromComposer: true, thread: store.composerThread) {
                             draft = ""
                             _ = attachments.take()
-                            store.closeThread()
+                            store.composerSent()
                         }
                     }
                 }
@@ -158,7 +160,7 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
                         .equatable()
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -269,9 +271,11 @@ struct ConciergeRow: View, Equatable {
     /// The row's message is the tinted one: its bubble or card draws the
     /// tint behind its own shape, never behind the whole row.
     var tinted = false
+    /// The row's stack is the one a pill just brought into view: it takes a tint for a moment.
+    var stackTinted = false
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread && lhs.tinted == rhs.tinted
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread && lhs.tinted == rhs.tinted && lhs.stackTinted == rhs.stackTinted
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
@@ -310,7 +314,18 @@ struct ConciergeRow: View, Equatable {
     }
 
     var body: some View {
-        content.environment(\.rowTinted, tinted)
+        content
+            .environment(\.rowTinted, tinted)
+            .environment(\.rowStackTinted, stackTinted)
+            // A link to a chat thread in a message's text: a chip that opens
+            // it, except in a thread view, where it opens nothing.
+            .environment(\.threadLinks, inThread ? store.threadLinksInThread : store.threadLinks)
+    }
+
+    /// Opens the thread under this row's stack.
+    private func openStack() {
+        guard let root = info.stack?.root else { return }
+        store.actions.openThread(root)
     }
 
     @ViewBuilder
@@ -324,11 +339,11 @@ struct ConciergeRow: View, Equatable {
             let onQuote = quoteAction(replyId: row.messageId ?? "")
             UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
                        mark: info.mark,
-                       quote: info.quote, rail: info.rail, onQuote: onQuote)
+                       quote: info.quote, onQuote: onQuote, stack: info.stack, onOpenStack: openStack)
         case .agentText(_, let text, _, let forwardedFrom, let position):
             let onQuote = quoteAction(replyId: row.messageId ?? "")
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
-                        quote: info.quote, rail: info.rail, onQuote: onQuote)
+                        quote: info.quote, onQuote: onQuote, stack: info.stack, onOpenStack: openStack)
         case .sourceLabel(_, let text):
             if !inThread { SourceLabelLine(text: text) }
         case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
@@ -338,7 +353,7 @@ struct ConciergeRow: View, Equatable {
             let name = tasks.title(forChat: chatId, fallback: title)
             let onQuote = quoteAction(replyId: row.ownMessageId ?? "")
             VStack(alignment: .leading, spacing: 8) {
-                TaskCard(title: name, state: tasks.cardState(forChat: chatId)) {
+                TaskCard(title: name, state: tasks.cardState(forChat: chatId), stack: info.stack, onOpenStack: openStack) {
                     openChat(chatId, name)
                 }
                 // The newest card from before `show`, while it waits on the
@@ -348,14 +363,14 @@ struct ConciergeRow: View, Equatable {
                     TaskAskView(chatId: chatId, card: ask, latest: true, store: store) { openChat(chatId, name) }
                 }
             }
-            .replyMark(quote: info.quote, rail: info.rail, onTap: onQuote)
+            .replyMark(quote: info.quote, onTap: onQuote)
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
             TaskAskView(chatId: chatId, card: card, latest: latest, store: store) {
                 openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
-            .replyMark(quote: info.quote, rail: info.rail, onTap: quoteAction(replyId: row.ownMessageId ?? ""))
+            .replyMark(quote: info.quote, onTap: quoteAction(replyId: row.ownMessageId ?? ""))
             .keepsTaps(inThread)
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)

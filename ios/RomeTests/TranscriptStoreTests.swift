@@ -263,6 +263,9 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
+    /// The messages told to the instance as seen, by chat, in order.
+    var markedRead: [(session: String, ids: [String])] = []
+    func markMessagesRead(sessionId: String, ids: [String]) async { markedRead.append((sessionId, ids)) }
     /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
     /// many reads had gone out each time it was asked for.
     var readMarkValue: String?

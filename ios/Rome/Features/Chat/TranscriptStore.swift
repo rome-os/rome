@@ -53,6 +53,9 @@ final class TranscriptStore {
     private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
+    /// Bumps for a new message that is on the main line: a reply a stack
+    /// stands for is not new there, so it is no "new message" to scroll to.
+    private(set) var mainArrivals = 0
     /// What was unread when the chat opened, as far as the loaded pages
     /// show it. It stays while the chat is open, once read too. Nil when
     /// nothing was unread, and until the read mark is known.
@@ -157,19 +160,45 @@ final class TranscriptStore {
         guard !rowsHeld else { return }
         PerfProbe.count("rowBuild")
         let answers = answers
+        let shown = visibleMessages
+        // The threads this chat's main line shows as stacks. A share picks
+        // whole turns, so it shows every message and no stacks.
+        var held = kind == .concierge ? ThreadStacks.build(shown, arrival: seen) : .none
+        if share.isSelecting { held.stacks = [:]; held.stacked = [] }
+        if held != threads { threads = held }
         let built = TranscriptBuilder.rows(
-            messages: visibleMessages,
+            messages: shown,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, showNotices: kind == .concierge, typing: showsTyping, unreadFrom: unreadFrom)
+            options: .init(showTools: kind == .task, showNotices: kind == .concierge, typing: showsTyping, unreadFrom: unreadFrom, stacked: held.stacked)
         )
         // An equal list is not stored: no reader is told of a change that is none.
         if built != rows { rows = built }
         if built.isEmpty != rowsEmpty { rowsEmpty = built.isEmpty }
-        let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind)
+        let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind, threads: held)
         if infos != rowInfo { rowInfo = infos }
+        var hosts: [String: String] = [:]
+        if !held.stacks.isEmpty {
+            for (row, info) in infos { if let stack = info.stack { hosts[stack.root] = row } }
+        }
+        if hosts != stackHosts { stackHosts = hosts }
         thread?.rebuildRows(chatMessages: messages)
     }
+
+    /// Share mode started or ended: the rows are built again, with or without stacks.
+    func shareModeChanged() { rebuildRows() }
+
+    /// What a link to a thread in a message's text reads and does here
+    /// (`ThreadLinkContext`): one for the main line, which opens the thread,
+    /// and one for a thread view, where a link opens nothing.
+    @ObservationIgnored private(set) lazy var threadLinks = ThreadLinkContext(store: self, opens: true)
+    @ObservationIgnored private(set) lazy var threadLinksInThread = ThreadLinkContext(store: self, opens: false)
+
+    /// The chat threads of the main line: their stacks, names and the replies
+    /// the stacks stand for (docs/domains/chats.md#chat-thread).
+    private(set) var threads: ThreadStacks = .none
+    /// The row each stack hangs under, by its thread's root.
+    private(set) var stackHosts: [String: String] = [:]
 
     /// The dots are the only part of the rows that how the turn writes
     /// decides: the rows change only when they come or go.
@@ -478,7 +507,9 @@ final class TranscriptStore {
     }
 
     private func summarizeUnread() {
-        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder) }
+        // The replies a stack stands for are not on the main line, so they are no
+        // place for the line to go.
+        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder, excluding: threads.stacked) }
         // No line drawn yet, the run going on into an older page: the pill
         // shows as for a line above the screen.
         if let unread, unread.firstId == nil { unreadPill.dividerAbove(true) }
@@ -524,6 +555,8 @@ final class TranscriptStore {
         defer {
             rowsHeld = false
             rebuildRows()
+            // What arrives in the thread that is open is seen as it comes.
+            readOpenThread()
         }
         // A copy of a message already held, with the same turn and time,
         // keeps its place: every key the order goes by is unchanged, so it
@@ -577,6 +610,9 @@ final class TranscriptStore {
             message.chatThreadTitle = held.chatThreadTitle
             message.knowsThreads = true
         }
+        // A message the owner has seen stays seen, and a copy that leaves the
+        // mark out (a live insert) keeps the one already known.
+        if held?.read == true { message.read = true } else if message.read == nil { message.read = held?.read }
         // A copy that leaves the title out keeps the one already known, and a
         // message of a thread takes its title from the thread.
         if message.chatThreadTitle == nil, let root = message.chatThreadId {
@@ -641,7 +677,10 @@ final class TranscriptStore {
             if isNew { hold(message, after: newest) }
             if isNew, openRead != nil { openLive.insert(message.id) }
             merge([message])
-            if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
+            if isNew, !message.isUser, !message.isTrace {
+                arrivals += 1
+                if !threads.stacked.contains(message.id) { mainArrivals += 1 }
+            }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
             writing = (turnId, mode, isWriting)
         case .sessionRunning(let id, let isRunning) where id == sessionId:
@@ -829,6 +868,11 @@ final class TranscriptStore {
 
     /// Brings a held message into view and tints it for a moment.
     func jump(to messageId: String) {
+        // A reply a stack stands for is not on the main line: its thread opens on it.
+        if threads.stacked.contains(messageId) {
+            if thread == nil, !share.isSelecting { openThread(at: messageId) }
+            return
+        }
         jumpTarget = messageId
         jumps += 1
         tint(messageId, for: .seconds(2))
@@ -854,6 +898,7 @@ final class TranscriptStore {
         repliesToThread = false
         tint(target ?? anchor.id)
         opened.start()
+        readOpenThread()
     }
 
     /// Takes the open thread off the screen and nothing else: a reply or a
@@ -916,6 +961,133 @@ final class TranscriptStore {
         } catch APIError.notFound {
             if reopening == target { reopening = nil }
         } catch {}
+    }
+
+    // MARK: Stacks, read marks and pills
+
+    /// The messages of thread `root` the owner has not seen, the root
+    /// included. An instance that keeps no read marks has none.
+    func unreadMessages(inThread root: String) -> [String] {
+        messages.filter { threads.roots[$0.id] == root && $0.read == false }.map(\.id)
+    }
+
+    /// The owner has seen these messages: they read as seen at once, and the
+    /// instance is told. The instance not taking it, as one before the route
+    /// does, changes nothing here: the next open reads them again.
+    func markMessagesRead(_ ids: [String]) {
+        guard kind == .concierge, !ids.isEmpty else { return }
+        let wanted = Set(ids)
+        editMessages { messages in
+            for index in messages.indices where wanted.contains(messages[index].id) && messages[index].read == false {
+                messages[index].read = true
+            }
+        }
+        cache?.save(chat: sessionId, messages: messages)
+        // The messages carry the chat's own id, which the main chat's store, by the fixed one, does not.
+        let session = messages.first { wanted.contains($0.id) }?.sessionId ?? sessionId
+        let backend = backend
+        Task { await backend.markMessagesRead(sessionId: session, ids: ids) }
+    }
+
+    /// Everything unread in thread `root` is seen: it was opened, or its pill was pressed.
+    func markThreadRead(_ root: String) {
+        markMessagesRead(unreadMessages(inThread: root))
+    }
+
+    /// Opening a thread reads it, and so does a message that arrives in it while it is open.
+    private func readOpenThread() {
+        guard let thread else { return }
+        markThreadRead(thread.root)
+    }
+
+    /// Which watched stacks the list says are at least half on screen. Seeing a
+    /// stack reads nothing: it only hides the pill that would say what the
+    /// guardian already sees.
+    private(set) var seenStacks: Set<String> = []
+
+    func setSeenStacks(_ seen: Set<String>) {
+        if seen != seenStacks { seenStacks = seen }
+    }
+
+    /// The stacks whose visibility decides a pill, by the row each hangs
+    /// under: those with unread replies.
+    var stackWatch: [String: String] {
+        var watch: [String: String] = [:]
+        for stack in threads.stacks.values where stack.hasUnread {
+            if let host = stackHosts[stack.root] { watch[host] = stack.root }
+        }
+        return watch
+    }
+
+    /// The threads that wait for the guardian with a pill, oldest waiting first
+    /// (`ThreadStacks.waiting`): none while a thread is open.
+    var pills: [String] {
+        threads.waiting(seen: seenStacks, threadOpen: thread != nil)
+    }
+
+    /// A thread's name, as a pill or a link shows it.
+    func threadName(_ root: String) -> String? { threads.titles[root] }
+
+    /// The stack shown tinted for a moment: where a pill brought the transcript.
+    private(set) var tintedStack: String?
+    @ObservationIgnored private var untintStack: Task<Void, Never>?
+
+    /// A pill was pressed: the transcript goes to the thread's stack and tints
+    /// it for a moment, the thread's messages are read, and the pill goes. The
+    /// thread does not open.
+    func showStack(_ root: String) {
+        guard let host = stackHosts[root] else { return }
+        jumpTarget = host
+        jumps += 1
+        untintStack?.cancel()
+        tintedStack = root
+        untintStack = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.tintedStack = nil
+        }
+        markThreadRead(root)
+    }
+
+    /// A stack, or a link to a thread, was pressed: opens the thread when the
+    /// chat holds it. Nothing opens while one is open already, or while a share is picked.
+    func openChatThread(_ root: String) {
+        guard kind == .concierge, thread == nil, !share.isSelecting, threads.holds(root) else { return }
+        openThread(at: root)
+    }
+
+    /// Whether a link to thread `root` opens it here.
+    func opensThread(_ root: String) -> Bool {
+        kind == .concierge && thread == nil && !share.isSelecting && threads.holds(root)
+    }
+
+    /// A Reply sent from the main line, with no thread open, opens the thread it
+    /// joined once the instance takes it, so the guardian sees what they sent and
+    /// the answer. A reply from inside a thread is in it already.
+    private func openJoinedThread(_ target: ThreadTarget?) {
+        guard kind == .concierge, thread == nil, !share.isSelecting, let target, target.isQuote, target.bare != true, target.thread == nil,
+              let anchor = message(target.messageId) else { return }
+        open(anchor: anchor, older: [], bare: true)
+    }
+
+    /// The sends still on their way that land in thread `root`: its own, and a
+    /// reply to one of its messages.
+    func pendingSends(inThread root: String) -> [PendingSend] {
+        pending.filter { send in
+            guard let target = send.thread else { return false }
+            return (target.thread ?? message(target.messageId)?.threadRoot) == root
+        }
+    }
+
+    /// The composer sent a message. A thread open over the chat stays open, so
+    /// the next message goes into it as well; a Reply from the main line ends
+    /// here, and opens its thread once the instance takes it.
+    func composerSent() {
+        if thread != nil {
+            repliesToThread = false
+        } else {
+            closeThread()
+        }
     }
 
     /// The messages held for this chat that are in `root`'s thread.
@@ -1229,6 +1401,7 @@ final class TranscriptStore {
                     pending[index].state = .sent
                 }
                 if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
+                if keepsDraft { openJoinedThread(thread) }
                 // The server does not announce the guardian's own input, so fetch it,
                 // and once more if that fetch fails.
                 Task {
@@ -1473,9 +1646,9 @@ enum UnreadAtOpen {
     /// turns, so while older pages remain and the oldest loaded turn has an
     /// unread message, the run may start on an older page: no first until it
     /// loads, and the count is a lower bound.
-    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> UnreadSummary? {
+    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool, excluding stacked: Set<String> = []) -> UnreadSummary? {
         guard !unread.isEmpty, let oldest = messages.first else { return nil }
-        let drawn = messages.filter { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
+        let drawn = messages.filter { unread.contains($0.id) && !stacked.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
         guard let first = drawn.first else { return nil }
         let oldestTurn = oldest.turnId ?? oldest.id
         let more = hasOlder && messages.contains { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }

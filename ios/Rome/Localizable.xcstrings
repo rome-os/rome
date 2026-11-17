@@ -359,6 +359,62 @@
         }
       }
     },
+    "%lld new replies" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new reply"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new replies"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条新回复"
+          }
+        }
+      }
+    },
+    "%lld replies" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld reply"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld replies"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条"
+          }
+        }
+      }
+    },
     "%lld readings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2965,6 +3021,16 @@
         }
       }
     },
+    "New replies in \"%@\"" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」有新回复"
+          }
+        }
+      }
+    },
     "New topic chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3551,6 +3617,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开任务对话来回答"
+          }
+        }
+      }
+    },
+    "Open the thread, newest: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开话题，最新一条：%@"
           }
         }
       }
@@ -5415,6 +5491,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这次在后台更新，不影响聊天等核心功能；更新完成前，个别新功能可能暂时用不了。"
+          }
+        }
+      }
+    },
+    "Thread" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "话题"
           }
         }
       }

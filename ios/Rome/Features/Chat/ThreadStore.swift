@@ -99,6 +99,8 @@ final class ThreadStore {
             older = thread
             rowsHeld = false
             rebuildRows()
+            // The thread is open: what it brought in is seen too.
+            chat?.markMessagesRead(thread.filter { $0.read == false }.map(\.id))
         } catch {
             // The thread stays as it is shown.
         }
@@ -155,10 +157,14 @@ final class ThreadStore {
         guard !rowsHeld else { return }
         let answers = TranscriptBuilder.answers(in: Self.ordered(older + (chatMessages ?? chat?.messages ?? [])))
         let held = messages
+        // The sends on their way into this thread show in it as they go, so a
+        // message sent here, or a Reply that opened it, is never missing.
         let resends = pendingResends
-        let built = TranscriptBuilder.rows(messages: held, pending: resends, answers: answers, options: .init())
+        let sending = (chat?.pendingSends(inThread: root) ?? []).filter { send in !resends.contains { $0.id == send.id } }
+        let pending = resends + sending
+        let built = TranscriptBuilder.rows(messages: held, pending: pending, answers: answers, options: .init())
         if built != rows { rows = built }
-        let infos = RowInfo.build(rows: built, messages: held, pending: resends, kind: chat?.kind ?? .concierge)
+        let infos = RowInfo.build(rows: built, messages: held, pending: pending, kind: chat?.kind ?? .concierge)
         if infos != rowInfo { rowInfo = infos }
     }
 }

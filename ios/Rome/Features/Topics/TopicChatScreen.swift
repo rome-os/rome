@@ -110,6 +110,8 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
+                // One pill for each thread with replies the guardian has not seen.
+                if let store { ThreadPills(store: store) }
                 if let store, store.showsQuoteBar {
                     QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -164,7 +166,7 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
@@ -241,7 +243,7 @@ struct TopicChatScreen: View {
             if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
                 draft = ""
                 _ = attachments.take()
-                store.closeThread()
+                store.composerSent()
             }
             return
         }

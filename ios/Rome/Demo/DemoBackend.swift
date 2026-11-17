@@ -273,11 +273,31 @@ final class DemoBackend: RomeBackend {
         for key in shares.keys { shares[key]?.removeAll { $0.id == id } }
     }
 
-    /// The demo is an instance with chat threads: every message says its thread.
+    /// The demo is an instance with chat threads and read marks: every message
+    /// says its thread, and is read unless the demo made it unread.
     private static func withThreads(_ message: ChatMessage) -> ChatMessage {
         var message = message
         message.knowsThreads = true
+        if message.read == nil { message.read = true }
         return message
+    }
+
+    /// The message as an instance records one the guardian has not seen yet.
+    private func unread(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.read = false
+        return message
+    }
+
+    func markMessagesRead(sessionId: String, ids: [String]) async {
+        let wanted = Set(ids)
+        guard let held = messages[sessionId] else { return }
+        messages[sessionId] = held.map { message in
+            guard wanted.contains(message.id) else { return message }
+            var seen = message
+            seen.read = true
+            return seen
+        }
     }
 
 
@@ -835,7 +855,10 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
+        var message = message
+        // What the agent says arrives unread; the guardian's own is read.
+        if message.role == "assistant", message.read == nil { message.read = false }
+        message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -1173,13 +1196,18 @@ final class DemoBackend: RomeBackend {
             threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)), "c-login"),
             threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
             threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
-            threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
-            threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
-            threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
+            // The threads show as stacks under their first message: the login
+            // task's replies are read, the site and price tasks' are not, so two
+            // pills wait; the research question stays read.
+            unread(threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site")),
+            unread(threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site")),
+            unread(threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site")),
             threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
             threaded(taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)), "c-research"),
             threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
-            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price"),
+            unread(threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price")),
+            // The Concierge points back to a thread with a link, drawn as a chip.
+            threaded(agent("官网文案那个任务在 [官网首页双语文案](#rome-thread=c-site)，改完会提醒你。", at: at(9, 41), id: "c-link"), "c-link"),
             // The Concierge asks and waits for an approval in the main chat too.
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),

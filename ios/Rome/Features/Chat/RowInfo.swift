@@ -14,9 +14,9 @@ struct RowInfo: Hashable {
     var quote: MessagePart.ReplyQuote?
     /// The quote leads somewhere: the reply's thread view, or the original.
     var quoteLeads = false
-    /// A reply that sits right under what it answers draws this mark and no
-    /// quote text; the quote above is still what a tap on the mark leads from.
-    var rail: ReplyRail.Kind?
+    /// The thread this message roots, when it has replies: its stack, drawn
+    /// under the message's last bubble.
+    var stack: ThreadStack?
     /// The badge on a guardian message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
@@ -26,20 +26,36 @@ struct RowInfo: Hashable {
     var senderName: String?
 
     /// The info of every text and task card row, by row id. `messages` are the ones the
-    /// rows were built from, and everything the quote may lead to.
+    /// rows were built from, and everything the quote may lead to. `threads`
+    /// are the stacks the main line draws: each goes on the last bubble or
+    /// card of its root.
     @MainActor
     static func build(
         rows: [TranscriptRow],
         messages: [ChatMessage],
         pending: [PendingSend],
-        kind: TranscriptStore.Kind
+        kind: TranscriptStore.Kind,
+        threads: ThreadStacks = .none
     ) -> [String: RowInfo] {
         var byID: [String: ChatMessage] = [:]
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
         var infos: [String: RowInfo] = [:]
-        let joins = TranscriptBuilder.replyJoins(messages)
-        for (index, row) in rows.enumerated() {
+        // A reply the main line leaves out for a stack is not the message above another.
+        let adjacent = TranscriptBuilder.adjacentReplies(messages, hidden: threads.stacked)
+        // The last bubble or card of each message, which carries its stack.
+        var lastBubble: [String: String] = [:]
+        if !threads.stacks.isEmpty {
+            for row in rows {
+                switch row {
+                case .userText, .agentText, .taskCard:
+                    if let message = row.ownMessageId { lastBubble[message] = row.id }
+                default:
+                    break
+                }
+            }
+        }
+        for row in rows {
             var info = RowInfo()
             switch row {
             case .userText(_, _, _, let state):
@@ -60,28 +76,17 @@ struct RowInfo: Hashable {
                 // The quote leads where `TranscriptStore.quoteAction` would take it:
                 // a reply is in a thread of more than one, since its root is
                 // another message.
-                if let quote = Self.quote(of: message, row: row) {
+                // A reply that sits right under what it answers shows nothing.
+                if !adjacent.contains(message.id), let quote = Self.quote(of: message, row: row) {
                     info.quote = quote
-                    info.rail = Self.rail(joins[message.id], row: row, previous: index > 0 ? rows[index - 1] : nil, own: message.id)
                     let inThread = message.chatThreadId.map { $0 != message.id } ?? false
                     info.quoteLeads = kind == .concierge && (inThread || byID[quote.messageId] != nil)
                 }
             }
+            if let own = row.ownMessageId, lastBubble[own] == row.id { info.stack = threads.stacks[own] }
             infos[row.id] = info
         }
         return infos
-    }
-
-    /// The mark of an adjacent reply. A line needs the reply it joins to be the
-    /// row right above, one gap away; with anything else between, it is a hook.
-    private static func rail(_ join: TranscriptBuilder.ReplyJoin?, row: TranscriptRow, previous: TranscriptRow?, own: String) -> ReplyRail.Kind? {
-        switch join {
-        case nil: return nil
-        case .hook: return .hook
-        case .line:
-            guard let previous, let above = previous.ownMessageId, above != own, !previous.isSeparatorOrError else { return .hook }
-            return .line(gap: TranscriptSpacing.top(row, after: previous))
-        }
     }
 
     /// The quote a reply carries, drawn on the first bubble or card of its message only.

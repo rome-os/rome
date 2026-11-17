@@ -54,6 +54,13 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Rome's status on a guardian message of its Chat: `working` or `failed`.
     /// It shows over the reaction. Nil when it has none, and from older instances.
     var status: String? = nil
+    /// Whether the chat's owner has seen the message
+    /// (docs/domains/chats.md#chat-thread). Nil from an instance before read
+    /// marks, and then every message reads as seen.
+    var read: Bool? = nil
+
+    /// The owner has seen it, or the instance keeps no mark.
+    var isRead: Bool { read != false }
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -69,7 +76,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status, read
     }
 }
 
@@ -107,6 +114,7 @@ extension ChatMessage {
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
         reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        read = (try? container.decodeIfPresent(Bool.self, forKey: .read)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -126,6 +134,7 @@ extension ChatMessage {
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
         try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(read, forKey: .read)
     }
 
     /// The root of the thread it is in: its own id when it is the root.
