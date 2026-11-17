@@ -54,7 +54,12 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
-import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import {
+  dinnerQuestion,
+  healthSummaryCard,
+  mealPlannerCard,
+  mealPlannerHandlers,
+} from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -508,6 +513,18 @@ const transcripts: Record<string, ChatMessage[]> = {
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
       dinnerQuestion,
     ]),
+    ...turn(
+      CONCIERGE_CHAT_ID,
+      10,
+      "2026-08-07T12:50:00.000Z",
+      "Can you send my health summary now?",
+      [
+        healthSummaryCard,
+        text(
+          "Main data synced at 10:02 p.m. Sleep advice from the [CDC](https://www.cdc.gov/sleep/).",
+        ),
+      ],
+    ),
     // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
     ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
       {

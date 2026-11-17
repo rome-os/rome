@@ -287,6 +287,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 - An agent shows a widget by calling a tool.
 - A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
 - An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
+- An agent can show a widget it describes itself, such as a report's numbers as tiles. Rome owns it, and it only shows text and numbers: it names no events, and draws nothing from anywhere else, such as an image or an app's data (zhangfan, 2026-11-17).
 - A widget is a message of its own, and is known by that message. A message that holds a widget holds nothing else (zhangfan, 2026-11-12).
 - A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event.
 - People do two things with a widget. An **edit**, such as picking an option or typing an answer, changes only what the widget shows on the screen in front of them. An **event**, such as pressing Send or a button that logs a glass of water, asks Rome to act, and carries the edits it needs. An edit never leaves the screen on its own.

@@ -95,6 +95,7 @@ import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
 import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";
+import { checkShowCard, SHOW_CARD_APP_ID } from "../../agent/index.js";
 import { normalizeRoutineDraftForCard } from "../../routines/propose-routine-tool.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
 import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
@@ -547,7 +548,8 @@ type WidgetPart = Extract<MessagePart, { type: "widget" }>;
  * another tool can print the same JSON. So a widget is stored only from a
  * tool call named `execute_action` (`actionName`), only for the app that owns
  * that action, and only when that app is installed and declares the component
- * (a described card names none).
+ * (a described card names none). The agent's own card (`show_card`) has no
+ * app and is checked by {@link agentCard} instead.
  */
 function trustedWidget(
   msg: Extract<AgentEvent, { type: "tool_result" }>,
@@ -557,6 +559,7 @@ function trustedWidget(
 ): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
+  if (widget.appId === SHOW_CARD_APP_ID) return agentCard(msg, widget, sessionId);
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
   if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
     log.warn("rejected widget: not shown by an action its app owns", {
@@ -645,6 +648,32 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
     },
   ];
+
+/**
+ * The agent's own card from `show_card`, when Rome may store it. A tool of
+ * another server can share the name once the provider drops its prefix, so
+ * the card is checked again here as display only: whatever printed it, it
+ * can show text and numbers and nothing more.
+ */
+function agentCard(
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
+  widget: ShownWidgetPart,
+  sessionId: string,
+): WidgetPart | null {
+  const tool = typeof msg.tool === "string" ? msg.tool : "";
+  const problems =
+    "ui" in widget && !widget.waits && !widget.bind ? checkShowCard(widget.ui) : ["not a card"];
+  if (!(tool === "show_card" || tool.endsWith("__show_card")) || problems.length > 0) {
+    log.warn("rejected widget: not a display-only card from show_card", {
+      sessionId,
+      tool,
+      problems,
+    });
+    return null;
+  }
+  const { waits: _waits, ...shown } = widget;
+  return { type: "widget", toolUseId: msg.toolUseId, ...shown };
+}
 
 /** Validate and shape a host-owned suspension a tool result may emit.
  *

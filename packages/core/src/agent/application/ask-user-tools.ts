@@ -1,5 +1,6 @@
-// The tools that ask the person something or wait on them: `ask_question`,
-// `defer`, and the session's own tools after them.
+// The tools that ask the person something, show them something, or wait on
+// them: `ask_question`, `show_card`, `defer`, and the session's own tools
+// after them.
 
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
@@ -7,6 +8,7 @@ import { parseDeferInput, type WakeUp } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
+import { showCardTool } from "./show-card-tool.js";
 
 /** What `defer` is served with, for a session with a live thread to wake. */
 export interface DeferTool {
@@ -162,7 +164,8 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
   };
 }
 
-/** `ask_question`, then `defer` where a thread can be woken, then the session tools. */
+/** `ask_question`, then `show_card` where the place draws cards, then `defer` where a
+ *  thread can be woken, then the session tools. */
 export function askUserTools(input: {
   turn: TurnFacts;
   widgetsShow: boolean;
@@ -252,6 +255,10 @@ export function askUserTools(input: {
         }),
     },
   ];
+  // A card is only worth its tokens where the place draws cards; elsewhere the
+  // model just writes the report as text. Served by the place, not by whether
+  // this turn shows widgets, so an exact fork keeps its source's tools.
+  if (turn.widgets === "card") tools.push(showCardTool(widgetsShow, run));
   // `defer` injects an inbound message rather than drawing a widget, so it is
   // served wherever there is a live thread to wake.
   if (defer) tools.push(deferTool(defer, turn, run));

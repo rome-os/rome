@@ -356,6 +356,56 @@ describe("defer", () => {
   });
 });
 
+describe("show_card", () => {
+  const ui = { components: [{ id: "root", component: "Stat", label: "Steps", value: "5,673" }] };
+
+  const cardTurn = { ...TURN, widgets: "card" as const };
+
+  it("is served only where the place draws cards", () => {
+    expect(askUserNames()).not.toContain("show_card");
+    expect(askUserNames({ turn: cardTurn })).toEqual(["ask_question", "show_card"]);
+  });
+
+  it("asks for the text where this turn shows no widget", async () => {
+    const res = await tools({ turn: cardTurn }).callTool("ask_user", "show_card", {
+      ui,
+      text: "Steps: 5,673",
+    });
+    expect(res.content[0].text).toContain("cannot show cards");
+  });
+
+  it("answers with the card for the chat to store", async () => {
+    const res = await tools({ turn: cardTurn, widgetsShow: true }).callTool(
+      "ask_user",
+      "show_card",
+      {
+        ui,
+        text: "Steps: 5,673",
+      },
+    );
+    expect(res.isError).toBeUndefined();
+    expect(JSON.parse(res.content[0].text)).toMatchObject({
+      showWidget: true,
+      appId: "core",
+      ui,
+      text: "Steps: 5,673",
+    });
+  });
+
+  it("fails with the reason when the card is not display only", async () => {
+    const res = await tools({ turn: cardTurn, widgetsShow: true }).callTool(
+      "ask_user",
+      "show_card",
+      {
+        ui: { components: [{ id: "root", component: "Image", url: "https://example.com/a.png" }] },
+        text: "A picture",
+      },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("may not use");
+  });
+});
+
 describe("session tools", () => {
   const say = (handler: RomeTool["handler"]): RomeTool => ({
     name: "say",

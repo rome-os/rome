@@ -16,6 +16,12 @@ const DIAGRAMS_SECTION = [
   "This chat surface renders Mermaid fenced code blocks (```mermaid) as interactive SVG diagrams. Use them to visualize architecture, workflows, state machines, and data flows when a diagram would be clearer than prose. Supported types: flowchart (graph TD/LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, xychart-beta. Focus on structure (the right diagram type and clear labels) and leave styling to the host: the UI themes diagrams with Rome's own fonts and colors, so do NOT add color/font styling — no `%%{init}%%` directives, `style`/`classDef` color rules, or hard-coded fills.",
 ].join("\n");
 
+const CARDS_SECTION = [
+  "# Cards",
+  "",
+  "When a message reports several numbers the guardian will scan, such as a daily summary or a status roundup, show them with the `show_card` tool as metric tiles and a short list, then keep your text to what the card leaves out, such as sources. Answer a conversational question or a single fact in text.",
+].join("\n");
+
 /** What a system prompt reads of an agent. */
 export interface PromptAgent {
   name: AgentName;
@@ -139,7 +145,7 @@ export function buildSystemPrompt(input: {
   const prompt = sections.join("\n\n");
 
   return input.owner === "core" && input.widgets === "card" && !input.delegatesWork
-    ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}`
+    ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}${SECTION_DIVIDER}${CARDS_SECTION}`
     : prompt;
 }
 

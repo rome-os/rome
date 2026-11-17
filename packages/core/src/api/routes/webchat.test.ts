@@ -6054,6 +6054,93 @@ describe("Webchat API", () => {
       expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
     });
 
+    function agentCardEvents(tool: string, card: Record<string, unknown>) {
+      return async function* () {
+        yield { type: "tool_use", id: "tu-card", tool, input: {} };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-card",
+          tool,
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                appId: "core",
+                text: "Sleep 7h 25m.",
+                ...card,
+              }),
+            },
+          ],
+        };
+        yield { type: "result", content: "" };
+      };
+    }
+
+    async function partsAfterTurn(events: () => AsyncGenerator<unknown>) {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(events as never);
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "send my health summary" }),
+        }),
+      );
+      return assistantPartsIn(sessionId);
+    }
+
+    const statCard = {
+      components: [{ id: "root", component: "Stat", label: "Sleep", value: "7h 25m" }],
+    };
+
+    it("stores the agent's own card from show_card, with no app", async () => {
+      const parts = await partsAfterTurn(agentCardEvents("show_card", { ui: statCard }));
+      expect(parts).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-card",
+        appId: "core",
+        ui: statCard,
+        text: "Sleep 7h 25m.",
+      });
+    });
+
+    // Whatever printed it, the agent's card shows text and numbers only.
+    it.each([
+      { name: "from another tool", tool: "Bash", card: { ui: statCard } },
+      {
+        name: "with a button",
+        tool: "show_card",
+        card: {
+          ui: {
+            components: [
+              { id: "root", component: "Button", child: "t", action: { event: { name: "x" } } },
+              { id: "t", component: "Text", text: "Go" },
+            ],
+          },
+        },
+      },
+      {
+        name: "with an image",
+        tool: "show_card",
+        card: {
+          ui: {
+            components: [{ id: "root", component: "Image", url: "https://example.com/a.png" }],
+          },
+        },
+      },
+      { name: "with bindings", tool: "show_card", card: { ui: statCard, bind: { "/a": "b" } } },
+      { name: "that waits", tool: "show_card", card: { ui: statCard, waits: true } },
+    ])("stores no agent card $name", async ({ tool, card }) => {
+      const parts = await partsAfterTurn(agentCardEvents(tool, card));
+      expect(parts.some((p) => p.type === "widget" || p.type === "pending_interaction")).toBe(
+        false,
+      );
+    });
+
     // Tool output is not proof of where it came from, so a widget naming one
     // app is refused from another app's action and from any other tool.
     it.each([

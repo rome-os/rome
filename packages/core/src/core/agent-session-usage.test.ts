@@ -372,6 +372,7 @@ describe("AgentSession turn usage", () => {
       params.tools.listTools("ask_user").map((tool) => tool.name);
     expect(catalog(source)).toEqual([
       "ask_question",
+      "show_card",
       "defer",
       "say",
       "propose_routine",

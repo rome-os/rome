@@ -67,6 +67,7 @@ export {
   questionCardFromAnswers,
   questionCardUi,
 } from "./domain/ask-question.js";
+export { checkShowCard, SHOW_CARD_APP_ID } from "./domain/show-card.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
   currentMessageSection,
