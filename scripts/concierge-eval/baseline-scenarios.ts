@@ -18,7 +18,7 @@ import { ZH_SCENARIOS } from "./baseline-scenarios-zh.js";
 
 export type { BaselineScenario, CheckInput } from "./baseline-checks.js";
 
-export const BASELINE_VERSION = 4;
+export const BASELINE_VERSION = 5;
 
 const VOICE =
   "Voice: short and direct, like a capable assistant texting its owner; no preamble, no filler such as 'Got it' or 'Let me check', no closing offers.";

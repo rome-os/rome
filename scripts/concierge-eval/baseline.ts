@@ -33,6 +33,8 @@ Options:
   --max-load N         wait before each scenario until the 1-minute load average is below N
   --name <snapshot>    restore this snapshot before each run (pnpm concierge:eval --snapshot)
   --no-restore         keep the stack as it is between runs
+  --keep-memory        let each scenario see the memory earlier ones saved (by default
+                       the snapshot's memory is put back before each scenario)
   --no-judge           skip the judge's scores
   --judge-model <m>    the judge's model (default claude-opus-5-5) at --judge-effort (default high)
   --container, --base-url, --user, --out, --timeout: as pnpm concierge:eval`;
@@ -53,6 +55,7 @@ const { values: args } = parseArgs({
     name: { type: "string", default: "frozen" },
     "no-restore": { type: "boolean" },
     "no-judge": { type: "boolean" },
+    "keep-memory": { type: "boolean" },
     "judge-model": { type: "string", default: "claude-opus-5-5" },
     "judge-effort": { type: "string", default: "high" },
     report: { type: "boolean" },
@@ -74,6 +77,20 @@ const { values: args } = parseArgs({
 });
 
 const stack = new Stack({ container: args.container, baseUrl: args["base-url"] });
+
+/** The snapshot's memory notes the judge may hold answers against, read once. */
+let memoryNotes: string | null = null;
+function snapshotMemory(): string {
+  memoryNotes ??= (() => {
+    try {
+      const notes = stack.memoryFacts(args.name);
+      return notes.length > 12_000 ? `${notes.slice(0, 12_000)}\n…` : notes;
+    } catch {
+      return "";
+    }
+  })();
+  return memoryNotes;
+}
 
 /** The stack's log lines since `sinceIso`. */
 function logsSince(sinceIso: string): string {
@@ -185,6 +202,7 @@ async function playScenario(
   let verdict: Verdict | null = null;
   if (!args["no-judge"]) {
     verdict = await judge(scenario.rubric, transcript.join("\n\n"), {
+      memory: snapshotMemory(),
       model: args["judge-model"] as string,
       effort: args["judge-effort"] as string,
     }).catch((error: unknown) => {
@@ -286,6 +304,7 @@ async function rejudge(ids: string[]): Promise<void> {
         const scenario = BASELINE_SCENARIOS.find((s) => s.id === run.id);
         if (!scenario) continue;
         run.verdict = await judge(scenario.rubric, run.transcript.join("\n\n"), {
+          memory: snapshotMemory(),
           model: args["judge-model"] as string,
           effort: args["judge-effort"] as string,
         }).catch((error: unknown) => {
@@ -340,6 +359,9 @@ async function main(): Promise<void> {
     const startedAt = new Date().toISOString();
     const results = await pool(scenarios, Number(args.concurrency), async (s) => {
       await belowMaxLoad(s.id);
+      // Scenarios played at once share the memory, so it is put back only
+      // when they run one at a time.
+      if (!args["keep-memory"] && Number(args.concurrency) === 1) stack.restoreMemory(args.name);
       const before = loadavg()[0] as number;
       const played = await playScenario(api, s, run);
       return { ...played, load: { before, after: loadavg()[0] as number } };

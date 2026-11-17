@@ -13,7 +13,7 @@ import {
 import { thanksWithoutEyes } from "./baseline-rules.js";
 
 const VOICE =
-  "语气：简短直接，像能干的助理给主人发消息；不要开场白，不要「好的」「收到」「我来看看」这类填充，结尾不要主动提出帮忙或反问。用中文回答，用全角标点，产品词 Agent 保持英文，不要译成「代理」或「智能体」。";
+  "语气：简短直接，像能干的助理给主人发消息；不要开场白，不要「好的」「收到」「我来看看」这类填充，结尾不要主动提出帮忙或反问。用中文回答，用全角标点。";
 
 const SCHEDULE =
   "三个会议要排进一个下午，13:00 到 17:00：A 要 90 分钟，B 要 60 分钟，C 要 45 分钟。B 必须在 A 开始前结束，C 不能紧接在 B 后面，任意两个会议之间要留 15 分钟休息。给我一个可行的安排。";
@@ -200,14 +200,5 @@ export const ZH_SCENARIOS: BaselineScenario[] = [
       ...noFiller(i.said),
     ],
     rubric: `最后一个回答必须说出波尔图和在设计工作室上班，一行即可。第一条回复应简短回应这个消息（一个表情回应或一句话），礼物的回答应简短实用。${VOICE}`,
-  },
-  {
-    id: "zh-agent-term",
-    lang: "zh",
-    row: "simple-qa",
-    about: "一个会让回答提到 Agent 的问题，检查 Agent 不被翻译",
-    steps: [{ text: "你把事情交给任务去做的时候，具体是谁在做？一两句话说清楚。", settleS: 6 }],
-    check: (i) => [...answeredInline(i, 0), ...noFiller(i.said)],
-    rubric: `好的回答用一两句话说明：任务由一个单独的 Agent（在自己的任务聊天里）去做，Concierge 负责交代和转达结果。产品词 Agent 必须保持英文；译成「代理」或「智能体」给 2 分以下。${VOICE}`,
   },
 ];

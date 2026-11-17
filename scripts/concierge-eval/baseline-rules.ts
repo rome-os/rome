@@ -77,13 +77,7 @@ const LATIN = /[A-Za-z]/g;
 const HALF_WIDTH =
   /[\u{3400}-\u{9FFF}] ?[,;:!?]|[,;:!?] ?[\u{3400}-\u{9FFF}]|[\u{3400}-\u{9FFF}]\.(?=\s|$)/u;
 
-/** The words the product keeps in English, and the translations it must not use. */
-const TRANSLATED_AGENT = /代理|智能体|智能代理/;
-
-/**
- * Checks a Chinese reply: it is in Chinese, uses full-width punctuation, and
- * keeps "Agent" in English.
- */
+/** Checks a Chinese reply: it is in Chinese and uses full-width punctuation. */
 export function chineseStyle(said: string[]): string[] {
   const notes: string[] = [];
   for (const t of said) {
@@ -93,7 +87,6 @@ export function chineseStyle(said: string[]): string[] {
     if (cjk + latin >= 8 && cjk < latin / 4) notes.push(`zh: not Chinese: "${t.slice(0, 60)}"`);
     const half = t.match(HALF_WIDTH);
     if (half) notes.push(`zh: half-width punctuation "${half[0]}" in "${t.slice(0, 60)}"`);
-    if (TRANSLATED_AGENT.test(t)) notes.push(`zh: translates Agent in "${t.slice(0, 60)}"`);
   }
   return notes;
 }

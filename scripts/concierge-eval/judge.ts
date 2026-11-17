@@ -29,8 +29,15 @@ Score 1-5:
 1 = wrong, invented, or no answer.
 Reply with only a JSON object: {"score": <1-5>, "why": "<one sentence>"}`;
 
-export function judgePrompt(rubric: string, transcript: string): string {
-  return `${INSTRUCTIONS}\n\n<rubric>\n${rubric}\n</rubric>\n\n<transcript>\n${transcript}\n</transcript>`;
+/**
+ * The judge's prompt. `memory` is what the assistant's memory held about the
+ * owner when the scenario started: a fact from it is known, not invented.
+ */
+export function judgePrompt(rubric: string, transcript: string, memory = ""): string {
+  const known = memory
+    ? `\n\n<memory>\nThe assistant's memory about the owner when the chat started. It may rightly use these facts; do not count them as invented.\n\n${memory}\n</memory>`
+    : "";
+  return `${INSTRUCTIONS}\n\n<rubric>\n${rubric}\n</rubric>${known}\n\n<transcript>\n${transcript}\n</transcript>`;
 }
 
 /** The verdict in a judge's reply, or null when it holds none. */
@@ -47,7 +54,11 @@ export function parseVerdict(reply: string): Verdict | null {
   }
 }
 
-export function judge(rubric: string, transcript: string, options: JudgeOptions): Promise<Verdict> {
+export function judge(
+  rubric: string,
+  transcript: string,
+  options: JudgeOptions & { memory?: string },
+): Promise<Verdict> {
   const args = [
     "-p",
     "--model",
@@ -81,6 +92,6 @@ export function judge(rubric: string, transcript: string, options: JudgeOptions)
         else reject(new Error(`the judge gave no verdict: ${text.slice(0, 200)}`));
       },
     );
-    child.stdin?.end(judgePrompt(rubric, transcript));
+    child.stdin?.end(judgePrompt(rubric, transcript, options.memory));
   }).finally(() => rmSync(cwd, { recursive: true, force: true }));
 }

@@ -49,12 +49,11 @@ describe("thanksWithoutEyes", () => {
 });
 
 describe("chineseStyle", () => {
-  it("wants Chinese, full-width punctuation and Agent in English", () => {
+  it("wants Chinese and full-width punctuation", () => {
     expect(chineseStyle(["交给一个 Agent 去做，完成后我转达结果。", "Porto", "11:30"])).toEqual([]);
     const half = chineseStyle(["大约 22.2 °C, 很舒服."]);
     expect(half).toHaveLength(1);
     expect(half[0]).toMatch(/half-width punctuation ", 很"/);
-    expect(chineseStyle(["交给智能体去做。"])[0]).toMatch(/translates Agent/);
     expect(chineseStyle(["It is about 22.2 degrees today."])[0]).toMatch(/not Chinese/);
   });
 });

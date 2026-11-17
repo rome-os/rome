@@ -52,7 +52,7 @@ const VOICE_EN =
   "Voice: short and direct, like a capable assistant texting its owner; no preamble, no filler such as 'Got it' or 'Let me check', no closing offers.";
 
 const VOICE_ZH =
-  "语气：简短直接，像能干的助理给主人发消息；不要开场白和填充，结尾不要主动提出帮忙或反问。用中文回答，用全角标点，产品词 Agent 保持英文。";
+  "语气：简短直接，像能干的助理给主人发消息；不要开场白和填充，结尾不要主动提出帮忙或反问。用中文回答，用全角标点。";
 
 const WARM = 5;
 
