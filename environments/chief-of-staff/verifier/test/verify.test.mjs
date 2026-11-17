@@ -121,7 +121,7 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     });
     const k7 = report.results.find((r) => r.rule === "K7");
     assert.equal(k7.scored, false);
-    assert.equal(report.summary.rules.of, 10, "K7 and A8 are left out of the score");
+    assert.equal(report.summary.rules.of, 9, "K7, A7 and A8 are left out, and K3 is scored by leg");
     assert.equal(report.memory.files.length, 0, "the memory folder is observed");
     const k5 = report.results.find((r) => r.rule === "K5");
     assert.equal(k5.checks.length, 1, "phase 2 scores K5 on invention alone");
