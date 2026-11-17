@@ -38,11 +38,11 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Dashboard admin
 
-A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow-list. The guardian adds them in Settings, and they use the whole dashboard as the guardian does.
+A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow-list. The guardian adds them in Settings, and they use the dashboard apart from the parts kept for the guardian.
 
 **Contracts:**
 
-- A dashboard admin never holds approval authority. Which raw sockets admit them is in [access control](../architecture/access-control.md#request-flow).
+- A dashboard admin never passes a guardian-only check, such as approvals, the vault or app-connection access. Which raw sockets admit them is in [access control](../architecture/access-control.md#request-flow).
 - A dashboard admin has their own Concierge while it is on. Memory and connections stay shared.
 - Removing the email ends dashboard admin access at the next request.
 

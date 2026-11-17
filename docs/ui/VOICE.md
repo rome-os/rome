@@ -140,7 +140,7 @@ Each row was verified against the rendered pair.
 | Upgrade Rome to {{version}}? | Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back. | Rome is the actor. Cause, then cost, then what needs no action. |
 | Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | A state the guardian did not choose, so the cause leads. No control on this screen fixes it. |
 | Access for {{name}} | Applies to the public Rome URL. Your own dashboard access is not affected. | Scope, plus the misreading it prevents. |
-| Allowed emails | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
+| Admins | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
 | On a schedule | *(no description)* | "These run at a set time" restates the heading. Deleted, not reworded. |
 
 ### Economical
