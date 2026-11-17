@@ -192,6 +192,46 @@ export interface QuotaSwitchPart {
   model: string;
 }
 
+/** A provider the guardian can make the default. Rome credits run Codex. */
+export type DefaultModelProvider = "anthropic" | "openai" | "rome_credits";
+
+/**
+ * Host-written card: the provider a turn needed could not run, so the turn did
+ * not run. Rome never moves the chat to another provider on its own.
+ * docs/domains/agents.md#default-provider
+ */
+export interface ProviderFailurePart {
+  type: "provider_failure";
+  provider: DefaultModelProvider;
+  /** `removed`: not signed in. `login`: the sign-in expired. `quota`: its usage limit. */
+  reason: "quota" | "login" | "removed";
+  /** When the usage limit ends, for `quota`. */
+  until?: string;
+  /** The chat follows the default provider; false for an exact model selection. */
+  followsDefault: boolean;
+  /** Other signed-in providers that can run now. */
+  alternatives: DefaultModelProvider[];
+  /** The chat the card is in, so its actions resend there. */
+  chatId: string;
+}
+
+/**
+ * Host-written notice in the Concierge main chat: unattended chats (task chats
+ * and routines) are waiting for one provider. One notice per outage.
+ */
+export interface ProviderOutagePart {
+  type: "provider_outage";
+  outageId: string;
+  provider: DefaultModelProvider;
+  reason: "quota" | "login" | "removed";
+  until?: string;
+  /** The chats waiting, as of the last write. */
+  chatIds: string[];
+  alternatives: DefaultModelProvider[];
+  /** Set once the provider runs again or the chats ran elsewhere. */
+  resolvedAt?: string;
+}
+
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
   | Exclude<MessagePart, { type: "text" }>
@@ -200,7 +240,9 @@ export type TranscriptPart =
   | TaskChatPart
   | ConnectCardPart
   | ReplyToPart
-  | QuotaSwitchPart;
+  | QuotaSwitchPart
+  | ProviderFailurePart
+  | ProviderOutagePart;
 
 /** The person or automation that sent a WebChat user message, resolved at load
  * time. Absent when no sender was recorded. Automation names the actual source;

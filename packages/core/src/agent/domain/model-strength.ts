@@ -2,7 +2,13 @@
 // quick model, strong its best. The Concierge runs strong, and picks one of
 // the two for each task chat it starts. docs/domains/agents.md#model-strength
 
-import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL, type ModelSelectionId } from "./model-selection.js";
+import {
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  MODEL_SELECTIONS,
+  type ModelSelectionId,
+} from "./model-selection.js";
+import { providerOfDefault, type DefaultProvider } from "./default-provider.js";
 import { accountAllowsModel, type ModelAccountReport } from "./model-account-report.js";
 
 export type ModelStrength = "fast" | "strong";
@@ -28,4 +34,25 @@ export function selectionOfStrength(
   return strength === "fast"
     ? codexFastSelection(codexAccount)
     : codexStrongSelection(codexAccount);
+}
+
+/** How strong a selection is: each provider's quick models are fast, the rest strong. */
+export function strengthOfSelection(id: ModelSelectionId): ModelStrength {
+  return /sonnet|haiku|luna|terra/.test(id) ? "fast" : "strong";
+}
+
+/**
+ * The model a chat that follows the default runs: its stored model while that
+ * is on the default provider, else the default provider's model of the same
+ * strength. With no default, the stored model stays.
+ */
+export function followingSelection(
+  stored: ModelSelectionId,
+  defaultProvider: DefaultProvider | null,
+  codexAccount?: ModelAccountReport["account"],
+): ModelSelectionId {
+  if (!defaultProvider) return stored;
+  const provider = providerOfDefault(defaultProvider);
+  if (MODEL_SELECTIONS[stored].providerId === provider) return stored;
+  return selectionOfStrength(provider, strengthOfSelection(stored), codexAccount);
 }

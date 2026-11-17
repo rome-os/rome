@@ -624,7 +624,6 @@ describe("usage-limit continuation", () => {
       { parentSessionId: "parent" },
       { ownerKey: "visitor:someone" },
       { triggerKind: "routine" },
-      { triggerKind: "concierge" },
       { archivedAt: new Date() },
       { chatId: null },
     ])("leaves an out-of-scope chat stopped: %j", async (change) => {
@@ -634,6 +633,19 @@ describe("usage-limit continuation", () => {
       start(runner);
       await clearAndSweep();
       expect(agent.calls).toHaveLength(0);
+    });
+
+    it("continues a task chat, which runs unattended, until the guardian writes in it", async () => {
+      await stopped();
+      await db.db
+        .update(romeSessions)
+        .set({ triggerKind: "concierge" })
+        .where(eq(romeSessions.id, "chat"));
+      await db.db.run("DELETE FROM agent_turn_messages");
+      const { agent, runner } = backend();
+      start(runner);
+      await clearAndSweep();
+      expect(agent.calls).toHaveLength(1);
     });
 
     describe("a Concierge chat", () => {

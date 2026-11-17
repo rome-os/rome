@@ -305,7 +305,11 @@ export class AgentRunner {
     // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
     const receipt = session.submit(
-      { prompt: params.prompt, images: params.images },
+      {
+        prompt: params.prompt,
+        images: params.images,
+        ...(params.providerOverride ? { providerOverride: params.providerOverride } : {}),
+      },
       {
         priority: "after",
         threadContext,

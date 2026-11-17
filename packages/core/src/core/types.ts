@@ -10,6 +10,8 @@ import type { AgentEvent } from "../types.js";
 export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/app-runtime";
 
 export interface RunParams extends SdkRunParams {
+  /** Runs this turn alone on another provider than the default ("run them on {other} now"). */
+  providerOverride?: "anthropic" | "openai";
   shouldRun?: () => boolean;
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";

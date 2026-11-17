@@ -23,6 +23,8 @@ export interface BackendTurnOptions {
   pushLevel?: NotifyLevel;
   /** Who the turn acts for: the person whose routine or action woke it. Absent, no one. */
   actor?: SessionActor;
+  /** Runs this turn alone on another provider than the default. */
+  providerOverride?: "anthropic" | "openai";
 }
 
 /** How a backend turn ended: `stopped` when a Stop request cut it short,

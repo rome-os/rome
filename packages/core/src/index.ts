@@ -4,6 +4,8 @@ import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import { webchatSessionKey } from "./core/agent-session-key.js";
+import { createProviderFailures } from "./webchat/provider-failures.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
@@ -203,6 +205,7 @@ import {
   createTierModelsSetting,
   createDefaultProviders,
   createDefaultProviderSetting,
+  followingSelection,
   type DefaultProvider,
   DrizzleSessionRepository,
   codexLoginKind,
@@ -1276,6 +1279,7 @@ async function main() {
     webchatRepo,
     sessionRepository,
     accounts: modelAccounts,
+    defaults: defaultProviders,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
@@ -1332,7 +1336,15 @@ async function main() {
       subagentSessions: (manager, parentLink, inherited) =>
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
-      sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      sessionSettings: new ChatSessionSettings({
+        webchatRepo,
+        follow: (saved) =>
+          followingSelection(
+            saved,
+            defaultProviders.current(),
+            modelAccounts.read().openai?.account,
+          ),
+      }),
       chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
@@ -1449,7 +1461,7 @@ async function main() {
 
   const backendTurnRunner = createBackendTurnRunner({
     resolveTurn: (params) => concierge.resolveTurn(params),
-    beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
+    beforeTurn: ({ threadId }) => concierge.followDefault(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
     // no backend turn runs before boot completes.
@@ -1466,6 +1478,38 @@ async function main() {
         resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
           "private"
       );
+    },
+  });
+
+  // A provider that cannot run shows a card in the chat, or, for task chats,
+  // one notice per outage in the Concierge main chat. Nothing moves a chat to
+  // another provider on its own.
+  const providerFailures = createProviderFailures({
+    accounts: modelAccounts,
+    defaults: defaultProviders,
+    webchatRepo,
+    settings: settingsRepo,
+    mainChatId: () => concierge.findChatId(),
+    runtimeOf: async (chatId, agentName) =>
+      (await sessionRepository.current(webchatSessionKey(chatId), agentName))?.id ?? null,
+    runner: backendTurnRunner,
+    notify: notifyClient,
+  });
+  const stopProviderFailureTurns = turnListeners.listen({
+    ended: (event) => {
+      const thread = event.turn.threadContext;
+      if (event.status !== "error" || event.turn.parent) return;
+      if (thread?.channel !== "webchat" || !thread.threadId || !event.output.failure) return;
+      void providerFailures
+        .failed({
+          chatId: thread.threadId,
+          agentName: event.turn.agentName,
+          sessionId: event.turn.sessionId,
+          failure: { kind: "turn", failure: event.output.failure },
+        })
+        .catch((error: unknown) =>
+          log.warn("provider failure handling failed", { error: String(error) }),
+        );
     },
   });
 
@@ -2358,6 +2402,8 @@ async function main() {
       modelAccounts,
       codexAccountService,
       claudeAccount,
+      defaultProviders,
+      providerFailures,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       permissions,
       dashboardAccessState,
@@ -2672,6 +2718,8 @@ async function main() {
     shutdownLog.info("capability discovery stopped");
 
     stopUsageLimitContinuation();
+    stopProviderFailureTurns();
+    providerFailures.stop();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();

@@ -4519,8 +4519,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
-    if (isConciergeChat(session)) {
-      await deps.concierge?.switchIfExhausted(sessionId);
+    if (isConciergeChat(session) || session.largeModelSelectionBy === "auto") {
+      // A model Rome chose follows the default provider.
+      await deps.concierge?.followDefault(sessionId);
       // A background turn may also have moved the chat since this send read it.
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
@@ -4734,6 +4735,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           turn: createAgentTurnRef({ sessionId, turnId, agentName, threadContext }),
           error: modelError.error,
         });
+        // The chat shows why, and what the guardian can do.
+        void deps.providerFailures
+          ?.failed({
+            chatId: sessionId,
+            agentName,
+            failure: { kind: "resolution", payload: modelError },
+          })
+          .catch((error: unknown) =>
+            log.warn("provider failure card failed", { sessionId, error: String(error) }),
+          );
 
         return answer({ turnId, sessionId, startedAt: stream.startedAt, content: userContent });
       }

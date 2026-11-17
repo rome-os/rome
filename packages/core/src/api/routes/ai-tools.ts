@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isDefaultProvider } from "../../agent/index.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -64,9 +65,29 @@ async function anthropicCompatibleJson(claude: Pick<ClaudeLogins, "storedCredent
 }
 
 export function aiToolsRoutes(
-  deps: Pick<ApiDeps, "modelAccounts" | "codexAccountService" | "claudeAccount">,
+  deps: Pick<
+    ApiDeps,
+    | "modelAccounts"
+    | "codexAccountService"
+    | "claudeAccount"
+    | "defaultProviders"
+    | "providerFailures"
+  >,
 ): Hono {
   const app = new Hono();
+
+  // The default provider, the providers it can be, and the note a removal left.
+  const defaultJson = async () => {
+    const defaults = deps.defaultProviders;
+    if (!defaults) return null;
+    await defaults.ready();
+    const note = defaults.note();
+    return {
+      provider: defaults.current(),
+      signedIn: defaults.signedIn(),
+      ...(note ? { note } : {}),
+    };
+  };
 
   const statusJson = async () => {
     const state = deps.modelAccounts.read();
@@ -97,7 +118,97 @@ export function aiToolsRoutes(
         lastError: login.lastError,
       },
       anthropicCompatible: claude.anthropicCompatible,
+      defaultProvider: await defaultJson(),
     });
+  });
+
+  app.get("/ai-tools/default", async (c) => c.json({ defaultProvider: await defaultJson() }));
+
+  // The guardian's choice of default, after the confirm dialog. Following
+  // chats move on their next turn. `resend` also runs a chat's stopped request
+  // again, as a failure card's "Make {other} the default" does.
+  app.put("/ai-tools/default", async (c) => {
+    const defaults = deps.defaultProviders;
+    if (!defaults) return c.json({ error: "No default provider here" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      provider?: unknown;
+      resend?: { chatId?: unknown; agentName?: unknown };
+    } | null;
+    if (!isDefaultProvider(body?.provider)) return c.json({ error: "Unknown provider" }, 400);
+    try {
+      await defaults.choose(body.provider);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+    const resend = body.resend;
+    if (
+      resend &&
+      typeof resend.chatId === "string" &&
+      typeof resend.agentName === "string" &&
+      deps.providerFailures
+    ) {
+      await deps.providerFailures
+        .resend(resend.chatId, resend.agentName)
+        .catch((err) =>
+          log.warn("resend after a default change failed", { error: getErrorMessage(err) }),
+        );
+    }
+    return c.json({ defaultProvider: await defaultJson() });
+  });
+
+  app.delete("/ai-tools/default/note", async (c) => {
+    await deps.defaultProviders?.dismissNote();
+    return c.json({ defaultProvider: await defaultJson() });
+  });
+
+  // A failure card's resend: the chat's stopped request runs again, after
+  // the guardian signed in, went back to following the default, or chose
+  // another default.
+  app.post("/ai-tools/provider-failures/resend", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      chatId?: unknown;
+      agentName?: unknown;
+    } | null;
+    if (typeof body?.chatId !== "string" || typeof body.agentName !== "string") {
+      return c.json({ error: "chatId and agentName are required" }, 400);
+    }
+    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
+    try {
+      await deps.providerFailures.resend(body.chatId, body.agentName);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+  });
+
+  app.get("/ai-tools/provider-outages", async (c) => {
+    const outages = (await deps.providerFailures?.outages()) ?? [];
+    return c.json({
+      outages: outages.map(({ id, provider, reason, until, chats, since }) => ({
+        id,
+        provider,
+        reason,
+        ...(until ? { until } : {}),
+        chatIds: chats.map((chat) => chat.chatId),
+        since,
+      })),
+    });
+  });
+
+  // "Run them on {other} now": each waiting chat runs its stopped request once
+  // on `provider`, and goes back to the default on its next turn.
+  app.post("/ai-tools/provider-outages/:id/run", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { provider?: unknown } | null;
+    const provider = body?.provider;
+    if (provider !== "anthropic" && provider !== "openai" && provider !== "rome_credits") {
+      return c.json({ error: "Unknown provider" }, 400);
+    }
+    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
+    const ran = await deps.providerFailures.runOutageOn(
+      c.req.param("id"),
+      provider === "anthropic" ? "anthropic" : "openai",
+    );
+    return c.json({ ran });
   });
 
   // Rome Cloud owns the balance; every instance of the account reads the same one.

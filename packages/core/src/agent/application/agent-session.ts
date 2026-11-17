@@ -87,6 +87,7 @@ import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
 import { type WakeUp } from "../domain/defer.js";
 import { subagentToolName, type Subagent, type Subagents } from "../domain/subagent.js";
 import { type ModelTier } from "../domain/model-tier.js";
+import type { AccountedProviderId } from "../domain/model-account-report.js";
 import { modelResolutionRequest } from "../domain/model-resolution.js";
 import {
   toModelResolutionErrorPayload,
@@ -218,6 +219,12 @@ export interface AgentTurnInput {
   /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
   images?: string[];
   reasoningEffort?: ModelReasoningEffort;
+  /**
+   * Runs this turn alone on another provider than the default, as the
+   * guardian's "run them on {other} now" does. The next turn follows the
+   * default again. An exact selection ignores it.
+   */
+  providerOverride?: AccountedProviderId;
 }
 
 /** A forked turn: what it says, and what the fork asks of its source (see `openFork`). */
@@ -2087,6 +2094,11 @@ async function openSession(
   });
 
   impl.startModelSessionEvents();
+  // The session reopened on another provider than its recorded thread: the
+  // new thread's first turn carries the chat.
+  if (!threadResumed && resumed?.modelThreadId && !continuesChat) {
+    await impl.carryChatAcrossProviders();
+  }
 
   log.info("agent session opened", {
     agentName: key.agentName,
@@ -2144,7 +2156,7 @@ interface ImplArgs {
    * handoff if any: what the session it replaced held (`held`), or the
    * latest ones (`recent`).
    */
-  carriesMessages?: "held" | "recent";
+  carriesMessages?: "held" | "recent" | "own";
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -2434,7 +2446,7 @@ class AgentSessionImpl implements AgentSession {
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
   /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
-  private carriesMessages?: "held" | "recent";
+  private carriesMessages?: "held" | "recent" | "own";
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2741,10 +2753,10 @@ class AgentSessionImpl implements AgentSession {
     this.selectionId = selectionId ?? undefined;
   }
 
-  private async ensureModelSessionForTurn(): Promise<void> {
+  private async ensureModelSessionForTurn(override?: AccountedProviderId): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.resolve(
-      modelResolutionRequest(this.selectionId, this.sessionPin, this.config),
+      modelResolutionRequest(this.selectionId, this.sessionPin, this.config, override),
     );
     if (
       this.modelSessionAvailable &&
@@ -2780,6 +2792,7 @@ class AgentSessionImpl implements AgentSession {
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
+          await this.carryChatAcrossProviders();
         }
       }
       this.toolCount =
@@ -3054,6 +3067,15 @@ class AgentSessionImpl implements AgentSession {
       });
       return { openTasks: null, recent: [] };
     };
+    if (this.carriesMessages === "own") {
+      const held = await heldBy(this.deps.sessionRepository, this.session).catch(() => null);
+      if (held) {
+        const context = await handoffs
+          .context(sink.romeSessionId, sink.turnId, held.since)
+          .catch(failed);
+        return handoffSections(held.handoff, context, { all: true });
+      }
+    }
     if (this.carriesMessages === "held") {
       const held = await this.heldByPredecessor().catch(() => null);
       if (held) {
@@ -3065,6 +3087,43 @@ class AgentSessionImpl implements AgentSession {
     }
     const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch(failed);
     return handoffSections(this.handoff ?? null, context);
+  }
+
+  /**
+   * The thread moved to another provider, which has seen none of the chat.
+   * Its first turn carries what this session held: the chat's text messages
+   * since it opened and its open tasks, for every agent. When that is past the
+   * light handoff's cap, a handoff note is written instead, from the chat's
+   * messages, since the old provider may not run any more. Tool traces are
+   * not carried. docs/concepts/sessions.md#continuation
+   */
+  async carryChatAcrossProviders(): Promise<void> {
+    const chatId = this.threadContext?.romeSessionId;
+    if (this.isSubagent || this.config.codeBacked || !this.deps.handoffs || !chatId) return;
+    if (!(await lightReplayTooLarge(this.deps, this.session, chatId))) {
+      this.carriesMessages = "own";
+      return;
+    }
+    const note = await writeRenewalHandoff(
+      {
+        retired: this.session,
+        agentName: this.key.agentName,
+        chatId,
+        systemPrompt: this.systemPrompt,
+        workingDir: this.workingDir ?? "",
+        env: {},
+        thread: null,
+        background: true,
+      },
+      {
+        handoffs: this.deps.handoffs,
+        modelResolver: this.deps.modelResolver,
+        turnUsage: this.deps.turnUsage,
+        log: this.log,
+      },
+    ).catch(() => null);
+    if (note) this.handoff = note;
+    this.carriesMessages = "recent";
   }
 
   /**
@@ -4015,7 +4074,7 @@ class AgentSessionImpl implements AgentSession {
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
     if (!sink.lifecycleInterrupted) {
-      await this.ensureModelSessionForTurn();
+      await this.ensureModelSessionForTurn(input.providerOverride);
     }
     if (sink.lifecycleInterrupted) {
       await this.modelSession.interrupt("user-stop");

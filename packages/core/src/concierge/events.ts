@@ -528,26 +528,22 @@ export function startConciergeEvents(
           );
           return chain.finished;
         };
-        let crossed = false;
-        let next: AgentTurnFinishedEvent | undefined;
+        // A temporary failure gets one retry on the same model after a wait,
+        // and a single model's limit another model of the same provider. A
+        // quota or a lost login stops here: the chat shows a card, and no
+        // other provider takes over.
         if (reason === "temporary") {
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
           // The wait may have ended the subscription that paid for this turn.
           if (!failoverReason(failure, service.deps.accounts.read())) return;
-          next = await recover(failure, reason, true);
-        } else {
-          const moved = await service.switchForFailure(chatId, failure, reason);
+          await recover(failure, reason, true);
+        } else if (reason === "model_limit") {
+          const moved = await service.switchForModelLimit(chatId, failure);
           if (!moved) return;
-          crossed = moved.from !== moved.to;
-          next = await recover(failure, reason, !crossed);
+          await recover(failure, reason, true);
         }
-        if (crossed || next?.status !== "error" || !next.output.failure) return;
-        const second = failoverReason(next.output.failure, service.deps.accounts.read());
-        if (!second) return;
-        const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
-        if (moved) await recover(next.output.failure, second, false);
       } finally {
         recoveriesRunning.delete(chatId);
         const left = await settleTurnMarks(

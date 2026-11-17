@@ -27,13 +27,14 @@ import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
-  codexStrongSelection,
+  followingSelection,
+  isModelSelectionId,
   MODEL_SELECTIONS,
+  providerOfDefault,
   selectionOfStrength,
+  type DefaultProviders,
   type ModelStrength,
   sameProviderTarget,
-  soleProviderAtUsageLimit,
-  usageSwitchTarget,
   type ModelAccounts,
   type ModelSelectionId,
   type SessionRepository,
@@ -63,8 +64,6 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
-
-import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 /** The models a Concierge chat started on before it ran on the strongest. */
 const OLD_DEFAULTS: ReadonlySet<ModelSelectionId> = new Set([
@@ -252,6 +251,8 @@ export interface ConciergeDeps {
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
+  /** The default provider. Absent, none is set, and chats keep their models. */
+  defaults?: Pick<DefaultProviders, "current">;
   agentSessionManager: Pick<Sessions, "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -751,39 +752,75 @@ export class ConciergeService {
     );
   }
 
-  // The YAML tier prefers Codex whenever it is signed in, so the choice is
-  // stored on the chat: the strongest model of Claude, else of Codex. Opus
+  // The Concierge runs the default provider's strongest model, stored on the
+  // chat as Rome's choice, so it follows the default when that changes. Opus
   // answers a simple turn as fast as Sonnet, since its thinking adapts to the
   // question (docs/concierge-eval.md#baseline). An Anthropic-compatible
   // provider serves its own models through the tier mappings, so it keeps the
-  // tier's choice, as does a chat that neither provider can serve.
+  // tier's choice, as does a Rome with no default yet.
   private pickModel(): ModelSelectionId | null {
+    const provider = this.defaultModelProvider();
+    if (!provider) return null;
     const { anthropic: claude, openai: codex } = this.deps.accounts.read();
-    if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
-      return "claude-opus-5-5";
-    }
-    if (codex?.state === "available") return codexStrongSelection(codex.account);
-    return null;
+    if (provider === "anthropic" && claude?.account.authMethod === "stored-compatible") return null;
+    return selectionOfStrength(provider, "strong", codex?.account);
+  }
+
+  /** The provider the default runs on, or null when none is set. */
+  private defaultModelProvider(): "anthropic" | "openai" | null {
+    const current = this.deps.defaults?.current() ?? null;
+    return current ? providerOfDefault(current) : null;
   }
 
   /**
    * The model of `strength` for a task chat that Concierge chat `chatId`
-   * starts: on the Concierge chat's own provider, so the task runs on the
-   * account the Concierge does. Null when that chat has no provider of its own.
+   * starts. It follows the default provider like the Concierge chat, unless
+   * that chat's owner picked a model, whose provider it then runs on.
    */
   async taskModel(chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
-    const stored = (await this.deps.webchatRepo.getSession(chatId))?.largeModelSelection;
-    const own = stored ? MODEL_SELECTIONS[stored as ModelSelectionId]?.providerId : undefined;
-    const picked = own === "anthropic" || own === "openai" ? null : this.pickModel();
-    const provider = picked ? MODEL_SELECTIONS[picked].providerId : own;
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    const stored = chat?.largeModelSelection;
+    const own =
+      isModelSelectionId(stored) && chat?.largeModelSelectionBy === "owner"
+        ? MODEL_SELECTIONS[stored].providerId
+        : undefined;
+    const provider = own ?? this.defaultModelProvider();
     if (provider !== "anthropic" && provider !== "openai") return null;
     return selectionOfStrength(provider, strength, this.deps.accounts.read().openai?.account);
   }
 
-  /** Checks raw subscription availability before a turn in any Concierge chat. */
-  async switchIfExhausted(chatId: string) {
+  /**
+   * Before a turn in chat `chatId`: a model Rome chose for it follows the
+   * default provider at the same strength, and a Concierge chat on an older
+   * default moves to the strong model. A model its owner picked stays. Returns
+   * the provider the chat moved from and to, or null when it stayed.
+   */
+  async followDefault(
+    chatId: string,
+  ): Promise<{ from: "anthropic" | "openai"; to: "anthropic" | "openai" } | null> {
     await this.adoptStrongDefault(chatId);
-    return this.move(chatId);
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    const stored = chat?.largeModelSelection;
+    if (!chat || chat.largeModelSelectionBy !== "auto" || !isModelSelectionId(stored)) return null;
+    const next = followingSelection(
+      stored,
+      this.deps.defaults?.current() ?? null,
+      this.deps.accounts.read().openai?.account,
+    );
+    if (next === stored) return null;
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
+    const agentName = chat.agentName ?? CONCIERGE_AGENT_ID;
+    this.deps.agentSessionManager
+      .find({ agentName, channelThreadKey: webchatSessionKey(chatId) })
+      ?.selectModel(next);
+    const from = MODEL_SELECTIONS[stored].providerId;
+    const to = MODEL_SELECTIONS[next].providerId;
+    log.info("chat follows the default provider", { chatId, from: stored, to: next });
+    return from === to ||
+      (from !== "anthropic" && from !== "openai") ||
+      (to !== "anthropic" && to !== "openai")
+      ? null
+      : { from, to };
   }
 
   /**
@@ -810,21 +847,11 @@ export class ConciergeService {
       log.info("concierge chat moved to its strong model", { chatId, from: stored, to: strong });
   }
 
-  async switchForFailure(
-    chatId: string,
-    failure: AgentTurnFailure,
-    reason: FailoverReason,
-    crossOnly = false,
-  ) {
-    return this.move(chatId, failure, reason, crossOnly);
-  }
-
-  private async move(
-    chatId: string,
-    failure?: AgentTurnFailure,
-    reason?: FailoverReason,
-    crossOnly = false,
-  ) {
+  /**
+   * A Concierge chat whose model hit a limit of its own moves to another model
+   * of the same provider, with a note. It never moves to another provider.
+   */
+  async switchForModelLimit(chatId: string, failure: AgentTurnFailure) {
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (!chat || !isConciergeChat(chat)) return null;
     const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
@@ -832,47 +859,25 @@ export class ConciergeService {
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const state = this.deps.accounts.read();
-    // An Auto chat whose first turn failed has no recorded provider yet.
-    const from =
-      selected?.providerId ??
-      runtime?.provider ??
-      failure?.provider ??
-      soleProviderAtUsageLimit(state);
+    const from = selected?.providerId ?? runtime?.provider ?? failure.provider;
     if (from !== "openai" && from !== "anthropic") return null;
-    if (failure && failure.provider !== from) return null;
-    const source = state[from];
+    if (failure.provider && failure.provider !== from) return null;
+    const state = this.deps.accounts.read();
     // An account billed per use has no subscription to switch from.
-    if (source?.account.usageLimited === false) return null;
-    reason ??=
-      source?.state === "usage_limit_reached"
-        ? "quota"
-        : // Codex runs on Rome credits while the ChatGPT account is out, so that alone is no failure.
-          (from === "anthropic" && source?.state === "unauthorized") || source?.state === "expired"
-          ? "login"
-          : undefined;
-    if (!reason) return null;
+    if (state[from]?.account.usageLimited === false) return null;
     const fromModel = selected?.model ?? runtime?.model ?? "";
-    const same =
-      !crossOnly &&
-      (reason === "model_limit" || (reason === "quota" && ambiguousQuota(failure?.message ?? "")))
-        ? sameProviderTarget(state, from, fromModel)
-        : null;
-    const cross = usageSwitchTarget(state, from, true);
-    const candidates = reason === "model_limit" ? [same, cross] : [cross, same];
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
-    const target = candidates.find(
-      (candidate) =>
-        candidate &&
-        (this.leftModels.get(modelKey(MODEL_SELECTIONS[candidate.selectionId].model)) ?? 0) <=
-          Date.now(),
-    );
-    if (!target) return null;
+    const target = sameProviderTarget(state, from, fromModel);
+    if (
+      !target ||
+      (this.leftModels.get(modelKey(MODEL_SELECTIONS[target.selectionId].model)) ?? 0) > Date.now()
+    )
+      return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(
       chatId,
       target.selectionId,
-      "auto",
+      chat.largeModelSelectionBy === "owner" ? "owner" : "auto",
     );
     this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
@@ -881,12 +886,12 @@ export class ConciergeService {
         type: "quota_switch",
         from,
         to: target.provider,
-        reason,
+        reason: "model_limit",
         fromModel,
         model: MODEL_SELECTIONS[target.selectionId].model,
       },
     ]);
-    return { from, to: target.provider, selectionId: target.selectionId, reason };
+    return { from, to: target.provider, selectionId: target.selectionId };
   }
 
   /** The runtime session id of a Concierge chat, or null before its first turn. */
@@ -985,7 +990,7 @@ export class ConciergeService {
   private async runtimeOf(chatId: string): Promise<string | null> {
     const existing = await this.runtimeSessionId(chatId);
     if (existing || !this.attached) return existing;
-    await this.switchIfExhausted(chatId);
+    await this.followDefault(chatId);
     return this.attached.chats.openSession(chatId);
   }
 

@@ -67,7 +67,7 @@ export interface UsageLimitContinuationOptions {
   repo: Pick<
     ChatsWebChatRepository,
     | "getLatestErroredTurns"
-    | "canContinueAfterRestart"
+    | "canContinueAfterUsageLimit"
     | "getRestartGuardianPrompt"
     | "getRestartLastActivityAt"
   >;
@@ -82,11 +82,12 @@ export interface UsageLimitContinuationOptions {
 }
 
 /**
- * Continues guardian turns a usage limit stopped, once the limit has cleared.
- * Call once after startup. Each settled read of an account that shows its
- * provider available sweeps that provider's stopped turns, one chat at a time.
- * A turn with activity in the last day, in a top-level dashboard chat nobody
- * has written in since, gets one continuation.
+ * Continues turns a usage limit stopped, once the limit has cleared: the
+ * guardian's own, and a task chat's, which runs unattended. Call once after
+ * startup. Each settled read of an account that shows its provider available
+ * sweeps that provider's stopped turns, one chat at a time. A turn with
+ * activity in the last day, in a top-level dashboard chat nobody has written
+ * in since, gets one continuation.
  * Returns what stops it.
  */
 export function startUsageLimitContinuation(options: UsageLimitContinuationOptions): () => void {
@@ -109,7 +110,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
       if (turn.prompt.includes(USAGE_LIMIT_MARKER)) continue;
       if (usageLimitProviderOf(stop, accounts.read()) !== provider) continue;
       try {
-        if (!repo.canContinueAfterRestart(turn)) continue;
+        if (!repo.canContinueAfterUsageLimit(turn)) continue;
         if (!isRecentActivity(repo.getRestartLastActivityAt(turn), Date.now())) continue;
         // A continuation against a provider that is limited again would fail at once.
         if (!available(provider)) return;
@@ -132,7 +133,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
             inputLabel: "Usage limit recovery",
             ...(actor ? { actor } : {}),
             shouldRun: () => {
-              const run = !stopped && available(provider) && repo.canContinueAfterRestart(turn);
+              const run = !stopped && available(provider) && repo.canContinueAfterUsageLimit(turn);
               if (!run) dropped = true;
               else void Promise.resolve(options.onContinue?.(turn)).catch(() => undefined);
               return run;

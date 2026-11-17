@@ -1,3 +1,4 @@
+import { TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
 import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // The dashboard's repository over Chats' tables. Vocabulary:
 // docs/domains/chats.md and docs/domains/participation.md.
@@ -447,6 +448,39 @@ export class ChatsWebChatRepository extends WebChatRepository {
               WHERE l2.message_id = m.id AND l2.session_id = s.id
                 AND l2.turn_id = ${turn.turnId} AND l2.role = 'prompt'
             )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${romeAgentMessages} n
+          WHERE n.session_id = s.id AND n.role = 'trace' AND n.id <> t.id
+            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
+        )
+    `)?.eligible === 1
+    );
+  }
+
+  /**
+   * Rechecked at dispatch: a turn a usage limit stopped continues in an
+   * unchanged guardian root chat, as after a restart, and also in a task chat,
+   * which runs unattended: there the turn may come from the Concierge or a
+   * scheduled run, and the guardian has not written in it since.
+   */
+  canContinueAfterUsageLimit(turn: InterruptedTurn): boolean {
+    if (this.canContinueAfterRestart(turn)) return true;
+    return (
+      this.db.get<{ eligible: number }>(sql`
+      SELECT 1 AS eligible
+      FROM ${romeSessions} s
+      JOIN ${CHATS} c ON c.id = s.chat_id AND c.platform = 'webchat'
+      JOIN ${romeAgentMessages} t ON t.id = ${turn.messageId} AND t.session_id = s.id
+      WHERE s.id = ${turn.sessionId} AND s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND (s.owner_key IS NULL OR s.owner_key = 'guardian')
+        AND s.parent_session_id IS NULL AND s.parent_turn_id IS NULL
+        AND s.archived_at IS NULL AND s.trigger_kind = ${TASK_CHAT_TRIGGER_KIND}
+        AND NOT EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+            AND m.said_at > t.created_at
         )
         AND NOT EXISTS (
           SELECT 1 FROM ${romeAgentMessages} n

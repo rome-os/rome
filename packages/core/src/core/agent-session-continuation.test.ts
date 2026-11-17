@@ -455,16 +455,16 @@ describe("continuation notice through Sessions", () => {
     ).events()) {
     }
     if (concierge) {
-      const raw = healthyState();
-      raw[source] = reportOf("usage_limit_reached");
-      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "owner");
+      // Rome chose the model, so the chat follows the default to the other provider.
+      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "auto");
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        accounts: fakeAccounts(() => raw),
+        accounts: fakeAccounts(healthyState),
+        defaults: { current: () => target },
       } as unknown as ConciergeDeps);
-      expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
+      expect(await service.followDefault(chatId)).toEqual({ from: source, to: target });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to, "owner");
     await manager.shutdown();
     const runner = new AgentRunner(createManager(), loader);
@@ -475,18 +475,16 @@ describe("continuation notice through Sessions", () => {
       threadContext: context,
     })) {
     }
-    const calls = (concierge ? target : source) === "openai" ? openai.calls : anthropic.calls;
+    // Both move: a model Rome chose follows the default, and an owner's pick is
+    // the chat's exact selection, which outranks the session's pin on a cold resume.
+    const calls = target === "openai" ? openai.calls : anthropic.calls;
     const prompt = calls.at(-1)?.prompt;
     expect(continuationOf(prompt)).toEqual(
-      concierge ? expect.stringContaining("system:fetch_channel_history") : null,
+      concierge ? expect.stringContaining("system:fetch_channel_history") : expect.any(String),
     );
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
-      provider: concierge ? target : source,
-      model: concierge
-        ? MODEL_SELECTIONS[to].model
-        : from === "claude-sonnet"
-          ? "claude-sonnet-5-5"
-          : from,
+      provider: target,
+      model: MODEL_SELECTIONS[to].model,
     });
   });
 

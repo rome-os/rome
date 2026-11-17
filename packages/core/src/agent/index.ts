@@ -171,15 +171,12 @@ export {
 } from "./infrastructure/settings/default-provider-setting.js";
 export {
   codexStrongSelection,
+  followingSelection,
+  strengthOfSelection,
   selectionOfStrength,
   type ModelStrength,
 } from "./domain/model-strength.js";
-export {
-  sameProviderTarget,
-  soleProviderAtUsageLimit,
-  usageSwitchTarget,
-  type UsageSwitchTarget,
-} from "./domain/usage-switch.js";
+export { sameProviderTarget, type UsageSwitchTarget } from "./domain/usage-switch.js";
 export {
   createModelAccounts,
   type CreateModelAccountsOptions,

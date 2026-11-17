@@ -158,6 +158,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       | "pushLevel"
       | "reportedTask"
       | "actor"
+      | "providerOverride"
     > &
       Pick<RunParams, "shouldRun"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
@@ -314,6 +315,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
             ...(options?.actor ? { actor: options.actor } : {}),
             ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
+            ...(options?.providerOverride ? { providerOverride: options.providerOverride } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;

@@ -9,10 +9,14 @@
  * with the props it carries, so only the webchat drain writes one, for the app
  * that owns the action that showed it. A card the agent waits on is a widget
  * too, and an event on it can answer the agent, so only the drain writes one.
+ * A provider failure card and an outage notice change the default provider
+ * and resend turns, so only the host writes them.
  */
 const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set([
   "routine_draft_card",
   "quota_switch",
+  "provider_failure",
+  "provider_outage",
   "connect_card",
   "widget",
   "pending_interaction",

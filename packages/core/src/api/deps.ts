@@ -55,7 +55,14 @@ import type { SessionRepository } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
-import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
+import type {
+  ClaudeLogins,
+  CodexLogins,
+  DefaultProviders,
+  ModelAccount,
+  ModelAccounts,
+} from "../agent/index.js";
+import type { ProviderFailures } from "../webchat/provider-failures.js";
 import type { Permissions } from "../access/permissions.js";
 import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import type { DashboardAccessStore } from "../access/dashboard-access-store.js";
@@ -229,6 +236,10 @@ export interface ApiDeps {
   codexAccountService: ModelAccount & CodexLogins;
   /** The guardian's Claude account, read from the Claude CLI and Rome's stored credentials. */
   claudeAccount: ModelAccount & ClaudeLogins;
+  /** The default provider. Absent, AI Tools offers no default. */
+  defaultProviders?: DefaultProviders;
+  /** What a chat shows when its provider cannot run, and the actions on it. */
+  providerFailures?: ProviderFailures;
   /** Codex's loopback route to Rome credits, built by the composition root. */
   romeCreditsProxy: Hono;
   /**
