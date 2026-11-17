@@ -101,11 +101,11 @@ export function chatsTaskChatCards(db: DrizzleDb): TaskChatCards {
       const chat = storedPlace(db, place);
       if (!chat) return null;
       const id = lines.idOf(chat.chat, messageId);
-      const turnId = id === null ? null : turns.turnsOf([id]).get(id)?.turnId;
-      if (!turnId) return null;
+      const link = id === null ? undefined : turns.turnsOf([id]).get(id);
+      if (!link?.turnId) return null;
       // The whole turn, however many messages it said after its widget.
       const cards = lines
-        .byIds(turns.answersOf(turnId))
+        .byIds(turns.answersOf(link.sessionId, link.turnId))
         .filter((line) => line.direction === "fromRome")
         .flatMap((line) => agentCardsIn(line.parts));
       return cards.at(-1) ?? null;
