@@ -38,8 +38,9 @@ function pricedUsd(turn, model) {
  * Adds to each turn the model that served it and two costs. `pricedUsd` is its tokens at
  * Rome's rates. `recordedUsd` is what Rome recorded for the turn less what it recorded for
  * the session's turn before: Rome stores the SDK's `total_cost_usd`, which in a long-lived
- * session is the session's running total. A total lower than the one before starts a new
- * session. Pass every turn the environment holds, not only a window, so the first turn in a
+ * session is the session's running total. Turns are grouped by the session's name, since Rome
+ * can open a new session record per turn on one continuing model session. A total lower than
+ * the one before starts a new session. Pass every turn the environment holds, not only a window, so the first turn in a
  * window has the turn before it.
  *
  * The model is the turn's own `model` when the environment records one, else `fallbackModel`
@@ -54,9 +55,10 @@ export function turnCosts(turns, fallbackModel) {
       const recorded = Number(t.costUsd);
       let recordedUsd = null;
       if (Number.isFinite(recorded)) {
-        const before = last.get(t.sessionId);
+        const key = t.session ?? t.sessionId;
+        const before = last.get(key);
         recordedUsd = before !== undefined && recorded >= before ? recorded - before : recorded;
-        last.set(t.sessionId, recorded);
+        last.set(key, recorded);
       }
       return {
         ...t,

@@ -462,7 +462,8 @@ describe("turn costs", () => {
   const turn = (start, sessionId, costUsd, extra = {}) => ({
     start,
     turnId: start,
-    sessionId,
+    sessionId: `${sessionId}-${start}`,
+    session: sessionId,
     inputTokens: 2,
     outputTokens: 100,
     cacheReadTokens: 20_000,
