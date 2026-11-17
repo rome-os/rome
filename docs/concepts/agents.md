@@ -52,10 +52,6 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 | `handoffOnRenewal` | Whether a renewed session starts from a [handoff](sessions.md#handoff). | `false` |
 | `delegatesWork` | Whether the agent hands its work to other chats rather than doing it. Its system prompt then leaves out the command line tools and the runtime context beyond where memory and the docs are, and its sessions carry no `propose_routine`. | `false` |
 
-## Woken by its app
-
-An app that runs its own agent on an account declares `wokenByApp: true` on that agent. When the guardian links the agent to an account, the Inbox app stops answering that account's messages, and the app's own `channel-message` hook hears them and runs the agent's turns. The flag changes nothing on an account linked to another agent. A Rome that predates the flag refuses an agent file that sets it.
-
 ## Builtin tools
 
 A builtin tool is a tool the model provider runs itself, such as a file read or a shell command. An agent's `tools` list names the builtin tools it gets. Its actions, skills, and subagents are Rome tools, which `tools` does not control.

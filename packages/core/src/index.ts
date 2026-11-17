@@ -331,6 +331,7 @@ import {
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
+import { bypassesInbox } from "./app-host/inbox-bypass.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -1977,7 +1978,7 @@ async function main() {
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
-      wokenByApp: (agent) => agentLoader.find(agent)?.definition.wokenByApp === true,
+      unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
     },
     mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
     onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),

@@ -2224,14 +2224,14 @@ export interface ChannelMessageHookDeps {
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
   /**
-   * Whether the app that installed an agent decides when it wakes, which the
-   * agent declares with `wokenByApp: true`. That app hears the messages on the
-   * accounts linked to the agent and runs its turns, so no other hook answers
-   * them. Pass a canonical agent id, as `accountAgentOf` answers. A host that
-   * predates it passes none, and every agent is woken by the hook that answers
-   * its account.
+   * @internal A test-only back door for the Inbox app. True when the Inbox
+   * app must answer no message on an account linked to `agent`, a canonical
+   * agent id, because the app that installed it runs the agent's turns
+   * itself. The host answers true only for an agent that declares
+   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
+   * for every other. Not for apps to build on.
    */
-  wokenByApp?: (agent: string) => boolean;
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }

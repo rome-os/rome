@@ -28,8 +28,8 @@ export interface AgentDefinition {
   outputSchema?: Record<string, unknown>;
   /** Its turns come from a turn middleware, never a model, so its session opens no provider query. */
   codeBacked?: boolean;
-  /** Its own app decides when it wakes on the accounts linked to it, so the Inbox app answers none of their messages. */
-  wokenByApp?: boolean;
+  /** A test-only back door, honoured only for the apps in `INBOX_BYPASS_APPS`: the Inbox app answers no message on an account linked to this agent. */
+  unsafeTestOnlyBypassInbox?: boolean;
   policy?: Partial<AgentPolicy>;
   /**
    * On a cold resume, the model a chat saved replaces the model the session is

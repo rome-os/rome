@@ -464,7 +464,7 @@ describe("ChannelMessageHook", () => {
       accountAgentOf.mockClear();
       harness = createHarness({
         accountAgentOf,
-        wokenByApp: (agent) => agent === "chief-of-staff:chief-of-staff",
+        unsafeTestOnlyBypassesInbox: (agent) => agent === "chief-of-staff:chief-of-staff",
       });
       harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
       await harness.hook.register();
@@ -544,7 +544,7 @@ describe("ChannelMessageHook", () => {
       );
     });
 
-    it("answers nothing on an account whose agent its own app wakes", async () => {
+    it("answers nothing on an account whose agent bypasses Inbox", async () => {
       linked = "chief-of-staff:chief-of-staff";
 
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));

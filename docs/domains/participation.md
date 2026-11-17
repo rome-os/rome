@@ -14,7 +14,6 @@ The moment a message is judged to need the agent and the agent starts a turn. Th
 
 - The wake is decided on a message already recorded in its chat. A message that wakes no agent stays in the record, and the agent reads it when it next catches up. Until its wake is decided, no turn catches up on it, since it may yet start a turn of its own.
 - Not every message wakes the agent. Under "when it is needed" a lightweight check decides whether the message needs the agent, and a mention always does.
-- An agent may declare that its own app wakes it (`wokenByApp: true`). On an account linked to that agent, the app hears every message and decides each wake itself, and the Inbox app answers none of them. The account's link is the same as any other: the guardian links that agent to the account.
 - What the guardian writes in an [assistant's](chats.md#assistant) chat wakes no agent. It goes to the assistant, and main wakes on the assistant's answer.
 - A woken agent first catches up on what it has not seen, then acts.
 - Waking and speaking are two decisions. A woken agent may read, remember and act with its tools, and end its turn without saying anything in the chat.

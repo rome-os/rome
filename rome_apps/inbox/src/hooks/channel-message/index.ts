@@ -50,7 +50,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
-      wokenByApp?: ChannelMessageHookDeps["wokenByApp"];
+      unsafeTestOnlyBypassesInbox?: ChannelMessageHookDeps["unsafeTestOnlyBypassesInbox"];
       messagesSaid?: MessagesSaid;
     } = {},
   ) {}
@@ -203,9 +203,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       });
       return;
     }
-    // Its own app hears the account and runs the agent's turns.
-    if (accountAgent && this.options.wokenByApp?.(accountAgent)) {
-      log.debug("account's agent is woken by its app; not answering", {
+    // A test-only back door: the agent's own app runs its turns.
+    if (accountAgent && this.options.unsafeTestOnlyBypassesInbox?.(accountAgent)) {
+      log.debug("account's agent bypasses Inbox; not answering", {
         service,
         agent: accountAgent,
         messageId: message.messageId,
@@ -403,7 +403,9 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.channels,
     {
       accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf),
-      ...(deps.wokenByApp ? { wokenByApp: deps.wokenByApp } : {}),
+      ...(deps.unsafeTestOnlyBypassesInbox
+        ? { unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox }
+        : {}),
       ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
     },
   );
