@@ -72,6 +72,9 @@ describe("connector_proxy endpoint validation", () => {
     expect(
       validateProxyEndpoint("shopify", "https://acme.myshopify.com/admin/api/2026-10/graphql.json"),
     ).toBeNull();
+    expect(
+      validateProxyEndpoint("freshdesk", "https://acme.freshdesk.com/api/v2/tickets"),
+    ).toBeNull();
   });
 
   it("rejects an off-provider host (credential exfiltration)", () => {
@@ -175,7 +178,7 @@ describe("connector_proxy path/host assembly", () => {
     const withoutDefault = [...SUPPORTED_TOOLKITS]
       .filter((t) => !TOOLKIT_DEFAULT_API_HOST[t])
       .sort();
-    expect(withoutDefault).toEqual(["otter_ai_mcp", "shopify", "supabase"]);
+    expect(withoutDefault).toEqual(["freshdesk", "otter_ai_mcp", "shopify", "supabase"]);
   });
 
   it("every default host clears its toolkit's allowlist (default route never fails open)", () => {
