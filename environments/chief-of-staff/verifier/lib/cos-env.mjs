@@ -128,6 +128,26 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     async memory(since) {
       return JSON.parse(await call(["memory", "--since", since]));
     },
+    /** Every memory.md the app renders, as `[{ place, text }]`, one per place. */
+    async memoryFiles() {
+      const out = await call(["memory"]);
+      return out
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+    },
+    /**
+     * Arms a test-only crash: the app's worker exits when its next turn reaches `point`,
+     * `before-commit`, `after-commit-before-send` or `mid-outbox`. Rome stays up and needs
+     * `rome restart` to start the worker again.
+     */
+    async crashAt(point) {
+      return JSON.parse(await call(["crash-at", point]));
+    },
+    /** The app's committed turns per event and its outbox counts, `{ events, outbox }`. */
+    async handled() {
+      return JSON.parse(await call(["handled"]));
+    },
     /** A document the app holds for the agent (`goals` or `roster`), as its current text. */
     async doc(name) {
       return call(["doc", name]);

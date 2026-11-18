@@ -315,5 +315,28 @@
       "question": "Which room is the quarterly ops review in now?",
       "tokens": [["T-9"]]
     }
+  ],
+  "a13Crashes": [
+    {
+      "point": "before-commit",
+      "as": "member1",
+      "chat": "general",
+      "date": "2027-04-02",
+      "text": "decision: the Kelpie-7 firmware 3.0 goal date moves to 2027-04-02. Please update the goals document and confirm."
+    },
+    {
+      "point": "after-commit-before-send",
+      "as": "member1",
+      "chat": "general",
+      "date": "2027-04-09",
+      "text": "decision: the Kelpie-7 firmware 3.0 goal date moves again, to 2027-04-09. Please update the goals document and confirm."
+    },
+    {
+      "point": "mid-outbox",
+      "as": "member1",
+      "chat": "general",
+      "date": "2027-04-16",
+      "text": "decision: the Kelpie-7 firmware 3.0 goal date moves once more, to 2027-04-16. Please update the goals document and confirm."
+    }
   ]
 }

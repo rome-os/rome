@@ -51,9 +51,12 @@ export function goalsDocument(state, agent) {
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
   const said = (t) => state.messages.find((m) => m.text === t);
   const heard = breaks === "K4" ? [] : hearing.k4Changes.filter((c) => said(c.text));
+  // A13's decisions move the Kelpie-7 goal's date; the latest one holds.
+  const crash = hearing.a13Crashes.findLast((c) => said(c.text));
   const rows = state.team.goals.map((g) => {
     const change = heard.find((c) => c.goal === g.id);
     let row = { ...g, ...(change ?? {}) };
+    if (crash && g.id === "G1") row = { ...row, date: crash.date };
     const proposal = said(hearing.k4Proposal.text);
     if (breaks === "K4proposal" && g.id === "G1" && proposal) row = { ...row, date: "2027-03-19" };
     const source = change ? ` (changed in ${link(said(change.text))})` : "";

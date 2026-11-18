@@ -199,6 +199,13 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     );
   });
 
+  it("passes A13 when a crash's turn lands once, and fails it when it lands twice", async () => {
+    const good = await runAgainst("good", { rules: ["A13"], phase: 3 });
+    assert.deepEqual(statuses(good.report), { A13: "pass" });
+    const bad = await runAgainst("fail-A13", { rules: ["A13"], phase: 3 });
+    assert.deepEqual(statuses(bad.report), { A13: "fail" });
+  });
+
   it("still runs A8 when named, and fails it for the stand-in that breaks it", async () => {
     const { report } = await runAgainst("fail-A8", { rules: ["A8"], phase: 2 });
     assert.deepEqual(statuses(report), { A8: "fail" });

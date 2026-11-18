@@ -184,6 +184,10 @@ switch (command) {
     if (lostTo && message.text.includes(lostTo) && !state.lostOnce) {
       state.lostOnce = true;
       state.romeStarts = (state.romeStarts ?? 0) + 1;
+    } else if (state.crashAt && message.mentionsAgent) {
+      // The worker exits partway through this turn; the turn runs when Rome restarts.
+      state.crashAt = null;
+      state.crashed = message.id;
     } else if (!state.stopped && !message.unheard) agentTurn(message);
     console.log(message.id);
     break;
@@ -231,7 +235,29 @@ switch (command) {
     );
     break;
   case "memory":
-    console.log(JSON.stringify({ files: [], toolUses: [] }));
+    if (values.since) console.log(JSON.stringify({ files: [], toolUses: [] }));
+    else
+      console.log(
+        JSON.stringify({
+          place: "server/1",
+          text: state.messages
+            .filter((m) => m.author !== "agent" && m.mentionsAgent && /^decision:/.test(m.text))
+            .map((m) => `- ${m.text}`)
+            .join("\n"),
+        }),
+      );
+    break;
+  case "crash-at":
+    state.crashAt = positionals[0];
+    console.log(JSON.stringify({ armed: positionals[0] }));
+    break;
+  case "handled":
+    console.log(
+      JSON.stringify({
+        events: state.handled ?? {},
+        outbox: state.outbox ?? { sent: 0, found: 0 },
+      }),
+    );
     break;
   case "usage":
     for (const turn of state.turns ?? [])
@@ -267,6 +293,15 @@ switch (command) {
     }
     if (positionals[0] === "stop") state.stopped = true;
     if (positionals[0] === "restart" || positionals[0] === "start") state.restarts += 1;
+    // Back from a crash, the turn it cut short lands once, or twice for "fail-A13".
+    if (positionals[0] === "restart" && state.crashed) {
+      const cut = state.messages.find((m) => m.id === state.crashed);
+      const times = agent === "fail-A13" ? 2 : 1;
+      for (let i = 0; i < times; i++) agentTurn(cut);
+      state.handled = { ...state.handled, [cut.id]: times };
+      state.outbox = { sent: (state.outbox?.sent ?? 0) + times, found: 0 };
+      state.crashed = null;
+    }
     // Back from a stop, the agent reads what was said while Rome was down.
     if (positionals[0] === "start" && state.stopped) {
       state.stopped = false;

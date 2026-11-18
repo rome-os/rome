@@ -81,6 +81,7 @@ The rules and their pass bars come from the rules doc, version R4. `scenarios/in
 | A11 Hears only its own connected account | Phase 3, proposed. A member says a fact in `second-bot-only`, which only the second Rome bot reads, and another mentions the second bot in `general` | No reply from the agent to the mention within the A1 wait, and an answer about the fact in `general` that does not hold it. Without the second bot, A11 is not checked |
 | A12 Another bot never pings it | Phase 3, proposed. The driver bot, posting as itself, mentions the agent in `general` with a fact | No reply within the A1 wait, and a member asking about the fact later gets it |
 | K8 Keeps what it was told | Phase 3, for the fresh-context prototype (design thread, 2026-11-18). Members tell the agent 5 facts in `general` with a mention, facts in no document. Then 30 K5 questions with answers are asked there, by each member in turn. Then other members ask for each fact | The answer holds the fact's distinctive words for at least 4 of 5 |
+| A13 Survives a crash mid-turn | Phase 3, for turn-as-one-commit (design thread, 2026-11-18). Runs last. Three times, `cos-env crash-at` arms a crash at one point, `before-commit`, `after-commit-before-send` and `mid-outbox`, and member1 mentions the agent with a decision that moves the Kelpie-7 goal's date. After the A1 wait, `cos-env rome restart`; the run waits for the reply, then up to 60 s more | Per crash: exactly one agent reply to the mention; no event in `cos-env handled` committed more than once; the new date appears exactly once in the goals document; at most one line of the memory files (`cos-env memory`) names it. The first rule scored on more than the chat |
 
 Rules that wait "a day" or "an hour" in the rules doc run on the waits above, and the report states them.
 
@@ -92,7 +93,7 @@ From phase 2, K5's leg "a message source is linked" is scored: each K3 answer mu
 
 "A day later" moves the app's stored times into the past with `cos-env clock forward`; Rome, the model and Discord keep the real time. After the move the run renews the session in `general`, as K6 does. A2 and K4 state this limit in the report: a pass shows the agent answers "yesterday" questions from what it stored, not that it survives a real day.
 
-The rules run fast ones first: K1, K2, A1, A5, K7, K3, K5, K6, A8, A2, K4, A12, A11, A9, A10, A3, A7. A5 reads A1's replies, K5 reads K3's answers, K6 reuses K1's and K2's, and K5 and K6 run before K4 changes the goals they ask about. A7's instruction comes after everything that asks about its topic. The report is written after every rule, marked in progress until the run ends, and gives each rule's wall time.
+The rules run fast ones first: K1, K2, A1, A5, K7, K3, K5, K6, A8, A2, K4, A12, A11, A9, A10, K8, A3, A7, A13. A5 reads A1's replies, K5 reads K3's answers, K6 reuses K1's and K2's, and K5 and K6 run before K4 changes the goals they ask about. A7's instruction comes after everything that asks about its topic. The report is written after every rule, marked in progress until the run ends, and gives each rule's wall time.
 
 ### Direct messages
 
