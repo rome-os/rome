@@ -3860,6 +3860,65 @@ describe("Chat Concierge empty state", () => {
         expect(total()).toBe("2");
       });
 
+      it("keeps the owner's reply in the thread once its turn ends, though the newest page holds only the answer", async () => {
+        threaded();
+        // No turn runs, so the sent one is followed, and ends at once.
+        rs.mocked(listSessionTurns).mockResolvedValue([]);
+        rs.mocked(postSessionTurn).mockResolvedValueOnce({
+          ok: true,
+          data: { turnId: "turn-new" },
+        } as never);
+        rs.mocked(openTurnStream).mockImplementationOnce(
+          async () => new Response(null, { status: 404 }),
+        );
+        try {
+          renderChat(concierge());
+          await screen.findAllByTestId("user-row");
+          fireEvent.click(screen.getByTestId("open-other-thread"));
+          await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+          // The page read when the turn ends: each root and its thread's newest
+          // reply, which is the answer, not the owner's reply before it.
+          const message = (id: string, role: "user" | "assistant", thread: string, at: string) => ({
+            id,
+            sessionId: "session-1",
+            turnId: `turn-${id}`,
+            role,
+            content: JSON.stringify([{ type: "text", content: id }]),
+            createdAt: at,
+            chatThreadId: thread,
+          });
+          const body = [
+            message("u-1", "user", "u-1", "2026-11-10T10:00:00Z"),
+            message("ar-1", "assistant", "u-1", "2026-11-10T10:00:00Z"),
+            message("u-2", "user", "u-2", "2026-11-10T10:00:00Z"),
+            message("ar-3", "assistant", "u-2", new Date(Date.now() + 60_000).toISOString()),
+          ];
+          rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+            messages: body,
+            nextCursor: null,
+            concierge: {
+              body,
+              oldestAt: Date.parse("2026-11-10T10:00:00Z"),
+              titles: new Map(),
+              threads: summariesOfLoaded(body),
+            },
+          });
+          const reads = rs.mocked(listSessionMessagePage).mock.calls.length;
+
+          fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+          await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(reads + 1));
+          await act(async () => {});
+          const sent = screen
+            .getAllByTestId("user-row")
+            .find((row) => row.dataset.rowKey === "11111111-1111-4111-8111-111111111111");
+          expect(sent?.dataset.chatThread).toBe("u-2");
+          expect(composer().dataset.thread).toBe("u-2");
+        } finally {
+          rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+        }
+      });
+
       it("reads the thread in focus again after a reconnect, and keeps it in focus", async () => {
         threaded();
         threaded();
