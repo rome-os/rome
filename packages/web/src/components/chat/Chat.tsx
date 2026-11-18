@@ -1749,7 +1749,25 @@ export function Chat({
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
-        const dropMessageIds = localBeforeFetch;
+        // A local row goes when the page stands for it. A Concierge page holds
+        // each thread's newest reply only, so a reply the owner sent into a
+        // thread that the page does not hold stays, until the thread is read
+        // whole.
+        const fetchedIds = new Set(fetchedMessages.map((message) => message.id));
+        const unheldReplies = new Set(
+          page.concierge
+            ? (messagesRef.current.get(id) ?? []).flatMap((message) =>
+                message.chatThreadId &&
+                message.chatThreadId !== message.id &&
+                !fetchedIds.has(message.id)
+                  ? [message.id]
+                  : [],
+              )
+            : [],
+        );
+        const dropMessageIds = localBeforeFetch
+          ? new Set([...localBeforeFetch].filter((messageId) => !unheldReplies.has(messageId)))
+          : undefined;
         // A thread in focus stays as it is while the range is read again.
         const focusedRoot = focusRef.current?.root;
         const keepIds = new Set(localOptimisticMessageIdsRef.current.get(id));
