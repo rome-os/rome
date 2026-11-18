@@ -53,6 +53,19 @@ export function useChatThreads(): ChatThreads | null {
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
   Partial<Pick<ChatMessage, "content" | "chatThreadTitle" | "read" | "sender">>;
 
+/** The distinct roots named by replies but absent from this page, in first-reference order. */
+export function missingThreadRoots(messages: readonly ThreadTimelineMessage[]): string[] {
+  const loaded = new Set(messages.map((message) => message.id));
+  return [
+    ...new Set(
+      messages.flatMap((message) => {
+        const root = message.chatThreadId;
+        return root && root !== message.id && !loaded.has(root) ? [root] : [];
+      }),
+    ),
+  ];
+}
+
 /** How much of a root's text names its thread. */
 const THREAD_NAME_MAX = 50;
 

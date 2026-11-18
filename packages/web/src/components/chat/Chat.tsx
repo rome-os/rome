@@ -99,6 +99,7 @@ import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPe
 import {
   CHAT_PAGE_TURNS,
   CONCIERGE_PAGE_TURNS,
+  CONCIERGE_ROOT_PAGE_TURNS,
   useOlderMessages,
 } from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
@@ -140,6 +141,7 @@ import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
 import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
   ChatThreadsProvider,
+  missingThreadRoots,
   threadTail,
   unreadIn,
   useChatThreadsValue,
@@ -192,6 +194,7 @@ import {
 } from "@/lib/chat-sse";
 import {
   mergeChatMessage,
+  mergeFetchedChatMessages,
   mergeLatestMessagePage,
   orderChatMessages,
   startsNewHistory,
@@ -1397,11 +1400,35 @@ export function Chat({
           onSessionNotFoundRef.current?.(id);
           return;
         }
-        const fetchedMessages = orderChatMessages(page.messages);
+        const newestMessages = page.messages;
         const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
-          messages: fetchedMessages,
+          messages: newestMessages,
           hasOlder: page.nextCursor !== null,
         });
+        let olderMessages: ChatMessage[] = [];
+        // A topic chat's thread metadata can arrive before the Concierge list sets its variant.
+        if (!shareMode && !loadedSessionsRef.current.has(id) && page.nextCursor) {
+          const missing = missingThreadRoots(newestMessages);
+          if (missing.length > 0) {
+            try {
+              const older = await listSessionMessagePage(id, {
+                limit: CONCIERGE_ROOT_PAGE_TURNS,
+                before: page.nextCursor,
+              });
+              if (older) {
+                olderMessages = older.messages;
+                page = {
+                  ...page,
+                  messages: mergeFetchedChatMessages(olderMessages, newestMessages),
+                  nextCursor: older.nextCursor,
+                };
+              }
+            } catch {
+              // Root history is optional: a failed read must not block the newest page.
+            }
+          }
+        }
+        const fetchedMessages = orderChatMessages(page.messages);
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
@@ -1439,8 +1466,9 @@ export function Chat({
           if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
         if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
-          noteOpened(fetchedMessages);
+          noteOpened(newestMessages);
         }
+        if (olderMessages.length > 0) onOlderPage(id, olderMessages);
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
@@ -1450,7 +1478,15 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead, noteOpened, pageTurns, setOlderCursor],
+    [
+      shareMode,
+      isReadVisibleSession,
+      markSessionRead,
+      noteOpened,
+      onOlderPage,
+      pageTurns,
+      setOlderCursor,
+    ],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,

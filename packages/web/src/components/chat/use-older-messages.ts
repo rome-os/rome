@@ -20,6 +20,9 @@ import type { ChatMessage } from "@/lib/chat-types";
 export const CHAT_PAGE_TURNS = 10;
 export const CONCIERGE_PAGE_TURNS = 30;
 
+// Bound first-load root reads to two older pages. `through` can exceed `limit`.
+export const CONCIERGE_ROOT_PAGE_TURNS = 60;
+
 /** How far above the viewport the sentinel counts as reached, so older turns arrive before the top does. */
 const LOAD_AHEAD_PX = 800;
 
