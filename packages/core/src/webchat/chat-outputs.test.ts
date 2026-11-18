@@ -24,6 +24,7 @@ describe("ChatOutputs", () => {
   let root: string;
   let projects: string;
   let assets: string;
+  let memory: string;
   let savedProjectsRoot: string | undefined;
 
   beforeEach(async () => {
@@ -33,7 +34,9 @@ describe("ChatOutputs", () => {
     root = mkdtempSync(join(tmpdir(), "rome-chat-outputs-test-"));
     projects = join(root, "projects");
     assets = join(root, "assets");
+    memory = join(root, "memory");
     mkdirSync(join(projects, "demo"), { recursive: true });
+    mkdirSync(memory, { recursive: true });
     mkdirSync(assets, { recursive: true });
     outputs = new ChatOutputs({
       repo,
@@ -44,7 +47,7 @@ describe("ChatOutputs", () => {
           : null;
       },
       messages: (id) => chats.getMessages(id),
-      roots: { projects, assets, showable: [projects, assets] },
+      roots: { projects, assets, memory, showable: [projects, assets, memory] },
     });
     await chats.createSession("chat-1", "Chat");
     savedProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -224,6 +227,15 @@ describe("ChatOutputs", () => {
     expect(list[0].links).toEqual(
       expect.arrayContaining([`/api/assets/${ID_A}.png`, "/projects/demo/chart.png", chart]),
     );
+  });
+
+  it("names a written memory file by its memory route too", async () => {
+    const terms = join(memory, "notes", "terms.md");
+    mkdirSync(join(memory, "notes"));
+    writeFileSync(terms, "# Terms");
+    await write("chat-1", "t1", terms);
+    const [output] = await listed("chat-1");
+    expect(output.links).toEqual(expect.arrayContaining(["/memory/notes/terms.md", terms]));
   });
 
   it("keeps an earlier shown copy's link when the file is shown again", async () => {

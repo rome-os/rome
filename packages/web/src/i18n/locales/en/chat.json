@@ -797,6 +797,10 @@
     },
     "indexing": "Still finding earlier files."
   },
+  "memoryFile": {
+    "openPage": "Open in Memory",
+    "close": "Close memory"
+  },
   "chatHeader": {
     "menu": "Chat menu",
     "project": "Project · {{name}}",

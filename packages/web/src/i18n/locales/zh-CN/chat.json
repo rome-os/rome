@@ -797,6 +797,10 @@
     },
     "indexing": "还在查找更早的文件。"
   },
+  "memoryFile": {
+    "openPage": "在记忆页打开",
+    "close": "关闭记忆"
+  },
   "chatHeader": {
     "menu": "聊天菜单",
     "project": "项目 · {{name}}",
