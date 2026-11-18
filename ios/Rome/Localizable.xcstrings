@@ -5109,6 +5109,16 @@
         }
       }
     },
+    "The app cannot be used during this update, which takes a few minutes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次更新期间暂时无法使用，大约需要几分钟。"
+          }
+        }
+      }
+    },
     "The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5325,6 +5335,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这一轮没有完成"
+          }
+        }
+      }
+    },
+    "This update runs in the background. Chat and the main features keep working. A few new features may not work until it finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次在后台更新，不影响聊天等核心功能；更新完成前，个别新功能可能暂时用不了。"
           }
         }
       }
@@ -5645,6 +5665,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新没有开始"
+          }
+        }
+      }
+    },
+    "Update in background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在后台更新"
           }
         }
       }

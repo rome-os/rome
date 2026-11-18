@@ -569,8 +569,29 @@ enum SnapshotRunner {
             model.dynamicTypeOverride = .accessibility3
             await capture("35-login-ax3", style: styleName, in: directory, wait: 1) { model.debugSetPhase(.signedOut) }
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("36b-update-background-ax3", style: styleName, in: directory, wait: 2) {
+                model.update.minimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.update.minimums = .init()
+            // The largest text before the accessibility sizes: the page's own
+            // layout, which must keep clear of the button.
+            model.dynamicTypeOverride = .xxxLarge
+            await capture("37-update-required-xxxl", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("37b-update-background-xxxl", style: styleName, in: directory, wait: 2) {
+                model.update.minimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.update.minimums = .init()
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            // Behind the background minimum only: the page asks once, then the
+            // upgrade runs in the background.
+            await capture("20b-update-background", style: styleName, in: directory, wait: 2) {
+                model.update.minimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.update.minimums = .init()
             // Behind but new enough: Chat, and the drawer's line.
             await capture("48-update-pill", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
             await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }

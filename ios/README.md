@@ -46,13 +46,21 @@ Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome"
 
 TestFlight ships under Rome's own Apple Developer team, not a personal one. The archive command passes that team on the command line, so it signs with it whatever `Config/Local.xcconfig` says. The build number is the archive time in UTC, `YYYYMMDDHHMM`. It always increases whatever branch you archive from, so no upload needs a manual edit.
 
-1. Archive (local only, safe to run):
+1. Raise the minimum instance versions from `Config/pending-minimum.json`, from the repository root:
+
+   ```bash
+   node ios/Tools/bump-minimum.mjs
+   ```
+
+   It fetches the tags and takes the newest published server release: a `v1.*` tag whose GitHub release exists and is neither a draft nor a prerelease, asked through `gh`. A tag is pushed before its image builds, so a tag alone is not a release. When `gh` cannot say, it stops and raises nothing. It then checks that the release contains the server change of every entry. If one is missing it stops with "Release the server first" and changes nothing: release the server, then run it again. Otherwise it sets `minimumInstanceVersion` to that release, and `blockingMinimumInstanceVersion` too when an entry is `blocking`. It never lowers either, and it empties the pending file. It commits nothing: review the two files and commit them with the build. With no entries it says so and changes nothing.
+
+2. Archive (local only, safe to run):
 
    ```bash
    xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates "${ASC_KEY[@]}" DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
    ```
 
-2. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
+3. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
 
    ```bash
    xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates "${ASC_KEY[@]}"
@@ -64,7 +72,7 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
-3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+4. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
 
 ### Signing with the API key
 
@@ -164,9 +172,9 @@ It asks for Health access in one system sheet (tap "Turn On All", then "Allow").
 
 ## Instance versions
 
-The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer, a row in the drawer. A tap asks to confirm, then the upgrade runs in the background: the row shows its progress, and a failure with Retry. Once the instance answers on the new release, the app refreshes in place and says "{Agent} updated to X" once above the composer. Rome Cloud reporting the instance as no longer upgrading while it still answers on its old release ends the wait as failed, before the 40-minute timeout. Visitors get the same update flow as the guardian, the update itself included.
+The app has two minimum instance versions, both in `UpdateGate` (`Rome/Features/Update/InstanceUpdater.swift`). `blockingMinimumInstanceVersion` is the oldest release whose API Chat itself works with. An instance below it gets the update page over the whole app, with no way past it but updating, and the page says the app cannot be used meanwhile. `minimumInstanceVersion` is the oldest release with every API the app calls. An instance below it, but at or above the blocking one, gets the update page once, with one button, Update in background: the page closes and the upgrade runs as one started from the drawer, below. The page does not come back for that release on that instance, a failure or a relaunch included. An instance at or above both that is behind its latest release only gets an offer, a row in the drawer. A tap asks to confirm, then the upgrade runs in the background: the row shows its progress, and a failure with Retry. Once the instance answers on the new release, the app refreshes in place and says "{Agent} updated to X" once above the composer. Rome Cloud reporting the instance as no longer upgrading while it still answers on its old release ends the wait as failed, before the 40-minute timeout. Visitors get the same update flow as the guardian, the update itself included.
 
-Raise the minimum only when the app starts calling an API a newer release brought, to the first release tag (`v1.*`) that has it. Anything else the app reads from an older supported instance is optional and degrades quietly.
+Nobody edits the two constants by hand. A PR that starts calling an API the latest server release lacks adds an entry to `Config/pending-minimum.json`, and `Tools/bump-minimum.mjs` applies the entries before a TestFlight build (see "Release to TestFlight"). An entry is `blocking` only when Chat itself (sending, reading, streaming) needs the API; most new APIs belong to one feature, so most entries are `background`, and the rest of the app keeps working while the instance updates. Anything else the app reads from an older supported instance is optional and degrades quietly.
 
 ## Tests
 
@@ -197,4 +205,4 @@ The app follows the system language: English, or Simplified Chinese on a Chinese
 ROME_SNAPSHOT_DIR=/tmp/rome-shots-zh /tmp/rome-cat/Build/Products/Debug-maccatalyst/Rome.app/Contents/MacOS/Rome -AppleLanguages "(zh-Hans)"
 ```
 
-`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.
+`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. When every PNG of a style comes out the same image, the window stopped redrawing while hidden behind other windows (App Nap): run it again with `-NSAppSleepDisabled YES` after the binary's path, which turns App Nap off for that launch only. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.

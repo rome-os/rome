@@ -541,7 +541,7 @@ function mixOklab(a: string, share: number, b: string): string {
 
 describe("sidebar upgrade row", () => {
   // `.rome-upgrade-row` in globals.css: ink 60% of the way from the text
-  // color to `primary` (an opaque OKLab mix), on `primary` at 15–28% alpha
+  // color to `success` (an opaque OKLab mix), on `success` at 15–28% alpha
   // painted over the rail's canvas, at rest and hovered. Change one, change
   // the other.
   const INK_SHARE = 0.6;
@@ -550,11 +550,11 @@ describe("sidebar upgrade row", () => {
   it("keeps its ink at AA on its tint in every theme and mode", () => {
     const failing = getThemeDefinitions().flatMap((theme) =>
       MODES.flatMap((mode) => {
-        const primary = resolveToken(theme, mode, "primary");
+        const success = resolveToken(theme, mode, "success");
         const canvas = resolveToken(theme, mode, "background");
-        const ink = mixOklab(primary, INK_SHARE, resolveToken(theme, mode, "foreground"));
+        const ink = mixOklab(success, INK_SHARE, resolveToken(theme, mode, "foreground"));
         return TINTS[mode].flatMap((tint) => {
-          const ratio = contrastRatio(ink, overSrgb(primary, tint, canvas));
+          const ratio = contrastRatio(ink, overSrgb(success, tint, canvas));
           return ratio < AA_TEXT ? [`${theme.id}/${mode} at ${tint}: ${ratio.toFixed(2)}:1`] : [];
         });
       }),

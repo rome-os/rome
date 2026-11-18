@@ -9,6 +9,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 - Before changing the transcript, a list, a store or anything that runs while a chat streams, read [`PERFORMANCE.md`](PERFORMANCE.md), and measure the change with `ROME_PERF`.
 - When changing a screen, run the snapshot pass in [`README.md`](README.md#snapshots) and look at both the light and dark images.
 - When reading a new wire field, add it to `Rome/Networking/Models.swift` as optional, so an older server keeps decoding.
+- When an iOS change starts calling a server API that the latest server release lacks, add an entry to `Config/pending-minimum.json` in the same PR: `tier`, `reason`, `pr` (this PR's number) and `server` (the server PR as `"#1234"`, or its commit SHA). The tier is `blocking` only when Chat itself (sending, reading, streaming) needs the API, and `background` for any other feature.
 - When adding text, use `romeFont(_:_:)` from `Rome/Design/Typography.swift`, never `.font(.system(size:))`, so it scales with Dynamic Type.
 - When adding a color, add a light and dark pair to `Palette` in `Rome/Design/Theme.swift`; the values come from the design boards.
 - When you need the Simulator, boot it headless (`xcrun simctl boot`) and drive and watch it through the Claude app's Simulator panel; don't open Simulator.app (`open -a Simulator`), which pops a window over the user's desktop.
@@ -17,7 +18,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 - When adding text, write it in English, following [`docs/ui/VOICE.md`](../docs/ui/VOICE.md), and add its Simplified Chinese to `Rome/Localizable.xcstrings`. `LocalizationTests` fails on a key without zh-Hans text. Build once, then run `xcrun xcstringstool sync` with the build's `.stringsdata` files to list new keys.
 - When writing user-facing copy, call the main conversation Chat, never Concierge, in zh-Hans too (Chat, never Concierge or 管家). Code and type names keep Concierge.
 - When changing `Rome/Info.plist`, change `Config/Info-Debug.plist` the same way. Debug builds read the second one, which adds plain HTTP to a local Rome; Release must stay HTTPS only.
-- When reading the instance's API, rely on it staying backward compatible. The app works with any instance at or above `UpdateGate.minimumInstanceVersion`. Below it, the update page blocks. Above it, a newer release is only offered, in a drawer row, and updates in the background. Raise the minimum only when the app starts calling an API that a newer release brought, to the first `v1.*` tag that has it.
+- When reading the instance's API, rely on it staying backward compatible. The app has two minimum instance versions in `UpdateGate`. Below `blockingMinimumInstanceVersion`, the update page blocks until the instance is updated. Below `minimumInstanceVersion` only, the page asks once and the upgrade runs in the background, as one started from the drawer. At or above both, a newer release is only offered, in a drawer row. Only `Tools/bump-minimum.mjs` changes the two constants, before a TestFlight build ([`README.md`](README.md#release-to-testflight)).
 
 ## Traps
 

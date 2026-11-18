@@ -58,7 +58,14 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "lint/**/*.ts", "infra/**/*.test.mjs"],
+      // ios/Tools holds the iOS release scripts, run by hand before a
+      // TestFlight build and tested with node --test.
+      "entry": [
+        "scripts/**/*.{mjs,mts,ts,js}",
+        "lint/**/*.ts",
+        "infra/**/*.test.mjs",
+        "ios/Tools/**/*.mjs"
+      ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
