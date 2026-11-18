@@ -754,11 +754,14 @@ export class DiscordAdapter {
 
       // A test-only back door: the account's app hears every message, so no
       // chat setting drops one. Another bot's message is heard but never
-      // addresses Rome, so two bots cannot answer each other forever.
+      // addresses Rome, so two bots cannot answer each other forever. A
+      // webhook linked to a person speaks for that person: the chief of
+      // staff's test team posts through webhooks, and a webhook cannot read
+      // a reply, so it cannot keep that exchange going.
       if (this.unsafeTestOnlyHearEveryMessage?.()) {
         const addressing: MessageAddressing = isDm
           ? "direct"
-          : message.author.bot
+          : message.author.bot && !(await this.isPersonsWebhook(message))
             ? "ambient"
             : await this.addressingOf(message);
         await this.dispatchMessage(message, isDm, isThread, addressing);
@@ -838,6 +841,16 @@ export class DiscordAdapter {
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
+  }
+
+  /** Whether the message came through a webhook that is linked to a person. */
+  private async isPersonsWebhook(message: Message): Promise<boolean> {
+    if (!message.webhookId || !this.resolveDiscordPerson) return false;
+    try {
+      return (await this.resolveDiscordPerson(message.author.id)) !== null;
+    } catch {
+      return false;
+    }
   }
 
   /** How a guild message addresses Rome's bot: a mention, a reply to it, a

@@ -279,6 +279,8 @@ describe("DiscordAdapter gateway filters", () => {
         }),
       } as unknown as ConstructorParameters<typeof DiscordAdapter>[0]["chatSettings"],
       unsafeTestOnlyHearEveryMessage: () => bypass,
+      resolveDiscordPerson: async (id) =>
+        id === "member-webhook" ? { id: "person-1", bondLevel: "acquaintance" } : null,
     });
     Object.assign(adapter, {
       client: {
@@ -296,17 +298,18 @@ describe("DiscordAdapter gateway filters", () => {
     const guildMessage = (
       id: string,
       content: string,
-      more: { mentions?: string[]; bot?: boolean } = {},
+      more: { mentions?: string[]; bot?: boolean; webhook?: string } = {},
     ) =>
       ({
         id,
+        webhookId: more.webhook ?? null,
         channelId: "channel-1",
         content,
         createdAt: new Date("2026-05-10T00:00:00Z"),
         type: MessageType.Default,
         reference: null,
         author: {
-          id: more.bot ? "ci-bot" : "user-1",
+          id: more.webhook ?? (more.bot ? "ci-bot" : "user-1"),
           username: "alice",
           displayName: "Alice",
           bot: more.bot,
@@ -323,6 +326,20 @@ describe("DiscordAdapter gateway filters", () => {
     await say(guildMessage("m2", "<@grace> can you take the notes?", { mentions: ["grace"] }));
     await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
     await say(guildMessage("m4", `<@${BOT.id}> build passed`, { mentions: [BOT.id], bot: true }));
+    await say(
+      guildMessage("w1", `<@${BOT.id}> who owns Orkney?`, {
+        mentions: [BOT.id],
+        bot: true,
+        webhook: "member-webhook",
+      }),
+    );
+    await say(
+      guildMessage("w2", `<@${BOT.id}> deploy finished`, {
+        mentions: [BOT.id],
+        bot: true,
+        webhook: "ci-webhook",
+      }),
+    );
     bypass = false;
     await say(guildMessage("m5", "not heard: the chat is off"));
 
@@ -331,6 +348,8 @@ describe("DiscordAdapter gateway filters", () => {
       ["m2", "ambient"],
       ["m3", "mention"],
       ["m4", "ambient"],
+      ["w1", "mention"],
+      ["w2", "ambient"],
     ]);
   });
 });
