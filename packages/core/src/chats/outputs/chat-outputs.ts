@@ -4,7 +4,7 @@ import { setImmediate as nextTick } from "node:timers/promises";
 import type { ChatOutputDto, ChatOutputSource } from "@rome/api-types/chat-outputs";
 import { openRegularFile, resolveShowablePath } from "../../assets/store.js";
 import { createLogger } from "../../logger.js";
-import { getAssetsDir, getProjectsRoot } from "../../paths.js";
+import { getAssetsDir, getProfileMemoryDir, getProjectsRoot } from "../../paths.js";
 import type { BackfillMessage, ChatOutputRow, ChatOutputsRepository } from "./repository.js";
 
 const log = createLogger("chat-outputs");
@@ -26,7 +26,7 @@ export interface ChatOutputsDeps {
   /** A chat's facts, or null when it is gone. */
   chat: (id: string) => Promise<OutputChat | null>;
   /** Folders a written file is read in: test seam. */
-  roots?: { projects: string; assets: string; showable?: string[] };
+  roots?: { projects: string; assets: string; memory?: string; showable?: string[] };
 }
 
 /** An output's file, open: read it from `handle`, which the caller closes. */
@@ -79,6 +79,10 @@ export class ChatOutputs {
 
   private get projectsRoot() {
     return this.deps.roots?.projects ?? getProjectsRoot();
+  }
+
+  private get memoryDir() {
+    return this.deps.roots?.memory ?? getProfileMemoryDir();
   }
 
   private get assetsDir() {
@@ -273,14 +277,18 @@ export class ChatOutputs {
 
   /** `/projects/<path>` for a file in the projects folder, else null. */
   private projectLink(file: string): string | null {
-    const rel = relative(this.projectsRoot, file);
-    if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
-    return `/projects/${rel.split(sep).join("/")}`;
+    return routeLink("/projects", this.projectsRoot, file);
+  }
+
+  /** `/memory/<path>` for a file in the memory folder, else null. */
+  private memoryLink(file: string): string | null {
+    return routeLink("/memory", this.memoryDir, file);
   }
 
   /**
-   * Every link a message may give record `entry`'s file: its project route or
-   * asset URL, and its absolute path; a shown copy's also the file it copied.
+   * Every link a message may give record `entry`'s file: its project or memory
+   * route or asset URL, and its absolute path; a shown copy's also the file it
+   * copied.
    */
   private linksOf(entry: Located): string[] {
     const files =
@@ -292,8 +300,8 @@ export class ChatOutputs {
     const links = entry.row.kind === "shown" ? [entry.row.path] : [];
     for (const file of files) {
       links.push(file);
-      const project = this.projectLink(file);
-      if (project) links.push(project);
+      const route = this.projectLink(file) ?? this.memoryLink(file);
+      if (route) links.push(route);
     }
     return links;
   }
@@ -325,4 +333,11 @@ export class ChatOutputs {
         : null,
     };
   }
+}
+
+/** `<route>/<path>` for a file inside folder `root`, else null. */
+function routeLink(route: string, root: string, file: string): string | null {
+  const rel = relative(root, file);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+  return `${route}/${rel.split(sep).join("/")}`;
 }

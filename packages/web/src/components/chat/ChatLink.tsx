@@ -1,4 +1,4 @@
-import { useContext, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
@@ -10,6 +10,7 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 import { parseAssetHref } from "@/lib/asset-links";
 import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
+import { MemoryFileSheet } from "./MemoryFileSheet";
 import { useOutputLinks } from "./outputs/chat-outputs";
 import { ThreadLink } from "./reply/ThreadLink";
 import { threadOfLink } from "./reply/thread-link";
@@ -26,6 +27,8 @@ import { threadOfLink } from "./reply/thread-link";
 //   /apps/<appId>[/<route>][?q]  → open that app's workspace tile, preserving
 //                                 the in-app sub-route and query params so the
 //                                 tile lands on the exact linked page.
+//   /memory/<path>             → open the file or folder in a sheet beside
+//                                the chat.
 //
 // Both reuse the exact mechanisms FreeGrid already drives for agent-linked
 // files and installed apps, just triggered by an explicit click.
@@ -88,6 +91,20 @@ function decodeProjectsHref(href: string): string | null {
   if (href === "/projects") return href;
   const decoded = decodeFileBrowserRoutePath(href.slice("/projects/".length));
   return decoded === null ? null : `/projects/${decoded}`;
+}
+
+// The logical path (`memory/<path>`, or `memory` for the root) of an href
+// that addresses a `/memory` route on this workspace, or null. Decoded and
+// guarded the way the full Memory page decodes its URL.
+function memoryLogicalPath(href: string): string | null {
+  if (!isInternalHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  if (rawPath === null) return null;
+  const path = stripQueryAndFragment(rawPath).replace(/\/+$/, "");
+  if (path === "/memory") return "memory";
+  if (!path.startsWith("/memory/")) return null;
+  const decoded = decodeFileBrowserRoutePath(path.slice("/memory/".length));
+  return decoded === null ? null : `memory/${decoded}`;
 }
 
 // A same-origin link whose path names a file by its extension, such as an
@@ -208,6 +225,32 @@ function LocalFileLink({ path, ...props }: MarkdownLinkProps & { path: string })
   );
 }
 
+// A link to a memory file or folder: one of the chat's outputs opens in its
+// Outputs tab, anything else in a sheet beside the chat.
+function MemoryLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
+  const outputs = useOutputLinks();
+  const [open, setOpen] = useState(false);
+  const href = props.href ?? "";
+  return (
+    <>
+      <WorkspaceLink
+        {...props}
+        onActivate={() => {
+          if (!outputs) return setOpen(true);
+          void outputs.open(`/${path}`).then((opened) => {
+            if (!opened) setOpen(true);
+          });
+        }}
+      />
+      <MemoryFileSheet
+        path={open ? path : null}
+        href={toInternalPath(href)}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  );
+}
+
 // A picture inside the link leaves the tap to the link.
 export function ChatLink(props: MarkdownLinkProps) {
   return (
@@ -264,6 +307,10 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
       );
     }
   }
+
+  // Outside a chat, a memory link opens the Memory page as before.
+  const memoryPath = outputs && href ? memoryLogicalPath(href) : null;
+  if (memoryPath) return <MemoryLink {...props} path={memoryPath} />;
 
   const localFile = outputs && href ? localFileHref(href) : null;
   if (localFile) return <LocalFileLink {...props} path={localFile} />;

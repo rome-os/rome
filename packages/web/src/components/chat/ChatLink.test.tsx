@@ -17,6 +17,14 @@ import {
   type WorkspaceEventBus,
 } from "@/pages/free/workspace-event-bus";
 
+// The sheet's file browser is the Memory page's own; here it shows what it was
+// asked to select.
+rs.mock("@/components/file-browser-page", () => ({
+  FileBrowserPage: ({ externalSelection }: { externalSelection: { path: string } | null }) => (
+    <div data-testid="memory-browser">{externalSelection?.path}</div>
+  ),
+}));
+
 const autoPlaceApp = rs.fn();
 rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
@@ -114,6 +122,46 @@ describe("ChatLink and the chat's outputs", () => {
     await waitFor(() =>
       expect(screen.getByTestId("where").textContent).toBe("/home/rome/elsewhere/notes.md"),
     );
+    expect(opened).toEqual([]);
+  });
+
+  it("opens a memory file the agent wrote in the Outputs tab", async () => {
+    const { opened } = withOutputs(<ChatLink href="/memory/voice-terms.md">terms</ChatLink>, [
+      "/memory/voice-terms.md",
+    ]);
+    fireEvent.click(screen.getByText("terms"));
+    await waitFor(() => expect(opened).toEqual(["/memory/voice-terms.md"]));
+    expect(screen.queryByTestId("memory-browser")).toBeNull();
+  });
+
+  it("opens any other memory file in a sheet beside the chat, not the Memory page", async () => {
+    function Where() {
+      return <span data-testid="where">{useLocation().pathname}</span>;
+    }
+    const resolved: string[] = [];
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        resolved.push(url);
+        return new Response(JSON.stringify({ type: "file" }), { status: 200 });
+      }),
+    );
+    const { opened } = withOutputs(
+      <>
+        <ChatLink href="/memory/topics/%E7%AC%94%E8%AE%B0.md">notes</ChatLink>
+        <Where />
+      </>,
+      [],
+    );
+    const before = screen.getByTestId("where").textContent;
+    fireEvent.click(screen.getByText("notes"));
+    await waitFor(() =>
+      expect(screen.getByTestId("memory-browser").textContent).toBe("memory/topics/笔记.md"),
+    );
+    expect(resolved).toEqual([
+      `/api/memory/resolve?path=${encodeURIComponent("memory/topics/笔记.md")}`,
+    ]);
+    expect(screen.getByTestId("where").textContent).toBe(before);
     expect(opened).toEqual([]);
   });
 
