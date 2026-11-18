@@ -18,6 +18,10 @@ describe("removeFillerWords", () => {
     ["I think, um, that works", "I think, that works"],
     ["I think um.", "I think."],
     ["Done. Uh. Next step", "Done. Next step"],
+    ["Um, uh, I think so", "I think so"],
+    ["Uh, um, yes", "Yes"],
+    ["Hmm, um, okay.", "Okay."],
+    ["So, um, uh, yes", "So, yes"],
     ["打开 Rome，uh，然后 deploy", "打开 Rome，然后 deploy"],
     ["嗯", ""],
   ])("drops the filler in %j", (spoken, written) => {

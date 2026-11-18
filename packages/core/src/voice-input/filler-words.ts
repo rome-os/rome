@@ -32,6 +32,19 @@ export function removeFillerWords(text: string, before = ""): string {
   before = before.slice(-16);
   let out = "";
   let at = 0;
+  // Set when a sentence began with a dropped filler: the first word kept
+  // after it, past any more fillers, takes the capital.
+  let capitalize = false;
+  const keep = (kept: string) => {
+    if (capitalize && /\S/u.test(kept)) {
+      capitalize = false;
+      kept = kept.replace(
+        /^(\s*)([a-z])/,
+        (_, space: string, letter: string) => space + letter.toUpperCase(),
+      );
+    }
+    out += kept;
+  };
   for (const match of text.matchAll(FILLER)) {
     const start = match.index;
     if (start < at) continue;
@@ -47,7 +60,7 @@ export function removeFillerWords(text: string, before = ""): string {
     // The text can start inside a word that began in the text before it.
     if (ENGLISH.test(filler) && IN_WORD.test(prev)) continue;
     if (QUESTION.test(text.slice(end))) continue;
-    out += text.slice(at, start);
+    keep(text.slice(at, start));
     const shown = before + out;
     const pause = PAUSE.exec(text.slice(end));
     const stop = SENTENCE_END.exec(text.slice(end));
@@ -80,16 +93,11 @@ export function removeFillerWords(text: string, before = ""): string {
     }
     // A sentence that began with the filler begins with a capital.
     const lead = (before + out).trimEnd();
-    if ((lead === "" || /[.!?。！？]$/u.test(lead)) && /^[A-Z]/.test(filler)) {
-      const first = text.charAt(end);
-      if (/[a-z]/.test(first)) {
-        out += first.toUpperCase();
-        end += 1;
-      }
-    }
+    if ((lead === "" || /[.!?。！？]$/u.test(lead)) && /^[A-Z]/.test(filler)) capitalize = true;
     at = end;
   }
-  return out + text.slice(at);
+  keep(text.slice(at));
+  return out;
 }
 
 // The end of the settled text that could still become, or lose, a filler:
