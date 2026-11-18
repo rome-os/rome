@@ -779,6 +779,7 @@ final class AppModel {
     init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared, instanceConfiguration: @escaping () -> URLSessionConfiguration = { .default }, update: InstanceUpdater = InstanceUpdater()) {
         self.cloud = cloud
         self.update = update
+        instanceMinimums = update.minimums
         self.images = images
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
@@ -1552,6 +1553,8 @@ final class AppModel {
     private func open(_ workspace: Workspace) async {
         // A banner from the workspace this one replaces does not carry over.
         sessionExpired = false
+        // The demo goes by its own minimums, a real Rome by the app's.
+        update.minimums = workspace.backend is DemoBackend ? demoMinimums : instanceMinimums
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
@@ -1887,6 +1890,11 @@ final class AppModel {
         workspace = nil
         self.phase = phase
     }
+
+    /// The minimums the demo opens with; snapshot runs pass others.
+    var demoMinimums = UpdateGate.Minimums.demo
+    /// The minimums a real Rome opens with: the updater's own, as it came.
+    @ObservationIgnored private let instanceMinimums: UpdateGate.Minimums
 
     func openDemo(_ variant: DemoBackend.Variant = .full) {
         update.reset()

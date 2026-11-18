@@ -28,7 +28,7 @@ extension LastInstanceDefaults {
     @Suite(.serialized) struct StoppedPushTests {
         private static let keys = ["lastInstanceID", "lastInstanceRecord"]
 
-        private func model(sessionForB: Bool = true, update: InstanceUpdater = InstanceUpdater()) -> AppModel {
+        private func model(sessionForB: Bool = true, update: InstanceUpdater = InstanceUpdater(minimums: .demo)) -> AppModel {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [InstanceListProtocol.self]
             let store = MemoryStore()
@@ -125,7 +125,7 @@ extension LastInstanceDefaults {
                     "/v1/instances/b/authorizations": (409, #"{"error":"instance_not_ready"}"#),
                 ]
                 list(b: "running")
-                let app = model(sessionForB: false, update: InstanceUpdater(pollInterval: .milliseconds(5), now: { clock.date }))
+                let app = model(sessionForB: false, update: InstanceUpdater(minimums: .demo, pollInterval: .milliseconds(5), now: { clock.date }))
                 await app.openInstance(preferring: "b")
                 #expect(app.update.waitingInstanceID == "b")
                 // Rome Cloud reports B stopped until the wait gives up.
