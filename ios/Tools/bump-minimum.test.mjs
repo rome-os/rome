@@ -9,7 +9,8 @@ import {
   GATE_PATH,
   PENDING_PATH,
   compareVersions,
-  latestReleaseTag,
+  publishedRelease,
+  releaseTags,
   plan,
   readMinimums,
   run,
@@ -28,12 +29,50 @@ describe("versions", () => {
     assert.throws(() => compareVersions("dev", "1.1.1"));
   });
 
-  it("picks the highest v1 release tag, not the last in text order", () => {
-    assert.equal(
-      latestReleaseTag(["v1.1.99", "v1.1.204", "v1.1.3", "rome-ui-v1.2.0", "v1.1.205-rc.1"]),
-      "v1.1.204",
+  it("orders the stable v1 release tags newest first, not in text order", () => {
+    assert.deepEqual(
+      releaseTags(["v1.1.99", "v1.1.204", "v1.1.3", "rome-ui-v1.2.0", "v1.1.205-rc.1"]),
+      ["v1.1.204", "v1.1.99", "v1.1.3"],
     );
-    assert.equal(latestReleaseTag(["rome-ui-v1.2.0"]), null);
+    assert.deepEqual(releaseTags(["rome-ui-v1.2.0"]), []);
+  });
+});
+
+describe("publication", () => {
+  const tags = ["v1.1.203", "v1.1.205", "v1.1.204"];
+
+  it("takes the newest tag whose release is published", () => {
+    assert.deepEqual(
+      publishedRelease(tags, () => true),
+      { tag: "v1.1.205", skipped: [] },
+    );
+  });
+
+  it("skips a tag with no release yet, a draft, or a prerelease, and says so", () => {
+    const status = {
+      "v1.1.205": "no GitHub release yet",
+      "v1.1.204": "the GitHub release is a draft",
+    };
+    const found = publishedRelease(tags, (tag) => status[tag] ?? true);
+    assert.equal(found.tag, "v1.1.203");
+    assert.deepEqual(found.skipped, [
+      "v1.1.205: no GitHub release yet",
+      "v1.1.204: the GitHub release is a draft",
+    ]);
+  });
+
+  it("raises nothing when publication cannot be confirmed", () => {
+    const found = publishedRelease(tags, () => ({ error: "gh: not logged in" }));
+    assert.equal(found.tag, undefined);
+    assert.match(
+      found.stop,
+      /Cannot confirm that v1\.1\.205 is published \(gh: not logged in\)\. Minimums not raised\./,
+    );
+  });
+
+  it("raises nothing when no recent tag is published", () => {
+    const found = publishedRelease(tags, () => "no GitHub release yet");
+    assert.match(found.stop, /^No published server release found/);
   });
 });
 
@@ -147,7 +186,7 @@ describe("run, in a scratch repository", () => {
       writeFileSync(join(repo, PENDING_PATH), JSON.stringify(pending));
       const quiet = () => {};
 
-      const stopped = run({ repo, fetch: false, log: quiet });
+      const stopped = run({ repo, fetch: false, log: quiet, published: () => true });
       assert.equal(stopped.code, 1);
       assert.match(stopped.message, /Release the server first: v1\.1\.200 does not contain #2340/);
       assert.deepEqual(readMinimums(readFileSync(join(repo, GATE_PATH), "utf8")), {
@@ -156,7 +195,21 @@ describe("run, in a scratch repository", () => {
       });
 
       git("tag", "v1.1.201");
-      const raised = run({ repo, fetch: false, log: quiet });
+      // Tagged but not published yet: nothing is raised.
+      const unpublished = run({
+        repo,
+        fetch: false,
+        log: quiet,
+        published: (tag) => tag !== "v1.1.201" || "no GitHub release yet",
+      });
+      assert.equal(unpublished.code, 1);
+      assert.match(unpublished.message, /v1\.1\.200 does not contain #2340/);
+      assert.deepEqual(readMinimums(readFileSync(join(repo, GATE_PATH), "utf8")), {
+        blocking: "1.1.196",
+        background: "1.1.196",
+      });
+
+      const raised = run({ repo, fetch: false, log: quiet, published: () => true });
       assert.equal(raised.code, 0, raised.message);
       assert.deepEqual(readMinimums(readFileSync(join(repo, GATE_PATH), "utf8")), {
         blocking: "1.1.196",
@@ -175,7 +228,7 @@ describe("run, in a scratch repository", () => {
     try {
       const pending = { entries: [{ tier: "blocking", reason: "x", pr: 1, server: "#9999" }] };
       writeFileSync(join(repo, PENDING_PATH), JSON.stringify(pending));
-      const result = run({ repo, fetch: false, log: () => {} });
+      const result = run({ repo, fetch: false, log: () => {}, published: () => true });
       assert.equal(result.code, 1);
       assert.match(result.message, /#9999 \(no commit on any fetched branch mentions it\)/);
     } finally {

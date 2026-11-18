@@ -107,6 +107,47 @@ import Testing
         updater.reset()
     }
 
+    /// The handover is kept per instance and release: a relaunch after a
+    /// failed start, or a switch to another instance and back, does not
+    /// bring the page back for it. Another instance still gets its own page.
+    @Test func theHandoverSurvivesARelaunchAndASwitch() async {
+        let defaults = UserDefaults(suiteName: "UpdateTiersTests-\(UUID().uuidString)")!
+        func launch() -> InstanceUpdater {
+            InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: minimums, pollInterval: .milliseconds(5))
+        }
+        func behind() -> FakeBackend {
+            let backend = FakeBackend()
+            backend.check = .success(UpgradeCheck(current: .init(version: "1.1.195"), latest: .init(version: "1.1.198"), upgradeAvailable: true))
+            return backend
+        }
+        let first = launch()
+        let backend = behind()
+        backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
+        await first.attach(backend: backend, instanceID: "i1")
+        await first.updateFromBackgroundPage()
+        guard case .failed(.start) = first.state else { Issue.record("\(first.state)"); return }
+        first.reset()
+
+        // Relaunch: the check finds the same release behind; the drawer offers it.
+        let second = launch()
+        await second.attach(backend: behind(), instanceID: "i1")
+        #expect(second.pageVariant == nil)
+        #expect(!second.blocking)
+        #expect(second.rowState == .offered("1.1.198"))
+
+        // Another instance behind has its own page; back on the first, none.
+        await second.attach(backend: behind(), instanceID: "i2")
+        #expect(second.pageVariant == .background)
+        await second.attach(backend: behind(), instanceID: "i1")
+        #expect(second.pageVariant == nil)
+
+        // Sign-out forgets it.
+        UpdateBannerStore.removeAll(defaults: defaults)
+        await second.attach(backend: behind(), instanceID: "i1")
+        #expect(second.pageVariant == .background)
+        second.reset()
+    }
+
     /// A newer release than the one handed over asks again.
     @Test func aNewerReleaseAsksAgain() async {
         let (updater, backend, _) = updater(on: "1.1.195")

@@ -231,19 +231,26 @@ struct PendingUpgrade: Codable, Equatable {
     }
 }
 
-/// The latest release whose banner the guardian closed, per instance: a
-/// newer release shows the banner again.
+/// Per instance, the releases the guardian already answered an update
+/// prompt for: the latest release whose banner they closed (a newer release
+/// shows the banner again), and the release the background page handed to
+/// the drawer (the page does not ask for it again, after a relaunch or a
+/// switch to another instance and back too).
 struct UpdateBannerStore {
     var defaults: UserDefaults = .standard
 
-    func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: key(instanceID)) }
-    func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: key(instanceID)) }
-    private func key(_ instanceID: String) -> String { Self.prefix + instanceID }
+    func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: Self.prefix + instanceID) }
+    func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: Self.prefix + instanceID) }
     static let prefix = "updateBannerDismissed."
 
-    /// Sign-out, or another account: the banner was that guardian's to close.
+    func handedOver(_ instanceID: String) -> String? { defaults.string(forKey: Self.handedOverPrefix + instanceID) }
+    func handOver(_ version: String, for instanceID: String) { defaults.set(version, forKey: Self.handedOverPrefix + instanceID) }
+    static let handedOverPrefix = "updateHandedOver."
+
+    /// Sign-out, or another account: the prompts were that guardian's to answer.
     static func removeAll(defaults: UserDefaults = .standard) {
         defaults.removeKeys(prefix: prefix)
+        defaults.removeKeys(prefix: handedOverPrefix)
     }
 }
 
@@ -338,8 +345,9 @@ final class InstanceUpdater {
     private(set) var runsInBackground = false
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
-    /// The release the background page handed to the drawer: the page does
-    /// not ask for it again, a failure and its Retry included.
+    /// The release the background page handed to the drawer on this
+    /// instance, kept in `banners`: the page does not ask for it again, a
+    /// failure, its Retry and a relaunch included.
     private var handedOver: String?
     /// The minimum versions this updater goes by.
     var minimums: UpdateGate.Minimums
@@ -523,6 +531,7 @@ final class InstanceUpdater {
         self.backend = backend
         self.instanceID = instanceID
         dismissedVersion = banners.dismissed(instanceID)
+        handedOver = banners.handedOver(instanceID)
         if justUpdated?.instanceID != instanceID { justUpdated = nil }
         await check()
     }
@@ -656,8 +665,9 @@ final class InstanceUpdater {
     /// From the background page: the page closes, and the upgrade runs as
     /// one started from the drawer.
     func updateFromBackgroundPage() async {
-        guard pageVariant == .background, case .required(_, let latest, _) = state else { return }
+        guard pageVariant == .background, case .required(_, let latest, _) = state, let instanceID else { return }
         handedOver = latest
+        banners.handOver(latest, for: instanceID)
         await updateInBackground()
     }
 

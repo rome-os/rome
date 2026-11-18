@@ -2,7 +2,7 @@
 // Raises the app's minimum instance versions before a TestFlight build, from
 // the entries iOS PRs left in ios/Config/pending-minimum.json. Each entry
 // names the server change that brings an API the app now calls; the minimum
-// becomes the latest server release, once that release contains every change.
+// becomes the newest published server release, once it contains every change.
 // The script only edits files: committing and pushing stay with whoever runs it.
 //
 // Usage: node ios/Tools/bump-minimum.mjs [--repo <dir>] [--no-fetch]
@@ -30,11 +30,58 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-/** The highest server release tag (`v1.*`), or null when there is none. */
-export function latestReleaseTag(tags) {
-  const releases = tags.filter((tag) => tag.startsWith("v1.") && parseVersion(tag));
-  if (releases.length === 0) return null;
-  return releases.reduce((best, tag) => (compareVersions(tag, best) > 0 ? tag : best));
+/** Stable server release tags (`v1.*`), newest first. */
+export function releaseTags(tags) {
+  return tags
+    .filter((tag) => tag.startsWith("v1.") && parseVersion(tag))
+    .sort((a, b) => compareVersions(b, a));
+}
+
+/** How many of the newest tags are asked about before giving up. */
+export const PUBLISHED_LOOKBACK = 5;
+
+/**
+ * The newest release tag that is published, or the reason to stop. A tag is
+ * pushed before its image builds; the release flow creates the GitHub release
+ * only once the image is out (docs/releases.md). `published(tag)` answers
+ * true, a reason the tag is not published, or `{ error }` when it cannot say.
+ */
+export function publishedRelease(tags, published) {
+  const skipped = [];
+  for (const tag of releaseTags(tags).slice(0, PUBLISHED_LOOKBACK)) {
+    const status = published(tag);
+    if (status === true) return { tag, skipped };
+    if (typeof status === "object") {
+      return {
+        stop: `Cannot confirm that ${tag} is published (${status.error}). Minimums not raised.`,
+      };
+    }
+    skipped.push(`${tag}: ${status}`);
+  }
+  const why = skipped.length > 0 ? ` (${skipped.join("; ")})` : "";
+  return { stop: `No published server release found${why}. Minimums not raised.` };
+}
+
+/** Whether a tag has a GitHub release that is neither a draft nor a prerelease, through the gh CLI. */
+export function publishedOnGitHub(repo) {
+  return (tag) => {
+    let release;
+    try {
+      const out = execFileSync("gh", ["release", "view", tag, "--json", "isDraft,isPrerelease"], {
+        cwd: repo,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      release = JSON.parse(out);
+    } catch (error) {
+      const message = String(error.stderr ?? error.message ?? "").trim();
+      if (/release not found/i.test(message)) return "no GitHub release yet";
+      return { error: message.split("\n")[0] || "gh release view failed" };
+    }
+    if (release.isDraft) return "the GitHub release is a draft";
+    if (release.isPrerelease) return "the GitHub release is a prerelease";
+    return true;
+  };
 }
 
 /** What is wrong with the pending file's content, as messages; empty when nothing is. */
@@ -145,7 +192,12 @@ export function containsInRepo(repo, tag) {
   };
 }
 
-export function run({ repo, fetch = true, log = console.log }) {
+export function run({
+  repo,
+  fetch = true,
+  log = console.log,
+  published = publishedOnGitHub(repo),
+}) {
   if (fetch) git(repo, ["fetch", "--tags", "--quiet", "origin"]);
   const pendingFile = join(repo, PENDING_PATH);
   const gateFile = join(repo, GATE_PATH);
@@ -156,7 +208,14 @@ export function run({ repo, fetch = true, log = console.log }) {
 
   const swift = readFileSync(gateFile, "utf8");
   const current = readMinimums(swift);
-  const release = latestReleaseTag(git(repo, ["tag", "-l", "v1.*"]).split("\n").filter(Boolean));
+  if (pending.entries.length === 0) return { code: 0, message: "No pending minimum changes." };
+  const found = publishedRelease(
+    git(repo, ["tag", "-l", "v1.*"]).split("\n").filter(Boolean),
+    published,
+  );
+  if (found.stop) return { code: 1, message: found.stop };
+  for (const line of found.skipped) log(`Skipped ${line}`);
+  const release = found.tag;
   const result = plan({
     entries: pending.entries,
     release,
