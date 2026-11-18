@@ -16,7 +16,6 @@ import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
   chatThreadsOf,
-  missingThreadRoots,
   type ThreadTimelineMessage,
   threadsOf,
   threadTail,
@@ -79,24 +78,6 @@ const a = (id: string, thread: string | null) => sent(id, "assistant", thread);
 /** A message in no thread: nothing replies to it. */
 const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage =>
   sent(id, role, null);
-
-describe("missingThreadRoots", () => {
-  it("returns a reply's root when it is outside the page, once per root", () => {
-    expect(missingThreadRoots([a("a1", "q1"), g("g1", "q2"), a("a2", "q1")])).toEqual(["q1", "q2"]);
-  });
-
-  it("does not return a root in the page, even when it follows its reply", () => {
-    expect(missingThreadRoots([a("a1", "q1"), g("q1")])).toEqual([]);
-  });
-
-  it("does not return a message that is its own root", () => {
-    expect(missingThreadRoots([g("q1", "q1")])).toEqual([]);
-  });
-
-  it("does not return messages with no thread", () => {
-    expect(missingThreadRoots([free("q1"), { id: "q2", role: "assistant" }])).toEqual([]);
-  });
-});
 
 describe("threadsOf", () => {
   it("puts a message in the thread its chatThreadId names, and a root delivered with none in it once a reply says so", () => {
@@ -705,10 +686,51 @@ describe("the main timeline", () => {
     expect(document.querySelector("[data-thread-stack]")).toBeNull();
   });
 
-  it("keeps a reply whose root is not loaded, since no stack could hold it", () => {
+  it("leaves out a reply whose root is not loaded too: a reply never draws in the main line", () => {
     renderTranscript(messages.slice(1), undefined, undefined, true);
-    expect(document.querySelector('[data-thread-entry="a1"]')).not.toBeNull();
+    expect(document.querySelector('[data-thread-entry="a1"]')).toBeNull();
+    expect(document.querySelector('[data-thread-entry="f1"]')).not.toBeNull();
+    // No root is drawn, so there is nothing to hang a stack from.
     expect(document.querySelector("[data-thread-stack]")).toBeNull();
+  });
+});
+
+describe("the stacks of loaded replies", () => {
+  it("stacks every reply, whether its root is loaded or not", () => {
+    const { stacks, stacked } = chatThreadsOf([
+      a("a1", "q1"),
+      g("q2"),
+      a("a2", "q2"),
+      g("a3", "q2"),
+      free("w1"),
+    ]);
+    // q1 is not loaded: its reply stands in a stack all the same.
+    expect([...stacked]).toEqual(["a1", "a2", "a3"]);
+    expect([...stacks.keys()]).toEqual(["q1", "q2"]);
+    expect(stacks.get("q2")).toMatchObject({ total: 2, unread: 0 });
+  });
+
+  it("counts a reply only the owner has not seen, and no automation's", () => {
+    const { stacks } = chatThreadsOf([
+      { ...a("a1", "q1"), read: false },
+      { ...a("a2", "q1"), read: true },
+      { ...a("a3", "q1"), read: false, sender: { kind: "automated" } },
+    ] as ThreadTimelineMessage[]);
+    expect(stacks.get("q1")).toMatchObject({ total: 2, unread: 1 });
+  });
+
+  it("names a thread whose root is not loaded by its task, else by the hint the page gave", () => {
+    const waiting = [{ ...a("a1", "q9"), read: false }] as ThreadTimelineMessage[];
+    const hints = new Map([["q9", "Plan the trip"]]);
+    expect(chatThreadsOf(waiting, null, true, hints).titles.get("q9")).toBe("Plan the trip");
+    const named = [{ ...waiting[0]!, chatThreadTitle: "Tokyo" }] as ThreadTimelineMessage[];
+    expect(chatThreadsOf(named, null, true, hints).titles.get("q9")).toBe("Tokyo");
+  });
+
+  it("stacks nothing where a message shows itself, as in a share", () => {
+    const { stacks, stacked } = chatThreadsOf([a("a1", "q1")], null, false);
+    expect(stacks.size).toBe(0);
+    expect(stacked.size).toBe(0);
   });
 });
 
@@ -886,6 +908,24 @@ describe("the pills of threads with new replies", () => {
     fireEvent.click(pills[1]!);
     expect(onPick).toHaveBeenCalledWith("n1");
     expect(roots(all).get("n2")).toBe("n1");
+  });
+
+  it("has a pill for a thread whose root is not loaded, named by what the page gave", () => {
+    const waiting = [
+      { ...message("a9", "assistant", "Done", "q9", 6), read: false },
+    ] as ChatMessage[];
+    const onPick = rs.fn();
+    render(
+      <ThreadPills
+        threads={chatThreadsOf(waiting, null, true, new Map([["q9", "Plan trip"]]))}
+        onPick={onPick}
+      />,
+    );
+    const pill = document.querySelector<HTMLElement>("[data-thread-pill]")!;
+    expect(pill.dataset.threadPill).toBe("q9");
+    expect(pill.textContent).toBe('New replies in "Plan trip"');
+    fireEvent.click(pill);
+    expect(onPick).toHaveBeenCalledWith("q9");
   });
 
   it("shows no row without a pill, and none with a thread in focus", () => {

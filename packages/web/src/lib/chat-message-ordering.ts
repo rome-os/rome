@@ -67,17 +67,20 @@ export function startsNewHistory(
 /**
  * Folds a refetched newest page into the loaded transcript: the page replaces
  * the messages it carries and leaves older loaded pages alone. With `restart`
- * (see {@link startsNewHistory}) the loaded messages older than the page go.
+ * (see {@link startsNewHistory}) the loaded messages older than the page go:
+ * older than its oldest message, or than `since` when given, which a page that
+ * also carries replies of older threads names, as the time of its oldest
+ * main-line message.
  */
 export function mergeLatestMessagePage(
   currentMessages: ChatMessage[],
   fetchedMessages: ChatMessage[],
-  options: { restart?: boolean; dropMessageIds?: ReadonlySet<string> } = {},
+  options: { restart?: boolean; dropMessageIds?: ReadonlySet<string>; since?: number } = {},
 ): ChatMessage[] {
   if (!options.restart || fetchedMessages.length === 0) {
     return mergeFetchedChatMessages(currentMessages, fetchedMessages, options);
   }
-  const oldestFetched = Math.min(...fetchedMessages.map(messageTimestamp));
+  const oldestFetched = options.since ?? Math.min(...fetchedMessages.map(messageTimestamp));
   const history = currentMessages
     .filter((message) => messageTimestamp(message) < oldestFetched)
     .map((message) => message.id);

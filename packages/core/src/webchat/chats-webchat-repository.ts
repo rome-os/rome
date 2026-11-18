@@ -30,6 +30,11 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { SessionRecords } from "../sessions/session-records.js";
 import {
+  type ConciergeMainLine,
+  type ConciergeOutside,
+  type ConciergePage,
+  type ConciergePageCursor,
+  type ConciergePageOptions,
   type EnsureRomeSessionInput,
   type InterruptedTurn,
   type MessagePageCursor,
@@ -37,6 +42,7 @@ import {
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
   THROUGH_CONTEXT_GROUPS,
+  THROUGH_CONTEXT_MESSAGES,
   type TraceBatch,
   WebChatRepository,
 } from "./repository.js";
@@ -814,6 +820,251 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
   }
 
+  /**
+   * A page of the session's chat by its main-line messages, newest first by
+   * (`said_at`, record order), as the transcript draws them: what the
+   * session has seen since it started, in its place. A main-line message is
+   * one that replies to none (`root_message_id` null or its own id), so a
+   * reply never counts toward `limit`. Each carries the whole thread it
+   * roots, so a reply never comes without its root. The newest page, the one
+   * with no `before`, also names the threads with unread replies whose root
+   * is on none of it. No trace row is read.
+   */
+  override async getConciergePage(
+    sessionId: string,
+    options: ConciergePageOptions,
+  ): Promise<ConciergePage> {
+    const { before } = options;
+    const limit = options.through
+      ? Math.max(options.limit, await this.mainLineThrough(sessionId, before, options.through))
+      : options.limit;
+    const found = this.db.all<MainLineKey>(sql`
+      SELECT m.id AS id, m.key AS key, m.said_at AS said_at
+      ${this.sessionPlace(sessionId)}
+        AND ${MAIN_LINE}
+        ${
+          before
+            ? sql`AND (m.said_at, m.id) < (${before.saidAt},
+                COALESCE((SELECT b.id FROM chat_messages b
+                  WHERE b.chat_id = s.chat_id AND b.key = ${before.key}), 0))`
+            : sql``
+        }
+      ORDER BY m.said_at DESC, m.id DESC
+      LIMIT ${limit + 1}
+    `);
+    const page = found.slice(0, limit);
+    const oldest = page[page.length - 1];
+    const nextCursor: ConciergePageCursor | null =
+      found.length > limit && oldest ? { saidAt: oldest.said_at, key: oldest.key } : null;
+    return {
+      mainLine: this.threadsOf(sessionId, page),
+      outside: before ? [] : this.threadsWaiting(sessionId, new Set(page.map((m) => m.key))),
+      nextCursor,
+    };
+  }
+
+  /** The chat thread of the message keyed `key`, any message of it, as a page of its root alone: empty when the chat holds none. */
+  override async getConciergeThread(sessionId: string, key: string): Promise<ConciergePage> {
+    const root = this.db.all<MainLineKey>(sql`
+      SELECT r.id AS id, r.key AS key, r.said_at AS said_at FROM chat_messages r
+      WHERE r.id = (
+        SELECT COALESCE(m.root_message_id, m.id)
+        ${this.sessionPlace(sessionId)}
+          AND m.key = ${key}
+      )
+    `);
+    return { mainLine: this.threadsOf(sessionId, root), outside: [], nextCursor: null };
+  }
+
+  /** The session's place in its chat, to read `m`, a message it has seen: the
+   *  scoping {@link sessionLines} gives its lines. */
+  private sessionPlace(sessionId: string): SQL {
+    return sql`FROM rome_sessions s
+      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+        AND m.said_at >= s.created_at
+      WHERE s.id = ${sessionId}`;
+  }
+
+  /**
+   * The session's place, to read `m`, a reply it has seen: only those of the
+   * threads rooted at `roots`, or of every thread. Read by the root index:
+   * left to guess, the planner walks every message of the place since the
+   * session started to find the few that reply.
+   */
+  private repliesPlace(sessionId: string, roots?: readonly number[]): SQL {
+    return sql`FROM rome_sessions s
+      ${roots ? sql`CROSS JOIN json_each(${JSON.stringify(roots)}) j` : sql``}
+      CROSS JOIN chat_messages m INDEXED BY idx_chat_messages_root
+      WHERE s.id = ${sessionId} AND m.chat_id = s.chat_id
+        AND m.thread_id IS s.thread_id AND m.said_at >= s.created_at
+        AND ${roots ? sql`m.root_message_id = j.value` : sql`m.root_message_id IS NOT NULL`}
+        AND m.root_message_id != m.id`;
+  }
+
+  /**
+   * How many main-line messages a page from `before` must hold to reach the
+   * root of the thread of message `through`, with
+   * {@link THROUGH_CONTEXT_MESSAGES} older ones. Zero when the chat does not
+   * hold that message, or its root is not older than `before`.
+   */
+  private async mainLineThrough(
+    sessionId: string,
+    before: ConciergePageCursor | null | undefined,
+    through: string,
+  ): Promise<number> {
+    const [row] = this.db.all<{ n: number }>(sql`
+      SELECT count(*) AS n
+      ${this.sessionPlace(sessionId)}
+        AND ${MAIN_LINE}
+        AND (m.said_at, m.id) >= (
+          SELECT r.said_at, r.id FROM chat_messages t
+          JOIN chat_messages r ON r.id = COALESCE(t.root_message_id, t.id)
+          WHERE t.chat_id = s.chat_id AND t.key = ${through}
+        )
+        ${
+          before
+            ? sql`AND (m.said_at, m.id) < (${before.saidAt},
+                COALESCE((SELECT b.id FROM chat_messages b
+                  WHERE b.chat_id = s.chat_id AND b.key = ${before.key}), 0))`
+            : sql``
+        }
+    `);
+    const n = row?.n ?? 0;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_MESSAGES;
+  }
+
+  /**
+   * The main-line messages `roots` with every message that has one as its
+   * root, read together over {@link sessionLines}. The counts follow the
+   * client's stack: a reply counts when a user or an assistant said it and no
+   * automation did; it is unread when the assistant said it and the owner has
+   * not seen it.
+   */
+  private threadsOf(sessionId: string, roots: readonly MainLineKey[]): ConciergeMainLine[] {
+    if (roots.length === 0) return [];
+    const replies = this.db.all<{ key: string }>(sql`
+      SELECT m.key AS key
+      ${this.repliesPlace(
+        sessionId,
+        roots.map((root) => root.id),
+      )}
+    `);
+    const rows = this.linesByKey(sessionId, [
+      ...roots.map((root) => root.key),
+      ...replies.map((r) => r.key),
+    ]);
+    const repliesOf = new Map<string, LineRow[]>();
+    const mainLine = new Map<string, LineRow>();
+    for (const row of rows) {
+      if (row.chat_thread_id === row.id) mainLine.set(row.id, row);
+      else if (row.chat_thread_id) {
+        repliesOf.set(row.chat_thread_id, [...(repliesOf.get(row.chat_thread_id) ?? []), row]);
+      }
+    }
+    return [...mainLine.values()].map((row): ConciergeMainLine => {
+      const own = repliesOf.get(row.id) ?? [];
+      const counted = own.filter((reply) => !reply.sender_id?.startsWith("automated::"));
+      return {
+        message: storedLine(row),
+        thread:
+          own.length === 0
+            ? null
+            : {
+                replyCount: counted.length,
+                unreadCount: counted.filter((r) => r.role === "assistant" && r.is_read === 0)
+                  .length,
+                replies: own.map(storedLine),
+              },
+      };
+    });
+  }
+
+  /**
+   * The threads with a reply the owner has not seen whose root is not among
+   * `onPage`, the keys of the page's main-line messages, with each one's
+   * newest unread reply, oldest waiting first. Found by the unread marks, not
+   * by walking the transcript.
+   */
+  private threadsWaiting(sessionId: string, onPage: ReadonlySet<string>): ConciergeOutside[] {
+    const unread = this.db.all<{
+      key: string;
+      said_at: number;
+      id: number;
+      root_id: number;
+      root: string;
+    }>(
+      sql`
+      SELECT m.key AS key, m.said_at AS said_at, m.id AS id,
+        m.root_message_id AS root_id,
+        (SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id) AS root
+      ${this.repliesPlace(sessionId)}
+        AND m.read_at IS NULL AND m.sender_agent IS NOT NULL
+    `,
+    );
+    const waiting = new Map<
+      number,
+      { root: string; unread: number; latest: (typeof unread)[number] }
+    >();
+    for (const reply of unread) {
+      if (onPage.has(reply.root)) continue;
+      const seen = waiting.get(reply.root_id);
+      const newer =
+        !seen ||
+        reply.said_at > seen.latest.said_at ||
+        (reply.said_at === seen.latest.said_at && reply.id > seen.latest.id);
+      waiting.set(reply.root_id, {
+        root: reply.root,
+        unread: (seen?.unread ?? 0) + 1,
+        latest: newer ? reply : (seen?.latest ?? reply),
+      });
+    }
+    if (waiting.size === 0) return [];
+    const counted = new Map(
+      this.db
+        .all<{ root_id: number; n: number }>(sql`
+          SELECT m.root_message_id AS root_id, count(*) AS n
+          ${this.repliesPlace(sessionId, [...waiting.keys()])}
+            AND COALESCE(m.sender_account_id, '') NOT GLOB 'automated::*'
+          GROUP BY m.root_message_id
+        `)
+        .map((row) => [row.root_id, row.n]),
+    );
+    const latest = new Map(
+      this.linesByKey(
+        sessionId,
+        [...waiting.values()].map((entry) => entry.latest.key),
+      ).map((row) => [row.id, row]),
+    );
+    return [...waiting.entries()]
+      .flatMap(([rootId, entry]): (ConciergeOutside & { at: number; order: number })[] => {
+        const row = latest.get(entry.latest.key);
+        return row
+          ? [
+              {
+                root: entry.root,
+                replyCount: counted.get(rootId) ?? entry.unread,
+                unreadCount: entry.unread,
+                latestUnread: storedLine(row),
+                at: entry.latest.said_at,
+                order: entry.latest.id,
+              },
+            ]
+          : [];
+      })
+      .sort((a, b) => a.at - b.at || a.order - b.order)
+      .map(({ at: _at, order: _order, ...outside }) => outside);
+  }
+
+  /** The transcript lines keyed `keys`, in the order they were said. */
+  private linesByKey(sessionId: string, keys: readonly string[]): LineRow[] {
+    return this.db.all<LineRow>(sql`
+      SELECT * FROM ${sessionLines([sessionId])}
+      WHERE id IN (SELECT value FROM json_each(${JSON.stringify(keys)}))
+        AND role IN ('user', 'assistant')
+      ORDER BY created_at, seq
+    `);
+  }
+
   override async getMessagesBatch(sessionIds: string[]) {
     if (sessionIds.length === 0) return [];
     return this.selectLines(sessionIds).map(
@@ -1193,6 +1444,16 @@ function partsOf(content: string): MessagePart[] {
   }
   return [{ type: "text", content }];
 }
+
+/** A main-line message found by its place, before its lines are read. */
+interface MainLineKey {
+  id: number;
+  key: string;
+  said_at: number;
+}
+
+/** A message that replies to none: its own root. */
+const MAIN_LINE = sql`(m.root_message_id IS NULL OR m.root_message_id = m.id)`;
 
 interface LineRow {
   id: string;

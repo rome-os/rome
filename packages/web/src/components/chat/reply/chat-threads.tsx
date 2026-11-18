@@ -53,19 +53,6 @@ export function useChatThreads(): ChatThreads | null {
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
   Partial<Pick<ChatMessage, "content" | "chatThreadTitle" | "read" | "sender">>;
 
-/** The distinct roots named by replies but absent from this page, in first-reference order. */
-export function missingThreadRoots(messages: readonly ThreadTimelineMessage[]): string[] {
-  const loaded = new Set(messages.map((message) => message.id));
-  return [
-    ...new Set(
-      messages.flatMap((message) => {
-        const root = message.chatThreadId;
-        return root && root !== message.id && !loaded.has(root) ? [root] : [];
-      }),
-    ),
-  ];
-}
-
 /** How much of a root's text names its thread. */
 const THREAD_NAME_MAX = 50;
 
@@ -117,9 +104,12 @@ export function threadsOf(messages: readonly ThreadTimelineMessage[]): {
 
 /**
  * The stack of each thread with replies in a loaded timeline, by root, and the
- * replies that stand in a stack. A reply stands in it only when its root is
- * loaded: a reply whose root has not paged in yet stays a message of the
- * timeline, so it is never out of sight with nothing to hold it.
+ * replies that stand in a stack. Every reply stands in one, whether its root
+ * is loaded or not: a Concierge chat never draws a reply in the main line. A
+ * thread whose root is not loaded still has its stack, which only a pill
+ * shows, until the reader reads down to the root and the stack draws under
+ * it. A thread with a loaded root has all its replies, as the server pages
+ * them with it, so its counts are whole.
  */
 function stacksOf(
   messages: readonly ThreadTimelineMessage[],
@@ -129,7 +119,7 @@ function stacksOf(
   const stacked = new Set<string>();
   messages.forEach((message, at) => {
     const root = roots.get(message.id);
-    if (root === undefined || root === message.id || roots.get(root) !== root) return;
+    if (root === undefined || root === message.id) return;
     stacked.add(message.id);
     // What the owner reads: a message the timeline draws, and no automation's.
     if (message.role !== "user" && message.role !== "assistant") return;
@@ -148,20 +138,27 @@ function stacksOf(
   return { stacks, stacked };
 }
 
+const NO_HINTS: ReadonlyMap<string, string> = new Map();
+
 /**
  * What a loaded timeline shows of its chat threads, with the thread in `focus`.
  * Unless `stacking` is off, as in a share, where a message is shown itself
  * and not as a stack, the main timeline leaves the replies out for stacks. A thread
  * in focus shows its own replies in place of its stack. The other threads'
  * replies stay out: the focus hides their threads anyway, so drawing them
- * would only be work, and a flash while the chat changes.
+ * would only be work, and a flash while the chat changes. `hints` name the
+ * threads whose root is not loaded, by root: the first words of what a reply
+ * quotes, when the thread has no task title.
  */
 export function chatThreadsOf(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
   stacking = true,
+  hints: ReadonlyMap<string, string> = NO_HINTS,
 ): ChatThreads {
   const { roots, titles } = threadsOf(messages);
+  // A thread whose root is not loaded is named by what the server read of it.
+  for (const [root, hint] of hints) if (!titles.has(root)) titles.set(root, hint);
   const { stacks, stacked } = stacking
     ? stacksOf(messages, roots)
     : { stacks: new Map<string, ThreadStack>(), stacked: new Set<string>() };
@@ -220,8 +217,12 @@ export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
   stacking = true,
+  hints: ReadonlyMap<string, string> = NO_HINTS,
 ): ChatThreads {
-  return useMemo(() => chatThreadsOf(messages, focus, stacking), [messages, focus, stacking]);
+  return useMemo(
+    () => chatThreadsOf(messages, focus, stacking, hints),
+    [messages, focus, stacking, hints],
+  );
 }
 
 /**

@@ -12,7 +12,6 @@ import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
-import type { ChatMessagePage } from "@/lib/chat-api";
 import type { MessageListProps } from "./MessageList";
 import { useChatThreads } from "./reply/chat-threads";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
@@ -208,7 +207,7 @@ function renderChatComponent(
     // Answers `/api/concierge/session` once it resolves; a chat's messages 404 until then.
     conciergeCreated?: Promise<void>;
     conciergeChatsGate?: Promise<void>;
-    messagePage?: (url: string) => ChatMessagePage | Promise<ChatMessagePage>;
+    messagePage?: (url: string) => unknown;
   },
   initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
@@ -333,14 +332,10 @@ describe("ChatComponent draft file drops", () => {
 });
 
 describe("ChatComponent topic chat reload", () => {
-  it("loads thread roots before the delayed Concierge list identifies the topic chat", async () => {
+  it("reads a topic chat by its main line before the Concierge list names it, and stacks its replies from the first frame", async () => {
     let releaseChats!: () => void;
-    let resolveOlder!: (page: ChatMessagePage) => void;
     const conciergeChatsGate = new Promise<void>((resolve) => {
       releaseChats = resolve;
-    });
-    const older = new Promise<ChatMessagePage>((resolve) => {
-      resolveOlder = resolve;
     });
     const root = {
       id: "root",
@@ -352,27 +347,37 @@ describe("ChatComponent topic chat reload", () => {
       chatThreadId: "root",
     };
     const reply = { ...root, id: "reply", createdAt: "2026-11-09T10:00:00.000Z" };
-    const messagePage = rs.fn((url: string) =>
-      new URL(url, "http://localhost").searchParams.has("before")
-        ? older
-        : { messages: [reply], nextCursor: "newest" },
-    );
+    // The thread comes whole with its root, so no second read looks for it.
+    const messagePage = rs.fn((_url: string) => ({
+      type: "concierge",
+      mainLine: [
+        {
+          message: root,
+          thread: {
+            replyCount: 1,
+            unreadCount: 0,
+            lastReplyAt: reply.createdAt,
+            replies: [reply],
+          },
+        },
+      ],
+      outside: [],
+      nextCursor: null,
+      hasMore: false,
+    }));
     renderChatComponent(
       { sessionId: "topic-1" },
       { sessions: [], projects: [], conciergeChatsGate, messagePage },
       "/chat/topic-1",
     );
-    await waitFor(() => expect(messagePage).toHaveBeenCalledTimes(2));
-    expect(messagePage.mock.calls[0]?.[0]).toContain("limit=10");
-    expect(messagePage.mock.calls[1]?.[0]).toContain("before=newest");
-    expect(transcriptFrames).toEqual([]);
-
-    await act(async () => resolveOlder({ messages: [root], nextCursor: "older" }));
     await waitFor(() =>
       expect(screen.getByTestId("message-list").dataset.messageIds).toBe("root,reply"),
     );
+    expect(messagePage).toHaveBeenCalledOnce();
+    expect(messagePage.mock.calls[0]?.[0]).toContain("type=concierge");
+    expect(messagePage.mock.calls[0]?.[0]).toContain("limit=40");
     expect(screen.getByTestId("message-list").dataset.variant).toBe("default");
-    expect(transcriptFrames[0]?.ids).toEqual(["root", "reply"]);
+    expect(transcriptFrames[0]?.stacked).toEqual(["reply"]);
 
     await act(async () => releaseChats());
     await waitFor(() =>
@@ -380,9 +385,9 @@ describe("ChatComponent topic chat reload", () => {
     );
     const conciergeFrames = transcriptFrames.filter((frame) => frame.variant === "concierge");
     expect(conciergeFrames.length).toBeGreaterThan(0);
-    expect(conciergeFrames.every((frame) => frame.stacked.includes("reply"))).toBe(true);
+    expect(transcriptFrames.every((frame) => frame.stacked.includes("reply"))).toBe(true);
     expect(transcriptFrames.every((frame) => frame.ids.includes("root"))).toBe(true);
-    expect(messagePage).toHaveBeenCalledTimes(2);
+    expect(messagePage).toHaveBeenCalledOnce();
   });
 });
 

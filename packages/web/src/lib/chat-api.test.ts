@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { postSessionTurn } from "./chat-api";
+import type { ChatMessage } from "./chat-types";
+import { conciergePageOf, listSessionMessagePage, postSessionTurn } from "./chat-api";
 
 afterEach(() => {
   rs.unstubAllGlobals();
@@ -203,5 +204,134 @@ describe("postSessionTurn", () => {
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(NeverUsedXHR.created).toBe(0);
+  });
+});
+
+const line = (id: string, minute: number): ChatMessage =>
+  ({
+    id,
+    sessionId: "s1",
+    turnId: null,
+    role: "user",
+    content: "[]",
+    createdAt: new Date(Date.UTC(2026, 9, 27, 12, minute)).toISOString(),
+  }) as ChatMessage;
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+describe("conciergePageOf", () => {
+  it("flattens the main line, each thread's replies and the waiting replies into the messages the chat keeps", () => {
+    const page = conciergePageOf({
+      mainLine: [
+        { message: line("m1", 5), thread: { replies: [line("r1", 6), line("r2", 7)] } },
+        { message: line("m2", 8), thread: null },
+      ],
+      outside: [{ root: "old", title: "Trip", latestUnread: line("o1", 9) }],
+      nextCursor: "c1",
+      layout: [],
+    });
+
+    expect(page.messages.map((message) => message.id)).toEqual(["m1", "r1", "r2", "m2", "o1"]);
+    expect(page.concierge?.body.map((message) => message.id)).toEqual(["m1", "r1", "r2", "m2"]);
+    expect(page.nextCursor).toBe("c1");
+    expect(page.layout).toEqual([]);
+    // The oldest main-line message, not a reply nor a waiting thread's.
+    expect(page.concierge?.oldestAt).toBe(Date.parse(line("m1", 5).createdAt));
+    expect(page.concierge?.titles).toEqual(new Map([["old", "Trip"]]));
+  });
+
+  it("reads an empty page", () => {
+    const page = conciergePageOf({ mainLine: [], outside: [], nextCursor: null });
+    expect(page.messages).toEqual([]);
+    expect(page.concierge?.oldestAt).toBeNull();
+    expect("layout" in page).toBe(false);
+  });
+});
+
+describe("listSessionMessagePage", () => {
+  const stub = (...responses: Response[]) => {
+    const fetchMock = rs.fn();
+    for (const response of responses) fetchMock.mockResolvedValueOnce(response);
+    rs.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+
+  it("asks for the Concierge paging and reads its answer", async () => {
+    const fetchMock = stub(
+      json({
+        type: "concierge",
+        mainLine: [{ message: line("m1", 1), thread: null }],
+        outside: [],
+        nextCursor: null,
+        hasMore: false,
+      }),
+    );
+
+    const page = await listSessionMessagePage("s1", {
+      limit: 40,
+      before: "c0",
+      through: "m0",
+      concierge: { fallbackLimit: 10 },
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/chat/sessions/s1/messages?limit=40&type=concierge&before=c0&through=m0",
+    );
+    expect(page?.concierge).toBeDefined();
+    expect(page?.messages.map((message) => message.id)).toEqual(["m1"]);
+  });
+
+  it("takes an answer by turns from a server that does not know the paging mode", async () => {
+    stub(json({ messages: [line("m1", 1)], nextCursor: "t1" }));
+
+    const page = await listSessionMessagePage("s1", {
+      limit: 40,
+      concierge: { fallbackLimit: 10 },
+    });
+
+    expect(page).toEqual({ messages: [line("m1", 1)], nextCursor: "t1" });
+  });
+
+  it("reads by turns again when the chat says it is not a Concierge chat", async () => {
+    const fetchMock = stub(
+      json({ error: "Not a Concierge chat", code: "not_concierge" }, 400),
+      json({ messages: [line("m1", 1)], nextCursor: "t1" }),
+    );
+
+    const page = await listSessionMessagePage("s1", {
+      limit: 40,
+      concierge: { fallbackLimit: 10 },
+    });
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/chat/sessions/s1/messages?limit=40&type=concierge",
+      "/api/chat/sessions/s1/messages?limit=10",
+    ]);
+    expect(page).toEqual({ messages: [line("m1", 1)], nextCursor: "t1" });
+    expect(page?.concierge).toBeUndefined();
+  });
+
+  it("answers null for a chat that does not exist, and throws on any other refusal", async () => {
+    stub(json({ error: "Session not found" }, 404));
+    await expect(
+      listSessionMessagePage("s1", { limit: 40, concierge: { fallbackLimit: 10 } }),
+    ).resolves.toBeNull();
+
+    stub(json({ error: "Invalid before cursor" }, 400));
+    await expect(
+      listSessionMessagePage("s1", { limit: 40, concierge: { fallbackLimit: 10 } }),
+    ).rejects.toMatchObject({ status: 400, message: "Invalid before cursor" });
+  });
+
+  it("asks by turns, as it always did, without the option", async () => {
+    const fetchMock = stub(json({ messages: [], nextCursor: null }));
+
+    await listSessionMessagePage("s1", { limit: 10, before: "c1" });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/chat/sessions/s1/messages?limit=10&before=c1");
   });
 });

@@ -180,8 +180,12 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
 
 /** One page of a session's history: whole turns, oldest first within the page. */
 export interface ChatMessagePage {
+  /** Every message of the page. */
   messages: ChatMessage[];
-  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  /**
+   * Pass as `before` for the page of older history; null when this page
+   * reaches the start. A cursor reads only in the mode that made it.
+   */
   nextCursor: string | null;
   /**
    * The session's saved workspace layout, as `GET /layout` returns it. Sent on
@@ -189,11 +193,59 @@ export interface ChatMessagePage {
    * older pages.
    */
   layout?: unknown[] | null;
+  /**
+   * Present when the server paged the chat by its main-line messages
+   * (`type=concierge`, docs/domains/chats.md#chat-thread); absent for turn
+   * paging.
+   */
+  concierge?: {
+    /** The messages of the page but the unread replies of threads whose root is older. */
+    body: ChatMessage[];
+    /** When the oldest main-line message of the page was said, in ms; null for an empty page. */
+    oldestAt: number | null;
+    /** The name of each thread that waits with a root that is not on the page, by root, when it has one. */
+    titles: ReadonlyMap<string, string>;
+  };
+}
+
+/** What `GET /messages?type=concierge` answers. */
+interface ConciergeWirePage {
+  mainLine: { message: ChatMessage; thread: { replies: ChatMessage[] } | null }[];
+  outside: { root: string; title: string | null; latestUnread: ChatMessage }[];
+  nextCursor: string | null;
+  layout?: unknown[] | null;
+}
+
+/** Reads a Concierge page into the messages the transcript keeps: the main line, the replies of each thread, and the one unread reply of each thread that waits outside it. */
+export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
+  const body = wire.mainLine.flatMap(({ message, thread }) => [
+    message,
+    ...(thread?.replies ?? []),
+  ]);
+  const times = wire.mainLine.map(({ message }) => Date.parse(message.createdAt));
+  return {
+    messages: [...body, ...wire.outside.map((entry) => entry.latestUnread)],
+    nextCursor: wire.nextCursor,
+    ...(wire.layout === undefined ? {} : { layout: wire.layout }),
+    concierge: {
+      body,
+      oldestAt: times.length > 0 ? Math.min(...times) : null,
+      titles: new Map(
+        wire.outside.flatMap((entry) => (entry.title ? [[entry.root, entry.title] as const] : [])),
+      ),
+    },
+  };
 }
 
 /**
  * The newest `limit` turns of a session, or the `limit` turns before `before`.
  * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ *
+ * With `concierge`, the page is asked for by main-line messages and each
+ * brings its thread whole. A chat that is not a Concierge chat refuses, and the
+ * read is made again by turns, `fallbackLimit` of them, so a caller that does
+ * not know the chat yet reads either kind. Which way it was paged is in the
+ * page's `concierge`.
  */
 export async function listSessionMessagePage(
   sessionId: string,
@@ -202,14 +254,42 @@ export async function listSessionMessagePage(
     before?: string | null;
     /** A message the page must reach, however far back: one read lands on it. */
     through?: string;
+    concierge?: { fallbackLimit: number };
   },
 ): Promise<ChatMessagePage | null> {
-  const params = new URLSearchParams({ limit: String(options.limit) });
-  if (options.before) params.set("before", options.before);
-  if (options.through) params.set("through", options.through);
-  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
-    credentials: "include",
-  });
+  const read = (params: URLSearchParams) =>
+    fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, { credentials: "include" });
+  const query = (limit: number, concierge: boolean) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (concierge) params.set("type", "concierge");
+    if (options.before) params.set("before", options.before);
+    if (options.through) params.set("through", options.through);
+    return params;
+  };
+  if (options.concierge) {
+    const res = await read(query(options.limit, true));
+    if (res.status === 404) return null;
+    if (res.ok) {
+      const body = (await res.json()) as ConciergeWirePage | ChatMessagePage;
+      // A server that does not know the paging mode answers by turns.
+      return "mainLine" in body ? conciergePageOf(body) : body;
+    }
+    const payload = await readErrorPayload(res);
+    const code = payload && typeof payload === "object" && "code" in payload ? payload.code : null;
+    if (res.status !== 400 || code !== "not_concierge") {
+      throw new ChatApiError(
+        payload && typeof payload === "object" && "error" in payload
+          ? String(payload.error)
+          : `Request failed with status ${res.status}`,
+        res.status,
+        payload,
+      );
+    }
+    const turns = await read(query(options.concierge.fallbackLimit, false));
+    if (turns.status === 404) return null;
+    return jsonOrThrow<ChatMessagePage>(turns);
+  }
+  const res = await read(query(options.limit, false));
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessagePage>(res);
 }
