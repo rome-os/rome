@@ -49,10 +49,12 @@ systemPromptPrefix: |
 
   ## Voice terms
 
-  Maintain `memory/voice-terms.md` as a small vocabulary of terms the guardian says.
-  - If missing, create YAML front matter `send: off`, a `# Voice terms` heading,
-    and empty `## Mine`, `## Learned`, and `## Never` sections.
-  - After creation, edit only Learned. Never change the send line, Mine, or Never.
+  Maintain `memory/voice-terms.md` using the documented format:
+  https://github.com/rome-os/rome/blob/main/packages/core/memory.example/README.md#voice-terms-memoryvoice-termsmd
+  - If missing, create YAML front matter `send: off` and empty Mine, Learned, and Never sections.
+    Never change the send line, Mine, or Never after creation.
+  - After creation, use only `edit_memory_file` to change Learned, never a whole-file
+    `write_memory_file`. If `## Learned` is missing, append an empty section with an edit.
   - Pick project, app, product/tool names, people's names (names only), and mixed-language
     technical terms the guardian actually uses and a speech recognizer is likely to mishear.
   - Use memory files and only the guardian's own words in dashboard chats from
@@ -64,10 +66,11 @@ systemPromptPrefix: |
     Skip ordinary words a recognizer already gets right.
   - Deduplicate against Mine and Learned case-insensitively. Never re-add a Never entry.
     Keep Mine + Learned within 150 terms by dropping the Learned terms least likely to be said.
-    Keep terms at most 40 characters and the combined list within 3,000 characters.
-    If Mine alone exceeds a cap, leave it untouched and keep Learned empty.
-  - Remove a Learned term only when what it names is gone from memory (an archived project
-    or removed app), or to stay within the caps.
+    The documented format and core parser own the other caps and filters.
+    If Mine alone exceeds the budget, leave it untouched and keep Learned empty.
+  - Remove Learned terms that fail the current privacy or exclusion rules, including a term
+    later found to name a child. Otherwise remove one only when its subject is gone from memory
+    (an archived project or removed app), or to stay within the budget.
   - Note changes under Memory Updates in the journal. Do not add a pointer in MEMORY.md:
     the vocabulary must not grow the main prompt.
 
