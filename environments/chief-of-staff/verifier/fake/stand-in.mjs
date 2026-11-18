@@ -115,11 +115,18 @@ function answer(state, message, breaks) {
   if (a7Case && !k5.some((q) => q.q === text))
     return `${a7Case.tokens[0]} (source: ${ROSTER_LINK}).`;
 
-  // A2 and A8: facts said without a mention, recalled from the chat.
-  const fact = [...hearing.a2Facts, ...hearing.a8Facts].find((f) => f.question === text);
+  // A2, A8 and A9 to A12: facts said without a mention, recalled from the chat.
+  const fact = [
+    ...hearing.a2Facts,
+    ...hearing.a8Facts,
+    ...hearing.a9Facts,
+    hearing.a10.unlinkedFact,
+    hearing.a11.fact,
+    hearing.a12,
+  ].find((f) => f.question === text);
   if (fact) {
     const said = state.messages.find((m) => m.text === fact.text);
-    return said && remembers(state, said, breaks)
+    return said && !said.unheard && remembers(state, said, breaks)
       ? `${fact.text} (${link(said)})`
       : "I don't know; nobody has told me that.";
   }
@@ -192,6 +199,19 @@ export function respond({ agent, state, message, catchUp = false }) {
       text: "I have nothing I can share about that here.",
     };
   const breaks = agent.startsWith("fail-") ? agent.slice("fail-".length) : null;
+  // Another bot's message, or a mention of the second bot, is heard but never answered,
+  // except by "fail-A12" and "fail-A11".
+  if (message.author === "driver" && breaks !== "A12") return null;
+  if (message.mentionsSecond && !message.mentionsAgent) {
+    return breaks === "A11"
+      ? {
+          chat: message.chat,
+          thread: message.thread,
+          text: "Here are the notes.",
+          delaySeconds: 20,
+        }
+      : null;
+  }
   // Hearing every message: a message in a shared chat that does not mention the agent gets no
   // reply, except from "fail-A3", which answers every question it overhears.
   if (!message.mentionsAgent && !message.chat.startsWith("dm-")) {

@@ -1,6 +1,7 @@
 // What the phase 2 rules share: facts said without a mention, the day that passes before
 // they are asked about, and the questions that check the agent heard them.
 import { readFileSync } from "node:fs";
+import { waitForAgent } from "./checks.mjs";
 import { ask, check } from "./scenario.mjs";
 
 export function loadHearing() {
@@ -133,3 +134,49 @@ export async function recallCheck(ctx, facts, saidIds, name) {
 }
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Asks about `fact` with a mention in `general`, from a member other than the one who said
+ * it, and checks the answer holds the fact's distinctive words. `recall: false` checks the
+ * opposite: the answer must not hold them.
+ */
+export async function factCheck(ctx, fact, saidId, name, { recall = true } = {}) {
+  const as = ctx.team.members.map((m) => m.account).find((a) => a !== fact.as.split(":")[0]);
+  const { questionId, reply } = await ask(ctx, { as, chat: "general", text: fact.question });
+  const evidence = [saidId, questionId, reply?.id];
+  const holds = Boolean(reply) && holdsAll(reply.text, fact.tokens);
+  if (recall)
+    return check(
+      name,
+      holds ? "pass" : "fail",
+      reply ? `answer ${reply.id}${holds ? " holds" : " lacks"} the fact` : "no reply",
+      evidence,
+    );
+  // An answer that does not know is right; silence shows nothing either way.
+  if (!reply) return check(name, "not_checked", "no reply to the question", evidence);
+  return check(
+    name,
+    holds ? "fail" : "pass",
+    `answer ${reply.id}${holds ? " repeats" : " does not hold"} the fact`,
+    evidence,
+  );
+}
+
+/**
+ * Whether the agent stays silent in `chats` for `ms` after message `since`: passes on no
+ * agent message, fails on the first one.
+ */
+export async function silentCheck(ctx, { chats, since, ms, name }) {
+  const reply = await waitForAgent(ctx.env, {
+    chats,
+    since,
+    timeoutMs: ms,
+    pollMs: ctx.waits.pollMs,
+  });
+  return check(
+    name,
+    reply ? "fail" : "pass",
+    reply ? `replied in ${reply.id}` : `no reply within ${ms / 1000} s`,
+    [since, reply?.id],
+  );
+}

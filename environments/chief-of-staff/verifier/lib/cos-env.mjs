@@ -25,11 +25,15 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
 
   return {
     agentAuthor,
-    /** Posts as a member and returns the new message's id. */
-    async post({ as, chat, thread, mentionAgent = false, text }) {
+    /**
+     * Posts as a member, or as the driver bot itself with `as: "driver"`, and returns the new
+     * message's id. `mentionSecond` mentions the environment's second Rome bot.
+     */
+    async post({ as, chat, thread, mentionAgent = false, mentionSecond = false, text }) {
       const args = ["post", "--as", as, "--chat", chat];
       if (thread) args.push("--thread", thread);
       if (mentionAgent) args.push("--mention-agent");
+      if (mentionSecond) args.push("--mention-second");
       args.push(text);
       return call(args);
     },
@@ -115,6 +119,21 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
     /** A document the app holds for the agent (`goals` or `roster`), as its current text. */
     async doc(name) {
       return call(["doc", name]);
+    },
+    /**
+     * Resets one of the agent's chats to Rome's defaults, then applies `setting`: `default`,
+     * `mentions-only`, `ignore-others`, `off` or `every`.
+     */
+    async chatSetting(chat, setting) {
+      await call(["chat", chat, setting]);
+    },
+    /** Takes the agent off its connected account. */
+    async unlink() {
+      await call(["unlink"]);
+    },
+    /** Links the agent to its connected account again. */
+    async link() {
+      await call(["link"]);
     },
     async rename({ as, displayName }) {
       await call(["rename", "--as", as, displayName]);

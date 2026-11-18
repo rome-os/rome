@@ -150,6 +150,35 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     });
   }
 
+  const PHASE_3_NEW = ["A9", "A10", "A11", "A12"];
+
+  it("passes A9 to A12 for the good stand-in, reporting A10's unlinked fact unscored", async () => {
+    const { report } = await runAgainst("good", { rules: PHASE_3_NEW, phase: 3 });
+    assert.deepEqual(statuses(report), Object.fromEntries(PHASE_3_NEW.map((r) => [r, "pass"])));
+    const a10 = report.results.find((r) => r.rule === "A10");
+    assert.match(a10.info[0], /stays unknown: pass/);
+  });
+
+  for (const rule of PHASE_3_NEW) {
+    it(`fails ${rule} alone among A9 to A12 for the stand-in that breaks it`, async () => {
+      const { report } = await runAgainst(`fail-${rule}`, { rules: PHASE_3_NEW, phase: 3 });
+      assert.deepEqual(
+        statuses(report),
+        Object.fromEntries(PHASE_3_NEW.map((r) => [r, r === rule ? "fail" : "pass"])),
+      );
+    });
+  }
+
+  it("does not check A11, and checks A9 in part, without the second bot", async () => {
+    const { report } = await runAgainst("good", {
+      rules: ["A9", "A11"],
+      phase: 3,
+      fakeEnv: { COS_FAKE_NO_SECOND_BOT: "1" },
+    });
+    assert.deepEqual(statuses(report), { A9: "pass", A11: "not_checked" });
+    assert.equal(report.results.find((r) => r.rule === "A9").partial, true);
+  });
+
   it("still runs A8 when named, and fails it for the stand-in that breaks it", async () => {
     const { report } = await runAgainst("fail-A8", { rules: ["A8"], phase: 2 });
     assert.deepEqual(statuses(report), { A8: "fail" });

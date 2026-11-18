@@ -13,6 +13,8 @@ if (!statePath) {
   process.exit(2);
 }
 const agent = process.env.COS_FAKE_AGENT ?? "good";
+/** The chat only the environment's second Rome bot reads. */
+const SECOND_BOT_CHAT = "second-bot-only";
 
 // The verifier runs some commands at once, as K5 does, and each one reads and rewrites the
 // whole state file, so one command holds the state at a time.
@@ -105,6 +107,7 @@ const { values, positionals } = parseArgs({
     thread: { type: "string" },
     since: { type: "string" },
     "mention-agent": { type: "boolean", default: false },
+    "mention-second": { type: "boolean", default: false },
   },
 });
 
@@ -131,10 +134,26 @@ switch (command) {
   case "rename":
     state.displayNames[values.as] = positionals.join(" ");
     break;
+  case "chat":
+    state.chatSettings = { ...state.chatSettings, [positionals[0]]: positionals[1] };
+    break;
+  case "unlink":
+  case "link":
+    state.unlinked = command === "unlink";
+    break;
   case "post": {
+    // COS_FAKE_NO_SECOND_BOT: an environment without the second Rome bot.
+    if (
+      (values["mention-second"] || values.chat === SECOND_BOT_CHAT) &&
+      process.env.COS_FAKE_NO_SECOND_BOT
+    ) {
+      console.error("the second bot is not connected");
+      process.exit(2);
+    }
     // Strict like the real cos-env: a member posts only in chats they can read.
     const readers = state.team?.chats?.[values.chat]?.readers;
-    if (readers && !readers.includes(values.as.split(":")[0])) {
+    // The driver bot reads every test chat.
+    if (readers && values.as !== "driver" && !readers.includes(values.as.split(":")[0])) {
       console.error(`cos-env: ${values.as} is not in #${values.chat}`);
       process.exit(2);
     }
@@ -150,12 +169,21 @@ switch (command) {
       text: positionals.join(" "),
       mentionsAgent: values["mention-agent"],
     });
+    message.mentionsSecond = values["mention-second"];
+    // What reaches the agent: nothing while it is unlinked, nothing said where only the
+    // second bot reads, and with "fail-A9" nothing in a chat off Rome's defaults.
+    const setting = state.chatSettings?.[message.chat] ?? "default";
+    message.unheard =
+      state.unlinked ||
+      (message.chat === SECOND_BOT_CHAT && agent !== "fail-A11") ||
+      (agent === "fail-A9" && setting !== "default");
+    if (state.unlinked && agent === "fail-A10") message.unheard = false;
     // COS_FAKE_RESTART_ON: the first message containing it is lost to a Rome restart.
     const lostTo = process.env.COS_FAKE_RESTART_ON;
     if (lostTo && message.text.includes(lostTo) && !state.lostOnce) {
       state.lostOnce = true;
       state.romeStarts = (state.romeStarts ?? 0) + 1;
-    } else if (!state.stopped) agentTurn(message);
+    } else if (!state.stopped && !message.unheard) agentTurn(message);
     console.log(message.id);
     break;
   }

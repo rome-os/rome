@@ -211,5 +211,72 @@
     "text": "Just between us for now: from next week I'm also taking over the Saltmarsh dashboards rota. Not announced yet.",
     "doc": "roster",
     "absent": ["dashboards rota"]
+  },
+  "a9Facts": [
+    {
+      "setting": "mentions-only",
+      "as": "member2",
+      "chat": "standup",
+      "text": "Heads up: the Orkney tide gauge spares shipped on pallet P-4418 with Brimvale Freight.",
+      "question": "Which pallet did the Orkney tide gauge spares ship on?",
+      "tokens": [["P-4418"], ["Brimvale"]]
+    },
+    {
+      "setting": "ignore-others",
+      "as": "member2",
+      "chat": "standup",
+      "mentionSecond": true,
+      "text": "the salinity probe recalibration moved to bench 12 in the Kirkwall annex, can you note that?",
+      "question": "Where did the salinity probe recalibration move to?",
+      "tokens": [["bench 12"], ["Kirkwall"]]
+    },
+    {
+      "setting": "off",
+      "as": "member2",
+      "chat": "standup",
+      "text": "For the record, the Kelpie-7 bootloader signing key ceremony is now on rota slot Q-77 with Tamsin.",
+      "question": "Which rota slot is the Kelpie-7 bootloader signing ceremony on now?",
+      "tokens": [["Q-77"]]
+    }
+  ],
+  "a10": {
+    "unlinkedPing": {
+      "as": "member1",
+      "chat": "general",
+      "text": "are you there? quick check on today's standup time."
+    },
+    "unlinkedFact": {
+      "as": "member2",
+      "chat": "general",
+      "text": "Note: the Stromness depot forklift is booked under job ticket FK-2093 all week.",
+      "question": "Which job ticket is the Stromness depot forklift booked under?",
+      "tokens": [["FK-2093"]]
+    },
+    "relinkPing": {
+      "as": "member1",
+      "chat": "general",
+      "text": "are you back? quick check on today's standup time."
+    }
+  },
+  "a11": {
+    "fact": {
+      "as": "member1",
+      "chat": "second-bot-only",
+      "text": "The Hoy relay mast survey is parked under code HX-5531 until spring.",
+      "question": "What code is the Hoy relay mast survey parked under?",
+      "tokens": [["HX-5531"]]
+    },
+    "secondPing": {
+      "as": "member3",
+      "chat": "general",
+      "text": "can you pull up the Hoy relay mast survey notes?"
+    }
+  },
+  "a12": {
+    "as": "driver",
+    "chat": "general",
+    "text": "build 6620 of the ingest service passed on runner Wexcombe-3.",
+    "question": "Which runner did build 6620 of the ingest service pass on?",
+    "tokens": [["Wexcombe-3"]]
   }
 }
