@@ -267,6 +267,35 @@ export function useVoiceInput({
     return () => watching.disconnect();
   }, [state, stop, textareaRef]);
 
+  // The screen stays on while voice input is on: a guardian dictating does not
+  // touch the device. The browser drops the lock whenever the page is hidden,
+  // so it is asked for again when the page shows.
+  const on = state !== "idle";
+  useEffect(() => {
+    const wakeLock = typeof navigator === "undefined" ? undefined : navigator.wakeLock;
+    if (!on || !wakeLock) return;
+    let held: WakeLockSentinel | null = null;
+    let ended = false;
+    const hold = () => {
+      if (document.visibilityState !== "visible") return;
+      wakeLock.request("screen").then(
+        (sentinel) => {
+          if (ended) void sentinel.release();
+          else held = sentinel;
+        },
+        // A refused lock, as on low battery, leaves dictation as it was.
+        () => {},
+      );
+    };
+    hold();
+    document.addEventListener("visibilitychange", hold);
+    return () => {
+      ended = true;
+      document.removeEventListener("visibilitychange", hold);
+      void held?.release();
+    };
+  }, [on]);
+
   const level = useCallback(() => dictationRef.current?.level() ?? 0, []);
 
   return {
