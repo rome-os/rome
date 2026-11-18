@@ -659,8 +659,8 @@
       "sendFallback": "Failed to send message.",
       "stopFallback": "Failed to stop generation.",
       "stopStatus": "Stop failed ({{status}}).",
-      "reconnecting": "Lost the connection to Rome, which may be restarting. Reconnecting…",
-      "unreachable": "Can't reach Rome, which may be restarting. Try again in a moment."
+      "reconnecting": "Updating now, reconnecting…",
+      "unreachable": "Updating now, try again soon."
     }
   },
   "empty": {
