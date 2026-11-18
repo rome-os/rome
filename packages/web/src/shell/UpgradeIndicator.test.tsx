@@ -278,15 +278,31 @@ describe("UpgradeIndicator", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
-  it("reads an upgrade already in progress as updating", async () => {
-    mockBackend({
-      check: [available("1.1.0", "1.2.0")],
-      upgrade: [{ status: 409, body: { error: "upgrade_in_progress" } }],
-    });
+  it.each([
+    ["the code alone", { status: 409, body: { error: "upgrade_in_progress" } }],
+    [
+      "the code with a sentence",
+      {
+        status: 409,
+        body: {
+          error: "upgrade_in_progress",
+          message: "Cannot update your Rome while it is upgrading",
+        },
+      },
+    ],
+    [
+      "the sentence alone",
+      { status: 400, body: { error: "Cannot update your Rome while it is upgrading" } },
+    ],
+  ])("reads an upgrade already in progress, refused with %s, as updating", async (_shape, refusal) => {
+    // Started elsewhere: another tab or device, or this page before a reload.
+    mockBackend({ check: [available("1.1.0", "1.2.0")], upgrade: [refusal] });
     renderIndicator();
     await confirm(userEvent.setup());
 
     expect(await screen.findByRole("status", { name: UPDATING })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upgrade and restart" })).toBeNull();
+    expect(screen.queryByText(/Upgrade request failed/)).toBeNull();
   });
 
   it("gives the dialog back when the upgrade request times out", async () => {
