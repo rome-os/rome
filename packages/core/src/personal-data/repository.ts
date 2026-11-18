@@ -1,6 +1,6 @@
 // The personal-data store's one way into the database. Concept: docs/personal-data.md.
 
-import { and, asc, count, desc, eq, gt, gte, lt, max, min, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, isNull, lt, max, min, ne, or, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   personalDataIngests,
@@ -15,6 +15,8 @@ import {
   MAX_POINTS_PER_TYPE,
   type PointInput,
   type Rejected,
+  type SnapshotWindow,
+  snapshotWindow,
 } from "./domain/ingest.js";
 import type { StoredPoint } from "./domain/query.js";
 import type { Resolution, Shape, SourceSpec } from "./domain/source.js";
@@ -37,6 +39,18 @@ export interface IngestResponse {
   deleted: number;
   rejected: Rejected[];
   receivedAt: string;
+  /** The types whose snapshot this batch committed, now or by an earlier try. */
+  committed?: string[];
+}
+
+/** The origin a query reads for one type, and how far it covers. */
+export interface OriginReading {
+  origin: string;
+  syncedThroughAt: number | null;
+  earliestAt: number | null;
+  /** The window its last committed snapshot holds whole, if it sends one. */
+  snapshotStartAt: number | null;
+  snapshotEndAt: number | null;
 }
 
 export interface CatalogType {
@@ -159,7 +173,19 @@ export class PersonalDataRepository {
           return;
         }
         const item = checked.item;
-        const outcome = writePoint(tx, source.source, origin, item, ingestId, receivedAt, stored);
+        const stamp =
+          envelope.snapshot && typeSpec(source, item.type)?.syncedBackDays !== undefined
+            ? envelope.snapshot.id
+            : null;
+        const outcome = writePoint(
+          tx,
+          source.source,
+          origin,
+          item,
+          { ingestId, snapshotId: stamp },
+          receivedAt,
+          stored,
+        );
         if (outcome === "type_cap") {
           refusedTypes.add(item.type);
           rejected.push({ index, key: item.key, code: "type_cap" });
@@ -200,6 +226,23 @@ export class PersonalDataRepository {
         for (const row of gone) touched.add(row.type);
       });
 
+      const committed: string[] = [];
+      const windows = new Map<string, SnapshotWindow>();
+      for (const window of envelope.snapshot?.windows ?? []) {
+        const spec = typeSpec(source, window.type);
+        // A type with a refused item is not whole: its last snapshot stays.
+        if (!spec || !envelope.snapshot || refusedTypes.has(window.type)) continue;
+        const accepted = snapshotWindow(spec, envelope.snapshot, window, receivedAt);
+        if (!accepted) continue;
+        const outcome = commitSnapshot(tx, source.source, origin, window.type, accepted);
+        if (outcome === "stale") continue;
+        committed.push(window.type);
+        if (outcome === "repeat") continue;
+        counts.deleted += outcome.deleted;
+        windows.set(window.type, accepted);
+        touched.add(window.type);
+      }
+
       const syncedThrough = new Map<string, number>();
       for (const entry of envelope.types) {
         if (!typeSpec(source, entry.type) || !entry.syncedThrough) continue;
@@ -210,7 +253,15 @@ export class PersonalDataRepository {
         touched.add(entry.type);
       }
       for (const type of touched) {
-        refreshType(tx, source, origin, type, syncedThrough.get(type), receivedAt);
+        refreshType(
+          tx,
+          source,
+          origin,
+          type,
+          syncedThrough.get(type),
+          receivedAt,
+          windows.get(type),
+        );
       }
 
       const status = rejected.length > 0 ? "partial" : "ok";
@@ -220,6 +271,7 @@ export class PersonalDataRepository {
         ...counts,
         rejected,
         receivedAt: new Date(receivedAt).toISOString(),
+        ...(committed.length > 0 ? { committed } : {}),
       };
       tx.update(personalDataIngests)
         .set({
@@ -306,12 +358,18 @@ export class PersonalDataRepository {
     source: string,
     type: string,
     windowStart: number,
-  ): { origin: string; syncedThroughAt: number | null; earliestAt: number | null } | undefined {
+    windowEnd = windowStart,
+  ): OriginReading | undefined {
+    // A snapshot that holds the whole window wins whatever else is stored,
+    // an empty one too, and the one the device read last among those.
+    const holds = sql`coalesce(${personalDataTypes.snapshotStartAt} <= ${windowStart} and ${personalDataTypes.snapshotEndAt} >= ${windowEnd}, 0)`;
     return this.db
       .select({
         origin: personalDataTypes.origin,
         syncedThroughAt: personalDataTypes.syncedThroughAt,
         earliestAt: personalDataTypes.earliestAt,
+        snapshotStartAt: personalDataTypes.snapshotStartAt,
+        snapshotEndAt: personalDataTypes.snapshotEndAt,
       })
       .from(personalDataTypes)
       .innerJoin(
@@ -329,6 +387,8 @@ export class PersonalDataRepository {
         ),
       )
       .orderBy(
+        sql`${holds} desc`,
+        sql`case when ${holds} then ${personalDataTypes.snapshotReadAt} else 0 end desc`,
         sql`coalesce(${personalDataTypes.earliestAt} <= ${windowStart}, 0) desc`,
         sql`coalesce(${personalDataTypes.syncedThroughAt}, 0) desc`,
         sql`coalesce(${personalDataTypes.latestAt}, 0) desc`,
@@ -620,12 +680,17 @@ function writePoint(
   source: string,
   origin: string,
   item: PointInput,
-  ingestId: number,
+  by: { ingestId: number; snapshotId: string | null },
   now: number,
   stored: Map<string, number>,
 ): "inserted" | "updated" | "unchanged" | "type_cap" {
+  const { ingestId, snapshotId } = by;
   const existing = tx
-    .select({ id: personalDataPoints.id, hash: personalDataPoints.contentHash })
+    .select({
+      id: personalDataPoints.id,
+      hash: personalDataPoints.contentHash,
+      snapshotId: personalDataPoints.snapshotId,
+    })
     .from(personalDataPoints)
     .where(
       and(
@@ -635,7 +700,16 @@ function writePoint(
       ),
     )
     .get();
-  if (existing?.hash === item.contentHash) return "unchanged";
+  if (existing?.hash === item.contentHash) {
+    // Sent again as it is: only the snapshot that holds it changes.
+    if (snapshotId !== null && existing.snapshotId !== snapshotId) {
+      tx.update(personalDataPoints)
+        .set({ snapshotId })
+        .where(eq(personalDataPoints.id, existing.id))
+        .run();
+    }
+    return "unchanged";
+  }
   const values = {
     type: item.type,
     shape: item.shape,
@@ -649,6 +723,7 @@ function writePoint(
     metadata: item.metadata,
     contentHash: item.contentHash,
     ingestId,
+    ...(snapshotId !== null ? { snapshotId } : {}),
     updatedAt: now,
   };
   if (existing) {
@@ -690,6 +765,7 @@ function refreshType(
   type: string,
   syncedThroughAt: number | undefined,
   now: number,
+  snapshot?: SnapshotWindow,
 ): void {
   const spec = typeSpec(source, type);
   if (!spec) return;
@@ -715,6 +791,14 @@ function refreshType(
     earliestAt: stats?.earliest ?? null,
     latestAt: stats?.latest ?? null,
     pointCount: stats?.n ?? 0,
+    ...(snapshot
+      ? {
+          snapshotId: snapshot.id,
+          snapshotStartAt: snapshot.startAt,
+          snapshotEndAt: snapshot.endAt,
+          snapshotReadAt: snapshot.readAt,
+        }
+      : {}),
     updatedAt: now,
   };
   tx.insert(personalDataTypes)
@@ -738,4 +822,51 @@ function refreshType(
             },
     })
     .run();
+}
+
+/**
+ * Commits one type's snapshot: deletes the origin's rows of the type inside
+ * the window that another snapshot, or none, sent. "repeat" when this
+ * snapshot is the one already committed, so a retry after a lost answer
+ * changes nothing; "stale" when a newer snapshot is committed already.
+ *
+ * Only rows strictly inside the window go: one that only touches an edge
+ * stays. The device sends every event that touches the window, edges
+ * included, so nothing still in its calendar is deleted.
+ */
+function commitSnapshot(
+  tx: DrizzleTx,
+  source: string,
+  origin: string,
+  type: string,
+  window: SnapshotWindow,
+): "repeat" | "stale" | { deleted: number } {
+  const current = tx
+    .select({ id: personalDataTypes.snapshotId, readAt: personalDataTypes.snapshotReadAt })
+    .from(personalDataTypes)
+    .where(
+      and(
+        eq(personalDataTypes.source, source),
+        eq(personalDataTypes.origin, origin),
+        eq(personalDataTypes.type, type),
+      ),
+    )
+    .get();
+  if (current?.id === window.id) return "repeat";
+  if (current?.readAt != null && window.readAt <= current.readAt) return "stale";
+  const gone = tx
+    .delete(personalDataPoints)
+    .where(
+      and(
+        eq(personalDataPoints.source, source),
+        eq(personalDataPoints.origin, origin),
+        eq(personalDataPoints.type, type),
+        lt(personalDataPoints.startAt, window.endAt),
+        gt(personalDataPoints.endAt, window.startAt),
+        or(isNull(personalDataPoints.snapshotId), ne(personalDataPoints.snapshotId, window.id)),
+      ),
+    )
+    .returning({ id: personalDataPoints.id })
+    .all();
+  return { deleted: gone.length };
 }

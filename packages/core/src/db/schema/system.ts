@@ -1559,6 +1559,10 @@ export const personalDataPoints = sqliteTable(
     contentHash: text("content_hash").notNull(),
     // The ingest that last wrote the row.
     ingestId: integer("ingest_id").notNull(),
+    // For a type the device sends as a snapshot of a window: the snapshot
+    // that last sent the row. Its commit deletes the window's rows any other
+    // snapshot sent. Null for a row sent any other way.
+    snapshotId: text("snapshot_id"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
@@ -1588,6 +1592,13 @@ export const personalDataTypes = sqliteTable(
     // What the device reports as complete, not the latest point: a day with no
     // steps still counts as synced.
     syncedThroughAt: integer("synced_through_at"),
+    // The last committed snapshot, for a type the device sends as one: its
+    // id, the window it holds whole, and when the device read it. Null until
+    // the first commit, and for a type sent any other way.
+    snapshotId: text("snapshot_id"),
+    snapshotStartAt: integer("snapshot_start_at"),
+    snapshotEndAt: integer("snapshot_end_at"),
+    snapshotReadAt: integer("snapshot_read_at"),
     pointCount: integer("point_count").notNull().default(0),
     updatedAt: integer("updated_at").notNull(),
   },
