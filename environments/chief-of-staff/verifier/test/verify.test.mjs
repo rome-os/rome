@@ -129,8 +129,6 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     const cost = report.results.find((r) => r.rule === "A3").cost;
     assert.ok(cost.turns > 0, "A3 counts the turns the replay started");
     assert.ok(cost.tokens.input > 0, "A3 sums the turns' tokens");
-    const fast = report.results.find((r) => r.rule === "A3").fastCost;
-    assert.ok(fast.turns > 0, "A3 also costs the replay 1 s apart");
     const markdown = readFileSync(join(outDir, "report.md"), "utf8");
     assert.match(markdown, /\| K7 Keeps private things private \| pass, not scored/);
     assert.match(markdown, /## A3 replay cost/);

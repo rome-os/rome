@@ -146,7 +146,7 @@ export function renderMarkdown(report) {
   }
   if (report.memory) lines.push(...memoryLines(report.memory));
   const a3 = report.results.find((r) => r.rule === "A3");
-  if (a3?.cost) lines.push(...costLines(a3.cost, a3.fastCost));
+  if (a3?.cost) lines.push(...costBlock(a3.cost, "## A3 replay cost"));
   if (report.romeEvents.length > 0) {
     lines.push(
       "",
@@ -160,19 +160,6 @@ export function renderMarkdown(report) {
   }
   lines.push(...failureLines(report.failures));
   return `${lines.join("\n")}\n`;
-}
-
-function costLines(cost, fastCost) {
-  const lines = costBlock(cost, "## A3 replay cost");
-  if (fastCost)
-    lines.push(
-      ...costBlock(fastCost, "### The same replay, 1 s apart").map((l) =>
-        l.startsWith("Reported for")
-          ? "Cost only, never scored: the same 100 messages replayed again 1 s apart, after A3 was scored, to show what batching saves."
-          : l,
-      ),
-    );
-  return lines;
 }
 
 function costBlock(cost, heading) {
