@@ -2756,6 +2756,40 @@ describe("AnthropicProvider", () => {
       ).not.toHaveProperty("reasoningTokens");
     });
 
+    it("prices a resumed thread's first result from its tokens, not the SDK's running total", async () => {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          num_turns: 1,
+          stop_reason: "end_turn",
+          // The total the resumed transcript saved, earlier turns included.
+          total_cost_usd: 42,
+          duration_ms: 5,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          config: { model: "claude-sonnet-5" },
+          thread: { kind: "resume", modelThreadId: "thread-1" },
+        }),
+      );
+      const messages = await collectEvents(session);
+      await session.close();
+
+      const costUsd = (messages[0] as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costUsd).toBeGreaterThan(0);
+      expect(costUsd).toBeLessThan(42);
+    });
+
     it("reads reasoning tokens from output_tokens_details and maps the stop reason", async () => {
       mockQuery([
         {
