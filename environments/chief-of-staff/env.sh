@@ -65,8 +65,16 @@ APP_PATH_IN_ROME=/home/rome/app-sources/chief-of-staff
 # COS_AGENT_NAME, written straight into Rome's database because no loaded agent
 # has it. See link_unloaded_agent.
 UNLOADED_AGENT="${COS_LINK_UNLOADED_AGENT-${SAVED_LINK_UNLOADED_AGENT-}}"
-# 1 makes every chat answer every message, not only the dm-* chats.
+# 1 makes every chat answer every message, not only the dm-* chats. Kept for
+# COS_CHAT_SETTINGS=every.
 HEAR_EVERY_MESSAGE="${COS_HEAR_EVERY_MESSAGE:-${SAVED_HEAR_EVERY_MESSAGE:-0}}"
+# What `up` sets on the agent's chats: "default" leaves every chat at Rome's
+# defaults, "hear-bots" lets every chat hear bots and the dm-* chats answer
+# every message, "every" makes every chat answer every message.
+CHAT_SETTINGS="${COS_CHAT_SETTINGS:-${SAVED_CHAT_SETTINGS:-}}"
+if [ -z "$CHAT_SETTINGS" ]; then
+  if [ "$HEAR_EVERY_MESSAGE" = 1 ]; then CHAT_SETTINGS=every; else CHAT_SETTINGS=hear-bots; fi
+fi
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
 REF_NOTES="${COS_REF_NOTES:-}"
@@ -395,41 +403,62 @@ all_chat_names() {
   local member
   printf '%s\n' "${CHATS[@]}"
   for member in "${MEMBERS[@]}"; do printf '%s\n' "${COS_DM_CHAT_PREFIX}${member}"; done
+  [ -z "${COS_SECOND_BOT_TOKEN:-}" ] || printf '%s\n' "$COS_SECOND_BOT_CHAT"
 }
 
 # Writes the bots' and chats' Discord ids, which every later command reads.
 # Keeps the webhooks, display names and connection an earlier run recorded.
 write_discord_state() {
-  local agent driver chats names
+  local agent driver second chats names
   agent="$(COS_TOKEN="$COS_AGENT_BOT_TOKEN" discord whoami)"
   driver="$(discord whoami)"
+  second=null
+  if [ -n "${COS_SECOND_BOT_TOKEN:-}" ]; then
+    second="$(COS_TOKEN="$COS_SECOND_BOT_TOKEN" discord whoami)"
+    # A chat the second bot reads and the agent's bot cannot, so what is said
+    # there reaches Rome only through the second bot.
+    discord private-chat "$COS_SECOND_BOT_CHAT" "$(json id <<<"$agent")" "$(json id <<<"$second")"
+  fi
   mapfile -t names < <(all_chat_names)
   chats="$(discord chats "${names[@]}")"
   node -e '
     const fs = require("fs");
-    const [file, agent, driver, chats, dmPrefix] = process.argv.slice(1);
+    const [file, agent, driver, chats, dmPrefix, second] = process.argv.slice(1);
     let old = {};
     try { old = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
-    const s = { ...old, agent: JSON.parse(agent), driver: JSON.parse(driver), chats: JSON.parse(chats), dmPrefix };
+    const s = { ...old, agent: JSON.parse(agent), driver: JSON.parse(driver), second: JSON.parse(second), chats: JSON.parse(chats), dmPrefix };
     fs.writeFileSync(file, JSON.stringify(s) + "\n", { mode: 0o600 });' \
-    "$STATE_FILE" "$agent" "$driver" "$chats" "$COS_DM_CHAT_PREFIX"
+    "$STATE_FILE" "$agent" "$driver" "$chats" "$COS_DM_CHAT_PREFIX" "$second"
 }
 
 state() { json "$1" <"$STATE_FILE"; }
 
 # Connects the agent's bot the way the dashboard does: start the Discord setup,
 # then answer its one question with the token.
-connect_agent_bot() {
-  local started cid outcome status error
-  log "connecting the agent's Discord bot ..."
+connect_agent_bot() { connect_bot COS_AGENT_BOT_TOKEN "the agent's"; }
+
+# Connects the second bot as a connected account of its own, linked to no
+# agent, unless Rome already holds it.
+connect_second_bot() {
+  [ -n "${COS_SECOND_BOT_TOKEN:-}" ] || return 0
+  if api GET /connected-accounts | grep -q "\"id\":\"$(state second.id)\""; then
+    log "Rome already holds the second bot's connection, keeping it"
+  else
+    connect_bot COS_SECOND_BOT_TOKEN "the second"
+  fi
+}
+
+connect_bot() {
+  local var="$1" whose="$2" started cid outcome status error
+  log "connecting $whose Discord bot ..."
   started="$(echo '{}' | api POST /connections/discord/grants/bot/setup)"
   cid="$(json cid <<<"$started")"
   [ -n "$cid" ] || die "Rome did not start the Discord setup: $started"
-  outcome="$(node -e 'process.stdout.write(JSON.stringify({answers:{token:process.env.COS_AGENT_BOT_TOKEN}}))' |
+  outcome="$(node -e 'process.stdout.write(JSON.stringify({answers:{token:process.env[process.argv[1]]}}))' "$var" |
     api POST "/setups/$cid/input")"
   status="$(json state.status <<<"$outcome")"
   error="$(json state.error <<<"$outcome")"
-  [ "$status" = "done" ] || die "Rome did not take the agent's bot token (${error:-$status})"
+  [ "$status" = "done" ] || die "Rome did not take $whose bot token (${error:-$status})"
 }
 
 # Fetches the app's repository at APP_REF on the devbox, copies the checkout
@@ -514,6 +543,30 @@ set_chat() {
 
 # Every test chat hears every bot message, since webhook authors count as bots. Every
 # other chat setting keeps Rome's default.
+reset_chat() {
+  printf '{"ref":{"connectionId":"%s","chatId":"%s"}}' \
+    "$(state connection)" "$(state "chats.$1")" | api POST /chat-settings/reset >/dev/null
+}
+
+# `cos-env chat <name> <setting>`: sets one of the agent's chats back to Rome's
+# defaults and then to the setting.
+cos_chat() {
+  local name="${1:-}" setting="${2:-}" patch
+  case "$setting" in
+    default) patch="" ;;
+    mentions-only) patch='{"activation":{"mode":"mention"}}' ;;
+    ignore-others) patch='{"activation":{"whenOthersMentioned":"ignore"}}' ;;
+    off) patch='{"enabled":false}' ;;
+    every) patch='{"activation":{"botMessages":"all","mode":"all"}}' ;;
+    *) die "usage: cos-env chat <name> default|mentions-only|ignore-others|off|every" ;;
+  esac
+  [ -n "$(state "chats.$name" 2>/dev/null)" ] || die "no chat \"$name\". Chats: $(all_chat_names | tr '\n' ' ')"
+  claim_ownership
+  reset_chat "$name" || die "Rome refused to reset #$name"
+  [ -z "$patch" ] || set_chat "$name" "$patch" || die "Rome refused to set #$name to $setting"
+  log "#$name is now $setting"
+}
+
 let_chats_hear_bots() {
   local name tries=0
   # Rome sets a rule only on a chat whose kind it knows, from a message there
@@ -526,10 +579,14 @@ let_chats_hear_bots() {
     sleep 2
   done
   while IFS= read -r name; do
-    if [[ "$name" == "$COS_DM_CHAT_PREFIX"* ]] || [ "$HEAR_EVERY_MESSAGE" = 1 ]; then
+    # The second bot's chat is one the agent's bot cannot see.
+    [ "$name" != "$COS_SECOND_BOT_CHAT" ] || continue
+    reset_chat "$name"
+    if [ "$CHAT_SETTINGS" = default ]; then
+      continue
+    elif [[ "$name" == "$COS_DM_CHAT_PREFIX"* ]] || [ "$CHAT_SETTINGS" = every ]; then
       # A direct message is answered without a mention, so the private chat
-      # that stands in for one answers every message too. COS_HEAR_EVERY_MESSAGE
-      # does the same for every chat.
+      # that stands in for one answers every message too.
       set_chat "$name" '{"activation":{"botMessages":"all","mode":"all"}}'
     else
       set_chat "$name" '{"activation":{"botMessages":"all"}}'
@@ -562,9 +619,9 @@ save_settings() {
     printf 'SAVED_APP_REPO=%q\n' "$APP_REPO"
     printf 'SAVED_APP_REF=%q\n' "$APP_REF"
     printf 'SAVED_LINK_UNLOADED_AGENT=%q\n' "$UNLOADED_AGENT"
-    printf 'SAVED_HEAR_EVERY_MESSAGE=%q\n' "$HEAR_EVERY_MESSAGE"
+    printf 'SAVED_CHAT_SETTINGS=%q\n' "$CHAT_SETTINGS"
   } >"$SETTINGS_FILE"
-  log "settings: Rome refs \"$AGENT_REFS\", app $APP_REPO at $APP_REF, linked agent ${UNLOADED_AGENT:-$COS_AGENT_NAME}, every chat hears every message: $([ "$HEAR_EVERY_MESSAGE" = 1 ] && echo yes || echo no)"
+  log "settings: Rome refs \"$AGENT_REFS\", app $APP_REPO at $APP_REF, linked agent ${UNLOADED_AGENT:-$COS_AGENT_NAME}, chat settings $CHAT_SETTINGS, second bot $([ -n "${COS_SECOND_BOT_TOKEN:-}" ] && echo yes || echo no)"
 }
 
 # Fails unless Rome runs the app at APP_REF and the connected account links the
@@ -604,6 +661,7 @@ cmd_up() {
     link_agent
   fi
   let_chats_hear_bots
+  connect_second_bot
   set_model
   let_agent_answer_team
   check_settings_took
@@ -980,6 +1038,19 @@ for (const file of walk(TRANSCRIPTS).filter((p) => p.endsWith(".jsonl"))) {
 toolUses.sort((a, b) => a.time.localeCompare(b.time));
 process.stdout.write(`${JSON.stringify({ files, toolUses })}\n`);
 JS
+}
+
+# `cos-env unlink` takes the agent off its connected account; `cos-env link`
+# links it again, as `up` does.
+cos_link() {
+  claim_ownership
+  if [ "$1" = unlink ]; then
+    echo '{"agent":null}' | api PUT "/connected-accounts/discord/$(state agent.id)/agent" >/dev/null ||
+      die "Rome refused to unlink the agent"
+    log "the agent's connected account links no agent"
+  else
+    link_agent
+  fi
 }
 
 # Prints the roster or the goals document exactly as the app holds it, read

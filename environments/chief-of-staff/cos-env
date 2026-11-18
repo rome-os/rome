@@ -9,7 +9,7 @@ set -euo pipefail
 usage() {
   die "usage:
   cos-env seed <dir>
-  cos-env post --as <member> --chat <name> [--thread <id>] [--mention-agent] <text>
+  cos-env post --as <member|driver> --chat <name> [--thread <id>] [--mention-agent | --mention-second] <text>
   cos-env dm --as <member> <text>
   cos-env read --chat <name> [--thread <id>] [--since <message id>]
   cos-env read --dm <member> [--since <message id>]
@@ -23,6 +23,8 @@ usage() {
   cos-env usage [--since <time>]
   cos-env doc roster|goals
   cos-env memory [--since <time>]
+  cos-env chat <name> default|mentions-only|ignore-others|off|every
+  cos-env link | unlink
   cos-env reset
   cos-env version"
 }
@@ -39,7 +41,8 @@ while [ $# -gt 0 ]; do
     --dm) dm="${2:?--dm needs a member}" && shift 2 ;;
     --thread) thread="${2:?--thread needs a thread id}" && shift 2 ;;
     --since) since="${2:?--since needs a message id or, for logs, a time}" && shift 2 ;;
-    --mention-agent) mention=1 && shift ;;
+    --mention-agent) mention=agent && shift ;;
+    --mention-second) mention=second && shift ;;
     --gap) gap="${2:?--gap needs seconds}" && shift 2 ;;
     --for) minutes="${2:?--for needs minutes}" && shift 2 ;;
     --) shift && args+=("$@") && break ;;
@@ -63,7 +66,7 @@ case "$command" in
     ;;
   post)
     [ -n "$as" ] && [ -n "$chat" ] && [ ${#args[@]} -gt 0 ] || usage
-    check_member "$as"
+    [ "$as" = driver ] || check_member "$as"
     load_secrets
     discord post "$as" "$chat" "$thread" "$mention" "${args[*]}"
     ;;
@@ -107,6 +110,12 @@ case "$command" in
   usage) cos_usage "$since" ;;
   doc) cos_doc "${args[0]:-}" ;;
   memory) cos_memory "$since" ;;
+  chat)
+    [ ${#args[@]} -eq 2 ] || usage
+    load_secrets
+    cos_chat "${args[0]}" "${args[1]}"
+    ;;
+  link | unlink) cos_link "$command" ;;
   reset) cmd_reset ;;
   version) cos_version ;;
   *) usage ;;

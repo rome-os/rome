@@ -112,6 +112,7 @@ function webhookOf(s, chat, member) {
 function authorName(s, user) {
   if (user.id === s.agent.id) return "agent";
   if (user.id === s.driver?.id) return "driver";
+  if (user.id === s.second?.id) return "second";
   for (const hooks of Object.values(s.webhooks ?? {})) {
     for (const [member, hook] of Object.entries(hooks)) {
       if (hook.id === user.id) return member.split(":")[0];
@@ -275,6 +276,9 @@ async function deleteAsAuthor(s, bot, channelId, parent, message) {
 
 // Posts one message as a member, through the member's webhook in the chat, or
 // in a thread of it. Answers the message Discord made.
+// `member` "driver" posts as the driver bot itself rather than through a
+// webhook. `mention` names whom the message mentions first: "agent", "second"
+// (the second bot), or nothing.
 async function send(s, bot, member, chat, thread, mention, text) {
   let threadId = "";
   let chatName = chat;
@@ -285,15 +289,25 @@ async function send(s, bot, member, chat, thread, mention, text) {
   } else {
     chatByName(s, chat);
   }
+  const mentioned = mention === "agent" ? s.agent.id : mention === "second" ? s.second?.id : null;
+  if (mention && !mentioned) die(`nobody to mention as "${mention}". Is COS_SECOND_BOT_TOKEN set?`);
+  const content = mentioned ? `<@${mentioned}> ${text}` : text;
+  const allowed = mentioned ? { parse: [], users: [mentioned] } : { parse: [] };
+  if (member === "driver") {
+    return await discord(bot, "POST", `/channels/${threadId || chatByName(s, chatName)}/messages`, {
+      content,
+      allowed_mentions: allowed,
+    });
+  }
   const hook = webhookOf(s, chatName, member);
   return await discord(
     null,
     "POST",
     `/webhooks/${hook.id}/${hook.token}?wait=true${threadId ? `&thread_id=${threadId}` : ""}`,
     {
-      content: mention ? `<@${s.agent.id}> ${text}` : text,
+      content,
       username: s.members?.[member]?.name ?? member,
-      allowed_mentions: mention ? { parse: [], users: [s.agent.id] } : { parse: [] },
+      allowed_mentions: allowed,
     },
   );
 }
@@ -305,6 +319,24 @@ const commands = {
   async whoami() {
     const me = await discord(token("COS_TOKEN"), "GET", "/users/@me");
     process.stdout.write(`${JSON.stringify({ id: me.id, username: me.username })}\n`);
+  },
+
+  // Makes a text chat the given bot may read and the hidden bot may not, unless
+  // the test server has it already.
+  async "private-chat"(name, hiddenId, readerId) {
+    const server = token("COS_DISCORD_SERVER_ID");
+    const bot = token("COS_TOKEN");
+    const all = await discord(bot, "GET", `/guilds/${server}/channels`);
+    if (all.some((c) => c.name === name && c.type === 0)) return;
+    const VIEW = String(1 << 10);
+    await discord(bot, "POST", `/guilds/${server}/channels`, {
+      name,
+      type: 0,
+      permission_overwrites: [
+        { id: hiddenId, type: 1, allow: "0", deny: VIEW },
+        { id: readerId, type: 1, allow: VIEW, deny: "0" },
+      ],
+    });
   },
 
   // Prints {name: id} for the named text chats in the test server.
@@ -363,7 +395,8 @@ const commands = {
   async post(member, chat, thread, mentionAgent, text) {
     const s = state();
     const bot = token("COS_TOKEN");
-    const sent = await send(s, bot, member, chat, thread, mentionAgent === "1", text);
+    const mention = mentionAgent === "1" ? "agent" : mentionAgent === "0" ? "" : mentionAgent;
+    const sent = await send(s, bot, member, chat, thread, mention, text);
     process.stdout.write(`${sent.id}\n`);
   },
 
@@ -381,9 +414,10 @@ const commands = {
     for (const [i, m] of messages.entries()) {
       if (i > 0) await sleep(Number(gap) * 1000);
       if (!m.as || !m.chat || !m.text) die(`message ${i} of ${file} needs as, chat and text`);
-      const sent = await send(s, bot, m.as, m.chat, m.thread ?? "", m.mention === true, m.text);
+      const mention = m.mention === true ? "agent" : typeof m.mention === "string" ? m.mention : "";
+      const sent = await send(s, bot, m.as, m.chat, m.thread ?? "", mention, m.text);
       process.stdout.write(
-        `${JSON.stringify({ index: i, id: sent.id, as: m.as, chat: m.chat, mention: m.mention === true, at: sent.timestamp })}\n`,
+        `${JSON.stringify({ index: i, id: sent.id, as: m.as, chat: m.chat, mention: m.mention ?? false, at: sent.timestamp })}\n`,
       );
     }
     const left = Number(span) * 1000 - (Date.now() - started);
