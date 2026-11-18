@@ -59,11 +59,17 @@ interface Located {
  * docs/domains/chats.md#outputs
  */
 export class ChatOutputs {
-  /** When outputs began to be recorded as they happen; chats made since need no reading back. */
-  private readonly since: Date;
+  constructor(private deps: ChatOutputsDeps) {}
 
-  constructor(private deps: ChatOutputsDeps) {
-    this.since = deps.repo.recordingSince();
+  private recordedSince: Date | null = null;
+
+  /**
+   * When outputs began to be recorded as they happen; chats made since need no
+   * reading back. Read on first use, so mounting the routes touches no table.
+   */
+  private get since(): Date {
+    this.recordedSince ??= this.deps.repo.recordingSince();
+    return this.recordedSince;
   }
 
   private get projectsRoot() {
