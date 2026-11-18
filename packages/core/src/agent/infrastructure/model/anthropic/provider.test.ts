@@ -393,6 +393,43 @@ describe("AnthropicProvider", () => {
       expect(second.at(-1)).toMatchObject({ type: "result", content: "It printed MARKER-1" });
     });
 
+    it("records the spend of a turn the SDK starts while idle in Rome's next turn", async () => {
+      const costed = (text: string, echo: string[], origin: string, total: number) => ({
+        ...result(text, echo, origin),
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        total_cost_usd: total,
+      });
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield costed("DONE", [first.uuid], "human", 0.5);
+        yield say("The background command finished.");
+        yield costed("The background command finished.", [], "task-notification", 0.75);
+        const second = await sent();
+        yield { ...second, isReplay: true };
+        yield say("It printed MARKER-1", second.uuid);
+        yield costed("It printed MARKER-1", [second.uuid], "human", 1);
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "start it", inputId: a });
+      const first = await nextTurn(events);
+      await session.sendUserInput({ text: "what did it print?", inputId: p });
+      const second = await nextTurn(events);
+      await session.close();
+
+      const costOf = (turn: ModelSessionEvent[]) =>
+        (turn.at(-1) as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costOf(first)).toBeCloseTo(0.5);
+      expect(costOf(second)).toBeCloseTo(0.5);
+    });
+
     it("hands an SDK-started turn to the Rome send it folds in", async () => {
       scripted(async function* (sent) {
         const first = await sent();

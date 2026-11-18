@@ -932,7 +932,10 @@ export class AnthropicProvider implements ModelProvider {
               message,
               effectiveModel,
               providerId,
-              runningCost.next(readPositiveNumber(message.total_cost_usd)),
+              // An SDK-owned result ends no Rome turn, so nothing records its
+              // accounting. Leaving the tracker where it was puts its spend in
+              // the next Rome turn's difference.
+              sdkOwned ? undefined : runningCost.next(readPositiveNumber(message.total_cost_usd)),
               contextUsage,
               abortController.signal.aborted,
             );
