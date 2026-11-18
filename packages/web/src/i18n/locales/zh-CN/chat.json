@@ -221,6 +221,7 @@
     "title": "分享对话",
     "loading": "加载中…",
     "createError": "无法创建链接。",
+    "hydrateError": "无法加载完整的对话以进行分享。",
     "selectedCount_one": "已选择 {{count}} 条消息",
     "selectedCount_other": "已选择 {{count}} 条消息",
     "createTitle": "创建分享链接",

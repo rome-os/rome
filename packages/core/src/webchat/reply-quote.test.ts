@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { REPLY_TO_TEXT_MAX_LENGTH } from "@rome/api-types/chat";
-import { quoteSpans, replyQuoteOf, textSpans, truncateQuote } from "./reply-quote.js";
+import {
+  quoteSpans,
+  replyQuoteOf,
+  storedQuoteLine,
+  textSpans,
+  truncateQuote,
+} from "./reply-quote.js";
 
 const stored = (...parts: unknown[]) => JSON.stringify(parts);
 
@@ -71,5 +77,16 @@ describe("the quote of a reply", () => {
     expect(truncateQuote(long).endsWith("…")).toBe(true);
     const pair = `${"x".repeat(REPLY_TO_TEXT_MAX_LENGTH - 2)}😀tail`;
     expect(truncateQuote(pair)).toBe(`${"x".repeat(REPLY_TO_TEXT_MAX_LENGTH - 2)}…`);
+  });
+
+  it("names a thread by the first line with text of the quote a reply carries", () => {
+    const quote = { type: "reply_to", messageId: "m1", author: "guardian" };
+    expect(
+      storedQuoteLine(
+        stored({ type: "text", content: "Yes" }, { ...quote, text: "\n Plan\nmore" }),
+      ),
+    ).toBe("Plan");
+    expect(storedQuoteLine(stored({ type: "text", content: "Yes" }))).toBeNull();
+    expect(storedQuoteLine("not json")).toBeNull();
   });
 });

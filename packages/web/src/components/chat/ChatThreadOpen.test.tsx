@@ -6,6 +6,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { conciergePageOf } from "@/lib/chat-api";
+import { orderChatMessages } from "@/lib/chat-message-ordering";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
@@ -16,7 +18,9 @@ import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
   chatThreadsOf,
-  missingThreadRoots,
+  summariesOfLoaded,
+  withLiveReply,
+  withThreadsRead,
   type ThreadTimelineMessage,
   threadsOf,
   threadTail,
@@ -79,24 +83,6 @@ const a = (id: string, thread: string | null) => sent(id, "assistant", thread);
 /** A message in no thread: nothing replies to it. */
 const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage =>
   sent(id, role, null);
-
-describe("missingThreadRoots", () => {
-  it("returns a reply's root when it is outside the page, once per root", () => {
-    expect(missingThreadRoots([a("a1", "q1"), g("g1", "q2"), a("a2", "q1")])).toEqual(["q1", "q2"]);
-  });
-
-  it("does not return a root in the page, even when it follows its reply", () => {
-    expect(missingThreadRoots([a("a1", "q1"), g("q1")])).toEqual([]);
-  });
-
-  it("does not return a message that is its own root", () => {
-    expect(missingThreadRoots([g("q1", "q1")])).toEqual([]);
-  });
-
-  it("does not return messages with no thread", () => {
-    expect(missingThreadRoots([free("q1"), { id: "q2", role: "assistant" }])).toEqual([]);
-  });
-});
 
 describe("threadsOf", () => {
   it("puts a message in the thread its chatThreadId names, and a root delivered with none in it once a reply says so", () => {
@@ -299,7 +285,7 @@ function renderTranscript(
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider value={chatThreadsOf(shown, focused?.root ?? null, stacking)}>
+            <ChatThreadsProvider value={threadsAsRead(shown, focused?.root ?? null, stacking)}>
               <ReplyBar />
               <ConciergeTranscript
                 rows={rows}
@@ -558,6 +544,23 @@ describe("the source label in the transcript", () => {
     expect(screen.queryByRole("note")).toBeNull();
   });
 
+  it("shows after a cold load by Concierge pages, whose trace rows come with the messages", () => {
+    const wire = {
+      mainLine: [{ message: reply("r1", 10), thread: null }],
+      outside: [],
+      traces: [trace("t-r1", 10, { type: "routine", name: "Daily summary" })],
+      nextCursor: null,
+    };
+
+    renderTranscript(orderChatMessages(conciergePageOf(wire).messages));
+    expect(screen.getByText("Routine · Daily summary")).toBeTruthy();
+    cleanup();
+
+    // A page without the trace rows loses the label, which is why they come.
+    renderTranscript(orderChatMessages(conciergePageOf({ ...wire, traces: [] }).messages));
+    expect(screen.queryByText("Routine · Daily summary")).toBeNull();
+  });
+
   it("shows nothing for an agent's input the Concierge did not answer", () => {
     renderTranscript([trace("t-x", 10, { type: "agent", name: "Flint" })]);
     expect(screen.queryByText(/Flint/)).toBeNull();
@@ -705,10 +708,147 @@ describe("the main timeline", () => {
     expect(document.querySelector("[data-thread-stack]")).toBeNull();
   });
 
-  it("keeps a reply whose root is not loaded, since no stack could hold it", () => {
+  it("leaves out a reply whose root is not loaded too: a reply never draws in the main line", () => {
     renderTranscript(messages.slice(1), undefined, undefined, true);
-    expect(document.querySelector('[data-thread-entry="a1"]')).not.toBeNull();
+    expect(document.querySelector('[data-thread-entry="a1"]')).toBeNull();
+    expect(document.querySelector('[data-thread-entry="f1"]')).not.toBeNull();
+    // No root is drawn, so there is nothing to hang a stack from.
     expect(document.querySelector("[data-thread-stack]")).toBeNull();
+  });
+});
+
+/** What a chat that read every thread of `shown` whole knows of its threads. */
+function threadsAsRead(
+  shown: readonly ThreadTimelineMessage[],
+  focus: string | null = null,
+  stacking = true,
+  hints?: ReadonlyMap<string, string>,
+) {
+  return chatThreadsOf(shown, focus, stacking, {
+    summaries: summariesOfLoaded(shown as ChatMessage[]),
+    ...(hints ? { hints } : {}),
+  });
+}
+
+describe("the stacks of thread summaries", () => {
+  const latest = (id: string, text = "Latest") =>
+    ({ ...message(id, "assistant", text, "q1", 7), chatThreadId: "q1" }) as ChatMessage;
+
+  it("reads a stack from the thread's summary, not from the replies that are loaded", () => {
+    const summaries = new Map([
+      ["q1", { replyCount: 5, unreadCount: 2, latestReply: latest("a9"), unreadAt: 70 }],
+    ]);
+
+    const { stacks, stacked } = chatThreadsOf([g("q1"), a("a9", "q1")], null, true, { summaries });
+
+    expect(stacks.get("q1")).toMatchObject({ total: 5, unread: 2, unreadAt: 70 });
+    expect(stacks.get("q1")?.last.id).toBe("a9");
+    // The loaded reply stands in the stack; the others are not loaded.
+    expect([...stacked]).toEqual(["a9"]);
+  });
+
+  it("has a stack for a thread whose root is not loaded, for its pill, and hides its loaded reply", () => {
+    const summaries = new Map([
+      ["q9", { replyCount: 1, unreadCount: 1, latestReply: latest("a1"), unreadAt: 5 }],
+    ]);
+
+    const { stacks, stacked } = chatThreadsOf([a("a1", "q9"), free("w1")], null, true, {
+      summaries,
+    });
+
+    expect([...stacks.keys()]).toEqual(["q9"]);
+    expect([...stacked]).toEqual(["a1"]);
+  });
+
+  it("stacks no thread without replies, and nothing where a message shows itself, as in a share", () => {
+    const empty = new Map([
+      ["q1", { replyCount: 0, unreadCount: 0, latestReply: latest("a1"), unreadAt: 0 }],
+    ]);
+    expect(chatThreadsOf([g("q1")], null, true, { summaries: empty }).stacks.size).toBe(0);
+    const some = new Map([
+      ["q1", { replyCount: 1, unreadCount: 0, latestReply: latest("a1"), unreadAt: 0 }],
+    ]);
+    const share = chatThreadsOf([g("q1"), a("a1", "q1")], null, false, { summaries: some });
+    expect(share.stacks.size).toBe(0);
+    expect(share.stacked.size).toBe(0);
+  });
+
+  it("names a thread whose root is not loaded by its task, else by the hint the page gave", () => {
+    const waiting = [{ ...a("a1", "q9"), read: false }] as ThreadTimelineMessage[];
+    const hints = new Map([["q9", "Plan the trip"]]);
+    expect(chatThreadsOf(waiting, null, true, { hints }).titles.get("q9")).toBe("Plan the trip");
+    const named = [{ ...waiting[0]!, chatThreadTitle: "Tokyo" }] as ThreadTimelineMessage[];
+    expect(chatThreadsOf(named, null, true, { hints }).titles.get("q9")).toBe("Tokyo");
+  });
+});
+
+describe("the summary of a thread", () => {
+  const reply = (id: string, over: Partial<ChatMessage> = {}) =>
+    ({
+      ...message(id, "assistant", `said ${id}`, "q1", Number(id.slice(1))),
+      chatThreadId: "q1",
+      read: false,
+      ...over,
+    }) as ChatMessage;
+
+  it("counts the replies the stack counts, and the unread ones the owner did not say", () => {
+    const summaries = summariesOfLoaded([
+      { ...message("q1", "user", "Plan", "q1", 0), chatThreadId: "q1" } as ChatMessage,
+      reply("a1"),
+      reply("a2", { read: true }),
+      reply("a3", { role: "user", read: true }),
+      reply("a4", { sender: { kind: "automated", name: "Daily" } as ChatMessage["sender"] }),
+    ]);
+
+    expect(summaries.get("q1")).toMatchObject({ replyCount: 3, unreadCount: 1 });
+    // The newest counted reply, not the automation's.
+    expect(summaries.get("q1")?.latestReply.id).toBe("a3");
+    expect(summaries.get("q1")?.unreadAt).toBe(Date.parse(at(1)));
+  });
+
+  it("has none for a thread no reply of which counts", () => {
+    expect(
+      summariesOfLoaded([
+        reply("a1", { sender: { kind: "automated", name: "Daily" } as ChatMessage["sender"] }),
+      ]).size,
+    ).toBe(0);
+  });
+
+  it("takes a reply that comes live once: as the newest, one more, and one more unread", () => {
+    const base = new Map([
+      [
+        "q1",
+        { replyCount: 2, unreadCount: 0, latestReply: reply("a1", { read: true }), unreadAt: 0 },
+      ],
+    ]);
+
+    const next = withLiveReply(base, reply("a5"));
+    expect(next.get("q1")).toMatchObject({ replyCount: 3, unreadCount: 1 });
+    expect(next.get("q1")?.latestReply.id).toBe("a5");
+    // The same reply twice changes nothing, nor does a root, or a message that does not count.
+    expect(withLiveReply(next, reply("a5"))).toBe(next);
+    expect(withLiveReply(next, { ...reply("q1"), chatThreadId: "q1" })).toBe(next);
+    expect(
+      withLiveReply(next, reply("a6", { sender: { kind: "automated" } as ChatMessage["sender"] })),
+    ).toBe(next);
+    // A thread no summary holds yet starts one.
+    expect(withLiveReply(new Map(), reply("a7")).get("q1")).toMatchObject({
+      replyCount: 1,
+      unreadCount: 1,
+    });
+  });
+
+  it("says nothing waits once the owner has read a thread", () => {
+    const base = new Map([
+      ["q1", { replyCount: 2, unreadCount: 2, latestReply: reply("a1"), unreadAt: 10 }],
+      ["q2", { replyCount: 1, unreadCount: 0, latestReply: reply("a2"), unreadAt: 0 }],
+    ]);
+
+    const next = withThreadsRead(base, ["q1", "q2", "q3"]);
+
+    expect(next.get("q1")).toMatchObject({ replyCount: 2, unreadCount: 0, unreadAt: 0 });
+    expect(next.get("q2")).toBe(base.get("q2"));
+    expect(withThreadsRead(base, ["q2"])).toBe(base);
   });
 });
 
@@ -878,7 +1018,7 @@ describe("the pills of threads with new replies", () => {
       "a2",
     );
     const onPick = rs.fn();
-    render(<ThreadPills threads={chatThreadsOf(all)} onPick={onPick} />);
+    render(<ThreadPills threads={threadsAsRead(all)} onPick={onPick} />);
     const pills = [...document.querySelectorAll<HTMLElement>("[data-thread-pill]")];
     // a2 (Kyoto) came before n2; p1 has no unread reply.
     expect(pills.map((pill) => pill.dataset.threadPill)).toEqual(["m1", "n1"]);
@@ -888,19 +1028,40 @@ describe("the pills of threads with new replies", () => {
     expect(roots(all).get("n2")).toBe("n1");
   });
 
+  it("has a pill for a thread whose root is not loaded, named by what the page gave", () => {
+    const waiting = [
+      { ...message("a9", "assistant", "Done", "q9", 6), read: false },
+    ] as ChatMessage[];
+    const onPick = rs.fn();
+    render(
+      <ThreadPills
+        threads={chatThreadsOf(waiting, null, true, {
+          hints: new Map([["q9", "Plan trip"]]),
+          summaries: summariesOfLoaded(waiting),
+        })}
+        onPick={onPick}
+      />,
+    );
+    const pill = document.querySelector<HTMLElement>("[data-thread-pill]")!;
+    expect(pill.dataset.threadPill).toBe("q9");
+    expect(pill.textContent).toBe('New replies in "Plan trip"');
+    fireEvent.click(pill);
+    expect(onPick).toHaveBeenCalledWith("q9");
+  });
+
   it("shows no row without a pill, and none with a thread in focus", () => {
     const { container, rerender } = render(
-      <ThreadPills threads={chatThreadsOf(messages)} onPick={() => {}} />,
+      <ThreadPills threads={threadsAsRead(messages)} onPick={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
     rerender(
-      <ThreadPills threads={chatThreadsOf(unseen(messages, "a1"), "m1")} onPick={() => {}} />,
+      <ThreadPills threads={threadsAsRead(unseen(messages, "a1"), "m1")} onPick={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
   });
 
   it("is one row that scrolls sideways and never wraps", () => {
-    render(<ThreadPills threads={chatThreadsOf(unseen(messages, "a1"))} onPick={() => {}} />);
+    render(<ThreadPills threads={threadsAsRead(unseen(messages, "a1"))} onPick={() => {}} />);
     const row = document.querySelector<HTMLElement>("[data-thread-pills]")!;
     expect(row.className).toContain("overflow-x-auto");
     expect(row.className).not.toContain("flex-wrap");
@@ -918,7 +1079,7 @@ describe("the pills of threads with new replies", () => {
       ],
       "a1",
     );
-    render(<ThreadPills threads={chatThreadsOf(long)} onPick={() => {}} />);
+    render(<ThreadPills threads={threadsAsRead(long)} onPick={() => {}} />);
     expect(document.querySelector("[data-thread-pill]")!.textContent).toBe(
       'New replies in "A very long…"',
     );

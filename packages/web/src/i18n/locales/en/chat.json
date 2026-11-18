@@ -221,6 +221,7 @@
     "title": "Share chat",
     "loading": "Loading…",
     "createError": "Couldn't create the link.",
+    "hydrateError": "Couldn't load the whole chat to share.",
     "selectedCount_one": "{{count}} message selected",
     "selectedCount_other": "{{count}} messages selected",
     "createTitle": "Create a share link",

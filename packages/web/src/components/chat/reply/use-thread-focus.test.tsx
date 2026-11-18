@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import "@/i18n";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
@@ -10,7 +10,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { ConciergeTranscript } from "../ConciergeTranscript";
 import { buildRows } from "../chat-view";
 import type { BlockActions, LivePreview } from "../MessageList";
-import { ChatThreadsProvider, useChatThreadsValue } from "./chat-threads";
+import { ChatThreadsProvider, summariesOfLoaded, useChatThreadsValue } from "./chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply-draft";
 import { type Env, liveEntry, pin, transition, useThreadFocus } from "./use-thread-focus";
 
@@ -121,7 +121,8 @@ function Harness({
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
   const threadFocus = useThreadFocus({ scroller, content, resetKey: chatId });
-  const threads = useChatThreadsValue(messages, threadFocus.shown);
+  const known = useMemo(() => ({ summaries: summariesOfLoaded(messages) }), [messages]);
+  const threads = useChatThreadsValue(messages, threadFocus.shown, true, known);
   const draft = useReplyDraftState({
     chatId: "concierge",
     sessionId: "concierge",

@@ -6,23 +6,23 @@ import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
-import type { ChatMessage } from "@/lib/chat-types";
+import type { ChatMessage, ThreadSummary } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
-import { isRenderable } from "@/components/chat/concierge-groups";
 import { plainQuote, replyPreview } from "./reply-source";
 import type { ReplyTarget } from "./reply-draft";
 
 /**
  * A thread with replies, as the main timeline shows it under its root
  * (ThreadStack.tsx): how many replies it has, how many of them the owner has
- * not seen, and its newest message. The root is not a reply.
+ * not seen, and its newest message. The root is not a reply. It is read from
+ * the thread's summary, not counted from the replies that are loaded.
  */
 export interface ThreadStack {
   root: string;
   total: number;
   /** Replies not said by the owner that the owner has not seen. */
   unread: number;
-  /** Where the newest unread reply stands among the timeline's messages, to order the threads that wait. */
+  /** When the newest unread reply was said, in ms, to order the threads that wait. */
   unreadAt: number;
   last: Pick<ChatMessage, "id" | "role" | "content">;
 }
@@ -52,19 +52,6 @@ export function useChatThreads(): ChatThreads | null {
 /** A message of the timeline, as the thread rules read it. */
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
   Partial<Pick<ChatMessage, "content" | "chatThreadTitle" | "read" | "sender">>;
-
-/** The distinct roots named by replies but absent from this page, in first-reference order. */
-export function missingThreadRoots(messages: readonly ThreadTimelineMessage[]): string[] {
-  const loaded = new Set(messages.map((message) => message.id));
-  return [
-    ...new Set(
-      messages.flatMap((message) => {
-        const root = message.chatThreadId;
-        return root && root !== message.id && !loaded.has(root) ? [root] : [];
-      }),
-    ),
-  ];
-}
 
 /** How much of a root's text names its thread. */
 const THREAD_NAME_MAX = 50;
@@ -115,38 +102,133 @@ export function threadsOf(messages: readonly ThreadTimelineMessage[]): {
   return { roots, titles };
 }
 
+/** Whether a message is a reply the stack counts: said by the owner or the agent, and no automation. */
+function countsAsReply(message: ThreadTimelineMessage): boolean {
+  return (
+    (message.role === "user" || message.role === "assistant") &&
+    message.sender?.kind !== "automated"
+  );
+}
+
+/** Whether the owner has not seen a counted reply: the agent said it and it is not read. */
+function isUnreadReply(message: ThreadTimelineMessage): boolean {
+  return message.role === "assistant" && message.read === false;
+}
+
 /**
- * The stack of each thread with replies in a loaded timeline, by root, and the
- * replies that stand in a stack. A reply stands in it only when its root is
- * loaded: a reply whose root has not paged in yet stays a message of the
- * timeline, so it is never out of sight with nothing to hold it.
+ * The summary of a thread from all its replies, which only a thread read
+ * whole has. Null when none counts.
+ */
+function summarizeReplies(replies: readonly ChatMessage[]): ThreadSummary | null {
+  const counted = replies.filter(countsAsReply);
+  const latest = counted.at(-1);
+  if (!latest) return null;
+  const unread = counted.filter(isUnreadReply);
+  const newestUnread = unread.at(-1);
+  return {
+    replyCount: counted.length,
+    unreadCount: unread.length,
+    latestReply: latest,
+    unreadAt: newestUnread ? Date.parse(newestUnread.createdAt) || 0 : 0,
+  };
+}
+
+/**
+ * The summary of every thread of `messages` that has replies among them, by
+ * root: right for threads read whole, whose replies are all loaded.
+ */
+export function summariesOfLoaded(messages: readonly ChatMessage[]): Map<string, ThreadSummary> {
+  const replies = new Map<string, ChatMessage[]>();
+  for (const message of messages) {
+    const root = message.chatThreadId;
+    if (root && root !== message.id) replies.set(root, [...(replies.get(root) ?? []), message]);
+  }
+  const summaries = new Map<string, ThreadSummary>();
+  for (const [root, own] of replies) {
+    const summary = summarizeReplies(own);
+    if (summary) summaries.set(root, summary);
+  }
+  return summaries;
+}
+
+/**
+ * The summaries after a reply came live: it counts once, and is the newest.
+ * A reply the summary already holds, or that does not count, changes nothing.
+ */
+export function withLiveReply(
+  summaries: ReadonlyMap<string, ThreadSummary>,
+  message: ChatMessage,
+): ReadonlyMap<string, ThreadSummary> {
+  const root = message.chatThreadId;
+  if (!root || root === message.id || !countsAsReply(message)) return summaries;
+  const current = summaries.get(root);
+  if (current?.latestReply.id === message.id) return summaries;
+  const unread = isUnreadReply(message);
+  return new Map(summaries).set(root, {
+    replyCount: (current?.replyCount ?? 0) + 1,
+    unreadCount: (current?.unreadCount ?? 0) + (unread ? 1 : 0),
+    latestReply: message,
+    unreadAt: unread ? Date.parse(message.createdAt) || 0 : (current?.unreadAt ?? 0),
+  });
+}
+
+/** The summaries after the owner has seen every reply of the threads `roots`. */
+export function withThreadsRead(
+  summaries: ReadonlyMap<string, ThreadSummary>,
+  roots: Iterable<string>,
+): ReadonlyMap<string, ThreadSummary> {
+  let next: Map<string, ThreadSummary> | null = null;
+  for (const root of roots) {
+    const current = (next ?? summaries).get(root);
+    if (!current || current.unreadCount === 0) continue;
+    next ??= new Map(summaries);
+    next.set(root, { ...current, unreadCount: 0, unreadAt: 0 });
+  }
+  return next ?? summaries;
+}
+
+/**
+ * The stack of each thread with replies, by root, from the threads' summaries,
+ * and the replies that stand in a stack. Every loaded reply stands in one,
+ * whether its root is loaded or not: a Concierge chat never draws a reply in
+ * the main line. A thread whose root is not loaded still has its stack, which
+ * only a pill shows, until the reader reads down to the root and the stack
+ * draws under it.
  */
 function stacksOf(
   messages: readonly ThreadTimelineMessage[],
   roots: ReadonlyMap<string, string>,
+  summaries: ReadonlyMap<string, ThreadSummary>,
 ): { stacks: Map<string, ThreadStack>; stacked: Set<string> } {
   const stacks = new Map<string, ThreadStack>();
   const stacked = new Set<string>();
-  messages.forEach((message, at) => {
+  for (const message of messages) {
     const root = roots.get(message.id);
-    if (root === undefined || root === message.id || roots.get(root) !== root) return;
-    stacked.add(message.id);
-    // What the owner reads: a message the timeline draws, and no automation's.
-    if (message.role !== "user" && message.role !== "assistant") return;
-    if (message.sender?.kind === "automated") return;
-    if (message.content !== undefined && !isRenderable(message as ChatMessage)) return;
-    const stack = stacks.get(root);
-    const unread = message.role !== "user" && message.read === false;
+    if (root !== undefined && root !== message.id) stacked.add(message.id);
+  }
+  for (const [root, summary] of summaries) {
+    if (summary.replyCount === 0) continue;
+    const { latestReply } = summary;
     stacks.set(root, {
       root,
-      total: (stack?.total ?? 0) + 1,
-      unread: (stack?.unread ?? 0) + (unread ? 1 : 0),
-      unreadAt: unread ? at : (stack?.unreadAt ?? -1),
-      last: { id: message.id, role: message.role, content: message.content ?? "[]" },
+      total: summary.replyCount,
+      unread: summary.unreadCount,
+      unreadAt: summary.unreadAt,
+      last: { id: latestReply.id, role: latestReply.role, content: latestReply.content ?? "[]" },
     });
-  });
+  }
   return { stacks, stacked };
 }
+
+/** What a timeline knows of its threads besides its messages. */
+interface ThreadKnowledge {
+  /** The names of threads whose root is not loaded, by root. */
+  hints?: ReadonlyMap<string, string>;
+  /** The summary of each thread with replies, by root. */
+  summaries?: ReadonlyMap<string, ThreadSummary>;
+}
+
+const NO_THREAD_KNOWLEDGE: ThreadKnowledge = {};
 
 /**
  * What a loaded timeline shows of its chat threads, with the thread in `focus`.
@@ -154,16 +236,21 @@ function stacksOf(
  * and not as a stack, the main timeline leaves the replies out for stacks. A thread
  * in focus shows its own replies in place of its stack. The other threads'
  * replies stay out: the focus hides their threads anyway, so drawing them
- * would only be work, and a flash while the chat changes.
+ * would only be work, and a flash while the chat changes. `hints` name the
+ * threads whose root is not loaded, by root: the first words of what a reply
+ * quotes, when the thread has no task title.
  */
 export function chatThreadsOf(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
   stacking = true,
+  { hints, summaries }: ThreadKnowledge = NO_THREAD_KNOWLEDGE,
 ): ChatThreads {
   const { roots, titles } = threadsOf(messages);
+  // A thread whose root is not loaded is named by what the server read of it.
+  for (const [root, hint] of hints ?? []) if (!titles.has(root)) titles.set(root, hint);
   const { stacks, stacked } = stacking
-    ? stacksOf(messages, roots)
+    ? stacksOf(messages, roots, summaries ?? new Map())
     : { stacks: new Map<string, ThreadStack>(), stacked: new Set<string>() };
   if (focus !== null) {
     stacks.delete(focus);
@@ -220,8 +307,12 @@ export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   focus: string | null = null,
   stacking = true,
+  knowledge: ThreadKnowledge = NO_THREAD_KNOWLEDGE,
 ): ChatThreads {
-  return useMemo(() => chatThreadsOf(messages, focus, stacking), [messages, focus, stacking]);
+  return useMemo(
+    () => chatThreadsOf(messages, focus, stacking, knowledge),
+    [messages, focus, stacking, knowledge],
+  );
 }
 
 /**
