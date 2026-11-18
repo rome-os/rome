@@ -176,7 +176,8 @@ rs.mock("@/components/agent-trace/TraceDrawer", () => ({
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
-  AgentAvatar: () => null,
+  AgentAvatar: ({ iconUrl }: { iconUrl?: string | null }) =>
+    iconUrl ? <span data-agent-avatar={iconUrl} /> : null,
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
@@ -1216,6 +1217,36 @@ describe("Chat agent identity", () => {
     renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  Atlas  " />);
 
     expect(screen.getByTestId("message-list").textContent).toBe("Atlas");
+  });
+
+  it("shows a chat's app agent in the header's badge, and the mascot otherwise", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: "/api/apps/workflow-studio/icon",
+      },
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="session-1" />);
+    const badge = document.querySelector("[data-concierge-header-badge]")!;
+    expect(badge.querySelector("[data-agent-avatar]")?.getAttribute("data-agent-avatar")).toBe(
+      "/api/apps/workflow-studio/icon",
+    );
+    expect(badge.querySelector(".rome-mascot")).toBeNull();
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    const plain = document.querySelector("[data-concierge-header-badge]")!;
+    expect(plain.querySelector("[data-agent-avatar]")).toBeNull();
+    expect(plain.querySelector(".rome-mascot")).not.toBeNull();
   });
 
   it("keeps a session-pinned app agent ahead of the main agent display name", () => {

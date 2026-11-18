@@ -46,6 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
@@ -2700,6 +2701,16 @@ export function Chat({
       // Nothing while the chat's name loads, so "New chat" never flashes first.
       name={sessionLoading ? null : sessionName?.trim() || t("sidebar.newChat")}
       // The same mascot as the Concierge's; the tag names the chat instead.
+      // A chat bound to an app's agent shows that app's icon, as its agent.
+      avatar={
+        pinnedAgentMention?.iconUrl ? (
+          <AgentAvatar
+            iconUrl={pinnedAgentMention.iconUrl}
+            label={pinnedAgentMention.appLabel}
+            size="sm"
+          />
+        ) : undefined
+      }
       menu={headerMenu}
       showsActivity={false}
     />
