@@ -301,7 +301,7 @@
   --row-count-font-size: 0.6875rem;
   --row-count-line-height: calc(16 / 11);
   --row-count-px: 0.125rem;
-  --row-count-fg: color-mix(in oklab, var(--primary) 60%, var(--foreground));
+  --row-count-fg: var(--primary-foreground);
   font-size: var(--row-count-font-size);
   line-height: var(--row-count-line-height);
   color: var(--row-count-fg);
