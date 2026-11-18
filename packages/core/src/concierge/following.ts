@@ -1392,6 +1392,8 @@ export function startConciergeFollowing(
       await deps.timezoneMoved?.(owner, timezone);
     },
 
+    // Read outside the write queue: the labels may ask the providers, and a
+    // slow one must not hold up an archive, unarchive or delete behind it.
     async followsOfChat(chatId, owner) {
       const follows = followsOf(await readStored(), owner).filter((f) => f.chat === chatId);
       if (follows.length === 0) return [];
@@ -1514,11 +1516,8 @@ export function startConciergeFollowing(
       exclusive(() => unserialized.unfollow(source, target, owner)),
     setRules: (change, owner) => exclusive(() => unserialized.setRules(change, owner)),
     setTimezone: (owner, timezone) => exclusive(() => unserialized.setTimezone(owner, timezone)),
-    followsOfChat: (chatId, owner) => exclusive(() => unserialized.followsOfChat(chatId, owner)),
     moveToMainChat: (chatId, to, archived) =>
       exclusive(() => unserialized.moveToMainChat(chatId, to, archived)),
-    followsMovedFrom: (chatId, mainChat, owner) =>
-      exclusive(() => unserialized.followsMovedFrom(chatId, mainChat, owner)),
     restoreToChat: (chatId, mainChat, owner, moveBack) =>
       exclusive(() => unserialized.restoreToChat(chatId, mainChat, owner, moveBack)),
   };

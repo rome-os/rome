@@ -189,6 +189,8 @@ function setup(
     triage?: Record<string, "important" | "digest" | "ignore">;
     triageLine?: string;
     catalog?: ProviderSources;
+    /** Holds every read of the sources until it settles, as a slow provider does. */
+    sourcesHeld?: Promise<void>;
   } = {},
 ) {
   /** The Concierge chats that exist and are not archived; "calendar" is a topic chat. */
@@ -313,6 +315,7 @@ function setup(
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
+        await options.sourcesHeld;
         return {
           status: "ok",
           data: options.catalog ?? sources(options.gmailStatus, options.gmailUndelivered),
@@ -1671,6 +1674,30 @@ describe("follows in several Concierge chats", () => {
     expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
     expect(await chatOf(s, "acme/gadgets")).toMatchObject({ id: "trips" });
     expect(await moved()).toEqual([]);
+    s.stop();
+  });
+
+  it("lists what an archive moved or would move without holding up a follow change behind a slow source", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(1);
+    // Past the sources' TTL, a provider that does not answer yet.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    let answer = () => {};
+    options.sourcesHeld = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const moved = s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER);
+    const inChat = s.following().followsOfChat("concierge", GUARDIAN_OWNER);
+    // The unarchive's own change goes through while those lists still wait.
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, false)).toBe(0);
+    answer();
+    expect(await moved).toEqual([{ source: "github", label: "GitHub", target: "acme/widgets" }]);
+    await inChat;
     s.stop();
   });
 
