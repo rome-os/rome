@@ -54,7 +54,13 @@ export function MemoryFileSheet({
           </SheetTitle>
           <Link
             to={href}
-            onClick={onClose}
+            // Only a plain click leaves for the page. One that opens a new tab
+            // keeps the sheet, and its edits, here; a plain click with unsaved
+            // edits is held by the browser's own leave check before this runs.
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              if (event.button === 0) onClose();
+            }}
             className="flex shrink-0 items-center gap-1 text-ui text-muted-foreground hover:text-foreground"
           >
             <ExternalLink className="size-4" aria-hidden />

@@ -201,6 +201,11 @@ describe("ChatLink and the chat's outputs", () => {
     fireEvent.click(sheetBrowser);
     expect(outer).not.toHaveBeenCalled();
 
+    // Opening the Memory page in a new tab keeps the sheet and its edits.
+    fireEvent.click(screen.getByRole("link", { name: "memoryFile.openPage" }), { metaKey: true });
+    fireEvent.click(screen.getByRole("link", { name: "memoryFile.openPage" }), { ctrlKey: true });
+    expect(screen.getByTestId("memory-browser")).toBeTruthy();
+
     browser.canLeave = false;
     fireEvent.click(screen.getByRole("button", { name: "memoryFile.close" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
