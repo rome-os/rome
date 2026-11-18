@@ -27,7 +27,7 @@ How a chat treats one agent's turns: whether the agent's text reaches the chat, 
 
 ## Skill
 
-Know-how an agent reads and follows. An agent has the skills its installed apps offer, and a slash command invokes one for a turn. What a skill is, is in [`concepts/skills.md`](../concepts/skills.md).
+Know-how an agent reads and follows. An agent has the skills its installed apps offer, and a slash command invokes one for a turn. An agent with no actions sees none. What a skill is, is in [`concepts/skills.md`](../concepts/skills.md).
 
 - In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts). The Apps context's `SkillLoader` in [`packages/core/src/app-host/skill-loader.ts`](../../packages/core/src/app-host/skill-loader.ts) fills it from the installed apps.
 
