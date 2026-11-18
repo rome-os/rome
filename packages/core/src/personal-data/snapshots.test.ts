@@ -192,6 +192,28 @@ describe("snapshots", () => {
     expect(keys()).toEqual(["events:a", "events:b"]);
   });
 
+  it("moves synced-through on a mark alone and keeps the snapshot", () => {
+    ingest(
+      batch("s1", {
+        upserts: [event("a", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-1", window: WINDOW },
+        syncedThrough: NOW,
+      }),
+    );
+    // The phone read the same again: it sends only the mark.
+    const later = NOW + 2 * HOUR;
+    const answer = ingest(batch("m1", { syncedThrough: later }), later);
+    expect(answer).toMatchObject({ inserted: 0, deleted: 0 });
+    expect(keys()).toEqual(["events:a"]);
+    const type = testDb.db.select().from(personalDataTypes).all()[0];
+    expect(type).toMatchObject({
+      syncedThroughAt: later,
+      snapshotId: "snap-1",
+      snapshotReadAt: NOW,
+    });
+    expect(list("2026-11-18", "2026-11-18", later).connection).toBeUndefined();
+  });
+
   it("cleans up a snapshot that never committed at the next commit", () => {
     ingest(
       batch("b1", {

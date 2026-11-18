@@ -7,8 +7,8 @@ import Foundation
 // so the phone keeps no record of what the Rome has: a lost answer is mended
 // by the next run, and a run cut off leaves the last snapshot in place. An
 // event that has aged out of the window stays on the Rome as history. A run
-// that reads what the Rome last committed, window included, sends nothing,
-// except once a day, so the Rome's copy never looks more than a day old.
+// that reads what the Rome last committed, window included, sends only the
+// type's mark, and the whole snapshot again once a day.
 
 struct CalendarSource: PersonalDataSource {
     static let pastDays = 7
@@ -52,7 +52,9 @@ struct CalendarSource: PersonalDataSource {
         let chunk = Self.chunk(items, progress: progress, window: window, now: now)
         if let at = progress.snapshotAt, progress.snapshotDigest == chunk.snapshot?.digest,
            now >= at, now.timeIntervalSince(at) < Self.resendAfter {
-            await pending.clear()
+            // The Rome committed exactly this: only the mark goes, so it
+            // counts as synced now and the Agent need not read live.
+            await pending.set(SyncChunk(kind: .delta, marks: chunk.marks, commit: progress))
             return
         }
         await pending.set(chunk)
@@ -77,9 +79,11 @@ struct CalendarSource: PersonalDataSource {
         // A Rome that does not know events keeps nothing: tried again next time.
         guard unsupported.isEmpty else { return }
         var commit = chunk.commit
+        // A mark alone keeps the snapshot the Rome holds.
+        guard let snapshot = chunk.snapshot else { return await store.save(commit) }
         // Only a commit the Rome answered is one it holds: anything else is
         // sent whole next time.
-        if committed.contains("events"), let snapshot = chunk.snapshot {
+        if committed.contains("events") {
             commit.snapshotDigest = snapshot.digest
             commit.snapshotAt = snapshot.readAt
         } else {

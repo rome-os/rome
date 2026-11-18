@@ -305,18 +305,21 @@ enum CalendarFixtures {
 
         clock.advance(3600)
         await engine.sync(.manual)
-        #expect(await backend.envelopes.count == 1, "the Rome has this snapshot already")
+        let skipped = try #require(await backend.envelopes.last)
+        #expect(await backend.envelopes.count == 2)
+        #expect(skipped.upserts.isEmpty && skipped.deletes.isEmpty && skipped.snapshot == nil, "the Rome has this snapshot already")
+        #expect(skipped.types == [.init(type: "events", syncedThrough: WireTime.string(clock.now))], "only the mark, so synced-through moves")
 
         fake.events[0].title = "Moved"
         await engine.sync(.manual)
-        #expect(await backend.envelopes.count == 2, "a change sends it all again")
+        #expect(await backend.envelopes.last?.snapshot?.windows?.map(\.type) == ["events"], "a change sends it all again")
 
         // 09:00 in Shanghai plus 16 hours: past midnight, the window moves on.
         clock.advance(16 * 3600)
         await engine.sync(.manual)
         let envelopes = await backend.envelopes
-        #expect(envelopes.count == 3, "a new day sends the snapshot again")
-        #expect(envelopes.last?.upserts.map(\.key) == ["events:a"])
+        #expect(envelopes.count == 4)
+        #expect(envelopes.last?.upserts.map(\.key) == ["events:a"], "a new day sends the snapshot again")
     }
 
     @Test func aLostCommitAnswerSendsTheSnapshotAgain() async throws {
@@ -334,7 +337,7 @@ enum CalendarFixtures {
         #expect(await backend.envelopes.count == 2, "sent whole again")
         clock.advance(60)
         await engine.sync(.manual)
-        #expect(await backend.envelopes.count == 2, "committed and answered: skipped")
+        #expect(await backend.envelopes.last?.upserts.isEmpty == true, "committed and answered: only the mark")
     }
 
     @Test func theWindowIsWholeDaysFifteenAhead() {
