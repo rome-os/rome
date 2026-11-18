@@ -561,11 +561,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             {/* At least as tall as the buttons beside it, with one line of text
                 centered, so the text sits on their center line until it wraps.
                 `--row-h` follows the buttons: `icon-sm`, raised to the touch
-                floor where `touch-target` applies it. */}
+                floor where `touch-target` applies it. On its own row while
+                voice input is on, the text starts where the + below draws:
+                the + is centered in a `--row-h` wide button and its strokes
+                begin about 4px left of that center. */}
             <div
               className={cn(
                 "relative flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
-                voice.active && "order-first basis-full",
+                voice.active && "order-first basis-full pl-[calc(var(--row-h)/2-0.25rem)]",
               )}
               style={{ minHeight: "var(--row-h)" }}
             >
