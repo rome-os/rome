@@ -194,6 +194,24 @@ const COMPOSIO_GLYPHS: Record<string, ReactNode> = {
       <path d="M11.6 9.4c0-.7.6-1 1.5-1 1.3 0 2.7.4 4 1.1V5.8C15.7 5.3 14.3 5.1 13 5.1c-3.1 0-5.2 1.6-5.2 4.3 0 4.2 5.8 3.5 5.8 5.3 0 .8-.7 1.1-1.7 1.1-1.4 0-3.2-.6-4.6-1.4v3.8c1.5.7 3.1 1 4.6 1 3.2 0 5.4-1.6 5.4-4.3 0-4.5-5.8-3.7-5.8-5.5z" />
     </svg>
   ),
+  freshdesk: (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="22"
+      height="22"
+      aria-hidden="true"
+    >
+      <path d="M4.5 13.5V12a7.5 7.5 0 0 1 15 0v1.5" />
+      <rect x="4" y="13" width="3.6" height="5" rx="1.5" />
+      <rect x="16.4" y="13" width="3.6" height="5" rx="1.5" />
+      <path d="M18.2 18v.6a2.4 2.4 0 0 1-2.4 2.4H13" />
+    </svg>
+  ),
   supabase: (
     <svg
       viewBox="0 0 24 24"
