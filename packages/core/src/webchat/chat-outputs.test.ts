@@ -444,6 +444,10 @@ describe("ChatOutputs", () => {
   });
 
   it("reads back nothing for a chat made since outputs were recorded as they happen", async () => {
+    // Recording began well before the chat. Left to the first read, it could
+    // land a whole second later than the chat's creation, which is stored in
+    // seconds, and make the chat look older.
+    repo.recordingSince(new Date("2026-01-01T00:00:00Z"));
     const asset = `${ID_A}.png`;
     writeFileSync(join(assets, asset), "png");
     // A link the reply holds, with no show call recorded for it.
