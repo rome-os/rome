@@ -20,6 +20,7 @@ import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
+import { createFillerFilter } from "./filler-words.js";
 import type { TranscriptionFailure, TranscriptionStream } from "./transcriber.js";
 import type { ListeningSource, VoiceInputSource } from "./voice-input-source.js";
 import { readVoiceTerms } from "./voice-terms.js";
@@ -227,6 +228,11 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       sampleRate,
       termCount: terms.length,
     });
+    const fillers = createFillerFilter();
+    const showLast = () => {
+      const last = fillers.finish();
+      if (last && !closed) reply({ type: "text", ...last });
+    };
     stream = transcriber.open(
       { sampleRate, ...(terms.length ? { terms } : {}) },
       {
@@ -239,11 +245,15 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
             audioArrived();
           }
           lastPending = pending;
-          reply({ type: "text", settled, pending });
+          reply({ type: "text", ...fillers.update(settled, pending) });
         },
-        onEnd: () => close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" }),
+        onEnd: () => {
+          showLast();
+          close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" });
+        },
         onFailure: (failure, detail) => {
           log.warn("voice input provider failed", { failure, detail });
+          showLast();
           close({ type: "error", reason: STOP_REASON[failure] });
         },
       },
