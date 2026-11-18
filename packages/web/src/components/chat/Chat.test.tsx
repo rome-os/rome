@@ -30,6 +30,7 @@ import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   acceptLatestSocket,
   FakeWebSocket,
@@ -2680,6 +2681,26 @@ describe("Chat turn stream lifecycle", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.unreachable"),
+    );
+  });
+
+  it("says Rome is updating when its proxy answers a send while this page knows of an upgrade", async () => {
+    function UpgradeUnderWay() {
+      useUpgradeUnderWay(true);
+      return null;
+    }
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, status: 502, message: "" });
+    renderChat(
+      <>
+        <UpgradeUnderWay />
+        <Chat sessionId="session-1" />
+      </>,
+    );
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.updating"),
     );
   });
 

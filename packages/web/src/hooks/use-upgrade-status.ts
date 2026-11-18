@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 
 export const UPGRADE_STATUS_IDLE_POLL_MS = 15_000;
 export const UPGRADE_STATUS_ACTIVE_POLL_MS = 3_000;
@@ -375,6 +376,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
   const updateNow = useCallback(() => act("now"), [act]);
   const defer = useCallback(() => act("defer"), [act]);
   const dismissStalled = useCallback(() => setStalledDismissed(true), []);
+  useUpgradeUnderWay(state?.phase === "updating");
 
   return { state, updateNow, defer, dismissStalled };
 }

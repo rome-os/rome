@@ -659,8 +659,10 @@
       "sendFallback": "发送消息失败。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。",
-      "reconnecting": "正在升级，重连中…",
-      "unreachable": "正在升级，稍后再试。"
+      "reconnecting": "暂时连不上 Rome，重连中…",
+      "unreachable": "暂时连不上 Rome，稍后再试。",
+      "updating": "正在升级，稍后再试。",
+      "updatingReconnecting": "正在升级，重连中…"
     }
   },
   "empty": {

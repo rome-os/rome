@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { apiErrorMessageFrom } from "@/lib/api-error";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 
 /** Mirrors the Rome Cloud upgrade-check contract relayed by GET /api/system/upgrade/check. */
 export interface UpgradeCheck {
@@ -92,6 +93,7 @@ export function useSystemUpgrade(
   const [retrying, setRetrying] = useState(false);
 
   const accept = (target: string) => setWait({ target });
+  useUpgradeUnderWay(wait !== null && upgradedTo === null && !restartTimedOut);
 
   const mutation = useMutation({
     mutationFn: (target: string) => requestUpgrade(target, t("system.upgradeFailedFallback")),

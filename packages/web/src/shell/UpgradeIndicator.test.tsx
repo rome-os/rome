@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
+import { isUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import { UpgradeIndicator } from "./UpgradeIndicator";
 
 beforeAll(async () => {
@@ -220,12 +221,15 @@ describe("UpgradeIndicator", () => {
     try {
       await confirm(user);
       expect(await screen.findByRole("status", { name: UPDATING })).toBeTruthy();
+      // The chat names an outage an upgrade only while it is under way.
+      expect(isUpgradeUnderWay()).toBe(true);
 
       backend.state.build = "1.2.0";
       await rs.advanceTimersByTimeAsync(3_000);
 
       const done = await screen.findByRole("button", { name: UPDATED });
       expect(done.textContent).toBe("UpdatedReload");
+      expect(isUpgradeUnderWay()).toBe(false);
       // It stays: no reload and no timer takes it away.
       await rs.advanceTimersByTimeAsync(10 * 60_000);
       expect(screen.getByRole("button", { name: UPDATED })).toBe(done);

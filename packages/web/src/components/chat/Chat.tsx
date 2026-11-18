@@ -189,6 +189,7 @@ import type {
   ThreadSummary,
 } from "@/lib/chat-types";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
+import { isUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   parseSSEEvents,
   STREAM_STALL_TIMEOUT_MS,
@@ -2198,10 +2199,13 @@ export function Chat({
           } else if (sessionId === mainSessionIdRef.current) {
             // The composer banner belongs to the chat's own turn; a background
             // turn retries quietly.
-            // Rome answering nothing behind its proxy, as while it restarts,
-            // is a dropped connection, and this loop already reconnects.
+            // Rome answering nothing behind its proxy is a dropped
+            // connection, and this loop already reconnects. It is named an
+            // upgrade only when this page knows one is under way.
             shownError = isUnreachableStatus(res.status)
-              ? t("stream.errors.reconnecting")
+              ? isUpgradeUnderWay()
+                ? t("stream.errors.updatingReconnecting")
+                : t("stream.errors.reconnecting")
               : t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
@@ -2421,7 +2425,7 @@ export function Chat({
           (result.status === 0
             ? t("stream.errors.sendInvalidResponse")
             : isUnreachableStatus(result.status)
-              ? t("stream.errors.unreachable")
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
               : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
@@ -2772,7 +2776,7 @@ export function Chat({
         setStreamError(
           message ||
             (isUnreachableStatus(res.status)
-              ? t("stream.errors.unreachable")
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
               : t("stream.errors.stopStatus", { status: res.status })),
         );
       }
