@@ -24,6 +24,7 @@ describe("ChatOutputs", () => {
   let root: string;
   let projects: string;
   let assets: string;
+  let savedProjectsRoot: string | undefined;
 
   beforeEach(async () => {
     testDb = createTestDb();
@@ -46,9 +47,13 @@ describe("ChatOutputs", () => {
       roots: { projects, assets, showable: [projects, assets] },
     });
     await chats.createSession("chat-1", "Chat");
+    savedProjectsRoot = process.env.ROME_PROJECTS_ROOT;
+    process.env.ROME_PROJECTS_ROOT = projects;
   });
 
   afterEach(() => {
+    if (savedProjectsRoot === undefined) delete process.env.ROME_PROJECTS_ROOT;
+    else process.env.ROME_PROJECTS_ROOT = savedProjectsRoot;
     testDb.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -121,6 +126,46 @@ describe("ChatOutputs", () => {
       },
     );
   }
+
+  it("records a file a shell command wrote and one the reply links, as Codex makes them", async () => {
+    const dir = join(projects, "demo");
+    writeFileSync(join(dir, "hello.txt"), "Hello");
+    writeFileSync(join(dir, "plan.md"), "# Plan");
+    const run = {
+      type: "commandExecution",
+      id: "c1",
+      command: `/usr/bin/bash -lc "printf 'Hello' > hello.txt"`,
+      cwd: dir,
+    };
+    await turn(
+      "chat-1",
+      "t1",
+      { type: "tool_use", id: "c1", tool: "Bash", input: { ...run, exitCode: null } },
+      { type: "tool_result", toolUseId: "c1", tool: "Bash", output: { ...run, exitCode: 0 } },
+    );
+    await chats.appendTraceBlocks({
+      messageId: "t1-trace",
+      sessionId: "chat-1",
+      turnId: "t1",
+      startSeq: 3,
+      blocks: [
+        {
+          type: "result",
+          content:
+            "Made [hello.txt](</projects/demo/hello.txt>) and [plan.md](/projects/demo/plan.md).",
+        },
+        { type: "turn_end", turnId: "t1" },
+      ],
+    });
+
+    const list = await listed("chat-1");
+    expect(list.map((output) => [output.name, output.kind, output.link])).toEqual([
+      ["plan.md", "written", "/projects/demo/plan.md"],
+      ["hello.txt", "written", "/projects/demo/hello.txt"],
+    ]);
+    const hello = list.find((output) => output.name === "hello.txt")!;
+    expect(await read("chat-1", hello.id)).toEqual({ name: "hello.txt", text: "Hello" });
+  });
 
   it("records a written file and a shown one with their chat, turn and trace message", async () => {
     const notes = join(projects, "demo", "notes.md");

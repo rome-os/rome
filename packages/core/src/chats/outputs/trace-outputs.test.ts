@@ -1,5 +1,25 @@
 import { describe, expect, it } from "@rstest/core";
-import { outputsInMessage, outputsInTrace } from "./trace-outputs.js";
+import { outputsInMessage, outputsInReply, outputsInTrace } from "./trace-outputs.js";
+
+const FILES = new Set(["/home/p/test/hello.txt", "/home/p/test/my notes.md", "/tmp/out.csv"]);
+const SCOPE = {
+  projectsRoot: "/home/p",
+  isFile: (path: string) => FILES.has(path),
+  traceId: "tr1",
+};
+
+/** A Codex command run, as the trace stores its call and result. */
+function codexRun(
+  id: string,
+  command: string,
+  result: { exitCode: number | null; status: string },
+) {
+  const run = { type: "commandExecution", id, command, cwd: "/home/p/test" };
+  return [
+    { type: "tool_use", id, tool: "Bash", input: { ...run, status: "inProgress", exitCode: null } },
+    { type: "tool_result", toolUseId: id, tool: "Bash", output: { ...run, ...result } },
+  ];
+}
 
 const ASSET = "/api/assets/0123456789abcdef0123456789abcdef.png";
 
@@ -111,6 +131,70 @@ describe("outputsInTrace", () => {
         { type: "tool_result", toolUseId: "o1", tool: "execute_action", output: ASSET },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("outputsInTrace, for shell commands and replies", () => {
+  it("finds a file a Codex command wrote, resolved against its folder, once it succeeds", () => {
+    const found = outputsInTrace(
+      codexRun("c1", `/usr/bin/bash -lc "printf 'hi' > hello.txt && cat hello.txt"`, {
+        exitCode: 0,
+        status: "completed",
+      }),
+      undefined,
+      SCOPE,
+    );
+    expect(found).toEqual([
+      {
+        sourceKey: "c1#sh:/home/p/test/hello.txt",
+        kind: "written",
+        path: "/home/p/test/hello.txt",
+        sourcePath: null,
+        name: "hello.txt",
+        mimeType: "text/plain",
+      },
+    ]);
+  });
+
+  it("finds nothing for a failed command, a file not there, or without a way to check files", () => {
+    const failed = codexRun("c1", "echo hi > hello.txt", { exitCode: 1, status: "failed" });
+    const gone = codexRun("c2", "echo hi > gone.txt", { exitCode: 0, status: "completed" });
+    expect(outputsInTrace([...failed, ...gone], undefined, SCOPE)).toEqual([]);
+    const ok = codexRun("c3", "echo hi > hello.txt", { exitCode: 0, status: "completed" });
+    expect(outputsInTrace(ok)).toEqual([]);
+  });
+
+  it("finds a Claude Code shell write only by an absolute path, as its call names no folder", () => {
+    const found = outputsInTrace(
+      [
+        {
+          type: "tool_use",
+          id: "b1",
+          tool: "Bash",
+          input: { command: "date > when.txt; cp a /tmp/out.csv" },
+        },
+        { type: "tool_result", toolUseId: "b1", tool: "Bash", output: "" },
+      ],
+      undefined,
+      SCOPE,
+    );
+    expect(found.map((output) => output.path)).toEqual(["/tmp/out.csv"]);
+  });
+
+  it("finds the local files a turn's reply links", () => {
+    const reply =
+      "已生成 [hello.txt](</projects/test/hello.txt>)，see [notes](/projects/test/my%20notes.md), " +
+      "[web](https://example.com/a.txt), [asset](/api/assets/x.png), [gone](/projects/test/gone.txt), " +
+      "[escape](/projects/../etc/passwd) and [abs](/tmp/out.csv).";
+    const found = outputsInTrace([{ type: "result", content: reply }], undefined, SCOPE);
+    expect(found.map((output) => [output.sourceKey, output.name])).toEqual([
+      ["reply:tr1:/home/p/test/hello.txt", "hello.txt"],
+      ["reply:tr1:/home/p/test/my notes.md", "my notes.md"],
+      ["reply:tr1:/tmp/out.csv", "out.csv"],
+    ]);
+    expect(
+      outputsInReply("tr1", "[a](/projects/test/hello.txt) [b](/projects/test/hello.txt)", SCOPE),
+    ).toHaveLength(1);
   });
 });
 

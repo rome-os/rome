@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { createLogger } from "../../logger.js";
+import { getProjectsRoot } from "../../paths.js";
 import {
   chatOutputBackfills,
   chatOutputs,
@@ -16,6 +18,7 @@ import {
   outputsInMessage,
   outputsInTrace,
   type OutputFound,
+  type OutputScope,
   type ToolUseBlock,
 } from "./trace-outputs.js";
 
@@ -43,6 +46,20 @@ export interface OutputPlace {
 }
 
 type Writer = Pick<DrizzleDb, "insert" | "select">;
+
+/** The files on this machine, as a shell command or a reply names them. */
+function localFiles(): OutputScope {
+  return {
+    projectsRoot: getProjectsRoot(),
+    isFile: (path) => {
+      try {
+        return statSync(path).isFile();
+      } catch {
+        return false;
+      }
+    },
+  };
+}
 
 function insertOutputs(db: Writer, place: OutputPlace, found: OutputFound[], at: Date): void {
   if (found.length === 0) return;
@@ -151,6 +168,7 @@ export function recordTraceOutputs(
       const found = outputsInTrace(
         blocks,
         (id) => calls.find(place.messageId, id) ?? storedToolUse(tx, place.messageId, id),
+        { ...localFiles(), traceId: place.messageId },
       );
       insertOutputs(tx, place, found, at);
     }
@@ -266,9 +284,9 @@ export class ChatOutputsRepository {
 
   /**
    * Reads back what chat `sessionId` made before outputs were recorded, from
-   * its `messages`: the write and show calls its stored traces still hold,
-   * and the asset links its agent's messages hold that no guardian message
-   * attached. An output already recorded is not recorded again, so a second
+   * its `messages`: the write, shell and show calls its stored traces still
+   * hold, the local files its replies link, and the asset links its agent's
+   * messages hold that no guardian message attached. An output already recorded is not recorded again, so a second
    * read back changes nothing. A trace stored whole on its message row, from
    * before traces were stored block by block, is not read back.
    */
@@ -306,7 +324,7 @@ export class ChatOutputsRepository {
       .where(
         and(
           eq(romeAgentTraceBlocks.messageId, messageId),
-          sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') IN ('tool_use', 'tool_result')`,
+          sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') IN ('tool_use', 'tool_result', 'result')`,
         ),
       )
       .orderBy(asc(romeAgentTraceBlocks.seq))
@@ -319,7 +337,7 @@ export class ChatOutputsRepository {
         // A block that does not parse made no output.
       }
     }
-    return outputsInTrace(blocks);
+    return outputsInTrace(blocks, undefined, { ...localFiles(), traceId: messageId });
   }
 
   /** Removes chats' outputs with the chats, in their delete's transaction. */

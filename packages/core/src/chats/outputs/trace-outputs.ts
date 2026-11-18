@@ -1,6 +1,7 @@
-import { basename } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { ChatOutputKind } from "@rome/api-types/chat-outputs";
 import { describeFile } from "../../lib/file-browser-server.js";
+import { shellWrites } from "./shell-writes.js";
 
 /** An output found in a trace or a message, before it is stored. */
 export interface OutputFound {
@@ -20,6 +21,17 @@ export interface ToolUseBlock {
   input?: unknown;
 }
 
+/**
+ * What reading a shell command's or a reply's files needs: their text names
+ * a file loosely, so only a file that is there now counts.
+ */
+export interface OutputScope {
+  /** Where `/projects/<path>` links point. */
+  projectsRoot: string;
+  /** Whether absolute path `path` is a regular file now. */
+  isFile: (path: string) => boolean;
+}
+
 interface ToolResultBlock {
   type: "tool_result";
   toolUseId?: string;
@@ -31,6 +43,9 @@ interface ToolResultBlock {
 // Tools that write a file: Claude Code's, and Codex's file change, which the
 // trace names `Edit`.
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+// Tools that run a shell command: Claude Code's, and Codex's command run,
+// which the trace names `Bash` too.
+const SHELL_TOOLS = new Set(["Bash"]);
 const ACTION_TOOL = "execute_action";
 const SHOW_FILE_ACTIONS = new Set(["core:show_file", "show_file"]);
 
@@ -66,6 +81,33 @@ export function writtenPaths(tool: string | undefined, input: unknown): string[]
   });
 }
 
+/**
+ * The files a shell tool call's command plainly writes, absolute: a relative
+ * one resolved against the command's folder. One whose folder the call does
+ * not give is left out, as there is no telling where it went.
+ */
+export function shellWrittenPaths(tool: string | undefined, input: unknown): string[] {
+  if (!tool || !SHELL_TOOLS.has(tool)) return [];
+  const args = record(input);
+  const command = args?.command;
+  if (typeof command !== "string") return [];
+  const cwd = typeof args?.cwd === "string" && isAbsolute(args.cwd) ? args.cwd : null;
+  return shellWrites(command).flatMap((path) =>
+    isAbsolute(path) ? [resolve(path)] : cwd ? [resolve(cwd, path)] : [],
+  );
+}
+
+/** Whether a shell result says its command finished without failing. */
+function shellSucceeded(result: ToolResultBlock): boolean {
+  if (result.isError === true) return false;
+  const output = record(result.output);
+  if (!output) return true;
+  const exitCode = output.exitCode;
+  return (
+    (exitCode === undefined || exitCode === null || exitCode === 0) && output.status !== "failed"
+  );
+}
+
 /** The local path a `core:show_file` call names, or null for any other call. */
 function showFilePath(tool: string | undefined, input: unknown): string | null | undefined {
   if (tool !== ACTION_TOOL) return undefined;
@@ -90,18 +132,24 @@ function text(value: unknown): string {
  * the copy `core:show_file` stored. A failed call made none. A Codex change
  * that touched several files made one output each.
  */
-export function outputsOfToolCall(use: ToolUseBlock, result: ToolResultBlock): OutputFound[] {
+export function outputsOfToolCall(
+  use: ToolUseBlock,
+  result: ToolResultBlock,
+  scope?: OutputScope,
+): OutputFound[] {
   if (result.isError === true || !use.id) return [];
+  const fromShell = shellWrittenPaths(use.tool, use.input);
+  if (fromShell.length > 0) {
+    if (!scope || !shellSucceeded(result)) return [];
+    return fromShell
+      .filter((path) => scope.isFile(path))
+      .map((path) => writtenFile(`${use.id}#sh:${path}`, path));
+  }
   const written = writtenPaths(use.tool, use.input);
   if (written.length > 0) {
-    return written.map((path, index) => ({
-      sourceKey: written.length === 1 ? use.id! : `${use.id}#${index}`,
-      kind: "written",
-      path,
-      sourcePath: null,
-      name: basename(path),
-      mimeType: outputMimeType(path),
-    }));
+    return written.map((path, index) =>
+      writtenFile(written.length === 1 ? use.id! : `${use.id}#${index}`, path),
+    );
   }
   const shownFrom = showFilePath(use.tool, use.input);
   if (shownFrom === undefined) return [];
@@ -128,6 +176,7 @@ export function outputsOfToolCall(use: ToolUseBlock, result: ToolResultBlock): O
 export function outputsInTrace(
   blocks: readonly unknown[],
   findUse: (toolUseId: string) => ToolUseBlock | null = () => null,
+  reply?: OutputScope & { traceId: string },
 ): OutputFound[] {
   const uses = new Map<string, ToolUseBlock>();
   const found: OutputFound[] = [];
@@ -138,14 +187,19 @@ export function outputsInTrace(
       uses.set(block.id, block as unknown as ToolUseBlock);
       continue;
     }
+    // A turn's reply: the local files it links.
+    if (block.type === "result" && reply && typeof block.content === "string") {
+      found.push(...outputsInReply(reply.traceId, block.content, reply));
+      continue;
+    }
     if (block.type !== "tool_result" || typeof block.toolUseId !== "string") continue;
     const result = block as unknown as ToolResultBlock;
     // Only a result whose tool could have written or shown a file looks its
     // call up. An action's result shows a file only when it holds a copy's URL.
-    if (result.tool && !WRITE_TOOLS.has(result.tool) && result.tool !== ACTION_TOOL) continue;
+    if (result.tool && !mayWrite(result.tool)) continue;
     if (result.tool === ACTION_TOOL && !ASSET_URL.test(text(result.output))) continue;
     const use = uses.get(block.toolUseId) ?? findUse(block.toolUseId);
-    if (use) found.push(...outputsOfToolCall(use, result));
+    if (use) found.push(...outputsOfToolCall(use, result, reply));
   }
   return found;
 }
@@ -159,17 +213,27 @@ export function isOutputCall(block: unknown): block is ToolUseBlock & { id: stri
   const use = record(block);
   if (use?.type !== "tool_use" || typeof use.id !== "string") return false;
   const tool = typeof use.tool === "string" ? use.tool : undefined;
-  return writtenPaths(tool, use.input).length > 0 || showFilePath(tool, use.input) !== undefined;
+  return (
+    writtenPaths(tool, use.input).length > 0 ||
+    shellWrittenPaths(tool, use.input).length > 0 ||
+    showFilePath(tool, use.input) !== undefined
+  );
+}
+
+/** Whether a tool's result could hold an output: a write, a shell command or an action. */
+function mayWrite(tool: string): boolean {
+  return WRITE_TOOLS.has(tool) || SHELL_TOOLS.has(tool) || tool === ACTION_TOOL;
 }
 
 /** Whether a trace stretch has a result that might have made an output. */
 export function mayHoldOutputs(blocks: readonly unknown[]): boolean {
   return blocks.some((raw) => {
     const block = record(raw);
+    if (block?.type === "result") return true;
     return (
       block?.type === "tool_result" &&
       block.isError !== true &&
-      (typeof block.tool !== "string" || WRITE_TOOLS.has(block.tool) || block.tool === ACTION_TOOL)
+      (typeof block.tool !== "string" || mayWrite(block.tool))
     );
   });
 }
@@ -217,6 +281,54 @@ function messageText(content: string): string {
   };
   walk(parsed);
   return strings.join("\n");
+}
+
+/**
+ * The local files a turn's reply links, by Markdown link: a `/projects/<path>`
+ * route or an absolute path, each kept only while it is a file. An asset, a
+ * web page or a relative link is not one of them.
+ */
+export function outputsInReply(traceId: string, reply: string, scope: OutputScope): OutputFound[] {
+  const found = new Map<string, OutputFound>();
+  // `[label](href)` or `[label](<href>)`, an image's `![label](href)` too.
+  const link = /\[(?:\\.|[^\]\\])*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))/g;
+  for (const match of reply.matchAll(link)) {
+    const path = localPath(match[1] ?? match[2], scope.projectsRoot);
+    if (path && !found.has(path) && scope.isFile(path)) {
+      found.set(path, writtenFile(`reply:${traceId}:${path}`, path));
+    }
+  }
+  return [...found.values()];
+}
+
+/** The file a link's `href` points at on this machine, or null for anything else. */
+function localPath(href: string, projectsRoot: string): string | null {
+  let path = href.trim().replace(/[?#].*$/, "");
+  try {
+    path = decodeURI(path);
+  } catch {
+    return null;
+  }
+  if (path.startsWith("file://")) path = path.slice("file://".length);
+  if (path.startsWith("/projects/")) {
+    const rel = path.slice("/projects/".length);
+    const root = resolve(projectsRoot);
+    const file = resolve(join(root, rel));
+    return file.startsWith(root + sep) ? file : null;
+  }
+  if (!isAbsolute(path) || path.startsWith("/api/")) return null;
+  return resolve(path);
+}
+
+function writtenFile(sourceKey: string, path: string): OutputFound {
+  return {
+    sourceKey,
+    kind: "written",
+    path,
+    sourcePath: null,
+    name: basename(path),
+    mimeType: outputMimeType(path),
+  };
 }
 
 function shownLink(messageId: string, url: string, label: string): OutputFound {
