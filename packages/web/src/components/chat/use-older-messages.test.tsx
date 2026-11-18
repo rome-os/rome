@@ -330,9 +330,9 @@ describe("useOlderMessages", () => {
 });
 
 describe("useOlderMessages onOlderPage", () => {
-  it("reports the messages of each older page that loads, and no other", async () => {
-    const page = [message("m1", 1), message("m2", 2)];
-    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({ messages: page, nextCursor: null });
+  it("reports each older page that loads, and no other", async () => {
+    const page = { messages: [message("m1", 1), message("m2", 2)], nextCursor: null };
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce(page);
     const onOlderPage = rs.fn();
     const { result } = renderHook(() =>
       useOlderMessages("s1", {
@@ -384,7 +384,7 @@ describe("useOlderMessages in a Concierge chat", () => {
     rs.mocked(listSessionMessagePage).mockResolvedValue({
       messages: [message("m2", 2)],
       nextCursor: null,
-      concierge: { body: [], oldestAt: null, titles: new Map() },
+      concierge: { body: [], oldestAt: null, titles: new Map(), threads: new Map() },
     });
     const seen = renderHarness([message("m3", 3)], false, false, true);
 

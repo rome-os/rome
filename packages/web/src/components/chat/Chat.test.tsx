@@ -7,7 +7,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatMessagePage } from "@/lib/chat-api";
 import { CHAT_PAGE_TURNS, CONCIERGE_PAGE_MESSAGES } from "./use-older-messages";
-import type { ChatMessage, ChatSession } from "@/lib/chat-types";
+import type { ChatMessage, ChatSession, ThreadSummary } from "@/lib/chat-types";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
@@ -16,7 +16,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
-import { useChatThreads } from "@/components/chat/reply/chat-threads";
+import { summariesOfLoaded, useChatThreads } from "@/components/chat/reply/chat-threads";
 import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
@@ -43,6 +43,7 @@ import {
   interruptTurn,
   listSessionMessagePage,
   listSessionMessages,
+  listSessionThread,
   listSessionTurns,
   markMessagesRead,
   markSessionRead,
@@ -217,7 +218,15 @@ function Stacks() {
   }
   return [...(threads?.stacks.keys() ?? [])]
     .filter((root) => threads?.roots.get(root) === root)
-    .map((root) => <div key={root} data-thread-stack={root} data-testid="thread-stack" />);
+    .map((root) => (
+      <div
+        key={root}
+        data-thread-stack={root}
+        data-testid="thread-stack"
+        data-total={threads?.stacks.get(root)?.total}
+        data-unread={threads?.stacks.get(root)?.unread}
+      />
+    ));
 }
 
 function ReplyJump() {
@@ -535,16 +544,49 @@ rs.mock("@/components/chat/entries", () => ({
 
 rs.mock("@/lib/chat-api", () => {
   const listSessionMessages = rs.fn().mockResolvedValue([]);
+  // What the last newest-page read brought, which a thread then reads from.
+  let lastList: import("@/lib/chat-types").ChatMessage[] = [];
   return {
     ...chatApiModule,
     createSession: rs.fn(),
     deleteSession: rs.fn(),
     interruptTurn: rs.fn(),
     listSessionMessages,
-    // The newest page reads like the whole list unless a test says otherwise.
-    listSessionMessagePage: rs.fn(async (id: string) => {
-      const all = await listSessionMessages(id);
-      return all === null ? null : { messages: all, nextCursor: null };
+    // The newest page reads like the whole list unless a test says otherwise,
+    // paged by main-line messages where the chat asks for that.
+    listSessionMessagePage: rs.fn(
+      async (id: string, options?: { concierge?: unknown; through?: string }) => {
+        const all = await listSessionMessages(id);
+        if (all === null) return null;
+        lastList = all;
+        if (!options?.concierge) return { messages: all, nextCursor: null };
+        return {
+          messages: all,
+          nextCursor: null,
+          concierge: {
+            body: all,
+            oldestAt: null,
+            titles: new Map(),
+            threads: summariesOfLoaded(all),
+          },
+        };
+      },
+    ),
+    // A thread reads whole from the same list.
+    listSessionThread: rs.fn(async (_id: string, key: string) => {
+      const thread = lastList.filter(
+        (message) => message.chatThreadId === key || message.id === key,
+      );
+      return {
+        messages: thread,
+        nextCursor: null,
+        concierge: {
+          body: thread,
+          oldestAt: null,
+          titles: new Map(),
+          threads: summariesOfLoaded(thread),
+        },
+      };
     }),
     listSessionTurns: rs.fn().mockResolvedValue([{ turnId: "turn-1", status: "running" }]),
     markSessionRead: rs.fn().mockResolvedValue({
@@ -931,6 +973,13 @@ describe("Chat unread divider", () => {
 
     it("divides any other chat at the first unread message it draws, whatever its threads", async () => {
       threaded();
+      // A chat that is not a Concierge chat refuses the paging mode, and is read by turns.
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: await rs
+          .mocked(listSessionMessages)("concierge")
+          .then((all) => all ?? []),
+        nextCursor: null,
+      });
       renderChat(<Chat sessionId="concierge" loadReadMark={() => Promise.resolve(MARK)} />);
       await waitFor(() => expect(unreadFrom()).toBe("a3"));
     });
@@ -1531,9 +1580,12 @@ describe("Chat history paging", () => {
   const conciergePage = (
     body: ChatMessage[],
     nextCursor: string | null,
-    extra: Partial<ChatMessagePage> & { outside?: ChatMessage[] } = {},
+    extra: Partial<ChatMessagePage> & {
+      outside?: ChatMessage[];
+      threads?: ReadonlyMap<string, ThreadSummary>;
+    } = {},
   ): ChatMessagePage => {
-    const { outside = [], ...rest } = extra;
+    const { outside = [], threads, ...rest } = extra;
     const mainLine = body.filter((message) => message.chatThreadId === message.id);
     return {
       messages: [...body, ...outside],
@@ -1545,6 +1597,8 @@ describe("Chat history paging", () => {
           ? Math.min(...mainLine.map((message) => Date.parse(message.createdAt)))
           : null,
         titles: new Map(),
+        // What the server summarizes: the threads of the page, and the ones that wait outside it.
+        threads: threads ?? summariesOfLoaded([...body, ...outside]),
       },
     };
   };
@@ -1614,6 +1668,7 @@ describe("Chat history paging", () => {
         }),
       )
       .mockResolvedValueOnce(conciergePage([root(), waiting()], null));
+    rs.mocked(listSessionThread).mockResolvedValueOnce(conciergePage([root(), waiting()], null));
     // jsdom lays nothing out and has no scrollTo; the test cares that the stack is reached.
     const originalScrollTo = Element.prototype.scrollTo;
     const scrollTo = rs.fn();
@@ -1634,6 +1689,10 @@ describe("Chat history paging", () => {
         before: "c9",
         through: "user-1",
       });
+      // Then the thread, whole, before it is marked read.
+      await waitFor(() =>
+        expect(listSessionThread).toHaveBeenCalledExactlyOnceWith("session-1", "user-1"),
+      );
       expect(shownKeys()).toEqual(["user-1", "user-9"]);
       await waitFor(() => expect(scrollTo).toHaveBeenCalled());
       await waitFor(() => expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["user-4"]));
@@ -1666,6 +1725,76 @@ describe("Chat history paging", () => {
     await waitFor(() => expect(shownKeys()).toEqual(["user-1", "user-4", "user-9"]));
     expect(threadFrames.at(-1)?.stacked).toEqual(["user-4", "user-5"]);
     expect(document.querySelector('[data-thread-pill="user-1"]')).not.toBeNull();
+  });
+
+  const stackOf = (root: string) =>
+    document.querySelector<HTMLElement>(`[data-thread-stack="${root}"]`);
+
+  it("reads a stack's numbers from the thread's summary, and takes a reply that comes live into them once", async () => {
+    const summary: ThreadSummary = {
+      replyCount: 5,
+      unreadCount: 2,
+      latestReply: waiting(),
+      unreadAt: 4,
+    };
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce(
+      conciergePage([root(), waiting()], null, { threads: new Map([["user-1", summary]]) }),
+    );
+    renderChat(concierge());
+    // One reply is loaded, and the stack counts five: the summary says so.
+    await waitFor(() => expect(stackOf("user-1")?.dataset.total).toBe("5"));
+    expect(stackOf("user-1")?.dataset.unread).toBe("2");
+    await waitFor(() => expect(MockEventSource.instances[0]).toBeTruthy());
+    const live = { ...waiting(), id: "user-7", createdAt: userMessage(7).createdAt };
+
+    act(() => MockEventSource.instances[0]!.emit("message_insert", live));
+    await waitFor(() => expect(stackOf("user-1")?.dataset.total).toBe("6"));
+    expect(stackOf("user-1")?.dataset.unread).toBe("3");
+
+    // The same reply again is the same reply.
+    act(() => MockEventSource.instances[0]!.emit("message_insert", live));
+    await act(async () => {});
+    expect(stackOf("user-1")?.dataset.total).toBe("6");
+  });
+
+  it("takes a reply the owner sent into a thread, which is read already, as one more reply", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce(conciergePage([root()], null));
+    renderChat(concierge());
+    await waitFor(() => expect(shownKeys()).toEqual(["user-1"]));
+    await waitFor(() => expect(MockEventSource.instances[0]).toBeTruthy());
+
+    act(() => MockEventSource.instances[0]!.emit("message_insert", reply()));
+
+    await waitFor(() => expect(stackOf("user-1")?.dataset.total).toBe("1"));
+    expect(stackOf("user-1")?.dataset.unread).toBe("0");
+  });
+
+  it("takes the summaries of every thread from the page that reads the loaded range again after a reconnect", async () => {
+    const main = (n: number) => ({ ...userMessage(n), chatThreadId: `user-${n}` });
+    const summary = (replyCount: number, unreadCount: number): ThreadSummary => ({
+      replyCount,
+      unreadCount,
+      latestReply: reply(),
+      unreadAt: 0,
+    });
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce(
+        conciergePage([main(1), reply(), main(9)], null, {
+          threads: new Map([["user-1", summary(1, 0)]]),
+        }),
+      )
+      .mockResolvedValueOnce(
+        conciergePage([main(1), reply(), main(9)], null, {
+          threads: new Map([["user-1", summary(3, 1)]]),
+        }),
+      );
+    renderChat(concierge());
+    await waitFor(() => expect(stackOf("user-1")?.dataset.total).toBe("1"));
+
+    act(() => MockEventSource.instances[0]!.emitLifecycle("error", MockEventSource.CLOSED));
+
+    await waitFor(() => expect(stackOf("user-1")?.dataset.total).toBe("3"));
+    expect(stackOf("user-1")?.dataset.unread).toBe("1");
   });
 
   it("restarts a disconnected history from its oldest main-line message, not an older reply that waits", async () => {
@@ -3563,7 +3692,9 @@ describe("Chat Concierge empty state", () => {
 
         fireEvent.click(document.querySelector("[data-thread-pill='u-1']")!);
 
-        expect(scrollTo).toHaveBeenCalled();
+        // The thread is read whole first, then the reader goes to its stack.
+        await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+        expect(listSessionThread).toHaveBeenCalledExactlyOnceWith("session-1", "u-1");
         expect(stack("u-1").hasAttribute("data-timeline-landed")).toBe(true);
         expect(stack("u-3").hasAttribute("data-timeline-landed")).toBe(false);
         expect(composer().dataset.thread).toBe("");
@@ -3582,6 +3713,85 @@ describe("Chat Concierge empty state", () => {
         expect(pills()).toEqual([]);
         expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["ar-1"]);
         expect(markMessagesRead).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe("reading a thread whole", () => {
+      beforeEach(() => {
+        rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+        rs.mocked(listSessionThread).mockClear();
+        toast.error.mockClear();
+      });
+
+      it("reads the thread the first time it comes into focus, and uses what it has the next time", async () => {
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        expect(listSessionThread).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        expect(listSessionThread).toHaveBeenCalledExactlyOnceWith("session-1", "u-1");
+        fireEvent.click(back()!);
+        await waitFor(() => expect(composer().dataset.thread).toBe(""));
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+
+        expect(listSessionThread).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not focus a thread it could not read, and says so", async () => {
+        threaded();
+        rs.mocked(listSessionThread).mockRejectedValueOnce(new Error("offline"));
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        fireEvent.click(screen.getByTestId("open-thread"));
+
+        await waitFor(() =>
+          expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"),
+        );
+        expect(back()).toBeNull();
+        expect(composer().dataset.thread).toBe("");
+      });
+
+      it("reads a thread again after a reconnect, since what was read of it may be out of date", async () => {
+        threaded();
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        await waitFor(() => expect(chatEvents()).toBeTruthy());
+        const readAndClose = async (open: string, thread: string) => {
+          fireEvent.click(screen.getByTestId(open));
+          await waitFor(() => expect(composer().dataset.thread).toBe(thread));
+          fireEvent.click(back()!);
+          await waitFor(() => expect(composer().dataset.thread).toBe(""));
+        };
+        await readAndClose("open-other-thread", "u-2");
+        expect(listSessionThread).toHaveBeenCalledTimes(1);
+
+        act(() => chatEvents()?.emitLifecycle("error", MockEventSource.CLOSED));
+        await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+        await readAndClose("open-other-thread", "u-2");
+
+        expect(listSessionThread).toHaveBeenCalledTimes(2);
+      });
+
+      it("reads the thread in focus again after a reconnect, and keeps it in focus", async () => {
+        threaded();
+        threaded();
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        await waitFor(() => expect(chatEvents()).toBeTruthy());
+        fireEvent.click(screen.getByTestId("open-thread"));
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        expect(listSessionThread).toHaveBeenCalledTimes(1);
+
+        act(() => chatEvents()?.emitLifecycle("error", MockEventSource.CLOSED));
+
+        await waitFor(() => expect(listSessionThread).toHaveBeenCalledTimes(2));
+        expect(listSessionThread).toHaveBeenLastCalledWith("session-1", "u-1");
+        expect(composer().dataset.thread).toBe("u-1");
       });
     });
 
@@ -3821,6 +4031,38 @@ describe("Chat Concierge empty state", () => {
       await waitFor(() => expect(screen.getAllByTestId("user-row")).toHaveLength(3));
 
       // The reply carries the thread and its name; the root is in it with no event of its own.
+      // The thread is read whole before it comes into focus: the root and the reply.
+      const inThread = [
+        {
+          id: "u-1",
+          sessionId: "session-1",
+          turnId: "turn-a",
+          role: "user" as const,
+          content: JSON.stringify([{ type: "text", content: "First" }]),
+          createdAt: "2026-11-10T10:00:00Z",
+          chatThreadId: "u-1",
+        },
+        {
+          id: "u-3",
+          sessionId: "session-1",
+          turnId: "turn-c",
+          role: "user" as const,
+          content: JSON.stringify([{ type: "text", content: "More" }]),
+          createdAt: "2026-11-10T10:05:00Z",
+          chatThreadId: "u-1",
+          chatThreadTitle: "First",
+        },
+      ];
+      rs.mocked(listSessionThread).mockResolvedValueOnce({
+        messages: inThread,
+        nextCursor: null,
+        concierge: {
+          body: inThread,
+          oldestAt: null,
+          titles: new Map(),
+          threads: summariesOfLoaded(inThread),
+        },
+      });
       fireEvent.click(screen.getByTestId("open-thread"));
       await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
       expect(back()?.textContent).toBe("First");

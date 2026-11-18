@@ -7,7 +7,7 @@ import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 
 // `?type=concierge` pages a Concierge chat by its main-line messages, each
-// with the whole thread it roots (docs/domains/chats.md#chat-thread).
+// with a summary of the thread it roots (docs/domains/chats.md#chat-thread).
 
 interface WireMessage {
   id: string;
@@ -23,8 +23,8 @@ interface WirePage {
     thread: {
       replyCount: number;
       unreadCount: number;
-      lastReplyAt: string;
-      replies: WireMessage[];
+      latestReply: WireMessage;
+      replies?: WireMessage[];
     } | null;
   }[];
   outside: {
@@ -124,7 +124,7 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
     testDb.close();
   });
 
-  it("pages by main-line messages, so a reply never counts, and brings each thread whole", async () => {
+  it("pages by main-line messages, so a reply never counts, and summarizes each thread", async () => {
     const seeded = await seedChat();
 
     const first = await getPage("?type=concierge&limit=3");
@@ -139,26 +139,26 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
     );
     expect(ids(second)).toEqual(["m5", "m6", "m7"]);
     const [m5] = second.mainLine;
-    // Every reply whose root it is, deeper ones too, in the order they were said.
-    expect(m5?.thread?.replies.map((reply) => reply.id)).toEqual([
-      seeded.r5,
-      "r5own",
-      seeded.r5late,
-    ]);
+    // The counts of the replies the stack counts, deeper ones too, and the newest of them.
     expect(m5?.thread).toMatchObject({ replyCount: 3, unreadCount: 2 });
-    expect(m5?.thread?.lastReplyAt).toBe(new Date((BASE_SECONDS + 230) * 1000).toISOString());
-    expect(m5?.thread?.replies.every((reply) => reply.chatThreadId === "m5")).toBe(true);
+    expect(m5?.thread?.latestReply.id).toBe(seeded.r5late);
+    expect(m5?.thread?.latestReply.chatThreadId).toBe("m5");
+    // A page holds no reply but each thread's newest: the rest is read by `thread`.
+    expect(m5?.thread).not.toHaveProperty("replies");
+    expect(m5?.thread).not.toHaveProperty("lastReplyAt");
 
     const third = await getPage(
       `?type=concierge&limit=3&before=${encodeURIComponent(second.nextCursor ?? "")}`,
     );
     expect(ids(third)).toEqual(["m2", "m3", "m4"]);
-    // An automation's reply is in the thread and is not counted.
-    expect(third.mainLine[0]?.thread?.replies.map((reply) => reply.id)).toEqual([
-      seeded.r2,
-      seeded.r2auto,
-    ]);
+    // An automation's reply is said after the Concierge's, and is neither counted nor the newest.
     expect(third.mainLine[0]?.thread).toMatchObject({ replyCount: 1, unreadCount: 1 });
+    expect(third.mainLine[0]?.thread?.latestReply.id).toBe(seeded.r2);
+    const everyone = [...first.mainLine, ...second.mainLine, ...third.mainLine];
+    expect(everyone.filter((entry) => entry.thread).map((entry) => entry.message.id)).toEqual([
+      "m5",
+      "m2",
+    ]);
 
     const last = await getPage(
       `?type=concierge&limit=3&before=${encodeURIComponent(third.nextCursor ?? "")}`,
@@ -246,7 +246,7 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
     expect(ids(await getPage("?type=concierge&limit=2&through=missing"))).toEqual(["m9", "m10"]);
   });
 
-  it("reads a whole thread by any message of it, in the same shape", async () => {
+  it("reads a whole thread by any message of it, with its summary and every reply", async () => {
     const seeded = await seedChat();
 
     for (const key of ["m5", seeded.r5, seeded.r5own]) {
@@ -258,12 +258,19 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
         hasMore: false,
       });
       expect(ids(page)).toEqual(["m5"]);
-      expect(page.mainLine[0]?.thread?.replies.map((reply) => reply.id)).toEqual([
+      expect(page.mainLine[0]?.thread?.replies?.map((reply) => reply.id)).toEqual([
         seeded.r5,
         "r5own",
         seeded.r5late,
       ]);
+      expect(page.mainLine[0]?.thread).toMatchObject({ replyCount: 3, unreadCount: 2 });
+      expect(page.mainLine[0]?.thread?.latestReply.id).toBe(seeded.r5late);
     }
+    // An automation's reply is in the thread, and is not counted.
+    const kept = (await getPage("?type=concierge&thread=m2")).mainLine[0]?.thread;
+    expect(kept?.replies?.map((reply) => reply.id)).toEqual([seeded.r2, seeded.r2auto]);
+    expect(kept).toMatchObject({ replyCount: 1, unreadCount: 1 });
+    expect(kept?.latestReply.id).toBe(seeded.r2);
     expect((await getPage("?type=concierge&thread=nope")).mainLine).toEqual([]);
   });
 
@@ -406,6 +413,43 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
       const page = await getPage("?type=concierge&thread=p2");
 
       expect(page.traces.map((trace) => trace.id)).toEqual(["trace-2"]);
+    });
+
+    it("brings the traces of the lines it returns: a thread's newest reply, not its older ones", async () => {
+      await seedTurns();
+      for (const n of [9, 10]) {
+        const { id } = await deps.webchatRepo.addBackendMessage(
+          CHAT,
+          `turn-${n}`,
+          [{ type: "text", content: `reply ${n}` }],
+          { replyTo: "p1" },
+        );
+        setSaidAt(id, BASE_SECONDS + 100 + n);
+        await deps.webchatRepo.appendTraceBlocks({
+          messageId: `trace-${n}`,
+          sessionId: CHAT,
+          turnId: `turn-${n}`,
+          startSeq: 0,
+          blocks: [
+            { type: "turn_end", turnId: `turn-${n}`, status: "completed", durationMs: 1000 },
+          ],
+        });
+        testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${BASE_SECONDS + 101 + n}
+          WHERE id = ${`trace-${n}`}`);
+      }
+
+      const page = await getPage("?type=concierge&limit=100");
+      expect(page.mainLine[0]?.thread?.latestReply.id).toEqual(expect.any(String));
+      expect(page.traces.map((trace) => trace.id)).toEqual([
+        "trace-1",
+        "trace-2",
+        "trace-3",
+        "trace-4",
+        "trace-10",
+      ]);
+
+      const thread = await getPage("?type=concierge&thread=p1");
+      expect(thread.traces.map((trace) => trace.id)).toEqual(["trace-1", "trace-9", "trace-10"]);
     });
 
     it("has no traces for a page whose turns have none", async () => {

@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import "@/i18n";
-import { chatThreadsOf, type ThreadTimelineMessage } from "./chat-threads";
+import { chatThreadsOf, summariesOfLoaded, type ThreadTimelineMessage } from "./chat-threads";
+import type { ChatMessage } from "@/lib/chat-types";
 import { ThreadPills, waitingThreads } from "./ThreadPills";
 import { useVisibleStacks } from "./use-visible-stacks";
 
@@ -71,7 +72,9 @@ const messages = [
 function Harness({ list = messages }: { list?: ThreadTimelineMessage[] }) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
-  const threads = chatThreadsOf(list);
+  const threads = chatThreadsOf(list, null, true, {
+    summaries: summariesOfLoaded(list as ChatMessage[]),
+  });
   const visible = useVisibleStacks(scroller, content, waitingThreads(threads));
   return (
     <div ref={setScroller} data-testid="scroller">

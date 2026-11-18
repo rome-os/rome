@@ -140,9 +140,12 @@ import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
 import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
   ChatThreadsProvider,
+  summariesOfLoaded,
   threadTail,
   unreadIn,
   useChatThreadsValue,
+  withLiveReply,
+  withThreadsRead,
 } from "@/components/chat/reply/chat-threads";
 import { ThreadPills, waitingThreads } from "@/components/chat/reply/ThreadPills";
 import { useVisibleStacks } from "@/components/chat/reply/use-visible-stacks";
@@ -182,6 +185,7 @@ import type {
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
+  ThreadSummary,
 } from "@/lib/chat-types";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
 import {
@@ -192,18 +196,21 @@ import {
 } from "@/lib/chat-sse";
 import {
   mergeChatMessage,
+  mergeFetchedChatMessages,
   mergeLatestMessagePage,
   orderChatMessages,
   replaceLoadedMessages,
   startsNewHistory,
 } from "@/lib/chat-message-ordering";
 import {
+  type ChatMessagePage,
   ChatApiError,
   createSession,
   deleteSession,
   interruptTurn,
   listChatAgents,
   listSessionMessagePage,
+  listSessionThread,
   listSessionTurns,
   markMessagesRead as apiMarkMessagesRead,
   markSessionRead as apiMarkSessionRead,
@@ -756,11 +763,28 @@ export function Chat({
     noteLive,
     pendingMark,
   } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
+  // What the main session's threads are, apart from the replies loaded: each
+  // thread's summary by root, which the stacks and pills read, and the names of
+  // the threads that wait with a root that is not loaded.
+  const [threadSummaries, setThreadSummaries] = useState<ReadonlyMap<string, ThreadSummary>>(
+    () => new Map(),
+  );
+  const [threadHints, setThreadHints] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const noteThreads = useCallback((page: ChatMessagePage, options: { replace?: boolean } = {}) => {
+    const known = page.concierge;
+    if (!known) return;
+    setThreadSummaries((prev) =>
+      options.replace ? new Map(known.threads) : new Map([...prev, ...known.threads]),
+    );
+    if (known.titles.size > 0) setThreadHints((hints) => new Map([...hints, ...known.titles]));
+  }, []);
   const onOlderPage = useCallback(
-    (id: string, page: ChatMessage[]) => {
-      if (id === mainSessionIdRef.current) noteOlder(page);
+    (id: string, page: ChatMessagePage) => {
+      if (id !== mainSessionIdRef.current) return;
+      noteOlder(page.messages);
+      noteThreads(page);
     },
-    [noteOlder],
+    [noteOlder, noteThreads],
   );
 
   // The chat thread in focus, which is view state: nothing keeps it across a
@@ -772,7 +796,7 @@ export function Chat({
   });
   // The main session loads its newest page first and pages older ones in as
   // the transcript scrolls toward the top. With a thread in focus, the pages
-  // would add no height, so none loads: a thread is whole once its root is.
+  // would add no height, so none loads.
   const {
     setCursor: setOlderCursor,
     hasOlder,
@@ -791,8 +815,6 @@ export function Chat({
   const [pagedConcierge, setPagedConcierge] = useState<string | null>(null);
   // The sessions whose loaded history came by main-line messages.
   const conciergePagedRef = useRef(new Set<string>());
-  // The names of threads that wait with a root that is not loaded, by root.
-  const [threadHints, setThreadHints] = useState<ReadonlyMap<string, string>>(() => new Map());
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
   // it on the message map, so a streaming turn (which never touches
@@ -813,13 +835,17 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
+  const threadKnowledge = useMemo(
+    () => ({ hints: threadHints, summaries: threadSummaries }),
+    [threadHints, threadSummaries],
+  );
   // Only a Concierge chat stacks threads. A share picks whole turns and shows every
   // message itself, so it stacks nothing.
   const chatThreads = useChatThreadsValue(
     displayMessages,
     threadFocus.shown,
     (concierge || pagedConcierge === mainSessionId) && !shareMode,
-    threadHints,
+    threadKnowledge,
   );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
   // The unread divider goes before a message the main line shows: the replies of
@@ -1073,10 +1099,20 @@ export function Chat({
   // The owner has seen these messages: they read as seen at once, and the
   // server is told. The server failing to take it changes nothing here, as with
   // the chat's own read mark: the next open reads them again.
-  const markRead = useCallback((ids: readonly string[]) => {
+  const markRead = useCallback((ids: readonly string[], thread?: string) => {
     const session = mainSessionIdRef.current;
-    if (!session || ids.length === 0) return;
+    if (!session) return;
+    // The summaries of the threads whose replies these are, and of `thread`
+    // when the owner has seen the whole of it, say nothing is waiting.
+    const roots = new Set(thread ? [thread] : []);
     const seen = new Set(ids);
+    for (const message of messagesRef.current.get(session) ?? []) {
+      if (seen.has(message.id) && message.chatThreadId && message.chatThreadId !== message.id) {
+        roots.add(message.chatThreadId);
+      }
+    }
+    if (roots.size > 0) setThreadSummaries((prev) => withThreadsRead(prev, roots));
+    if (ids.length === 0) return;
     const unseen = (message: ChatMessage) => seen.has(message.id) && message.read === false;
     setMessages((prev) => {
       const list = prev.get(session);
@@ -1088,18 +1124,77 @@ export function Chat({
     });
     void apiMarkMessagesRead(session, ids).catch(() => {});
   }, []);
+  // The replies that have counted in a summary as they came, so one that comes
+  // twice, as its sender's own row and again from the server, counts once.
+  const countedLiveRef = useRef(new Set<string>());
+  // A thread being read to come into focus, so a second press waits for it.
+  const openingThreadRef = useRef(false);
+  const noteReply = useCallback((message: ChatMessage) => {
+    if (countedLiveRef.current.has(message.id)) return;
+    countedLiveRef.current.add(message.id);
+    setThreadSummaries((prev) => withLiveReply(prev, message));
+  }, []);
+  // The threads read whole, by root: every reply of one is loaded, and the
+  // replies that come live after keep it so. Nothing else is known of a
+  // thread's replies beyond the newest, so a thread is read whole before it
+  // comes into focus or is marked read. A read sets the thread's summary from
+  // what it brought.
+  const fetchedThreadsRef = useRef(new Set<string>());
+  const threadReadsRef = useRef(new Map<string, Promise<ChatMessage[] | null>>());
+  const ensureThreadWhole = useCallback(
+    (root: string, options: { force?: boolean } = {}): Promise<ChatMessage[] | null> => {
+      const session = mainSessionIdRef.current;
+      if (!session) return Promise.resolve(null);
+      const inThread = (list: readonly ChatMessage[]) =>
+        list.filter((message) => message.chatThreadId === root);
+      if (!options.force && fetchedThreadsRef.current.has(root)) {
+        return Promise.resolve(inThread(messagesRef.current.get(session) ?? []));
+      }
+      const pending = threadReadsRef.current.get(root);
+      if (pending) return pending;
+      const read = (async () => {
+        try {
+          const page = await listSessionThread(session, root);
+          if (!page || page.messages.length === 0) return null;
+          setMessages((prev) => {
+            const next = new Map(prev);
+            next.set(session, mergeFetchedChatMessages(next.get(session) ?? [], page.messages));
+            return next;
+          });
+          const thread = inThread(page.messages);
+          const summary = summariesOfLoaded(thread).get(root);
+          setThreadSummaries((prev) => {
+            const next = new Map(prev);
+            if (summary) next.set(root, summary);
+            else next.delete(root);
+            return next;
+          });
+          fetchedThreadsRef.current.add(root);
+          return thread;
+        } catch {
+          return null;
+        } finally {
+          threadReadsRef.current.delete(root);
+        }
+      })();
+      threadReadsRef.current.set(root, read);
+      return read;
+    },
+    [],
+  );
   // Opening a thread reads it, and so does a message that arrives in it while
   // it is open.
   useEffect(() => {
-    if (focus) markRead(unreadIn(displayMessages, chatThreads.roots, focus.root));
+    if (focus) markRead(unreadIn(displayMessages, chatThreads.roots, focus.root), focus.root);
   }, [focus, displayMessages, chatThreads.roots, markRead]);
   // A thread whose stack the reader sees has no pill.
   const waitingRoots = useMemo(() => waitingThreads(chatThreads), [chatThreads]);
   const visibleStacks = useVisibleStacks(scrollerEl, contentEl, waitingRoots);
   // A pill of the bottom row takes the reader to its thread's stack and
   // tints it, without opening the thread, and reads the thread. A thread whose
-  // root is older than the loaded history is read down to in one read first,
-  // which brings the whole thread with it.
+  // root is older than the loaded history is read down to in one read first.
+  // The thread is read whole before it is marked read, since its stack knows
+  // only the newest reply.
   const showStack = useCallback(
     async (root: string) => {
       const scroller = scrollerEl;
@@ -1108,21 +1203,29 @@ export function Chat({
         [...scroller.querySelectorAll<HTMLElement>("[data-thread-stack]")].find(
           (candidate) => candidate.dataset.threadStack === root,
         ) ?? null;
-      const reveal = () => {
+      const reveal = async () => {
+        const thread = await ensureThreadWhole(root);
+        if (!thread) {
+          toast.error(t("concierge.tasks.sourceMissing"));
+          return;
+        }
         const stack = findStack();
         if (stack) {
           scrollToAnchor(scroller, findMessageAnchor(scroller, root) ?? stack);
           landOn(scroller, stack);
         }
-        markRead(unreadIn(displayedRef.current, rootsRef.current, root));
+        markRead(
+          thread.filter((message) => message.read === false).map((message) => message.id),
+          root,
+        );
       };
       if (rootsRef.current.get(root) === root) {
-        reveal();
+        await reveal();
         return;
       }
       await revealWhenLoaded(findStack, reveal, t("concierge.tasks.sourceMissing"), root);
     },
-    [scrollerEl, scrollToAnchor, landOn, markRead, revealWhenLoaded, t],
+    [scrollerEl, scrollToAnchor, landOn, markRead, ensureThreadWhole, revealWhenLoaded, t],
   );
   // With a thread in focus, a quote can only go to what is shown.
   const displayedMessageIds = useMemo(
@@ -1154,9 +1257,21 @@ export function Chat({
         );
         return;
       }
-      const title = chatThreads.titles.get(root) ?? next.title;
-      await openFocus({ ...next, title, root });
-      if (!coarsePointer) composerRef.current?.focus();
+      // A thread is read whole once, and its replies that come live keep it
+      // whole. A thread that cannot be read does not come into focus half.
+      if (openingThreadRef.current) return;
+      openingThreadRef.current = true;
+      try {
+        if (!(await ensureThreadWhole(root))) {
+          toast.error(t("concierge.tasks.sourceMissing"));
+          return;
+        }
+        const title = chatThreads.titles.get(root) ?? next.title;
+        await openFocus({ ...next, title, root });
+        if (!coarsePointer) composerRef.current?.focus();
+      } finally {
+        openingThreadRef.current = false;
+      }
     },
     [
       shareMode,
@@ -1166,6 +1281,7 @@ export function Chat({
       chatThreads,
       coarsePointer,
       scrollerEl,
+      ensureThreadWhole,
       revealWhenLoaded,
       t,
     ],
@@ -1488,7 +1604,14 @@ export function Chat({
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = localBeforeFetch;
-        const titles = page.concierge?.titles;
+        // A thread in focus stays as it is while the range is read again.
+        const focusedRoot = focusRef.current?.root;
+        const keepIds = new Set(localOptimisticMessageIdsRef.current.get(id));
+        if (focusedRoot) {
+          for (const message of messagesRef.current.get(id) ?? []) {
+            if (message.chatThreadId === focusedRoot) keepIds.add(message.id);
+          }
+        }
         const commitMessages = () => {
           setMessages((prev) => {
             const next = new Map(prev);
@@ -1496,10 +1619,7 @@ export function Chat({
             next.set(
               id,
               replaceRange
-                ? replaceLoadedMessages(current, fetchedMessages, {
-                    keepIds: localOptimisticMessageIdsRef.current.get(id),
-                    dropMessageIds,
-                  })
+                ? replaceLoadedMessages(current, fetchedMessages, { keepIds, dropMessageIds })
                 : mergeLatestMessagePage(current, fetchedMessages, {
                     restart,
                     dropMessageIds,
@@ -1512,7 +1632,13 @@ export function Chat({
           if (page.concierge) conciergePagedRef.current.add(id);
           else conciergePagedRef.current.delete(id);
           setPagedConcierge(page.concierge ? id : null);
-          if (titles && titles.size > 0) setThreadHints((hints) => new Map([...hints, ...titles]));
+          // A page that starts the history over also says what every loaded
+          // thread is, and what was read of a thread whole may be out of date.
+          noteThreads(page, { replace: restart });
+          if (restart) {
+            fetchedThreadsRef.current.clear();
+            countedLiveRef.current.clear();
+          }
         };
         const handLayoutToHost = onSessionLayoutRef.current;
         if (handLayoutToHost && !loadedSessionsRef.current.has(id)) {
@@ -1526,6 +1652,8 @@ export function Chat({
         } else {
           commitMessages();
         }
+        // The thread in focus is read whole again, so it stays whole.
+        if (restart && focusedRoot) void ensureThreadWhole(focusedRoot, { force: true });
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart)
@@ -1552,6 +1680,8 @@ export function Chat({
       isReadVisibleSession,
       markSessionRead,
       noteOpened,
+      noteThreads,
+      ensureThreadWhole,
       mayBeConcierge,
       pageTurns,
       setOlderCursor,
@@ -1580,6 +1710,7 @@ export function Chat({
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
       noteLive(message.id);
+      noteReply(message);
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];
@@ -1590,7 +1721,7 @@ export function Chat({
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead, noteLive, refreshArchivedSession],
+    [markSessionRead, noteLive, noteReply, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -2059,6 +2190,8 @@ export function Chat({
         const localIds =
           localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
         localIds.add(message.id);
+        // The owner's reply into a thread is one more reply of it.
+        noteReply(message);
         localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
         setMessages((prev) => {
           const next = new Map(prev);
@@ -2203,6 +2336,7 @@ export function Chat({
       t,
       scrollToBottom,
       refreshArchivedSession,
+      noteReply,
     ],
   );
 

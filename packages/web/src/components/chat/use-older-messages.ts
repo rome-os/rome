@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { listSessionMessagePage } from "@/lib/chat-api";
+import { type ChatMessagePage, listSessionMessagePage } from "@/lib/chat-api";
 import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -19,8 +19,8 @@ import type { ChatMessage } from "@/lib/chat-types";
 export const CHAT_PAGE_TURNS = 10;
 /**
  * Main-line messages per page of a Concierge chat, which are a few short
- * bubbles each. Replies do not count: each page brings the whole thread of
- * every message on it.
+ * bubbles each. Replies do not count: each page brings a summary of the thread
+ * of every message on it.
  */
 export const CONCIERGE_PAGE_MESSAGES = 40;
 
@@ -54,13 +54,13 @@ interface UseOlderMessagesOptions {
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
-  /** Called with the messages of each older page that loads, once it is merged in. */
-  onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
+  /** Called with each older page that loads, once its messages are merged in. */
+  onOlderPage?: (sessionId: string, page: ChatMessagePage) => void;
   /**
    * No page loads while this holds, as when a chat thread is in focus: the rows
    * outside it are hidden, so a page adds no height and the sentinel would
-   * report again until the history ran out. A thread is whole once its root is
-   * loaded, so focus needs no older page.
+   * report again until the history ran out. A thread is read whole for the
+   * focus, so it needs no older page.
    */
   paused?: boolean;
 }
@@ -162,7 +162,7 @@ export function useOlderMessages(
           return next;
         });
         setCursor(id, page.nextCursor, !!page.concierge);
-        onOlderPage?.(id, page.messages);
+        onOlderPage?.(id, page);
       } catch {
         setRetryBlocked(true);
       } finally {

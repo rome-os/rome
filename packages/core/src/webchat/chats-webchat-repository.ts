@@ -825,8 +825,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * (`said_at`, record order), as the transcript draws them: what the
    * session has seen since it started, in its place. A main-line message is
    * one that replies to none (`root_message_id` null or its own id), so a
-   * reply never counts toward `limit`. Each carries the whole thread it
-   * roots, so a reply never comes without its root. The newest page, the one
+   * reply never counts toward `limit`. Each carries a summary of the thread it
+   * roots, with its newest reply, so a reply never comes without its root.
+   * The newest page, the one
    * with no `before`, also names the threads with unread replies whose root
    * is on none of it. The trace rows of the turns on the page come with it.
    */
@@ -861,7 +862,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return { mainLine, outside, traces: this.tracesOf(sessionId, mainLine, outside), nextCursor };
   }
 
-  /** The chat thread of the message keyed `key`, any message of it, as a page of its root alone: empty when the chat holds none. */
+  /** The chat thread of the message keyed `key`, any message of it, as a page of its root alone, with every reply: empty when the chat holds none. */
   override async getConciergeThread(sessionId: string, key: string): Promise<ConciergePage> {
     const root = this.db.all<MainLineKey>(sql`
       SELECT r.id AS id, r.key AS key, r.said_at AS said_at FROM chat_messages r
@@ -871,7 +872,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
           AND m.key = ${key}
       )
     `);
-    const mainLine = this.threadsOf(sessionId, root);
+    const mainLine = this.threadsOf(sessionId, root, true);
     return {
       mainLine,
       outside: [],
@@ -938,47 +939,71 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * The main-line messages `roots` with every message that has one as its
-   * root, read together over {@link sessionLines}. The counts follow the
-   * client's stack, by {@link COUNTED_REPLY} and {@link UNREAD_REPLY}.
+   * The main-line messages `roots` with a summary of the thread each roots,
+   * read over {@link sessionLines}: how many replies the stack counts, how
+   * many of them are unread, and the newest of them, by {@link COUNTED_REPLY}
+   * and {@link UNREAD_REPLY}. With `whole`, each also has every reply of its
+   * thread, in the order they were said; a thread none of whose replies
+   * counts then has the newest reply it has as its latest.
    */
-  private threadsOf(sessionId: string, roots: readonly MainLineKey[]): ConciergeMainLine[] {
+  private threadsOf(
+    sessionId: string,
+    roots: readonly MainLineKey[],
+    whole = false,
+  ): ConciergeMainLine[] {
     if (roots.length === 0) return [];
-    const replies = this.db.all<{ key: string; counted: number; unread: number }>(sql`
-      SELECT m.key AS key, ${COUNTED_REPLY} AS counted, ${UNREAD_REPLY} AS unread
-      ${this.repliesPlace(
-        sessionId,
-        roots.map((root) => root.id),
-      )}
-    `);
+    const ids = roots.map((root) => root.id);
+    // One pass over the replies of the roots, by the root index: a window
+    // counts each root's replies and picks its newest.
+    const summaries = new Map(
+      this.db
+        .all<{ root_id: number; key: string; n: number; unread: number }>(sql`
+          SELECT root_id, key, n, unread FROM (
+            SELECT m.root_message_id AS root_id, m.key AS key,
+              row_number() OVER (
+                PARTITION BY m.root_message_id ORDER BY m.said_at DESC, m.id DESC
+              ) AS rn,
+              count(*) OVER (PARTITION BY m.root_message_id) AS n,
+              sum(${UNREAD_REPLY}) OVER (PARTITION BY m.root_message_id) AS unread
+            ${this.repliesPlace(sessionId, ids)}
+              AND ${COUNTED_REPLY}
+          ) WHERE rn = 1
+        `)
+        .map((row) => [row.root_id, row]),
+    );
+    const replyKeys = whole
+      ? this.db
+          .all<{ key: string }>(sql`SELECT m.key AS key ${this.repliesPlace(sessionId, ids)}`)
+          .map((reply) => reply.key)
+      : [];
     const rows = this.linesByKey(sessionId, [
       ...roots.map((root) => root.key),
-      ...replies.map((r) => r.key),
+      ...[...summaries.values()].map((summary) => summary.key),
+      ...replyKeys,
     ]);
-    const repliesOf = new Map<string, LineRow[]>();
-    const mainLine = new Map<string, LineRow>();
-    for (const row of rows) {
-      if (row.chat_thread_id === row.id) mainLine.set(row.id, row);
-      else if (row.chat_thread_id) {
-        repliesOf.set(row.chat_thread_id, [...(repliesOf.get(row.chat_thread_id) ?? []), row]);
-      }
-    }
-    const flags = new Map(replies.map((reply) => [reply.key, reply]));
-    return [...mainLine.values()].map((row): ConciergeMainLine => {
-      const own = repliesOf.get(row.id) ?? [];
-      const counted = own.filter((reply) => flags.get(reply.id)?.counted === 1);
-      return {
-        message: storedLine(row),
-        thread:
-          own.length === 0
-            ? null
-            : {
-                replyCount: counted.length,
-                unreadCount: counted.filter((reply) => flags.get(reply.id)?.unread === 1).length,
-                replies: own.map(storedLine),
-              },
-      };
-    });
+    const lines = new Map(rows.map((row) => [row.id, row]));
+    const rootKeys = new Set(roots.map((root) => root.key));
+    return rows
+      .filter((row) => row.chat_thread_id === row.id && rootKeys.has(row.id))
+      .map((row): ConciergeMainLine => {
+        const rootId = roots.find((root) => root.key === row.id)?.id;
+        const summary = rootId === undefined ? undefined : summaries.get(rootId);
+        const replies = whole
+          ? rows.filter((r) => r.chat_thread_id === row.id && r.id !== row.id)
+          : [];
+        const latest = summary ? lines.get(summary.key) : replies.at(-1);
+        return {
+          message: storedLine(row),
+          thread: latest
+            ? {
+                replyCount: summary?.n ?? 0,
+                unreadCount: summary?.unread ?? 0,
+                latestReply: storedLine(latest),
+                ...(whole ? { replies: replies.map(storedLine) } : {}),
+              }
+            : null,
+        };
+      });
   }
 
   /**
@@ -1058,7 +1083,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * The trace rows of the turns the lines of a page belong to, as
+   * The trace rows of the turns of the lines a page returns, as
    * {@link sessionLines} reads them, in the order they were said. A turn's
    * trace is where a client reads its source, its model switch and whether it
    * failed. Found by turn, not by walking the session's traces.
@@ -1070,7 +1095,10 @@ export class ChatsWebChatRepository extends WebChatRepository {
   ): TranscriptLine[] {
     const turns = new Set(
       [
-        ...mainLine.flatMap(({ message, thread }) => [message, ...(thread?.replies ?? [])]),
+        ...mainLine.flatMap(({ message, thread }) => [
+          message,
+          ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
+        ]),
         ...outside.map((entry) => entry.latestUnread),
       ].flatMap((line) => line.turnId ?? []),
     );

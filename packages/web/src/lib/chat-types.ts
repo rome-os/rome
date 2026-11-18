@@ -163,6 +163,20 @@ export interface CreateTurnResponse {
   content?: string;
 }
 
+/**
+ * What a Concierge chat knows of a chat thread without having its replies: how
+ * many replies its stack counts, how many of them the owner has not seen, and
+ * the newest one (docs/domains/chats.md#chat-thread).
+ */
+export interface ThreadSummary {
+  replyCount: number;
+  unreadCount: number;
+  /** The newest reply that counts. */
+  latestReply: ChatMessage;
+  /** When the newest reply the owner has not seen was said, in ms; 0 when none waits. Orders the threads that wait. */
+  unreadAt: number;
+}
+
 export interface ChatMessage {
   id: string;
   sessionId: string;

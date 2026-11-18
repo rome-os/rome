@@ -347,18 +347,13 @@ describe("ChatComponent topic chat reload", () => {
       chatThreadId: "root",
     };
     const reply = { ...root, id: "reply", createdAt: "2026-11-09T10:00:00.000Z" };
-    // The thread comes whole with its root, so no second read looks for it.
+    // The page carries the newest reply of the thread, which stacks, and no second read looks for the rest.
     const messagePage = rs.fn((_url: string) => ({
       type: "concierge",
       mainLine: [
         {
           message: root,
-          thread: {
-            replyCount: 1,
-            unreadCount: 0,
-            lastReplyAt: reply.createdAt,
-            replies: [reply],
-          },
+          thread: { replyCount: 1, unreadCount: 0, latestReply: reply },
         },
       ],
       outside: [],

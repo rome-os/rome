@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatMessage } from "./chat-types";
-import { conciergePageOf, listSessionMessagePage, postSessionTurn } from "./chat-api";
+import {
+  conciergePageOf,
+  listSessionMessagePage,
+  listSessionThread,
+  postSessionTurn,
+} from "./chat-api";
 
 afterEach(() => {
   rs.unstubAllGlobals();
@@ -224,24 +229,73 @@ const json = (body: unknown, status = 200) =>
   });
 
 describe("conciergePageOf", () => {
-  it("flattens the main line, each thread's replies and the waiting replies into the messages the chat keeps", () => {
+  it("flattens the main line, each thread's newest reply and the waiting replies into the messages the chat keeps", () => {
     const page = conciergePageOf({
       mainLine: [
-        { message: line("m1", 5), thread: { replies: [line("r1", 6), line("r2", 7)] } },
+        {
+          message: line("m1", 5),
+          thread: { replyCount: 4, unreadCount: 1, latestReply: line("r2", 7) },
+        },
         { message: line("m2", 8), thread: null },
       ],
-      outside: [{ root: "old", title: "Trip", latestUnread: line("o1", 9) }],
+      outside: [
+        { root: "old", title: "Trip", replyCount: 2, unreadCount: 2, latestUnread: line("o1", 9) },
+      ],
       nextCursor: "c1",
       layout: [],
     });
 
-    expect(page.messages.map((message) => message.id)).toEqual(["m1", "r1", "r2", "m2", "o1"]);
-    expect(page.concierge?.body.map((message) => message.id)).toEqual(["m1", "r1", "r2", "m2"]);
+    expect(page.messages.map((message) => message.id)).toEqual(["m1", "r2", "m2", "o1"]);
+    expect(page.concierge?.body.map((message) => message.id)).toEqual(["m1", "r2", "m2"]);
     expect(page.nextCursor).toBe("c1");
     expect(page.layout).toEqual([]);
     // The oldest main-line message, not a reply nor a waiting thread's.
     expect(page.concierge?.oldestAt).toBe(Date.parse(line("m1", 5).createdAt));
     expect(page.concierge?.titles).toEqual(new Map([["old", "Trip"]]));
+  });
+
+  it("sets apart what the page says of each thread: its main line's, and the ones that wait outside it", () => {
+    const page = conciergePageOf({
+      mainLine: [
+        {
+          message: line("m1", 5),
+          thread: { replyCount: 4, unreadCount: 1, latestReply: line("r2", 7) },
+        },
+        { message: line("m2", 8), thread: null },
+      ],
+      outside: [
+        { root: "old", title: null, replyCount: 2, unreadCount: 2, latestUnread: line("o1", 9) },
+      ],
+      nextCursor: null,
+    });
+
+    expect([...(page.concierge?.threads.keys() ?? [])]).toEqual(["m1", "old"]);
+    expect(page.concierge?.threads.get("m1")).toMatchObject({ replyCount: 4, unreadCount: 1 });
+    expect(page.concierge?.threads.get("m1")?.latestReply.id).toBe("r2");
+    // What waits is ordered by when its newest unread reply was said; what does not wait is not.
+    expect(page.concierge?.threads.get("m1")?.unreadAt).toBe(Date.parse(line("r2", 7).createdAt));
+    expect(page.concierge?.threads.get("old")?.unreadAt).toBe(Date.parse(line("o1", 9).createdAt));
+  });
+
+  it("brings every reply of a thread read by itself", () => {
+    const page = conciergePageOf({
+      mainLine: [
+        {
+          message: line("m1", 5),
+          thread: {
+            replyCount: 2,
+            unreadCount: 0,
+            latestReply: line("r2", 7),
+            replies: [line("r1", 6), line("r2", 7)],
+          },
+        },
+      ],
+      outside: [],
+      nextCursor: null,
+    });
+
+    expect(page.messages.map((message) => message.id)).toEqual(["m1", "r1", "r2"]);
+    expect(page.concierge?.body.map((message) => message.id)).toEqual(["m1", "r1", "r2"]);
   });
 
   it("brings the trace rows of the page's turns in with the messages, apart from the main line", () => {
@@ -348,5 +402,51 @@ describe("listSessionMessagePage", () => {
     await listSessionMessagePage("s1", { limit: 10, before: "c1" });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/chat/sessions/s1/messages?limit=10&before=c1");
+  });
+});
+
+describe("listSessionThread", () => {
+  it("asks for one thread by any message of it, and reads it whole", async () => {
+    const fetchMock = rs.fn().mockResolvedValueOnce(
+      json({
+        type: "concierge",
+        mainLine: [
+          {
+            message: line("m1", 1),
+            thread: {
+              replyCount: 1,
+              unreadCount: 0,
+              latestReply: line("r1", 2),
+              replies: [line("r1", 2)],
+            },
+          },
+        ],
+        outside: [],
+        traces: [],
+        nextCursor: null,
+        hasMore: false,
+      }),
+    );
+    rs.stubGlobal("fetch", fetchMock);
+
+    const page = await listSessionThread("s1", "r1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/chat/sessions/s1/messages?type=concierge&thread=r1",
+    );
+    expect(page?.messages.map((message) => message.id)).toEqual(["m1", "r1"]);
+  });
+
+  it("answers null for a chat that does not exist, and throws on any other refusal", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValueOnce(json({ error: "gone" }, 404)));
+    await expect(listSessionThread("s1", "m1")).resolves.toBeNull();
+
+    rs.stubGlobal(
+      "fetch",
+      rs
+        .fn()
+        .mockResolvedValueOnce(json({ error: "Not a Concierge chat", code: "not_concierge" }, 400)),
+    );
+    await expect(listSessionThread("s1", "m1")).rejects.toMatchObject({ status: 400 });
   });
 });

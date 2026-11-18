@@ -1917,9 +1917,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
   // `type=concierge` pages a Concierge chat by its main-line messages
   // (docs/domains/chats.md#chat-thread): the messages that reply to none.
-  // Each comes with the whole thread it roots, so a reply never comes without
-  // its root, and the newest page names the threads with unread replies whose
-  // root is older. Every message is read once and enriched once, whichever of
+  // Each comes with a summary of the thread it roots (its counts and newest
+  // reply), so a reply never comes without its root, and the newest page names
+  // the threads with unread replies whose root is older. `thread` reads one
+  // thread whole. Every message is read once and enriched once, whichever of
   // the three lists it stands in.
   const respondWithConciergePage = async (
     c: Context,
@@ -1961,7 +1962,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             ...(throughParam ? { through: throughParam } : {}),
           });
     const stored = [
-      ...page.mainLine.flatMap(({ message, thread }) => [message, ...(thread?.replies ?? [])]),
+      ...page.mainLine.flatMap(({ message, thread }) => [
+        message,
+        ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
+      ]),
       ...page.outside.map((entry) => entry.latestUnread),
       ...page.traces,
     ];
@@ -1984,8 +1988,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           ? {
               replyCount: thread.replyCount,
               unreadCount: thread.unreadCount,
-              lastReplyAt: thread.replies.at(-1)?.createdAt.toISOString() ?? null,
-              replies: thread.replies.map(shown),
+              latestReply: shown(thread.latestReply),
+              // Only a thread read by itself brings all its replies.
+              ...(thread.replies ? { replies: thread.replies.map(shown) } : {}),
             }
           : null,
       })),

@@ -15,6 +15,7 @@ import type {
   ReasoningEffort,
   RomeSessionsPageResult,
   SkillSummary,
+  ThreadSummary,
   TurnInfo,
 } from "./chat-types";
 import type {
@@ -199,34 +200,83 @@ export interface ChatMessagePage {
    * paging.
    */
   concierge?: {
-    /** The main line and the replies of its threads: what says where the loaded history stands. The waiting replies and trace rows are not in it. */
+    /** The main line and the newest reply of each thread (every reply, for one thread read by itself): what says where the loaded history stands. The waiting replies and trace rows are not in it. */
     body: ChatMessage[];
     /** When the oldest main-line message of the page was said, in ms; null for an empty page. */
     oldestAt: number | null;
     /** The name of each thread that waits with a root that is not on the page, by root, when it has one. */
     titles: ReadonlyMap<string, string>;
+    /** What the page says of each thread with replies, by root: those of its main line, and the ones that wait outside it. */
+    threads: ReadonlyMap<string, ThreadSummary>;
   };
 }
 
 /** What `GET /messages?type=concierge` answers. */
 interface ConciergeWirePage {
-  mainLine: { message: ChatMessage; thread: { replies: ChatMessage[] } | null }[];
-  outside: { root: string; title: string | null; latestUnread: ChatMessage }[];
+  mainLine: {
+    message: ChatMessage;
+    thread: {
+      replyCount: number;
+      unreadCount: number;
+      latestReply: ChatMessage;
+      /** Only in an answer for one thread. */
+      replies?: ChatMessage[];
+    } | null;
+  }[];
+  outside: {
+    root: string;
+    title: string | null;
+    replyCount: number;
+    unreadCount: number;
+    latestUnread: ChatMessage;
+  }[];
   /** The trace rows of the turns on the page. */
   traces?: ChatMessage[];
   nextCursor: string | null;
   layout?: unknown[] | null;
 }
 
-/** Reads a Concierge page into the messages the transcript keeps: the main line, the replies of each thread, the one unread reply of each thread that waits outside it, and the trace rows of their turns. */
+/** When `message` was said, in ms. */
+const saidAt = (message: ChatMessage) => Date.parse(message.createdAt);
+
+/**
+ * Reads a Concierge page into the messages the transcript keeps: the main
+ * line, the newest reply of each thread (all of them, for one thread read by
+ * itself), the one unread reply of each thread that waits outside the page,
+ * and the trace rows of their turns. What the page says of each thread comes
+ * apart, as its summary.
+ */
 export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
   const body = wire.mainLine.flatMap(({ message, thread }) => [
     message,
-    ...(thread?.replies ?? []),
+    ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
   ]);
-  const times = wire.mainLine.map(({ message }) => Date.parse(message.createdAt));
+  const times = wire.mainLine.map(({ message }) => saidAt(message));
+  const threads = new Map<string, ThreadSummary>();
+  for (const { message, thread } of wire.mainLine) {
+    if (!thread) continue;
+    threads.set(message.id, {
+      replyCount: thread.replyCount,
+      unreadCount: thread.unreadCount,
+      latestReply: thread.latestReply,
+      unreadAt: thread.unreadCount > 0 ? saidAt(thread.latestReply) : 0,
+    });
+  }
+  for (const entry of wire.outside) {
+    threads.set(entry.root, {
+      replyCount: entry.replyCount,
+      unreadCount: entry.unreadCount,
+      latestReply: entry.latestUnread,
+      unreadAt: saidAt(entry.latestUnread),
+    });
+  }
+  const messages = new Map(
+    [...body, ...wire.outside.map((entry) => entry.latestUnread), ...(wire.traces ?? [])].map(
+      (message) => [message.id, message],
+    ),
+  );
   return {
-    messages: [...body, ...wire.outside.map((entry) => entry.latestUnread), ...(wire.traces ?? [])],
+    messages: [...messages.values()],
     nextCursor: wire.nextCursor,
     ...(wire.layout === undefined ? {} : { layout: wire.layout }),
     concierge: {
@@ -235,6 +285,7 @@ export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
       titles: new Map(
         wire.outside.flatMap((entry) => (entry.title ? [[entry.root, entry.title] as const] : [])),
       ),
+      threads,
     },
   };
 }
@@ -244,7 +295,7 @@ export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
  * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  *
  * With `concierge`, the page is asked for by main-line messages and each
- * brings its thread whole. A chat that is not a Concierge chat refuses, and the
+ * brings a summary of its thread. A chat that is not a Concierge chat refuses, and the
  * read is made again by turns, `fallbackLimit` of them, so a caller that does
  * not know the chat yet reads either kind. Which way it was paged is in the
  * page's `concierge`.
@@ -294,6 +345,24 @@ export async function listSessionMessagePage(
   const res = await read(query(options.limit, false));
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessagePage>(res);
+}
+
+/**
+ * One chat thread of a Concierge chat, whole, named by any message of it: its
+ * root, every reply, and the trace rows of their turns. `null` means the
+ * session doesn't exist (HTTP 404). A thread the chat does not hold comes
+ * back with no messages.
+ */
+export async function listSessionThread(
+  sessionId: string,
+  key: string,
+): Promise<ChatMessagePage | null> {
+  const params = new URLSearchParams({ type: "concierge", thread: key });
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  return conciergePageOf(await jsonOrThrow<ConciergeWirePage>(res));
 }
 
 export interface ListRomeSessionsOptions {

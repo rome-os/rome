@@ -360,17 +360,22 @@ type StoredChatLine = StoredWebchatMessage & {
   inputState: import("@rome-os/app-runtime").AgentInputState | null;
 };
 
-/** A main-line message with the thread it roots, whole. */
+/** A main-line message with a summary of the thread it roots. */
 export interface ConciergeMainLine {
   message: StoredChatLine;
-  /** Null when no message replies to it. */
+  /** Null when no reply counts. */
   thread: {
     /** Replies the reader's stack counts: a user or assistant message no automation said. */
     replyCount: number;
     /** Counted replies the chat's owner did not say and has not seen. */
     unreadCount: number;
-    /** Every message whose root is the message, deeper replies too, in the order they were said. */
-    replies: StoredChatLine[];
+    /** The newest counted reply. */
+    latestReply: StoredChatLine;
+    /**
+     * Every message whose root is the message, deeper replies too, in the
+     * order they were said. Only a thread read by itself has it.
+     */
+    replies?: StoredChatLine[];
   } | null;
 }
 
