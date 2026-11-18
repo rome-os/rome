@@ -189,6 +189,8 @@ function setup(
     triage?: Record<string, "important" | "digest" | "ignore">;
     triageLine?: string;
     catalog?: ProviderSources;
+    /** Holds every read of the sources until it settles, as a slow provider does. */
+    sourcesHeld?: Promise<void>;
   } = {},
 ) {
   /** The Concierge chats that exist and are not archived; "calendar" is a topic chat. */
@@ -313,6 +315,7 @@ function setup(
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
+        await options.sourcesHeld;
         return {
           status: "ok",
           data: options.catalog ?? sources(options.gmailStatus, options.gmailUndelivered),
@@ -1636,6 +1639,81 @@ describe("follows in several Concierge chats", () => {
     rs.setSystemTime(Date.now() + 31_000);
     expect(await stateIn()).toEqual(["active"]);
     expect(asked()).toBe(before);
+    s.stop();
+  });
+
+  it("marks the follows an archive moves, until they move again, and moves them back on restore", async () => {
+    const s = setup();
+    s.liveChats.set("trips", { id: "trips", name: "Trips", main: false });
+    s.calling.chat = "calendar";
+    for (const target of ["acme/widgets", "acme/gadgets", "acme/gizmos"]) {
+      await s.following().follow({ source: "github", target });
+    }
+    s.calling.chat = null;
+    // A delete's move marks nothing; an archive's marks each follow it moves.
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(3);
+    s.liveChats.delete("calendar");
+    const moved = async () =>
+      (await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).map((f) => f.target);
+    expect(await moved()).toEqual(["acme/widgets", "acme/gadgets", "acme/gizmos"]);
+    // Another owner has none of them.
+    expect(await s.following().followsMovedFrom("calendar", null, "visitor:acct-ann")).toEqual([]);
+    // Ended in the main chat, moved to another chat, or changed where it is: only the last stays.
+    await s.following().unfollow("github", "acme/gizmos", GUARDIAN_OWNER);
+    await s.following().configure({ source: "github", target: "acme/gadgets", chatId: "trips" });
+    await s.following().configure({
+      source: "github",
+      target: "acme/widgets",
+      chatId: "concierge",
+      preference: "only failures",
+    });
+    expect(await moved()).toEqual(["acme/widgets"]);
+
+    s.liveChats.set("calendar", { id: "calendar", name: "Calendar", main: false });
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, true)).toBe(1);
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
+    expect(await chatOf(s, "acme/gadgets")).toMatchObject({ id: "trips" });
+    expect(await moved()).toEqual([]);
+    s.stop();
+  });
+
+  it("lists what an archive moved or would move without holding up a follow change behind a slow source", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(1);
+    // Past the sources' TTL, a provider that does not answer yet.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    let answer = () => {};
+    options.sourcesHeld = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const moved = s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER);
+    const inChat = s.following().followsOfChat("concierge", GUARDIAN_OWNER);
+    // The unarchive's own change goes through while those lists still wait.
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, false)).toBe(0);
+    answer();
+    expect(await moved).toEqual([{ source: "github", label: "GitHub", target: "acme/widgets" }]);
+    await inChat;
+    s.stop();
+  });
+
+  it("keeps an archive's follows in the main chat when the restore says so, and forgets they moved", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    expect(await s.following().moveToMainChat("calendar", null)).toBe(1);
+    // Moved by a delete: nothing to move back.
+    expect(await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).toEqual([]);
+    await s.following().configure({ source: "github", target: "acme/widgets", chatId: "calendar" });
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(1);
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, false)).toBe(0);
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "concierge", main: true });
+    expect(await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).toEqual([]);
     s.stop();
   });
 

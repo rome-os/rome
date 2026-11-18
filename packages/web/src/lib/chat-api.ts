@@ -103,13 +103,28 @@ export async function searchChatMessages(query: string): Promise<ChatSearchMessa
   return jsonOrThrow<ChatSearchMessageMatch[]>(res);
 }
 
+/**
+ * What archiving or unarchiving a topic chat does with its follows and open
+ * tasks. `followsAndTasks: "stop"` ends them when it is archived; without it
+ * they move to the main chat. `follows: "moveBack"` moves the follows its
+ * archive moved back to it when it is unarchived; without it they stay.
+ */
+export interface ArchiveSessionOptions {
+  followsAndTasks?: "stop";
+  follows?: "moveBack";
+}
+
 /** Archive (soft-hide) or unarchive a top-level webchat session. */
-export async function archiveSession(sessionId: string, archived: boolean): Promise<ChatSession> {
+export async function archiveSession(
+  sessionId: string,
+  archived: boolean,
+  options: ArchiveSessionOptions = {},
+): Promise<ChatSession> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/archive`, {
     method: "PATCH",
     credentials: "include",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ archived }),
+    body: JSON.stringify({ archived, ...options }),
   });
   return jsonOrThrow<ChatSession>(res);
 }

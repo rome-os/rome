@@ -4585,3 +4585,173 @@ describe("Chat header delete of a Concierge topic chat", () => {
     expect(workReads).toEqual([]);
   });
 });
+
+// The header's archive and unarchive of a topic chat ask what the sidebar's ask.
+describe("Chat header archive of a Concierge topic chat", () => {
+  // What `follows-and-tasks` answers for topic-1.
+  const work = {
+    answer: { follows: [], openTasks: [] } as {
+      follows: { source: string; label: string; target: string }[];
+      openTasks: { id: string; title: string }[];
+      movedFollows?: { source: string; label: string; target: string }[];
+    },
+  };
+  const workReads: string[] = [];
+  const patches: Array<{ url: string; body: unknown }> = [];
+
+  const identity = (archivedAt: string | null) =>
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt,
+    });
+
+  beforeEach(() => {
+    work.answer = { follows: [], openTasks: [] };
+    workReads.length = 0;
+    patches.length = 0;
+    identity(null);
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          workReads.push(url);
+          return Response.json(work.answer);
+        }
+        if (init?.method === "PATCH") {
+          patches.push({ url, body: JSON.parse(String(init.body)) });
+          return Response.json({ id: "topic-1" });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+  });
+
+  it("asks before archiving a topic chat with follows or open tasks, and stops them when asked", async () => {
+    work.answer = {
+      follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+      openTasks: [{ id: "t-1", title: "Fix login redirect" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatArchiveTitle",
+    });
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(within(dialog).getByText("recentChats.topicChatDeleteTask")).toBeTruthy();
+    expect(patches).toEqual([]);
+    await user.click(within(dialog).getByRole("radio", { name: /topicChatDeleteStop/ }));
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: true, followsAndTasks: "stop" },
+        },
+      ]),
+    );
+  });
+
+  it("asks before unarchiving a topic chat whose archive moved follows, and moves them back by default", async () => {
+    identity("2026-11-01T00:00:00.000Z");
+    work.answer = {
+      follows: [],
+      openTasks: [],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "archived.unarchive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatUnarchiveTitle",
+    });
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(
+      within(dialog)
+        .getByRole("radio", { name: /topicChatUnarchiveMoveBack/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.unarchive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: false, follows: "moveBack" },
+        },
+      ]),
+    );
+  });
+
+  it("asks before unarchiving an archived topic chat that opens as an ordinary chat", async () => {
+    // An archived topic chat is in no active list, so the chat page opens it
+    // without the Concierge variant; the session itself says what it is.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: "2026-11-01T00:00:00.000Z",
+      isConciergeSession: true,
+    });
+    work.answer = {
+      follows: [],
+      openTasks: [],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "archived.unarchive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatUnarchiveTitle",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.unarchive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: false, follows: "moveBack" },
+        },
+      ]),
+    );
+    expect(workReads).toEqual(["/api/concierge/chats/topic-1/follows-and-tasks"]);
+  });
+
+  it("never treats the main chat as a topic chat, even read from its session", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Main chat",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      isConciergeSession: true,
+    });
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="concierge" conciergeMainChatId="concierge" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        { url: "/api/chat/sessions/concierge/archive", body: { archived: true } },
+      ]),
+    );
+    expect(workReads).toEqual([]);
+  });
+
+  it("archives a chat that is not a topic chat without reading anything", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        { url: "/api/chat/sessions/session-1/archive", body: { archived: true } },
+      ]),
+    );
+    expect(workReads).toEqual([]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});

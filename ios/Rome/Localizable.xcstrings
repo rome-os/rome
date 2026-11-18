@@ -817,6 +817,16 @@
         }
       }
     },
+    "Archive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档“%@”？"
+          }
+        }
+      }
+    },
     "Ask the owner of this Rome to turn it on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5285,6 +5295,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个对话会被永久删除。它的关注和未完成的任务会转到 Chat。"
+          }
+        }
+      }
+    },
+    "This chat will be archived. It has:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被归档。其中有："
           }
         }
       }

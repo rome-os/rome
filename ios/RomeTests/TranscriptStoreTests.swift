@@ -108,6 +108,11 @@ final class FakeBackend: RomeBackend {
     var chatWorkAnswer: ConciergeChatWork?
     var chatWorkDelay: Duration?
 
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "archive \(id) stopping work" : "archive \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
     func deleteChat(_ id: String, stoppingWork: Bool) async throws {
         calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
         topicChats.removeAll { $0.id == id }

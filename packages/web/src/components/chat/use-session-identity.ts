@@ -35,6 +35,11 @@ export interface SessionIdentity {
   isTaskChat: boolean;
   /** The chat's project, as the chat list names it, or null while loading. */
   projectPath: string | null;
+  /**
+   * Whether the session is a Concierge chat, read from the session itself, so
+   * an archived topic chat, which no active list holds, counts too.
+   */
+  isConciergeSession: boolean;
 }
 
 /**
@@ -62,6 +67,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [forkable, setForkable] = useState(false);
   const [isTaskChat, setIsTaskChat] = useState(false);
   const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [isConciergeSession, setIsConciergeSession] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
   // id so switching sessions is "loading" again with no reset-effect flash.
   const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
@@ -78,6 +84,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setArchivedAt(null);
       setForkable(false);
       setProjectPath(null);
+      setIsConciergeSession(false);
       return;
     }
     setModel(null);
@@ -105,6 +112,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
         setProjectPath(session?.projectPath ?? null);
+        setIsConciergeSession(!!session && chatKind(session) === "topic");
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -134,6 +142,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setArchivedAt(null);
           setForkable(false);
           setIsTaskChat(false);
+          setIsConciergeSession(false);
         }
       }
     })();
@@ -165,6 +174,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
         setProjectPath(session?.projectPath ?? null);
+        setIsConciergeSession(!!session && chatKind(session) === "topic");
       } catch {
         // Best effort; the next mount / event reconciles.
       }
@@ -183,5 +193,6 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     forkable,
     isTaskChat,
     projectPath,
+    isConciergeSession,
   };
 }

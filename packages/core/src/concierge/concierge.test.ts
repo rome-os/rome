@@ -5000,6 +5000,53 @@ describe("Concierge chats", () => {
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
   });
 
+  it("knows a topic chat of its owner whether it is archived or not, and never the main chat or another person's", async () => {
+    const s = setup({ startEvents: false });
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
+    // An archived topic chat is in no list, but its unarchive asks about it.
+    s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
+    expect(await s.service.conciergeChat(TOPIC_CHAT)).toBeNull();
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "visitor:acct-ann")).toBe(false);
+    expect(await s.service.isTopicChatOf(CONCIERGE_CHAT, "guardian")).toBe(false);
+    expect(await s.service.isTopicChatOf("gone", "guardian")).toBe(false);
+  });
+
+  it("restoring an archived topic chat reads its rows as its own again, and moves its follows back only when asked", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("say", { text: "On it" });
+    await s.tool("chat_start", { title: "Book dentist", brief: "Book it" });
+    const moves: unknown[][] = [];
+    const restores: unknown[][] = [];
+    s.service.attachFollowing({
+      moveToMainChat: async (...args: unknown[]) => (moves.push(args), 1),
+      followsOfChat: async () => [],
+      followsMovedFrom: async () => [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+      restoreToChat: async (...args: unknown[]) => (restores.push(args), 1),
+    } as unknown as ConciergeFollowing);
+    await s.storedChats.archiveSession(TOPIC_CHAT);
+    await s.service.retireChat(TOPIC_CHAT, "archived");
+    // An archive marks the follows it moves, so a restore can move them back.
+    expect(moves).toEqual([[TOPIC_CHAT, null, true]]);
+    expect(await s.service.followsAndTasksOf(TOPIC_CHAT, "guardian")).toMatchObject({
+      movedFollows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
+    });
+    const chatOfRow = async () =>
+      (await s.tasks.listForPanel()).find((row) => row.title === "Book dentist")?.conciergeChat.id;
+    expect(await chatOfRow()).toBe(CONCIERGE_CHAT);
+
+    await s.storedChats.unarchiveSession(TOPIC_CHAT);
+    await s.service.restoreChat(TOPIC_CHAT, true);
+    expect(restores).toEqual([[TOPIC_CHAT, null, "guardian", true]]);
+    // The row was never moved, so it is the topic chat's again.
+    expect(await chatOfRow()).toBe(TOPIC_CHAT);
+    // The main chat is never restored.
+    await s.service.restoreChat(CONCIERGE_CHAT, true);
+    expect(restores).toHaveLength(1);
+  });
+
   describe("ending a topic chat's follows and tasks before it is deleted", () => {
     /** "Calendar" has a running task with a task chat, a finished one, and one with no task chat. */
     const withWork = async () => {
@@ -5037,6 +5084,7 @@ describe("Concierge chats", () => {
           return { removed: true };
         },
         moveToMainChat: async () => 0,
+        followsMovedFrom: async () => [],
       } as unknown as ConciergeFollowing);
       return { s, running, oldId, looseId, cancelled, unfollowed };
     };
@@ -5162,6 +5210,7 @@ describe("Concierge chats", () => {
           throw new Error("connector down");
         },
         moveToMainChat: async () => 1,
+        followsMovedFrom: async () => [],
       } as unknown as ConciergeFollowing);
       await s.service.endChatWork(TOPIC_CHAT);
       // A task whose turn could not be interrupted stays open, neither stopped nor archived.

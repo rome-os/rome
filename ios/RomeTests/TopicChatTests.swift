@@ -159,6 +159,23 @@ import Testing
         #expect(workspace.topics.chats.isEmpty)
     }
 
+    /// As on the web: an archive moves the chat's follows and open tasks
+    /// unless the guardian chose to stop them.
+    @Test func archiveStopsTheChatsWorkOnlyWhenAsked() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 0),
+            ConciergeChat(id: "topic-2", name: "Home", main: false, unread: 0),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.archiveTopic("topic-1"))
+        #expect(await workspace.archiveTopic("topic-2", stoppingWork: true))
+        #expect(backend.calls == ["archive topic-1", "archive topic-2 stopping work"])
+        #expect(workspace.topics.chats.isEmpty)
+    }
+
     /// The list arrives; a failed read, or one slower than the wait, gives
     /// nil, and the delete moves them. The waits are far apart, so a busy
     /// test machine cannot flip the outcome.
@@ -313,6 +330,27 @@ import Testing
         let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: nil)
         #expect(!prompt.asksAboutWork)
         #expect(prompt.message == "This chat is deleted permanently. Its follows and open tasks move to Chat.")
+    }
+
+    /// The archive alert lists what the delete alert lists, after its own lead.
+    @Test func theArchiveAlertListsTheWorkAndAsks() {
+        let work = ConciergeChatWork(
+            follows: [.init(source: "github", label: "GitHub", target: "rome-os/rome")],
+            openTasks: (1...6).map { .init(id: "t\($0)", title: "Task \($0)") }
+        )
+        let prompt = TopicArchivePrompt(id: "topic-1", name: "Trip", work: work)
+        #expect(prompt.title == "Archive “Trip”?")
+        #expect(prompt.message == """
+        This chat will be archived. It has:
+        • Following GitHub · rome-os/rome
+        • Open task: Task 1
+        • Open task: Task 2
+        • Open task: Task 3
+        • Open task: Task 4
+        and 2 more
+
+        What happens to them?
+        """)
     }
 
     @Test func parsesTheServersList() throws {

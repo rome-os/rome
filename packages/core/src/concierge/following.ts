@@ -203,7 +203,19 @@ interface FollowRecord {
   owner?: ConciergeOwner;
   /** When it was made, epoch milliseconds. Absent on follows made before it was kept. */
   createdAt?: number;
+  /**
+   * The topic chat whose archive moved it to the main chat, while it is still
+   * there: restoring that chat can move it back. Dropped once it moves again.
+   */
+  movedFrom?: string;
 }
+
+/** `next`, without where an archive moved it from once it reports to another chat than `before`. */
+const keepMovedFrom = (before: FollowRecord, next: FollowRecord): FollowRecord => {
+  if (next.chat === before.chat || next.movedFrom === undefined) return next;
+  const { movedFrom: _, ...moved } = next;
+  return moved;
+};
 
 /** A visitor's own rules, and the time zone their browser reported. */
 interface PersonRules extends Partial<ConciergeFollowRules> {
@@ -305,9 +317,33 @@ export interface ConciergeFollowing {
   reconcile(): Promise<void>;
   /**
    * Moves the follows and owed events of Concierge chat `chatId` to its
-   * owner's main chat `to` (null for the guardian's). Answers how many follows moved.
+   * owner's main chat `to` (null for the guardian's). Answers how many follows
+   * moved. `archived` marks each follow as moved by the chat's archive, so
+   * restoring the chat can move it back.
    */
-  moveToMainChat(chatId: string, to?: string | null): Promise<number>;
+  moveToMainChat(chatId: string, to?: string | null, archived?: boolean): Promise<number>;
+  /**
+   * The follows of `owner` that archiving topic chat `chatId` moved to their
+   * main chat `mainChat` (null for the guardian's) and that still report
+   * there, with each source's label.
+   */
+  followsMovedFrom(
+    chatId: string,
+    mainChat: string | null,
+    owner: ConciergeOwner,
+  ): Promise<{ source: string; label: string; target: string }[]>;
+  /**
+   * Topic chat `chatId` is restored. The follows its archive moved to main
+   * chat `mainChat` that still report there move back to it when `moveBack`
+   * says so, and stay otherwise. Either way they are no longer marked as
+   * moved. Answers how many moved back.
+   */
+  restoreToChat(
+    chatId: string,
+    mainChat: string | null,
+    owner: ConciergeOwner,
+    moveBack: boolean,
+  ): Promise<number>;
   /**
    * The owner's follows whose alerts go to Concierge chat `chatId`, with the
    * owner's digest times, read without asking the sources again. A follow of
@@ -367,6 +403,7 @@ function parseFollows(value: unknown): FollowRecord[] {
         ...(typeof f.createdAt === "number" && Number.isFinite(f.createdAt)
           ? { createdAt: f.createdAt }
           : {}),
+        ...(typeof f.movedFrom === "string" && f.movedFrom ? { movedFrom: f.movedFrom } : {}),
       },
     ];
   });
@@ -1227,13 +1264,13 @@ export function startConciergeFollowing(
         owner,
         createdAt: Date.now(),
       };
-      const next = {
+      const next = keepMovedFrom(base, {
         ...applyChange(source, base, change),
         account,
         owner,
         // One that exists moves only when the change names a chat.
         ...(existing && change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
-      };
+      });
       // Check first, so a refusal (no admin rights for a webhook) leaves nothing behind.
       await ensure(source.provider, next, true);
       await ensure(source.provider, next, false);
@@ -1256,11 +1293,11 @@ export function startConciergeFollowing(
         (f) => f.source === source.source && f.target === target,
       );
       if (!existing) return null;
-      const next = {
+      const next = keepMovedFrom(existing, {
         ...applyChange(source, existing, change),
         owner,
         ...(change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
-      };
+      });
       const added = next.kinds.filter((k) => !existing.kinds.includes(k));
       if (added.length > 0 && source.status === "ready") {
         await ensure(source.provider, { ...next, kinds: added }, false);
@@ -1355,6 +1392,8 @@ export function startConciergeFollowing(
       await deps.timezoneMoved?.(owner, timezone);
     },
 
+    // Read outside the write queue: the labels may ask the providers, and a
+    // slow one must not hold up an archive, unarchive or delete behind it.
     async followsOfChat(chatId, owner) {
       const follows = followsOf(await readStored(), owner).filter((f) => f.chat === chatId);
       if (follows.length === 0) return [];
@@ -1367,16 +1406,49 @@ export function startConciergeFollowing(
       }));
     },
 
-    async moveToMainChat(chatId, to = null) {
+    async moveToMainChat(chatId, to = null, archived = false) {
       const stored = await readStored();
       const moved = stored.follows.filter((f) => f.chat === chatId).length;
       if (moved > 0) {
         await writeStored({
           ...stored,
-          follows: stored.follows.map((f) => (f.chat === chatId ? { ...f, chat: to } : f)),
+          follows: stored.follows.map((f) =>
+            f.chat === chatId ? { ...f, chat: to, ...(archived ? { movedFrom: chatId } : {}) } : f,
+          ),
         });
       }
       await deps.items.moveToMainChat(chatId, to);
+      return moved;
+    },
+
+    async followsMovedFrom(chatId, mainChat, owner) {
+      const follows = followsOf(await readStored(), owner).filter(
+        (f) => f.movedFrom === chatId && f.chat === mainChat,
+      );
+      if (follows.length === 0) return [];
+      const sources = await readSources().catch(() => [] as WatchSource[]);
+      return follows.map(({ source, target }) => ({
+        source,
+        label: sources.find((s) => s.source === source)?.label ?? source,
+        target,
+      }));
+    },
+
+    async restoreToChat(chatId, mainChat, owner, moveBack) {
+      const stored = await readStored();
+      const marked = (f: FollowRecord) => f.movedFrom === chatId && ownerOfFollow(f) === owner;
+      if (!stored.follows.some(marked)) return 0;
+      let moved = 0;
+      await writeStored({
+        ...stored,
+        follows: stored.follows.map((f) => {
+          if (!marked(f)) return f;
+          const { movedFrom: _, ...unmarked } = f;
+          if (!moveBack || f.chat !== mainChat) return unmarked;
+          moved += 1;
+          return { ...unmarked, chat: chatId };
+        }),
+      });
       return moved;
     },
 
@@ -1444,8 +1516,10 @@ export function startConciergeFollowing(
       exclusive(() => unserialized.unfollow(source, target, owner)),
     setRules: (change, owner) => exclusive(() => unserialized.setRules(change, owner)),
     setTimezone: (owner, timezone) => exclusive(() => unserialized.setTimezone(owner, timezone)),
-    followsOfChat: (chatId, owner) => exclusive(() => unserialized.followsOfChat(chatId, owner)),
-    moveToMainChat: (chatId, to) => exclusive(() => unserialized.moveToMainChat(chatId, to)),
+    moveToMainChat: (chatId, to, archived) =>
+      exclusive(() => unserialized.moveToMainChat(chatId, to, archived)),
+    restoreToChat: (chatId, mainChat, owner, moveBack) =>
+      exclusive(() => unserialized.restoreToChat(chatId, mainChat, owner, moveBack)),
   };
   service.attachFollowing(following);
 

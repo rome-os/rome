@@ -357,10 +357,11 @@ final class Workspace {
     }
 
     /// Archives a topic chat and drops it from the drawer. Returns whether the
-    /// server took it.
+    /// server took it. `stoppingWork` ends its follows and open tasks instead
+    /// of moving them to the main Chat.
     @discardableResult
-    func archiveTopic(_ chatId: String) async -> Bool {
-        guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+    func archiveTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        guard (try? await backend.archiveChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
         return true
     }
@@ -377,9 +378,9 @@ final class Workspace {
         return true
     }
 
-    /// The follows and open tasks that deleting topic chat `chatId` would
-    /// move, or nil when they cannot be read within `wait`: an older
-    /// instance, or a slow network. The delete then moves them, as before.
+    /// The follows and open tasks that archiving or deleting topic chat
+    /// `chatId` would move, or nil when they cannot be read within `wait`: an
+    /// older instance, or a slow network. Both then move them, as before.
     func topicWork(_ chatId: String, wait: Duration = .seconds(3)) async -> ConciergeChatWork? {
         let backend = backend
         return await withTaskGroup(of: ConciergeChatWork?.self) { group in

@@ -592,6 +592,198 @@ describe("RecentChats", () => {
     });
   });
 
+  describe("archiving and unarchiving a Concierge topic chat", () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    type Work = {
+      follows: { source: string; label: string; target: string }[];
+      openTasks: { id: string; title: string }[];
+      movedFollows?: { source: string; label: string; target: string }[];
+    };
+    // What `follows-and-tasks` answers for each chat; null makes the read fail.
+    const work: Record<string, Work | null> = {};
+    const mockArchive = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method !== "GET") {
+          requests.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+          return Response.json({ ok: true });
+        }
+        const read = url.match(/^\/api\/concierge\/chats\/([^/]+)\/follows-and-tasks$/)?.[1];
+        if (read) {
+          const answer = work[read];
+          return answer ? Response.json(answer) : new Response("unavailable", { status: 500 });
+        }
+        if (url.startsWith("/api/chat/sessions")) {
+          const status = new URL(url, "http://localhost").searchParams.get("status");
+          return Response.json(
+            status === "archived"
+              ? [
+                  sessionRow("old-topic", "Old topic", {
+                    agentName: "core:concierge",
+                    archivedAt: "2026-07-08T12:00:00.000Z",
+                  }),
+                ]
+              : [],
+          );
+        }
+        if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch);
+    const archiveDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "Actions for Calendar" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      return screen.findByRole("dialog", { name: 'Archive "Calendar"?' });
+    };
+    const unarchive = async (user: ReturnType<typeof userEvent.setup>) => {
+      localStorage.setItem("rome-recent-chats-status-filter", "archived");
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "Actions for Old topic" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Unarchive chat" }));
+    };
+    const patches = () => requests.filter((request) => request.method === "PATCH");
+
+    beforeEach(() => {
+      requests.length = 0;
+      for (const key of Object.keys(work)) delete work[key];
+      concierge.chatId = "concierge";
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 0 },
+      ];
+    });
+
+    it("lists the follows and open tasks, moves them by default, and stops them only when asked", async () => {
+      work["topic-1"] = {
+        follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+        openTasks: [{ id: "t-1", title: "Fix login redirect" }],
+      };
+      mockArchive();
+      const user = userEvent.setup();
+      const dialog = await archiveDialog(user);
+      expect(within(dialog).getByText("This chat will be archived. It has:")).toBeTruthy();
+      expect(within(dialog).getByText("Following GitHub · rome-os/rome")).toBeTruthy();
+      expect(within(dialog).getByText("Open task: Fix login redirect")).toBeTruthy();
+      expect(
+        within(dialog)
+          .getByRole("radio", { name: /Move to the main chat/ })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      // Asked, nothing is archived yet.
+      expect(patches()).toEqual([]);
+      await user.click(within(dialog).getByRole("button", { name: "Archive" }));
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          { url: "/api/chat/sessions/topic-1/archive", method: "PATCH", body: { archived: true } },
+        ]),
+      );
+
+      requests.length = 0;
+      cleanup();
+      const again = await archiveDialog(user);
+      await user.click(within(again).getByRole("radio", { name: /Stop them/ }));
+      await user.click(within(again).getByRole("button", { name: "Archive" }));
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          {
+            url: "/api/chat/sessions/topic-1/archive",
+            method: "PATCH",
+            body: { archived: true, followsAndTasks: "stop" },
+          },
+        ]),
+      );
+    });
+
+    it.each([
+      ["has nothing to move", { follows: [], openTasks: [] }],
+      ["cannot be read", null],
+    ])("archives at once, asking nothing, when the list %s", async (_name, answer) => {
+      work["topic-1"] = answer;
+      mockArchive();
+      const user = userEvent.setup();
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "Actions for Calendar" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          { url: "/api/chat/sessions/topic-1/archive", method: "PATCH", body: { archived: true } },
+        ]),
+      );
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("asks to move back the follows its archive moved, moves them by default, and keeps them when asked", async () => {
+      work["old-topic"] = {
+        follows: [],
+        openTasks: [],
+        movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+      };
+      mockArchive();
+      const user = userEvent.setup();
+      await unarchive(user);
+      const dialog = await screen.findByRole("dialog", { name: 'Unarchive "Old topic"?' });
+      expect(
+        within(dialog).getByText(
+          "When this chat was archived, these follows moved to the main chat:",
+        ),
+      ).toBeTruthy();
+      expect(within(dialog).getByText("Following Gmail · me@example.com")).toBeTruthy();
+      expect(
+        within(dialog)
+          .getByRole("radio", { name: /Move them back to this chat/ })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      expect(patches()).toEqual([]);
+      await user.click(within(dialog).getByRole("button", { name: "Unarchive chat" }));
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          {
+            url: "/api/chat/sessions/old-topic/archive",
+            method: "PATCH",
+            body: { archived: false, follows: "moveBack" },
+          },
+        ]),
+      );
+
+      requests.length = 0;
+      cleanup();
+      await unarchive(user);
+      const again = await screen.findByRole("dialog", { name: 'Unarchive "Old topic"?' });
+      await user.click(within(again).getByRole("radio", { name: /Keep them in the main chat/ }));
+      await user.click(within(again).getByRole("button", { name: "Unarchive chat" }));
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          {
+            url: "/api/chat/sessions/old-topic/archive",
+            method: "PATCH",
+            body: { archived: false },
+          },
+        ]),
+      );
+    });
+
+    it("unarchives at once, asking nothing, when no follow is left to move back", async () => {
+      work["old-topic"] = { follows: [], openTasks: [], movedFollows: [] };
+      mockArchive();
+      const user = userEvent.setup();
+      await unarchive(user);
+      await waitFor(() =>
+        expect(patches()).toEqual([
+          {
+            url: "/api/chat/sessions/old-topic/archive",
+            method: "PATCH",
+            body: { archived: false },
+          },
+        ]),
+      );
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
   describe("Concierge unread badge", () => {
     const server = { unread: 0, settings: {} as Record<string, unknown> };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>

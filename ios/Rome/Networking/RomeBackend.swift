@@ -33,12 +33,15 @@ protocol RomeBackend: AnyObject, Sendable {
     func renameChat(_ id: String, to name: String) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
+    /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
+    /// instead of moving them to the main chat.
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
     /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
     /// tasks instead of moving them to the main chat.
     func deleteChat(_ id: String, stoppingWork: Bool) async throws
-    /// The follows and open tasks that deleting topic chat `chatId` would move.
+    /// The follows and open tasks that archiving or deleting topic chat `chatId` would move.
     func chatWork(chatId: String) async throws -> ConciergeChatWork
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
@@ -170,6 +173,13 @@ final class LiveBackend: RomeBackend {
 
     func archiveChat(_ id: String) async throws {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
+    }
+
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws {
+        // Without the option, the server moves them, as it always has.
+        var body: [String: JSONValue] = ["archived": .bool(true)]
+        if stoppingWork { body["followsAndTasks"] = .string("stop") }
+        try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
     }
 
     func deleteChat(_ id: String) async throws {
@@ -472,6 +482,7 @@ enum ToolCallExtractor {
 
 extension RomeBackend {
     /// Demo data and test doubles move a chat's work, as an older instance does.
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.

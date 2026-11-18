@@ -3305,23 +3305,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const body = await c.req
-      .json<{ archived?: unknown }>()
-      .catch(() => ({}) as { archived?: unknown });
+      .json<{ archived?: unknown; followsAndTasks?: unknown; follows?: unknown }>()
+      .catch(() => ({}) as { archived?: unknown; followsAndTasks?: unknown; follows?: unknown });
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
+    const isTopic = isConciergeChat(lookup.session);
     // A repeated archive changes nothing, so a topic chat is not retired twice.
     if (body.archived && !lookup.session.archivedAt) {
+      // `followsAndTasks: "stop"` ends a topic chat's follows and open tasks
+      // first, as a delete's does, so retireChat has nothing to move.
+      if (isTopic && body.followsAndTasks === "stop") await deps.concierge?.endChatWork(sessionId);
       // Archiving a task chat stops its task, in the archive's own transaction.
       if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "archived");
       else await deps.webchatRepo.archiveSession(sessionId);
-      if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
+      if (isTopic) await deps.concierge?.retireChat(sessionId, "archived");
     } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
       await deps.concierge?.restoreTaskChat(sessionId);
+      // `follows: "moveBack"` moves back the follows its archive moved to the main chat.
+      if (isTopic) await deps.concierge?.restoreChat(sessionId, body.follows === "moveBack");
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
