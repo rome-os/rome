@@ -1064,7 +1064,7 @@ const since = sinceArg ? Date.parse(sinceArg) : 0;
 if (Number.isNaN(since)) throw new Error(`not a time: ${sinceArg}`);
 const db = new Database("/home/rome/.rome/default/rome.db", { readonly: true });
 const sessionOf = db.prepare(
-  "select channel_thread_key as name from sessions where provider_thread_id = ?",
+  "select channel_thread_key as name, created_at as created from sessions where provider_thread_id = ?",
 );
 // rome_agent_messages times are whole seconds, so a turn that started in the
 // same second as the call counts.
@@ -1073,6 +1073,14 @@ const turnOf = db.prepare(
    from rome_agent_messages m left join rome_sessions s on s.id = m.session_id
    where m.turn_id is not null and (? is null or s.name = ?)
    group by m.turn_id having start <= ? order by start desc limit 1`,
+);
+// A build that opens a model session for each turn keys it apart from the
+// turn's own session, so the turn is the first to start once it opened.
+const turnOpening = db.prepare(
+  `select m.turn_id, s.name, min(m.created_at) as start
+   from rome_agent_messages m left join rome_sessions s on s.id = m.session_id
+   where m.turn_id is not null
+   group by m.turn_id having start >= ? and start <= ? order by start limit 1`,
 );
 const root = "/home/rome/.claude/projects";
 const calls = new Map();
@@ -1099,8 +1107,13 @@ const ordered = [...calls.values()]
   .filter((e) => Date.parse(e.timestamp) >= since)
   .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 for (const e of ordered) {
-  const name = sessionOf.get(e.sessionId)?.name ?? null;
-  const turn = turnOf.get(name, name, Math.floor(Date.parse(e.timestamp) / 1000));
+  const model = sessionOf.get(e.sessionId);
+  const name = model?.name ?? null;
+  const at = Math.floor(Date.parse(e.timestamp) / 1000);
+  let turn = turnOf.get(name, name, at);
+  if (model && (!turn || turn.start < model.created - 1)) {
+    turn = turnOpening.get(model.created - 1, at) ?? turn;
+  }
   const u = e.message.usage;
   process.stdout.write(
     `${JSON.stringify({
