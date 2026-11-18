@@ -220,6 +220,22 @@ describe("ChatOutputs", () => {
     await show("chat-1", "t2", chart, `${ID_A}.png`);
     const list = await listed("chat-1");
     expect(list.map((output) => output.kind)).toEqual(["shown"]);
+    // A message's earlier link to the written file still names this output.
+    expect(list[0].links).toEqual(
+      expect.arrayContaining([`/api/assets/${ID_A}.png`, "/projects/demo/chart.png", chart]),
+    );
+  });
+
+  it("keeps an earlier shown copy's link when the file is shown again", async () => {
+    const chart = join(projects, "demo", "chart.png");
+    writeFileSync(chart, "png");
+    await show("chat-1", "t1", chart, `${ID_A}.png`);
+    await show("chat-1", "t2", chart, `${ID_B}.png`);
+    const [output] = await listed("chat-1");
+    expect(output.link).toBe(`/api/assets/${ID_B}.png`);
+    expect(output.links).toEqual(
+      expect.arrayContaining([`/api/assets/${ID_A}.png`, `/api/assets/${ID_B}.png`]),
+    );
   });
 
   it("marks a written file that is gone as missing, and serves nothing for it", async () => {

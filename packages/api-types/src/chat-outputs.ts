@@ -27,6 +27,13 @@ export interface ChatOutputDto {
    * the projects folder, `/api/assets/<name>` for a shown copy, else null.
    */
   link: string | null;
+  /**
+   * Every link a chat message may give the same file, from each time it was
+   * written or shown: `link` and the earlier ones, and its absolute path. A
+   * message's link that is any of them is this output. Absent from servers
+   * that only give `link`.
+   */
+  links?: string[];
   /** Null when the extension says nothing. */
   mimeType: string | null;
   /** When it was written or shown, ISO 8601. */

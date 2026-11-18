@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ChatLink } from "./ChatLink";
 import { OutputLinksContext } from "./outputs/chat-outputs";
@@ -89,6 +89,31 @@ describe("ChatLink and the chat's outputs", () => {
     ]);
     fireEvent.click(screen.getByText("folder"));
     await waitFor(() => expect(followed).toEqual([{ paths: ["/projects/default"], force: true }]));
+    expect(opened).toEqual([]);
+  });
+
+  it("opens a file the reply linked by its absolute path in the Outputs tab", async () => {
+    const path = "/home/rome/projects/demo/report.md";
+    const { opened } = withOutputs(<ChatLink href={path}>report</ChatLink>, [path]);
+    fireEvent.click(screen.getByText("report"));
+    await waitFor(() => expect(opened).toEqual([path]));
+  });
+
+  it("follows an absolute path that is none of the outputs as before", async () => {
+    function Where() {
+      return <span data-testid="where">{useLocation().pathname}</span>;
+    }
+    const { opened } = withOutputs(
+      <>
+        <ChatLink href="/home/rome/elsewhere/notes.md">notes</ChatLink>
+        <Where />
+      </>,
+      [],
+    );
+    fireEvent.click(screen.getByText("notes"));
+    await waitFor(() =>
+      expect(screen.getByTestId("where").textContent).toBe("/home/rome/elsewhere/notes.md"),
+    );
     expect(opened).toEqual([]);
   });
 

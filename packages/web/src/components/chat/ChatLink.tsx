@@ -1,8 +1,9 @@
 import { useContext, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { decodeFileBrowserRoutePath } from "@/lib/file-browser-routing";
-import { getInternalRawPath, isInternalHref } from "@/lib/internal-href";
+import { getInternalRawPath, isApiHref, isInternalHref, toInternalPath } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
@@ -89,6 +90,22 @@ function decodeProjectsHref(href: string): string | null {
   return decoded === null ? null : `/projects/${decoded}`;
 }
 
+// A same-origin link whose path names a file by its extension, such as an
+// absolute path an agent wrote (`/home/…/projects/demo/report.md`): decoded,
+// or null for anything else. The dashboard's own routes name no extension.
+function localFileHref(href: string): string | null {
+  if (!isInternalHref(href) || isApiHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  if (rawPath === null) return null;
+  const path = stripQueryAndFragment(rawPath);
+  if (!/\.[A-Za-z0-9]{1,8}$/.test(path)) return null;
+  try {
+    return decodeURI(path);
+  } catch {
+    return null;
+  }
+}
+
 // /apps/<appId>[/<route...>][?query]. `route` rides the iframe src path
 // (`/full/apps/<id>/<route>`) and `params` the query — see use-free-cells. The
 // AppsIndex page (`/apps` with no segment) is left to react-router.
@@ -173,6 +190,24 @@ function linkText(children: ReactNode): string {
   return "";
 }
 
+// A link to a local file by its path opens the file in the chat's Outputs
+// tab when it is one of them; anything else follows the link as before.
+function LocalFileLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
+  const outputs = useOutputLinks();
+  const navigate = useNavigate();
+  const href = props.href ?? "";
+  return (
+    <WorkspaceLink
+      {...props}
+      onActivate={() => {
+        void outputs?.open(path).then((opened) => {
+          if (!opened) navigate(toInternalPath(href));
+        });
+      }}
+    />
+  );
+}
+
 // A picture inside the link leaves the tap to the link.
 export function ChatLink(props: MarkdownLinkProps) {
   return (
@@ -229,6 +264,9 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
       );
     }
   }
+
+  const localFile = outputs && href ? localFileHref(href) : null;
+  if (localFile) return <LocalFileLink {...props} path={localFile} />;
 
   return <MarkdownLink {...props} />;
 }

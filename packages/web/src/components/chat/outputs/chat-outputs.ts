@@ -38,8 +38,9 @@ export function useChatOutputs(chatId: string | null) {
 
 /**
  * The output a chat message's link points at: a link to a file in the
- * projects folder (its decoded `/projects/…` path) or to a shown copy
- * (`/api/assets/…`). Undefined for any other link, a folder's included.
+ * projects folder (its decoded `/projects/…` path), to a shown copy
+ * (`/api/assets/…`), or the file's absolute path, as any time it was written
+ * or shown named it. Undefined for any other link, a folder's included.
  */
 export function outputOfLink(
   outputs: readonly ChatOutputDto[] | undefined,
@@ -47,7 +48,9 @@ export function outputOfLink(
 ): ChatOutputDto | undefined {
   if (!outputs) return undefined;
   const bare = path.split(/[?#]/)[0] ?? path;
-  return outputs.find((output) => output.link !== null && output.link === bare);
+  return outputs.find(
+    (output) => (output.link !== null && output.link === bare) || output.links?.includes(bare),
+  );
 }
 
 const taskListChangedSchema = z.object({ chatId: z.string() });

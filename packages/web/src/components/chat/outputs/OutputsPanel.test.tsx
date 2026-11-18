@@ -243,6 +243,24 @@ describe("outputOfLink", () => {
     expect(outputOfLink(list, "/projects/demo")).toBeUndefined();
     expect(outputOfLink(list, "/projects/demo/other.txt")).toBeUndefined();
   });
+
+  it("matches an earlier link to the same file, or its absolute path", () => {
+    const list = [
+      output("chart", {
+        kind: "shown",
+        link: "/api/assets/new.png",
+        links: [
+          "/api/assets/new.png",
+          "/api/assets/old.png",
+          "/projects/demo/chart.png",
+          "/home/p/demo/chart.png",
+        ],
+      }),
+    ];
+    expect(outputOfLink(list, "/api/assets/old.png")?.id).toBe("chart");
+    expect(outputOfLink(list, "/projects/demo/chart.png")?.id).toBe("chart");
+    expect(outputOfLink(list, "/home/p/demo/chart.png")?.id).toBe("chart");
+  });
 });
 
 describe("readPrefix", () => {

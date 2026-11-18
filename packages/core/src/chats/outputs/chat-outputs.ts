@@ -134,9 +134,24 @@ export class ChatOutputs {
       });
     }
     const newest = [...chosen.values()].sort((a, b) => a - b).map((index) => located[index]);
+    // Every link a message may give the file, from each of its records.
+    const aliases = new Map<string, Set<string>>();
+    for (const entry of located) {
+      const identity = identityOf(entry);
+      let links = aliases.get(identity);
+      if (!links) {
+        links = new Set();
+        aliases.set(identity, links);
+      }
+      for (const link of this.linksOf(entry)) links.add(link);
+    }
 
     return {
-      outputs: await Promise.all(newest.map((entry) => this.toDto(chatId, entry, fromTask))),
+      outputs: await Promise.all(
+        newest.map((entry) =>
+          this.toDto(chatId, entry, fromTask, [...(aliases.get(identityOf(entry)) ?? [])]),
+        ),
+      ),
       indexing: waiting.length > 0,
     };
   }
@@ -253,15 +268,41 @@ export class ChatOutputs {
   /** The link a chat message gives the file, in the projects folder or the asset store. */
   private link(entry: Located): string | null {
     if (entry.row.kind === "shown") return entry.row.path;
-    const rel = relative(this.projectsRoot, entry.file);
+    return this.projectLink(entry.file);
+  }
+
+  /** `/projects/<path>` for a file in the projects folder, else null. */
+  private projectLink(file: string): string | null {
+    const rel = relative(this.projectsRoot, file);
     if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
     return `/projects/${rel.split(sep).join("/")}`;
+  }
+
+  /**
+   * Every link a message may give record `entry`'s file: its project route or
+   * asset URL, and its absolute path; a shown copy's also the file it copied.
+   */
+  private linksOf(entry: Located): string[] {
+    const files =
+      entry.row.kind === "shown"
+        ? entry.row.sourcePath
+          ? [resolve(entry.row.sourcePath)]
+          : []
+        : [entry.file];
+    const links = entry.row.kind === "shown" ? [entry.row.path] : [];
+    for (const file of files) {
+      links.push(file);
+      const project = this.projectLink(file);
+      if (project) links.push(project);
+    }
+    return links;
   }
 
   private async toDto(
     chatId: string,
     entry: Located,
     fromTask: ReadonlyMap<string, ChatOutputSource>,
+    links: string[],
   ): Promise<ChatOutputDto> {
     const { row } = entry;
     const missing = !(await this.exists(entry));
@@ -272,6 +313,7 @@ export class ChatOutputs {
       name: row.name,
       path: row.path,
       link: this.link(entry),
+      links,
       mimeType: row.mimeType,
       at: row.createdAt.toISOString(),
       turnId: row.turnId,
