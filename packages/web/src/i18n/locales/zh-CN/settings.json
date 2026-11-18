@@ -618,7 +618,7 @@
       "manageCredits": "查看 ChatGPT 使用情况",
       "settingsButton": "设置",
       "label": "允许使用额度",
-      "description": "订阅额度用完时使用 ChatGPT 积分。开启后，因额度用尽而暂停的对话会继续，可能立即消耗积分。",
+      "description": "订阅额度用完时使用 ChatGPT 积分。开启后，因额度用尽而暂停的对话会继续，可能立即消耗积分。不会自动购买积分。",
       "saveFailed": "无法读取或保存积分设置，请重试。"
     },
     "title": "AI 工具",

@@ -130,6 +130,7 @@ export function MoveDialog() {
       ariaLabel={t("moveDialog.title", { name: movingName })}
       initialFocusRef={listRef}
       className="p-6"
+      aria-describedby={undefined}
     >
       <div>
         <DialogTitle>{t("moveDialog.title", { name: movingName })}</DialogTitle>
