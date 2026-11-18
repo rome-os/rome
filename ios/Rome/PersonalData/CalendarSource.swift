@@ -40,11 +40,14 @@ struct CalendarSource: PersonalDataSource {
         let items = try await read { try await reader.events(in: window) }.map { Self.point($0, window: window, calendar: calendar) }
         let chunk = Self.chunk(items, progress: progress, window: window, now: now)
         // Kept before anything is sent: a run cut off midway may leave some
-        // of these on the Rome, and the next one must still delete them.
+        // of these done on the Rome and some not, so the next run sends each
+        // again, an upsert or a delete, whatever the phone has by then.
+        let held = Self.held(progress)
+        var trying: [String: SyncProgress.SentEntry] = [:]
+        for item in chunk.upserts { trying[item.key] = chunk.commit.entries?[item.key] }
+        for key in chunk.deletes { trying[key] = held[key] }
         var attempting = progress
-        attempting.attempted = (progress.attempted ?? [:]).merging(chunk.commit.entries?.filter { key, _ in
-            chunk.upserts.contains { $0.key == key }
-        } ?? [:]) { _, new in new }
+        attempting.attempted = (progress.attempted ?? [:]).merging(trying) { _, new in new }
         if attempting.attempted?.isEmpty == false { await store.save(attempting) }
         await pending.set(chunk)
     }
@@ -117,9 +120,7 @@ struct CalendarSource: PersonalDataSource {
             )
         }
         var deletes: [String] = []
-        // What the Rome may hold: what it confirmed, and what an interrupted
-        // run began sending.
-        let held = (progress.attempted ?? [:]).merging(old) { _, confirmed in confirmed }
+        let held = Self.held(progress)
         for (key, entry) in held where next[key] == nil {
             // Aged out: the Rome keeps it as history, and nothing here tracks it.
             if entry.end < window.start { continue }
@@ -138,6 +139,12 @@ struct CalendarSource: PersonalDataSource {
             counts: counts,
             commit: commit
         )
+    }
+
+    /// What the Rome may hold: what it confirmed, and what an interrupted
+    /// run began sending or deleting.
+    static func held(_ progress: SyncProgress) -> [String: SyncProgress.SentEntry] {
+        (progress.attempted ?? [:]).merging(progress.entries ?? [:]) { _, confirmed in confirmed }
     }
 
     static func hash(_ point: PersonalDataPoint) -> String {

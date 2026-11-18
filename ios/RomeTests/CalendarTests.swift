@@ -287,6 +287,23 @@ enum CalendarFixtures {
         #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
     }
 
+    @Test func anEventRestoredAfterAnUnconfirmedDeleteIsSentAgain() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let source = source(fake, MemoryProgressStore())
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+        // The delete goes out, and the Rome's answer is lost.
+        let restored = fake.events.removeLast()
+        #expect(try await run(source).deletes == ["events:a"])
+        // Back as the Rome last confirmed it, which the delete may have removed.
+        fake.events.append(restored)
+        let next = try await run(source)
+        #expect(next.upserts.map(\.key) == ["events:a"])
+        #expect(next.deletes.isEmpty)
+        await source.confirm(next, unsupported: [], rejected: [])
+        #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
+    }
+
     @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10)]
