@@ -210,7 +210,7 @@ describe("connector API catalog", () => {
         .map((item) => item.slug)
         .sort(),
     ).toEqual(["github", "shopify", "slack"]);
-    expect(items.filter((item) => !item.romeManaged)).toHaveLength(19);
+    expect(items.filter((item) => !item.romeManaged)).toHaveLength(20);
   });
 
   it.each([
