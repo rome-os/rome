@@ -103,7 +103,10 @@ struct CalendarSource: PersonalDataSource {
             let hash = hash(item)
             let end = RomeDate.parse(item.end) ?? now
             next[item.key] = .init(hash: hash, end: end)
-            guard old[item.key]?.hash != hash else { continue }
+            // Sent before but never confirmed, the Rome may hold that try or
+            // the one before: it goes again, whichever this phone has now.
+            let uncertain = progress.attempted?[item.key] != nil
+            guard uncertain || old[item.key]?.hash != hash else { continue }
             upserts.append(item)
             let start = RomeDate.parse(item.start)
             let count = counts[item.type] ?? SyncTypeCount(items: 0, start: nil, end: nil)

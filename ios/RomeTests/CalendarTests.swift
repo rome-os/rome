@@ -260,6 +260,33 @@ enum CalendarFixtures {
         #expect(after.deletes.isEmpty, "confirmed: nothing left to retry")
     }
 
+    @Test func anUnconfirmedChangeIsSentAgainEvenWhenItLooksUnchanged() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let source = source(fake, MemoryProgressStore())
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+        // An edit goes out, and the run is cut off before the Rome confirms it.
+        fake.events[0].title = "Moved"
+        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
+        // Unchanged since that try: still sent, since the Rome may not have it.
+        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
+    }
+
+    @Test func aChangeRevertedAfterAnUnconfirmedTryIsSentAgain() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let source = source(fake, MemoryProgressStore())
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+        fake.events[0].title = "Moved"
+        _ = try await run(source)
+        // Back to what the Rome last confirmed, which it may have lost to the try.
+        fake.events[0].title = "Event a"
+        let next = try await run(source)
+        #expect(next.upserts.map(\.key) == ["events:a"])
+        await source.confirm(next, unsupported: [], rejected: [])
+        #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
+    }
+
     @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10)]
