@@ -23,13 +23,36 @@ export interface ToolUseBlock {
 
 /**
  * What reading a shell command's or a reply's files needs: their text names
- * a file loosely, so only a file that is there now counts.
+ * a file loosely, so only a file that is there now, in a folder the agent
+ * produces in, counts. A log in a temporary folder or the owner's attachment
+ * in the asset store is not one.
  */
 export interface OutputScope {
   /** Where `/projects/<path>` links point. */
   projectsRoot: string;
+  /** The folders a loosely named file must be in: the projects and memory folders. */
+  roots: readonly string[];
   /** Whether absolute path `path` is a regular file now. */
   isFile: (path: string) => boolean;
+}
+
+/** Where a stretch of trace comes from, and what reading its loosely named files needs. */
+export interface TraceContext {
+  /** The trace's message: every record key carries it, as a tool call's id is only unique within its turn. */
+  traceId: string;
+  /** A call an earlier stretch of the trace stored. */
+  findUse?: (toolUseId: string) => ToolUseBlock | null;
+  /** Without it, shell commands and replies are not read. */
+  files?: OutputScope;
+}
+
+/** Whether `path`, named loosely, is a file the agent could have produced. */
+function producible(path: string, scope: OutputScope): boolean {
+  const inRoot = scope.roots.some((root) => {
+    const base = resolve(root);
+    return path === base || path.startsWith(base + sep);
+  });
+  return inRoot && scope.isFile(path);
 }
 
 interface ToolResultBlock {
@@ -135,20 +158,21 @@ function text(value: unknown): string {
 export function outputsOfToolCall(
   use: ToolUseBlock,
   result: ToolResultBlock,
-  scope?: OutputScope,
+  { traceId, files }: Pick<TraceContext, "traceId" | "files">,
 ): OutputFound[] {
   if (result.isError === true || !use.id) return [];
+  const key = `${traceId}:${use.id}`;
   const fromShell = shellWrittenPaths(use.tool, use.input);
   if (fromShell.length > 0) {
-    if (!scope || !shellSucceeded(result)) return [];
+    if (!files || !shellSucceeded(result)) return [];
     return fromShell
-      .filter((path) => scope.isFile(path))
-      .map((path) => writtenFile(`${use.id}#sh:${path}`, path));
+      .filter((path) => producible(path, files))
+      .map((path) => writtenFile(`${key}#sh:${path}`, path));
   }
   const written = writtenPaths(use.tool, use.input);
   if (written.length > 0) {
     return written.map((path, index) =>
-      writtenFile(written.length === 1 ? use.id! : `${use.id}#${index}`, path),
+      writtenFile(written.length === 1 ? key : `${key}#${index}`, path),
     );
   }
   const shownFrom = showFilePath(use.tool, use.input);
@@ -158,7 +182,7 @@ export function outputsOfToolCall(
   const name = shownFrom ? basename(shownFrom) : basename(url);
   return [
     {
-      sourceKey: use.id,
+      sourceKey: key,
       kind: "shown",
       path: url,
       sourcePath: shownFrom,
@@ -169,15 +193,12 @@ export function outputsOfToolCall(
 }
 
 /**
- * The outputs among `blocks`, a stretch of one trace. A result's call is
- * looked up in `blocks` first, then with `findUse`, for a call an earlier
- * stretch recorded.
+ * The outputs among `blocks`, a stretch of trace `context.traceId`. A
+ * result's call is looked up in `blocks` first, then with `findUse`, for a
+ * call an earlier stretch recorded.
  */
-export function outputsInTrace(
-  blocks: readonly unknown[],
-  findUse: (toolUseId: string) => ToolUseBlock | null = () => null,
-  reply?: OutputScope & { traceId: string },
-): OutputFound[] {
+export function outputsInTrace(blocks: readonly unknown[], context: TraceContext): OutputFound[] {
+  const { traceId, findUse = () => null, files } = context;
   const uses = new Map<string, ToolUseBlock>();
   const found: OutputFound[] = [];
   for (const raw of blocks) {
@@ -188,8 +209,8 @@ export function outputsInTrace(
       continue;
     }
     // A turn's reply: the local files it links.
-    if (block.type === "result" && reply && typeof block.content === "string") {
-      found.push(...outputsInReply(reply.traceId, block.content, reply));
+    if (block.type === "result" && files && typeof block.content === "string") {
+      found.push(...outputsInReply(traceId, block.content, files));
       continue;
     }
     if (block.type !== "tool_result" || typeof block.toolUseId !== "string") continue;
@@ -199,7 +220,7 @@ export function outputsInTrace(
     if (result.tool && !mayWrite(result.tool)) continue;
     if (result.tool === ACTION_TOOL && !ASSET_URL.test(text(result.output))) continue;
     const use = uses.get(block.toolUseId) ?? findUse(block.toolUseId);
-    if (use) found.push(...outputsOfToolCall(use, result, reply));
+    if (use) found.push(...outputsOfToolCall(use, result, { traceId, files }));
   }
   return found;
 }
@@ -285,8 +306,9 @@ function messageText(content: string): string {
 
 /**
  * The local files a turn's reply links, by Markdown link: a `/projects/<path>`
- * route or an absolute path, each kept only while it is a file. An asset, a
- * web page or a relative link is not one of them.
+ * route or an absolute path, each kept only while it is a file in the
+ * projects or memory folder. An asset, a web page or a relative link is not
+ * one of them.
  */
 export function outputsInReply(traceId: string, reply: string, scope: OutputScope): OutputFound[] {
   const found = new Map<string, OutputFound>();
@@ -294,7 +316,7 @@ export function outputsInReply(traceId: string, reply: string, scope: OutputScop
   const link = /\[(?:\\.|[^\]\\])*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))/g;
   for (const match of reply.matchAll(link)) {
     const path = localPath(match[1] ?? match[2], scope.projectsRoot);
-    if (path && !found.has(path) && scope.isFile(path)) {
+    if (path && !found.has(path) && producible(path, scope)) {
       found.set(path, writtenFile(`reply:${traceId}:${path}`, path));
     }
   }

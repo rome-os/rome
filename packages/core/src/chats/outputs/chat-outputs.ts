@@ -53,6 +53,11 @@ interface Located {
   identity: string;
 }
 
+/** Whether a record was read from a message's or a reply's link, not made by a call. */
+function isInferred(row: ChatOutputRow): boolean {
+  return row.sourceKey.startsWith("reply:") || row.sourceKey.startsWith("link:");
+}
+
 /**
  * A chat's outputs: the files its agent wrote or showed, read from the
  * records the trace left, newest first and one per file.
@@ -112,20 +117,26 @@ export class ChatOutputs {
         copiedFrom.set(entry.row.path, entry.identity);
       }
     }
-    const newest = new Map<string, Located>();
-    for (const entry of located) {
-      const identity =
-        entry.row.kind === "shown" && !entry.row.sourcePath
-          ? (copiedFrom.get(entry.row.path) ?? entry.identity)
-          : entry.identity;
-      // Rows come newest first, so the first one per file wins.
-      if (!newest.has(identity)) newest.set(identity, entry);
+    const identityOf = (entry: Located) =>
+      entry.row.kind === "shown" && !entry.row.sourcePath
+        ? (copiedFrom.get(entry.row.path) ?? entry.identity)
+        : entry.identity;
+    // Rows come newest first, so the first one per file wins. A row a call
+    // recorded wins over one read from a message's link, which only stands in
+    // when nothing else recorded the file: a Concierge reply passing on a task
+    // chat's file leaves it the task chat's.
+    const chosen = new Map<string, number>();
+    for (const inferredPass of [false, true]) {
+      located.forEach((entry, index) => {
+        if (isInferred(entry.row) !== inferredPass) return;
+        const identity = identityOf(entry);
+        if (!chosen.has(identity)) chosen.set(identity, index);
+      });
     }
+    const newest = [...chosen.values()].sort((a, b) => a - b).map((index) => located[index]);
 
     return {
-      outputs: await Promise.all(
-        [...newest.values()].map((entry) => this.toDto(chatId, entry, fromTask)),
-      ),
+      outputs: await Promise.all(newest.map((entry) => this.toDto(chatId, entry, fromTask))),
       indexing: waiting.length > 0,
     };
   }
@@ -159,7 +170,7 @@ export class ChatOutputs {
     for (const id of this.backfillQueue) {
       await nextTick();
       try {
-        this.deps.repo.backfill(id, await this.deps.messages(id));
+        this.deps.repo.backfill(id, await this.deps.messages(id), this.since);
       } catch (error) {
         log.warn("could not read back a chat's earlier outputs", {
           sessionId: id,

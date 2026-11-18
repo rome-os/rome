@@ -2335,14 +2335,14 @@ export class WebChatRepository {
     await this.writeTraceBatch(input);
   }
 
+  /** The output calls of the turns being written, until each ends. */
+  private readonly outputCalls = new OutputCalls();
+
   /**
    * Write a trace batch in one transaction, its transcript lines stamped
    * against `now`. A subclass that writes more with the batch calls this
    * inside its own transaction, so the batch commits with it or not at all.
    */
-  /** The output calls of the turns being written, until each ends. */
-  private readonly outputCalls = new OutputCalls();
-
   protected writeTraceBatch(input: TraceBatch, now = new Date()): void {
     const totals = emptyTraceAccountingTotals();
     const blockRows = input.blocks.map((block, i) => {

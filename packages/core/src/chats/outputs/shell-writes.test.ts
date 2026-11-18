@@ -41,6 +41,17 @@ describe("shellWrites", () => {
     expect(shellWrites("bash -c 'echo hi | tee log.txt'")).toEqual(["log.txt"]);
   });
 
+  it("leaves out a relative path once the command changed folder, keeping an absolute one", () => {
+    expect(shellWrites("cd sub && printf new > report.md")).toEqual([]);
+    expect(shellWrites("echo a > first.md; cd sub; echo b > second.md > /p/abs.md")).toEqual([
+      "first.md",
+      "/p/abs.md",
+    ]);
+    expect(shellWrites("(cd sub && touch x.md)")).toEqual([]);
+    expect(shellWrites("cd sub && bash -c 'echo hi > inner.md'")).toEqual([]);
+    expect(shellWrites(`/usr/bin/bash -lc "cd sub && printf hi > report.md"`)).toEqual([]);
+  });
+
   it("finds the redirect after a stream's descriptor, and in each command of a chain", () => {
     expect(shellWrites("run 2> err.log; date > when.txt || true")).toEqual(["err.log", "when.txt"]);
   });

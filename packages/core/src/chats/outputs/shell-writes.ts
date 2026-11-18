@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 /**
  * The files a shell command plainly writes, read from its text: a `>` or `>>`
  * redirect's target, `tee`'s files, `touch`'s files, and where `cp` or `mv`
@@ -110,19 +112,31 @@ const COMMAND_SEPARATORS = new Set(["&&", "||", ";", ";;", "|", "|&", "&", "\n"]
 /** Wrappers a command runs under, which leave the command after them. */
 const PREFIXES = new Set(["sudo", "command", "builtin", "exec", "nohup", "time"]);
 
-/** The files simple command `words` writes, by what it runs. */
-function writesOf(words: string[]): string[] {
+/** Commands that change the folder a later relative path is read against. */
+const DIRECTORY_CHANGES = new Set(["cd", "pushd", "popd"]);
+
+/** The name simple command `words` runs, past wrappers, assignments and a subshell's bracket. */
+function commandName(words: string[]): { name: string | undefined; rest: string[] } {
   let start = 0;
   while (start < words.length && (PREFIXES.has(words[start]) || /^\w+=/.test(words[start]))) {
     start++;
   }
-  const [name, ...rest] = words.slice(start);
+  const [first, ...rest] = words.slice(start);
+  return { name: first?.replace(/^[({]+/, "") || undefined, rest };
+}
+
+/**
+ * The files simple command `words` writes, by what it runs. `moved` says a
+ * folder change came before it, which a script it runs inherits.
+ */
+function writesOf(words: string[], moved: boolean): string[] {
+  const { name, rest } = commandName(words);
   if (!name) return [];
   // `bash -lc "<script>"`, as Codex runs every command: the script's writes.
   if (/(^|\/)(ba|z|da)?sh$/.test(name)) {
     const flag = rest.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
     const script = flag === -1 ? undefined : rest[flag + 1];
-    return script === undefined ? [] : shellWrites(script);
+    return script === undefined ? [] : shellWrites(script, moved);
   }
   const args = rest.filter((arg) => !arg.startsWith("-"));
   switch (name) {
@@ -141,13 +155,22 @@ function writesOf(words: string[]): string[] {
   }
 }
 
-/** The files shell command `command` writes, as written in it: relative or absolute. */
-export function shellWrites(command: string): string[] {
+/**
+ * The files shell command `command` writes, as written in it: relative or
+ * absolute. Once the command changes folder (`cd`, `pushd`), a relative path
+ * after it is left out, as it no longer reads against the command's own
+ * folder; `moved` says that happened before `command` began.
+ */
+export function shellWrites(command: string, moved = false): string[] {
   const tokens = tokenize(withoutHeredocs(command));
   const found: string[] = [];
   let words: string[] = [];
+  const add = (paths: string[]) => {
+    found.push(...paths.filter((path) => !moved || isAbsolute(path)));
+  };
   const flush = () => {
-    found.push(...writesOf(words));
+    if (DIRECTORY_CHANGES.has(commandName(words).name ?? "")) moved = true;
+    else add(writesOf(words, moved));
     words = [];
   };
   for (let i = 0; i < tokens.length; i++) {
@@ -167,7 +190,7 @@ export function shellWrites(command: string): string[] {
       (token.op === ">" || token.op === ">>" || token.op === "&>" || token.op === ">|") &&
       target
     ) {
-      found.push(target);
+      add([target]);
     }
     // `<` and `<<` take a word that is read, not written.
   }

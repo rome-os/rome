@@ -292,6 +292,68 @@ describe("ChatOutputs", () => {
     ]);
   });
 
+  it("leaves a task chat's file the task chat's when the Concierge's reply passes it on", async () => {
+    await chats.createSession(
+      CONCIERGE_CHAT_ID,
+      "Main chat",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+    );
+    await chats.createSession("task-1", "Draft the report");
+    const tasks = new ConciergeTasksRepository(testDb.db);
+    await tasks.upsertMany([{ title: "Report", state: "doing", sessionId: "task-1" }]);
+    const report = join(projects, "demo", "report.md");
+    writeFileSync(report, "# Report");
+    await write("task-1", "t1", report);
+    await chats.appendTraceBlocks({
+      messageId: "t2-trace",
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: "t2",
+      startSeq: 0,
+      blocks: [
+        { type: "turn_start", turnId: "t2" },
+        { type: "result", content: "The report is ready: [report.md](/projects/demo/report.md)" },
+        { type: "turn_end", turnId: "t2" },
+      ],
+    });
+
+    const started = await tasks.taskChatsStartedBy(CONCIERGE_CHAT_ID, "guardian");
+    const list = await listed(CONCIERGE_CHAT_ID, started);
+    expect(list.map((output) => [output.name, output.from])).toEqual([
+      ["report.md", { chatId: "task-1", name: "Draft the report" }],
+    ]);
+  });
+
+  it("marks when recording began with the first trace it records", async () => {
+    const before = Date.now();
+    await write("chat-1", "t1", join(projects, "demo", "a.md"));
+    const since = repo.recordingSince(new Date("2030-01-01T00:00:00Z")).getTime();
+    expect(since).toBeGreaterThanOrEqual(before - 1000);
+    expect(since).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("reads no link back from a message an older chat got since recording began", async () => {
+    const asset = `${ID_A}.png`;
+    writeFileSync(join(assets, asset), "png");
+    repo.recordingSince(new Date("2026-06-01T00:00:00Z"));
+    // Another chat's shown file, passed on after recording began.
+    await chats.addMessage(
+      "reply",
+      "chat-1",
+      "assistant",
+      JSON.stringify([{ type: "text", content: `![plot.png](/api/assets/${asset})` }]),
+      "t0",
+    );
+    await testDb.db
+      .update(romeSessions)
+      .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+      .where(eq(romeSessions.id, "chat-1"));
+    expect(await listed("chat-1")).toEqual([]);
+  });
+
   it("reads back a chat's outputs from before they were recorded, once", async () => {
     const asset = `${ID_A}.png`;
     const attached = `${ID_B}.jpg`;

@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { createLogger } from "../../logger.js";
-import { getProjectsRoot } from "../../paths.js";
+import { getProfileMemoryDir, getProjectsRoot } from "../../paths.js";
 import {
   chatOutputBackfills,
   chatOutputs,
@@ -51,6 +51,7 @@ type Writer = Pick<DrizzleDb, "insert" | "select">;
 function localFiles(): OutputScope {
   return {
     projectsRoot: getProjectsRoot(),
+    roots: [getProjectsRoot(), getProfileMemoryDir()],
     isFile: (path) => {
       try {
         return statSync(path).isFile();
@@ -83,6 +84,14 @@ function insertOutputs(db: Writer, place: OutputPlace, found: OutputFound[], at:
     .run();
 }
 
+/** Stores `now` as when recording began, unless a time is stored already. */
+function storeRecordingStart(db: Writer, now: Date): void {
+  db.insert(settings)
+    .values({ key: RECORDING_SINCE_KEY, value: now.toISOString(), updatedAt: now })
+    .onConflictDoNothing({ target: settings.key })
+    .run();
+}
+
 /** How many turns' calls are kept at most, for turns that never sent their end. */
 const REMEMBERED_TRACES = 256;
 
@@ -93,6 +102,8 @@ const REMEMBERED_TRACES = 256;
  */
 export class OutputCalls {
   private byTrace = new Map<string, Map<string, ToolUseBlock>>();
+  /** Whether this process has made sure when recording began is stored. */
+  startStored = false;
 
   /** Remembers stretch `blocks`' output calls of trace `messageId`, and forgets them at its end. */
   remember(messageId: string, blocks: readonly unknown[]): void {
@@ -163,13 +174,18 @@ export function recordTraceOutputs(
 ): void {
   // An output that cannot be recorded never costs the trace it came with.
   try {
+    // The first stretch recorded marks when recording began, once and for good.
+    if (!calls.startStored) {
+      storeRecordingStart(tx, at);
+      calls.startStored = true;
+    }
     calls.remember(place.messageId, blocks);
     if (mayHoldOutputs(blocks)) {
-      const found = outputsInTrace(
-        blocks,
-        (id) => calls.find(place.messageId, id) ?? storedToolUse(tx, place.messageId, id),
-        { ...localFiles(), traceId: place.messageId },
-      );
+      const found = outputsInTrace(blocks, {
+        traceId: place.messageId,
+        findUse: (id) => calls.find(place.messageId, id) ?? storedToolUse(tx, place.messageId, id),
+        files: localFiles(),
+      });
       insertOutputs(tx, place, found, at);
     }
     calls.endIfDone(place.messageId, blocks);
@@ -231,15 +247,12 @@ export class ChatOutputsRepository {
 
   /**
    * When Rome began recording outputs as they happen, kept once: the first
-   * call stores `now`, every later one answers what it stored. Only a chat
+   * trace recorded stores its time, and so does this call when none is
+   * stored yet; every later call answers what is stored. Only a chat
    * made before then has earlier outputs to read back.
    */
   recordingSince(now = new Date()): Date {
-    this.db
-      .insert(settings)
-      .values({ key: RECORDING_SINCE_KEY, value: now.toISOString(), updatedAt: now })
-      .onConflictDoNothing({ target: settings.key })
-      .run();
+    storeRecordingStart(this.db, now);
     const row = this.db
       .select({ value: settings.value })
       .from(settings)
@@ -286,11 +299,16 @@ export class ChatOutputsRepository {
    * Reads back what chat `sessionId` made before outputs were recorded, from
    * its `messages`: the write, shell and show calls its stored traces still
    * hold, the local files its replies link, and the asset links its agent's
-   * messages hold that no guardian message attached. An output already recorded is not recorded again, so a second
+   * messages from before `since` hold that no guardian message attached. An output already recorded is not recorded again, so a second
    * read back changes nothing. A trace stored whole on its message row, from
    * before traces were stored block by block, is not read back.
    */
-  backfill(sessionId: string, messages: readonly BackfillMessage[], now = new Date()): void {
+  backfill(
+    sessionId: string,
+    messages: readonly BackfillMessage[],
+    since: Date,
+    now = new Date(),
+  ): void {
     this.db.transaction((tx) => {
       const attached = new Set(
         messages
@@ -299,7 +317,9 @@ export class ChatOutputsRepository {
       );
       for (const message of messages) {
         const place = { sessionId, turnId: message.turnId ?? null, messageId: message.id };
-        if (message.role === "assistant") {
+        // A message from since recording began links only what a recorded
+        // call made, or another chat's file it passes on: its links are not read.
+        if (message.role === "assistant" && message.createdAt < since) {
           const shown = outputsInMessage(message.id, message.content).filter(
             (output) => !attached.has(output.path),
           );
@@ -337,7 +357,7 @@ export class ChatOutputsRepository {
         // A block that does not parse made no output.
       }
     }
-    return outputsInTrace(blocks, undefined, { ...localFiles(), traceId: messageId });
+    return outputsInTrace(blocks, { traceId: messageId, files: localFiles() });
   }
 
   /** Removes chats' outputs with the chats, in their delete's transaction. */

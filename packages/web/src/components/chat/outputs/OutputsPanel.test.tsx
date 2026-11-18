@@ -15,6 +15,12 @@ import { OutputsPanel, outputTitle, outputTypeOf, previewOf, readPrefix } from "
 import { outputOfLink } from "./chat-outputs";
 
 const HOUR = 3_600_000;
+/** A moment earlier today, whatever the time the suite runs at: halfway since midnight. */
+function earlierToday(): string {
+  const now = Date.now();
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  return new Date(midnight + (now - midnight) / 2).toISOString();
+}
 let outputs: ChatOutputDto[];
 let files: Record<string, string>;
 let indexing: boolean;
@@ -27,7 +33,7 @@ function output(id: string, extra: Partial<ChatOutputDto>): ChatOutputDto {
     path: `/projects/demo/${id}.txt`,
     link: `/projects/demo/${id}.txt`,
     mimeType: "text/plain",
-    at: new Date(Date.now() - HOUR).toISOString(),
+    at: earlierToday(),
     turnId: null,
     messageId: null,
     missing: false,

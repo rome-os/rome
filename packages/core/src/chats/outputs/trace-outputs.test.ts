@@ -1,12 +1,22 @@
 import { describe, expect, it } from "@rstest/core";
 import { outputsInMessage, outputsInReply, outputsInTrace } from "./trace-outputs.js";
 
-const FILES = new Set(["/home/p/test/hello.txt", "/home/p/test/my notes.md", "/tmp/out.csv"]);
+const FILES = new Set([
+  "/home/p/test/hello.txt",
+  "/home/p/test/my notes.md",
+  "/home/mem/notes.md",
+  "/tmp/out.csv",
+  "/home/assets/upload.pdf",
+]);
 const SCOPE = {
   projectsRoot: "/home/p",
+  roots: ["/home/p", "/home/mem"],
   isFile: (path: string) => FILES.has(path),
-  traceId: "tr1",
 };
+/** A trace's context, without reading shell commands or replies. */
+const T = { traceId: "tr1" };
+/** A trace's context that reads them. */
+const CTX = { traceId: "tr1", files: SCOPE };
 
 /** A Codex command run, as the trace stores its call and result. */
 function codexRun(
@@ -25,13 +35,16 @@ const ASSET = "/api/assets/0123456789abcdef0123456789abcdef.png";
 
 describe("outputsInTrace", () => {
   it("finds a file a Write call wrote, once its result succeeds", () => {
-    const found = outputsInTrace([
-      { type: "tool_use", id: "w1", tool: "Write", input: { file_path: "/p/a/notes.md" } },
-      { type: "tool_result", toolUseId: "w1", tool: "Write", output: "ok" },
-    ]);
+    const found = outputsInTrace(
+      [
+        { type: "tool_use", id: "w1", tool: "Write", input: { file_path: "/p/a/notes.md" } },
+        { type: "tool_result", toolUseId: "w1", tool: "Write", output: "ok" },
+      ],
+      T,
+    );
     expect(found).toEqual([
       {
-        sourceKey: "w1",
+        sourceKey: "tr1:w1",
         kind: "written",
         path: "/p/a/notes.md",
         sourcePath: null,
@@ -43,61 +56,73 @@ describe("outputsInTrace", () => {
 
   it("finds nothing for a failed write, a read or a call with no result yet", () => {
     expect(
-      outputsInTrace([
-        { type: "tool_use", id: "w1", tool: "Edit", input: { file_path: "/p/a.ts" } },
-        { type: "tool_result", toolUseId: "w1", tool: "Edit", isError: true, output: "no" },
-        { type: "tool_use", id: "r1", tool: "Read", input: { file_path: "/p/b.ts" } },
-        { type: "tool_result", toolUseId: "r1", tool: "Read", output: "text" },
-        { type: "tool_use", id: "w2", tool: "Write", input: { file_path: "/p/c.ts" } },
-      ]),
+      outputsInTrace(
+        [
+          { type: "tool_use", id: "w1", tool: "Edit", input: { file_path: "/p/a.ts" } },
+          { type: "tool_result", toolUseId: "w1", tool: "Edit", isError: true, output: "no" },
+          { type: "tool_use", id: "r1", tool: "Read", input: { file_path: "/p/b.ts" } },
+          { type: "tool_result", toolUseId: "r1", tool: "Read", output: "text" },
+          { type: "tool_use", id: "w2", tool: "Write", input: { file_path: "/p/c.ts" } },
+        ],
+        T,
+      ),
     ).toEqual([]);
   });
 
   it("finds each file a Codex change touched", () => {
-    const found = outputsInTrace([
-      {
-        type: "tool_use",
-        id: "c1",
-        tool: "Edit",
-        input: { type: "fileChange", changes: [{ path: "/p/one.ts" }, { path: "/p/two.ts" }] },
-      },
-      { type: "tool_result", toolUseId: "c1", tool: "Edit", output: {} },
-    ]);
+    const found = outputsInTrace(
+      [
+        {
+          type: "tool_use",
+          id: "c1",
+          tool: "Edit",
+          input: { type: "fileChange", changes: [{ path: "/p/one.ts" }, { path: "/p/two.ts" }] },
+        },
+        { type: "tool_result", toolUseId: "c1", tool: "Edit", output: {} },
+      ],
+      T,
+    );
     expect(found.map((output) => [output.sourceKey, output.path])).toEqual([
-      ["c1#0", "/p/one.ts"],
-      ["c1#1", "/p/two.ts"],
+      ["tr1:c1#0", "/p/one.ts"],
+      ["tr1:c1#1", "/p/two.ts"],
     ]);
   });
 
   it("looks up a call an earlier stretch of the trace stored", () => {
     const found = outputsInTrace(
       [{ type: "tool_result", toolUseId: "w1", tool: "Write", output: "ok" }],
-      (id) =>
-        id === "w1"
-          ? { type: "tool_use", id: "w1", tool: "Write", input: { file_path: "/p/x.txt" } }
-          : null,
+      {
+        traceId: "tr1",
+        findUse: (id) =>
+          id === "w1"
+            ? { type: "tool_use", id: "w1", tool: "Write", input: { file_path: "/p/x.txt" } }
+            : null,
+      },
     );
     expect(found.map((output) => output.path)).toEqual(["/p/x.txt"]);
   });
 
   it("finds the copy core:show_file stored, named after the file it copied", () => {
-    const found = outputsInTrace([
-      {
-        type: "tool_use",
-        id: "s1",
-        tool: "execute_action",
-        input: { action_name: "core:show_file", json_args: { path: "/p/chart.png" } },
-      },
-      {
-        type: "tool_result",
-        toolUseId: "s1",
-        tool: "execute_action",
-        output: JSON.stringify({ url: ASSET, markdown: `![chart.png](${ASSET})` }),
-      },
-    ]);
+    const found = outputsInTrace(
+      [
+        {
+          type: "tool_use",
+          id: "s1",
+          tool: "execute_action",
+          input: { action_name: "core:show_file", json_args: { path: "/p/chart.png" } },
+        },
+        {
+          type: "tool_result",
+          toolUseId: "s1",
+          tool: "execute_action",
+          output: JSON.stringify({ url: ASSET, markdown: `![chart.png](${ASSET})` }),
+        },
+      ],
+      T,
+    );
     expect(found).toEqual([
       {
-        sourceKey: "s1",
+        sourceKey: "tr1:s1",
         kind: "shown",
         path: ASSET,
         sourcePath: "/p/chart.png",
@@ -109,28 +134,47 @@ describe("outputsInTrace", () => {
 
   it("finds nothing for a show_file call that was refused, or another action", () => {
     expect(
-      outputsInTrace([
-        {
-          type: "tool_use",
-          id: "s1",
-          tool: "execute_action",
-          input: { action_name: "core:show_file", json_args: { path: "/etc/passwd" } },
-        },
-        {
-          type: "tool_result",
-          toolUseId: "s1",
-          tool: "execute_action",
-          output: { status: "error", error: "File is outside the folders chat can show" },
-        },
-        {
-          type: "tool_use",
-          id: "o1",
-          tool: "execute_action",
-          input: { action_name: "core:other", json_args: {} },
-        },
-        { type: "tool_result", toolUseId: "o1", tool: "execute_action", output: ASSET },
-      ]),
+      outputsInTrace(
+        [
+          {
+            type: "tool_use",
+            id: "s1",
+            tool: "execute_action",
+            input: { action_name: "core:show_file", json_args: { path: "/etc/passwd" } },
+          },
+          {
+            type: "tool_result",
+            toolUseId: "s1",
+            tool: "execute_action",
+            output: { status: "error", error: "File is outside the folders chat can show" },
+          },
+          {
+            type: "tool_use",
+            id: "o1",
+            tool: "execute_action",
+            input: { action_name: "core:other", json_args: {} },
+          },
+          { type: "tool_result", toolUseId: "o1", tool: "execute_action", output: ASSET },
+        ],
+        T,
+      ),
     ).toEqual([]);
+  });
+});
+
+describe("outputsInTrace, across traces", () => {
+  it("keeps a call id a later turn reuses apart, as Codex numbers each turn's calls afresh", () => {
+    const edit = (path: string) => [
+      { type: "tool_use", id: "item_0", tool: "Edit", input: { file_path: path } },
+      { type: "tool_result", toolUseId: "item_0", tool: "Edit", output: "ok" },
+    ];
+    const first = outputsInTrace(edit("/p/a.md"), { traceId: "turn-1" });
+    const second = outputsInTrace(edit("/p/b.md"), { traceId: "turn-2" });
+    expect(first[0].sourceKey).not.toBe(second[0].sourceKey);
+    // The same trace read again gives the same key, so a replay records nothing new.
+    expect(outputsInTrace(edit("/p/a.md"), { traceId: "turn-1" })[0].sourceKey).toBe(
+      first[0].sourceKey,
+    );
   });
 });
 
@@ -141,12 +185,11 @@ describe("outputsInTrace, for shell commands and replies", () => {
         exitCode: 0,
         status: "completed",
       }),
-      undefined,
-      SCOPE,
+      CTX,
     );
     expect(found).toEqual([
       {
-        sourceKey: "c1#sh:/home/p/test/hello.txt",
+        sourceKey: "tr1:c1#sh:/home/p/test/hello.txt",
         kind: "written",
         path: "/home/p/test/hello.txt",
         sourcePath: null,
@@ -159,38 +202,38 @@ describe("outputsInTrace, for shell commands and replies", () => {
   it("finds nothing for a failed command, a file not there, or without a way to check files", () => {
     const failed = codexRun("c1", "echo hi > hello.txt", { exitCode: 1, status: "failed" });
     const gone = codexRun("c2", "echo hi > gone.txt", { exitCode: 0, status: "completed" });
-    expect(outputsInTrace([...failed, ...gone], undefined, SCOPE)).toEqual([]);
+    expect(outputsInTrace([...failed, ...gone], CTX)).toEqual([]);
     const ok = codexRun("c3", "echo hi > hello.txt", { exitCode: 0, status: "completed" });
-    expect(outputsInTrace(ok)).toEqual([]);
+    expect(outputsInTrace(ok, T)).toEqual([]);
   });
 
-  it("finds a Claude Code shell write only by an absolute path, as its call names no folder", () => {
+  it("finds a Claude Code shell write only by an absolute path in a folder the agent produces in", () => {
     const found = outputsInTrace(
       [
         {
           type: "tool_use",
           id: "b1",
           tool: "Bash",
-          input: { command: "date > when.txt; cp a /tmp/out.csv" },
+          input: { command: "date > when.txt; cp a /tmp/out.csv; cp b /home/mem/notes.md" },
         },
         { type: "tool_result", toolUseId: "b1", tool: "Bash", output: "" },
       ],
-      undefined,
-      SCOPE,
+      CTX,
     );
-    expect(found.map((output) => output.path)).toEqual(["/tmp/out.csv"]);
+    expect(found.map((output) => output.path)).toEqual(["/home/mem/notes.md"]);
   });
 
   it("finds the local files a turn's reply links", () => {
     const reply =
       "已生成 [hello.txt](</projects/test/hello.txt>)，see [notes](/projects/test/my%20notes.md), " +
       "[web](https://example.com/a.txt), [asset](/api/assets/x.png), [gone](/projects/test/gone.txt), " +
-      "[escape](/projects/../etc/passwd) and [abs](/tmp/out.csv).";
-    const found = outputsInTrace([{ type: "result", content: reply }], undefined, SCOPE);
+      "[escape](/projects/../etc/passwd), [log](/tmp/out.csv), [upload](/home/assets/upload.pdf) " +
+      "and [memory](/home/mem/notes.md).";
+    const found = outputsInTrace([{ type: "result", content: reply }], CTX);
     expect(found.map((output) => [output.sourceKey, output.name])).toEqual([
       ["reply:tr1:/home/p/test/hello.txt", "hello.txt"],
       ["reply:tr1:/home/p/test/my notes.md", "my notes.md"],
-      ["reply:tr1:/tmp/out.csv", "out.csv"],
+      ["reply:tr1:/home/mem/notes.md", "notes.md"],
     ]);
     expect(
       outputsInReply("tr1", "[a](/projects/test/hello.txt) [b](/projects/test/hello.txt)", SCOPE),
