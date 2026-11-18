@@ -6,6 +6,11 @@
 
 import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
+import {
+  defaultReplyTarget as defaultReplyTargetOf,
+  ownPrompts as ownPromptsOf,
+  turnPrompts as turnPromptsOf,
+} from "./reply-target.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
@@ -27,7 +32,7 @@ import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
 } from "../core/conversation-title.js";
-import { romeToolRunner, type RomeTool } from "../agent/index.js";
+import { REPLY_TO_PARAMETER, romeToolRunner, type RomeTool } from "../agent/index.js";
 import type { TaskInputSender, SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
@@ -63,13 +68,6 @@ const runTool = romeToolRunner(log);
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
-
-/** The parameter that names the one earlier message a `say` replies to. */
-const REPLY_TO_PARAMETER = {
-  type: "string",
-  description:
-    "The id of the one earlier message this replies to: the message_id of a guardian message from its <chat_thread> line, a messageId say returned, or a task's start_message_id for its result. The guardian sees the quote, and the message joins that message's thread. Leave it out for a message that replies to nothing, except when the guardian wrote inside a thread: then it replies there.",
-};
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -531,21 +529,15 @@ export async function buildConciergeTools(
   // The user-role messages this turn took: one still queued behind it belongs
   // to the turn that takes it. An automation's or an agent's input is stored
   // as one too, its source in `senderId`.
-  const ownPrompts = async () => {
+  const ownPrompts = () => {
     const { chatId, turnId } = currentTurn();
-    return (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
-      (row) => row.role === "user" && row.inputState !== "queued",
-    );
+    return ownPromptsOf(service, chatId, turnId);
   };
 
-  // The messages this turn answers: the ones it took, and the ones a turn a
-  // newer input superseded handed on to it. An automated input counts: the
-  // reply to it is placed and the message settled like any other's.
-  const turnPrompts = async () => {
-    const { chatId } = currentTurn();
-    const own = (await ownPrompts()).map((row) => row.id);
-    const handedOn = service.promptsHandedOn(chatId).filter((id) => !own.includes(id));
-    return [...handedOn, ...own];
+  // The messages this turn answers (reply-target.ts).
+  const turnPrompts = () => {
+    const { chatId, turnId } = currentTurn();
+    return turnPromptsOf(service, chatId, turnId);
   };
 
   // Whether the guardian started this turn: one of the messages it took is
@@ -664,20 +656,10 @@ export async function buildConciergeTools(
     return task;
   };
 
-  // The message a `say` that names none replies to: the turn's latest
-  // guardian message when every one the turn took was said inside one chat
-  // thread, a reply there and not the thread's root. Otherwise none
-  // (docs/domains/chats.md#chat-thread).
-  const defaultReplyTarget = async () => {
-    const { chatId } = currentTurn();
-    const prompts = await turnPrompts();
-    const threads = new Set<string>();
-    for (const key of prompts) {
-      const thread = (await webchatRepo.getReplyTarget(chatId, key))?.chatThreadId;
-      if (!thread || thread === key) return undefined;
-      threads.add(thread);
-    }
-    return threads.size === 1 ? prompts.at(-1) : undefined;
+  // The message a `say` that names none replies to (reply-target.ts).
+  const defaultReplyTarget = () => {
+    const { chatId, turnId } = currentTurn();
+    return defaultReplyTargetOf(service, chatId, turnId);
   };
 
   const say = async (
@@ -1642,16 +1624,14 @@ export async function buildConciergeTools(
           if (connector.state === "working") {
             return { connected: true, note: "Already connected; no card shown." };
           }
-          const id = await addMessage([
-            {
-              type: "connect_card",
-              service: connector.service,
-              label: connector.label,
-              icon: connector.icon,
-              // A service with no entry can only be connected from Settings.
-              connect: connector.connect ?? { kind: "dashboard" },
-            },
-          ]);
+          const id = await service.addCard(chatId, turnId, {
+            type: "connect_card",
+            service: connector.service,
+            label: connector.label,
+            icon: connector.icon,
+            // A service with no entry can only be connected from Settings.
+            connect: connector.connect ?? { kind: "dashboard" },
+          });
           said(chatId, turnId, `Connect ${connector.label}`);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),

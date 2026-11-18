@@ -546,6 +546,19 @@ final class Workspace {
         return store
     }
 
+    /// Each chat's outputs once listed, kept so the Outputs tab shows them at
+    /// once the next time and reads them again behind.
+    @ObservationIgnored private var outputLists: [String: ChatOutputsStore] = [:]
+
+    /// The outputs of Concierge chat `id`; nil for a blank topic chat.
+    func outputs(forChat id: String) -> ChatOutputsStore? {
+        guard let chatId = serverChatId(id) else { return nil }
+        if let held = outputLists[chatId] { return held }
+        let store = ChatOutputsStore(chatId: chatId, backend: backend)
+        outputLists[chatId] = store
+        return store
+    }
+
     /// The transcript of Concierge chat `id`: the main chat's or a topic chat's.
     func transcript(forChat id: String) -> TranscriptStore {
         isMainChat(id) ? concierge : topicStore(id)

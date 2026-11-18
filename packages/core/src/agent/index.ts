@@ -66,6 +66,7 @@ export {
   type Question,
   questionCardFromAnswers,
   questionCardUi,
+  REPLY_TO_PARAMETER,
 } from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {

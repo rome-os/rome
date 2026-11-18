@@ -54,6 +54,7 @@ import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../w
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
+import { defaultReplyTarget } from "./reply-target.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -1117,6 +1118,31 @@ export class ConciergeService {
   /** The guardian messages earlier turns in `chatId` handed on to the running one. */
   promptsHandedOn(chatId: string): readonly string[] {
     return this.handedOnPrompts.get(chatId) ?? [];
+  }
+
+  /**
+   * Says a card the Concierge shows, which replies as its messages do: to the
+   * message `named`, else to the turn's default (reply-target.ts). A name that
+   * is no message of the chat is dropped, not refused: the guardian was shown
+   * the card already. A card is a message of its own, so it carries no quote.
+   */
+  async addCard(
+    chatId: string,
+    turnId: string,
+    part: Parameters<WebChatRepository["addBackendMessage"]>[2][number],
+    named?: string,
+  ): Promise<string> {
+    const { webchatRepo } = this.deps;
+    const target = named ? await webchatRepo.getReplyTarget(chatId, named) : null;
+    const key = target ? undefined : await defaultReplyTarget(this, chatId, turnId);
+    const replyTo = target ?? (key ? await webchatRepo.getReplyTarget(chatId, key) : null);
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [part],
+      replyTo ? { replyTo: replyTo.id } : {},
+    );
+    return id;
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

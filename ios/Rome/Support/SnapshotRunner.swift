@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     /// The Agent page on a tab, opened from the main Chat; nil closes it.
     case agent(AgentTab?)
+    /// The Agent page on a tab, opened from a blank topic chat.
+    case agentBlank(AgentTab)
     /// Pages pushed inside the open Agent page.
     case agentRoute([Route])
     case route([Route])
@@ -228,7 +230,10 @@ enum SnapshotRunner {
             }
             model.debugCommand = .agentRoute([])
             try? await Task.sleep(for: .seconds(0.8))
-            await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
+            await capture("57-agent-outputs", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.outputs) }
+            model.debugCommand = .agent(nil)
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("57b-agent-outputs-empty", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agentBlank(.outputs) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {

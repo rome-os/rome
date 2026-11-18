@@ -2,31 +2,28 @@ import SwiftUI
 import UIKit
 
 /// The Agent page's tabs; it opens on Tasks.
-enum AgentTab: Hashable { case tasks, uses }
+enum AgentTab: Hashable { case tasks, outputs }
 
-/// The Agent page as opened from one chat's header: which chat's tasks it
-/// lists, which composer a picked prompt goes to, and the avatar it grows
-/// out of.
+/// The Agent page as opened from one chat's header: which chat's tasks and
+/// outputs it lists, and the avatar it grows out of.
 struct AgentRoute: Identifiable, Equatable {
-    /// The Concierge chat whose tasks show: the main chat, a topic chat, or
-    /// "" for a blank topic chat, which has none yet.
+    /// The Concierge chat whose tasks and outputs show: the main chat, a
+    /// topic chat, or "" for a blank topic chat, which has none yet.
     let tasksChatId: String
-    /// The composer a picked prompt goes to (`Workspace.composerPrefills`).
-    let composerKey: String
+    /// The chat's key on this phone: its id, or a blank chat's draft key.
+    let chatKey: String
 
-    var id: String { composerKey }
+    var id: String { chatKey }
     /// The header avatar the page zooms out of and back into.
-    var zoomSource: String { AgentZoom.source(composerKey) }
+    var zoomSource: String { AgentZoom.source(chatKey) }
 }
 
 /// Opened from the mascot in a chat's header: the Agent, big, with its name;
-/// then what to ask it (Uses) and what it is doing in this chat (Tasks).
+/// then what it is doing in this chat (Tasks) and the files it made (Outputs).
 struct AgentPage: View {
     let workspace: Workspace
     let route: AgentRoute
     @Binding var tab: AgentTab
-    /// A prompt was picked: the page closes and it goes in the composer.
-    let onUse: (String) -> Void
     /// A task's chat was asked for: it opens inside the page.
     let onOpenTask: (ConciergeTask.LinkedChat) -> Void
     let onClose: () -> Void
@@ -41,6 +38,8 @@ struct AgentPage: View {
     /// The chat's task list, kept by the workspace: in the first frame, so
     /// the tab never shows "No tasks yet" while it is looked up.
     private var taskList: TaskListStore? { workspace.taskList(forChat: route.tasksChatId) }
+    /// The chat's outputs, kept by the workspace, read again each time the tab opens.
+    private var outputs: ChatOutputsStore? { workspace.outputs(forChat: route.tasksChatId) }
 
     static let discSize: CGFloat = 96
 
@@ -49,7 +48,7 @@ struct AgentPage: View {
             header
             Picker(selection: $tab) {
                 Text("Tasks").tag(AgentTab.tasks)
-                Text("Uses").tag(AgentTab.uses)
+                Text("Outputs").tag(AgentTab.outputs)
             } label: {
                 EmptyView()
             }
@@ -59,8 +58,8 @@ struct AgentPage: View {
             .padding(.top, 18)
             .padding(.bottom, 12)
             switch tab {
-            case .uses:
-                uses
+            case .outputs:
+                AgentOutputsView(store: outputs, backend: workspace.backend, onOpenChat: onOpenTask)
             case .tasks:
                 TaskListView(store: taskList, onOpenChat: onOpenTask)
             }
@@ -118,54 +117,12 @@ struct AgentPage: View {
         }
         .padding(.top, 56)
     }
-
-    private var uses: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                ForEach(Array(AgentUse.all.enumerated()), id: \.element.id) { index, use in
-                    useRow(use, last: index == AgentUse.all.count - 1)
-                }
-            }
-            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-            .hairline(radius: Metrics.groupRadius)
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 24)
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func useRow(_ use: AgentUse, last: Bool) -> some View {
-        Button { onUse(use.prompt) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: use.symbol)
-                    .romeFont(17)
-                    .foregroundStyle(Palette.sub)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-                Text(verbatim: use.title)
-                    .romeFont(16)
-                    .foregroundStyle(Palette.fg)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.vertical, 13)
-            .padding(.horizontal, 16)
-            .overlay(alignment: .bottom) {
-                if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 52) }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityHint(Text("Puts it in the message box."))
-    }
 }
 
 /// The zoom from a chat header's avatar into the Agent page (iOS 18 and
 /// later; before that the page rises as a plain cover).
 enum AgentZoom {
-    static func source(_ composerKey: String) -> String { "agent-" + composerKey }
+    static func source(_ chatKey: String) -> String { "agent-" + chatKey }
 }
 
 private struct AgentZoomNamespaceKey: EnvironmentKey {

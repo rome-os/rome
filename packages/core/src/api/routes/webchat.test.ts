@@ -6327,6 +6327,104 @@ describe("Webchat API", () => {
       });
     });
 
+    it("stores a Concierge's question card, alone, in the thread of the message it replies to, and no other chat's", async () => {
+      const ctl = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      // The real card write, on the real store.
+      const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
+      deps.concierge = {
+        deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
+        switchIfExhausted: async () => null,
+        conciergeChat: async () => null,
+        cardSettled: async () => {},
+        addCard: service.addCard.bind(service),
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const start = await deps.webchatRepo.addBackendMessage("topic-1", "t0", [
+        { type: "text", content: "On it" },
+      ]);
+      const questions = [{ id: "q1", question: "Which day?", type: "text" }];
+      let ask: { toolUseId: string; replyTo?: string } = { toolUseId: "tu-1" };
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: ask.toolUseId,
+          tool: "ask_question",
+          input: { questions, ...(ask.replyTo ? { replyTo: ask.replyTo } : {}) },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: ask.toolUseId,
+          tool: "ask_question",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "question-card",
+              props: { questions },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const send = async (sessionId: string, body: Record<string, unknown>) =>
+        drainTurn(
+          app,
+          await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "ask me something", ...body }),
+          }),
+        );
+      const rows = () =>
+        testDb.db
+          .select({
+            id: chatMessages.id,
+            key: chatMessages.key,
+            replyTo: chatMessages.replyToMessageId,
+            root: chatMessages.rootMessageId,
+            parts: chatMessages.parts,
+          })
+          .from(chatMessages)
+          .all();
+      const cardOf = (toolUseId: string) => rows().find((row) => row.parts.includes(toolUseId))!;
+      const startRow = rows().find((row) => row.key === start.id)!;
+
+      // The owner wrote inside the thread: the card replies there, with no name.
+      await send("topic-1", { replyToMessageId: start.id });
+      const inThread = cardOf("tu-1");
+      expect(inThread.replyTo).not.toBeNull();
+      expect(inThread.root).toBe(startRow.id);
+      expect(JSON.parse(inThread.parts)).toEqual([
+        expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-1" }),
+      ]);
+
+      // The owner wrote on the main line: the card replies to the message it names.
+      ask = { toolUseId: "tu-2", replyTo: start.id };
+      await send("topic-1", {});
+      const named = cardOf("tu-2");
+      expect([named.replyTo, named.root]).toEqual([startRow.id, startRow.id]);
+      expect(JSON.parse(named.parts)).toHaveLength(1);
+
+      // Another chat's card is written as it always was: replying to nothing.
+      const plain = await newSession(app);
+      ask = { toolUseId: "tu-3", replyTo: start.id };
+      await send(plain, {});
+      expect(await findCard(plain, "tu-3")).toBeDefined();
+      expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
+    });
+
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(inlineRenderEvents("tu-inline-2", "ask-user", "not-declared"));

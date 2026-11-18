@@ -1,6 +1,6 @@
 # Rome for iOS
 
-A native SwiftUI app for Rome. Chat (the Concierge) is the home screen. The mascot in a chat's header opens the Agent page, whose Tasks tab lists what runs for that chat; a task's question or approval is answered at its card in the chat. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
+A native SwiftUI app for Rome. Chat (the Concierge) is the home screen. The mascot in a chat's header opens the Agent page, whose Tasks tab lists what runs for that chat and whose Outputs tab lists the files its agent wrote or showed; a task's question or approval is answered at its card in the chat. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
 
 ## Build and run
 
@@ -53,6 +53,8 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
    ```
 
    It fetches the tags and takes the newest published server release: a `v1.*` tag whose GitHub release exists and is neither a draft nor a prerelease, asked through `gh`. A tag is pushed before its image builds, so a tag alone is not a release. When `gh` cannot say, it stops and raises nothing. It then checks that the release contains the server change of every entry. If one is missing it stops with "Release the server first" and changes nothing: release the server, then run it again. Otherwise it sets `minimumInstanceVersion` to that release, and `blockingMinimumInstanceVersion` too when an entry is `blocking`. It never lowers either, and it empties the pending file. It commits nothing: review the two files and commit them with the build. With no entries it says so and changes nothing.
+
+   The archive in step 2 checks this: while the pending file has entries, the Rome target's "Check pending minimums" build phase fails it with "Run node ios/Tools/bump-minimum.mjs first" and lists them. The phase runs `bump-minimum.mjs --check` only when archiving the Release configuration, so builds, tests and CI's Release build are not affected. It needs `node`: Xcode's own PATH has none, so the phase also looks in the usual install folders (fnm's default, Homebrew, Nix).
 
 2. Archive (local only, safe to run):
 
