@@ -6,6 +6,11 @@
 // The script only edits files: committing and pushing stay with whoever runs it.
 //
 // Usage: node ios/Tools/bump-minimum.mjs [--repo <dir>] [--no-fetch]
+//        node ios/Tools/bump-minimum.mjs --check [--pending <file>]
+//
+// --check only reads the pending file and fails while it has entries, so a
+// Release archive never ships with a minimum it was meant to raise. The
+// archive's build phase runs it (ios/README.md, "Release to TestFlight").
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -192,6 +197,33 @@ export function containsInRepo(repo, tag) {
   };
 }
 
+/**
+ * Whether the pending file is applied: code 0 when it has no entries, 1 with
+ * the entries to apply, or with what is wrong with the file.
+ */
+export function check(pendingText) {
+  let pending;
+  try {
+    pending = JSON.parse(pendingText);
+  } catch (error) {
+    return { code: 1, message: `${PENDING_PATH} is not JSON: ${error.message}` };
+  }
+  const errors = validatePending(pending);
+  if (errors.length > 0)
+    return { code: 1, message: `${PENDING_PATH} is malformed:\n  ${errors.join("\n  ")}` };
+  const { entries } = pending;
+  if (entries.length === 0) return { code: 0, message: "No pending minimum changes." };
+  const list = entries.map((entry) => `${entry.tier}: ${entry.reason} (#${entry.pr})`);
+  return {
+    code: 1,
+    message: [
+      `${entries.length} pending minimum change${entries.length === 1 ? "" : "s"} in ${PENDING_PATH}:`,
+      ...list.map((line) => `  ${line}`),
+      "Run node ios/Tools/bump-minimum.mjs first, commit what it changes, then archive again.",
+    ].join("\n"),
+  };
+}
+
 export function run({
   repo,
   fetch = true,
@@ -237,6 +269,17 @@ export function run({
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  if (args.includes("--check")) {
+    // Reads only the file it is given, so it runs in Xcode's script sandbox.
+    const pendingAt = args.indexOf("--pending");
+    const file =
+      pendingAt >= 0
+        ? args[pendingAt + 1]
+        : join(git(process.cwd(), ["rev-parse", "--show-toplevel"]), PENDING_PATH);
+    const { code, message } = check(readFileSync(file, "utf8"));
+    (code === 0 ? console.log : console.error)(message);
+    process.exit(code);
+  }
   const repoAt = args.indexOf("--repo");
   const repo =
     repoAt >= 0 ? args[repoAt + 1] : git(process.cwd(), ["rev-parse", "--show-toplevel"]);

@@ -185,8 +185,26 @@ private let twoTurns = [
             #expect(store.share.outgoing == nil)
             #expect(store.share.isSelecting && store.share.error != nil)
         }
-        #expect(ChatShareFlow.sharesLinks(version: UpdateGate.minimumInstanceVersion))
+        #expect(ChatShareFlow.sharesLinks(version: UpdateGate.shareLinksInstanceVersion))
+        #expect(!ChatShareFlow.sharesLinks(version: "1.1.190"))
         #expect(!ChatShareFlow.sharesLinks(version: nil))
+    }
+
+    /// Sharing goes by the release that brought it, not the app's moving
+    /// minimum: an instance the app updates in the background, below the
+    /// background minimum, still shares when it has the API.
+    @Test func anInstanceBelowTheBackgroundMinimumStillShares() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, twoTurns)
+        // Between the two minimums, as after a later background raise.
+        let minimums = UpdateGate.Minimums(blocking: UpdateGate.shareLinksInstanceVersion, background: "9.9.9")
+        let version = UpdateGate.shareLinksInstanceVersion
+        #expect(UpdateGate.tier(version, minimums: minimums) == .background)
+        backend.buildVersion = version
+        store.share.begin(turn: "t1")
+        await store.share.create()
+        #expect(backend.shareRequests.count == 1)
+        #expect(store.share.error == nil)
     }
 
     /// The Shared links sheet and the share sheet cover the chat: replies

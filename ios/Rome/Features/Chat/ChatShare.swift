@@ -196,10 +196,11 @@ final class ChatShareFlow {
         }
     }
 
-    /// A version known to be at or above the app's minimum.
+    /// A version known to be at or above the release that brought share
+    /// links, whatever the app's minimums are.
     static func sharesLinks(version: String?) -> Bool {
         guard let version, UpdateGate.isVersion(version) else { return false }
-        return UpdateGate.isSupported(version)
+        return UpdateGate.isSupported(version, minimum: UpdateGate.shareLinksInstanceVersion)
     }
 
     /// The Shared links sheet or the share sheet is up over the chat.

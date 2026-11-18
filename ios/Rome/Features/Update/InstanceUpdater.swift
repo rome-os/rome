@@ -23,6 +23,12 @@ enum UpdateGate {
     /// `blockingMinimumInstanceVersion`.
     static let minimumInstanceVersion = "1.1.196"
 
+    /// The first release with each feature's API, for a feature that checks
+    /// the instance's version itself. A feature never checks against the
+    /// minimums: the app runs below the background one while it updates.
+    /// Share links (#1976).
+    static let shareLinksInstanceVersion = "1.1.191"
+
     /// The two minimums an updater goes by; tests and snapshot runs pass others.
     struct Minimums: Equatable {
         var blocking = UpdateGate.blockingMinimumInstanceVersion
@@ -45,9 +51,10 @@ enum UpdateGate {
         return .supported
     }
 
-    /// Whether the app works with an instance on `version`. An unknown or
-    /// unreadable version is never held against it.
-    static func isSupported(_ version: String?, minimum: String = minimumInstanceVersion) -> Bool {
+    /// Whether an instance on `version` is at or above `minimum`: one of the
+    /// two minimums, or a feature's own release. An unknown or unreadable
+    /// version is never held against it.
+    static func isSupported(_ version: String?, minimum: String) -> Bool {
         guard let version, let have = numbers(version), let need = numbers(minimum) else { return true }
         for index in 0..<max(have.count, need.count) {
             let a = index < have.count ? have[index] : 0, b = index < need.count ? need[index] : 0

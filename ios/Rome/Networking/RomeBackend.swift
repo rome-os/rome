@@ -77,6 +77,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
+    /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
+    /// wrote or showed, a Concierge chat's task chats' included, newest first.
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
+    /// An output's bytes, from its `contentUrl` (the path after `/api`).
+    func chatOutputFile(path: String) async throws -> Data
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -270,6 +275,15 @@ final class LiveBackend: RomeBackend {
 
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
+    }
+
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
+        try await client.get("/chat/sessions/\(escape(chatId))/outputs")
+    }
+
+    func chatOutputFile(path: String) async throws -> Data {
+        // Sent as written: the server already encoded the ids in it.
+        try await client.getFile(apiPath: path, percentEncodedQuery: nil, limit: APIClient.outputLimit, accept: "*/*")
     }
 
     func pendingApprovals() async throws -> [PendingApproval] {
@@ -467,6 +481,8 @@ extension RomeBackend {
     func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
+    func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.

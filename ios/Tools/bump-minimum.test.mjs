@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   GATE_PATH,
   PENDING_PATH,
+  check,
   compareVersions,
   publishedRelease,
   releaseTags,
@@ -233,6 +234,54 @@ describe("run, in a scratch repository", () => {
       assert.match(result.message, /#9999 \(no commit on any fetched branch mentions it\)/);
     } finally {
       rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("check, before a Release archive", () => {
+  it("passes when nothing is pending", () => {
+    assert.equal(check('{ "entries": [] }\n').code, 0);
+  });
+
+  it("fails while an entry is not applied, and says what to run", () => {
+    const pending = {
+      entries: [{ tier: "background", reason: "Outputs tab", pr: 2356, server: "#2340" }],
+    };
+    const result = check(JSON.stringify(pending));
+    assert.equal(result.code, 1);
+    assert.match(result.message, /1 pending minimum change in ios\/Config\/pending-minimum\.json/);
+    assert.match(result.message, /background: Outputs tab \(#2356\)/);
+    assert.match(result.message, /Run node ios\/Tools\/bump-minimum\.mjs first/);
+  });
+
+  it("fails on a file it cannot read", () => {
+    assert.equal(check("{").code, 1);
+    assert.match(check('{ "entries": [{}] }').message, /malformed/);
+  });
+
+  it("runs from the command line on the file it is given", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rome-bump-check-"));
+    const script = join(repoRoot, "ios/Tools/bump-minimum.mjs");
+    const cli = (file) => {
+      try {
+        execFileSync(process.execPath, [script, "--check", "--pending", file], { stdio: "pipe" });
+        return 0;
+      } catch (error) {
+        return error.status;
+      }
+    };
+    try {
+      const empty = join(dir, "empty.json");
+      writeFileSync(empty, '{ "entries": [] }\n');
+      assert.equal(cli(empty), 0);
+      const pending = join(dir, "pending.json");
+      writeFileSync(
+        pending,
+        JSON.stringify({ entries: [{ tier: "blocking", reason: "x", pr: 1, server: "#1" }] }),
+      );
+      assert.equal(cli(pending), 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
