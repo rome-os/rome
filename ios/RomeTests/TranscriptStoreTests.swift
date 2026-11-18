@@ -72,8 +72,11 @@ final class FakeBackend: RomeBackend {
     var conciergeThreads: [String: MessagePage] = [:]
     var conciergeThreadReads: [String] = []
     var conciergeThreadError: APIError?
+    /// Runs inside a thread read by main-line paging, before it answers.
+    var duringConciergeThreadRead: (() async -> Void)?
     func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
         conciergeThreadReads.append(key)
+        await duringConciergeThreadRead?()
         if let conciergeThreadError { throw conciergeThreadError }
         guard let page = conciergeThreads[key] else { throw APIError.notFound }
         return page
@@ -298,7 +301,15 @@ final class FakeBackend: RomeBackend {
     func markRead(sessionId: String) async { reads.append(sessionId) }
     /// The messages told to the instance as seen, by chat, in order.
     var markedRead: [(session: String, ids: [String])] = []
-    func markMessagesRead(sessionId: String, ids: [String]) async { markedRead.append((sessionId, ids)) }
+    /// Off, the instance does not take a mark (a failed POST): every one is answered as not taken.
+    var markReadSucceeds = true
+    /// Runs inside a mark, before it answers.
+    var duringMarkRead: (() async -> Void)?
+    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
+        markedRead.append((sessionId, ids))
+        await duringMarkRead?()
+        return markReadSucceeds
+    }
     /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
     /// many reads had gone out each time it was asked for.
     var readMarkValue: String?

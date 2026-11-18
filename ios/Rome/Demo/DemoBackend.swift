@@ -372,15 +372,16 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
-    func markMessagesRead(sessionId: String, ids: [String]) async {
+    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
         let wanted = Set(ids)
-        guard let held = messages[sessionId] else { return }
+        guard let held = messages[sessionId] else { return false }
         messages[sessionId] = held.map { message in
             guard wanted.contains(message.id) else { return message }
             var seen = message
             seen.read = true
             return seen
         }
+        return true
     }
 
 

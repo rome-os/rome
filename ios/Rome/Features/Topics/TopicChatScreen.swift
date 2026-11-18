@@ -144,12 +144,22 @@ struct TopicChatScreen: View {
         }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
+        // The chat is seen only while it is the one on screen: a thread kept open under another
+        // page reads nothing, and is read when this one comes back.
+        .onChange(of: "\(store?.sessionId ?? "")|\(visibleChat ?? "")", initial: true) { updateOnScreen() }
         .onDisappear {
+            store?.onScreen = false
             store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
         }
+    }
+
+    /// Tells the store whether the guardian sees the chat.
+    private func updateOnScreen() {
+        guard let store else { return }
+        store.onScreen = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
     }
 
     /// Read only while it is the chat on screen: never under an instance

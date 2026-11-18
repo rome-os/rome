@@ -106,7 +106,7 @@ final class ThreadStore {
             rowsHeld = false
             rebuildRows()
             // The thread is open: what it brought in is seen too.
-            chat?.markMessagesRead(thread.filter { $0.read == false }.map(\.id))
+            chat?.markReadWhenSeen(thread.filter { $0.read == false }.map(\.id))
         } catch {
             // The thread stays as it is shown.
         }

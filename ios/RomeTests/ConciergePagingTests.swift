@@ -198,10 +198,12 @@ final class ConciergeWireRecorder: URLProtocol, @unchecked Sendable {
 /// A Concierge chat paged by main-line messages, in a store.
 @MainActor
 @Suite struct ConciergePagedStoreTests {
+    /// The chat is on screen, as the guardian sees it.
     private func chat(_ backend: FakeBackend) async -> TranscriptStore {
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        store.onScreen = true
         return store
     }
 
@@ -520,6 +522,126 @@ final class ConciergeWireRecorder: URLProtocol, @unchecked Sendable {
         #expect(backend.conciergeThreadReads == ["r", "r"])
         await settle { store.thread?.messages.count == 4 }
         #expect(store.thread?.messages.map(\.id) == ["r", "a1", "a5", "a6"])
+    }
+
+    // MARK: Listening stops
+
+    /// What a chat missed while it did not listen reaches a thread read whole before: it is read again.
+    @Test func aStoppedChatReadsItsThreadsWholeAgain() async {
+        let backend = FakeBackend()
+        paged(backend)
+        let first = [cmsg("a1", at: 10, thread: "r", read: true), a5]
+        backend.conciergeThreads["r"] = whole(root, first)
+        let store = await chat(backend)
+        store.openChatThread("r")
+        await settle { store.thread != nil }
+        #expect(store.thread?.messages.map(\.id) == ["r", "a1", "a5"])
+        // The guardian leaves (the topic screen closes the thread and stops the store), and two replies come meanwhile.
+        store.closeThread()
+        store.stop()
+        let missed = [cmsg("a6", "while away", at: 70, thread: "r", read: false), cmsg("a7", "and more", at: 80, thread: "r", read: false)]
+        backend.conciergeThreads["r"] = whole(root, first + missed)
+        backend.conciergePage = { [root] _, _, _ in
+            page([root], threads: ["r": summary(missed[1], total: 4, unread: 2)])
+        }
+        // Back: the range is read again, and the thread is not taken for whole.
+        store.start()
+        await settle { backend.conciergeReads.count == 2 }
+        #expect(backend.conciergeReads.last?.through != nil)
+        store.openChatThread("r")
+        await settle { store.thread != nil }
+        #expect(backend.conciergeThreadReads == ["r", "r"])
+        #expect(store.thread?.messages.map(\.id) == ["r", "a1", "a5", "a6", "a7"])
+        // The replies it missed are read and the count clears.
+        await settle { store.threads.stacks["r"]?.unread == 0 }
+        #expect(store.threads.stacks["r"]?.unread == 0 && store.threads.stacks["r"]?.total == 4)
+    }
+
+    // MARK: A reply sent into an older thread
+
+    /// The owner's own input is never sent live, and the newest page holds only each thread's newest reply:
+    /// a reply into a thread whose root is older is read with its thread, and replaces the row on its way.
+    @Test func aReplyInAnOlderThreadIsFetchedWithItsThread() async throws {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        let old = cmsg("old", role: "user", "book a table", at: 1, read: true)
+        let o1 = cmsg("o1", "found one", at: 5, thread: "old", read: true)
+        backend.conciergePage = { before, _, _ in
+            // The newest page never holds the root, nor the reply the owner sends.
+            before == nil
+                ? page([cmsg("m1", at: 20, read: true)], threads: ["old": summary(o1, total: 1, unread: 0)], next: "cursor-A")
+                : page([old], threads: ["old": summary(o1, total: 1, unread: 0)], next: nil)
+        }
+        backend.conciergeThreads["old"] = whole(old, [o1])
+        let store = await chat(backend)
+        store.acceptedFetchDelay = .milliseconds(20)
+        await store.loadOlder()
+        store.openChatThread("old")
+        await settle { store.thread != nil }
+        // A send from inside the thread.
+        #expect(store.send("go on", fromComposer: true, thread: store.composerThread))
+        store.composerSent()
+        let inputId = try #require(store.pending.first?.id)
+        #expect(store.thread?.rows.contains { if case .userText(_, "go on", _, _) = $0 { true } else { false } } == true)
+        // The instance stored it; no event says so, and the newest page does not hold it.
+        backend.conciergeThreads["old"] = whole(old, [o1, cmsg(inputId, role: "user", "go on", at: 30, thread: "old", read: true)])
+        await settle { store.pending.isEmpty }
+        // The row on its way gave way to the stored copy, in the thread, and nothing is on the main line.
+        #expect(store.pending.isEmpty)
+        #expect(store.thread?.messages.map(\.id) == ["old", "o1", inputId])
+        #expect(!store.rows.contains { $0.ownMessageId == inputId })
+        #expect(backend.conciergeThreadReads.count >= 2)
+    }
+
+    // MARK: Only when seen, with the thread read whole
+
+    /// A re-read after a gap brings the thread whole, and reads nothing while the chat is hidden.
+    @Test func aResyncReadsNothingWhileTheChatIsHidden() async {
+        let backend = FakeBackend()
+        paged(backend)
+        let a1 = cmsg("a1", at: 10, thread: "r", read: true)
+        backend.conciergeThreads["r"] = whole(root, [a1, a5])
+        let store = await chat(backend)
+        store.openChatThread("r")
+        await settle { store.thread != nil }
+        await settle { backend.markedRead.count == 1 }
+        store.onScreen = false
+        let a6 = cmsg("a6", "while away", at: 70, thread: "r", read: false)
+        backend.conciergeThreads["r"] = whole(root, [a1, a5, a6])
+        backend.conciergePage = { [root] _, _, _ in page([root], threads: ["r": summary(a6, total: 3, unread: 1)]) }
+        await store.reload(resync: true)
+        await settle { backend.conciergeThreadReads.count == 2 }
+        await settle { store.message("a6") != nil }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(store.message("a6")?.read == false && backend.markedRead.count == 1)
+        store.onScreen = true
+        await settle { backend.markedRead.count == 2 }
+        #expect(backend.markedRead.last?.ids.contains("a6") == true)
+    }
+
+    // MARK: A late open
+
+    /// A Reply the guardian picked meanwhile is not redirected by a thread that opens late.
+    @Test func aLateOpenKeepsTheNewerReplyTarget() async {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        paged(backend)
+        let sent = cmsg("in-1", role: "user", "and tomorrow?", at: 100, thread: "x", read: true)
+        backend.conciergeThreads["x"] = whole(cmsg("x", "weather?", at: 60, read: true), [sent])
+        let hold = HoldGate()
+        backend.duringConciergeThreadRead = { await hold.wait() }
+        let store = await chat(backend)
+        store.reply(to: "x")
+        #expect(store.send("and tomorrow?", fromComposer: true, thread: store.composerThread))
+        store.composerSent()
+        // Accepted; the thread is being read. The guardian picks another Reply.
+        await settle { backend.conciergeThreadReads == ["x"] }
+        store.reply(to: "r")
+        #expect(store.quote?.messageId == "r")
+        hold.open()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(store.thread == nil && store.quote?.messageId == "r")
+        #expect(store.composerThread?.body == ["replyToMessageId": .string("r")])
     }
 
     // MARK: Share

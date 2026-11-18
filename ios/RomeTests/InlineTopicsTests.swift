@@ -243,11 +243,13 @@ private func msg(
 /// Reading, opening and the pills of a Concierge chat.
 @MainActor
 @Suite struct ThreadReadingTests {
+    /// The chat is on screen, as the guardian sees it.
     private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> TranscriptStore {
         backend.stored = messages
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        store.onScreen = true
         return store
     }
 
@@ -298,16 +300,121 @@ private func msg(
         #expect(backend.markedRead.count == 2 && backend.markedRead.last?.ids == ["a3"])
     }
 
-    /// A message seen stays seen, and a live copy that leaves the mark out keeps the one held.
-    @Test func aSeenMessageStaysSeen() async {
+    /// A live copy that leaves the mark out keeps the one held.
+    @Test func aCopyWithNoMarkKeepsTheMarkHeld() async {
         let backend = FakeBackend()
+        let store = await chat(backend, unreadChat)
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("x", "weather?", at: 30, thread: "x", read: nil)))
+        #expect(store.message("x")?.read == false)
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("r", role: "user", "plan the trip", at: 0, thread: "r", read: nil)))
+        #expect(store.message("r")?.read == true)
+    }
+
+    /// A mark still on its way holds against a fetch; once the instance has answered, its flags win.
+    @Test func aMarkOnItsWayHoldsAndThenTheInstanceWins() async {
+        let backend = FakeBackend()
+        let gate = HoldGate()
+        backend.duringMarkRead = { await gate.wait() }
         let store = await chat(backend, unreadChat)
         store.markThreadRead("r")
         #expect(store.message("a1")?.read == true)
+        await settle { !backend.markedRead.isEmpty }
+        // The race: the copy a fetch brings, read before the instance took the mark.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("a1", "on it", at: 10, thread: "r", read: false)))
         #expect(store.message("a1")?.read == true)
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("x", "weather?", at: 30, thread: "x", read: nil)))
-        #expect(store.message("x")?.read == false)
+        gate.open()
+        try? await Task.sleep(for: .milliseconds(50))
+        // Answered: what the instance says is the truth.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("a1", "on it", at: 10, thread: "r", read: false)))
+        #expect(store.message("a1")?.read == false)
+    }
+
+    /// A mark the instance did not take is not kept as true: the next fetch says unread again, and
+    /// seeing the thread sends the mark again.
+    @Test func aFailedMarkIsSentAgain() async {
+        let backend = FakeBackend()
+        backend.markReadSucceeds = false
+        let store = await chat(backend, unreadChat)
+        store.markThreadRead("r")
+        await settle { !backend.markedRead.isEmpty }
+        try? await Task.sleep(for: .milliseconds(50))
+        // The instance still has it unread: its copy wins, and so does its count.
+        await store.reload()
+        #expect(store.message("a1")?.read == false && store.message("a2")?.read == false)
+        #expect(store.pills == ["r"])
+        // Seeing the thread marks it again.
+        store.openChatThread("r")
+        await settle { backend.markedRead.count == 2 }
+        #expect(backend.markedRead.count == 2 && Set(backend.markedRead[1].ids) == ["a1", "a2"])
+    }
+
+    /// What the cache keeps is what the instance said: a mark on its way is not saved as read.
+    @Test func aMarkOnItsWayIsNotKeptInTheCache() async throws {
+        let backend = FakeBackend()
+        let gate = HoldGate()
+        backend.duringMarkRead = { await gate.wait() }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "rome-cache-\(UUID().uuidString)")
+        let cache = TranscriptCache(root: directory, instance: "t")
+        backend.stored = unreadChat
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.cache = cache
+        store.start()
+        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        store.markThreadRead("r")
+        // Something else changes the chat, and the cache is written.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("z", "later", at: 99, thread: "z", read: true)))
+        let kept = try #require(cache.messages(chat: "concierge"))
+        #expect(kept.first { $0.id == "a1" }?.read == false)
+        gate.open()
+    }
+
+    // MARK: Only when seen
+
+    /// A chat kept under another page reads nothing as replies come; coming back reads them.
+    @Test func aHiddenChatMarksNothingUntilItIsSeenAgain() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, unreadChat)
+        store.openChatThread("r")
+        await settle { backend.markedRead.count == 1 }
+        // Hidden under a sheet: the thread stays open.
+        store.onScreen = false
+        #expect(store.thread != nil)
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("a3", "more", at: 40, thread: "r", read: false)))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(store.message("a3")?.read == false && backend.markedRead.count == 1)
+        // Seen again: what came meanwhile is read.
+        store.onScreen = true
+        await settle { backend.markedRead.count == 2 }
+        #expect(backend.markedRead.last?.ids == ["a3"] && store.message("a3")?.read == true)
+    }
+
+    /// The app in the background is not seeing the chat either.
+    @Test func aBackgroundedAppMarksNothingUntilItIsBack() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, unreadChat)
+        store.openChatThread("r")
+        await settle { backend.markedRead.count == 1 }
+        store.leftForBackground()
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("a3", "more", at: 40, thread: "r", read: false)))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(store.message("a3")?.read == false && backend.markedRead.count == 1)
+        store.chatShown()
+        await settle { backend.markedRead.count == 2 }
+        #expect(backend.markedRead.last?.ids == ["a3"])
+    }
+
+    /// A thread a view read in while the chat is hidden waits to be read too (an instance before the pages).
+    @Test func whatAThreadViewBroughtWaitsUntilTheChatIsSeen() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, unreadChat)
+        store.onScreen = false
+        store.markReadWhenSeen(["gone-1"])
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(backend.markedRead.isEmpty)
+        store.openChatThread("r")
+        store.onScreen = true
+        await settle { backend.markedRead.contains { $0.ids.contains("gone-1") } }
+        #expect(backend.markedRead.contains { $0.ids.contains("gone-1") })
     }
 
     /// A pill brings the transcript to the stack and tints it, reads the thread, and opens nothing.
@@ -420,6 +527,23 @@ private func msg(
         #expect(store.thread?.anchor.id == "a")
     }
 
+    /// A Reply picked while an earlier one is still on its way is the composer's target when the earlier is taken.
+    @Test func anotherReplyPickedMeanwhileIsKept() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [msg("q", role: "user", "weather?", at: 0, thread: "q"), msg("a", "sunny", at: 10, thread: "a"), msg("b", "rain", at: 20, thread: "b")])
+        store.reply(to: "a")
+        #expect(store.send("and tomorrow?", fromComposer: true, thread: store.composerThread))
+        store.composerSent()
+        await settle { store.pending.first?.state == .failed(.unreachable) }
+        // The guardian picks another Reply before the first is taken.
+        store.reply(to: "b")
+        backend.sendSucceeds = true
+        store.retry(store.pending[0].id)
+        await settle { store.pending.first?.state == .sent }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(store.thread == nil && store.quote?.messageId == "b")
+    }
+
     /// A send from inside an open thread keeps it open, so the next message goes into it too.
     @Test func aSendFromInsideTheThreadKeepsItOpen() async {
         let backend = FakeBackend()
@@ -491,7 +615,8 @@ final class ReadMarkRecorder: URLProtocol, @unchecked Sendable {
 
     @Test func theRequestNamesTheMessages() async throws {
         ReadMarkRecorder.reset()
-        await backend().markMessagesRead(sessionId: "chat 1", ids: ["a", "b"])
+        let took = await backend().markMessagesRead(sessionId: "chat 1", ids: ["a", "b"])
+        #expect(took)
         let (request, body) = try #require(ReadMarkRecorder.requests.last)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/api/chat/sessions/chat%201/messages/read" || request.url?.path == "/api/chat/sessions/chat 1/messages/read")
@@ -509,10 +634,29 @@ final class ReadMarkRecorder: URLProtocol, @unchecked Sendable {
     /// An instance before the route answers 404; the app takes it quietly, and so does a network that fails.
     @Test func anOlderInstanceFailsQuietly() async {
         ReadMarkRecorder.reset(status: 404)
-        await backend().markMessagesRead(sessionId: "chat-1", ids: ["a"])
-        #expect(ReadMarkRecorder.requests.count == 1)
+        let notTaken = await backend().markMessagesRead(sessionId: "chat-1", ids: ["a"])
+        #expect(!notTaken && ReadMarkRecorder.requests.count == 1)
         ReadMarkRecorder.reset(status: 500)
-        await backend().markMessagesRead(sessionId: "chat-1", ids: ["a"])
-        #expect(ReadMarkRecorder.requests.count == 1)
+        let failed = await backend().markMessagesRead(sessionId: "chat-1", ids: ["a"])
+        #expect(!failed && ReadMarkRecorder.requests.count == 1)
+    }
+}
+
+/// Holds a mark or a read until the test lets it go.
+@MainActor
+final class HoldGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    var isWaiting: Bool { continuation != nil }
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        opened = true
+        continuation?.resume()
+        continuation = nil
     }
 }

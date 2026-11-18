@@ -193,35 +193,8 @@ enum ThreadLink {
         guard let href, href.hasPrefix(prefix) else { return nil }
         // An id never holds a `%`: Foundation reads a stray one in a Markdown link
         // as `%25`, so one left after decoding is an escape that did not decode.
-        guard let root = decoded(String(href.dropFirst(prefix.count))), !root.isEmpty, !root.contains("%") else { return nil }
+        guard let root = String(href.dropFirst(prefix.count)).removingPercentEncoding, !root.isEmpty, !root.contains("%") else { return nil }
         return root
-    }
-
-    /// `text` with its percent escapes read as UTF-8, or nil when an escape is
-    /// cut short or the bytes are no text.
-    private static func decoded(_ text: String) -> String? {
-        var bytes: [UInt8] = []
-        var rest = text.utf8.makeIterator()
-        while let byte = rest.next() {
-            guard byte == UInt8(ascii: "%") else {
-                bytes.append(byte)
-                continue
-            }
-            guard let high = rest.next().flatMap(hexValue), let low = rest.next().flatMap(hexValue) else { return nil }
-            bytes.append(high << 4 | low)
-        }
-        // Bytes that are no text are repaired by decoding, so the text no longer matches them.
-        let text = String(decoding: bytes, as: UTF8.self)
-        return Array(text.utf8) == bytes ? text : nil
-    }
-
-    private static func hexValue(_ byte: UInt8) -> UInt8? {
-        switch byte {
-        case UInt8(ascii: "0")...UInt8(ascii: "9"): return byte - UInt8(ascii: "0")
-        case UInt8(ascii: "a")...UInt8(ascii: "f"): return byte - UInt8(ascii: "a") + 10
-        case UInt8(ascii: "A")...UInt8(ascii: "F"): return byte - UInt8(ascii: "A") + 10
-        default: return nil
-        }
     }
 
     static func root(of url: URL) -> String? { root(ofHref: url.absoluteString) }
