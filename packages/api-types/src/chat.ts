@@ -13,8 +13,16 @@ export type {
 } from "@rome-os/app-runtime";
 
 // The check core runs before it stores a described card, so a reader can run
-// it again on the stored part before drawing it or calling the app.
-export { checkWidgetUi, isWidgetAppPath } from "@rome-os/app-runtime";
+// it again on the stored part before drawing it or calling the app, and the
+// rules every reader draws a card by.
+export {
+  checkWidgetUi,
+  isWidgetAppPath,
+  isWidgetHref,
+  WIDGET_UI_CHART_MAX_POINTS,
+  type WidgetUiIcon,
+  widgetStatTone,
+} from "@rome-os/app-runtime";
 
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */
@@ -170,9 +178,10 @@ export interface ConnectCardPart {
 /** Longest `text` a {@link ReplyToPart} keeps; core truncates longer snapshots with an ellipsis. */
 export const REPLY_TO_TEXT_MAX_LENGTH = 1000;
 
-/** The message a user message replies to, snapshotted when it was sent. It is
- * the first part of the reply, so the quote stays whole after the original
- * leaves the transcript. `text` is the quoted selection or the whole message. */
+/** The message a message replies to, the owner's or the agent's, snapshotted
+ * when it was sent. It is the first part of the reply, so the quote stays whole
+ * after the original leaves the transcript. `text` is the quoted selection or
+ * the whole message. */
 export interface ReplyToPart {
   type: "reply_to";
   messageId: string;

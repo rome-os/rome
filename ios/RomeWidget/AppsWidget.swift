@@ -29,14 +29,14 @@ struct AppsWidget: Widget {
 /// "Edit Widget": which apps come first.
 struct ChooseAppsIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Choose apps"
-    static let description = IntentDescription("Pick the apps to show. Spots left over show the apps you opened last.")
+    static let description = IntentDescription("Pick the apps and shortcuts to show. Spots left over show the apps you opened last.")
 
     // The widget's four spots (`WidgetSlots.small`).
     @Parameter(title: "Apps", size: [.systemSmall: 4])
     var apps: [ShelfAppEntity]?
 }
 
-/// An app of the open instance, for the picker.
+/// An installed app or a built-in shortcut, for the picker.
 struct ShelfAppEntity: AppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "App"
     static let defaultQuery = ShelfAppQuery()
@@ -50,11 +50,18 @@ struct ShelfAppEntity: AppEntity {
 struct ShelfAppQuery: EntityQuery {
     func entities(for identifiers: [ShelfAppEntity.ID]) async throws -> [ShelfAppEntity] {
         let apps = AppShelfStore.shared?.read()?.apps ?? []
-        return identifiers.compactMap { id in apps.first { $0.id == id }.map { ShelfAppEntity(id: $0.id, name: $0.name) } }
+        return identifiers.compactMap { id in
+            if let shortcut = WidgetShortcut(rawValue: id) {
+                return ShelfAppEntity(id: id, name: String(localized: shortcut.title))
+            }
+            return apps.first { $0.id == id }.map { ShelfAppEntity(id: $0.id, name: $0.name) }
+        }
     }
 
     func suggestedEntities() async throws -> [ShelfAppEntity] {
-        (AppShelfStore.shared?.read()?.apps ?? []).map { ShelfAppEntity(id: $0.id, name: $0.name) }
+        let shortcuts = WidgetShortcut.allCases.map { ShelfAppEntity(id: $0.rawValue, name: String(localized: $0.title)) }
+        let apps = (AppShelfStore.shared?.read()?.apps ?? []).map { ShelfAppEntity(id: $0.id, name: $0.name) }
+        return shortcuts + apps
     }
 }
 
@@ -63,14 +70,14 @@ struct ShelfAppQuery: EntityQuery {
 struct AppsEntry: TimelineEntry {
     let date: Date
     let instanceId: String?
-    let apps: [ShelfApp]
+    let slots: [WidgetSlot]
     /// Icon files by app id, read when the entry is made.
     let icons: [String: UIImage]
 }
 
 struct AppsProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> AppsEntry {
-        AppsEntry(date: .now, instanceId: nil, apps: [], icons: [:])
+        AppsEntry(date: .now, instanceId: nil, slots: [], icons: [:])
     }
 
     func snapshot(for configuration: ChooseAppsIntent, in context: Context) async -> AppsEntry {
@@ -83,23 +90,20 @@ struct AppsProvider: AppIntentTimelineProvider {
     }
 
     private func entry(for configuration: ChooseAppsIntent) -> AppsEntry {
-        guard let store = AppShelfStore.shared, let shelf = store.read() else {
-            return placeholder(in: nil)
-        }
-        let apps = WidgetSlots.choose(
+        let store = AppShelfStore.shared
+        let shelf = store?.read()
+        let slots = WidgetSlots.choose(
             picked: configuration.apps?.map(\.id) ?? [],
-            recent: store.recent(instanceId: shelf.instanceId),
-            apps: shelf.apps
+            recent: shelf.map { store?.recent(instanceId: $0.instanceId) ?? [] } ?? [],
+            apps: shelf?.apps ?? []
         )
         var icons: [String: UIImage] = [:]
-        for app in apps where app.hasIcon {
-            icons[app.id] = UIImage(contentsOfFile: store.iconURL(app.id).path(percentEncoded: false))
+        if let store {
+            for case .app(let app) in slots where app.hasIcon {
+                icons[app.id] = UIImage(contentsOfFile: store.iconURL(app.id).path(percentEncoded: false))
+            }
         }
-        return AppsEntry(date: .now, instanceId: shelf.instanceId, apps: apps, icons: icons)
-    }
-
-    private func placeholder(in context: Context?) -> AppsEntry {
-        AppsEntry(date: .now, instanceId: nil, apps: [], icons: [:])
+        return AppsEntry(date: .now, instanceId: shelf?.instanceId, slots: slots, icons: icons)
     }
 }
 
@@ -113,8 +117,8 @@ struct AppsWidgetView: View {
 
     var body: some View {
         Group {
-            if let instanceId = entry.instanceId, !entry.apps.isEmpty {
-                AppsGrid(instanceId: instanceId, apps: entry.apps, icons: entry.icons)
+            if !entry.slots.isEmpty {
+                AppsGrid(instanceId: entry.instanceId, slots: entry.slots, icons: entry.icons)
                     .widgetURL(WidgetLink.apps.url(scheme: linkScheme))
             } else {
                 MakeAppButton()
@@ -125,14 +129,14 @@ struct AppsWidgetView: View {
     }
 }
 
-/// A 2×2 grid; one app or two keep the top row, as on a home screen.
+/// One or two slots keep the top row, as on a home screen.
 private struct AppsGrid: View {
-    let instanceId: String
-    let apps: [ShelfApp]
+    let instanceId: String?
+    let slots: [WidgetSlot]
     let icons: [String: UIImage]
 
-    private var rows: [[ShelfApp]] {
-        stride(from: 0, to: apps.count, by: 2).map { Array(apps[$0..<min($0 + 2, apps.count)]) }
+    private var rows: [[WidgetSlot]] {
+        stride(from: 0, to: slots.count, by: 2).map { Array(slots[$0..<min($0 + 2, slots.count)]) }
     }
 
     /// Two rows of icon and name fill the small family's height.
@@ -157,7 +161,29 @@ private struct AppsGrid: View {
     }
 
     @ViewBuilder
-    private func cell(_ app: ShelfApp) -> some View {
+    private func cell(_ slot: WidgetSlot) -> some View {
+        switch slot {
+        case .app(let app):
+            if let instanceId { appCell(app, instanceId: instanceId) }
+        case .shortcut(let shortcut):
+            Link(destination: shortcut.link.url(scheme: linkScheme)) {
+                VStack(spacing: 4) {
+                    WidgetShortcutIcon(shortcut: shortcut, size: Self.iconSize)
+                    Text(String(localized: shortcut.title))
+                        .romeFont(11)
+                        .foregroundStyle(WidgetColors.label)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                // Match the fixed-size app tiles in this home-screen grid.
+                .dynamicTypeSize(.large)
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func appCell(_ app: ShelfApp, instanceId: String) -> some View {
         let content = VStack(spacing: 4) {
             WidgetAppIcon(app: app, image: icons[app.id], size: Self.iconSize)
             // One line, cut at the end: a small widget's half is about 60 pt wide.
@@ -175,6 +201,25 @@ private struct AppsGrid: View {
         } else {
             content
         }
+    }
+}
+
+private struct WidgetShortcutIcon: View {
+    let shortcut: WidgetShortcut
+    let size: CGFloat
+
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    var body: some View {
+        Image(systemName: shortcut.systemImage)
+            .romeFont(size * 0.45, .medium)
+            .foregroundStyle(renderingMode == .fullColor ? WidgetColors.label : .white)
+            .widgetAccentable()
+            .frame(width: size, height: size)
+            .background(
+                renderingMode == .fullColor ? WidgetColors.plate : Color.white.opacity(0.18),
+                in: RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+            )
     }
 }
 

@@ -32,7 +32,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - A wake-up an agent schedules for itself carries the agent's own note: why it waits, what to do on waking, and what it concerns, with when and from which turn it was set. The woken turn reads the note whichever session wakes. When the wake-up reaches a newer session than the one that set it, its turn also carries the [continuation](#continuation) notice. A wake-up set before notes existed carries none, and reaches the current session with the notice.
 - A reset happens only when a session is opened cold. See [Renewal](#renewal).
 - An approval holds its session for a day: a pending one from when it was asked for, an executing one from when it was approved. A request never answered, or an execution a crash left running, would otherwise keep the chat on one session for good. The cost is that an approval answered after a day resumes in a newer session, which reads the chat's earlier messages through the [continuation](#continuation) notice rather than holding them in context.
-- A chat shows a faint line where its session was replaced, with the reason: the setup changed, an idle or daily reset, or a working folder that is gone. The line is part of the new session's first turn, so it stays after a reload, counts as nothing unread and sends no push.
+- A chat shows nothing where its session was replaced: which session answers is Rome's business, not the reader's. The new session's first turn still records the replacement and its reason.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
@@ -54,41 +54,52 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 
 **Contracts:**
 
-- A change to an agent's setup reaches a session only when a fresh session opens.
+- A change to an agent's setup reaches a session only when a fresh session opens. A resumed thread is not one: Claude answers from the system prompt a thread started with, whatever its resume passes.
 - An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its stored session opened, the next time the chat opens it cold ([Renewal](#renewal)). The Concierge's chats work this way, since one of them could otherwise run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next cold open under such a policy.
 - A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds.
+- Memory and the guardian's profile are read on each cold open, but a resumed Claude thread reads them only once its session renews.
 
 ## Renewal
 
-A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup), a reset its chat's policy says is due, or a [full context](#handoff). It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup), a reset its chat's policy says is due, or a [full context](#handoff). A setup change or a reset renews only when a session is opened cold: opened by continuity key while it is not live in memory.
 
 **Contracts:**
 
-- A live session is never renewed. Until its idle eviction it keeps the prompt, tools, MCP servers, answer shape and model it opened with, and every turn sent to it meanwhile runs on it. The next cold open after the eviction compares the stored setup with the agent's current one and renews when they differ.
+- A live session is never renewed on a setup change or a reset. Until its idle eviction it keeps the prompt, tools, MCP servers, answer shape and model it opened with, and every turn sent to it meanwhile runs on it. The next cold open after the eviction compares the stored setup with the agent's current one.
 - A resume by id, such as a wake-up, resumes the session it names as it is, or the chat's current session when a reset superseded it. It never renews.
 - While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
 - A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
 - The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
-- An agent whose policy asks for it starts the successor from a [handoff](#handoff). The Concierge's chats work this way.
+- An agent whose policy asks for it carries the chat over to the successor. The Concierge's chats work this way.
+  - A setup change takes a light handoff: no turn writes a note and no model is asked, so the message that caused the cold open does not wait. The successor reads what the retired session held: the handoff that session started from, if any, and the chat's text messages since it opened. A turn counts whole when any of its messages came since, so the message that opened the session comes with its reply. A run of light renewals counts as one session, and nothing reaches back past a session that started any other way.
+  - A reset writes a [handoff](#handoff), and the successor reads it with the chat's latest messages up to about 16,000 tokens, newest first. The guardian's messages are kept whole. An agent's message over about 1,500 tokens is cut to its start and marked, since the full reply is in the chat history. A reset that is due when the setup changed too takes this path, since a light handoff would carry over what the reset drops.
+  - A full context writes a handoff ahead of time ([Handoff](#handoff)), which the successor reads the same way.
+- Every successor of such an agent carries what it reads inside its continuation notice, with the chat's open tasks as Rome holds them when the turn runs. Messages are the guardian's and the agent's text, never tool traces. It stops carrying them once a turn of its own succeeds.
+- A light handoff carries every such message, up to half the context limit (`SESSION_HANDOFF_CONTEXT_TOKENS`). A provider that compacted the retired session mid-turn left it holding less than that text, so the text can outgrow the window. When it is over half, the renewal writes a [handoff](#handoff) instead, at send time, and only then does the message wait. A successor that still ends a turn past the limit renews for a full context like any session.
 
 ## Handoff
 
-A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. It is written at send time, when a cold open decides to renew, and not while the chat is quiet.
+A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. A reset writes it at send time, when a cold open decides to renew, and so does a setup change whose light handoff would be too large. A full context writes it in the background, while the chat goes on. Any other setup change writes none ([Renewal](#renewal)).
 
 **Contracts:**
 
 - Only an agent whose policy asks for it gets a handoff. Every other renewal starts with the [continuation](#continuation) notice alone.
-- The retired session writes it, in one turn on its own thread with no tools, asked for the note alone. Nothing of that turn reaches the chat or the guardian's phone: it has no turn of its own in the chat, marks no message, and consumes no task event. The retired thread is not resumed after it.
+- The retired session writes it, in one turn with no tools, asked for the note alone. Nothing of that turn reaches the chat or the guardian's phone: it has no turn of its own in the chat, marks no message, and consumes no task event.
+- At send time, that turn runs on the retired thread, which is not resumed after it. While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
 - When the retired session has not written it within 30 seconds (`SESSION_HANDOFF_TIMEOUT_SECONDS`), or cannot, a small model writes it from the chat's recent messages and open tasks, within another 30 seconds (`SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS`). When that fails too, the renewal goes on without one.
-- While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
-- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice, with the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens. They stop carrying it once a turn of the successor succeeds.
-- The chat shows a renewal as one plain line, such as "Context tidied up · setup updated", which opens nothing: the handoff is the successor's, not shown in the chat. The model writing it is still told the chat's owner, who may be a visitor, could read it, and writes only what may be shown to them.
+- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice ([Renewal](#renewal)), and so does a successor that a setup change renewed later in the same run.
+- The handoff is the successor's and is not shown in the chat. The model writing it is still told the chat's owner, who may be a visitor, could read it, and writes only what may be shown to them.
 - An approval that holds a session still defers its renewal, so no handoff is written while it holds.
-- A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default, at least 50,000). The handoff is written then, in the background, once the turn has settled with nothing queued on the session, no caller holding it and no approval holding it, and the successor is stored with reason `context` on no thread yet. Otherwise the renewal steps aside and the next turn end past the limit tries again. Nothing waits on it while the session is in use. The next message opens the successor without waiting for a handoff, and a message that comes while it is written waits for it. When no handoff is written, the session stays, and a later turn end tries again.
+- A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default, at least 50,000):
+  - The handoff is written once the turn has settled with nothing queued on the session, no caller holding it and no approval holding it. Otherwise the renewal steps aside, and the next turn end past the limit tries again.
+  - The session stays live while it is written, and its turn runs on a branch of its thread, so the thread never reads the request. The chat's header does not change.
+  - A message that comes meanwhile goes to the live session and is answered at once, since its context is still under the limit the provider compacts at. The handoff is dropped as stale. The end of that turn, still past the limit, writes it again once the chat has been quiet for a minute, so a back-and-forth does not pay for a full-context call per message.
+  - Only a session whose context is past a hard limit (`SESSION_HANDOFF_HARD_CONTEXT_TOKENS`, 180,000 tokens by default, at least the limit above) makes that message wait for the renewal, with the header tidying up.
+  - Once a handoff is written with no turn since, the session is closed and its successor stored with reason `context`, on no thread yet. The next message opens the successor without waiting. When no handoff is written, the session stays, and a later turn end tries again.
 - A session that started from a handoff and that no turn has run on yet has no thread to hand off from. A setup change before its first turn gives it the new setup in place, and it keeps its handoff and the renewal it came from.
 - A handoff written for a renewal whose fresh session then fails to open is kept, in memory, and the next cold open reuses it rather than asking the retired session again.
-- A new session starts at about the size of its setup, its handoff and its recent messages (about 30,000 tokens for the Concierge). A limit near that size renews it after every turn, so the limit stays well above it.
+- A new session starts at about the size of its setup, its handoff and its recent messages (about 38,000 tokens for the Concierge). A limit near that size renews it after every turn, so the limit stays well above it.
 - A session's context size is the input of its latest model request, as the provider reports it. Each turn that reports one records it on the session. The providers' own compaction stays on as the safety net.
 
 ## Session in use
@@ -117,7 +128,7 @@ A session remembers the concrete model that produced its history — the **sessi
 - Outside Concierge provider failover, a pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
-- Each successful model turn also records the reasoning effort it ran with, as the adapter applied it and in the provider's own terms (for example Claude's `max`, Codex's `xhigh`). Webchat shows that value beside the pinned model, without mapping it to the composer's effort labels. The recorded effort is for display only and never seeds a later turn's effort, which each turn still takes from its own request or the agent's configured effort.
+- Each successful model turn also records the reasoning effort it ran with, as the adapter applied it and in the provider's own terms (for example Claude's `max`, Codex's `xhigh`). Webchat shows that value beside the pinned model, without mapping it to the composer's effort labels. The recorded effort is for display only and never seeds a later turn's effort, which each turn still takes from its own request, else the effort stored on its chat (a task chat's, which the Concierge picks), else the dashboard's setting or the agent's configured effort. A turn that names none and resumes the chat's session cold, as a `defer` wake-up or an approval's continuation does, runs at the effort stored on its chat, else the agent's. A Concierge chat ignores the request's effort and runs at its chat's, else its agent's.
 
 **Not to be confused with:**
 

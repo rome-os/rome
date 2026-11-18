@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatMessages, romeSessions } from "../schema.js";
+import { chatMessages, conciergeMessageTurns, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
@@ -361,6 +361,85 @@ describe("ConciergeTasksRepository", () => {
     });
   });
 
+  describe("tasks started in a chat thread", () => {
+    const say = async (chatId: string, text: string, replyTo?: string) =>
+      (
+        await chats.addBackendMessage(
+          chatId,
+          "turn-1",
+          [{ type: "text", content: text }],
+          replyTo ? { replyTo } : {},
+        )
+      ).id;
+
+    it("answers the newest task started in each thread, by the key of the thread's root", async () => {
+      await chats.createSession("concierge", "Concierge");
+      const root = await say("concierge", "Plan a trip");
+      const ack = await say("concierge", "On it", root);
+      const alone = await say("concierge", "Unrelated");
+      const [flights] = await repo.upsertMany(
+        [{ title: "Flights", sourceMessageId: root }],
+        new Date(1000),
+      );
+      const [hotels] = await repo.upsertMany(
+        [{ title: "Hotels", sourceMessageId: ack }],
+        new Date(2000),
+      );
+      const [elsewhere] = await repo.upsertMany([{ title: "Elsewhere", sourceMessageId: alone }]);
+
+      const found = await repo.threadTasks("concierge", [root, alone, "missing"]);
+
+      expect(flights!.id).not.toBe(hotels!.id);
+      expect(found).toEqual(
+        new Map([
+          [root, { id: hotels!.id, title: "Hotels" }],
+          [alone, { id: elsewhere!.id, title: "Elsewhere" }],
+        ]),
+      );
+    });
+
+    it("leaves out a thread no task started in, and the tasks of another chat's threads", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const quiet = await say("concierge", "Hello");
+      const inTopic = await say("topic-1", "Agenda");
+      await repo.upsertMany([{ title: "Agenda", chatId: "topic-1", sourceMessageId: inTopic }]);
+
+      expect(await repo.threadTasks("concierge", [quiet, inTopic])).toEqual(new Map());
+      expect(await repo.threadTasks("concierge", [])).toEqual(new Map());
+      expect([...(await repo.threadTasks("topic-1", [inTopic])).keys()]).toEqual([inTopic]);
+    });
+
+    it("finds the tasks a message started, in its chat, and no others", async () => {
+      await chats.createSession("concierge", "Concierge");
+      const start = await say("concierge", "Book flights");
+      const other = await say("concierge", "Weather?");
+      const [flights, hotels] = await repo.upsertMany(
+        [
+          { title: "Flights", sourceMessageId: start },
+          { title: "Hotels", sourceMessageId: start },
+          { title: "Weather", sourceMessageId: other },
+        ],
+        new Date(1000),
+      );
+
+      const started = await repo.listStartedAt("concierge", start);
+
+      expect(started.map((task) => task.row.id).sort()).toEqual([flights!.id, hotels!.id].sort());
+      expect(started.every((task) => task.sourceMessageId === start)).toBe(true);
+      expect(await repo.listStartedAt("concierge", "missing")).toEqual([]);
+      expect(await repo.listStartedAt("topic-none", start)).toEqual([]);
+    });
+  });
+
   describe("Concierge chat of a row", () => {
     it("is the main chat unless the row names another, and the main chat once that chat is gone", async () => {
       await chats.createSession("concierge", "Concierge");
@@ -430,10 +509,6 @@ describe("ConciergeTasksRepository", () => {
         { title: "A", chatId: "topic-1", state: "doing" },
         { title: "B", chatId: "topic-1", state: "done" },
       ]);
-      await repo.setThreadRoot(open.id, "m0");
-      await repo.setThreadRoot(done.id, "m1");
-      const retired: string[] = [];
-      repo.onThreadRetired(({ root }) => retired.push(root));
       await chats.archiveSession("topic-1");
       // The open rows are the ones whose status has not ended, as the caller derives it.
       expect(await repo.leaveChat("topic-1", async () => new Set([open.id]))).toBe(1);
@@ -442,35 +517,6 @@ describe("ConciergeTasksRepository", () => {
         expect(found?.row.chatId).toBe("topic-1");
         expect(found?.conciergeChat).toMatchObject({ id: CONCIERGE_CHAT_ID, main: true });
       }
-      // An open task starts a new thread in the main chat; an ended one keeps its own.
-      expect((await repo.get(open.id))?.threadRoot).toBeNull();
-      expect((await repo.get(done.id))?.threadRoot).toBe("m1");
-      expect(retired).toEqual(["m0"]);
-    });
-
-    it("drops every row's thread root when its chat is deleted, since the messages that named them are gone", async () => {
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const [open, done] = await repo.upsertMany([
-        { title: "A", chatId: "topic-1", state: "doing" },
-        { title: "B", chatId: "topic-1", state: "done" },
-      ]);
-      await repo.setThreadRoot(open.id, "m0");
-      await repo.setThreadRoot(done.id, "m1");
-      expect(
-        await repo.leaveChat("topic-1", async () => new Set([open.id]), { deleted: true }),
-      ).toBe(1);
-      expect((await repo.get(open.id))?.threadRoot).toBeNull();
-      expect((await repo.get(done.id))?.threadRoot).toBeNull();
-      // Its next message in the main chat roots a thread there.
-      expect(await repo.setThreadRoot(done.id, "main-m2")).toBe("main-m2");
     });
 
     it("keeps a row its owner's when its chat is deleted without moving it", async () => {
@@ -572,7 +618,7 @@ describe("ConciergeTasksRepository", () => {
     await repo.reannounce(first.id);
     expect(seen.at(-1)).toBe("A:doing:refresh");
   });
-  describe("status reactions and chat threads", () => {
+  describe("message turns", () => {
     const conciergeChat = (id: string, ownerKey: string | null = null) =>
       chats.createSession(
         id,
@@ -586,57 +632,68 @@ describe("ConciergeTasksRepository", () => {
         null,
         { ownerKey },
       );
-    it("keeps which turn took a message and whether it answered it, and which tasks were made for it", async () => {
-      const told: string[] = [];
-      repo.onMessageChange(({ messageKey }) => told.push(messageKey));
+    // Whether the turn that took message `key` of chat `chatId` answered it, or null when none took it.
+    const answered = async (chatId: string, key: string) => {
+      const [row] = await testDb.db
+        .select({ answeredAt: conciergeMessageTurns.answeredAt })
+        .from(conciergeMessageTurns)
+        .where(
+          and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.messageKey, key)),
+        );
+      return row ? row.answeredAt !== null : null;
+    };
+
+    it("keeps which turn took a message and whether it answered it", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      const [task] = await repo.upsertMany([{ title: "A" }]);
-      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
-      expect(await repo.messageMarks("concierge", ["g1", "g2", "g3"])).toEqual(
-        new Map([
-          ["g1", { answered: false, turnFailed: false, taskIds: [] }],
-          ["g2", { answered: false, turnFailed: false, taskIds: [task!.id] }],
-        ]),
-      );
+      expect(await answered("concierge", "g1")).toBe(false);
+      expect(await answered("concierge", "g3")).toBeNull();
       // Saying an answer answers that message; the end of every turn not running, the rest.
       await repo.answerMessage("concierge", "g1");
       await repo.takeMessage("t3", { chatId: "concierge", messageKey: "g3" });
       expect(await repo.answerTurns("concierge", ["t3"])).toBe(1);
-      expect((await repo.messageMarks("concierge", ["g2", "g3"])).get("g2")?.answered).toBe(true);
-      expect((await repo.messageMarks("concierge", ["g3"])).get("g3")?.answered).toBe(false);
-      expect(told).toEqual(["g1", "g2", "g2", "g1", "g3", "g2"]);
+      expect(await answered("concierge", "g1")).toBe(true);
+      expect(await answered("concierge", "g2")).toBe(true);
+      expect(await answered("concierge", "g3")).toBe(false);
     });
 
-    it("hands a message on to the turn that takes it over, and reopens it all when that turn runs again", async () => {
+    it("tells a stopped turn's messages to the next turn, once", async () => {
+      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
+      await repo.answerTurns("concierge", ["t2"], new Date(), { stopped: true });
+      expect(await repo.takeStoppedRequests("concierge")).toEqual(["g1"]);
+      expect(await repo.takeStoppedRequests("concierge")).toEqual([]);
+    });
+
+    it("hands a message on to the turn that takes it over, and reopens what its failure left when that turn runs again", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
       // A newer turn took g1 over.
       await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g1" });
-      await repo.answerTurns("concierge", []);
+      // It answered g3 before it failed.
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g3" });
+      await repo.answerMessage("concierge", "g3");
+      await repo.answerTurns("concierge", [], new Date(), { failed: true });
       expect(await repo.reopenTurn("concierge", "t2")).toBe(2);
-      const marks = await repo.messageMarks("concierge", ["g1", "g2"]);
-      expect([marks.get("g1")?.answered, marks.get("g2")?.answered]).toEqual([false, false]);
+      expect(
+        await Promise.all(["g1", "g2", "g3"].map((key) => answered("concierge", key))),
+      ).toEqual([false, false, true]);
     });
 
     it("answers every open message after a restart, except in a chat whose turn continues", async () => {
       await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
       await repo.takeMessage("t2", { chatId: "topic", messageKey: "g2" });
       expect(await repo.answerInterrupted(new Set(["topic"]))).toBe(1);
-      expect((await repo.messageMarks("concierge", ["g1"])).get("g1")?.answered).toBe(true);
-      expect((await repo.messageMarks("topic", ["g2"])).get("g2")?.answered).toBe(false);
+      expect(await answered("concierge", "g1")).toBe(true);
+      expect(await answered("topic", "g2")).toBe(false);
     });
 
-    it("forgets a deleted chat's marks, and no other chat's", async () => {
-      const [task] = await repo.upsertMany([{ title: "A" }]);
-      await repo.linkMessage(task!.id, { chatId: "topic", messageKey: "g1" });
-      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
-      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g3" });
+    it("forgets a deleted chat's turns, and no other chat's", async () => {
+      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
       await repo.forgetMessages("topic");
-      expect(await repo.messagesOfTask(task!.id)).toEqual([
-        { chatId: "concierge", messageKey: "g2" },
-      ]);
-      expect(await repo.messageMarks("topic", ["g3"])).toEqual(new Map());
+      expect(await answered("topic", "g1")).toBeNull();
+      expect(await answered("concierge", "g2")).toBe(false);
     });
 
     it("keeps a task's result unsaid from the end of its chat's work until it is reported", async () => {
@@ -645,22 +702,6 @@ describe("ConciergeTasksRepository", () => {
       expect(await repo.tasksWithUnsaidOutcome()).toEqual([task!.id]);
       await repo.markReported([task!.id]);
       expect(await repo.tasksWithUnsaidOutcome()).toEqual([]);
-    });
-
-    it("tells a visitor's main chat, not the guardian's, when a task leaves it", async () => {
-      const owner = "visitor:acct-ann";
-      const main = mainChatIdOf(owner);
-      await conciergeChat(main, owner);
-      await conciergeChat("ann-topic", owner);
-      await conciergeChat("ann-other", owner);
-      const [row] = await repo.upsertMany([{ title: "A", chatId: "ann-topic", state: "doing" }]);
-      await repo.setThreadRoot(row!.id, "r1");
-      // The topic is deleted: the row is its owner's main chat's, unlinked.
-      await chats.deleteSession("ann-topic");
-      const retired: unknown[] = [];
-      repo.onThreadRetired((event) => retired.push(event));
-      await repo.upsertMany([{ id: row!.id, chatId: "ann-other" }]);
-      expect(retired).toEqual([{ chatId: main, root: "r1" }]);
     });
   });
 });

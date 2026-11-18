@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchApproval, resolveApproval } from "@/lib/chat-api";
 import { sameApproval } from "@/lib/chat-helpers";
+import { grantVaultSecret } from "@/lib/vault-api";
 import { emitSessionsChanged } from "@/lib/session-events";
 import type { ApprovalCardStatus, ApprovalRecord } from "@/lib/chat-types";
 import { deriveCardStatus, isTerminalCardStatus } from "./derive-card-status";
@@ -18,13 +19,21 @@ export interface UseApprovalCardArgs {
   onResolved: () => void;
 }
 
+/** What approving a vault secret sends besides the approval: the grant and the guardian's PIN. */
+interface SecretGrant {
+  names: string[];
+  ttlMinutes: number;
+  pin: string;
+}
+
 export interface UseApprovalCardResult {
   status: ApprovalCardStatus;
   isTerminal: boolean;
   record: ApprovalRecord | null;
   submitting: Intent | null;
   submitError: string | null;
-  submit: (intent: Intent) => Promise<void>;
+  /** With a `grant`, approving goes through the vault, which checks the PIN. */
+  submit: (intent: Intent, grant?: SecretGrant) => Promise<void>;
 }
 
 export function useApprovalCard({
@@ -134,22 +143,27 @@ export function useApprovalCard({
     onResolvedRef.current();
   }, [isTerminal]);
 
-  const submit = async (intent: Intent) => {
+  const submit = async (intent: Intent, grant?: SecretGrant) => {
     setSubmitting(intent);
     setSubmitError(null);
     try {
-      const result = await resolveApproval(approvalId, intent);
-      if (!result.ok) {
-        setSubmitError(
-          result.error ??
-            t(
-              intent === "approve"
-                ? "approvals.errors.approveStatus"
-                : "approvals.errors.rejectStatus",
-              { status: result.status },
-            ),
-        );
-        return;
+      if (grant) {
+        // A failed grant throws an error whose message the guardian reads.
+        await grantVaultSecret({ approvalId, ...grant });
+      } else {
+        const result = await resolveApproval(approvalId, intent);
+        if (!result.ok) {
+          setSubmitError(
+            result.error ??
+              t(
+                intent === "approve"
+                  ? "approvals.errors.approveStatus"
+                  : "approvals.errors.rejectStatus",
+                { status: result.status },
+              ),
+          );
+          return;
+        }
       }
       // Optimistic update so the badge/buttons flip immediately instead of
       // briefly reverting to "Approve" while we wait for the next 3s poll.

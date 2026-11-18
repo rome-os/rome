@@ -48,17 +48,23 @@ export interface InboundMessage {
    *  as the dashboard does. Absent, the body's text is its one part. */
   readonly parts?: readonly MessagePart[];
   readonly replyTo?: string;
+  /** Whether the chat's owner has seen it by the time it is recorded, as
+   *  for what the owner said themselves. Absent, it is unread
+   *  (docs/domains/chats.md#chat-thread). */
+  readonly read?: boolean;
   readonly at: Date;
 }
 
 /** A message for `MessageRepository.record` (message-repository.ts). */
 export type Message = InboundMessage;
 
-/** A message once it is on record: the id Chats gave it, and the id of the
- *  message it quotes when Rome holds that message. */
+/** A message once it is on record: the id Chats gave it, the id of the
+ *  message it quotes when Rome holds that message, and the key of its chat
+ *  thread's root (docs/domains/chats.md#chat-thread). */
 export type RecordedMessage = Omit<Message, "replyTo"> & {
   readonly id: number;
   readonly replyTo?: number;
+  readonly chatThread?: string;
 };
 
 /**
@@ -95,7 +101,7 @@ export interface SaidMessage {
   readonly parts: string;
   readonly replyTo?: number;
   /** The chat thread the message is in (docs/domains/chats.md#chat-thread):
-   *  the key of its first message. Absent when it is in none. */
+   *  the key of its root, which is its own key when it replies to nothing. */
   readonly chatThread?: string;
   readonly at: Date;
 }

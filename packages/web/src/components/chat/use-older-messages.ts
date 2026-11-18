@@ -20,8 +20,17 @@ import type { ChatMessage } from "@/lib/chat-types";
 export const CHAT_PAGE_TURNS = 10;
 export const CONCIERGE_PAGE_TURNS = 30;
 
+// Bound first-load root reads to two older pages. `through` can exceed `limit`.
+export const CONCIERGE_ROOT_PAGE_TURNS = 60;
+
 /** How far above the viewport the sentinel counts as reached, so older turns arrive before the top does. */
 const LOAD_AHEAD_PX = 800;
+
+/** Quiet time that ends one scroll gesture, so the next one may load a page. */
+const GESTURE_IDLE_MS = 250;
+
+/** How close to the top, in px, the scroll counts as at the top. */
+const TOP_PX = 1;
 
 /** Wait after a failed page before the sentinel tries again. */
 const RETRY_DELAY_MS = 3_000;
@@ -52,6 +61,17 @@ interface UseOlderMessagesOptions {
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
   /** Called with the messages of each older page that loads, once it is merged in. */
   onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
+  /**
+   * Pages load only on demand, as when a chat thread is in focus: the rows
+   * outside it are hidden, so a page adds no height and the sentinel would
+   * report again until the history ran out. The sentinel then loads nothing,
+   * and one page loads for each gesture that pushes up against the top of the
+   * scroll: a wheel up, a pull down on a touch screen, or PageUp, Home or the
+   * up arrow outside a field. That also holds with too little to scroll.
+   */
+  onDemand?: boolean;
+  /** With `onDemand`, whether the reader already has all they can want: a push then loads nothing. */
+  satisfied?: boolean;
 }
 
 export interface OlderMessages {
@@ -75,7 +95,15 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages, onOlderPage }: UseOlderMessagesOptions,
+  {
+    pageTurns,
+    scroller,
+    pinned,
+    setMessages,
+    onOlderPage,
+    onDemand = false,
+    satisfied = false,
+  }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
@@ -176,7 +204,8 @@ export function useOlderMessages(
   // Observing again after each page re-reports a sentinel that is still in
   // range, so a short transcript keeps loading until it fills the viewport.
   useEffect(() => {
-    if (!sessionId || !sentinel || !scroller || !waiting || loading || retryBlocked) return;
+    if (onDemand || !sessionId || !sentinel || !scroller || !waiting || loading || retryBlocked)
+      return;
     if (typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -186,7 +215,63 @@ export function useOlderMessages(
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [sessionId, sentinel, scroller, waiting, loading, retryBlocked, loadOlder]);
+  }, [onDemand, sessionId, sentinel, scroller, waiting, loading, retryBlocked, loadOlder]);
+
+  // One page for each gesture against the top. Events that follow each other
+  // within GESTURE_IDLE_MS are one gesture, momentum included, judged by when
+  // the input happened, not when it was handled: a page that is rendering
+  // delays the handlers, and must not split a gesture in two. A page that is
+  // still on its way is not asked for twice.
+  useEffect(() => {
+    if (!onDemand || satisfied || !sessionId || !scroller || !waiting) return;
+    let loaded = false;
+    let last = Number.NEGATIVE_INFINITY;
+    const push = (at: number) => {
+      if (at - last > GESTURE_IDLE_MS) loaded = false;
+      last = at;
+      if (loaded || scroller.scrollTop > TOP_PX) return;
+      loaded = true;
+      void loadOlder(sessionId);
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) push(event.timeStamp);
+    };
+    let touchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? 0;
+      loaded = false;
+      last = event.timeStamp;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY ?? touchY;
+      if (y > touchY) push(event.timeStamp);
+      touchY = y;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof Element &&
+        event.target.closest("input, textarea, select, [contenteditable]");
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        typing ||
+        !["PageUp", "Home", "ArrowUp"].includes(event.key)
+      )
+        return;
+      loaded = false;
+      push(event.timeStamp);
+    };
+    scroller.addEventListener("wheel", onWheel, { passive: true });
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      scroller.removeEventListener("wheel", onWheel);
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onDemand, satisfied, sessionId, scroller, waiting, loadOlder]);
 
   return { setCursor, hasOlder, sentinelRef, loadOlder };
 }

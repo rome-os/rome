@@ -169,6 +169,13 @@ describe("Markdown semantic tokens", () => {
       expect(block).toContain("line-height: inherit;");
       expect(block).toContain("border-bottom: 1px solid");
     }
+    const header = declarations(
+      markdownCss,
+      '.rome-markdown [data-streamdown="table-header-cell"]',
+    );
+    expect(header).toContain("white-space: nowrap;");
+    // The first column's label gets a wider floor, not nowrap: a sentence there still wraps.
+    expect(markdownCss).toMatch(/\):first-child \{\s*min-width: 8em;\s*\}/);
   });
 
   it("sets message prose with small headings, a loose line and a block gap on the grid", () => {

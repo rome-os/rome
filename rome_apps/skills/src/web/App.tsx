@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { navigateRome, type RomeAppBootstrap } from "@rome-os/app-web-sdk";
 import { ArrowUp, ChevronDown, FileText, Link2, PenLine, Plus, Search, Zap } from "lucide-react";
 import "./styles.css";
+import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 
 interface SkillSummary {
   name: string;
@@ -136,7 +137,7 @@ function AddSkillBar() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (shouldSubmitOnEnter(e)) {
               e.preventDefault();
               submit();
             }
@@ -239,7 +240,8 @@ function SkillRow({
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if (isImeCompositionEvent(e)) return;
+                  if (shouldSubmitOnEnter(e)) {
                     e.preventDefault();
                     startChat();
                   } else if (e.key === "Escape") {

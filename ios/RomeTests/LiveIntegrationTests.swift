@@ -42,7 +42,6 @@ struct LiveIntegrationTests {
         let concierge = try await backend.conciergeSession()
         #expect(concierge.id == "concierge")
         _ = try await backend.messages(sessionId: concierge.id, before: nil, limit: 20)
-        _ = try await backend.tasks()
         _ = try await backend.sessions()
         _ = try await backend.activeTurns(sessionId: concierge.id)
         let tools = try await backend.aiTools()

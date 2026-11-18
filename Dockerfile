@@ -375,6 +375,8 @@ COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 # rome-init.sh; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
 RUN ln -sf /app/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node
+# The vault CLI ships inside the signer package, next to the signer it talks to.
+RUN ln -sf /app/packages/signer/bin/vault.js /usr/local/bin/vault
 
 # Chrome/CDP launcher assets
 RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/rome-apply-cdp-stealth.sh

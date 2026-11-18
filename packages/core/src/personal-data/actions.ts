@@ -1,0 +1,201 @@
+// `core:personal_data_catalog` and `core:personal_data_query`: how an Agent reads user
+// data. Both are personal-data actions, so they run only in a private turn
+// (docs/domains/participation.md#audience). Contract: docs/personal-data.md#agent-access.
+
+import { actionExecutionContext } from "../apps/actions/context.js";
+import type { ActionRegistry } from "../apps/actions/types.js";
+import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
+import { queryInputSchema } from "./domain/query.js";
+import { queryPersonalData } from "./read.js";
+import type { PersonalDataRepository } from "./repository.js";
+import { type ConnectionLookup, connectionPointer, NO_CONNECTIONS } from "./connection-pointer.js";
+import { sourceSpec, PERSONAL_DATA_SOURCES } from "./sources/index.js";
+
+export const PERSONAL_DATA_CATALOG_ACTION = "core:personal_data_catalog";
+export const PERSONAL_DATA_QUERY_ACTION = "core:personal_data_query";
+
+const CONNECTION =
+  "Where the stored data does not cover the window, the reply's connection names the device " +
+  "connection that reads the rest live, with its state, or not_connected, and a next step to " +
+  "take in the same reply.";
+
+// Data can be deleted or change between turns, and a number from earlier in
+// the chat reads as current when it is not.
+const CURRENT_ONLY =
+  "Answer only from this turn's reply or live read: never give a number from earlier in the " +
+  "conversation as current. When the store holds nothing, say so plainly, and that the data " +
+  "may have been deleted.";
+
+export interface PersonalDataActionDeps {
+  personalData: PersonalDataRepository;
+  /** The guardian's time zone, the default zone of a query. */
+  guardianTimeZone: () => Promise<string>;
+  /** The device connections, which a source's pointer names. */
+  connections?: ConnectionLookup;
+  now?: () => number;
+}
+
+/** The running turn as a live read needs it: the device the guardian asks from. */
+function liveTurn(): LiveTurn {
+  return { askingDeviceId: askingDeviceOf(actionExecutionContext.getStore()?.channelContext) };
+}
+
+export function registerPersonalDataActions(
+  actions: Pick<ActionRegistry, "register">,
+  deps: PersonalDataActionDeps,
+): void {
+  const now = deps.now ?? Date.now;
+  const connections = deps.connections ?? NO_CONNECTIONS;
+  actions.register({
+    config: {
+      name: PERSONAL_DATA_CATALOG_ACTION,
+      type: "system",
+      description:
+        "List the guardian's personal data that their devices sync to Rome, such as Apple Health " +
+        "or their phone's calendar: " +
+        "each source, the device it comes from, when it last synced, each type with its unit, " +
+        "range and how far it is synced, and the device connection that reads the source live, " +
+        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${CURRENT_ONLY} ` +
+        "Runs only in a private chat with the guardian.",
+      complexity: "simple",
+      speed: "fast",
+      reliability: "high",
+      sideEffects: "read-only",
+    },
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    execute: async () => {
+      const turn = liveTurn();
+      // The envelope's connectionId is no longer read: the connection layer
+      // chooses, by the asking device and the origin's install.
+      const stored = deps.personalData.catalog().map(({ connectionId: _link, ...entry }) => ({
+        ...entry,
+        connection: connectionPointer(entry.source, turn, connections, entry.origin.id),
+      }));
+      // A source no device has synced yet, but whose device reads it live,
+      // as just after a connect: listed with no types, so the Agent reads live.
+      // Listed too when only the asking device lacks the connection: the
+      // pointer then names its kind, so the Agent can offer that device's card.
+      const unsynced = PERSONAL_DATA_SOURCES.flatMap((spec) => {
+        if (stored.some((entry) => entry.source === spec.source)) return [];
+        const connection = connectionPointer(spec.source, turn, connections);
+        if (connection.state === "not_connected" && !connection.kind) return [];
+        return [{ source: spec.source, title: spec.title, note: spec.note, types: [], connection }];
+      });
+      return { status: "ok", data: { sources: [...stored, ...unsynced] } };
+    },
+  });
+
+  const sourceNames = PERSONAL_DATA_SOURCES.map((source) => source.source);
+  actions.register({
+    config: {
+      name: PERSONAL_DATA_QUERY_ACTION,
+      type: "system",
+      description:
+        "Aggregate or list the guardian's synced personal data, such as Apple Health steps, sleep, " +
+        "heart rate or workouts, or calendar events, over a time window. The input " +
+        "and reply follow the iPhone's health.stats: types, start, end, interval, aggregate, unit. " +
+        "A bucket with no value is left out, never 0. Week, month and total averages are the mean " +
+        "of daily averages (aggregate avg_of_days). A type of entries, such as calendar events, is " +
+        "listed, never aggregated: send type, start and end, and search to match words; each entry " +
+        "in the window, or overlapping it, comes with its content. Answers such as whether the " +
+        "guardian is free come from these entries even while their device is away. The reply's " +
+        `freshness says how far each type is synced. ${CONNECTION} ` +
+        `${CURRENT_ONLY} ` +
+        "Runs only in a private chat with the guardian.",
+      complexity: "simple",
+      speed: "fast",
+      reliability: "high",
+      sideEffects: "read-only",
+    },
+    inputSchema: {
+      type: "object",
+      required: ["source"],
+      properties: {
+        source: {
+          type: "string",
+          enum: sourceNames,
+          description: "The source, such as apple_health or apple_calendar.",
+        },
+        types: {
+          type: "array",
+          items: { type: "string" },
+          description: "Types to read, such as stepCount and sleep. Send types or type.",
+        },
+        type: { type: "string", description: "One type to read." },
+        start: {
+          type: "string",
+          description:
+            "ISO 8601 time, with or without offset (without one, in timeZone), or YYYY-MM-DD in timeZone. Default: today from local midnight.",
+        },
+        end: {
+          type: "string",
+          description: "As start; a date means the end of that day. Default: now.",
+        },
+        timeZone: {
+          type: "string",
+          description: "IANA zone for dates and buckets. Default: the guardian's time zone.",
+        },
+        interval: {
+          type: "string",
+          enum: ["total", "hour", "day", "week", "month"],
+          description: "Bucket width, at most 1000 buckets. Default: total.",
+        },
+        aggregate: {
+          type: "string",
+          enum: ["sum", "avg", "min", "max", "latest"],
+          description:
+            "Default: sum for cumulative types such as stepCount, avg for the rest. latest does not fit cumulative types, sum does not fit averaged ones.",
+        },
+        unit: { type: "string", description: "Convert to this unit, such as km, kJ, lb or degF." },
+        records: {
+          type: "object",
+          description:
+            "For one sample or record type (sleep, workouts, body readings): list the records instead of aggregating. A type of entries is always listed; this sets its page.",
+          properties: {
+            limit: { type: "integer", description: "At most 500. Default 100." },
+            cursor: { type: "string", description: "The nextCursor of the previous page." },
+          },
+          additionalProperties: false,
+        },
+        search: {
+          type: "string",
+          description:
+            "For a type of entries: only those whose words hold this text, any case, such as a person's name.",
+        },
+      },
+      additionalProperties: false,
+    },
+    execute: async (args) => {
+      // A routine's fire adds the payload that fired it, which a query does not read.
+      const { __triggerPayload: _payload, ...query } = args;
+      const input = queryInputSchema.safeParse(query);
+      if (!input.success) {
+        const issue = input.error.issues[0];
+        return {
+          status: "error",
+          error: `Invalid input${issue?.path.length ? ` at ${issue.path.join(".")}` : ""}: ${issue?.message}`,
+        };
+      }
+      const source = sourceSpec(input.data.source);
+      if (!source) {
+        return {
+          status: "error",
+          error: `Unknown source "${input.data.source}". Sources: ${sourceNames.join(", ")}.`,
+        };
+      }
+      const answer = queryPersonalData(
+        deps.personalData,
+        source,
+        input.data,
+        {
+          tz: await deps.guardianTimeZone(),
+          now: now(),
+        },
+        connections,
+        liveTurn(),
+      );
+      if ("error" in answer) return { status: "error", error: answer.error };
+      return { status: "ok", data: answer };
+    },
+  });
+}

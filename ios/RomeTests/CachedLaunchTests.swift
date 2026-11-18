@@ -320,6 +320,18 @@ extension LastInstanceDefaults {
             }
         }
 
+        @Test func aChatShortcutThatLaunchedTheAppIsFollowed() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: fresh)
+                await app.openFromWidget(.chat)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "b") == .chat)
+                #expect(app.widgetRequest == nil)
+            }
+        }
+
         /// On a stopped page, a widget tap opens its app's instance, then the
         /// app, as a push tap opens its chat. Fails before the fix: the link
         /// only waited, and nothing showed.

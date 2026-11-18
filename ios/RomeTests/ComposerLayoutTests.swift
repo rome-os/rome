@@ -41,18 +41,9 @@ import UIKit
     }
 }
 
-/// A transcript whose content shrank under it never stays scrolled past its end.
+/// A long reply folds from its first frame.
 @MainActor
 @Suite struct TranscriptEndTests {
-    @Test func anOffsetPastTheEndGoesBackToTheEnd() {
-        // 2000 pt of rows in an 800 pt view with a 100 pt composer inset: the end is at 1300.
-        #expect(ScrollHandle.clampedOffset(offset: 1700, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == 1300)
-        #expect(ScrollHandle.clampedOffset(offset: 1300, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == nil)
-        #expect(ScrollHandle.clampedOffset(offset: 900, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == nil)
-        // Rows shorter than the view: the end is the top.
-        #expect(ScrollHandle.clampedOffset(offset: 400, contentHeight: 300, viewHeight: 800, topInset: 60, bottomInset: 100) == -60)
-    }
-
     /// A long reply is held to its folded height before it is measured.
     @Test func aLongReplyFoldsFromItsFirstFrame() {
         let long = AgentBubble.foldHeight(for: .large) * 3
@@ -61,4 +52,327 @@ import UIKit
         #expect(!AgentBubble.capped(measured: long, expanded: true, size: .large))
         #expect(!AgentBubble.capped(measured: 40, expanded: false, size: .large))
     }
+}
+
+@Suite struct ComposerHeightTests {
+    @Test func expandingGivesLongDraftsMoreRoomWithoutExceedingTheCap() {
+        for size in DynamicTypeSize.allCases {
+            let line = ComposerTextView.font(for: size).lineHeight
+            let inset = ComposerTextView.verticalInset(lineHeight: line)
+            let folded = ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: false)
+            let expanded = ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: true)
+            #expect(expanded >= folded)
+            #expect(folded >= line + inset * 2)
+            #expect(expanded <= max(280, line + inset * 2))
+        }
+        let line = ComposerTextView.font(for: .large).lineHeight
+        let inset = ComposerTextView.verticalInset(lineHeight: line)
+        #expect(ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: true)
+            > ComposerTextView.heightLimit(lineHeight: line, inset: inset, expanded: false))
+    }
+}
+
+@MainActor
+@Suite(.serialized) struct ComposerMorphTests {
+    @Observable final class Draft {
+        var text = "A draft with a selected word"
+        var focused = false
+        var expanded = false
+    }
+
+    final class Heights { var values: [CGFloat] = [] }
+
+    private struct Host: View {
+        @Bindable var draft: Draft
+        let attachments: ComposerAttachments
+        var heights: Heights? = nil
+
+        var body: some View {
+            VStack {
+                Spacer()
+                Composer(text: $draft.text, placeholder: "Message", focused: $draft.focused,
+                    attachments: attachments, onSend: {})
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights?.values.append($0) }
+            }
+            .padding(16)
+        }
+    }
+
+    private func editors(in view: UIView) -> [PastingTextView] {
+        (view as? PastingTextView).map { [$0] } ?? view.subviews.flatMap { editors(in: $0) }
+    }
+
+    /// Waits for a layout state, laying `view` out on each pass. On CI the main
+    /// actor stalls for tens of seconds while the suites start, and the run
+    /// loop's own layout passes come seldom; time queued behind them is not a
+    /// pass either.
+    private func waitUntil(_ message: @autoclosure () -> String = "Composer layout did not settle", laying view: UIView? = nil, _ condition: () -> Bool) async throws {
+        for _ in 0..<300 {
+            view?.layoutIfNeeded()
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        view?.layoutIfNeeded()
+        try #require(condition(), Comment(rawValue: message()))
+    }
+
+    /// Focus without the system keyboard: these tests check the composer, and
+    /// the keyboard's bring-up is one more cross-process wait they don't need.
+    private func noKeyboard(_ editor: PastingTextView) {
+        editor.inputView = UIView(frame: .zero)
+        if editor.isFirstResponder { editor.reloadInputViews() }
+    }
+
+    private func state(_ editor: PastingTextView, compactWidth: CGFloat) -> String {
+        "firstResponder=\(editor.isFirstResponder) width=\(editor.bounds.width) compact=\(compactWidth) selection=\(editor.selectedRange)"
+    }
+
+    @Test func morphKeepsTheEditorAndSelection() async throws {
+        let draft = Draft()
+        let host = UIHostingController(rootView: Host(draft: draft, attachments: ComposerAttachments()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil(laying: host.view) { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        noKeyboard(editor)
+        editor.selectedRange = NSRange(location: 15, length: 8)
+        let selection = editor.selectedRange
+        let compactWidth = editor.bounds.width
+
+        draft.focused = true
+        try await waitUntil("The editor did not focus and widen: \(state(editor, compactWidth: compactWidth))", laying: host.view) {
+            editor.isFirstResponder && editor.bounds.width > compactWidth + 1
+        }
+        #expect(editors(in: host.view).count == 1)
+        #expect(editors(in: host.view).first === editor)
+        #expect(editor.selectedRange == selection)
+        #expect(editor.bounds.width > compactWidth)
+
+        draft.focused = false
+        try await waitUntil("The editor did not blur and narrow: \(state(editor, compactWidth: compactWidth))", laying: host.view) {
+            !editor.isFirstResponder && abs(editor.bounds.width - compactWidth) < 1
+        }
+        #expect(editors(in: host.view).first === editor)
+        #expect(editor.selectedRange == selection)
+        #expect(editor.text == draft.text)
+        #expect(abs(editor.bounds.width - compactWidth) < 1)
+    }
+
+    @Test func restoredMultilineDraftStartsAtItsMeasuredHeight() async throws {
+        let draft = Draft()
+        draft.text = Array(repeating: "Restored draft", count: 8).joined(separator: "\n")
+        let heights = Heights()
+        let host = UIHostingController(rootView: Host(draft: draft, attachments: ComposerAttachments(), heights: heights))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { !heights.values.isEmpty }
+        #expect(try #require(heights.values.first) > 100)
+    }
+
+    @Test func measurementReportsExpansionOnlyForOverflowingDrafts() async throws {
+        let draft = Draft()
+        let reports = Reports()
+        let host = UIHostingController(rootView: MeasuredHost(draft: draft, reports: reports))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { reports.overflow != nil }
+        #expect(reports.overflow == false)
+        draft.text = Array(repeating: "A line of the long draft", count: 20).joined(separator: "\n")
+        try await waitUntil { reports.overflow == true }
+        draft.text = "Short again"
+        try await waitUntil { reports.overflow == false }
+    }
+
+    @Test func collapsingLongDraftKeepsTheCaretVisible() async throws {
+        let draft = Draft()
+        draft.text = Array(repeating: "A line of the long draft", count: 30).joined(separator: "\n")
+        draft.expanded = true
+        let host = UIHostingController(rootView: MeasuredHost(draft: draft, reports: Reports()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil(laying: host.view) { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        noKeyboard(editor)
+        draft.focused = true
+        try await waitUntil("The expanded editor did not become ready", laying: host.view) {
+            editor.isFirstResponder && editor.isScrollEnabled && editor.bounds.height > 200
+        }
+        editor.selectedRange = NSRange(location: (draft.text as NSString).length, length: 0)
+        editor.layoutIfNeeded()
+        let caret = editor.caretRect(for: editor.endOfDocument)
+        try #require(editor.contentSize.height >= caret.maxY)
+        editor.setContentOffset(CGPoint(x: 0,
+            y: max(0, caret.maxY + editor.textContainerInset.bottom - editor.bounds.height)), animated: false)
+        try await waitUntil("The caret was not visible before collapsing") {
+            editor.bounds.contains(editor.caretRect(for: editor.endOfDocument))
+        }
+
+        draft.expanded = false
+        try await waitUntil("The editor did not collapse") { editor.bounds.height < 170 }
+        try await waitUntil("Collapsing hid the caret") {
+            let caret = editor.caretRect(for: editor.endOfDocument)
+            return editor.bounds.contains(CGPoint(x: caret.midX, y: caret.midY))
+        }
+        #expect(editor.isScrollEnabled)
+        #expect(editor.selectedRange.location == (draft.text as NSString).length)
+    }
+
+    /// Typing into a restored draft keeps every key and the caret where it types. The Chat
+    /// keeps its draft in `@State`, as here, and each key that changes the field's measure
+    /// redraws the composer before its parent: the field then gets the text from before
+    /// that key, which once dropped the key and sent the caret to the end.
+    @Test func typingIntoARestoredDraftKeepsEveryKeyAndTheCaret() async throws {
+        let draft = "Remind me to call the dentist tomorrow at 9 in the morning."
+        let host = UIHostingController(rootView: StateHost(text: draft))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        noKeyboard(editor)
+        editor.becomeFirstResponder()
+        try await waitUntil { editor.isFirstResponder }
+        editor.selectedRange = NSRange(location: 0, length: 0)
+
+        // Enough keys to wrap the draft onto more lines, one key per layout pass.
+        let typed = "typed after refusing en 1794877489 and some more words "
+        for key in typed {
+            editor.insertText(String(key))
+            try await Task.sleep(for: .milliseconds(16))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(editor.text == typed + draft)
+        #expect(editor.selectedRange.location == (typed as NSString).length)
+    }
+
+    /// Text the app sets reaches the field even when it equals an earlier state of the
+    /// guardian's typing: a send clearing the field right after a key still clears it.
+    @Test func clearingRightAfterAKeyEmptiesTheField() async throws {
+        let clears = Clears()
+        let host = UIHostingController(rootView: StateHost(text: "", clears: clears))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        noKeyboard(editor)
+        editor.becomeFirstResponder()
+        try await waitUntil { editor.isFirstResponder }
+        try await Task.sleep(for: .milliseconds(200))
+
+        // The key and the clear land before the composer redraws.
+        editor.insertText("Sent at once")
+        clears.set("")
+        try await waitUntil("The field kept the sent text") { editor.text.isEmpty }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(editor.text.isEmpty)
+    }
+
+    /// Text the app sets reaches the field even when it equals a state the guardian just
+    /// typed through, such as a restore or a programmatic set right after the keys.
+    @Test func settingAnEarlierTypedStateRightAfterTheKeysApplies() async throws {
+        let clears = Clears()
+        let host = UIHostingController(rootView: StateHost(text: "", clears: clears))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await waitUntil { editors(in: host.view).first.map { $0.bounds.width > 0 } ?? false }
+        let editor = try #require(editors(in: host.view).first)
+        noKeyboard(editor)
+        editor.becomeFirstResponder()
+        try await waitUntil { editor.isFirstResponder }
+        try await Task.sleep(for: .milliseconds(200))
+
+        editor.insertText("a")
+        editor.insertText("b")
+        clears.set("a")
+        try await waitUntil("The field kept the typed text") { editor.text == "a" }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(editor.text == "a")
+    }
+
+    final class Clears { var set: (String) -> Void = { _ in } }
+
+    private struct StateHost: View {
+        @State var text: String
+        var clears = Clears()
+        @State private var focused = true
+
+        var body: some View {
+            VStack {
+                Spacer()
+                Composer(text: $text, placeholder: "Message", focused: $focused,
+                    attachments: ComposerAttachments(), onSend: {})
+            }
+            .padding(16)
+            .onAppear { clears.set = { text = $0 } }
+        }
+    }
+
+    final class Reports { var overflow: Bool? }
+
+    private struct MeasuredHost: View {
+        @Bindable var draft: Draft
+        let reports: Reports
+
+        var body: some View {
+            ComposerTextView(text: $draft.text, focused: $draft.focused, placeholder: "Message",
+                expanded: draft.expanded, compactWidth: 300, onMeasure: { _, _, overflow in reports.overflow = overflow })
+                .frame(width: 300)
+        }
+    }
+
 }

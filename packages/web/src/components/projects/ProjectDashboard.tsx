@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SyncStatusPanel } from "@/components/sync/SyncStatusPanel";
 import { CodexIcon, ModelProviderIcon } from "@/components/brand-icons/ai-tool-icons";
+import { useListEnd } from "@/hooks/use-list-end";
 
 const heroClassName = "flex shrink-0 items-start gap-3 py-1";
 const heroAvatarClassName =
@@ -188,7 +189,6 @@ function DashboardBody({
   const [chatLoadError, setChatLoadError] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const chatListRef = useRef<HTMLDivElement | null>(null);
-  const chatSentinelRef = useRef<HTMLDivElement | null>(null);
   const dashboardPageKey = `${dashboard.logicalPath}:${dashboard.chatPage.nextCursor ?? ""}:${dashboard.chatPage.total}:${dashboard.chats.map((chat) => chat.id).join(",")}`;
   const currentProjectRef = useRef(dashboard.logicalPath);
   const currentDashboardPageKeyRef = useRef(dashboardPageKey);
@@ -309,41 +309,19 @@ function DashboardBody({
     }
   }, [fillingChatBatch, chatLoadError, loadingMoreChats]);
 
-  // Filtering can leave the sentinel visible after loading. Reobserve when the batch is ready.
-  useEffect(() => {
-    const sentinel = chatSentinelRef.current;
-    if (
-      !sentinel ||
-      !hasMoreChats ||
-      (chatLoadError && !hasMoreCachedChats) ||
-      loadingMoreChats ||
-      fillingChatBatch
-    ) {
-      return;
-    }
-
-    const root = findScrollableYAncestor(sentinel, {
-      boundary: bodyRef.current,
-      fallback: bodyRef.current,
-    });
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setVisibleChatLimit(visibleChatLimit + CHAT_PAGE_SIZE);
-        }
-      },
-      { root, rootMargin: "160px 0px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [
-    chatLoadError,
-    hasMoreChats,
-    hasMoreCachedChats,
-    loadingMoreChats,
-    fillingChatBatch,
-    visibleChatLimit,
-  ]);
+  // Filtering can leave the sentinel visible after loading. Each batch watches it again.
+  const chatListEnd = useListEnd({
+    enabled:
+      hasMoreChats &&
+      !(chatLoadError && !hasMoreCachedChats) &&
+      !loadingMoreChats &&
+      !fillingChatBatch,
+    page: visibleChatLimit,
+    onReached: () => setVisibleChatLimit(visibleChatLimit + CHAT_PAGE_SIZE),
+    rootMargin: "160px 0px",
+    findRoot: (end) =>
+      findScrollableYAncestor(end, { boundary: bodyRef.current, fallback: bodyRef.current }),
+  });
 
   return (
     <section className="@container/project-dashboard flex h-full min-h-0 flex-col bg-surface font-sans text-ui text-foreground antialiased [text-rendering:optimizeLegibility]">
@@ -510,7 +488,7 @@ function DashboardBody({
             ))}
             {hasMoreChats && (
               <div
-                ref={chatSentinelRef}
+                ref={chatListEnd.ref}
                 className="flex min-h-11 items-center justify-center gap-2 border-t border-border text-aux text-subtle-foreground"
               >
                 {loadingMoreChats ? (

@@ -9,7 +9,7 @@ import type { LivePreview } from "@/components/chat/MessageList";
 /** Messages from the same sender closer than this share one group. */
 const GROUP_GAP_MS = 5 * 60_000;
 /** A gap of at least this long, or a change of local day, gets a time separator. */
-const SEPARATOR_GAP_MS = 15 * 60_000;
+const SEPARATOR_GAP_MS = 60 * 60_000;
 
 /** The sources that label a reply: someone else made the Concierge speak. */
 const LABELLED_SOURCES: ReadonlySet<SystemInputSource["type"]> = new Set([
@@ -42,8 +42,6 @@ export type ConciergeItem =
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
-  /** Faint line where the chat's agent session was renewed, for `reason`. */
-  | { kind: "renewal"; key: string; reason: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -98,8 +96,8 @@ export function simulatedTypingMs(message: ChatMessage): number {
 
 /**
  * Whether the Concierge chat shows its typing dots: the Concierge is writing
- * a message (docs/domains/chats.md#status-reaction). The owner's message it
- * took shows 👀 for having started; the dots say a message is coming. The
+ * a message (docs/domains/chats.md#reaction). A reaction on the owner's
+ * message says the Concierge heard it; the dots say a message is coming. The
  * server says how the running turn shows them (`live.writing`):
  * - `exact`, where the provider says when it writes a message: while it does.
  * - `simulated`, where it cannot: while a message that just landed is held
@@ -153,7 +151,6 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
-  if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
   if (a.kind === "unread") return b.kind === "unread";
   if (a.kind === "notice")
     return (
@@ -171,6 +168,46 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
     a.entries.length === b.entries.length &&
     a.entries.every((entry, index) => entry === b.entries[index])
   );
+}
+
+/**
+ * What a focus on `thread`, a root, hides, by message id and by item key: every
+ * message outside the thread, whichever thread it is in or none, the
+ * guardian's and the agent's; the unread divider; and a time separator with
+ * nothing of the thread under it. Model notices and the typing bubble stay, and
+ * keep their separator. `threadOf` maps each message in a thread to its root.
+ */
+export function focusHidden(
+  items: readonly ConciergeItem[],
+  thread: string,
+  threadOf: ReadonlyMap<string, string>,
+): Set<string> {
+  const hidden = new Set<string>();
+  // The separator being read, and whether anything stays under it.
+  let separator: string | null = null;
+  let kept = false;
+  const settle = () => {
+    if (separator && !kept) hidden.add(separator);
+  };
+  for (const item of items) {
+    if (item.kind === "separator") {
+      settle();
+      separator = item.key;
+      kept = false;
+    } else if (item.kind === "unread") {
+      hidden.add(item.key);
+    } else if (item.kind === "notice") {
+      kept = true;
+    } else {
+      if (item.typing) kept = true;
+      for (const { message } of item.entries) {
+        if (threadOf.get(message.id) === thread) kept = true;
+        else hidden.add(message.id);
+      }
+    }
+  }
+  settle();
+  return hidden;
 }
 
 /**
@@ -199,7 +236,6 @@ export function buildConciergeItems(
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
-    | { kind: "renewal"; key: string; reason: string }
     | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
@@ -269,13 +305,6 @@ export function buildConciergeItems(
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
-    } else if (row.kind === "session_renewal") {
-      slots.push({
-        kind: "renewal",
-        key: row.key,
-        reason: row.reason,
-      });
-      group = null;
     } else if (row.kind === "automated_input") {
       labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
@@ -305,7 +334,7 @@ export function buildConciergeItems(
       items.push(UNREAD_DIVIDER);
     } else if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice" || slot.kind === "renewal") {
+    } else if (slot.kind === "notice") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>

@@ -241,6 +241,19 @@ export type PreviewPayload =
       title: string;
       summary: string;
       fields?: { label: string; value: string }[];
+    }
+  | {
+      /** Time-limited use of one or several named secrets. `title` and `summary`
+       * say the same in words, for a surface that draws only the generic card.
+       * `name` is the first of `names`. A preview stored before several names
+       * carries `name` alone. */
+      kind: "secret_access";
+      name: string;
+      names?: string[];
+      ttlMinutes: number;
+      reason: string;
+      title: string;
+      summary: string;
     };
 
 /** Execution was suspended pending guardian approval; the action body has NOT
@@ -1797,8 +1810,9 @@ export interface ChannelMessage {
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
   /** The chat thread the message is in, in a chat that keeps them, such as
-   *  a Concierge chat: the id of the thread's first message. Not a platform
-   *  thread. Absent when the message is in none. */
+   *  a Concierge chat: the id of the root of its reply chain, which is the
+   *  message's own id when it replies to nothing. Not a platform thread.
+   *  Absent in a chat that keeps none. */
   chatThread?: string;
   addressing?: MessageAddressing;
   raw?: unknown;
@@ -2123,6 +2137,33 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
+  /**
+   * Who said the message: People's answer for the account it came from, the
+   * same answer Rome's own turns read. The name the message showed stays on
+   * {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
+   * host that predates it, and when People could not be asked.
+   */
+  readonly sender?: SaidSender;
+}
+
+/** How close a person is to the guardian. */
+export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
+
+/** Who said a message, as People answers for the account it came from. */
+export interface SaidSender {
+  /** The person linked to the account, or null when it is linked to nobody:
+   *  a stranger, or an account the guardian dismissed. */
+  readonly person: {
+    readonly id: string;
+    readonly name: string;
+    readonly bondLevel: BondLevel;
+  } | null;
+  /** The account is an agent's, acting for `person` (a delegate link), so
+   *  the message comes from that person's agent, not from the person. */
+  readonly delegate: boolean;
+  /** The answer as Rome's own turns read it, such as "Ana Lopez, inner
+   *  circle", "agent acting for Ana Lopez, inner circle" or "not linked". */
+  readonly label: string;
 }
 
 /**
@@ -2185,6 +2226,15 @@ export interface ChannelMessageHookDeps {
    * that passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /**
+   * @internal A test-only back door for the Inbox app. True when the Inbox
+   * app must answer no message on an account linked to `agent`, a canonical
+   * agent id, because the app that installed it runs the agent's turns
+   * itself. The host answers true only for an agent that declares
+   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
+   * for every other. Not for apps to build on.
+   */
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
@@ -2909,7 +2959,7 @@ export interface ChannelMappingRecord {
 export interface PersonRecord {
   id: string;
   displayName: string;
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
+  bondLevel: BondLevel;
   /** Superseded by {@link PersonRecord.accounts}, which names the same links
    *  by the {@link Account} value. Still filled. */
   channelMappings: ChannelMappingRecord[];

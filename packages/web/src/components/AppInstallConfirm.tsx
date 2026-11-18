@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation, Trans } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { EmptyState, EmptyStateAction, EmptyStateTitle } from "@/components/ui/empty-state";
@@ -228,18 +228,12 @@ export function AppInstallConfirm({
 
   return (
     <section className="flex flex-col gap-6 rounded-12 border border-border bg-surface p-6">
-      <header className="flex items-start gap-3">
+      <header className="flex items-center gap-3">
         <AppIcon displayName={displayName} iconUrl={iconUrl} />
         <div className="min-w-0 flex-1">
-          <h1 className="text-title text-foreground">{t("install.title")}</h1>
-          <p className="mt-1 text-ui text-muted-foreground">
-            <Trans
-              i18nKey="install.subtitle"
-              t={t}
-              values={{ name: displayName }}
-              components={{ strong: <strong className="text-foreground" /> }}
-            />
-          </p>
+          <h1 className="text-title text-foreground">
+            {t("install.titleNamed", { name: displayName })}
+          </h1>
         </div>
       </header>
 

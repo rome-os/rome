@@ -15,6 +15,7 @@ export function ChatPendingCardJump({
   floor,
   currentReplyMessageIds,
   waitingTaskMessageIds = NO_MESSAGES,
+  whenShown,
 }: {
   scroller: HTMLElement | null;
   content: HTMLElement | null;
@@ -26,6 +27,11 @@ export function ChatPendingCardJump({
    * not what a task card happens to have drawn.
    */
   waitingTaskMessageIds?: ReadonlySet<string>;
+  /**
+   * Hands `then` the element `find` gives once nothing hides it, closing a
+   * thread in focus first. A card the focus hides still counts as out of view.
+   */
+  whenShown?: (find: () => HTMLElement | null, then: (el: HTMLElement) => void) => void;
 }) {
   const { t } = useTranslation("chat");
   const [target, setTarget] = useState<HTMLElement | null>(null);
@@ -36,6 +42,8 @@ export function ChatPendingCardJump({
     const measure = () => {
       frame = 0;
       const viewport = scroller.getBoundingClientRect();
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      const top = viewport.top + clear;
       // The sticky composer covers part of the scroller, even though cards
       // behind it still intersect the scroller's bounding box.
       const bottom = Math.min(viewport.bottom, floor.getBoundingClientRect().top);
@@ -61,8 +69,10 @@ export function ChatPendingCardJump({
               .chatCardMessage;
             if (!messageId || !currentReplyMessageIds.has(messageId)) return false;
           }
+          // A card another thread's focus hides has no height, yet it waits.
+          if (card.closest("[data-thread-out]")) return true;
           const rect = card.getBoundingClientRect();
-          return rect.height > 0 && (rect.bottom <= viewport.top || rect.top >= bottom);
+          return rect.height > 0 && (rect.bottom <= top || rect.top >= bottom);
         });
       setTarget(next ?? null);
     };
@@ -83,6 +93,7 @@ export function ChatPendingCardJump({
         "data-chat-card-message",
         "data-chat-task-waiting",
         "data-timeline-anchor",
+        "data-thread-out",
       ],
     });
     scroller.addEventListener("scroll", schedule, { passive: true });
@@ -103,14 +114,20 @@ export function ChatPendingCardJump({
       size="sm"
       aria-label={t("jumpToWaitingCard")}
       onClick={() => {
-        target.focus({ preventScroll: true });
-        scroller.scrollTo({
-          top:
-            scroller.scrollTop +
-            target.getBoundingClientRect().top -
-            scroller.getBoundingClientRect().top,
-          behavior: "instant",
-        });
+        const jump = (card: HTMLElement) => {
+          card.focus({ preventScroll: true });
+          const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+          scroller.scrollTo({
+            top:
+              scroller.scrollTop +
+              card.getBoundingClientRect().top -
+              scroller.getBoundingClientRect().top -
+              clear,
+            behavior: "instant",
+          });
+        };
+        if (whenShown) whenShown(() => target, jump);
+        else jump(target);
       }}
       className="touch-target pointer-events-auto rounded-full bg-surface/95 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
     >

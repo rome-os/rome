@@ -12,10 +12,12 @@ import { z } from "zod";
 
 /** The components a described card may use. `Text`, `Image`, `Row`,
  *  `Column`, `List`, `Button`, `ChoicePicker` and `TextField` are A2UI's
- *  basic catalog; `Stat` and `Progress` are Rome's. */
+ *  basic catalog; `Stat`, `Progress`, `Chart` and `Markdown` are Rome's. */
 export const WIDGET_UI_COMPONENTS = [
   "Text",
+  "Markdown",
   "Stat",
+  "Chart",
   "List",
   "Row",
   "Column",
@@ -27,7 +29,9 @@ export const WIDGET_UI_COMPONENTS = [
 ] as const;
 
 /** Rome's own strings a card may name with `{ string }`. Each reader shows
- *  them in the guardian's language. */
+ *  them in the guardian's language. `connect`, `notNow` and
+ *  `deviceConnectNote` are the device connect card's; `share` and
+ *  `shareLocationTitle` the share-location card's. */
 export const WIDGET_UI_STRINGS = [
   "send",
   "dismiss",
@@ -35,7 +39,49 @@ export const WIDGET_UI_STRINGS = [
   "addOwn",
   "typeAnswer",
   "optional",
+  "connect",
+  "notNow",
+  "deviceConnectNote",
+  "share",
+  "shareLocationTitle",
 ] as const;
+
+/** The icons a card may name: a `Stat`'s label, or a `Text` or `Row`, such
+ *  as a list's row. Each reader draws its own glyph for the name. */
+export const WIDGET_UI_ICONS = [
+  "moon",
+  "heart",
+  "steps",
+  "flame",
+  "run",
+  "map-pin",
+  "clock",
+  "calendar",
+  "info",
+  "alert",
+] as const;
+
+export type WidgetUiIcon = (typeof WIDGET_UI_ICONS)[number];
+
+/** The most bars a `Chart` draws. */
+export const WIDGET_UI_CHART_MAX_POINTS = 14;
+
+/** Whether `href` is a link a card may open: an `https:` page, or a place in
+ *  the maps app (`maps://`). A press opens it; the card's owner hears nothing. */
+export function isWidgetHref(href: string): boolean {
+  return /^https:\/\/[^/]/.test(href) || /^maps:\/\/./.test(href);
+}
+
+/** Where a `Stat`'s value sits against its usual range: `normal` inside it,
+ *  `low` under it, `high` over it, or null when the value is not a number.
+ *  Each reader draws the verdict, so the card's author never writes it. */
+export function widgetStatTone(
+  value: unknown,
+  range: { low: number; high: number },
+): "low" | "normal" | "high" | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value < range.low ? "low" : value > range.high ? "high" : "normal";
+}
 
 export type WidgetUiStringName = (typeof WIDGET_UI_STRINGS)[number];
 
@@ -98,11 +144,43 @@ export type WidgetUiComponent =
       component: "Text";
       text: WidgetUiString;
       variant?: "h1" | "h2" | "h3" | "h4" | "h5" | "caption" | "body";
+      /** Rome's: a callout, drawn as a tinted strip with a small icon. */
+      tone?: "info" | "warning" | "success";
+      /** Rome's: an icon before the text. */
+      icon?: WidgetUiIcon;
+      /** Rome's: a link a press opens ({@link isWidgetHref}). */
+      href?: string;
+    })
+  | (Common & {
+      /**
+       * Markdown text: paragraphs, headings, lists, quotes, code and tables,
+       * with bold, italics and inline code. Readers
+       * draw a link as its text and an image as its description, and show raw
+       * HTML, math and diagrams as their source, so it never opens or loads
+       * anything.
+       */
+      component: "Markdown";
+      text: WidgetUiString;
     })
   | (Common & {
       component: "Stat";
       label: WidgetUiString;
       value: WidgetUiString | WidgetUiNumber;
+      unit?: WidgetUiString;
+      caption?: WidgetUiString;
+      /** The usual range, in the value's unit. Each reader says whether a
+       *  number `value` is inside it, under it or over it. */
+      range?: { low: number; high: number };
+      /** An icon before the label. */
+      icon?: WidgetUiIcon;
+    })
+  | (Common & {
+      /** Bars, one per point, such as a week of sleep. Literal values only. */
+      component: "Chart";
+      kind: "bar";
+      /** At most {@link WIDGET_UI_CHART_MAX_POINTS}. `highlight` marks a bar,
+       *  such as today (`accent`) or an outlier (`warning`). */
+      points: { label: string; value: number; highlight?: "accent" | "warning" }[];
       unit?: WidgetUiString;
       caption?: WidgetUiString;
     })
@@ -127,6 +205,10 @@ export type WidgetUiComponent =
   | (Common & {
       component: "Row" | "Column";
       children: WidgetUiChildren;
+      /** Rome's, on a Row only: an icon before its children. */
+      icon?: WidgetUiIcon;
+      /** Rome's, on a Row only: a link a press opens ({@link isWidgetHref}). */
+      href?: string;
       justify?:
         | "center"
         | "end"
@@ -216,6 +298,8 @@ const Children = z.union([
   z.object({ componentId: z.string(), path: z.string() }).strict(),
 ]);
 const common = { id: z.string().min(1) };
+const Icon = z.enum(WIDGET_UI_ICONS);
+const Href = z.string().refine(isWidgetHref, "must be an https: or maps:// link");
 
 // A2UI's function calls (`{ call }`) are left out on purpose: the iOS app
 // does not evaluate them, and a card must draw the same on every reader.
@@ -226,6 +310,16 @@ const ComponentSchema = z.discriminatedUnion("component", [
       component: z.literal("Text"),
       text: Str,
       variant: z.enum(["h1", "h2", "h3", "h4", "h5", "caption", "body"]).optional(),
+      tone: z.enum(["info", "warning", "success"]).optional(),
+      icon: Icon.optional(),
+      href: Href.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      component: z.literal("Markdown"),
+      text: Str,
     })
     .strict(),
   z
@@ -234,6 +328,33 @@ const ComponentSchema = z.discriminatedUnion("component", [
       component: z.literal("Stat"),
       label: Str,
       value: z.union([z.string(), z.number(), PathSchema]),
+      unit: Str.optional(),
+      caption: Str.optional(),
+      range: z
+        .object({ low: z.number(), high: z.number() })
+        .strict()
+        .refine((r) => r.low <= r.high, "low must not be over high")
+        .optional(),
+      icon: Icon.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      component: z.literal("Chart"),
+      kind: z.literal("bar"),
+      points: z
+        .array(
+          z
+            .object({
+              label: z.string(),
+              value: z.number(),
+              highlight: z.enum(["accent", "warning"]).optional(),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(WIDGET_UI_CHART_MAX_POINTS),
       unit: Str.optional(),
       caption: Str.optional(),
     })
@@ -265,6 +386,7 @@ const ComponentSchema = z.discriminatedUnion("component", [
         ...common,
         component: z.literal(name),
         children: Children,
+        ...(name === "Row" ? { icon: Icon.optional(), href: Href.optional() } : {}),
         justify: z
           .enum(["center", "end", "spaceAround", "spaceBetween", "spaceEvenly", "start", "stretch"])
           .optional(),
@@ -387,6 +509,7 @@ export function checkWidgetUi(
     }
   }
   if (problems.length === 0 && hasCycle(byId)) problems.push("the components contain a cycle");
+  if (problems.length === 0) problems.push(...linkProblems(components, byId));
 
   const bindParsed = z.record(z.string(), z.string()).safeParse(bind);
   if (!bindParsed.success) {
@@ -398,6 +521,64 @@ export function checkWidgetUi(
       }
       if (!isWidgetAppPath(path))
         problems.push(`bind "${pointer}" reads "${path}", which is not a path in the app's API`);
+    }
+  }
+  return problems;
+}
+
+const INTERACTIVE = new Set(["Button", "ChoicePicker", "TextField"]);
+
+/** Whether a component's subtree, itself included, holds one `test`
+ *  matches. A child may sit under several parents, so each id is answered
+ *  once and remembered: the walk stays linear in the components, never in
+ *  the paths. Cycles are refused before it runs. */
+function subtreeFinder(
+  byId: Map<string, WidgetUiComponent>,
+  test: (c: WidgetUiComponent) => boolean,
+): (id: string) => boolean {
+  const known = new Map<string, boolean>();
+  const has = (id: string): boolean => {
+    const seen = known.get(id);
+    if (seen !== undefined) return seen;
+    const c = byId.get(id);
+    const found = !!c && (test(c) || childIds(c).some(has));
+    known.set(id, found);
+    return found;
+  };
+  return has;
+}
+
+const hasHref = (c: WidgetUiComponent) =>
+  (c.component === "Text" || c.component === "Row") && c.href !== undefined;
+
+/**
+ * A press opens a link or sends an event, never both: a component with an
+ * `href` holds no Button, ChoicePicker or TextField, and a Button's label
+ * holds no link. A Stat's `range` is judged against a number, so its value
+ * is a number or a path to one.
+ */
+function linkProblems(
+  components: WidgetUiComponent[],
+  byId: Map<string, WidgetUiComponent>,
+): string[] {
+  const problems: string[] = [];
+  const holdsPressable = subtreeFinder(byId, (k) => INTERACTIVE.has(k.component) || hasHref(k));
+  const holdsLink = subtreeFinder(byId, hasHref);
+  for (const c of components) {
+    if (hasHref(c) && childIds(c).some(holdsPressable)) {
+      problems.push(
+        `"${c.id}" has an href and holds a control or another link: a press would do two things`,
+      );
+    }
+    if (c.component === "Button" && holdsLink(c.child)) {
+      problems.push(
+        `"${c.id}" is a Button whose label holds an href: a press would both send an event and open the link`,
+      );
+    }
+    if (c.component === "Stat" && c.range && typeof c.value === "string") {
+      problems.push(
+        `"${c.id}" has a range, so its value must be a plain number in the range's unit, or a path to one`,
+      );
     }
   }
   return problems;

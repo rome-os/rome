@@ -26,6 +26,10 @@ enum Palette {
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
+    /// The rail that joins a Concierge reply to the message it answers: the
+    /// bubble's fill taken 26% of the way to the text color, since the fill
+    /// itself sits too close to the page. A guardian reply's rail is `primary`.
+    static let replyRail = dynamic(0xB5AEA5, 0x54524E)
     static let hair = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.08))
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
@@ -53,6 +57,9 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+    /// A chart's plain bars, beside the highlighted ones.
+    static let chartBar = dynamic(0xE3DBCF, 0x45403B)
+    static let successSoft = dynamic(rgba: (0x5B7A4A, 0.12), (0x4AC06C, 0.14))
     /// Apple's Health pink (system pink): only the heart on the Apple Health page wears it.
     static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
@@ -138,10 +145,10 @@ extension View {
     /// agent's bubble can run, so the right edges of cards and long bubbles
     /// line up. A light card or a bubble hugs its content inside this
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
-    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`.
-    func bubbleWidth() -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, Metrics.bubbleInset)
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
+    /// tinted message's tint goes on before the width, so it hugs the bubble.
+    func bubbleWidth(full: Bool = false) -> some View {
+        modifier(BubbleWidth(full: full))
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -154,6 +161,19 @@ extension View {
     /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
     func readableColumn() -> some View {
         frame(maxWidth: Metrics.readableWidth).frame(maxWidth: .infinity)
+    }
+}
+
+private struct BubbleWidth: ViewModifier {
+    /// The chat's whole width, as an agent card takes it, rather than a bubble's.
+    let full: Bool
+    @Environment(\.rowTinted) private var tinted
+
+    func body(content: Content) -> some View {
+        content
+            .tinted(tinted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, full ? 0 : Metrics.bubbleInset)
     }
 }
 

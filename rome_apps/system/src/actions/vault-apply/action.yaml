@@ -1,0 +1,17 @@
+name: vault_apply
+type: system
+description: >-
+  Ask the guardian for time-limited use of one or several vault secrets, by `names`
+  (one to 10) or by a single `name`. The guardian sees the names, the duration and
+  your reason, and approves with a PIN on the card or rejects. Never ask for the PIN
+  in the chat. After approval, run `vault load A,B -- <command>` in the shell: the
+  command gets the secrets in its environment and its output is masked. The grant is
+  per secret name and all or none, lasts 15 minutes by default (up to 180), and does
+  not stop commands already running. Find names with vault_search. Give a short,
+  concrete reason. If a secret is not in the vault, tell the guardian to add it in
+  Settings, Advanced, Vault.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+requiresApproval: true

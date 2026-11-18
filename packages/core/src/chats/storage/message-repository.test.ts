@@ -312,6 +312,96 @@ describe("MessageRepository", () => {
     expect(messages.byIds([sent.id!])[0]?.replyTo).toBeUndefined();
   });
 
+  describe("chat thread roots", () => {
+    const at = new Date("2026-10-29T01:00:00Z");
+    const rootOf = (key: string) =>
+      testDb.db.all<{ root: number | null }>(
+        sql`SELECT root_message_id AS root FROM chat_messages WHERE key = ${key}`,
+      )[0]?.root;
+
+    it("is its own root for a message that quotes nothing, and the thread's key names it", () => {
+      const first = messages.record(heard("m1", at))!;
+      expect(rootOf("m1")).toBeNull();
+      expect(first.chatThread).toBe("m1");
+      expect(messages.read(placeIn(chat)).messages[0]?.chatThread).toBe("m1");
+    });
+
+    it("takes the quoted message's root, however deep the chain goes", () => {
+      const first = messages.record(heard("m1", at))!;
+      const second = messages.record({ ...heard("m2", at), replyTo: "m1" })!;
+      const third = messages.record({ ...heard("m3", at), replyTo: "m2" })!;
+      expect([rootOf("m2"), rootOf("m3")]).toEqual([first.id, first.id]);
+      expect([second.chatThread, third.chatThread]).toEqual(["m1", "m1"]);
+      expect(messages.read(placeIn(chat)).messages.map((m) => m.chatThread)).toEqual([
+        "m1",
+        "m1",
+        "m1",
+      ]);
+    });
+
+    it("takes the root a migration gave a message, by the quoted message's own root", () => {
+      const old = messages.record(heard("old", at))!;
+      messages.record(heard("member", at));
+      testDb.db.run(sql`UPDATE chat_messages SET root_message_id = ${old.id} WHERE key = 'member'`);
+      const next = messages.record({ ...heard("next", at), replyTo: "member" })!;
+      expect(rootOf("next")).toBe(old.id);
+      expect(next.chatThread).toBe("old");
+    });
+
+    it("sets no root for a quote of a message Rome never held, or one in another chat", () => {
+      const other = new ChatRepository(testDb.db).start(
+        { platform: "telegram", externalId: "chat-2" as ChatId },
+        "group",
+        null,
+      ).ref;
+      messages.record({ ...heard("m0", at), place: placeIn(other) });
+      messages.record({ ...heard("m1", at), replyTo: "m0" });
+      messages.record({ ...heard("m2", at), replyTo: "gone" });
+      expect([rootOf("m1"), rootOf("m2")]).toEqual([null, null]);
+    });
+
+    it("gives a send the root of the message it quotes, in the same insert", async () => {
+      const first = messages.record(heard("m1", at))!;
+      const sent = await messages.send(
+        {
+          direction: "fromRome",
+          place: placeIn(chat),
+          saidBy: { account: ROME, agent: "main" },
+          parts: [{ type: "text", content: "hi" }],
+          replyTo: first.id,
+        },
+        async () => ({ key: "tg-9" }),
+      );
+      expect(rootOf("tg-9")).toBe(first.id);
+      expect(messages.byIds([sent.id!])[0]?.chatThread).toBe("m1");
+      const second = await messages.send(
+        {
+          direction: "fromRome",
+          place: placeIn(chat),
+          saidBy: { account: ROME, agent: "main" },
+          parts: [{ type: "text", content: "again" }],
+          replyTo: { key: "tg-9" },
+        },
+        async () => ({ key: "tg-10" }),
+      );
+      expect(rootOf("tg-10")).toBe(first.id);
+      expect(second.recorded).toBe(true);
+    });
+
+    it("finds a thread's last message from any message of it", () => {
+      messages.record(heard("m1", at));
+      messages.record({ ...heard("m2", at), replyTo: "m1" });
+      messages.record({ ...heard("m3", new Date(at.getTime() + 1000)), replyTo: "m2" });
+      messages.record(heard("m4", new Date(at.getTime() + 2000), "Alone"));
+      expect(messages.lastInChatThread(chat, "m1")).toBe("m3");
+      // Any message of the thread names it.
+      expect(messages.lastInChatThread(chat, "m2")).toBe("m3");
+      expect(messages.lastInChatThread(chat, "m3")).toBe("m3");
+      expect(messages.lastInChatThread(chat, "m4")).toBe("m4");
+      expect(messages.lastInChatThread(chat, "missing")).toBeNull();
+    });
+  });
+
   it("names no chat by a ref on another platform than the chat's", () => {
     messages.record(heard("m1", new Date()));
     const wrong = { platform: "discord", id: chat.id };
@@ -362,5 +452,57 @@ describe("MessageRepository", () => {
       ["t1", "topic-1"],
       ["m2", undefined],
     ]);
+  });
+
+  describe("read marks", () => {
+    const at = new Date("2026-10-29T01:00:00Z");
+    const readAt = (key: string) =>
+      testDb.db.all<{ read_at: number | null }>(
+        sql`SELECT read_at FROM chat_messages WHERE key = ${key}`,
+      )[0]?.read_at;
+
+    it("records a message unread unless it says it is read", () => {
+      messages.record(heard("unread", at));
+      messages.record({ ...heard("owned", at), read: true });
+      expect(readAt("unread")).toBeNull();
+      expect(readAt("owned")).toBe(at.getTime() / 1000);
+    });
+
+    it("marks the named messages of the chat read, once", () => {
+      messages.record(heard("a", at));
+      messages.record(heard("b", at));
+      messages.record(heard("c", at));
+      const first = new Date("2026-10-29T02:00:00Z");
+      expect(messages.markRead(chat, ["a", "b", "missing"], first)).toBe(2);
+      expect(readAt("a")).toBe(first.getTime() / 1000);
+      expect(readAt("c")).toBeNull();
+      // A message already read keeps its time.
+      expect(messages.markRead(chat, ["a"], new Date("2026-10-29T03:00:00Z"))).toBe(0);
+      expect(readAt("a")).toBe(first.getTime() / 1000);
+      expect(messages.markRead(chat, [])).toBe(0);
+    });
+
+    it("marks only the chat's own messages", () => {
+      const other = new ChatRepository(testDb.db).start(
+        { platform: "telegram", externalId: "chat-2" as ChatId },
+        "group",
+        null,
+      ).ref;
+      messages.record({ ...heard("a", at), place: placeIn(other) });
+      expect(messages.markRead(chat, ["a"])).toBe(0);
+      expect(readAt("a")).toBeNull();
+    });
+
+    it("marks the main line read and leaves the replies inside a thread", () => {
+      messages.record(heard("root", at));
+      messages.record({ ...heard("reply", at), replyTo: "root" });
+      messages.record({ ...heard("deeper", at), replyTo: "reply" });
+      messages.record(heard("plain", at));
+      expect(messages.markMainLineRead(chat)).toBe(2);
+      expect(readAt("root")).not.toBeNull();
+      expect(readAt("plain")).not.toBeNull();
+      expect(readAt("reply")).toBeNull();
+      expect(readAt("deeper")).toBeNull();
+    });
   });
 });

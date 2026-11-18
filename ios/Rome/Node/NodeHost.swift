@@ -5,8 +5,8 @@ import UIKit
 // This iPhone as a rome-node device, ported from connectHost() and
 // connectGateway() in packages/rome-node-core. The app's Rome Cloud sign-in
 // (`romemob_` token and its device session) is the device's identity, as the
-// Mac app's is. It connects only once the person turns the switch in Settings
-// on (off by default), and lives while the app is in front and signed in.
+// Mac app's is. It connects while any capability's Live access is on (each
+// off until connected), and lives while the app is in front and signed in.
 
 /// The app's Rome Cloud sign-in, as the host reads it.
 @MainActor
@@ -84,9 +84,9 @@ final class NodeHost {
         case stopped(NodeStop)
     }
 
-    private enum Defaults {
-        static let enabled = "nodeEnabled"
-        static let health = "nodeHealthEnabled"
+    enum Defaults {
+        /// A capability's Live access, by its connection id.
+        static func live(_ id: String) -> String { "connections.live.\(id)" }
     }
 
     /// Requests answered at once. HealthKit reads are heavy, and an instance
@@ -96,22 +96,24 @@ final class NodeHost {
     private(set) var status = Status.off
     /// iPhone or iPad: the word Settings and the agent's messages use.
     let device: DeviceKind
-    /// The guardian's switch in Settings: off until turned on, so nothing
-    /// connects until the person chooses it.
-    private(set) var isEnabled: Bool
-    /// The guardian's "Apple Health" switch: off until turned on. Health data
-    /// goes to the Rome and its AI model, so it is the guardian's choice. Off,
-    /// the health actions are refused with `health_off`.
-    private(set) var isHealthEnabled: Bool
+    /// What Rome can do with this device, in Settings' order.
+    let registry: NodeCapabilityRegistry
+    /// Each capability's Live access by its connection id, off until turned
+    /// on or connected.
+    private(set) var liveSwitches: [String: Bool]
+    /// rome-node connects while any Live access is on.
+    var anyLive: Bool { liveSwitches.values.contains(true) }
+    /// A Live access switch changed: the connection report goes out again.
+    @ObservationIgnored var onLiveChanged: (() -> Void)?
+    /// A request was answered, by its action: Health catches up its sync.
+    @ObservationIgnored var onAnswered: ((String) -> Void)?
     /// Goes up when a request has been answered, so Settings reloads its list.
     private(set) var requestSerial = 0
     private(set) var recent: [NodeAuditEntry] = []
 
     @ObservationIgnored private let credentials: NodeCredentials
-    @ObservationIgnored private let reader: HealthReading
     @ObservationIgnored private let pingInterval: TimeInterval
     @ObservationIgnored private let pingTimeout: TimeInterval
-    @ObservationIgnored private let healthSwitch: HealthSwitch
     @ObservationIgnored private let executor: NodeExecutor
     @ObservationIgnored private let audit: NodeAuditing
     @ObservationIgnored private let defaults: UserDefaults
@@ -136,7 +138,7 @@ final class NodeHost {
     init(
         credentials: NodeCredentials,
         audit: NodeAuditing = NodeAuditLog(),
-        health: HealthActions = HealthActions(reader: LiveHealth()),
+        registry: NodeCapabilityRegistry,
         device: DeviceKind = .current,
         defaults: UserDefaults = .standard,
         http: URLSession? = nil,
@@ -151,22 +153,22 @@ final class NodeHost {
         self.pingInterval = pingInterval
         self.pingTimeout = pingTimeout
         self.credentials = credentials
-        reader = health.reader
-        let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? false
-        healthSwitch = HealthSwitch(healthOn)
-        isHealthEnabled = healthOn
+        self.registry = registry
         self.device = device
-        var health = health
-        health.enabled = healthSwitch
-        health.device = device
+        var switches: [String: Bool] = [:]
+        for capability in registry.capabilities {
+            let on = defaults.bool(forKey: Defaults.live(capability.id))
+            capability.live.set(on)
+            switches[capability.id] = on
+        }
+        liveSwitches = switches
         self.audit = audit
         self.defaults = defaults
         self.connect = connect
         self.pause = pause
         self.random = random
         self.now = now
-        executor = NodeExecutor(name: name, audit: audit, health: health, now: now)
-        isEnabled = defaults.object(forKey: Defaults.enabled) as? Bool ?? false
+        executor = NodeExecutor(name: name, audit: audit, registry: registry, device: device, now: now)
         if let http {
             self.http = http
         } else {
@@ -176,38 +178,36 @@ final class NodeHost {
 
     // MARK: Control
 
-    /// The guardian's switch.
-    func setEnabled(_ on: Bool) {
-        isEnabled = on
-        defaults.set(on, forKey: Defaults.enabled)
+    /// A capability's Live access, by its connection id. Nothing to ask iOS
+    /// here: the authorization asks first. rome-node connects while any is on.
+    func setLive(_ id: String, on: Bool) {
+        guard let capability = registry.capability(id: id) else { return }
+        capability.live.set(on)
+        liveSwitches[id] = on
+        defaults.set(on, forKey: Defaults.live(id))
+        capabilitySerial += 1
         if on, case .stopped = status { status = .off }
         sync()
+        onLiveChanged?()
     }
 
-    /// The "Apple Health" switch. Turning it on while iOS has never been asked
-    /// shows the system sheet at once; once asked, iOS shows nothing more, and
-    /// neither does the app. The task is the prompt, for tests.
-    @discardableResult
-    func setHealthEnabled(_ on: Bool) -> Task<Void, Never>? {
-        isHealthEnabled = on
-        defaults.set(on, forKey: Defaults.health)
-        healthSwitch.set(on)
-        guard on else { return nil }
-        return Task { [reader] in
-            if await reader.shouldRequestAccess() { try? await reader.requestAccess() }
-        }
-    }
+    /// Goes up when a switch or a permission changes, so Settings reads the states again.
+    private(set) var capabilitySerial = 0
 
-    /// Another account may sign in next: both switches go back to their
-    /// defaults and the activity log is emptied, so nothing of this account
+    /// iOS may have changed a permission: Settings reads the states again.
+    func permissionsChanged() { capabilitySerial += 1 }
+
+    /// Another account may sign in next: every switch goes back to its
+    /// default and the activity log is emptied, so nothing of this account
     /// carries over. The task empties the log, for tests.
     @discardableResult
     func forgetAccount() -> Task<Void, Never> {
-        defaults.removeObject(forKey: Defaults.enabled)
-        defaults.removeObject(forKey: Defaults.health)
-        isEnabled = false
-        isHealthEnabled = false
-        healthSwitch.set(false)
+        for capability in registry.capabilities {
+            defaults.removeObject(forKey: Defaults.live(capability.id))
+            capability.live.set(false)
+            liveSwitches[capability.id] = false
+        }
+        capabilitySerial += 1
         recent = []
         sync()
         return Task { [audit] in
@@ -252,7 +252,7 @@ final class NodeHost {
     /// Starts, restarts or stops the connection to match the switch, the
     /// sign-in (a credential, and the app's phase) and the app being in front. Safe to call at any time.
     func sync() {
-        guard isEnabled, !accountOver, isSignedIn, let credential = credentials.deviceCredential else {
+        guard anyLive, !accountOver, isSignedIn, let credential = credentials.deviceCredential else {
             stop()
             return
         }
@@ -301,8 +301,42 @@ final class NodeHost {
     }
 
     func reloadRecent() async {
+        #if DEBUG
+        if let demoRecent {
+            recent = demoRecent
+            return
+        }
+        #endif
         recent = await audit.recent(limit: 50)
     }
+
+    #if DEBUG
+    @ObservationIgnored private var demoRecent: [NodeAuditEntry]?
+
+    /// Demo state for the snapshot runner: Live access and live reads, kept
+    /// out of the defaults and with nothing connecting.
+    func showDemo(live: [String: Bool], recent: [NodeAuditEntry]) {
+        for capability in registry.capabilities {
+            let on = live[capability.id] ?? false
+            capability.live.set(on)
+            liveSwitches[capability.id] = on
+        }
+        demoRecent = recent
+        self.recent = recent
+        capabilitySerial += 1
+    }
+
+    /// Runs one request as the Rome would send it, through the executor and
+    /// its audit log, with no Gateway: for a Simulator signed in to a local
+    /// Rome, which has no Rome Cloud device to reach. The reply, as JSON.
+    func debugRun(_ action: String, args: String) async -> String? {
+        let text = #"{"id":"debug","from":"debug","payload":{"type":"request","action":"\#(action)","args":\#(args)}}"#
+        let reply = await executor.respond(to: text, session: NodeSession())
+        requestSerial += 1
+        onAnswered?(action)
+        return reply
+    }
+    #endif
 
     // MARK: Connection
 
@@ -422,7 +456,10 @@ final class NodeHost {
             // A connection that ended meanwhile never gets the reply.
             if let reply, session.isLive { try? await socket.send(reply) }
             self.inFlight -= 1
-            if reply != nil { self.requestSerial += 1 }
+            if reply != nil {
+                self.requestSerial += 1
+                if let action = NodeProtocol.request(in: text)?.action { self.onAnswered?(action) }
+            }
         }
     }
 }

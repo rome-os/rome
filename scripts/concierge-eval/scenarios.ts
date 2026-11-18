@@ -7,8 +7,10 @@ export const SCENARIOS_VERSION = 2;
 
 export interface Step {
   text: string;
-  /** Send it as a Reply to the Concierge's latest text message in a task's thread. */
+  /** Send it as a Reply to the Concierge's newest text message, which is its latest result. */
   replyToResult?: boolean;
+  /** Quiet seconds that end this step, instead of the run's `--settle`. */
+  settleS?: number;
 }
 
 export interface Scenario {

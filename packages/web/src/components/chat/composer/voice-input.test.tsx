@@ -1,0 +1,820 @@
+// @rstest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createRef, type Ref } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { VoiceInputInfo } from "@rome/api-types/voice-input";
+import i18n from "@/i18n";
+import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
+import { ConciergeComposer } from "./ConciergeComposer";
+import { ReplyDraftHarness } from "../reply/reply-draft-harness";
+
+// The browser's microphone, which jsdom does not have.
+const microphone = rs.hoisted(() => ({
+  refuse: false,
+  /** While true, the permission prompt stays open until `answer()`. */
+  pending: false,
+  /** Answers the open permission prompt by allowing the microphone. */
+  answer: null as (() => void) | null,
+  /** The audio still in the capture buffer when listening stops. */
+  tail: null as ArrayBuffer | null,
+  closed: 0,
+  onAudio: null as ((chunk: ArrayBuffer) => void) | null,
+}));
+rs.mock("@/lib/voice-input/microphone", () => ({
+  openMicrophone: async (onAudio: (chunk: ArrayBuffer) => void, onAsk?: () => void) => {
+    if (microphone.pending) {
+      onAsk?.();
+      await new Promise<void>((resolve) => {
+        microphone.answer = resolve;
+      });
+    }
+    if (microphone.refuse) throw new DOMException("denied", "NotAllowedError");
+    microphone.onAudio = onAudio;
+    return {
+      sampleRate: 16000,
+      finish: async () => {
+        if (microphone.tail) onAudio(microphone.tail);
+        microphone.closed += 1;
+      },
+      close: () => {
+        microphone.closed += 1;
+      },
+      level: () => 0,
+    };
+  },
+}));
+
+/** Stands in for Rome's dictation socket. */
+class FakeSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  static last: FakeSocket | null = null;
+  /** False keeps every socket connecting, as a stalled handshake does. */
+  static opens = true;
+  readyState = FakeSocket.CONNECTING;
+  binaryType = "blob";
+  sent: Array<string | ArrayBuffer> = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(readonly url: string) {
+    FakeSocket.last = this;
+    queueMicrotask(() => {
+      if (!FakeSocket.opens) return;
+      this.readyState = FakeSocket.OPEN;
+      this.onopen?.();
+    });
+  }
+  send(data: string | ArrayBuffer) {
+    this.sent.push(data);
+  }
+  close() {
+    this.readyState = FakeSocket.CLOSED;
+  }
+  /** Rome sends a message. */
+  say(message: object) {
+    act(() => this.onmessage?.({ data: JSON.stringify(message) }));
+  }
+  get textSent() {
+    return this.sent
+      .filter((frame): frame is string => typeof frame === "string")
+      .map((f) => JSON.parse(f));
+  }
+}
+
+/**
+ * jsdom has no `execCommand`. This one inserts into the focused field as
+ * Chrome's does: it replaces the selection and fires an input event.
+ */
+function insertTextAtSelection(command: string, _ui: boolean, text: string): boolean {
+  const el = document.activeElement;
+  if (command !== "insertText" || !(el instanceof HTMLTextAreaElement)) return false;
+  const next = el.value.slice(0, el.selectionStart) + text + el.value.slice(el.selectionEnd);
+  const caret = el.selectionStart + text.length;
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, next);
+  el.setSelectionRange(caret, caret);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+}
+
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
+
+beforeEach(() => {
+  localStorage.clear();
+  microphone.refuse = false;
+  microphone.pending = false;
+  microphone.answer = null;
+  microphone.tail = null;
+  FakeSocket.opens = true;
+  microphone.closed = 0;
+  FakeSocket.last = null;
+  rs.stubGlobal("WebSocket", FakeSocket);
+  document.execCommand = insertTextAtSelection as typeof document.execCommand;
+});
+
+afterEach(() => {
+  // React Query pauses every later fetch after an `offline` event until it
+  // hears `online`.
+  window.dispatchEvent(new Event("online"));
+  rs.useRealTimers();
+  cleanup();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
+});
+
+function mockFetch(info: VoiceInputInfo) {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://rome.test").pathname;
+    if (path === "/api/voice-input") return Response.json(info);
+    if (path === "/api/settings") return Response.json({});
+    if (path === "/api/people") return Response.json({ people: [], counts: {} });
+    return Response.json({}, { status: 404 });
+  }) as typeof fetch);
+}
+
+const SONIOX: VoiceInputInfo = {
+  available: true,
+  place: { provider: "Soniox", host: "stt-rt.soniox.com" },
+};
+
+const composers = {
+  chat: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
+    <ChatComposer ref={ref} chatId={chatId} onSend={onSend} />
+  ),
+  concierge: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
+    <ReplyDraftHarness>
+      <ConciergeComposer ref={ref} chatId={chatId} onSend={onSend} />
+    </ReplyDraftHarness>
+  ),
+};
+
+/** Opens a message field; with `chatId`, the field of that chat, which keeps a draft. */
+function renderComposer(
+  kind: keyof typeof composers,
+  info: VoiceInputInfo = SONIOX,
+  chatId?: string,
+) {
+  mockFetch(info);
+  const onSend = rs.fn();
+  const handle = createRef<ChatComposerHandle>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        {composers[kind](onSend, chatId, handle)}
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
+  return { onSend, field, client, handle, leave: view.unmount };
+}
+
+async function startListening() {
+  fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+  await waitFor(() =>
+    expect(FakeSocket.last?.textSent).toEqual([
+      { type: "start", sampleRate: 16000, bufferedMs: 0 },
+    ]),
+  );
+  return FakeSocket.last!;
+}
+
+describe.each(["chat", "concierge"] as const)("voice input in the %s message field", (kind) => {
+  it("keeps the words heard and says why after leaving the chat mid-message", async () => {
+    const first = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    first.leave();
+    expect(microphone.closed).toBe(1);
+
+    const back = renderComposer(kind, SONIOX, "chat-a");
+    expect(back.field().value).toBe("hello the");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+
+    fireEvent.input(back.field(), { target: { value: "hello there" } });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps the words heard and says why after the page reloads mid-message", async () => {
+    const first = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "你好", pending: "" });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(microphone.closed).toBe(1);
+    first.leave();
+
+    const back = renderComposer(kind, SONIOX, "chat-a");
+    expect(back.field().value).toBe("你好");
+    expect(screen.getByRole("status").textContent).toBe("Listening stopped when the page reloaded");
+
+    fireEvent.keyDown(back.field(), { key: "Enter" });
+    await waitFor(() => expect(back.onSend).toHaveBeenCalled());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("gives the field back when the page comes back from the back/forward cache", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+
+    expect(microphone.closed).toBe(1);
+    expect(field().value).toBe("hello");
+    expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
+  it("has no voice control while Rome Cloud provides no voice input", async () => {
+    renderComposer(kind, { available: false, place: null });
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+  });
+
+  it("streams spoken text in at the cursor and leaves sending to the guardian", async () => {
+    const { onSend, field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Note:" } });
+    box.setSelectionRange(5, 5);
+
+    const socket = await startListening();
+    const stop = screen.getByRole("button", { name: "Stop voice input" });
+    expect(stop.getAttribute("aria-pressed")).toBe("true");
+    expect(stop.closest("form")).toBe(box.closest("form"));
+
+    socket.say({ type: "text", settled: "buy", pending: " mil" });
+    expect(field().value).toBe("Note: buy mil");
+    expect(field().readOnly).toBe(true);
+    socket.say({ type: "text", settled: " milk", pending: "" });
+
+    fireEvent.click(stop);
+    expect(
+      screen.getByRole("button", { name: "Finishing voice input" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(microphone.closed).toBe(1);
+    socket.say({ type: "ended" });
+    expect(
+      screen.getByRole("button", { name: "Start voice input" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+
+    expect(field().value).toBe("Note: buy milk");
+    expect(field().readOnly).toBe(false);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("draws the spoken text over the field while voice input is on, then gives the field its text back", async () => {
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Note:" } });
+    box.setSelectionRange(5, 5);
+    const copy = () => document.querySelector("[data-voice-input-spoken-text]");
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " milk" });
+    expect(copy()?.textContent?.startsWith("Note:")).toBe(true);
+    expect(field().style.color).toBe("transparent");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    socket.say({ type: "ended" });
+    expect(copy()).toBeNull();
+    expect(field().style.color).toBe("");
+    expect(field().value).toBe("Note: buy milk");
+  });
+
+  it("ends listening on Enter and sends once the last words are in", async () => {
+    const { onSend, field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " mil" });
+
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(screen.getByRole("button", { name: "Finishing voice input" })).toBeTruthy();
+    expect(onSend).not.toHaveBeenCalled();
+
+    socket.say({ type: "text", settled: " milk", pending: "" });
+    socket.say({ type: "ended" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[0]).toMatchObject({ text: "buy milk" });
+  });
+
+  it("sends nothing on Enter while listening ends with a reason to read", async () => {
+    const { onSend, field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    act(() => socket.onclose?.());
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("tells Rome how much audio it recorded while the socket connected", async () => {
+    FakeSocket.opens = false;
+    renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    const socket = await waitFor(() => {
+      expect(FakeSocket.last).toBeTruthy();
+      return FakeSocket.last!;
+    });
+    // Half a second of 16 kHz audio, two bytes a sample.
+    microphone.onAudio?.(new ArrayBuffer(16_000));
+
+    socket.readyState = FakeSocket.OPEN;
+    act(() => socket.onopen?.());
+
+    expect(socket.textSent).toEqual([{ type: "start", sampleRate: 16000, bufferedMs: 500 }]);
+    expect(socket.sent.filter((frame) => frame instanceof ArrayBuffer)).toHaveLength(1);
+  });
+
+  it("keeps the stop control while Rome Cloud stops offering voice input mid-dictation", async () => {
+    const { client } = renderComposer(kind);
+    await startListening();
+
+    mockFetch({ available: false, place: null });
+    await act(() => client.refetchQueries({ queryKey: ["voice-input"] }));
+    await waitFor(() =>
+      expect(client.getQueryData(["voice-input"])).toEqual({ available: false, place: null }),
+    );
+
+    expect(screen.getByRole("button", { name: "Stop voice input" })).toBeTruthy();
+  });
+
+  it("stops listening when the field is hidden", async () => {
+    let hidden = false;
+    const observers: Array<() => void> = [];
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(readonly callback: () => void) {
+          observers.push(() => this.callback());
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    rs.spyOn(HTMLTextAreaElement.prototype, "getClientRects").mockImplementation(
+      () => ({ length: hidden ? 0 : 1 }) as DOMRectList,
+    );
+    renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    hidden = true;
+    act(() => {
+      for (const observe of observers) observe();
+    });
+
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(microphone.closed).toBe(1);
+  });
+
+  it("keeps the spoken text when something else fills the field mid-dictation", async () => {
+    const { field, handle } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    act(() => handle.current?.insertText("an example prompt"));
+    expect(field().value).toBe("hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+    expect(field().value).toBe("hello");
+  });
+
+  it("replaces selected text the way typing does", async () => {
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Hello old world" } });
+    box.setSelectionRange(6, 9);
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "new", pending: "" });
+    expect(field().value).toBe("Hello new world");
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+
+    expect(field().value).toBe("Hello new world");
+  });
+
+  it("leaves the field and its selection as they were when nothing was heard", async () => {
+    microphone.refuse = true;
+    const { field } = renderComposer(kind);
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "Hello old world" } });
+    box.setSelectionRange(6, 9);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(field().value).toBe("Hello old world");
+    expect([field().selectionStart, field().selectionEnd]).toEqual([6, 9]);
+  });
+
+  it("stops at once while the microphone prompt is still open", async () => {
+    microphone.pending = true;
+    const { field } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+
+    await waitFor(() => expect(field().readOnly).toBe(false));
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(FakeSocket.last).toBeNull();
+  });
+
+  it("sends the last captured audio before asking for the rest of the text", async () => {
+    renderComposer(kind);
+    const socket = await startListening();
+    microphone.tail = new Uint8Array([7, 7]).buffer;
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(socket.sent.at(-2)).toBe(microphone.tail);
+  });
+
+  it("says it is finishing, not ready to start, until the rest of the text arrives", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Finishing voice input" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(field().readOnly).toBe(true);
+
+    socket.say({ type: "ended" });
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(field().value).toBe("hello");
+  });
+
+  it("shows the waveform inside the message field only while listening", async () => {
+    renderComposer(kind);
+    const waveform = () => document.querySelector("form [data-voice-input-waveform]");
+    await screen.findByRole("button", { name: "Start voice input" });
+    expect(waveform()).toBeNull();
+    const socket = await startListening();
+    expect(waveform()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    // The microphone is closed while the rest of the text arrives.
+    expect(waveform()).toBeNull();
+  });
+
+  it("gives the field back when Rome never answers a stop", async () => {
+    const { field } = renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the stop's own bound can run out.
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
+    expect(socket.textSent).toEqual([{ type: "start", sampleRate: 16000, bufferedMs: 0 }]);
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await act(async () => {});
+    expect(socket.textSent.at(-1)).toEqual({ type: "stop" });
+
+    // Rome is still there, so the connection is not lost, but the rest of the
+    // text never comes. Rome's own bound on a stop would run out first.
+    for (let elapsed = 0; elapsed < 18_000; elapsed += 2_000) {
+      act(() => rs.advanceTimersByTime(2_000));
+      socket.say({ type: "alive" });
+    }
+    expect(field().readOnly).toBe(true);
+    act(() => rs.advanceTimersByTime(2_000));
+    rs.useRealTimers();
+
+    expect(field().readOnly).toBe(false);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+    expect(screen.getByRole("button", { name: "Start voice input" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("keeps the words heard and closes the microphone the moment the browser goes offline", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    expect(field().value).toBe("hello the");
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("notices a connection that dies quietly within 5 seconds", async () => {
+    const { field } = renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    // Every dictation timer is fake, so only the quiet limit can run out.
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    const socket = FakeSocket.last!;
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => rs.advanceTimersByTime(2_000));
+    socket.say({ type: "alive" });
+    act(() => rs.advanceTimersByTime(2_900));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    act(() => rs.advanceTimersByTime(200));
+    rs.useRealTimers();
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("notices a connection that never opens within 5 seconds", async () => {
+    FakeSocket.opens = false;
+    renderComposer(kind);
+    const start = await screen.findByRole("button", { name: "Start voice input" });
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(start);
+    await act(async () => {});
+    expect(FakeSocket.last).toBeTruthy();
+
+    act(() => rs.advanceTimersByTime(3_100));
+    rs.useRealTimers();
+
+    expect(microphone.closed).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("keeps the words heard and says the connection was lost when it drops after a stop", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    act(() => socket.onclose?.());
+
+    expect(field().value).toBe("hello the");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Connection to Rome lost. Listening stopped",
+    );
+  });
+
+  it("keeps the words heard and says why when the transcriber stops listening", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    socket.say({ type: "error", reason: "provider-unavailable" });
+
+    expect(field().value).toBe("hello the");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Transcription service unavailable. Listening stopped",
+    );
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it.each([
+    ["no-speech", "Listening stopped after 30 seconds without speech"],
+    ["time-limit", "Listening stopped after 10 minutes"],
+  ])("keeps the words heard when Rome stops listening for %s", async (reason, notice) => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    socket.say({ type: "error", reason });
+
+    expect(field().value).toBe("hello");
+    expect(screen.getByRole("status").textContent).toBe(notice);
+    expect(microphone.closed).toBe(1);
+  });
+
+  it("says what the microphone is for while the browser asks for it", async () => {
+    microphone.pending = true;
+    renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "Rome uses the microphone to turn your speech into text",
+    );
+
+    await act(async () => microphone.answer?.());
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop voice input" })).toBeTruthy();
+  });
+
+  it("says why listening stopped, not what the microphone is for, after Back during the prompt", async () => {
+    microphone.pending = true;
+    renderComposer(kind, SONIOX, "chat-a");
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Listening stopped when you left this chat",
+    );
+  });
+
+  it("says why when Rome Cloud refuses voice input", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "error", reason: "service-refused", detail: "voice_input_rate_limited" });
+
+    expect(field().value).toBe("");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Too many voice inputs in the last minute. Try again shortly",
+    );
+  });
+
+  it("names a Rome Cloud reason the dashboard has no words for", async () => {
+    renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "error", reason: "service-refused", detail: "account_suspended" });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Rome Cloud refused voice input (account_suspended). Listening stopped",
+    );
+  });
+
+  it("says how to allow a refused microphone", async () => {
+    microphone.refuse = true;
+    renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(
+        "Microphone blocked. Allow it in the browser's site settings",
+      ),
+    );
+    expect(FakeSocket.last).toBeNull();
+  });
+
+  it("lets the first typed character through while it clears a notice", async () => {
+    microphone.refuse = true;
+    const { field, onSend } = renderComposer(kind);
+    fireEvent.click(await screen.findByRole("button", { name: "Start voice input" }));
+    await screen.findByRole("status");
+
+    const user = userEvent.setup();
+    await user.type(field(), "A");
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.type(field(), "bc{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
+  });
+});
+
+describe("voice input in the desktop app", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "rome");
+  });
+
+  it("shows the voice control when the app gives the dashboard the microphone", async () => {
+    Object.assign(window, { rome: { device: {}, microphone: true } });
+    renderComposer("chat");
+    expect(await screen.findByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it("has no voice control in an app too old to give it the microphone", async () => {
+    Object.assign(window, { rome: { device: {} } });
+    renderComposer("chat");
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/voice-input", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+  });
+});
+
+describe("voice input when a card locks the chat message field", () => {
+  it("stops listening, so the microphone does not stay open behind the lock", async () => {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer onSend={rs.fn()} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree(null));
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "half a", pending: "" });
+
+    rerender(tree("Answer the card above to continue."));
+
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(microphone.closed).toBe(1);
+  });
+
+  it("inserts text heard behind the lock as one undoable edit once the field shows again", async () => {
+    // jsdom renders nothing, so the hidden field is staged: it has no boxes and
+    // cannot take focus until it shows.
+    let hidden = false;
+    const observers: Array<() => void> = [];
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(readonly callback: () => void) {
+          observers.push(() => this.callback());
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const realFocus = HTMLTextAreaElement.prototype.focus;
+    rs.spyOn(HTMLTextAreaElement.prototype, "focus").mockImplementation(function (
+      this: HTMLTextAreaElement,
+    ) {
+      if (!hidden) realFocus.call(this);
+    });
+    rs.spyOn(HTMLTextAreaElement.prototype, "getClientRects").mockImplementation(
+      () => ({ length: hidden ? 0 : 1 }) as DOMRectList,
+    );
+    const execCommand = rs.spyOn(document, "execCommand");
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer onSend={rs.fn()} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree(null));
+    const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    hidden = true;
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(tree("Answer the card above to continue."));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    socket.say({ type: "ended" });
+
+    // The draft keeps the words while the field is hidden.
+    expect(field().value).toBe("hello");
+    expect(execCommand).not.toHaveBeenCalled();
+
+    hidden = false;
+    rerender(tree(null));
+    act(() => {
+      for (const observe of observers) observe();
+    });
+
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "hello");
+    expect(field().value).toBe("hello");
+  });
+});

@@ -49,7 +49,9 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * message every bubble of a message belongs to, so landing on the message
  * tints all of them. `arrival` marks a bubble
  * that enters while the chat is open. `className` adds to the outer box, as
- * the room a guardian bubble keeps above it for its status reaction.
+ * the room a guardian bubble keeps above it for its reaction. `under` goes in
+ * the bubble's box, not the outer one: the outer box also holds the touch
+ * details row, which can be wider than the bubble.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
   side,
@@ -61,6 +63,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   partOf,
   arrival,
   className,
+  under,
   children,
 }: {
   side: "start" | "end";
@@ -72,6 +75,8 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   partOf?: string;
   arrival?: number;
   className?: string;
+  /** What hangs under the bubble, positioned against its box, which is exactly as wide as the bubble: a thread's stack. */
+  under?: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -107,15 +112,23 @@ export const ConciergeBubble = memo(function ConciergeBubble({
       )}
     >
       <div
+        data-bubble-box
         className={cn(
           "group/bubble relative flex min-w-0 max-w-full",
           side === "end" && "justify-end",
           touch && "[-webkit-tap-highlight-color:transparent]",
+          // A thread's stack hangs under the bubble, behind it: the box is its
+          // own stacking context, and leaves room for it. The box takes the
+          // bubble's own width cap (ChatBubble), so a long message does not
+          // leave the box wider than the bubble the stack is inset against.
+          // The bubble's minimum width is in globals.css.
+          "has-[[data-thread-stack]]:isolate has-[[data-thread-stack]]:mb-10 has-[[data-thread-stack]]:max-w-[min(100%,var(--container-2xl))]",
         )}
         onClick={onTap}
         ref={boxRef}
       >
         {children}
+        {under}
         {touch ? (
           // Not drawn: anchored inside the bubble so its 44px box cannot
           // widen the transcript.

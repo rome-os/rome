@@ -97,6 +97,19 @@ enum MessagePart: Hashable, Sendable {
         /// An automated sender's name.
         let name: String?
         let text: String
+
+        /// The line a quote shows: the first line of the quoted message with
+        /// words in it, as plain reading text. A fence line holds none, so the
+        /// first line inside it counts. The rest of the message is not quoted.
+        var line: String {
+            for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { continue }
+                let plain = MarkdownParser.plain(String(raw)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !plain.isEmpty { return plain }
+            }
+            return ""
+        }
     }
 
     /// `routine_draft_card`: a routine Chat proposed, and the key it is created with.
@@ -339,7 +352,7 @@ enum MessagePart: Hashable, Sendable {
         var title: String?
         var summary: String?
         switch preview?["kind"]?.string {
-        case "generic":
+        case "generic", "secret_access":
             title = preview?["title"]?.string
             summary = preview?["summary"]?.string
             fields = (preview?["fields"]?.array ?? []).compactMap { field in
@@ -419,6 +432,12 @@ extension MessagePart {
     var replyQuote: ReplyQuote? {
         if case .replyTo(let quote) = self { return quote }
         return nil
+    }
+
+    /// Whether this is a task card.
+    var isTaskChat: Bool {
+        if case .taskChat = self { return true }
+        return false
     }
 
     /// The text of a text part.

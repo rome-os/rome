@@ -7,7 +7,12 @@ import { automatedInputLabel } from "./automated-input.js";
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
-import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
+import { MessageStatusTracker } from "./message-status.js";
+import {
+  CONCIERGE_CHAT_ID,
+  type ConciergeChatRef,
+  type MessageStatusEvent,
+} from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -22,9 +27,10 @@ import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
-  accountAllowsModel,
-  CODEX_LUNA_MODEL,
+  codexStrongSelection,
   MODEL_SELECTIONS,
+  selectionOfStrength,
+  type ModelStrength,
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,
@@ -48,6 +54,7 @@ import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../w
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
+import { defaultReplyTarget } from "./reply-target.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -57,8 +64,17 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
+import { guardianNow } from "./alerts.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 
 import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
+
+/** The models a Concierge chat started on before it ran on the strongest. */
+const OLD_DEFAULTS: ReadonlySet<ModelSelectionId> = new Set([
+  "claude-sonnet",
+  "gpt-6-luna",
+  "gpt-5-6-terra",
+]);
 
 const log = createLogger("concierge");
 
@@ -116,7 +132,7 @@ export {
   TASK_CHAT_TRIGGER_KIND,
 };
 /** The dashboard language the guardian picked: `en` or `zh-CN`. */
-const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
+export const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
@@ -158,7 +174,17 @@ export function conciergeOwnerLine(owner: OwnerProfile): string {
  */
 export interface TaskChats {
   /** Starts a dashboard chat owned by `ownerKey`. */
-  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
+  startChat(
+    input: {
+      agentName?: string;
+      projectPath?: string;
+      /** The chat's model, whatever the dashboard's model selector says. */
+      model?: ModelSelectionId;
+      /** The effort its messages run at when they name none. */
+      reasoningEffort?: "low" | "high";
+    },
+    ownerKey: string,
+  ): Promise<string>;
   /**
    * Opens the runtime session of a chat that has had no turn yet, as its
    * first message would, and answers its id.
@@ -193,6 +219,8 @@ export interface ConciergeDashboard {
 export interface ConciergeDeps {
   skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
+  /** The owner's local time, as each turn names it. Absent, the clock in the owner's time zone. */
+  localNow?: () => Promise<string>;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;
   webchatRepo: Pick<
@@ -205,8 +233,9 @@ export interface ConciergeDeps {
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
-    | "placeInChatThread"
+    | "setMessageReaction"
     | "setSessionTrigger"
+    | "setAskingDevice"
     | "listProjects"
     | "onMessageInserted"
     | "awaitingGuardianSince"
@@ -216,6 +245,7 @@ export interface ConciergeDeps {
     | "archiveSessionIn"
     | "deleteSessionIn"
     | "deleteSession"
+    | "taskChatPartMessages"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
@@ -311,6 +341,9 @@ export class ConciergeService {
   private stoppedRunWrites: Promise<void> = Promise.resolve();
   private taskEvents: TaskEventCoalescer | null = null;
   private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
+  private readonly statusListeners = new Set<(event: MessageStatusEvent) => void>();
+  /** The one watch on message statuses while anyone listens, and its stop. */
+  private stopStatusWatch: (() => void) | null = null;
   private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -321,8 +354,11 @@ export class ConciergeService {
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
+  /** When each open guardian message starts to show its turn working (docs/domains/chats.md#status). */
+  readonly messageStatus: MessageStatusTracker;
 
   constructor(readonly deps: ConciergeDeps) {
+    this.messageStatus = new MessageStatusTracker(() => this.deps.tasks.repo);
     this.push = deps.notify
       ? new ConciergePush({
           notify: deps.notify,
@@ -416,7 +452,9 @@ export class ConciergeService {
     if (existing) {
       if (!existing.largeModelSelection) {
         const picked = this.pickModel();
-        if (picked) await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked);
+        if (picked) {
+          await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked, "auto");
+        }
       }
       return id;
     }
@@ -442,6 +480,8 @@ export class ConciergeService {
       null,
       // The guardian's chat keeps no owner, as before; a visitor's names them.
       owner === GUARDIAN_OWNER ? {} : { ownerKey: owner },
+      null,
+      "auto",
     );
     log.info("concierge chat created", { chatId: id });
     return id;
@@ -490,7 +530,7 @@ export class ConciergeService {
     return this.deps.owners ?? ALL_OWNERS_SERVED;
   }
 
-  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a visitor while on the dashboard allow-list. */
+  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a dashboard admin while on the allow-list. */
   isServed(owner: ConciergeOwner): Promise<boolean> {
     return this.owners.isServed(owner);
   }
@@ -505,6 +545,23 @@ export class ConciergeService {
     if (ownerKey === null) throw new Error(`No Concierge chat ${chat.id}`);
     const owner = await this.owners.profileOf(ownerKey);
     return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
+  }
+
+  /**
+   * The chat owner's local weekday, date and time, which each Concierge turn
+   * names after its opening headers. The model's own date line names no
+   * weekday and follows the container's clock, which runs in UTC. This rides
+   * each turn, so the cached system prompt never changes with the clock. The
+   * zone is the owner's, as their follows and scheduled tasks use it.
+   */
+  async nowLine(chatId: string): Promise<string> {
+    if (this.deps.localNow) return `<now>${await this.deps.localNow()}</now>`;
+    const owner = (await this.ownerOfChat(chatId)) ?? GUARDIAN_OWNER;
+    const guardianZone = () => resolveGuardianTimezone(this.deps.settingsRepo);
+    const zone = this.attachedFollowing
+      ? await this.attachedFollowing.timezone(owner).catch(guardianZone)
+      : await guardianZone();
+    return `<now>${guardianNow(Date.now(), zone)}</now>`;
   }
 
   /** Whether a chat is its owner's main Concierge chat. */
@@ -576,6 +633,9 @@ export class ConciergeService {
       "webchat",
       null,
       { ownerKey: owner },
+      null,
+      // A topic chat takes the main chat's model as its owner or Rome chose it.
+      main?.largeModelSelection ? (main.largeModelSelectionBy ?? null) : "auto",
     );
     log.info("concierge topic chat started", { chatId: id });
     return { id, name: trimmed, main: false };
@@ -667,17 +727,13 @@ export class ConciergeService {
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
-    // none is moved. Open ones start a new thread there.
-    const tasks = await this.deps.tasks.repo.leaveChat(
-      chatId,
-      async (rows) => {
-        const status = await this.deps.tasks.statusOf(rows);
-        return new Set(
-          rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
-        );
-      },
-      { deleted: how === "deleted" },
-    );
+    // none is moved.
+    const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
+      const status = await this.deps.tasks.statusOf(rows);
+      return new Set(
+        rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
+      );
+    });
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     // A deleted chat is still there now: its caller tells the activity once
     // it is gone, so finished rows read as the main chat's by then.
@@ -697,14 +753,14 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
   async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
-    // A deleted chat's messages are gone, and their marks with them.
+    // A deleted chat's messages are gone, and the turns that took them with them.
     if (deleted) {
       await this.deps.tasks.repo.forgetMessages(chatId).catch((error: unknown) =>
-        log.warn("failed to forget a deleted chat's status reactions", {
+        log.warn("failed to forget a deleted chat's turns", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -718,24 +774,62 @@ export class ConciergeService {
   }
 
   // The YAML tier prefers Codex whenever it is signed in, so the choice is
-  // stored on the chat: Sonnet answers fastest and calls tools most reliably,
-  // and Codex's small model is next. An Anthropic-compatible provider serves
-  // its own models through the tier mappings, so it keeps the tier's choice,
-  // as does a chat that neither provider can serve.
+  // stored on the chat: the strongest model of Claude, else of Codex. Opus
+  // answers a simple turn as fast as Sonnet, since its thinking adapts to the
+  // question (docs/concierge-eval.md#baseline). An Anthropic-compatible
+  // provider serves its own models through the tier mappings, so it keeps the
+  // tier's choice, as does a chat that neither provider can serve.
   private pickModel(): ModelSelectionId | null {
     const { anthropic: claude, openai: codex } = this.deps.accounts.read();
     if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
-      return "claude-sonnet";
+      return "claude-opus-5-5";
     }
-    if (codex?.state === "available") {
-      return accountAllowsModel(codex.account, CODEX_LUNA_MODEL) ? "gpt-6-luna" : "gpt-5-6-terra";
-    }
+    if (codex?.state === "available") return codexStrongSelection(codex.account);
     return null;
+  }
+
+  /**
+   * The model of `strength` for a task chat that Concierge chat `chatId`
+   * starts: on the Concierge chat's own provider, so the task runs on the
+   * account the Concierge does. Null when that chat has no provider of its own.
+   */
+  async taskModel(chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
+    const stored = (await this.deps.webchatRepo.getSession(chatId))?.largeModelSelection;
+    const own = stored ? MODEL_SELECTIONS[stored as ModelSelectionId]?.providerId : undefined;
+    const picked = own === "anthropic" || own === "openai" ? null : this.pickModel();
+    const provider = picked ? MODEL_SELECTIONS[picked].providerId : own;
+    if (provider !== "anthropic" && provider !== "openai") return null;
+    return selectionOfStrength(provider, strength, this.deps.accounts.read().openai?.account);
   }
 
   /** Checks raw subscription availability before a turn in any Concierge chat. */
   async switchIfExhausted(chatId: string) {
+    await this.adoptStrongDefault(chatId);
     return this.move(chatId);
+  }
+
+  /**
+   * Moves a chat Rome put on an older default (Sonnet, Luna or Terra) before
+   * it kept who chose a chat's model to the strong model of the same
+   * provider, once. A model its owner picked, or one Rome chose since, stays.
+   */
+  private async adoptStrongDefault(chatId: string): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    const stored = chat?.largeModelSelection as ModelSelectionId | null | undefined;
+    // Only a Concierge chat: in any other chat, task chats included, a
+    // stored Sonnet or Luna may be its owner's pick or a task's fast model.
+    if (!chat || !isConciergeChat(chat)) return;
+    if (!stored || chat.largeModelSelectionBy || !OLD_DEFAULTS.has(stored)) return;
+    const provider = MODEL_SELECTIONS[stored].providerId;
+    if (provider !== "anthropic" && provider !== "openai") return;
+    const strong = selectionOfStrength(
+      provider,
+      "strong",
+      this.deps.accounts.read().openai?.account,
+    );
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, strong, "auto");
+    if (strong !== stored)
+      log.info("concierge chat moved to its strong model", { chatId, from: stored, to: strong });
   }
 
   async switchForFailure(
@@ -797,7 +891,11 @@ export class ConciergeService {
           Date.now(),
     );
     if (!target) return null;
-    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(
+      chatId,
+      target.selectionId,
+      "auto",
+    );
     this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
@@ -849,9 +947,11 @@ export class ConciergeService {
     // current one, and its note carries what it needs.
     const sessionId = (await this.runtimeOf(chatId)) || params.sessionId;
     const chat = await this.conciergeChat(chatId);
+    const opens = !!chat && !params.prompt.startsWith("<concierge_chat ");
     const opening = [
-      chat && !params.prompt.startsWith("<concierge_chat ") ? await this.turnHeader(chat) : "",
+      opens ? await this.turnHeader(chat) : "",
       chat ? await this.stoppedRequestLines(chatId) : "",
+      opens ? await this.nowLine(chatId) : "",
     ].filter(Boolean);
     const prompt = opening.length > 0 ? `${opening.join("\n")}\n\n${params.prompt}` : params.prompt;
     const reportedTask = await this.reportedTaskOf(this.taskIdsOf(params), chatId);
@@ -952,7 +1052,7 @@ export class ConciergeService {
     }
     // The tasks it reported on settle with the flush that carried them: the
     // coalescer settles exactly the news a completed turn carried
-    // (docs/domains/chats.md#status-reaction).
+    // (docs/domains/chats.md#reaction).
     return outcome;
   }
 
@@ -986,8 +1086,8 @@ export class ConciergeService {
   /**
    * The tasks whose report a newer input took over in Concierge chat
    * `chatId`, until the turn that took it over ends. That turn is about the
-   * owner's message and these tasks, so what it says names its subject
-   * (docs/domains/chats.md#chat-thread).
+   * owner's message and these tasks, so what it says is not certainly an
+   * answer to the owner's message alone.
    */
   carriedReport(chatId: string): readonly string[] | undefined {
     return this.carriedReports.get(chatId);
@@ -1020,6 +1120,31 @@ export class ConciergeService {
     return this.handedOnPrompts.get(chatId) ?? [];
   }
 
+  /**
+   * Says a card the Concierge shows, which replies as its messages do: to the
+   * message `named`, else to the turn's default (reply-target.ts). A name that
+   * is no message of the chat is dropped, not refused: the guardian was shown
+   * the card already. A card is a message of its own, so it carries no quote.
+   */
+  async addCard(
+    chatId: string,
+    turnId: string,
+    part: Parameters<WebChatRepository["addBackendMessage"]>[2][number],
+    named?: string,
+  ): Promise<string> {
+    const { webchatRepo } = this.deps;
+    const target = named ? await webchatRepo.getReplyTarget(chatId, named) : null;
+    const key = target ? undefined : await defaultReplyTarget(this, chatId, turnId);
+    const replyTo = target ?? (key ? await webchatRepo.getReplyTarget(chatId, key) : null);
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [part],
+      replyTo ? { replyTo: replyTo.id } : {},
+    );
+    return id;
+  }
+
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
   /**
    * Calls `listener` with the owner's messages a Concierge turn took in once
@@ -1037,6 +1162,25 @@ export class ConciergeService {
     if (inputIds.length === 0) return;
     for (const listener of this.inputListeners)
       listener({ sessionId: chatId, inputIds: [...inputIds] });
+  }
+
+  /**
+   * Calls `listener` whenever a guardian message's status changes
+   * (docs/domains/chats.md#status), in any Concierge chat. Each change is
+   * worked out once, however many listen. Returns the unsubscribe.
+   */
+  onMessageStatus(listener: (event: MessageStatusEvent) => void): () => void {
+    this.statusListeners.add(listener);
+    this.stopStatusWatch ??= this.deps.tasks.onMessageStatus((target, status) => {
+      const event = { sessionId: target.chatId, messageId: target.messageKey, status };
+      for (const each of this.statusListeners) each(event);
+    });
+    return () => {
+      this.statusListeners.delete(listener);
+      if (this.statusListeners.size > 0) return;
+      this.stopStatusWatch?.();
+      this.stopStatusWatch = null;
+    };
   }
 
   /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */
@@ -1493,6 +1637,10 @@ export class ConciergeService {
     }
     const chatId = row.sessionId;
     if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
+    // No one is asking from a device in a scheduled run, and a device id saved
+    // by an earlier handoff ends at the next sign-in: the run's live reads
+    // take a working device instead. A later handoff from a device sets it again.
+    await this.deps.webchatRepo.setAskingDevice(chatId, null);
     const sent = await this.dashboard.send(
       taskChatPlace(chatId),
       { text: schedule.brief, ...(schedule.skill ? { skillName: schedule.skill } : {}) },
@@ -1515,8 +1663,8 @@ export class ConciergeService {
 
   /**
    * The owner cancelled check `checkId` of chat `chatId` from the chat's
-   * checks. One for a task tells the Concierge quietly, as cancelling from
-   * the task's row does. Answers whether there was such a check.
+   * checks. One for a task tells the Concierge quietly. Answers whether
+   * there was such a check.
    */
   async cancelCheckByOwner(chatId: string, checkId: string): Promise<boolean> {
     const checks = this.deps.checks;
@@ -1532,20 +1680,6 @@ export class ConciergeService {
       await this.deps.tasks.taskChanged(check.taskId);
     }
     return true;
-  }
-
-  /**
-   * Task `taskId`'s owner called its checks off from its row: a wake-up is
-   * removed, and its schedule skips only its next run. A failure reaches the
-   * caller; once they are cancelled, the Concierge hears of it
-   * quietly, so it expects no wake-up from them.
-   */
-  async cancelChecksByOwner(taskId: string): Promise<void> {
-    const row = await this.deps.tasks.repo.get(taskId);
-    if (!row) return;
-    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
-    this.taskEvents?.mark({ taskId, kind: "checks_cancelled_by_owner", urgent: false });
-    await this.deps.tasks.taskChanged(taskId);
   }
 
   /**

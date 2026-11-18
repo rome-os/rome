@@ -29,7 +29,13 @@ import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
-import { handoffSections, type RenewalHandoffs } from "../domain/session-handoff.js";
+import {
+  handoffSections,
+  LIGHT_HANDOFF,
+  lightHandoffCap,
+  type RenewalHandoffs,
+  replayTokens,
+} from "../domain/session-handoff.js";
 import { writeRenewalHandoff } from "./session-handoff.js";
 import type { PromptFacts } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
@@ -40,7 +46,8 @@ import {
   forkSessionTools,
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
+import { type TurnFacts, type PushLevel, type TurnActor, sameActor } from "../domain/turn-facts.js";
+import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -190,6 +197,11 @@ export interface SessionOpening {
   toolEnv?: Record<string, string | undefined>;
   /** Attributes stamped on the spans of every turn. The session passes them through. */
   spanAttributes?: Attributes;
+  /**
+   * Who can read the session's chat, as its opener read it (turnAudience's
+   * `place`). Absent, a turn reads its place off its thread context alone.
+   */
+  audience?: Audience;
 }
 
 /** What a resume states. It carries no reset policy, since a session named by
@@ -267,6 +279,11 @@ export interface SendTurnOptions {
    * arrives. Absent, the turn acts for no one.
    */
   actor?: TurnActor;
+  /**
+   * The audience of the turn that started this one, such as a subagent's
+   * caller. The turn is never more private than it.
+   */
+  parentAudience?: Audience;
   /** The Concierge task the turn reports on, which no message of the owner started (TurnFacts.reportedTask). */
   reportedTask?: string;
 }
@@ -370,11 +387,11 @@ interface ManagerDeps {
   subagentSessions?: (
     manager: Sessions,
     parentLink: string,
-    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes">,
+    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes" | "audience">,
   ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
-  /** What each chat set for its sessions. Absent, no saved model is restored. */
+  /** What each chat set for its sessions. Absent, no saved model or effort is restored. */
   sessionSettings?: SessionSettings;
   /**
    * What the conversation a session serves adds to its context: text for the
@@ -427,10 +444,36 @@ interface ManagerOptions {
   isSubagent?: boolean;
   /** The turns of the manager that opened this one, so one lookup finds both. */
   turns?: TurnsById;
+  /**
+   * How long a chat must be quiet before a context handoff that a message
+   * dropped is written again. Defaults to a minute.
+   */
+  contextRetryQuietMs?: number;
 }
 
 /** How long a context renewal waits for the ending turn's own cleanup. */
 const CONTEXT_RENEWAL_SETTLE_MS = 5_000;
+
+/**
+ * How long a chat must be quiet before a dropped context handoff is written
+ * again. Each attempt is a full-context model call that a message throws
+ * away, so a chat in a back-and-forth does not pay for one per exchange.
+ */
+const CONTEXT_RETRY_QUIET_MS = 60_000;
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function quietFor(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
 
 async function waitUntilQuiescent(session: AgentSessionImpl, timeoutMs?: number): Promise<void> {
   if (session.status === "closed" || session.isQuiescentForRotation) return;
@@ -477,6 +520,9 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         () => {
           const cutoff = Date.now() - idleTtlMs;
           for (const session of [...sessions.values()]) {
+            // A session writing its handoff for a full context stays open:
+            // its renewal closes it.
+            if (contextHandoffs.get(keyOf(session.key))?.session === session) continue;
             if (session.isQuiescentForRotation && session.lastActiveAt < cutoff) {
               void session.close("idle").catch(() => {
                 // best-effort sweeper
@@ -494,7 +540,10 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const sentHeaders = new Map<string, SentHeaders>();
   const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
-    sessions.delete(keyOf(sess.key));
+    const k = keyOf(sess.key);
+    // A late close must not evict a newer live session under the same key.
+    if (sessions.get(k) !== sess) return;
+    sessions.delete(k);
     // A thread that read none, such as one just compacted, must send them all
     // on its reopen, so an earlier snapshot of the same session goes too.
     if (sess.readHeaders.size === 0) {
@@ -505,32 +554,69 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     sentHeaders.set(sess.sessionId, sess.readHeaders);
   };
 
-  // A renewal for a full context, by key, from the close of the session it
-  // renews until its successor is written. An open of the same key waits for
-  // that, and opens the successor; nothing waits while the session is in use.
+  // A renewal for a full context (docs/concepts/sessions.md#handoff), by key.
+  // While its handoff is written the session stays live, and a message that
+  // comes meanwhile goes to it at once and drops the handoff as stale: the
+  // turn's end, still past the limit, writes it again. Only a session past
+  // the hard limit makes that message wait. Once a handoff is written with
+  // no turn since, the session is closed and its successor stored; an open of
+  // the same key waits for that commit, and opens the successor.
+  const contextHandoffs = new Map<
+    string,
+    {
+      session: AgentSessionImpl;
+      abort: AbortController;
+      /** Ends the quiet wait before a retry, for a message that waits for it. */
+      hurry: AbortController;
+      done: Promise<void>;
+    }
+  >();
   const contextRenewals = new Map<string, Promise<void>>();
-  const pendingFull = new Set<string>();
+  // Sessions whose context handoff a message dropped: the next one waits for
+  // the chat to be quiet a while.
+  const droppedHandoffs = new WeakSet<AgentSessionImpl>();
+  const retryQuietMs = options.contextRetryQuietMs ?? CONTEXT_RETRY_QUIET_MS;
   const onContextFull = (sess: AgentSessionImpl) => {
     const k = keyOf(sess.key);
-    if (contextRenewals.has(k) || pendingFull.has(k) || shutDown) return;
-    pendingFull.add(k);
-    void (async () => {
+    const handoffs = deps.handoffs;
+    // A handoff dropped as stale may still be winding down: this one replaces it.
+    const writing = contextHandoffs.get(k);
+    if (!handoffs || (writing && !writing.abort.signal.aborted) || contextRenewals.has(k)) return;
+    if (shutDown) return;
+    const abort = new AbortController();
+    const hurry = new AbortController();
+    abort.signal.addEventListener("abort", () => hurry.abort(), { once: true });
+    const stillCurrent = () =>
+      !abort.signal.aborted &&
+      sessions.get(k) === sess &&
+      !sess.closing &&
+      sess.status !== "closed";
+    const done = (async () => {
       try {
         // Only the ending turn's own cleanup is waited for. A session still in
         // use after it (a caller, a queued input, an approval) is left alone,
         // and the next turn end past the limit tries again.
         await waitUntilQuiescent(sess, CONTEXT_RENEWAL_SETTLE_MS);
-        if (sess.status === "closed" || sessions.get(k) !== sess) return;
-        if (!sess.isQuiescentForRotation) return;
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
+        // A message dropped the last one: wait until the chat is quiet, and a
+        // message meanwhile drops this wait, at no model call's cost.
+        if (droppedHandoffs.has(sess)) await quietFor(retryQuietMs, hurry.signal);
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
         if (await deps.heldMidTurn?.(sess.sessionId)) return;
-        if (!sess.isQuiescentForRotation || sessions.get(k) !== sess || sess.closing) return;
-        const run = (async () => {
+        if (!stillCurrent()) return;
+        const handoff = await sess.writeContextHandoff(handoffs, abort.signal);
+        if (!handoff || !stillCurrent()) return;
+        if (await deps.heldMidTurn?.(sess.sessionId)) return;
+        // Nothing awaits between this check and the close, so no caller gets
+        // the session in between.
+        if (!stillCurrent() || !sess.isQuiescentForRotation) return;
+        const commit = (async () => {
           await sess.close("idle");
-          await renewForContext(deps, sess);
+          await storeContextSuccessor(deps, sess, handoff);
         })();
-        contextRenewals.set(k, run);
+        contextRenewals.set(k, commit);
         try {
-          await run;
+          await commit;
         } finally {
           contextRenewals.delete(k);
         }
@@ -541,9 +627,39 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        pendingFull.delete(k);
+        if (contextHandoffs.get(k)?.abort === abort) contextHandoffs.delete(k);
       }
     })();
+    contextHandoffs.set(k, { session: sess, abort, hurry, done });
+  };
+
+  /**
+   * An open meets a renewal for a full context. While its handoff is written,
+   * the live session answers, and the handoff is dropped, unless its context
+   * is past the hard limit: then the open waits for the renewal, under the
+   * chat's tidying activity. An open during the commit waits for it.
+   */
+  const meetContextRenewal = async (k: string): Promise<void> => {
+    const writing = contextHandoffs.get(k);
+    if (writing) {
+      const hard = deps.handoffs?.hardContextLimitTokens;
+      const used = writing.session.contextTokens;
+      if (deps.handoffs && hard !== undefined && used !== undefined && used >= hard) {
+        writing.hurry.abort();
+        await deps.handoffs.tidying(writing.session.chatId, () => writing.done);
+      } else {
+        writing.abort.abort();
+        droppedHandoffs.add(writing.session);
+        log.info("session_handoff.dropped", {
+          agentName: writing.session.key.agentName,
+          sessionId: writing.session.sessionId,
+          contextTokens: used,
+        });
+      }
+    }
+    // A renewal that failed leaves the session current: this open finds it.
+    const renewal = contextRenewals.get(k);
+    if (renewal) await renewal.catch(() => undefined);
   };
 
   const acquireInner = async (
@@ -552,10 +668,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     init?: OpenRequest,
   ): Promise<AgentSession> => {
     const k = keyOf(key);
-    // A renewal for a full context writes the successor this open is for.
-    const renewal = contextRenewals.get(k);
-    // A renewal that failed leaves the session current: this open finds it.
-    if (renewal) await renewal.catch(() => undefined);
+    await meetContextRenewal(k);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -811,6 +924,10 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
+  isLive?: () => boolean;
+  captureTaskInputLiveness?: () => () => boolean;
+  /** Who can read the running turn; its subagents' turns are never more private. */
+  getAudience: () => Audience;
 }
 
 /** Per-fork identity handed to `buildForkOpenParams` by `fork`. */
@@ -993,6 +1110,7 @@ function sessionSetupOf(
       log: deps.log,
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,
+      repliesTo: policy.delegatesWork,
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
@@ -1037,6 +1155,7 @@ function sessionSetupOf(
         sharedContext: () => opening.sharedContext,
         pushLevel: () => undefined,
         actor: () => undefined,
+        audience: () => "shared",
         reportedTask: () => undefined,
         inTurn: (fn) => fn(),
       };
@@ -1116,38 +1235,72 @@ async function prepareSetup(
 }
 
 /**
- * Renews the chat of a session just closed for a full context: the retired
- * session writes its handoff, and its successor is written with it, on no
- * thread yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
- * Nothing is written when no handoff is, so the chat keeps its session until
- * a later turn end tries again, or the provider's own compaction runs.
+ * What session `retired` held: the handoff it started from, if any, and the
+ * chat's messages since it opened. One renewed lightly held what its own
+ * predecessor did, so a run of light renewals counts as one session.
  */
-async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Promise<void> {
+async function heldBy(
+  repository: SessionRepository,
+  retired: Session,
+): Promise<{ handoff: string | null; since: Date }> {
+  let held = retired;
+  const seen = new Set<string>();
+  while (held.handoff === LIGHT_HANDOFF && !seen.has(held.id)) {
+    seen.add(held.id);
+    const before = await repository.predecessorOf(held.id);
+    if (!before) break;
+    held = before;
+  }
+  return {
+    handoff: held.handoff === LIGHT_HANDOFF ? null : held.handoff,
+    since: held.createdAt,
+  };
+}
+
+/**
+ * Whether what a light handoff from `retired` would carry is past its cap. A
+ * read that fails says no, as a light handoff is still the better guess.
+ */
+async function lightReplayTooLarge(
+  deps: ManagerDeps,
+  retired: Session,
+  chatId: string | undefined,
+): Promise<boolean> {
+  const limit = deps.handoffs?.contextLimitTokens;
+  if (!deps.handoffs || !limit || !chatId) return false;
+  try {
+    const held = await heldBy(deps.sessionRepository, retired);
+    const context = await deps.handoffs.context(chatId, "", held.since);
+    const tokens = replayTokens(held.handoff, context.recent);
+    const cap = lightHandoffCap(limit);
+    if (tokens <= cap) return false;
+    deps.log.info("session_handoff.light_too_large", {
+      oldSessionId: retired.id,
+      tokens,
+      cap,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Renews the chat of a session just closed for a full context, with the
+ * handoff it wrote while live: its successor is stored with it, on no thread
+ * yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
+ */
+async function storeContextSuccessor(
+  deps: ManagerDeps,
+  closed: AgentSessionImpl,
+  handoff: string,
+): Promise<void> {
   const { log } = deps;
   const { key } = closed;
-  if (!deps.handoffs || !key.channelThreadKey) return;
-  const retired = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-  if (!retired || retired.id !== closed.sessionId) return;
-  const handoff = await writeRenewalHandoff(
-    {
-      retired,
-      agentName: key.agentName,
-      chatId: closed.chatId,
-      systemPrompt: closed.openedSystemPrompt,
-      workingDir: closed.workingDirectory,
-      env: {},
-    },
-    {
-      handoffs: deps.handoffs,
-      modelResolver: deps.modelResolver,
-      turnUsage: deps.turnUsage,
-      log,
-    },
-  );
-  if (!handoff) return;
+  if (!key.channelThreadKey) return;
   // Something else renewed the chat meanwhile: its session stays.
   const still = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-  if (!still || still.id !== retired.id) return;
+  if (!still || still.id !== closed.sessionId) return;
   const successor = still.replace({
     setup: still.setup ?? undefined,
     reason: "context",
@@ -1263,6 +1416,8 @@ async function openSession(
   // session opened or the chat's reset policy says a reset is due, and no
   // approval holds it. A live session is never renewed; it takes the new
   // setup on its next cold open. A resume by id resumes what it names.
+  const changed =
+    resumed !== undefined && setupNow !== undefined && setupChanged(resumed.setup, setupNow);
   let renewing: { retired: Session; successor: Session; reason: string } | undefined;
   if (
     resumed &&
@@ -1270,22 +1425,26 @@ async function openSession(
     !opts.isSubagent &&
     resumed.handoff !== null &&
     !resumed.modelThreadId &&
-    setupNow !== undefined &&
-    setupChanged(resumed.setup, setupNow)
+    changed
   ) {
     // It started from a handoff and no turn ran on it yet, so there is no
     // thread to hand off from: it takes the new setup in place, and keeps the
     // handoff and the renewal it came from.
-    resumed.adoptSetup(setupNow);
+    resumed.adoptSetup(setupNow!);
     await deps.sessionRepository.save(resumed);
   } else if (resumed && !init.resumeSessionId && !opts.isSubagent) {
+    // A reset its chat's policy says is due renews with a handoff the retired
+    // session writes. Otherwise a setup change renews with a light handoff: no
+    // turn writes a note, and the successor reads what the retired session
+    // held, its handoff and the chat's messages since.
+    // A due reset goes first: its fresh session takes the new setup anyway,
+    // and a light handoff would carry over what the reset is meant to drop.
     let reason: string | undefined;
-    if (setupNow !== undefined && setupChanged(resumed.setup, setupNow)) {
-      reason = "setup";
-    } else if (init.resetPolicy) {
+    if (init.resetPolicy) {
       const decision = evaluateProviderSessionReset(init.resetPolicy, resumed, new Date());
       if (decision.due) reason = decision.reason;
     }
+    if (!reason && changed) reason = "setup";
     if (reason && (await deps.heldMidTurn?.(resumed.id))) {
       log.info("provider_session.reset_held", {
         agentName: key.agentName,
@@ -1294,15 +1453,22 @@ async function openSession(
       });
       reason = undefined;
     }
+    const handsOff =
+      !!deps.handoffs &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal;
+    // A setup change hands off lightly, unless what the successor would read
+    // is too large for its first turn.
+    const light =
+      reason === "setup" &&
+      !(handsOff && (await lightReplayTooLarge(deps, resumed, init.threadContext?.romeSessionId)));
     if (reason) {
       // Written at send time, before the fresh session opens, so the message
       // that caused the cold open is answered by a session that has read it.
       const written = opts.writtenHandoffs?.get(resumed.id);
       const handoff =
         written ??
-        (deps.handoffs &&
-        !config.codeBacked &&
-        resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        (!light && handsOff && deps.handoffs
           ? await writeRenewalHandoff(
               {
                 retired: resumed,
@@ -1330,7 +1496,7 @@ async function openSession(
         setup: setupNow ?? resumed.setup ?? undefined,
         reason,
         workingDir,
-        handoff: handoff ?? undefined,
+        handoff: light ? LIGHT_HANDOFF : (handoff ?? undefined),
       });
       renewing = { retired: resumed, successor, reason };
       resumed = undefined;
@@ -1378,6 +1544,13 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
+  // A cold resume runs at the effort its web chat saved when the open names
+  // none, as a message to that chat does; a turn that names one still wins.
+  const savedEffort =
+    init.resumeSessionId && init.reasoningEffort === undefined
+      ? await deps.sessionSettings?.savedReasoningEffort(sessionId)
+      : undefined;
+  const openedEffort = init.reasoningEffort ?? savedEffort ?? undefined;
 
   if (prepared) {
     prepared.moveTo(workingDir);
@@ -1418,6 +1591,9 @@ async function openSession(
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
+    isLive: () => impl.currentTurnLiveRef,
+    captureTaskInputLiveness: () => impl.captureTaskInputLiveness(),
+    getAudience: () => impl.currentTurnAudienceRef,
   };
 
   // The facts the ports behind the Rome tools read, for the turns the refs run.
@@ -1445,6 +1621,9 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
+    live: () => refs.isLive?.() === true,
+    captureTaskInputLiveness: refs.captureTaskInputLiveness,
+    audience: refs.getAudience,
     reportedTask,
     inTurn: refs.bindTurnCtx,
   });
@@ -1477,6 +1656,9 @@ async function openSession(
           sessions: deps.subagentSessions(refs.getChildManager(), refs.childChannelThreadKey, {
             toolEnv: init.toolEnv,
             spanAttributes: init.spanAttributes,
+            // The subagent reads its starter's place; each of its turns is
+            // narrowed again by the starter's turn (parentAudience).
+            audience: init.audience,
           }),
           at: {
             workingDir,
@@ -1484,6 +1666,7 @@ async function openSession(
             sharedContext: refs.getSharedContext(),
           },
           actor: refs.getActor(),
+          audience: refs.getAudience(),
         });
         try {
           refs.attachSubagentCall(toolContext.toolUseId, call);
@@ -1500,7 +1683,7 @@ async function openSession(
       });
 
   const reasoningEffortOf = (setup: PreparedSetup) =>
-    init.reasoningEffort ?? setup.source.definition.reasoningEffort;
+    openedEffort ?? setup.source.definition.reasoningEffort;
 
   // The Rome tools a session serves, bound to the refs that run them. The live
   // session has a speaker; a fork has none and may have no `defer`, and its
@@ -1672,6 +1855,10 @@ async function openSession(
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
+    const forkAudience = turnAudience(opening.threadContext, {
+      actor: fork.actor,
+      place: init.audience,
+    });
     const refs: TurnExecRefs = {
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
@@ -1700,6 +1887,9 @@ async function openSession(
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
       getActor: () => fork.actor,
+      // A fork answers for the turn it was forked from, so it reads the
+      // source's place and person.
+      getAudience: () => forkAudience,
     };
     const liveOpenParams = lastOpenParams;
     return {
@@ -1844,6 +2034,7 @@ async function openSession(
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
+    placeAudience: init.audience,
     spanAttributes: init.spanAttributes,
     isNewSession,
     isSubagent: opts.isSubagent,
@@ -1859,6 +2050,18 @@ async function openSession(
     renewal,
     // Shown with the continuation notice until a turn of this session succeeds.
     handoff: continuesChat ? (session.handoff ?? undefined) : undefined,
+    // A successor of an agent that renews with a handoff reads the chat's
+    // open tasks and its messages, whether or not a handoff was written: all
+    // its predecessor held after a setup change, else the recent ones.
+    carriesMessages:
+      continuesChat &&
+      !opts.isSubagent &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        ? session.handoff === LIGHT_HANDOFF
+          ? "held"
+          : "recent"
+        : undefined,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -1918,6 +2121,7 @@ interface ImplArgs {
   /** The app that owns the agent, when an app does. */
   owningAppId?: string;
   threadContext?: ThreadContext;
+  placeAudience?: Audience;
   sharedContext?: Record<string, unknown>;
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
   isNewSession: boolean;
@@ -1936,6 +2140,12 @@ interface ImplArgs {
   renewal?: SessionRenewal;
   /** The handoff the session started from, while no turn of it has succeeded. */
   handoff?: string;
+  /**
+   * Its first turns carry the chat's open tasks and messages, with the
+   * handoff if any: what the session it replaced held (`held`), or the
+   * latest ones (`recent`).
+   */
+  carriesMessages?: "held" | "recent";
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -2011,12 +2221,15 @@ interface TurnSink {
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
+  /** Who can read the turn, read once when it starts. */
+  audience: Audience;
   reportedTask?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   /** The guardian stopped the turn, not a `now` input superseding it. Its
    *  read inputs are then done with: the next turn hands none of them on. */
   stoppedByGuardian: boolean;
+  taskInputContinues: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
   pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
@@ -2172,9 +2385,13 @@ class AgentSessionImpl implements AgentSession {
   private readonly turns: TurnsById;
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
+  /** Who can read the session's chat, as its opener read it. */
+  private readonly placeAudience?: Audience;
   private sharedContext?: Record<string, unknown>;
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
+  private taskInputEpoch = 0;
+  private taskInputScope?: Pick<TurnSink, "actor" | "audience" | "threadContext">;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
   // runEventsLoop when the terminal `result`/`error` message lands, so the
   // trace contract is complete by the time the sink closes (i.e. before
@@ -2217,6 +2434,8 @@ class AgentSessionImpl implements AgentSession {
   private renewalPending?: SessionRenewal;
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
+  /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
+  private carriesMessages?: "held" | "recent";
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2247,7 +2466,10 @@ class AgentSessionImpl implements AgentSession {
         error: error instanceof Error ? error.message : String(error),
       }),
     (turnId) => {
-      if (this.currentSink?.turnId === turnId) this.currentSink.actor = undefined;
+      if (this.currentSink?.turnId === turnId) {
+        this.taskInputEpoch++;
+        this.currentSink.actor = undefined;
+      }
     },
   );
   private keepAlive: boolean;
@@ -2272,6 +2494,7 @@ class AgentSessionImpl implements AgentSession {
     this.turns = args.turns;
     this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
+    this.placeAudience = args.placeAudience;
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
@@ -2283,6 +2506,7 @@ class AgentSessionImpl implements AgentSession {
     this.continuationPending = args.replacedThread;
     this.renewalPending = args.renewal;
     this.handoff = args.handoff;
+    this.carriesMessages = args.carriesMessages;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2348,6 +2572,57 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnActorRef(): TurnActor | undefined {
     return this.currentSink?.actor;
+  }
+
+  get currentTurnLiveRef(): boolean {
+    return (
+      !!this.currentSink &&
+      !this.currentSink.done &&
+      !this.currentSink.lifecycleInterrupted &&
+      !this.closing
+    );
+  }
+
+  captureTaskInputLiveness(): () => boolean {
+    const sink = this.currentSink;
+    const epoch = this.taskInputEpoch;
+    if (!sink || !this.currentTurnLiveRef) return () => false;
+    return () =>
+      this.taskInputEpoch === epoch &&
+      !this.closing &&
+      !sink.stoppedByGuardian &&
+      (sink.taskInputContinues || (!sink.done && !sink.lifecycleInterrupted));
+  }
+
+  private observeTaskInputScope(options?: SendTurnOptions): boolean {
+    const thread = options?.threadContext ?? this.threadContext;
+    const audience = turnAudience(thread, {
+      actor: options?.actor,
+      parent: options?.parentAudience,
+      place: this.placeAudience,
+    });
+    const previous = this.taskInputScope;
+    const same =
+      !!previous &&
+      sameActor(previous.actor, options?.actor) &&
+      previous.audience === audience &&
+      previous.threadContext?.channel === thread?.channel &&
+      previous.threadContext?.threadId === thread?.threadId &&
+      previous.threadContext?.threadType === thread?.threadType;
+    if (!same) this.taskInputEpoch++;
+    this.taskInputScope = {
+      actor: options?.actor ? { ...options.actor } : undefined,
+      audience,
+      threadContext: thread ? { ...thread } : undefined,
+    };
+    return same;
+  }
+
+  /** The running turn's audience; between turns, the session's place read alone. */
+  get currentTurnAudienceRef(): Audience {
+    return (
+      this.currentSink?.audience ?? turnAudience(this.threadContext, { place: this.placeAudience })
+    );
   }
 
   /** The next turn resumes what an earlier session of the chat started, so
@@ -2668,7 +2943,10 @@ class AgentSessionImpl implements AgentSession {
               outbound.accounting?.context?.usedTokens,
             );
             if (sink.carriesContinuation) this.continuationPending = false;
-            if (sink.carriesHandoff) this.handoff = undefined;
+            if (sink.carriesHandoff) {
+              this.handoff = undefined;
+              this.carriesMessages = undefined;
+            }
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
             // A compaction, which the provider reports, or less context than
@@ -2720,24 +2998,84 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
+  /** The context the thread was left at by the last turn that reported one. */
+  get contextTokens(): number | undefined {
+    return this.lastContextTokens;
+  }
+
+  /**
+   * The handoff of a renewal for a full context, written while the session
+   * stays live and answers what comes: on a branch of its thread at the
+   * latest turn, so the thread never reads the request, or by the fallback
+   * when no turn left a place to branch at. Null when none was written, or
+   * `signal` dropped it as stale. docs/concepts/sessions.md#handoff
+   */
+  async writeContextHandoff(
+    handoffs: RenewalHandoffs,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const at = this.lastPosition;
+    return await writeRenewalHandoff(
+      {
+        retired: this.session,
+        agentName: this.key.agentName,
+        chatId: this.chatId,
+        systemPrompt: this.systemPrompt,
+        workingDir: this.workingDir,
+        env: {},
+        thread: at ? { kind: "branch", at, lifetime: "ephemeral" } : null,
+        background: true,
+        signal,
+      },
+      {
+        handoffs,
+        modelResolver: this.deps.modelResolver,
+        turnUsage: this.deps.turnUsage,
+        log: this.log,
+      },
+    );
+  }
+
   /**
    * The handoff sections of the continuation notice, with the open tasks and
-   * recent messages read now. Undefined when the session carries no handoff,
-   * or the turn is in no chat. A failed read leaves out what it would add.
+   * recent messages read now. Undefined when the session carries neither a
+   * handoff nor the recent messages, or the turn is in no chat. A failed read
+   * leaves out what it would add.
    */
   private async handoffSectionsFor(sink: TurnSink): Promise<string[] | undefined> {
-    const handoff = this.handoff;
     const handoffs = this.deps.handoffs;
-    if (!handoff || !handoffs || !sink.romeSessionId) return undefined;
+    if ((!this.handoff && !this.carriesMessages) || !handoffs || !sink.romeSessionId) {
+      return undefined;
+    }
     sink.carriesHandoff = true;
-    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch((err) => {
+    const failed = (err: unknown) => {
       this.log.warn("session_handoff.context_failed", {
         sessionId: this.sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
       return { openTasks: null, recent: [] };
-    });
-    return handoffSections(handoff, context);
+    };
+    if (this.carriesMessages === "held") {
+      const held = await this.heldByPredecessor().catch(() => null);
+      if (held) {
+        const context = await handoffs
+          .context(sink.romeSessionId, sink.turnId, held.since)
+          .catch(failed);
+        return handoffSections(held.handoff, context, { all: true });
+      }
+    }
+    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch(failed);
+    return handoffSections(this.handoff ?? null, context);
+  }
+
+  /**
+   * What the session this one replaced on a setup change held: the handoff
+   * it started from, if any, and the chat's messages since it opened. A run
+   * of light renewals counts as one session.
+   */
+  private async heldByPredecessor(): Promise<{ handoff: string | null; since: Date } | null> {
+    const retired = await this.deps.sessionRepository.predecessorOf(this.sessionId);
+    return retired ? await heldBy(this.deps.sessionRepository, retired) : null;
   }
 
   /**
@@ -3477,6 +3815,17 @@ class AgentSessionImpl implements AgentSession {
   submit(input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
     const { priority = "next", onInputStatus, ...turnOptions } = options;
+    // Observe before the queue synchronously stops a superseded turn. A changed
+    // scope revokes old callbacks even if another input restores it before delivery.
+    const sameScope = this.observeTaskInputScope(turnOptions);
+    if (
+      priority === "now" &&
+      sameScope &&
+      this.currentSink &&
+      !this.currentSink.stoppedByGuardian
+    ) {
+      this.currentSink.taskInputContinues = true;
+    }
     if (!isQueueInput(priority)) {
       const landed = afterLanding(this.turnMutex.isLocked());
       const handle = this.startTurn(input, turnOptions);
@@ -3520,6 +3869,7 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
+    this.observeTaskInputScope(options);
     // turnId is allocated here, at the bottom of the agent
     // stack, and threaded back to every consumer (route, tracing, IPC stream
     // channel name). No upper layer ever invents one — eliminates duplicate
@@ -3527,6 +3877,7 @@ class AgentSessionImpl implements AgentSession {
     const turnId = uuidv7();
     const { turn, writer } = createTurn(turnId, async (reason) => {
       if (sink.done) return;
+      if (reason !== SUPERSEDED_INTERRUPT_REASON) this.taskInputEpoch++;
       sink.lifecycleInterrupted = true;
       if (this.currentSink === sink) await this.stopRunning(reason);
     });
@@ -3550,10 +3901,16 @@ class AgentSessionImpl implements AgentSession {
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
+      audience: turnAudience(options?.threadContext ?? this.threadContext, {
+        actor: options?.actor,
+        parent: options?.parentAudience,
+        place: this.placeAudience,
+      }),
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       stoppedByGuardian: false,
+      taskInputContinues: false,
       subagentCallsByToolUse: new Map(),
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
@@ -3668,6 +4025,11 @@ class AgentSessionImpl implements AgentSession {
       span.end();
       return;
     }
+    this.observeTaskInputScope({
+      actor: sink.actor,
+      threadContext: sink.threadContext,
+      parentAudience: sink.audience,
+    });
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -4079,6 +4441,8 @@ class AgentSessionImpl implements AgentSession {
   }
 
   async stop(reason?: string): Promise<void> {
+    // Stop also revokes a pending handoff between two superseded turns.
+    this.taskInputEpoch++;
     await this.stopRunning(reason);
   }
 
@@ -4087,7 +4451,10 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
-    if (reason !== SUPERSEDED_INTERRUPT_REASON) sink.stoppedByGuardian = true;
+    if (reason !== SUPERSEDED_INTERRUPT_REASON) {
+      this.taskInputEpoch++;
+      sink.stoppedByGuardian = true;
+    }
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
     await Promise.all([
@@ -4111,6 +4478,7 @@ class AgentSessionImpl implements AgentSession {
   async close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void> {
     if (this.closingPromise) return await this.closingPromise;
     if (this.status === "closed") return;
+    this.taskInputEpoch++;
     this.inputs.close();
     this.closingPromise = (async () => {
       this.log.info("agent session closing", {

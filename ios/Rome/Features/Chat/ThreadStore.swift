@@ -3,8 +3,8 @@ import Observation
 
 /// One chat thread of a Concierge chat, open over it. Its live messages are
 /// the chat's own, filtered by thread, so everything the chat receives (a
-/// live insert, an answer a reload brings, a placement) shows here as well.
-/// The `?thread=` read only adds older messages of the thread that the
+/// live insert, an answer a reload brings) shows here as well. The
+/// `?thread=<root>` read only adds older messages of the thread that the
 /// chat's pages do not hold yet; it never replaces a message the chat has.
 /// An instance without chat threads shows just the message it opened from.
 @MainActor
@@ -12,8 +12,8 @@ import Observation
 final class ThreadStore {
     /// The message the guardian opened the thread from.
     let anchor: ChatMessage
-    /// The thread's first message, as the server names it; the anchor's own
-    /// id while it is alone, so a reply placed under it is recognised.
+    /// The thread's root, as the server names it; the anchor's own id while
+    /// it is alone, so a reply that arrives under it is recognised.
     private(set) var root: String { didSet { rebuildRows() } }
     /// Messages of the thread the chat does not hold, from the read.
     private(set) var older: [ChatMessage] { didSet { rebuildRows() } }
@@ -58,10 +58,10 @@ final class ThreadStore {
         return chat.pendingResends(of: originals)
     }
 
-    /// The title of the task the thread is, as its messages carry it.
+    /// The thread's name, as its messages carry it.
     var title: String? {
         (chat?.message(anchor.id) ?? anchor).chatThreadTitle
-            ?? messages.lazy.compactMap(\.chatThreadTitle).first
+            ?? TranscriptBuilder.threadTitles(messages)[root]
     }
 
     private var knowsThreads: Bool { (chat?.instanceKnowsThreads ?? false) || anchor.knowsThreads }
@@ -91,7 +91,7 @@ final class ThreadStore {
         loads += 1
         let mine = loads
         do {
-            let thread = try await backend.thread(sessionId: sessionId, messageId: anchor.id)
+            let thread = try await backend.thread(sessionId: sessionId, root: root)
             guard mine == loads else { return }
             // The root and the messages arrive together: one rebuild for both.
             rowsHeld = true
@@ -107,16 +107,11 @@ final class ThreadStore {
 
     func handle(_ event: LiveEvent) {
         switch event {
-        case .messageThread(let id, let messageId, let thread, _) where id == sessionId:
-            if thread == root {
-                // Placed here, and neither the chat nor the read holds it: read again.
-                if chat?.message(messageId) == nil, !older.contains(where: { $0.id == messageId }) {
-                    Task { await load() }
-                }
-            } else if messageId != anchor.id {
-                // Moved to another thread: it leaves this one.
-                older.removeAll { $0.id == messageId }
-            }
+        // A message only the read brought follows its badge too.
+        case .reaction(let id, let messageId, let reaction) where id == sessionId:
+            if let index = older.firstIndex(where: { $0.id == messageId }) { older[index].reaction = reaction }
+        case .status(let id, let messageId, let status) where id == sessionId:
+            if let index = older.firstIndex(where: { $0.id == messageId }) { older[index].status = status }
         case .reconnected:
             Task { await load() }
         default:

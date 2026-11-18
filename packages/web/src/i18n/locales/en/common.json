@@ -43,7 +43,6 @@
     "newChat": "New chat",
     "mainChat": "Main chat",
     "conciergeSection": "Main chat and topic chats",
-    "moreTopicChats": "{{count}} more",
     "mainChatUnavailable": "Could not load the main chat",
     "conciergeUnread_one": "{{name}}, {{label}} unread message",
     "conciergeUnread_other": "{{name}}, {{label}} unread messages",
@@ -51,13 +50,12 @@
     "conciergeUnreadBadge_other": "{{label}} unread messages",
     "newTopic": "New topic",
     "sectionTasks": "Tasks",
-    "tasksRunning": "{{count}} running",
-    "moreTasks": "{{count}} more",
+    "tasksRunning": "Tasks, {{count}} running",
     "modeSwitch": "Chat list mode",
     "modeChat": "Chat",
-    "modeConcierge": "Concierge",
+    "modeConcierge": "Agent",
     "modeChatReplying": "A chat is replying",
-    "modeConciergeUnread": "Unread Concierge messages or a task waiting for you",
+    "modeConciergeUnread": "Unread Agent messages or a task waiting for you",
     "topicChatActions": "Actions for {{name}}",
     "topicChatUnread_one": "{{name}}, {{label}} unread message",
     "topicChatUnread_other": "{{name}}, {{label}} unread messages",
@@ -152,15 +150,14 @@
       "previous7Days": "Previous 7 days",
       "previous30Days": "Previous 30 days",
       "older": "Older"
-    },
-    "startedByConcierge": "Started by {{name}}"
+    }
   },
   "language": {
     "label": "Language"
   },
   "profile": {
     "menuLabel": "Account",
-    "visitor": "Visitor",
+    "visitor": "Admin",
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."
   },
@@ -213,7 +210,17 @@
     }
   },
   "upgradeIndicator": {
-    "tooltip": "{{name}} can be upgraded"
+    "available": "Update to {{version}}",
+    "availableFull": "Update {{name}} to {{version}}",
+    "updating": "Updating to {{version}}…",
+    "updatingFull": "{{name}} is updating to {{version}}…",
+    "failed": "Update failed",
+    "failedFull": "Update to {{version}} failed",
+    "failedReason": "Update to {{version}} failed: {{message}}",
+    "updated": "Updated",
+    "updatedFull": "{{name}} updated to {{version}}",
+    "retry": "Retry",
+    "reload": "Reload"
   },
   "upgradeBanner": {
     "countdownTitle": "Update to Rome {{version}} is ready",
@@ -305,16 +312,6 @@
     "emptyAppsTitle": "No apps open",
     "emptyAppsDescription": "Open an app to use it alongside this chat."
   },
-  "connectChatApp": {
-    "title": "Connect your chat app",
-    "description": "Talk to your agent from Telegram, WhatsApp, Discord, or WeChat.",
-    "dismiss": "Dismiss"
-  },
-  "visitAppStore": {
-    "title": "Visit the app store",
-    "description": "Discover AI-native apps built for Rome.",
-    "dismiss": "Dismiss"
-  },
   "feedback": {
     "open": "Feedback",
     "title": "Share feedback",
@@ -355,5 +352,15 @@
     "noText": "No text",
     "placeholder": "Message {{name}}",
     "loadOlderFailed": "Failed to load older messages"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "Show PIN",
+    "hide": "Hide PIN",
+    "wrong_one": "Wrong PIN. {{count}} try left.",
+    "wrong_other": "Wrong PIN. {{count}} tries left.",
+    "locked": "Locked. Try again at {{time}}.",
+    "notSet": "Set a PIN in Settings first.",
+    "signerOutdated": "The signer is too old for the vault. Upgrade the instance."
   }
 }

@@ -1,3 +1,4 @@
+import { clearChatDraft } from "./chat-draft-storage";
 import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
@@ -211,23 +212,6 @@ export async function listSessionMessagePage(
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessagePage>(res);
-}
-
-/**
- * The messages of the chat thread `messageId` is in, oldest first, in one
- * page. A message in no chat thread comes back alone. `null` when the
- * session does not exist.
- */
-export async function listChatThreadMessages(
-  sessionId: string,
-  messageId: string,
-): Promise<ChatMessage[] | null> {
-  const params = new URLSearchParams({ thread: messageId });
-  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
-    credentials: "include",
-  });
-  if (res.status === 404) return null;
-  return (await jsonOrThrow<ChatMessagePage>(res)).messages;
 }
 
 export interface ListRomeSessionsOptions {
@@ -446,6 +430,7 @@ export async function deleteSession(
   });
   // A chat that was already gone is gone too, for every list that still shows it.
   if (res.ok || res.status === 404) {
+    clearChatDraft(sessionId);
     window.dispatchEvent(new CustomEvent(CHAT_SESSION_DELETED_EVENT, { detail: sessionId }));
   }
 }
@@ -460,6 +445,20 @@ export async function markSessionRead(
   return jsonOrThrow<{ sessionId: string; lastSeenActivityAt: string | null; unread: boolean }>(
     res,
   );
+}
+
+/** Tells the server the owner has seen the messages `ids` of chat `sessionId`. */
+export async function markMessagesRead(
+  sessionId: string,
+  ids: readonly string[],
+): Promise<{ marked: number }> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages/read`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  return jsonOrThrow<{ marked: number }>(res);
 }
 
 export async function createProject(name: string): Promise<ProjectOption> {

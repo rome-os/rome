@@ -1,5 +1,6 @@
 import { type ChatKind, isProjectChat, MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { isApplePlatform } from "@/lib/platform";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 /**
  * Which half of the chat list shows: ordinary chats grouped by project, or the
@@ -9,38 +10,29 @@ export type ChatListMode = "chat" | "concierge";
 
 const MODE_STORAGE_KEY = "rome-chat-list-mode";
 const LAST_CHAT_STORAGE_KEY = "rome-last-ordinary-chat";
+const LAST_CONCIERGE_STORAGE_KEY = "rome-last-concierge-chat";
 
 // Each tab keeps its own mode and last ordinary chat in memory, seeded from
 // localStorage when the page loads. A tab writes localStorage so that a new tab
 // or a reload starts from the last mode, and never reads it again: another
 // tab's navigation must not change the list this tab shows.
-const state: { mode: ChatListMode | null; lastChatId: string | null } = {
+const state: {
+  mode: ChatListMode | null;
+  lastChatId: string | null;
+  lastConciergeId: string | null;
+} = {
   mode: null,
   lastChatId: null,
+  lastConciergeId: null,
 };
 const listeners = new Set<() => void>();
 
-function readStorage(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Storage is unavailable: the choice holds for this tab only.
-  }
-}
-
 /** Seeds this tab's state from what the device stored, as a page load does. */
 export function loadChatListModeFromStorage(): void {
-  const mode = readStorage(MODE_STORAGE_KEY);
+  const mode = readStored(MODE_STORAGE_KEY);
   state.mode = mode === "chat" || mode === "concierge" ? mode : null;
-  state.lastChatId = readStorage(LAST_CHAT_STORAGE_KEY) || null;
+  state.lastChatId = readStored(LAST_CHAT_STORAGE_KEY) || null;
+  state.lastConciergeId = readStored(LAST_CONCIERGE_STORAGE_KEY) || null;
   for (const listener of listeners) listener();
 }
 if (typeof window !== "undefined") loadChatListModeFromStorage();
@@ -57,7 +49,7 @@ export function readChatListMode(): ChatListMode | null {
 }
 
 export function writeChatListMode(mode: ChatListMode): void {
-  writeStorage(MODE_STORAGE_KEY, mode);
+  writeStored(MODE_STORAGE_KEY, mode);
   if (state.mode === mode) return;
   state.mode = mode;
   for (const listener of listeners) listener();
@@ -69,18 +61,22 @@ export function readLastOrdinaryChatId(): string | null {
 }
 
 export function writeLastOrdinaryChatId(id: string): void {
-  writeStorage(LAST_CHAT_STORAGE_KEY, id);
+  writeStored(LAST_CHAT_STORAGE_KEY, id);
   if (state.lastChatId === id) return;
   state.lastChatId = id;
   for (const listener of listeners) listener();
 }
 
-/**
- * The mode of a device that has not shown one: Chat for someone who has
- * ordinary chats, Concierge for someone whose chats are all the Concierge's.
- */
-export function initialChatListMode(hasOrdinaryChat: boolean): ChatListMode {
-  return hasOrdinaryChat ? "chat" : "concierge";
+/** The Concierge chat last opened in this tab or, at load, on this device (the main chat's id when that was it); null when none. */
+export function readLastConciergeChatId(): string | null {
+  return state.lastConciergeId;
+}
+
+export function writeLastConciergeChatId(id: string): void {
+  writeStored(LAST_CONCIERGE_STORAGE_KEY, id);
+  if (state.lastConciergeId === id) return;
+  state.lastConciergeId = id;
+  for (const listener of listeners) listener();
 }
 
 /** The mode a chat of this kind belongs to. */
@@ -92,6 +88,8 @@ export interface ChatRouteMode {
   mode: ChatListMode;
   /** Set when the route opens an ordinary chat, which the rail's Chat entry returns to. */
   ordinaryChatId?: string;
+  /** Set when the route opens a Concierge chat, which the list's Agent switch returns to. */
+  conciergeChatId?: string;
 }
 
 /**
@@ -110,7 +108,9 @@ export function chatListModeForRoute({
   mainChatId: string | null;
   kindOf: (id: string) => ChatKind | null;
 }): ChatRouteMode | null {
-  if (pathname === MAIN_CHAT_PATH) return { mode: "concierge" };
+  if (pathname === MAIN_CHAT_PATH) {
+    return mainChatId ? { mode: "concierge", conciergeChatId: mainChatId } : { mode: "concierge" };
+  }
   if (pathname === "/chat" || pathname === "/chat/") {
     // A blank chat has no kind yet: the new-topic entry says which it is.
     const topic =
@@ -127,11 +127,11 @@ export function chatListModeForRoute({
   } catch {
     // An id that is not valid percent-encoding is its raw text.
   }
-  if (id === mainChatId) return { mode: "concierge" };
+  if (id === mainChatId) return { mode: "concierge", conciergeChatId: id };
   const kind = kindOf(id);
   if (!kind) return null;
   const mode = modeOfChatKind(kind);
-  return mode === "chat" ? { mode, ordinaryChatId: id } : { mode };
+  return mode === "chat" ? { mode, ordinaryChatId: id } : { mode, conciergeChatId: id };
 }
 
 /** The address the rail's Chat entry opens: the main chat in Concierge mode, else the last ordinary chat. */

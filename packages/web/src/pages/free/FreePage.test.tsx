@@ -1,8 +1,11 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import FreePage, { MainChatRedirect } from "./FreePage";
+import { writeChatListMode, writeLastOrdinaryChatId } from "@/lib/chat-list-mode";
+import { seedChatListMode } from "@/test/chat-list-mode";
+import FreePage, { HomeRedirect, MainChatRedirect } from "./FreePage";
 
 const concierge = rs.hoisted(() => ({
   state: { chatId: null as string | null, loading: false, failed: false },
@@ -23,16 +26,19 @@ function Where() {
   return <output data-testid="where">{`${pathname}${search}`}</output>;
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, queryClient = new QueryClient()) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/chat/concierge" element={<MainChatRedirect />} />
-        <Route path="/chat/*" element={<FreePage />} />
-        <Route path="/message" element={<FreePage />} />
-      </Routes>
-      <Where />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="/chat/concierge" element={<MainChatRedirect />} />
+          <Route path="/chat/*" element={<FreePage />} />
+          <Route path="/message" element={<FreePage />} />
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -89,5 +95,41 @@ describe("MainChatRedirect", () => {
     renderAt("/chat/concierge?hideSidebar=1");
     expect(screen.getByTestId("where").textContent).toBe("/message?hideSidebar=1");
     expect(screen.getByTestId("grid").textContent).toBe("concierge");
+  });
+});
+
+describe("HomeRedirect", () => {
+  afterEach(() => window.localStorage.clear());
+
+  it("opens the main chat in Concierge mode", () => {
+    on("concierge");
+    writeChatListMode("concierge");
+    renderAt("/");
+    expect(screen.getByTestId("where").textContent).toBe("/message");
+  });
+
+  it("opens a blank chat on a device that has not shown a mode", () => {
+    on("concierge");
+    seedChatListMode();
+    renderAt("/");
+    expect(screen.getByTestId("where").textContent).toBe("/chat");
+  });
+
+  it("opens the last ordinary chat in Chat mode, so a reload keeps the mode", () => {
+    on("concierge");
+    writeChatListMode("chat");
+    writeLastOrdinaryChatId("chat-7");
+    renderAt("/");
+    expect(screen.getByTestId("where").textContent).toBe("/chat/chat-7");
+  });
+
+  it("opens a blank chat in Chat mode once the last ordinary chat is gone", () => {
+    on("concierge");
+    writeChatListMode("chat");
+    writeLastOrdinaryChatId("chat-7");
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["chat-sessions", "active", "mine"], []);
+    renderAt("/", queryClient);
+    expect(screen.getByTestId("where").textContent).toBe("/chat");
   });
 });

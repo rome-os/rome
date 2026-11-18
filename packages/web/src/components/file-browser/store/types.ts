@@ -89,7 +89,6 @@ export type NameDialogState =
   | {
       confirmLabel: string;
       currentName: string;
-      description: string;
       error?: string | null;
       initialValue: string;
       inputLabel: string;
@@ -251,7 +250,6 @@ export interface UiSlice {
   discardChangesConfirmOpen: boolean;
   isDragActive: boolean;
   sidebarWidth: number;
-  isResizingSidebar: boolean;
   creating: boolean;
   deleting: boolean;
   moving: boolean;
@@ -275,7 +273,6 @@ export interface UiSlice {
   resolveDiscardChangesConfirm(discard: boolean): void;
   setIsDragActive(value: boolean): void;
   setSidebarWidth(value: number): void;
-  setIsResizingSidebar(value: boolean): void;
   setFilesPaneDrillPath(value: string | null): void;
   loadHistory(): Promise<void>;
   doSearch(): Promise<void>;
@@ -317,7 +314,5 @@ export interface FileBrowserState {
     pendingUploadTarget: string | null;
     discardChangesResolver: ((discard: boolean) => void) | null;
     acceptedBrowserPath: string;
-    sidebarResize: { startWidth: number; startX: number } | null;
-    dragDepth: number;
   };
 }

@@ -79,7 +79,7 @@
     },
     "topicEmpty": {
       "title": "Start an ongoing topic",
-      "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
+      "description": "Alerts and tasks here show up only in this chat.",
       "starters": {
         "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
         "work": "Keep track of work here: project progress, PRs and meetings",
@@ -107,7 +107,8 @@
         "tidyingUp": "Tidying up context"
       }
     },
-    "statusReaction": {
+    "reaction": "Reaction",
+    "status": {
       "working": "Working on it",
       "failed": "Did not finish"
     },
@@ -175,14 +176,17 @@
       },
       "created": "Created {{when}}",
       "endedAt": "Ended {{when}}"
+    },
+    "menu": {
+      "tasks": "Tasks",
+      "outputs": "Outputs"
     }
   },
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "openThread": "Open the chat thread",
-    "toThread": "Reply to {{title}}"
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -255,7 +259,7 @@
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",
       "commentPlaceholder": "Optional: what went wrong, or what was great?",
-      "submit": "Submit",
+      "submit": "Send feedback",
       "submitting": "Submitting…",
       "submitFailed": "Couldn't submit feedback",
       "recorded": "Feedback recorded"
@@ -306,12 +310,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "Reconnect {{provider}}",
-      "description": "Your {{provider}} login has expired or was revoked. Reconnect it in AI Tools, then try your message again.",
+      "description": "Your {{provider}} login has expired or was revoked. Send your message again after reconnecting.",
       "action": "Reconnect"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} is not signed in",
-      "description": "Sign in to {{provider}} in AI Tools, then try your message again.",
+      "description": "Send your message again after signing in.",
       "action": "Go to sign in"
     },
     "providerQuotaExhausted": {
@@ -383,6 +387,13 @@
       "rejected": "Rejected",
       "failed": "Execution failed"
     },
+    "secretAccess": {
+      "allow": "Allow {{minutes}} min",
+      "separator": ", ",
+      "duration": "{{minutes}} min",
+      "allowed": "Allowed {{name}} · {{minutes}} min",
+      "rejected": "Rejected {{name}}"
+    },
     "actions": {
       "approve": "Approve",
       "approving": "Approving…",
@@ -440,6 +451,12 @@
     "sendWhileRunningTitle": "Send while agent is working",
     "stopGenerating": "Stop generating"
   },
+  "agentCard": {
+    "usual": "Usual {{range}}",
+    "normal": "Normal",
+    "high": "High",
+    "low": "Low"
+  },
   "questionCard": {
     "sent": "Sent",
     "optional": "optional",
@@ -450,6 +467,23 @@
     "answered": "Answered",
     "dismiss": "Dismiss",
     "send": "Send"
+  },
+  "deviceConnectCard": {
+    "connected": "Connected",
+    "notConnected": "Not connected",
+    "connect": "Connect",
+    "notNow": "Not now",
+    "note": "So your Rome can read the data you allow."
+  },
+  "locationCard": {
+    "title": "Share your location?",
+    "share": "Share",
+    "shared": "Location shared · ±{{accuracy}}",
+    "notShared": "Not shared",
+    "locating": "Finding your location…",
+    "denied": "Location access is off for this site. Turn it on in the browser, or press Not now.",
+    "unavailable": "Couldn't find your location. Try again, or press Not now.",
+    "unsupported": "This browser can't share a location. Press Not now and name the place in a message."
   },
   "appComponent": {
     "dismiss": "Dismiss",
@@ -649,21 +683,14 @@
     }
   },
   "thread": {
-    "title": "Chat thread",
-    "openTaskChat": "Open task chat",
-    "close": "Close chat thread",
-    "loadFailed": "Couldn't load this chat thread.",
-    "replyPlaceholder": "Reply"
-  },
-  "sessionRenewal": {
-    "notice": "Context tidied up · {{reason}}",
-    "reasons": {
-      "context": "conversation got long",
-      "setup": "setup updated",
-      "idle": "after a quiet period",
-      "daily": "daily reset",
-      "working_dir": "working folder gone"
-    }
+    "back": "Back to the chat: {{title}}",
+    "replyPlaceholder": "Reply: {{title}}",
+    "untitled": "Thread",
+    "open": "Open the thread: {{title}}",
+    "stack": "Open the thread, newest: {{preview}}",
+    "stackCount_one": "{{count}} reply",
+    "stackCount_other": "{{count}} replies",
+    "newReplies": "New replies in \"{{title}}\""
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
@@ -699,5 +726,75 @@
     "channel": "Channel",
     "sendMessage": "Send a message",
     "action": "Action"
+  },
+  "voiceInput": {
+    "start": "Start voice input",
+    "stop": "Stop voice input",
+    "finishing": "Finishing voice input",
+    "whyMicrophone": "Rome uses the microphone to turn your speech into text",
+    "stopped": {
+      "provider-unavailable": "Transcription service unavailable. Listening stopped",
+      "provider-refused": "Transcription service refused the request. Listening stopped",
+      "bad-request": "Listening stopped after an error",
+      "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
+      "microphone-missing": "No microphone found",
+      "connection-lost": "Connection to Rome lost. Listening stopped",
+      "microphone-failed": "Microphone could not start. Listening stopped",
+      "time-limit": "Listening stopped after 10 minutes",
+      "service-refused": "Rome Cloud refused voice input ({{code}}). Listening stopped",
+      "service-unavailable": "Rome Cloud could not be reached. Listening stopped",
+      "service-signed-out": "Rome Cloud does not accept this Rome's sign-in. Sign in to Rome Cloud again. Listening stopped",
+      "left-chat": "Listening stopped when you left this chat",
+      "page-reloaded": "Listening stopped when the page reloaded",
+      "no-speech": "Listening stopped after 30 seconds without speech"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "Too many voice inputs in the last minute. Try again shortly",
+      "voice_input_not_configured": "Rome Cloud has not set up voice input yet. Listening stopped",
+      "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
+      "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
+    }
+  },
+  "outputs": {
+    "title": "Outputs",
+    "close": "Close outputs",
+    "loading": "Loading outputs",
+    "loadFailed": "Failed to load outputs",
+    "emptyTitle": "No outputs yet",
+    "emptyDescription": "Files the agent writes or shows in this chat appear here.",
+    "written": "Written",
+    "shown": "Shown",
+    "from": "from {{name}}",
+    "missing": "Moved or deleted",
+    "download": "Download",
+    "noPreview": "This file has no preview.",
+    "unavailable": "This file cannot be opened here.",
+    "previewFailed": "Failed to load the file",
+    "truncated": "Showing the first {{count}} characters.",
+    "back": "Back to outputs",
+    "filterLabel": "Show",
+    "noneOfType": "No outputs of this kind yet.",
+    "today": "Today",
+    "earlier": "Earlier",
+    "filters": {
+      "all": "All",
+      "document": "Documents",
+      "spreadsheet": "Spreadsheets",
+      "page": "Pages"
+    },
+    "types": {
+      "document": "Document",
+      "spreadsheet": "Spreadsheet",
+      "page": "Page",
+      "image": "Picture",
+      "code": "Code",
+      "file": "File"
+    },
+    "indexing": "Still finding earlier files."
+  },
+  "chatHeader": {
+    "menu": "Chat menu",
+    "project": "Project · {{name}}",
+    "lastModel": "Last answered by {{model}}"
   }
 }

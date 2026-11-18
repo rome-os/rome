@@ -147,7 +147,7 @@ describe("AI Tools refresh", () => {
     };
     await openCredits();
     const dialog = await screen.findByRole("dialog", { name: "Enable credit usage?" });
-    expect(within(dialog).getByText(/may spend credits immediately/)).toBeTruthy();
+    expect(within(dialog).getByText(/may spend credits right away/)).toBeTruthy();
     expect(
       within(dialog).getByRole("link", { name: "View ChatGPT usage" }).getAttribute("href"),
     ).toBe("https://chatgpt.com/settings/usage");
@@ -370,7 +370,7 @@ describe("AI Tools destructive actions", () => {
 
     expect(logoutCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Log out of Claude?" });
-    expect(within(dialog).getByText("Signs out on this server only.")).toBeTruthy();
+    expect(within(dialog).getByText("Logs out on this server only.")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Log Out" }));
 

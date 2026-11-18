@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     /// The Agent page on a tab, opened from the main Chat; nil closes it.
     case agent(AgentTab?)
+    /// The Agent page on a tab, opened from a blank topic chat.
+    case agentBlank(AgentTab)
     /// Pages pushed inside the open Agent page.
     case agentRoute([Route])
     case route([Route])
@@ -24,6 +26,89 @@ enum DebugCommand: Equatable {
     case page(URL?)
     /// An app in its sheet; nil closes it.
     case app(InstalledApp?)
+    /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
+    case connectSheet(String?)
+}
+
+/// Health sync's demo: a few syncs of today and yesterday.
+enum HealthDemo {
+    static func history(now: Date) -> [SyncLogEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, _ types: [String: Int], history: Bool = false) -> SyncLogEntry {
+            let time = now.addingTimeInterval(-minutesAgo * 60)
+            var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok, history: history)
+            for (type, items) in types {
+                entry.types[type] = SyncTypeCount(items: items, start: time.addingTimeInterval(-2 * 3600), end: time.addingTimeInterval(-5 * 60))
+            }
+            entry.inserted = types.values.reduce(0, +)
+            return entry
+        }
+        return [
+            entry(8, minutesAgo: 12, .observer, ["stepCount": 3, "heartRate": 4]),
+            entry(7, minutesAgo: 75, .foreground, ["stepCount": 2, "activeEnergyBurned": 2, "heartRate": 2]),
+            entry(6, minutesAgo: 60 * 9, .observer, ["sleep": 1, "restingHeartRate": 1]),
+            entry(5, minutesAgo: 60 * 26, .observer, ["workouts": 1, "activeEnergyBurned": 2]),
+            entry(4, minutesAgo: 60 * 27, .backfill, ["stepCount": 8_900, "heartRate": 8_700, "sleep": 183, "bodyMass": 40], history: true),
+        ]
+    }
+
+    /// Syncs that keep running with nothing new since four days ago.
+    static func stale(now: Date) -> [SyncLogEntry] {
+        var old = SyncLogEntry(seq: 3, time: now.addingTimeInterval(-4 * 86_400), trigger: .observer, outcome: .ok)
+        old.types["stepCount"] = SyncTypeCount(items: 4, start: old.time.addingTimeInterval(-3600), end: old.time)
+        return [
+            SyncLogEntry(seq: 5, time: now.addingTimeInterval(-20 * 60), trigger: .foreground, outcome: .ok),
+            SyncLogEntry(seq: 4, time: now.addingTimeInterval(-86_400), trigger: .foreground, outcome: .ok),
+            old,
+        ]
+    }
+
+    /// Live reads an Agent made today.
+    static func liveReads(now: Date) -> [NodeAuditEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ action: String, _ args: String, count: Int? = nil) -> NodeAuditEntry {
+            NodeAuditEntry(
+                seq: seq, time: now.addingTimeInterval(-minutesAgo * 60), from: "rome", action: action, args: args,
+                outcome: .ok, errorCode: nil, count: count, windowStart: nil, windowEnd: nil, durationMs: 120
+            )
+        }
+        return [
+            entry(4, minutesAgo: 8, "health.stats", #"{"types":["stepCount","activeEnergyBurned"]}"#),
+            entry(3, minutesAgo: 95, "health.stats", #"{"type":"sleep","start":"2026-11-13T18:00","end":"2026-11-14T12:00"}"#),
+            entry(2, minutesAgo: 180, "health.samples", #"{"type":"heartRate","limit":50}"#, count: 50),
+            entry(1, minutesAgo: 60 * 26, "health.stats", #"{"type":"restingHeartRate","interval":"day"}"#),
+        ]
+    }
+}
+
+/// Calendar's demo: syncs, and a read and a change an Agent made.
+enum CalendarDemo {
+    static func history(now: Date) -> [SyncLogEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, events: Int) -> SyncLogEntry {
+            let time = now.addingTimeInterval(-minutesAgo * 60)
+            var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok)
+            if events > 0 { entry.types["events"] = SyncTypeCount(items: events, start: time.addingTimeInterval(-7 * 86_400), end: time.addingTimeInterval(30 * 86_400)) }
+            entry.inserted = events
+            return entry
+        }
+        return [
+            entry(4, minutesAgo: 6, .manual, events: 1),
+            entry(3, minutesAgo: 40, .foreground, events: 3),
+            entry(2, minutesAgo: 60 * 5, .observer, events: 1),
+            entry(1, minutesAgo: 60 * 26, .manual, events: 48),
+        ]
+    }
+
+    static func liveReads(now: Date) -> [NodeAuditEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ action: String, _ args: String, count: Int? = nil) -> NodeAuditEntry {
+            NodeAuditEntry(
+                seq: seq, time: now.addingTimeInterval(-minutesAgo * 60), from: "rome", action: action, args: args,
+                outcome: .ok, errorCode: nil, count: count, windowStart: nil, windowEnd: nil, durationMs: 90
+            )
+        }
+        return [
+            entry(2, minutesAgo: 6, "calendar.create_event", #"{"title":"Lunch with Sam","start":"2026-11-20T12:30"}"#, count: 1),
+            entry(1, minutesAgo: 8, "calendar.free_busy", #"{"start":"2026-11-18T12:00","end":"2026-11-18T18:00"}"#, count: 1),
+        ]
+    }
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -125,6 +210,19 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.4))
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
+            // The topic chats folded: a count while replies wait unread, none once read.
+            await capture("05c-drawer-folded-unread", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                model.debugCommand = .drawer(true)
+            }
+            await capture("05d-drawer-folded", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                for chat in model.workspace?.topics.chats ?? [] { model.workspace?.topics.markRead(chat.id) }
+                model.debugCommand = .drawer(true)
+            }
+            model.debugCommand = .drawer(false)
+            model.workspace?.topics.setFolded(false)
+            model.workspace?.topics.refresh()
             try? await Task.sleep(for: .seconds(0.8))
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
@@ -132,7 +230,10 @@ enum SnapshotRunner {
             }
             model.debugCommand = .agentRoute([])
             try? await Task.sleep(for: .seconds(0.8))
-            await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
+            await capture("57-agent-outputs", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.outputs) }
+            model.debugCommand = .agent(nil)
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("57b-agent-outputs-empty", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agentBlank(.outputs) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {
@@ -168,19 +269,78 @@ enum SnapshotRunner {
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
+            // Connections: Health connected with Live access and Sync on, Device off.
+            let health = HealthCapability.id
+            model.health.showDemo(HealthDemo.history(now: .now))
+            model.connections.showDemo(authorized: [health: true])
+            model.node.showDemo(live: [health: true], recent: HealthDemo.liveReads(now: .now))
+            await capture("13-connections", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("13a-node-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.device]) }
+            // The Health page is longer than a screen: its top and its end.
+            model.debugHealthScroll = nil
+            await capture("14-connection-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            await capture("16-connection-health-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            // The Apple Health page is longer than a screen: its top, the data flow, and its end.
-            model.debugHealthScroll = nil
-            await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
-            await capture("15-health-access-data", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "where" }
-            await capture("16-health-access-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            await capture("13d-live-reads", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .liveReads(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory(HealthSettings.sourceId)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // The expired session: the status line offers a sign-in.
+            model.health.showDemo([SyncLogEntry(seq: 9, time: .now.addingTimeInterval(-3 * 3600), trigger: .observer, outcome: .error, errorCode: "signed_out")] + HealthDemo.history(now: .now))
+            await capture("14b-health-sign-in", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Syncs that bring nothing new for days: Health access may be off.
+            model.health.showDemo(HealthDemo.stale(now: .now))
+            await capture("14c-health-stale", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Not connected yet: the authorization's one button.
+            model.health.showDemo([], enabled: false)
+            model.connections.showDemo(authorized: [:])
+            model.node.showDemo(live: [:], recent: [])
+            await capture("14d-health-not-connected", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13c-connection-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Device connected: its Live access on, with a read it answered.
+            model.node.showDemo(live: [DeviceCapability.id: true], recent: [NodeAuditEntry(
+                seq: 9, time: .now.addingTimeInterval(-600), from: "rome", action: "device.status", args: "{}",
+                outcome: .ok, errorCode: nil, count: nil, windowStart: nil, windowEnd: nil, durationMs: 40
+            )])
+            await capture("13e-connection-device-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(DeviceCapability.id)]) }
+            await capture("13f-connection-device-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Calendar: not connected, then connected with Sync on,
+            // a read and a change it made, and its Sync history.
+            let calendar = CalendarCapability.id
+            model.calendarSync.showDemo([], enabled: false)
+            await capture("13g-connection-calendar", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.calendarSync.showDemo(CalendarDemo.history(now: .now))
+            model.connections.showDemo(authorized: [health: true, calendar: true])
+            model.node.showDemo(live: [calendar: true], recent: CalendarDemo.liveReads(now: .now))
+            await capture("13h-connection-calendar-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            await capture("13i-connection-calendar-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13j-calendar-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar), .syncHistory(CalendarSync.sourceId)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.connections.showDemo(authorized: [health: true])
+            model.node.showDemo(live: [:], recent: [])
+            model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
             // On Mac Catalyst a pushed task chat does not pop for these runs
@@ -193,6 +353,15 @@ enum SnapshotRunner {
             TranscriptStore.previewPhases = ["notion": .connecting, "linear": .failed(String(localized: "Sign-in timed out"))]
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
+            // A device connection's card: connected, then one still to connect.
+            await capture("43b-device-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-health")) }
+            // The sheet a card opens, for one not yet connected.
+            await capture("43c-connect-sheet-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet(health) }
+            await capture("43d-connect-sheet-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet("device") }
+            model.debugCommand = .connectSheet(nil)
+            // The next command in the same pass would hide this one from the
+            // shell, and the sheet would stay over every later screen.
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // A task's chat thread: its labels, and a reply's quote.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
@@ -271,6 +440,7 @@ enum SnapshotRunner {
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
+            await capture("59-markdown-lists", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-lists")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
             // The load-error bar: Retry, then its spinner while an attempt runs.
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
@@ -285,9 +455,21 @@ enum SnapshotRunner {
                 store.retryHold = .seconds(1)
             }
             await capture("57-widget-ui-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-meals")) }
+            // Cards the Concierge composed itself, with no `bind`.
+            await capture("57-agent-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-cards")) }
+            // An itinerary whose stops open in Maps.
+            await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
+            // Share-location cards: shared, not shared, and one still open.
+            await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+            // Folded over a topic chat: its row stays under the header.
+            await capture("05e-drawer-folded-topic", style: styleName, in: directory) {
+                model.workspace?.topics.setFolded(true)
+                model.debugCommand = .drawer(true)
+            }
             model.debugCommand = .drawer(false)
+            model.workspace?.topics.setFolded(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
@@ -357,7 +539,7 @@ enum SnapshotRunner {
                 }
             }
             model.dynamicTypeOverride = nil
-            // A dashboard visitor of the shared Rome: the drawer footer, Settings and the instance list.
+            // A dashboard admin of the shared Rome: the drawer footer, Settings and the instance list.
             model.openDemo(.visitor)
             try? await Task.sleep(for: .seconds(2))
             await capture("45-visitor-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
@@ -392,20 +574,68 @@ enum SnapshotRunner {
             model.dynamicTypeOverride = .accessibility3
             await capture("35-login-ax3", style: styleName, in: directory, wait: 1) { model.debugSetPhase(.signedOut) }
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("36b-update-background-ax3", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
+            // The largest text before the accessibility sizes: the page's own
+            // layout, which must keep clear of the button.
+            model.dynamicTypeOverride = .xxxLarge
+            await capture("37-update-required-xxxl", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("37b-update-background-xxxl", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
-            // Behind but new enough: the pill above the composer, the drawer's
-            // line, and the page it opens; then the pill after an upgrade.
+            // Behind the background minimum only: the page asks once, then the
+            // upgrade runs in the background.
+            await capture("20b-update-background", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
+            // Behind but new enough: Chat, and the drawer's line.
             await capture("48-update-pill", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
             await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("50-update-offered-page", style: styleName, in: directory, wait: 1.2) { model.update.openPage() }
             model.update.closePage()
-            await capture("48b-update-done", style: styleName, in: directory, wait: 1) {
-                model.update.debugShow(.upToDate)
-                model.update.debugShowUpdated(DemoBackend.releasedVersion)
+            // A background upgrade from the drawer: its row while it runs and
+            // when it fails, then the line above the composer once it lands.
+            let target = DemoBackend.releasedVersion
+            let rows: [(String, InstanceUpdater.State, UpdateGate.Progress)] = [
+                ("49b-update-drawer-starting", .starting(current: nil, latest: target), .downloading),
+                ("49c-update-drawer-updating", .updating(target: target, since: .now), .downloading),
+                ("49d-update-drawer-restarting", .updating(target: target, since: .now), .restarting),
+                ("49e-update-drawer-failed", .failed(.rolledBack(target: target, from: DemoBackend.offeredFromVersion)), .downloading),
+                ("49f-update-drawer-start-failed", .failed(.start(current: nil, latest: target, message: "")), .downloading),
+            ]
+            for (name, state, progress) in rows {
+                await capture(name, style: styleName, in: directory, wait: 2.4) {
+                    model.openDemo(.updateOffered)
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        model.update.debugShow(state, progress: progress, background: true)
+                        model.debugCommand = .drawer(true)
+                    }
+                }
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.6))
             }
+            await capture("48b-update-done", style: styleName, in: directory, wait: 2.4) {
+                model.openDemo(.updateOffered)
+                Task {
+                    try? await Task.sleep(for: .seconds(1.2))
+                    model.update.debugShow(.upToDate)
+                    model.update.debugShowUpdated(target)
+                }
+            }
+            // Said once: the dark pass's Chat would show it again otherwise.
+            model.update.clearUpdated()
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }
@@ -477,7 +707,8 @@ enum SnapshotRunner {
             _ = workspace.concierge.send(prompt)
             await capture("live-02-sent", style: "live", in: directory, wait: 1.0) {}
             await capture("live-03-typing", style: "live", in: directory, wait: 3) {}
-            for _ in 0..<60 where workspace.concierge.running || workspace.tasks.tasks.isEmpty {
+            let taskChat = { workspace.taskChats.chats.values.first { $0.triggerKind == "concierge" } }
+            for _ in 0..<60 where workspace.concierge.running || taskChat() == nil {
                 try? await Task.sleep(for: .seconds(2))
             }
             try? await Task.sleep(for: .seconds(4))
@@ -485,11 +716,11 @@ enum SnapshotRunner {
             await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .agent(.tasks) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
-            if let task = workspace.tasks.tasks.first(where: { $0.chat != nil }), let chat = task.chat {
+            if let chat = taskChat() {
                 await capture("live-06-task", style: "live", in: directory, wait: 3) {
                     model.debugCommand = .route([.taskChat(chatId: chat.id, title: chat.name)])
                 }
-                for _ in 0..<45 where workspace.tasks.tone(forChat: chat.id) == .running {
+                for _ in 0..<45 where workspace.taskChats.isRunning(chat: chat.id) {
                     try? await Task.sleep(for: .seconds(2))
                 }
                 await capture("live-07-task-done", style: "live", in: directory, wait: 3) {}

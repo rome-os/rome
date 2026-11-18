@@ -1,6 +1,6 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
+import { findScrollableYAncestor } from "@/lib/scroll-container";
+import { useRenameInPlace } from "@/hooks/use-rename-in-place";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
@@ -29,11 +31,12 @@ import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
 import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { useListEnd } from "@/hooks/use-list-end";
 
 const anyEvent = z.unknown();
 
-/** How many topic chats show before the More row. */
-export const TOPIC_CHATS_VISIBLE = 5;
+/** How many topic chats show at first, and how many more each scroll to the end adds. */
+export const TOPIC_CHATS_PAGE = 30;
 
 /** A topic chat as the sidebar lists it. */
 export interface TopicChatRow extends ConciergeChatDto {
@@ -104,34 +107,34 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="flex items-center">
+    <div className="mb-[var(--row-gap)] flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0
             ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
             : undefined
         }
       >
-        <span
-          className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-          aria-hidden
-        >
-          <RomeLogo className="size-4 shrink-0" aria-hidden />
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <RomeLogo className="size-4 shrink-0" aria-hidden />
+          )}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
     </div>
   );
@@ -139,9 +142,9 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
 
 /**
  * The sidebar's Concierge section: the main chat's entry, then the topic
- * chats, latest first, the first {@link TOPIC_CHATS_VISIBLE} and a More row
- * for the rest. Each topic chat has its unread badge and a menu to rename,
- * archive or unarchive, and delete it. The status filter applies here too:
+ * chats, latest first, {@link TOPIC_CHATS_PAGE} at a time: scrolling near the
+ * end of the list shows the next page. Each topic chat has its unread badge
+ * and a menu to rename, archive or unarchive, and delete it. The status filter applies here too:
  * the main chat is never archived, so the archived filter hides it.
  */
 export function ConciergeChats({
@@ -168,19 +171,27 @@ export function ConciergeChats({
       ),
     [conciergeChats, statusFilter, topicSessions],
   );
-  const [expanded, setExpanded] = useState(false);
+  const [limit, setLimit] = useState(TOPIC_CHATS_PAGE);
   // A topic chat's rows read two lists, so every change refetches both. A
-  // reply in any topic chat, shown or folded under More, refetches them from
+  // reply in any topic chat, shown or not yet scrolled to, refetches them from
   // the chat list's status stream, so no row subscribes on its own.
   const refresh = useRefreshTopicChats();
   useSessionsChanged(refresh);
-  // The open topic chat stays in view, even when it is past the first few.
+  // The open topic chat stays in view, even when it is past the pages shown.
   const activeIndex = topics.findIndex((chat) => chat.id === activeSessionId);
-  const showAll = expanded || activeIndex >= TOPIC_CHATS_VISIBLE;
-  const visible = showAll ? topics : topics.slice(0, TOPIC_CHATS_VISIBLE);
-  const hidden = topics.length - visible.length;
+  const shown = Math.max(limit, activeIndex + 1);
+  const visible = topics.slice(0, shown);
+  const hasMore = topics.length > shown;
+  // Near the end of the list, the next page: the list's scroller is the root,
+  // so the page lands a little before the guardian reaches the last row.
+  const end = useListEnd({
+    enabled: hasMore,
+    page: shown,
+    onReached: () => setLimit(shown + TOPIC_CHATS_PAGE),
+    rootMargin: "0px 0px 160px 0px",
+  });
   return (
-    <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
+    <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
       {statusFilter === "archived" ? null : (
         <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
@@ -195,16 +206,7 @@ export function ConciergeChats({
           }}
         />
       ))}
-      {hidden > 0 ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          data-concierge-more
-          className="ml-8 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-        >
-          {t("recentChats.moreTopicChats", { count: hidden })}
-        </button>
-      ) : null}
+      {hasMore ? <div ref={end.ref} aria-hidden className="h-px" data-topic-chats-end /> : null}
     </section>
   );
 }
@@ -223,19 +225,16 @@ function ConciergeTopicEntry({
   const { t } = useTranslation("common");
   // An untitled chat shows as a new chat until its first message names it.
   const name = chat.name || t("recentChats.newChat");
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
-  const rename = async () => {
-    setEditing(false);
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === chat.name) return;
-    await renameSession(chat.id, trimmed).catch(() => undefined);
-    onChanged();
-    emitSessionsChanged();
-  };
+  const rename = useRenameInPlace({
+    onCommit: async (id, name) => {
+      await renameSession(id, name).catch(() => undefined);
+      onChanged();
+      emitSessionsChanged();
+    },
+  });
   const retire = async (how: "archive" | "unarchive" | "delete", stopWork = false) => {
     try {
       if (how === "delete")
@@ -249,57 +248,51 @@ function ConciergeTopicEntry({
     // An unarchived chat stays open where it is.
     if (how !== "unarchive") onGone();
   };
-  if (editing) {
+  if (rename.editingId === chat.id) {
     return (
       <input
-        autoFocus
-        value={value}
+        {...rename.inputProps}
         aria-label={t("recentChats.renameLabel")}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={() => void rename()}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            void rename();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            setValue(chat.name);
-            setEditing(false);
-          }
-        }}
-        className="my-1 ml-6 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
+        className="my-1 ml-3 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
       />
     );
   }
   return (
-    <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
+    <div
+      className="group/topic relative mb-[var(--row-gap)] flex items-center"
+      data-concierge-topic={chat.id}
+    >
       <Link
         to={`/chat/${chat.id}`}
-        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-8`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <Hash aria-hidden className="size-4 shrink-0" />
+          )}
+        </span>
         {/* The menu button floats over the row's end, so the name keeps clear
-            of it: the badge holds that room when there is one. */}
+            of it. */}
         <span
-          className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""} ${
-            count > 0 ? "" : "pr-[var(--control-h-sm)]"
-          }`}
+          className={`flex-1 truncate pr-[var(--control-h-sm)] ${chat.archived ? "text-subtle-foreground" : ""}`}
         >
           {name}
         </span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums group-hover/topic:invisible"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -307,16 +300,16 @@ function ConciergeTopicEntry({
             size="sm"
             label={t("recentChats.topicChatActions", { name })}
             icon={<Ellipsis aria-hidden />}
-            className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
+            className="touch-show absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
-          <DropdownMenuItem
-            onSelect={() => {
-              setValue(chat.name);
-              setTimeout(() => setEditing(true), 0);
-            }}
-          >
+        <DropdownMenuContent
+          side="bottom"
+          align="end"
+          className="min-w-[180px]"
+          {...rename.menuContentProps}
+        >
+          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
             <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.rename")}
           </DropdownMenuItem>

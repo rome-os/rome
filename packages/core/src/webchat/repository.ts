@@ -1,7 +1,13 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
+import {
+  ChatOutputsRepository,
+  OutputCalls,
+  recordTraceOutputs,
+} from "../chats/outputs/repository.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -85,27 +91,15 @@ export interface StoredWebchatMessage {
   senderName?: string | null;
   replyToPlatformMessageId?: string | null;
   contextInjectedTurnId?: string | null;
-  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
-   *  or null when it is in none. */
+  /** The key of the root of the chat thread the message is in
+   *  (docs/domains/chats.md#chat-thread). Absent for a line kept outside Chats. */
   chatThreadId?: string | null;
+  /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
+  reaction?: string | null;
+  /** Whether the chat's owner has seen the message
+   *  (docs/domains/chats.md#chat-thread). Absent for a line kept outside Chats. */
+  read?: boolean;
   createdAt: Date;
-}
-
-/**
- * Where a message goes among its chat's chat threads: into the thread of
- * the message `in` names, or into a thread of its own. With `settle` it
- * stays there for good: its sender chose the thread, or a task's thread took
- * it. A settled message is never moved.
- */
-export type ChatThreadPlacement = ({ in: string } | { starts: true }) & {
-  settle?: boolean;
-};
-
-/** A message was placed in a chat thread. */
-export interface ChatThreadPlaced {
-  sessionId: string;
-  messageId: string;
-  chatThreadId: string;
 }
 
 export interface StoredSharedChat {
@@ -299,7 +293,7 @@ export interface TraceBatch {
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
-export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
+export type MessageReactionListener = (event: MessageReactionEvent) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -371,6 +365,8 @@ const sessionSelectFields = {
   name: romeSessions.name,
   personaId: romeSessions.personaId,
   largeModelSelection: romeSessions.largeModelSelection,
+  largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+  reasoningEffort: romeSessions.reasoningEffort,
   projectName: romeSessions.projectName,
   projectPath: romeSessions.projectPath,
   // The sidebar groups a device-folder chat under its folder, not its project.
@@ -860,55 +856,63 @@ export class WebChatRepository {
     }
   }
 
-  private chatThreadPlacedListeners = new Set<ChatThreadPlacedListener>();
+  private messageReactionListeners = new Set<MessageReactionListener>();
 
-  /** Told when a message is placed in a chat thread after it was said. */
-  onChatThreadPlaced(listener: ChatThreadPlacedListener): () => void {
-    this.chatThreadPlacedListeners.add(listener);
+  /** Told when a message's reaction is set, replaced or cleared. */
+  onMessageReaction(listener: MessageReactionListener): () => void {
+    this.messageReactionListeners.add(listener);
     return () => {
-      this.chatThreadPlacedListeners.delete(listener);
+      this.messageReactionListeners.delete(listener);
     };
   }
 
-  protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
-    for (const listener of this.chatThreadPlacedListeners) listener(event);
+  protected emitMessageReaction(event: MessageReactionEvent): void {
+    for (const listener of this.messageReactionListeners) listener(event);
   }
 
   /**
-   * Places message `messageId` of chat `sessionId` in a chat thread. A
-   * message whose sender chose its thread is never moved. Answers the
-   * thread the message is in after, or null when the chat holds no such
-   * message or keeps no chat threads. Chat threads live in Chats, so this
-   * repository keeps none.
+   * Sets message `messageId` of chat `sessionId` to react with `reaction`, or
+   * clears it with null. Answers false when the chat holds no such message or
+   * keeps no reactions. Reactions live in Chats, so this repository keeps none.
    */
-  async placeInChatThread(
+  async setMessageReaction(
     _sessionId: string,
     _messageId: string,
-    _placement: ChatThreadPlacement,
-  ): Promise<string | null> {
-    return null;
-  }
-
-  /** The chat thread message `messageId` of chat `sessionId` is in, else the
-   *  one it would start, or null when the chat holds no such message. */
-  async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
-    return null;
+    _reaction: string | null,
+  ): Promise<boolean> {
+    return false;
   }
 
   /**
-   * The messages of the chat thread that message `messageId` of chat
-   * `sessionId` is in, in the order they were said. A message in no chat
-   * thread is alone in its own. Empty when the chat holds no such message.
+   * The messages of the chat thread of the message keyed `key` in chat
+   * `sessionId`, which may be any message of it, in the order they were said. Empty when the chat holds no
+   * such message or keeps no chat threads. Chat threads live in Chats, so
+   * this repository keeps none.
    */
   async getChatThreadMessages(
     _sessionId: string,
-    _messageId: string,
+    _key: string,
   ): Promise<
     Array<
       StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
     >
   > {
     return [];
+  }
+
+  /** The key of the last message of the chat thread of the message keyed
+   *  `key` in chat `sessionId`, or null when the chat holds none. */
+  async lastInChatThread(_sessionId: string, _key: string): Promise<string | null> {
+    return null;
+  }
+
+  /**
+   * Mark the messages of chat `sessionId` keyed `keys` read, and answer how
+   * many were unread. A chat outside Chats keeps no read marks, so it
+   * marks none.
+   */
+  async markMessagesRead(_sessionId: string, _keys: readonly string[]): Promise<number> {
+    return 0;
   }
 
   /** Told when a session is renamed, from the dashboard or by its channel. */
@@ -1108,6 +1112,8 @@ export class WebChatRepository {
     ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
     // Set only here: a chat's device folder never changes after creation.
     deviceFolder: DeviceFolder | null = null,
+    // Who chose largeModelSelection: its owner, or Rome; null when unknown.
+    largeModelSelectionBy: "owner" | "auto" | null = "owner",
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -1126,6 +1132,7 @@ export class WebChatRepository {
       projectPath,
       deviceFolder,
       largeModelSelection: largeModelSelection ?? null,
+      largeModelSelectionBy: largeModelSelection ? largeModelSelectionBy : null,
       agentName,
       type: storedSessionType(type),
       sourceChannel: "webchat",
@@ -1281,6 +1288,7 @@ export class WebChatRepository {
       .where(inArray(romeAgentMessagePlatformIds.sessionId, ids))
       .run();
     tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, ids)).run();
+    ChatOutputsRepository.deleteIn(tx, ids);
     tx.delete(webchatWorkspaceLayouts).where(inArray(webchatWorkspaceLayouts.sessionId, ids)).run();
     // Kill the chat's public shares too. They're keyed by sessionId and only
     // discoverable via listSharedChatsBySession, so leaving them behind would
@@ -1816,6 +1824,24 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
+  /** The device the guardian asked from when this task chat was last handed work, or null. */
+  async askingDeviceOf(id: string): Promise<string | null> {
+    const row = await this.db
+      .select({ askingDeviceId: romeSessions.askingDeviceId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id))
+      .get();
+    return row?.askingDeviceId ?? null;
+  }
+
+  /** Keeps the device a task chat's live reads ask; null asks none in particular. */
+  async setAskingDevice(id: string, deviceId: string | null): Promise<void> {
+    await this.db
+      .update(romeSessions)
+      .set({ askingDeviceId: deviceId })
+      .where(eq(romeSessions.id, id));
+  }
+
   async updateSessionName(id: string, name: string) {
     if (await this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
   }
@@ -1860,8 +1886,21 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  async updateSessionLargeModelSelection(id: string, largeModelSelection: string | null) {
-    await this.db.update(romeSessions).set({ largeModelSelection }).where(eq(romeSessions.id, id));
+  /** Stores the chat's model, with who chose it: its owner, or Rome. */
+  async updateSessionLargeModelSelection(
+    id: string,
+    largeModelSelection: string | null,
+    by: "owner" | "auto",
+  ) {
+    await this.db
+      .update(romeSessions)
+      .set({ largeModelSelection, largeModelSelectionBy: largeModelSelection ? by : null })
+      .where(eq(romeSessions.id, id));
+  }
+
+  /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */
+  async updateSessionReasoningEffort(id: string, reasoningEffort: string | null) {
+    await this.db.update(romeSessions).set({ reasoningEffort }).where(eq(romeSessions.id, id));
   }
 
   async getMessageCount(sessionId: string) {
@@ -1882,7 +1921,7 @@ export class WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
-    _chatThread?: ChatThreadPlacement,
+    _replyTo?: string,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2061,6 +2100,21 @@ export class WebChatRepository {
       .get();
   }
 
+  /** Only a queued input may fail before admission. Never changes a submitted or consumed input. */
+  async failQueuedUserInput(sessionId: string, inputId: string): Promise<void> {
+    await this.db
+      .update(romeAgentMessages)
+      .set({ inputState: "failed" })
+      .where(
+        and(
+          eq(romeAgentMessages.id, inputId),
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          eq(romeAgentMessages.inputState, "queued"),
+        ),
+      );
+  }
+
   async updateUserInput(
     sessionId: string,
     status: import("@rome-os/app-runtime").InputStatusEvent,
@@ -2132,7 +2186,7 @@ export class WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id: string = randomUUID(),
-    _chatThread?: ChatThreadPlacement,
+    _replyTo?: string,
   ): Promise<StoredWebchatMessage> {
     assertWidgetAlone(parts);
     const message = await this.db.transaction((tx) => {
@@ -2243,7 +2297,7 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string,
     parts: TranscriptPart[],
-    options: { chatThread?: ChatThreadPlacement } = {},
+    options: { replyTo?: string } = {},
   ): Promise<StoredWebchatMessage> {
     return this.insertBackendMessage(
       sessionId,
@@ -2251,7 +2305,7 @@ export class WebChatRepository {
       "assistant",
       parts,
       undefined,
-      options.chatThread,
+      options.replyTo,
     );
   }
 
@@ -2280,6 +2334,9 @@ export class WebChatRepository {
     // fire-and-forget write (same contract as deleteSession).
     await this.writeTraceBatch(input);
   }
+
+  /** The output calls of the turns being written, until each ends. */
+  private readonly outputCalls = new OutputCalls();
 
   /**
    * Write a trace batch in one transaction, its transcript lines stamped
@@ -2387,6 +2444,13 @@ export class WebChatRepository {
       }
       insertTranscriptMessages(
         transcriptMessages.filter((message) => message.role === "assistant"),
+      );
+      recordTraceOutputs(
+        tx,
+        this.outputCalls,
+        { sessionId: input.sessionId, turnId: input.turnId ?? null, messageId: input.messageId },
+        input.blocks,
+        now,
       );
     });
   }
@@ -3258,6 +3322,7 @@ export class WebChatRepository {
       tx.delete(romeAgentMessagePlatformIds)
         .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
         .run();
+      ChatOutputsRepository.deleteIn(tx, [sessionId]);
     });
   }
 

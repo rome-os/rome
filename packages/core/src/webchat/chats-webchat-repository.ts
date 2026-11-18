@@ -30,7 +30,6 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { SessionRecords } from "../sessions/session-records.js";
 import {
-  type ChatThreadPlacement,
   type EnsureRomeSessionInput,
   type InterruptedTurn,
   type MessagePageCursor,
@@ -245,6 +244,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
           saidBy: fromAgent ? agentSender(standing) : dashboardSender(line.actor ?? undefined),
           body: { text: partsText(parts) },
           parts,
+          read: true,
           at: line.createdAt,
         });
         const lineId = recorded?.id ?? this.lines.idOf(standing.place.chat, line.id);
@@ -350,107 +350,88 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
   ): Promise<boolean> {
     const standing = this.standingOf(sessionId);
     if (!standing) return super.recordUserInput(id, sessionId, content, actor, saidBy);
     const parts = partsOf(content);
     // The input, its queued link and the session's activity commit together,
     // so an input on record is always one the session can admit.
-    let root: string | null = null;
-    const recorded = this.db.transaction(() => {
+    return this.db.transaction(() => {
+      // A tagged source records the chain kind; an agent speaking for the guardian uses their account.
+      const sender: SaidBy = saidBy
+        ? {
+            account: {
+              platform: WEBCHAT_PLATFORM,
+              id: saidBy.id.startsWith("automated::")
+                ? saidBy.id
+                : speaksForGuardian({ type: "agent", id: saidBy.id }, actor?.kind)
+                  ? "guardian"
+                  : dashboardAccountId(saidBy.id),
+            },
+            ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
+          }
+        : dashboardSender(actor);
       const recorded = this.lines.record({
         direction: "toRome",
         key: id,
         place: standing.place,
-        // A tagged source records the chain kind; an agent speaking for the guardian uses their account.
-        saidBy: saidBy
-          ? {
-              account: {
-                platform: WEBCHAT_PLATFORM,
-                id: saidBy.id.startsWith("automated::")
-                  ? saidBy.id
-                  : speaksForGuardian({ type: "agent", id: saidBy.id }, actor?.kind)
-                    ? "guardian"
-                    : dashboardAccountId(saidBy.id),
-              },
-              ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
-            }
-          : dashboardSender(actor),
+        saidBy: sender,
         body: { text: partsText(parts) },
         parts,
+        ...(replyTo === undefined ? {} : { replyTo }),
+        read: saidByOwner(sender),
         at: new Date(),
       });
       if (!recorded) return false;
-      if (chatThread) root = this.place(standing, id, chatThread).rooted;
       this.links.prompt(recorded.id, sessionId, null, "queued");
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
-    this.emitRooted(sessionId, root);
-    const thread = recorded && chatThread ? this.lines.chatThreadOf(standing.place.chat, id) : null;
-    if (thread) this.emitChatThreadPlaced({ sessionId, messageId: id, chatThreadId: thread });
-    return recorded;
-  }
-
-  override async placeInChatThread(
-    sessionId: string,
-    messageId: string,
-    placement: ChatThreadPlacement,
-  ): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    if (!standing || this.lines.idOf(standing.place.chat, messageId) === null) return null;
-    const { placed, rooted } = this.db.transaction(() =>
-      this.place(standing, messageId, placement),
-    );
-    this.emitRooted(sessionId, rooted);
-    const thread = this.lines.chatThreadOf(standing.place.chat, messageId);
-    if (placed && thread) this.emitChatThreadPlaced({ sessionId, messageId, chatThreadId: thread });
-    return thread;
-  }
-
-  override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
-  }
-
-  override async getChatThreadMessages(
-    sessionId: string,
-    messageId: string,
-  ): Promise<TranscriptLine[]> {
-    const standing = this.standingOf(sessionId);
-    const thread = standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
-    if (!thread) return [];
-    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, thread);
   }
 
   /**
-   * Put the line keyed `key` where `standing` is in the chat thread
-   * `placement` names. Answers whether it was placed. Runs inside the
-   * caller's transaction when there is one.
+   * Opening the chat reads its main line too: every message that is not a
+   * reply inside a thread. The messages of a thread are read when the
+   * reader opens the thread ({@link markMessagesRead}).
    */
-  private place(
-    standing: Standing,
-    key: string,
-    placement: ChatThreadPlacement,
-  ): { placed: boolean; rooted: string | null } {
-    const chat = standing.place.chat;
-    const thread = "in" in placement ? (this.lines.chatThreadOf(chat, placement.in) ?? key) : key;
-    // A message in no thread that a reply joins becomes its thread's root, so
-    // whether a message is in a thread has one answer.
-    const rooted =
-      "in" in placement && thread === placement.in && thread !== key
-        ? this.lines.rootChatThread(chat, thread)
-        : false;
-    const placed = this.lines.placeInChatThread(chat, key, thread, {
-      settle: placement.settle === true,
-    });
-    return { placed, rooted: rooted ? thread : null };
+  override async markSessionRead(id: string) {
+    const standing = this.standingOf(id);
+    if (standing) this.lines.markMainLineRead(standing.place.chat);
+    return await super.markSessionRead(id);
   }
 
-  /** Tells the chat's listeners that `root` now starts its own thread. */
-  private emitRooted(sessionId: string, root: string | null): void {
-    if (root) this.emitChatThreadPlaced({ sessionId, messageId: root, chatThreadId: root });
+  override async markMessagesRead(sessionId: string, keys: readonly string[]): Promise<number> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.markRead(standing.place.chat, keys) : 0;
+  }
+
+  override async setMessageReaction(
+    sessionId: string,
+    messageId: string,
+    reaction: string | null,
+  ): Promise<boolean> {
+    const standing = this.standingOf(sessionId);
+    if (!standing || !this.lines.setReaction(standing.place.chat, messageId, reaction))
+      return false;
+    this.emitMessageReaction({ sessionId, messageId, reaction });
+    return true;
+  }
+
+  /**
+   * The messages of the chat thread of the message keyed `key`, which may be
+   * any message of it, in the order they were said. Empty when the chat
+   * holds no such message.
+   */
+  override async getChatThreadMessages(sessionId: string, key: string): Promise<TranscriptLine[]> {
+    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, key);
+  }
+
+  /** The key of the last message of the chat thread of the message keyed
+   *  `key` in chat `sessionId`, or null when the chat holds none. */
+  override async lastInChatThread(sessionId: string, key: string): Promise<string | null> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.lastInChatThread(standing.place.chat, key) : null;
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
@@ -680,6 +661,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
       : undefined;
   }
 
+  override async failQueuedUserInput(sessionId: string, inputId: string): Promise<void> {
+    const line = this.lineIn(sessionId, inputId);
+    if (line === undefined) return super.failQueuedUserInput(sessionId, inputId);
+    if (line !== null) this.links.failQueuedPrompt(sessionId, line);
+  }
+
   override async updateUserInput(sessionId: string, status: InputStatusEvent): Promise<void> {
     const line = this.lineIn(sessionId, status.inputId);
     if (line === undefined) return super.updateUserInput(sessionId, status);
@@ -711,20 +698,28 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id?: string,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
   ): Promise<StoredWebchatMessage> {
     assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
-    const at = this.say(standing, key, "assistant", parts as MessagePart[], turnId, chatThread);
+    const { at, thread } = this.say(
+      standing,
+      key,
+      "assistant",
+      parts as MessagePart[],
+      turnId,
+      replyTo,
+    );
     const message: StoredWebchatMessage = {
       id: key,
       sessionId,
       turnId,
       role,
       content: JSON.stringify(parts),
-      ...(chatThread ? { chatThreadId: this.lines.chatThreadOf(standing.place.chat, key) } : {}),
+      ...(thread ? { chatThreadId: thread } : {}),
+      read: false,
       createdAt: new Date(Math.floor(at.getTime() / 1000) * 1000),
     };
     this.emitMessageInserted(message);
@@ -1068,11 +1063,10 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: "user" | "assistant",
     parts: MessagePart[],
     turnId: string | null,
-    chatThread?: ChatThreadPlacement,
+    replyTo?: string,
     at: Date = new Date(),
-  ): Date {
-    let root: string | null = null;
-    this.db.transaction(() => {
+  ): { at: Date; thread: string | null } {
+    return this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
         key,
@@ -1080,17 +1074,17 @@ export class ChatsWebChatRepository extends WebChatRepository {
         saidBy: role === "user" ? dashboardSender(undefined) : agentSender(standing),
         body: { text: partsText(parts) },
         parts,
+        ...(replyTo === undefined ? {} : { replyTo }),
+        read: role === "user",
         at,
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
       if (id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
-      if (chatThread) root = this.place(standing, key, chatThread).rooted;
       if (turnId && role === "user") this.links.prompt(id, standing.sessionId, turnId);
       if (turnId && role === "assistant") this.links.answer(id, standing.sessionId, turnId);
       this.advanceActivity(standing.sessionId, at);
+      return { at, thread: recorded?.chatThread ?? null };
     });
-    this.emitRooted(standing.sessionId, root);
-    return at;
   }
 
   override async taskChatPartMessages(
@@ -1157,6 +1151,13 @@ function dashboardSender(actor: SessionActor | undefined): SaidBy {
   return { account: { platform: WEBCHAT_PLATFORM, id: "guardian" } };
 }
 
+/** Whether `saidBy` is the chat's owner: the guardian, or a visitor on the
+ *  dashboard. What the owner says is read the moment it is recorded. */
+function saidByOwner(saidBy: SaidBy): boolean {
+  const id = saidBy.account.id;
+  return id === "guardian" || id.startsWith("visitor:");
+}
+
 /** The agent's dashboard account where `standing` is, as the sender of its
  *  lines. */
 function agentSender(standing: Standing): SaidBy & { agent: string } {
@@ -1208,6 +1209,9 @@ interface LineRow {
   turn_sender_id: string | null;
   source_id: string | null;
   chat_thread_id: string | null;
+  reaction: string | null;
+  /** 0 or 1: whether the chat's owner has seen the line. */
+  is_read: number;
   line_order: number;
   seq: number;
 }
@@ -1225,6 +1229,8 @@ function storedLine(row: LineRow): TranscriptLine {
     role: row.role,
     content: row.content,
     chatThreadId: row.chat_thread_id,
+    ...(row.reaction === null ? {} : { reaction: row.reaction }),
+    read: row.is_read === 1,
     createdAt: new Date(row.created_at * 1000),
   };
 }
@@ -1255,7 +1261,10 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
       CASE WHEN m.sender_agent IS NOT NULL THEN m.sender_agent
            WHEN m.sender_account_id GLOB 'automated::*' THEN m.sender_account_id END AS source_id,
-      m.chat_thread_id AS chat_thread_id,
+      COALESCE((SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id), m.key)
+        AS chat_thread_id,
+      m.reaction AS reaction,
+      m.read_at IS NOT NULL AS is_read,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -1270,12 +1279,14 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
       ${
-        // A line from before chat threads is in none, so the thread its own
-        // key names holds it. A line that is in a thread, even one that
-        // started here and moved on, is read by that thread alone.
+        // The thread of the message keyed `chatThread`, any message of it: its
+        // root and every message that replies down to it.
         chatThread === undefined
           ? sql``
-          : sql`AND (m.chat_thread_id = ${chatThread} OR (m.chat_thread_id IS NULL AND m.key = ${chatThread}))`
+          : sql`AND COALESCE(m.root_message_id, m.id) = (
+              SELECT COALESCE(t.root_message_id, t.id) FROM chat_messages t
+              WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
+            )`
       }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.
@@ -1289,7 +1300,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      NULL AS chat_thread_id,
+      NULL AS chat_thread_id, NULL AS reaction, 1 AS is_read,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,

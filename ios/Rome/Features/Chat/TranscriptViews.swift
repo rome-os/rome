@@ -13,7 +13,7 @@ extension EnvironmentValues {
     /// Opens a link tapped in chat text; the shell sets it so app and
     /// instance links stay in the app.
     @Entry var chatLinkOpener: ShellAction<URL, OpenURLAction.Result>? = nil
-    /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
+    /// A dashboard admin, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
     /// Opens a task chat in this window, over the page the row is on.
     @Entry var openTaskChat: ShellAction<(chatId: String, title: String), Void>? = nil
@@ -94,12 +94,24 @@ struct UserBubble: View {
     /// Removes a send that cannot go through; nil leaves it out.
     var onDelete: (() -> Void)? = nil
     var menu = BubbleMenu()
-    /// Rome's mark on the message: being worked on, or failed.
-    var mark: StatusMark? = nil
+    /// The badge on the message: Rome's status, else the Concierge's reaction.
+    var mark: MessageMark? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
+    /// The mark that stands for the quote where the reply sits right under what it answers.
+    var rail: ReplyRail.Kind? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    @Environment(\.rowTinted) private var tinted
+
+    /// The message has a bubble under its photos: text, or a quote drawn in it.
+    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil && rail == nil) }
+
+    /// Where the mark sits: on the text bubble when there is one, and on the
+    /// photos' corner only for photos sent alone.
+    nonisolated static func badgeOnPhotos(text: String, quoteInBubble: Bool) -> Bool {
+        text.isEmpty && !quoteInBubble
+    }
 
     private var problem: SendProblem? {
         SendProblem(pending, onRetry: onRetry, onDelete: onDelete)
@@ -121,11 +133,13 @@ struct UserBubble: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
+                            // Only photos alone carry it.
+                            .markBadge(hasBubble ? nil : mark)
                     }
-                    if !text.isEmpty || quote != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let quote {
-                                QuotedReply(quote: quote, onTap: onQuote)
+                    if hasBubble {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let quote, rail == nil {
+                                QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
                             }
                             if !text.isEmpty {
                                 Text(text)
@@ -137,26 +151,38 @@ struct UserBubble: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                            .overlay(alignment: .topTrailing) {
+                                if let rail, let quote { ReplyRail(kind: rail, isUser: true, label: quote.text, onTap: onQuote) }
+                            }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
-                    }
-                }
-                // The mark sits on the top leading corner of the bubble, or of the
-                // photos, over the corner and clear of the first line's start.
-                .overlay(alignment: .topLeading) {
-                    if let mark {
-                        StatusMarkBadge(mark: mark)
-                            .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
-                            .transition(.opacity)
+                            .markBadge(mark)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
+                // Behind the photos and the bubble, not the row.
+                .tinted(tinted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 56)
         .animation(.easeOut(duration: 0.2), value: pending)
         .animation(.easeOut(duration: 0.15), value: mark)
+    }
+}
+
+private extension View {
+    /// The message's badge on the top leading corner of its text bubble, or of
+    /// its photos when they come with no text, over the corner and clear of
+    /// the first line's start.
+    func markBadge(_ mark: MessageMark?) -> some View {
+        overlay(alignment: .topLeading) {
+            if let mark {
+                StatusMarkBadge(mark: mark)
+                    .offset(x: -StatusMarkBadge.size / 2, y: -StatusMarkBadge.size / 2)
+                    .transition(.opacity)
+            }
+        }
     }
 }
 
@@ -189,7 +215,11 @@ private struct UserImageGrid: View {
 
     var body: some View {
         let side: CGFloat = images.count == 1 ? 200 : 110
-        let columns = Array(repeating: GridItem(.fixed(side), spacing: 6), count: min(2, images.count))
+        let count = min(2, images.count)
+        let columns = Array(repeating: GridItem(.fixed(side), spacing: 6), count: count)
+        // A grid takes the whole width, its tiles trailing. Held to its tiles,
+        // its leading corner is the first photo's, where the badge goes.
+        let width = CGFloat(count) * side + CGFloat(count - 1) * 6
         LazyVGrid(columns: columns, alignment: .trailing, spacing: 6) {
             ForEach(Array(images.enumerated()), id: \.offset) { _, image in
                 UserImageTile(image: image)
@@ -201,6 +231,7 @@ private struct UserImageGrid: View {
                     .accessibilityHint("Opens the photo full screen")
             }
         }
+        .frame(width: width)
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
@@ -331,6 +362,12 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
+    /// What the message replies to, quoted at the top of the bubble.
+    var quote: MessagePart.ReplyQuote? = nil
+    /// The mark that stands for the quote where the reply sits right under what it answers.
+    var rail: ReplyRail.Kind? = nil
+    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    var onQuote: (() -> Void)? = nil
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
     static var startsExpanded = false
@@ -342,6 +379,8 @@ struct AgentBubble: View {
     /// characters on a line than English, so characters cannot tell.
     @State private var fullHeight: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.rowTopHold) private var rowTopHold
+    @Environment(\.transcriptRowID) private var rowID
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
@@ -383,7 +422,9 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // A forwarded result is a plain bubble: the label under it names its task.
+            if let quote, rail == nil {
+                QuotedReply(quote: quote, tone: .received, onTap: onQuote)
+            }
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -400,6 +441,9 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
+        .overlay(alignment: .topLeading) {
+            if let rail, let quote { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onQuote) }
+        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
         .bubbleWidth()
@@ -412,7 +456,7 @@ struct AgentBubble: View {
         Button(action: toggle) {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
-                .foregroundStyle(Palette.sub)
+                .foregroundStyle(Palette.sub.opacity(0.6))
                 .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
                 .background {
                     if !expanded {
@@ -426,7 +470,14 @@ struct AgentBubble: View {
     }
 
     private func toggle() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
+        // The bubble opens downward and closes upward: its top, and every
+        // row above it, stay where they are.
+        if let rowID { rowTopHold?.hold(rowID) }
+        // In one step: animated, the bubble's height eased inside a cell UIKit
+        // had already given its new height, so the text dipped and rose.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { expanded.toggle() }
     }
 }
 
@@ -478,20 +529,20 @@ struct CopyButton: View {
     }
 }
 
-/// A card for a task chat the Concierge started: "Task" + status, then its title.
 /// A task the Concierge started, as a card in the chat: the label and the
-/// title. Its status is left out, since progress is not reported accurately.
+/// title. The label says only what the task chat says live: Working or Needs
+/// you. It has no Stop; Stop is on the Tasks tab's row.
 struct TaskCard: View {
     let title: String
-    /// How the task stands, as "Task chat · <word>"; nil keeps the bare "Task".
+    /// How the task chat stands; nil keeps the bare "Task".
     var state: TaskCardState? = nil
-    var stopping = false
-    var onStop: (() -> Void)? = nil
     let action: () -> Void
 
     /// The line above the title.
     private var label: String {
-        state.map { String(localized: "Task chat · \($0.word)") } ?? String(localized: "Task")
+        guard let state else { return String(localized: "Task") }
+        guard let word = state.word else { return String(localized: "Task chat") }
+        return String(localized: "Task chat · \(word)")
     }
 
     var body: some View {
@@ -508,8 +559,6 @@ struct TaskCard: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            // Room for Stop on the right.
-            .padding(.trailing, state?.stoppable == true ? 58 : 0)
             // One width whatever the state line says, so a state change never moves the card's edge.
             .fillsBubbleWidth()
             .cardPadding()
@@ -518,25 +567,9 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .overlay(alignment: .trailing) {
-            // On the right of the card, beside its own tap, so a press on Stop
-            // never opens the chat. A quiet button, not a row of its own.
-            if state?.stoppable == true, let onStop {
-                Button(action: onStop) {
-                    Text(stopping ? "Stopping…" : "Stop")
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Palette.fill, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(stopping)
-                .padding(.trailing, 12)
-            }
-        }
         .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
+        .accessibilityIdentifier("task-card")
     }
 }
 
@@ -566,13 +599,11 @@ enum TranscriptSpacing {
         if case .notice = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
-        case (.sessionRenewal, _), (_, .sessionRenewal): return 14
+        case (.sessionRenewal, _), (_, .sessionRenewal), (.unreadDivider, _), (_, .unreadDivider): return 14
         default: break
         }
         // Tight under its own message, and apart from the next one.
-        if case .threadLabel = row { return 3 }
         if case .sourceLabel = row { return 3 }
-        if case .threadLabel = previous { return row.isGuardian ? 18 : 14 }
         if case .sourceLabel = previous { return row.isGuardian ? 18 : 14 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
@@ -596,10 +627,28 @@ struct Composer: View {
     @Binding var focused: Bool
     /// Photos to send with the message; nil leaves out the +.
     var attachments: ComposerAttachments? = nil
+    /// The instance's voice input; nil (demo data, previews) shows no control.
+    var voiceInput: VoiceInputService? = nil
+    /// The chat this field writes in, so voice input stopped by leaving it
+    /// says why on return; nil keeps no such notice.
+    var voiceKey: String? = nil
+    /// Which field this is, for the voice input start's signpost.
+    var voiceField: VoiceInputField = .chat
+    /// False while the field's chat is covered or hidden but still mounted
+    /// (Chat under another section, a sheet, the drawer): listening stops.
+    var onScreen = true
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
+    @State private var multiline = false
+    @State private var composerWidth: CGFloat = 300
+    @State private var editorHeight: CGFloat?
+    @State private var overflows = false
+    @State private var voice = VoiceInputController()
+    @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
@@ -614,72 +663,138 @@ struct Composer: View {
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
         guard !(attachments?.isPreparing ?? false) else { return false }
+        // Sending waits for the spoken words to land.
+        guard !voice.active else { return false }
         return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
+    private var usesRows: Bool {
+        focused || multiline || text.contains("\n") || expanded || hasPhotos || voice.active || dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var shapeAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0)
+    }
+
+    private var compactWidth: CGFloat {
+        composerWidth - compactGutter * 2 - leadingInset(rows: false) - trailingInset(rows: false)
+    }
+
+    private var compactGutter: CGFloat { composerWidth >= 340 ? 24 : 0 }
+    private var showsExpansion: Bool { (overflows || expanded) && !voice.active }
+
+    private func leadingInset(rows: Bool) -> CGFloat { rows || attachments == nil ? 18 : 51 }
+    private func trailingInset(rows: Bool) -> CGFloat { rows ? 18 : (voiceInput?.available ?? false) ? 95 : 51 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let notice = voice.notice {
+                VoiceInputNotice(stop: notice)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 18)
+            }
             if let attachments, !attachments.images.isEmpty || attachments.preparing > 0 {
                 ComposerThumbnails(attachments: attachments)
                     .padding(.top, 10)
                     .padding(.leading, 12)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                if let attachments {
-                    plusMenu(attachments)
-                        .padding(.bottom, controlPadding)
-                }
-                ComposerTextView(
-                    text: $text,
-                    focused: $focused,
-                    placeholder: placeholder,
-                    named: named,
-                    onPasteImages: attachments.map { attachments in
-                        { providers in Task { await attachments.add(providers: providers) } }
-                    },
-                    committedText: $committedText
-                )
-                Group {
-                    if stopVisible && !canSend {
-                        Button(action: onStop) {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Palette.bg)
-                                .frame(width: 12, height: 12)
-                                .frame(width: 36, height: 36)
-                                .background(Palette.fg, in: Circle())
-                                .opacity(stopping ? 0.5 : 1)
-                        }
-                        .disabled(stopping)
-                        .accessibilityLabel("Stop")
-                        .transition(.scale.combined(with: .opacity))
-                    } else {
-                        Button(action: onSend) {
-                            Image(systemName: "arrow.up")
-                                .romeFont(16, .bold)
-                                .foregroundStyle(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Palette.primary, in: Circle())
-                                .opacity(canSend ? 1 : 0.35)
-                        }
-                        .disabled(!canSend)
-                        .accessibilityLabel("Send")
-                        .transition(.scale.combined(with: .opacity))
+            // One editor and one set of controls retain focus and move through the morph.
+            ComposerTextView(
+                text: $text,
+                focused: $focused,
+                placeholder: placeholder,
+                named: named,
+                onPasteImages: attachments.map { attachments in
+                    { providers in Task { await attachments.add(providers: providers) } }
+                },
+                committedText: $committedText,
+                handle: textHandle,
+                editable: !voice.active,
+                onReturn: returnSends,
+                onEdit: { voice.edited(service: voiceInput, chat: voiceKey) },
+                expanded: expanded,
+                compactWidth: compactWidth,
+                onMeasure: { multiple, height, overflow in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = editorHeight == nil || !onScreen
+                    withTransaction(transaction) {
+                        if multiline != multiple { multiline = multiple }
+                        if editorHeight == nil || abs((editorHeight ?? 0) - height) > 0.5 { editorHeight = height }
+                        if overflows != overflow { overflows = overflow }
+                        if !overflow { expanded = false }
                     }
                 }
-                .buttonStyle(PressScaleStyle(scale: 0.9))
-                .padding(.bottom, controlPadding)
+            )
+            .frame(height: editorHeight)
+            .padding(.leading, leadingInset(rows: usesRows))
+            .padding(.trailing, trailingInset(rows: usesRows))
+            .padding(.bottom, usesRows ? 44 : 0)
+            .overlay(alignment: .bottomLeading) {
+                if let attachments {
+                    plusMenu(attachments)
+                        .padding(.leading, 7)
+                        .padding(.bottom, usesRows ? 7 : controlPadding)
+                }
             }
-            .padding(.leading, attachments == nil ? 18 : 7)
-            .padding(.trailing, 7)
+            .overlay(alignment: .bottom) {
+                if voice.state == .listening {
+                    VoiceInputWaveform(meter: voice.meter)
+                        .padding(.horizontal, 96)
+                        .padding(.bottom, 7 + (36 - VoiceInputWaveform.height) / 2)
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 0) {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        Image(systemName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .romeFont(15, .medium)
+                            .foregroundStyle(Palette.sub)
+                            .frame(width: 36, height: 36)
+                    }
+                    .accessibilityLabel(expanded ? String(localized: "Collapse input") : String(localized: "Expand input"))
+                    .accessibilityIdentifier("composer-expand")
+                    .opacity(showsExpansion ? 1 : 0)
+                    .frame(width: showsExpansion ? 44 : 0)
+                    .clipped()
+                    .allowsHitTesting(showsExpansion)
+                    .accessibilityHidden(!showsExpansion)
+                    HStack(spacing: 8) { controls }
+                }
+                .padding(.trailing, 7)
+                .padding(.bottom, usesRows ? 7 : controlPadding)
+            }
         }
         .frame(minHeight: ComposerTextView.minHeight)
+        .onChange(of: text.isEmpty) { _, empty in if empty { expanded = false } }
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+        .padding(.horizontal, usesRows ? 0 : compactGutter)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { composerWidth = $0 }
+        .animation(shapeAnimation, value: usesRows)
+        .animation(shapeAnimation, value: showsExpansion)
+        .animation(shapeAnimation, value: expanded)
+        .animation(shapeAnimation, value: editorHeight)
+        // The main Chat stays mounted under other sections, so it asks again on each return.
+        .task(id: onScreen) { if onScreen { await voiceInput?.refresh() } }
+        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
+        .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onChange(of: voice.state) { voice.stateShown() }
+        .onChange(of: onScreen) { _, now in
+            if now {
+                voice.arrive(service: voiceInput, chat: voiceKey)
+            } else {
+                voice.leave(service: voiceInput, chat: voiceKey)
+                expanded = false
+            }
+        }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)
@@ -713,6 +828,65 @@ struct Composer: View {
         }
     }
 
+    /// Return on a hardware keyboard while listening: listening ends, and the
+    /// message is sent once the last words are in. Shift-Return does nothing.
+    private var returnSends: (() -> Void)? {
+        guard voice.active else { return nil }
+        return sendWhenHeard
+    }
+
+    private func sendWhenHeard() {
+        voice.stopAndSend {
+            guard !(attachments?.isPreparing ?? false),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+            else { return }
+            voice.edited(service: voiceInput, chat: voiceKey)
+            onSend()
+        }
+    }
+
+    /// The voice control, and Send or the turn's stop.
+    @ViewBuilder private var controls: some View {
+        if let voiceInput, voiceInput.available {
+            VoiceInputButton(state: voice.state) {
+                voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
+            }
+        }
+        Group {
+            // While listening, the field's stop is the voice control's.
+            if stopVisible && !canSend && !voice.active {
+                Button(action: onStop) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Palette.bg)
+                        .frame(width: 12, height: 12)
+                        .frame(width: 36, height: 36)
+                        .background(Palette.fg, in: Circle())
+                        .opacity(stopping ? 0.5 : 1)
+                }
+                .disabled(stopping)
+                .accessibilityLabel("Stop")
+                .transition(.scale.combined(with: .opacity))
+            } else {
+                Button {
+                    voice.edited(service: voiceInput, chat: voiceKey)
+                    onSend()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .romeFont(16, .bold)
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Palette.primary, in: Circle())
+                        .opacity(canSend ? 1 : 0.35)
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("send")
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.9))
+    }
+
     private func plusMenu(_ attachments: ComposerAttachments) -> some View {
         Menu {
             Button {
@@ -733,7 +907,8 @@ struct Composer: View {
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
-        .disabled(attachments.isFull)
+        // The camera would cover the voice control while it listens.
+        .disabled(attachments.isFull || voice.active)
         .accessibilityLabel("Add photos")
     }
 }

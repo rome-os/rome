@@ -41,8 +41,7 @@ enum SourceCopy {
     }
 }
 
-/// A faint line under a Concierge reply: where its turn came from. Styled as
-/// the thread label is, and not tappable.
+/// A faint line under a Concierge reply: where its turn came from. Not tappable.
 struct SourceLabelLine: View {
     let text: String
 
@@ -59,16 +58,88 @@ struct SourceLabelLine: View {
     }
 }
 
-/// A faint centered line where the chat's agent session was renewed, with
-/// why. Plain: not tappable.
-struct SessionRenewalLine: View {
-    let reason: String
+/// "New messages" between two hairlines, above the first message that was
+/// unread when the chat opened. Plain: not tappable. The transcript tells
+/// the pill whether the line is above the visible rows.
+struct UnreadDivider: View {
 
     var body: some View {
-        Text(verbatim: NoticeCopy.renewal(reason))
+        HStack(spacing: 12) {
+            Rectangle().fill(Palette.hair).frame(height: 1)
+            Text("New messages")
+                .romeFont(12, .medium)
+                .foregroundStyle(Palette.sub)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Rectangle().fill(Palette.hair).frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// "N new messages" at the top right of a Concierge chat's transcript, while
+/// the unread line is out of sight above: a tap takes the transcript up to
+/// it. It reads the unread state itself, so the transcript is not drawn
+/// again when the pill comes or goes.
+struct UnreadPillButton: View {
+    let store: TranscriptStore
+
+    var body: some View {
+        let shown = store.unreadPill.phase == .shown && store.thread == nil
+        Group {
+            if shown, let unread = store.unread {
+                Button {
+                    store.unreadPill.tapped()
+                    Task { await store.revealUnread() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up")
+                            .romeFont(12, .semibold)
+                        Group {
+                            if unread.more {
+                                Text("\(unread.count)+ new messages")
+                            } else {
+                                Text("\(unread.count) new messages")
+                            }
+                        }
+                        .romeFont(13, .semibold)
+                        .lineLimit(1)
+                    }
+                    .foregroundStyle(Palette.fg)
+                    .padding(.horizontal, 14)
+                    .frame(height: 36)
+                    .glassSurface(Capsule(), interactive: true, frost: Frost.composer)
+                    .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
+                    .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressScaleStyle(scale: 0.95))
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.horizontal, Metrics.pagePadding)
+        .readableColumn()
+        .padding(.top, 4)
+        .animation(.easeOut(duration: 0.2), value: shown)
+    }
+}
+
+/// The one faint centered line of the transcript: the chat moving to another
+/// model, a renewed session and why, an automatic location share. Plain: not
+/// tappable.
+struct NoticeLine: View {
+    let text: String
+
+    var body: some View {
+        Text(verbatim: text)
             .romeFont(12)
             .foregroundStyle(Palette.sub.opacity(0.75))
-            .lineLimit(1)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .accessibilityLabel(Text(verbatim: text))
     }
 }

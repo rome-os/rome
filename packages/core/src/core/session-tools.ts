@@ -1,4 +1,4 @@
-import type { RomeTool } from "../agent/index.js";
+import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import type { ThreadContext } from "./types.js";
 
@@ -10,6 +10,8 @@ export interface SessionToolContext {
   /** Runtime session id. */
   sessionId: string;
   isSubagent: boolean;
+  /** How the session's place draws widgets: as cards, or as plain text. */
+  widgets: WidgetDrawing;
   /** The running turn's id, or undefined between turns. */
   getTurnId(): string | undefined;
   /** The running turn's thread, else the session's. */
@@ -20,7 +22,16 @@ export interface SessionToolContext {
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   getTurnReportedTask(): string | undefined;
+  /** Capture at tool-handler entry, before async setup. The sender refuses a changed source. */
+  captureTaskInput?(): TaskInputSender;
 }
+
+/** One task send stays bound to the turn that started its tool callback. */
+export type TaskInputSender = <T>(
+  chatId: string,
+  body: { text: string; skillName?: string },
+  send: () => Promise<T>,
+) => Promise<T>;
 
 /**
  * Supplies the extra tools one session carries. Asked each time the session

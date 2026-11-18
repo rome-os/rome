@@ -19,6 +19,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
+import { Separator } from "../components/ui/separator";
 import { SlotContent, SlotOutlet, useSlotOutlet } from "../components/slot";
 import { cn } from "@/lib/utils";
 import {
@@ -54,6 +55,7 @@ import { newChatTarget } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
 import { isApplePlatform } from "@/lib/platform";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -73,21 +75,13 @@ const isSupportedLanguage = (lng: string | undefined): lng is string =>
   !!lng && (SUPPORTED_LANGUAGES as readonly string[]).includes(lng);
 
 function readSidebarCollapsed(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStored(SIDEBAR_COLLAPSED_KEY) === "1";
 }
 
 // Names show until the guardian hides them, so a first visit reads the rail
 // instead of guessing at its icons.
 function readRailNames(): boolean {
-  try {
-    return localStorage.getItem(RAIL_NAMES_KEY) !== "0";
-  } catch {
-    return true;
-  }
+  return readStored(RAIL_NAMES_KEY) !== "0";
 }
 
 function sidebarShortcutForPlatform(): string {
@@ -157,7 +151,7 @@ export function RomeShellLayout() {
   // that keeps the list's mode with the open chat. The new-chat shortcut and
   // the rail read that mode.
   useChatListFollowsRoute(mainChat.chatId);
-  const chatListMode = useChatListModeForShell(!mainChat.failed, "chat");
+  const chatListMode = useChatListModeForShell(!mainChat.failed);
   const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
   const [headerClaimed, setHeaderClaimed] = useState(false);
   useEffect(() => {
@@ -203,18 +197,14 @@ export function RomeShellLayout() {
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {}
+      writeStored(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       return next;
     });
   }, []);
 
   const setRailNamesPersisted = useCallback((next: boolean) => {
     setRailNames(next);
-    try {
-      localStorage.setItem(RAIL_NAMES_KEY, next ? "1" : "0");
-    } catch {}
+    writeStored(RAIL_NAMES_KEY, next ? "1" : "0");
   }, []);
 
   // The rail's right edge switches the names. A click flips them; a drag
@@ -363,10 +353,8 @@ export function RomeShellLayout() {
       style={{ width: `${railRem}rem` }}
       data-rail-labelled={railNames ? "" : undefined}
     >
-      {/* The upgrade arrow ends the logo row with names shown, and sits under
-          the logo without them. */}
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center ${railNames ? (titlebar ? "justify-start px-2 pt-2" : "h-14 justify-start px-2") : `flex-col gap-1 pb-4 ${titlebar ? "pt-2" : "pt-5"}`}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -412,15 +400,17 @@ export function RomeShellLayout() {
             {t("appName")}
           </span>
         ) : null}
-        <UpgradeIndicator
-          suppressed={upgradeBannerUp}
-          tooltipSide={railNames ? "bottom" : "right"}
-        />
       </div>
+      {/* One instance in one place for both rail widths: the upgrade under
+          way lives in it, and switching names must not drop it. */}
+      <UpgradeIndicator suppressed={upgradeBannerUp} labelled={railNames} />
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
           <AppGrid onSearch={openChatSearch} chatPeek={canPeek ? chatPeek.tile : undefined} />
         </RailLabelsContext.Provider>
+      </div>
+      <div className={`shrink-0 ${railNames ? "px-3" : "px-5"}`}>
+        <Separator className="bg-border-strong" />
       </div>
       <div
         className={`flex shrink-0 py-3 ${railNames ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
@@ -534,10 +524,10 @@ export function RomeShellLayout() {
         <div className="flex min-h-0 flex-1">
           {hideSidebar ? null : <aside className="flex min-h-0 shrink-0">{rail}</aside>}
           <div
-            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border-strong ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
           >
             {showChats ? (
-              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border">
+              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -547,7 +537,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border bg-background shadow-10"
+                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border-strong bg-background shadow-10"
               >
                 {peekList}
               </div>
@@ -591,7 +581,7 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border-strong pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
@@ -603,7 +593,7 @@ export function RomeShellLayout() {
                 centered tile by half of it as the list opens and closes. */}
             {rail}
             {showChats ? (
-              <div className="flex w-64 min-w-0 flex-col border-l border-border-subtle">
+              <div className="flex w-64 min-w-0 flex-col border-l border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -613,7 +603,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border-strong bg-background shadow-10"
                 style={{ left: `${railRem}rem` }}
               >
                 {peekList}
@@ -659,7 +649,7 @@ export function RomeShellLayout() {
           ) : !hideSidebar ? (
             <header
               data-mobile-header
-              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
+              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border-strong bg-background px-2 pt-safe md:hidden"
             >
               <div className="flex shrink-0 items-center">{leadingButtons()}</div>
               {/* The chat page fills this with the session's identity + app

@@ -18,6 +18,7 @@ import {
 import { relativeTime } from "@/lib/routine-language";
 import { useAppsList } from "@/hooks/use-apps";
 import { useFreeCells, type WidgetPlacement } from "@/pages/free/use-free-cells";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
   return [...placements]
@@ -62,7 +63,7 @@ export function ShareBar({
   const [error, setError] = useState<string | null>(null);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   // Which URL was last copied, so each copy affordance shows its own check.
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const { copiedText: copiedUrl, copy } = useCopyFeedback();
   // The session's project path — shown on the Projects row so the guardian sees
   // exactly which project a workspace share exposes (the backend scopes to it).
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -103,15 +104,12 @@ export function ShareBar({
     });
   }, []);
 
-  const handleCopy = useCallback((url: string) => {
-    void navigator.clipboard?.writeText(url).then(
-      () => {
-        setCopiedUrl(url);
-        setTimeout(() => setCopiedUrl((cur) => (cur === url ? null : cur)), 1500);
-      },
-      () => {},
-    );
-  }, []);
+  const handleCopy = useCallback(
+    (url: string) => {
+      void copy(url);
+    },
+    [copy],
+  );
 
   const handleCreate = useCallback(async () => {
     if (selectedTurnIds.length === 0) return;

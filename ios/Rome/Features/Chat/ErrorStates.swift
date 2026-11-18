@@ -324,23 +324,9 @@ struct TranscriptBanners: View {
     }
 }
 
-/// A quiet centered line in the transcript, such as the chat moving to
-/// another model.
-struct NoticeLine: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .romeFont(13)
-            .foregroundStyle(Palette.sub)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
-    }
-}
-
-/// Rome's mark on a guardian message: it is being worked on, or it failed.
-enum StatusMark: String, Hashable, Sendable {
+/// Rome's status on a guardian message (docs/domains/chats.md#status): it is
+/// being worked on, or that work failed. It shows over the message's reaction.
+enum MessageStatus: String, Hashable, Sendable {
     case working, failed
 
     var emoji: String { self == .working ? "👀" : "⚠️" }
@@ -353,13 +339,33 @@ enum StatusMark: String, Hashable, Sendable {
     }
 }
 
-/// The mark's round badge, a nod to a tapback on a bubble's corner: the emoji
-/// on a quiet surface, and one small dot trailing off down and out, as a
+/// What the one badge on a guardian message shows: its status while it has
+/// one, else the Concierge's reaction, whatever string the server sends.
+struct MessageMark: Hashable, Sendable {
+    let emoji: String
+    let label: String
+
+    /// Nil when the message has neither. A status this app does not know shows none.
+    init?(status: String?, reaction: String?) {
+        if let status = status.flatMap(MessageStatus.init(rawValue:)) {
+            emoji = status.emoji
+            label = status.label
+        } else if let reaction {
+            emoji = reaction
+            label = reaction
+        } else {
+            return nil
+        }
+    }
+}
+
+/// The mark's round badge, a nod to a tapback on a bubble's corner: the
+/// emoji on a quiet surface, and one small dot trailing off down and out, as a
 /// thought bubble does. It is drawn about its own center, so the bubble's
 /// overlay sets where that center sits.
 struct StatusMarkBadge: View {
     static let size: CGFloat = 30
-    let mark: StatusMark
+    let mark: MessageMark
 
     var body: some View {
         Text(mark.emoji)

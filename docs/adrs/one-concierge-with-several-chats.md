@@ -7,7 +7,7 @@
 
 The guardian wants Concierge topics, such as the calendar or one project, to live apart from the main Concierge chat, so recurring alerts on one topic do not flood the rest.
 
-The Concierge triages followed events once per batch with a small model, stores what it owes the digest keyed by event, and arms one subscription at the source per followed thing. Its memory is the instance's one memory, and its digest times and quiet hours are one setting. A dashboard visitor on the allow-list already reads and edits that memory, those settings and every chat, so nothing inside one Rome is private from a visitor today.
+The Concierge triages followed events once per batch with a small model, stores what it owes the digest keyed by event, and arms one subscription at the source per followed thing. Its memory is the instance's one memory, and its digest times and quiet hours are one setting. A dashboard admin already reads and edits that memory, those settings and every chat, so nothing inside one Rome is private from a visitor today.
 
 Products in the same space split two ways. Muse, Claude Duet and Dots run one assistant with shared memory over several chats or channels. Grok Bot runs several bots, each with one job and its own memory. Muse's users name three failures of its model: they forget which task reports where, nothing from a side chat reaches the main chat, and archiving or deleting a side chat leaves its tasks in an unclear place.
 

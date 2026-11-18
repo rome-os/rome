@@ -1,4 +1,5 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import type { ComponentType, LazyExoticComponent } from "react";
+import { lazy } from "@/lib/lazy-with-reload";
 import type { MDXProps } from "mdx/types";
 
 // The MDX design docs, and the only place a new one is registered.

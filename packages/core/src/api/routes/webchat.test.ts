@@ -1,6 +1,7 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { locationCardUiFromProps } from "../../webchat/location-card.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,10 +17,12 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
-import { Session } from "../../agent/index.js";
+import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
+import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { askingDeviceOf } from "../../connections/device/live-route.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
   buildAgent,
@@ -40,19 +43,23 @@ import type {
 } from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
-import { conciergeTasks, guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
-import { Hono } from "hono";
-import { COOKIE_NAME, createSession as signGuardianSession } from "../../access/auth.js";
-import { sessionActorMiddleware } from "../../access/session-actor.js";
+import {
+  chatMessages,
+  conciergeMessageTurns,
+  conciergeTasks,
+  guardianAuth,
+  romeSessions,
+  webchatProjects,
+} from "../../db/schema.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../../concierge/service.js";
-import type { ApiDeps } from "../deps.js";
-import { conciergeRoutes } from "./concierge.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
+import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
+import { showCardTools } from "../../core/show-card-tool.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -244,6 +251,7 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/messages/read`, post)).toBe(404);
     }
     // Nor the guardian the visitor's.
     expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
@@ -292,10 +300,7 @@ describe("Webchat API", () => {
         tasks: {
           repo: {
             threadTasks: async () => new Map(),
-            onThreadRetired: () => () => {},
           },
-          reactionsOf: async () => new Map(),
-          onReaction: () => () => {},
         },
       },
     } as never;
@@ -846,7 +851,7 @@ describe("Webchat API", () => {
     }
   });
 
-  it("marks the owner's messages working as soon as a Concierge turn takes them", async () => {
+  it("records the owner's messages a Concierge turn takes, so a stopped turn can be told to the next one", async () => {
     let finish!: () => void;
     const terminal = new Promise<void>((resolve) => {
       finish = resolve;
@@ -925,20 +930,27 @@ describe("Webchat API", () => {
           body: JSON.stringify({ inputId, text }),
         }),
       );
-    const reaction = async (key: string) =>
-      (await tasks.reactionsOf("topic", [key])).get(key) ?? null;
+    // Whether the turn that took message `key` has answered it, or null when none took it.
+    const taken = async (key: string) => {
+      const [row] = testDb.db
+        .select({ answeredAt: conciergeMessageTurns.answeredAt })
+        .from(conciergeMessageTurns)
+        .where(eq(conciergeMessageTurns.messageKey, key))
+        .all();
+      return row ? row.answeredAt !== null : null;
+    };
     const a = "00000000-0000-4000-8000-00000000000a";
     const b = "00000000-0000-4000-8000-00000000000b";
     try {
       expect((await post(a, "Weather?")).status).toBe(200);
-      // Queued or sent is not taken: no mark yet.
-      expect(await reaction(a)).toBeNull();
+      // Queued or sent is not taken.
+      expect(await taken(a)).toBeNull();
       await queue.observe(
         { type: "input_status", inputId: a, state: "consumed" },
         "concierge-turn",
       );
-      expect(await reaction(a)).toBe("working");
-      // A second message the same turn takes gets its own mark.
+      expect(await taken(a)).toBe(false);
+      // A second message the same turn takes is recorded too.
       queue.ready("concierge-turn");
       await post(b, "And tomorrow?");
       await rs.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
@@ -946,7 +958,7 @@ describe("Webchat API", () => {
         { type: "input_status", inputId: b, state: "consumed" },
         "concierge-turn",
       );
-      expect([await reaction(a), await reaction(b)]).toEqual(["working", "working"]);
+      expect([await taken(a), await taken(b)]).toEqual([false, false]);
     } finally {
       finish();
     }
@@ -1064,9 +1076,13 @@ describe("Webchat API", () => {
         body: JSON.stringify({ text: "look", files }),
       });
     try {
-      expect((await send([file("first"), file("second")])).status).toBe(200);
+      const res = await send([file("first"), file("second")]);
+      expect(res.status).toBe(200);
 
       const [shown] = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      // The answer carries the message as stored, so the sender's row can show
+      // the uploads before any reload.
+      expect(((await res.json()) as { content?: string }).content).toBe(shown.content);
       const links = [
         ...shown.content.matchAll(/\[image\.png\]\(<(\/api\/assets\/[0-9a-f]{32}\.png)>\)/g),
       ];
@@ -2132,6 +2148,49 @@ describe("Webchat API", () => {
     });
   });
 
+  it("marks the messages it is given read, one chat's only, and reads each message's mark", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    await deps.webchatRepo.createSession("read-chat", "Reads");
+    await deps.webchatRepo.recordUserInput("m1", "read-chat", "[]");
+    const reply = (
+      await deps.webchatRepo.addBackendMessage(
+        "read-chat",
+        "turn-1",
+        [{ type: "text", content: "Sunny" }],
+        { replyTo: "m1" },
+      )
+    ).id;
+    const mark = (id: string, body: unknown) =>
+      app.request(`/chat/sessions/${id}/messages/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const readOf = async () =>
+      new Map(
+        (
+          (await (await app.request("/chat/sessions/read-chat/messages")).json()) as {
+            id: string;
+            read?: boolean;
+          }[]
+        ).map((message) => [message.id, message.read]),
+      );
+    expect(await readOf()).toEqual(
+      new Map([
+        ["m1", true],
+        [reply, false],
+      ]),
+    );
+
+    expect((await mark("read-chat", { ids: "nope" })).status).toBe(400);
+    expect((await mark("read-chat", { ids: [1] })).status).toBe(400);
+    expect((await mark("missing-chat", { ids: [reply] })).status).toBe(404);
+    const res = await mark("read-chat", { ids: [reply, "m1", "unknown"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ marked: 1 });
+    expect((await readOf()).get(reply)).toBe(true);
+  });
+
   it("emits a content-free OTLP event after a chat session is created", async () => {
     const exporter = new InMemoryLogRecordExporter();
     const provider = new LoggerProvider({
@@ -2654,7 +2713,7 @@ describe("Webchat API", () => {
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       // A stored selection does not change the key the runtime session is under.
-      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol");
+      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol", "owner");
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
     });
   });
@@ -2826,6 +2885,95 @@ describe("Webchat API", () => {
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
     expect(sentOptions).toMatchObject({ romeSessionId: session.id });
     expect(acquiredInit?.kind).toBe("conversation");
+  });
+
+  it("keeps the device the guardian sent from on the turn, so a live read asks it", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const session = (await (
+      await runWithSessionActor(guardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Battery" }),
+        }),
+      )
+    ).json()) as { id: string };
+    const send = (headers: Record<string, string>, actor?: typeof guardian) => {
+      const request = () =>
+        app.request(`/chat/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ text: "battery?" }),
+        });
+      return actor ? runWithSessionActor(actor, request) : request();
+    };
+    expect((await send({ "x-rome-device": "dev-1" }, guardian)).status).toBe(200);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-1");
+    // No header, a malformed one, or no guardian session: no asking device.
+    await send({}, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev 1" }, guardian);
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await send({ "x-rome-device": "dev-1" });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    expect(sent).toHaveLength(4);
+  });
+
+  it("gives a task chat's turn from the Concierge the device the task was handed from", async () => {
+    const sent: (SendTurnOptions | undefined)[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:task" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+        sent.push(options);
+        return testTurnHandle({
+          turnId: `turn-${sent.length}`,
+          events: (async function* () {
+            yield { type: "result", content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    const concierge = { platform: "webchat", id: "core:concierge" };
+    const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.post(id, { text: "Read my steps" }, concierge)).toMatchObject({
+      ok: true,
+    });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
+    await deps.webchatRepo.setAskingDevice(id, "dev-asking");
+    expect(await deps.webchatRepo.askingDeviceOf(id)).toBe("dev-asking");
+    expect(await runtime.post(id, { text: "And sleep" }, concierge)).toMatchObject({ ok: true });
+    expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-asking");
+    expect(sent).toHaveLength(2);
   });
 
   describe("device folder", () => {
@@ -4620,6 +4768,50 @@ describe("Webchat API", () => {
       expect(await status(visitor, "channel-turn")).toBe(200);
     });
 
+    it("opens a Concierge turn with its unchanged headers in one run, so the session drops them, then the time", async () => {
+      const { sentTurns } = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      deps.concierge = {
+        deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
+        switchIfExhausted: async () => null,
+        conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
+        turnHeader: async () =>
+          '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="guardian"/>',
+        nowLine: async () => "<now>Fri 20/11/2026 09:30 (Europe/Berlin)</now>",
+        stoppedRequestLines: async () => "",
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const workspace = { builtins: [{ kind: "desktop", line: "a window" }], apps: [] };
+      for (const text of ["one", "two"]) {
+        const sent = await app.request(`/chat/sessions/topic-1/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, workspace }),
+        });
+        expect(sent.status).toBe(200);
+        await drainTurn(app, sent);
+      }
+      const [first, second] = sentTurns.map((turn) => turn.prompt as string);
+      expect(first).toMatch(
+        /^<concierge_chat [^\n]+\/>\n<concierge_owner [^\n]+\/>\n<workspace_context>[\s\S]+<\/workspace_context>\n<chat_thread [^\n]+\/>\n<now>Fri 20\/11\/2026 09:30 \(Europe\/Berlin\)<\/now>\n\none$/,
+      );
+      // What the session sends of the second input: no unchanged header, the time kept.
+      const { headers } = withoutRepeatedHeaders(first as string, STICKY_HEADERS, new Map());
+      const resent = withoutRepeatedHeaders(second as string, STICKY_HEADERS, headers).prompt;
+      expect(resent).not.toContain("workspace_context");
+      expect(resent).not.toContain("<concierge_chat");
+      expect(resent).toMatch(/^<chat_thread [^\n]+\/>\n<now>[^\n]+<\/now>\n\ntwo$/);
+    });
+
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
@@ -4653,49 +4845,95 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      // The Concierge reads which message it is: one sent from the composer is in no thread.
+      // The Concierge reads which message it is, and its thread's root: a
+      // message sent from the composer replies to nothing, so it is its own.
       const first = sentTurns[0]?.prompt.match(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
-      )?.[1];
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" root="\1"\/>\n\nhello$/,
+      )?.[1] as string;
       expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
+      const lines = () =>
+        testDb.db
+          .select({
+            key: chatMessages.key,
+            id: chatMessages.id,
+            replyTo: chatMessages.replyToMessageId,
+            root: chatMessages.rootMessageId,
+            parts: chatMessages.parts,
+          })
+          .from(chatMessages)
+          .all();
+      const send = async (body: Record<string, unknown>) =>
+        drainTurn(
+          app,
+          await app.request(`/chat/sessions/topic-1/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        );
+      const lineOf = (prompt: string | undefined) =>
+        lines().find((row) => row.key === prompt?.match(/message_id="([^"]+)"/)?.[1])!;
+      const firstLine = lines().find((row) => row.key === first)!;
+      expect(firstLine).toMatchObject({ replyTo: null, root: null });
 
-      // A reply to a message in no task is only a quote: it is in no thread.
-      const quoted = await app.request(`/chat/sessions/topic-1/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "about that", replyToMessageId: first }),
-      });
-      await drainTurn(app, quoted);
-      expect(sentTurns[2]?.prompt).toMatch(/<chat_thread message_id="[^"]+"\/>/);
-      const quotedId = sentTurns[2]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
-      expect(await deps.webchatRepo.chatThreadOf("topic-1", quotedId)).toBe(quotedId);
-      expect((await deps.webchatRepo.getReplyTarget("topic-1", quotedId))?.chatThreadId).toBeNull();
-
-      // Once a task's thread starts at it, a message sent there reads the task.
-      const [task] = await repo.upsertMany([
-        { title: 'Book "dinner"', state: "doing", chatId: "topic-1" },
+      // The dashboard's Reply replies to that message and shows its quote.
+      await send({ text: "about that", replyToMessageId: first });
+      expect(sentTurns[2]?.prompt).toMatch(
+        new RegExp(`<chat_thread message_id="[^"]+" root="${first}"/>`),
+      );
+      const replied = lineOf(sentTurns[2]?.prompt);
+      expect(replied).toMatchObject({ replyTo: firstLine.id, root: firstLine.id });
+      expect(JSON.parse(replied.parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: first }),
+        { type: "text", content: "about that" },
       ]);
-      await repo.setThreadRoot(task.id, first as string);
-      await deps.webchatRepo.placeInChatThread("topic-1", first as string, {
-        starts: true,
-        settle: true,
-      });
-      const next = await app.request(`/chat/sessions/topic-1/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "and later?", chatThread: first }),
-      });
-      await drainTurn(app, next);
-      expect(sentTurns[3]?.prompt).toMatch(
-        new RegExp(
-          `<chat_thread message_id="[^"]+" thread="${first}" task="${task.id}" task_title="Book &quot;dinner&quot;"/>`,
-        ),
+
+      // A task started in the thread adds nothing to the line: it names the message and its root.
+      await repo.upsertMany([
+        { title: 'Book "dinner"', state: "doing", chatId: "topic-1", sourceMessageId: first },
+      ]);
+      // A composer focused on the thread replies to its last message, and shows its quote.
+      await send({ text: "and later?", chatThread: first });
+      expect(sentTurns[3]?.prompt).toContain(
+        `<chat_thread message_id="${lineOf(sentTurns[3]?.prompt).key}" root="${first}"/>`,
       );
-      const threaded = sentTurns[3]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
-      expect((await deps.webchatRepo.getReplyTarget("topic-1", threaded))?.chatThreadId).toBe(
-        first,
-      );
+      const focused = lineOf(sentTurns[3]?.prompt);
+      expect(focused).toMatchObject({ replyTo: replied.id, root: firstLine.id });
+      expect(JSON.parse(focused.parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
+        { type: "text", content: "and later?" },
+      ]);
+
+      // A Reply wins over the focus.
+      await send({ text: "no, that one", chatThread: first, replyToMessageId: first });
+      expect(lineOf(sentTurns[4]?.prompt)).toMatchObject({
+        replyTo: firstLine.id,
+        root: firstLine.id,
+      });
+
+      // A client that sends the message it tapped, not the root, gets the same thread.
+      await send({ text: "from an older build", chatThread: lineOf(sentTurns[3]?.prompt).key });
+      expect(lineOf(sentTurns[5]?.prompt)).toMatchObject({
+        replyTo: lineOf(sentTurns[4]?.prompt).id,
+        root: firstLine.id,
+      });
+
+      // A focus on no thread of the chat replies to nothing.
+      await send({ text: "hello again", chatThread: "elsewhere" });
+      expect(lineOf(sentTurns[6]?.prompt)).toMatchObject({ replyTo: null, root: null });
+
+      // A client that names the message it quotes gets exactly that one, not
+      // the thread's last: the server does not resolve the thread again.
+      await send({ text: "as shown", chatThread: first, replyToMessageId: replied.key });
+      expect(lineOf(sentTurns[7]?.prompt)).toMatchObject({
+        replyTo: replied.id,
+        root: firstLine.id,
+      });
+      expect(JSON.parse(lineOf(sentTurns[7]?.prompt).parts)).toEqual([
+        expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
+        { type: "text", content: "as shown" },
+      ]);
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -4703,7 +4941,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async (chatId: string) => {
-          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
+          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna", "owner");
           return null;
         },
         conciergeChat: async () => null,
@@ -4742,6 +4980,7 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({
         ...deps,
         accounts: deps.modelAccounts,
+        tasks: { repo: { threadTasks: async () => new Map() }, onMessageStatus: () => () => {} },
       } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
       deps.agentSessionManager.open = rs.fn(async (key: AgentSessionKey, init?: SessionOpening) => {
@@ -4767,19 +5006,21 @@ describe("Webchat API", () => {
         const sent = await app.request(`/chat/sessions/${id}/turns`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: "hello" }),
+          body: JSON.stringify({ text: "hello", reasoningEffort: "high" }),
         });
         expect(sent.status).toBe(200);
         const { turnId } = (await sent.json()) as { turnId: string };
         const stream = await (await app.request(`/chat/turns/${turnId}/stream`)).text();
         if (id === "ordinary-quota") expect(stream).toContain("quota_exhausted");
         expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
-          id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+          id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
         );
         expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.objectContaining({
-            selectionId: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+            selectionId: id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+            // A Concierge chat runs at its agent's effort, whatever the send asks.
+            reasoningEffort: id === "concierge" ? undefined : "high",
           }),
         );
       }
@@ -5348,6 +5589,116 @@ describe("Webchat API", () => {
       expect(lateRes.status).toBe(400);
     });
 
+    const locationCardEvents = (toolUseId: string) =>
+      async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId,
+          tool: "share_location",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "location-card",
+              props: { reason: "To find coffee near you" },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      };
+
+    it("answers a share-location card only through its event, in the card's own words", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(locationCardEvents("tu-loc"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "coffee near me?" }),
+        }),
+      );
+      const card = await findCard(sessionId, "tu-loc");
+      expect(card?.render).toMatchObject({
+        ui: locationCardUiFromProps({ reason: "To find coffee near you" }),
+      });
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const shared = {
+        status: "shared",
+        latitude: 31.23,
+        longitude: 121.47,
+        accuracyMeters: 25_000,
+        fixedAt: "2026-11-14T08:00:00.000Z",
+      };
+      const answerBody = JSON.stringify({
+        parts: [{ type: "interaction_result", toolUseId: "tu-loc", output: shared }],
+      });
+      // A client cannot post a position itself: only the card's event answers it.
+      const forged = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: answerBody,
+      });
+      expect(forged.status).toBe(400);
+
+      const res = await app.request(
+        `/chat/sessions/${sessionId}/turns`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: answerBody },
+        { [Symbol.for("rome.widget-event")]: true },
+      );
+      expect(res.status).toBe(200);
+      await drainTurn(app, res);
+      const prompt = ctl.sentTurns.at(-1)?.prompt ?? "";
+      expect(prompt).toContain("latitude: 31.23");
+      expect(prompt).toContain("around <city>");
+      // The chat keeps how the card ended, never where the guardian was.
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-loc",
+        output: { status: "shared", accuracyMeters: 25_000, fixedAt: "2026-11-14T08:00:00.000Z" },
+      });
+      expect(JSON.stringify(await userPartsIn(sessionId))).not.toContain("31.23");
+    });
+
+    it("expires an open share-location card when the guardian types a reply instead", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(locationCardEvents("tu-loc-typed"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "weather here?" }),
+        }),
+      );
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "I'm in Hangzhou" }),
+        }),
+      );
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain("skipped your open card");
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-loc-typed",
+        output: { dismissed: true },
+      });
+    });
+
     it("leaves an app's inline card open when the guardian types a reply", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(inlineRenderEvents("tu-app-typed", "ask-user", "question-card"));
@@ -5557,6 +5908,115 @@ describe("Webchat API", () => {
         ui,
         bind: { "/today": "days/2026-11-11" },
         text: "Showing today's meals.",
+      });
+    });
+
+    // docs/domains/chats.md#agent-card
+    describe("an agent card", () => {
+      const HEALTH = {
+        components: [
+          { id: "root", component: "Column", children: ["title", "stats"] },
+          { id: "title", component: "Text", text: "Today's health", variant: "h4" },
+          { id: "stats", component: "Row", children: ["sleep", "steps"] },
+          { id: "sleep", component: "Stat", label: "Sleep", value: "7h 12m" },
+          { id: "steps", component: "Stat", label: "Steps", value: 8432 },
+        ],
+      };
+      const TEXT = "Sleep 7h 12m, 8,432 steps.";
+      const lookAlike = (ui: unknown, extra: Record<string, unknown> = {}) => [
+        {
+          type: "text",
+          text: JSON.stringify({ showWidget: true, appId: "core", ui, text: TEXT, ...extra }),
+        },
+      ];
+      /** What core's own show_card answers, token included. */
+      const shownByRome = async (ui: unknown) => {
+        const [tool] = showCardTools({ widgets: "card", hasSpeaker: true });
+        return (await tool!.handler({ ui, text: TEXT }, { toolUseId: "tu-card" } as never)).content;
+      };
+      const playCard = async (events: () => AsyncGenerator<unknown>) => {
+        const ctl = mockScriptedManager();
+        ctl.setEvents(events as never);
+        const app = createWebchatRuntime(deps).routes;
+        const sessionId = await newSession(app);
+        await drainTurn(
+          app,
+          await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "how did I do today?" }),
+          }),
+        );
+        return (await assistantPartsIn(sessionId)).filter((p) => p.type === "widget");
+      };
+      const oneResult = (tool: string, output: unknown) =>
+        async function* () {
+          yield { type: "tool_use", id: "tu-card", tool, input: {} };
+          yield { type: "tool_result", toolUseId: "tu-card", tool, output };
+          yield { type: "result", content: "" };
+        };
+
+      it("is stored from core's show_card as Rome's own widget", async () => {
+        const widgets = await playCard(oneResult("show_card", await shownByRome(HEALTH)));
+        expect(widgets).toEqual([
+          { type: "widget", toolUseId: "tu-card", appId: "core", ui: HEALTH, text: TEXT },
+        ]);
+      });
+
+      it("is not stored when another tool prints the same output", async () => {
+        registerAppAction("show_today", "meals");
+        const widgets = await playCard(async function* () {
+          yield { type: "tool_use", id: "tu-bash", tool: "Bash", input: {} };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-bash",
+            tool: "Bash",
+            output: lookAlike(HEALTH),
+          };
+          yield {
+            type: "tool_use",
+            id: "tu-action",
+            tool: "execute_action",
+            input: { action_name: "show_today" },
+          };
+          yield {
+            type: "tool_result",
+            toolUseId: "tu-action",
+            tool: "execute_action",
+            output: lookAlike(HEALTH),
+          };
+          yield { type: "result", content: "" };
+        });
+        expect(widgets).toEqual([]);
+      });
+
+      it("is not stored from an external MCP tool that is also named show_card", async () => {
+        for (const tool of ["mcp__external__show_card", "show_card"]) {
+          const forged = await playCard(
+            oneResult(
+              tool,
+              lookAlike(HEALTH, { cardToken: "00000000-0000-4000-8000-000000000000" }),
+            ),
+          );
+          expect(forged).toEqual([]);
+          expect(await playCard(oneResult(tool, lookAlike(HEALTH)))).toEqual([]);
+        }
+      });
+
+      it("stores the card core checked, not what the output prints, and only once", async () => {
+        const output = (await shownByRome(HEALTH)) as Array<{ text: string }>;
+        const swapped = JSON.parse(output[0]!.text) as Record<string, unknown>;
+        const button = {
+          components: [
+            { id: "root", component: "Button", child: "go", action: { event: { name: "go" } } },
+            { id: "go", component: "Text", text: "Go" },
+          ],
+        };
+        const replayed = [{ type: "text", text: JSON.stringify({ ...swapped, ui: button }) }];
+        expect(await playCard(oneResult("show_card", replayed))).toEqual([
+          { type: "widget", toolUseId: "tu-card", appId: "core", ui: HEALTH, text: TEXT },
+        ]);
+        expect(await playCard(oneResult("show_card", replayed))).toEqual([]);
       });
     });
 
@@ -5865,6 +6325,104 @@ describe("Webchat API", () => {
         appId: "ask-user",
         render: { kind: "inline", componentId: "question-card" },
       });
+    });
+
+    it("stores a Concierge's question card, alone, in the thread of the message it replies to, and no other chat's", async () => {
+      const ctl = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      // The real card write, on the real store.
+      const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
+      deps.concierge = {
+        deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
+        switchIfExhausted: async () => null,
+        conciergeChat: async () => null,
+        cardSettled: async () => {},
+        addCard: service.addCard.bind(service),
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const start = await deps.webchatRepo.addBackendMessage("topic-1", "t0", [
+        { type: "text", content: "On it" },
+      ]);
+      const questions = [{ id: "q1", question: "Which day?", type: "text" }];
+      let ask: { toolUseId: string; replyTo?: string } = { toolUseId: "tu-1" };
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: ask.toolUseId,
+          tool: "ask_question",
+          input: { questions, ...(ask.replyTo ? { replyTo: ask.replyTo } : {}) },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: ask.toolUseId,
+          tool: "ask_question",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "question-card",
+              props: { questions },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const send = async (sessionId: string, body: Record<string, unknown>) =>
+        drainTurn(
+          app,
+          await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "ask me something", ...body }),
+          }),
+        );
+      const rows = () =>
+        testDb.db
+          .select({
+            id: chatMessages.id,
+            key: chatMessages.key,
+            replyTo: chatMessages.replyToMessageId,
+            root: chatMessages.rootMessageId,
+            parts: chatMessages.parts,
+          })
+          .from(chatMessages)
+          .all();
+      const cardOf = (toolUseId: string) => rows().find((row) => row.parts.includes(toolUseId))!;
+      const startRow = rows().find((row) => row.key === start.id)!;
+
+      // The owner wrote inside the thread: the card replies there, with no name.
+      await send("topic-1", { replyToMessageId: start.id });
+      const inThread = cardOf("tu-1");
+      expect(inThread.replyTo).not.toBeNull();
+      expect(inThread.root).toBe(startRow.id);
+      expect(JSON.parse(inThread.parts)).toEqual([
+        expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-1" }),
+      ]);
+
+      // The owner wrote on the main line: the card replies to the message it names.
+      ask = { toolUseId: "tu-2", replyTo: start.id };
+      await send("topic-1", {});
+      const named = cardOf("tu-2");
+      expect([named.replyTo, named.root]).toEqual([startRow.id, startRow.id]);
+      expect(JSON.parse(named.parts)).toHaveLength(1);
+
+      // Another chat's card is written as it always was: replying to nothing.
+      const plain = await newSession(app);
+      ask = { toolUseId: "tu-3", replyTo: start.id };
+      await send(plain, {});
+      expect(await findCard(plain, "tu-3")).toBeDefined();
+      expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {
@@ -6895,6 +7453,30 @@ describe("Webchat API", () => {
       expect(listed.map((s) => s.id)).toContain("branch-fork-session");
     });
 
+    it("opens a branch's source session at the chat's saved effort, as its next message runs", async () => {
+      // The source stays live for the chat's next message, and Claude fixes
+      // effort at open, so it must not open at the dashboard's.
+      await deps.settingsRepo.set(WEBCHAT_REASONING_EFFORT_SETTING_KEY, "xhigh");
+      await deps.webchatRepo.updateSessionReasoningEffort(SESSION_ID, "low");
+      const open = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
+        sessionId: "live-source-session",
+      } as AgentSession);
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
+      const app = createWebchatRuntime(deps).routes;
+
+      await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "What about the other approach?" }),
+      });
+
+      expect(open).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reasoningEffort: "low" }),
+      );
+    });
+
     it("refuses a follow-up until the branch thread exists", async () => {
       await deps.webchatRepo.ensureRomeSession({
         id: "branch-fork-session",
@@ -7271,18 +7853,11 @@ describe("Webchat API", () => {
       await runtime.flushAll();
     });
 
-    it("shows a status reaction on the guardian's message in a Concierge chat, and streams its changes", async () => {
-      const repo = new ConciergeTasksRepository(testDb.db);
-      const tasks = new ConciergeTasks(repo);
-      // The task chat runs while `running` says so.
-      let running = true;
-      tasks.attachFacts({
-        now: () => Date.now(),
-        running: () => running,
-        openWaits: async () => new Map(),
-        reportPending: () => [],
-      });
-      deps.concierge = { deps: { tasks }, onCardSettled: () => () => {} } as never;
+    it("shows the reaction on a guardian message of a chat, and streams its changes", async () => {
+      deps.concierge = {
+        deps: { tasks: new ConciergeTasks(new ConciergeTasksRepository(testDb.db)) },
+        onCardSettled: () => () => {},
+      } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -7292,51 +7867,112 @@ describe("Webchat API", () => {
         undefined,
         "core:concierge",
       );
+      await deps.webchatRepo.createSession("other", "Other");
+      for (const [id, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        await deps.webchatRepo.addMessage(
+          id,
+          "topic",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+          turn,
+        );
+      }
       await deps.webchatRepo.addMessage(
-        "g1",
-        "topic",
+        "o1",
+        "other",
         "user",
-        JSON.stringify([{ type: "text", content: "Weather?" }]),
-        "turn-1",
+        JSON.stringify([{ type: "text", content: "elsewhere" }]),
+        "turn-3",
       );
-      await deps.webchatRepo.addMessage(
-        "g2",
-        "topic",
-        "user",
-        JSON.stringify([{ type: "text", content: "Thanks" }]),
-        "turn-2",
-      );
-      await deps.webchatRepo.createSession("task-chat", "Weather");
-      const [task] = await repo.upsertMany([{ title: "Weather", sessionId: "task-chat" }]);
       const app = createWebchatRuntime(deps).routes;
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
-      const working = readSseUntil(events, "event: message_status_reaction");
-      await repo.linkMessage(task.id, { chatId: "topic", messageKey: "g1" });
-      expect(await working).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
+      const set = readSseUntil(events, "event: message_reaction");
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "👀");
+      expect(await set).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", reaction: "👀" })}`,
       );
-      // Finished and reported work shows none: the event carries null.
-      const cleared = readSseUntil(events, '"statusReaction":null');
-      running = false;
-      await repo.setLastOutcome(task.id, "succeeded");
-      await repo.markReported([task.id]);
+      // A reaction in another chat is no event of this one. A new one replaces, and null clears.
+      await deps.webchatRepo.setMessageReaction("other", "o1", "👍");
+      const replaced = readSseUntil(events, '"reaction":"✅"');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "✅");
+      const text = await replaced;
+      expect(text).toContain('"messageId":"g1"');
+      expect(text).not.toContain('"messageId":"o1"');
+      const cleared = readSseUntil(events, '"reaction":null');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", null);
       expect(await cleared).toContain('"messageId":"g1"');
-      await deps.webchatRepo.createSession("retry-chat", "Retry");
-      const [retry] = await repo.upsertMany([{ title: "Retry", sessionId: "retry-chat" }]);
-      await repo.linkMessage(retry.id, { chatId: "topic", messageKey: "g1" });
-      const failed = readSseUntil(events, '"statusReaction":"failed"');
-      await repo.setLastOutcome(retry.id, "failed");
-      await repo.markReported([retry.id]);
-      expect(await failed).toContain('"messageId":"g1"');
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "❤️");
       await events.cancel();
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
         id: string;
-        statusReaction?: string;
+        reaction?: string;
       }[];
-      // Only the message a task failed for has one; the other carries no field.
-      expect(listed.find((m) => m.id === "g1")?.statusReaction).toBe("failed");
-      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
+      // Only the message reacted to carries the field.
+      expect(listed.find((m) => m.id === "g1")?.reaction).toBe("❤️");
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("reaction");
+    });
+
+    it("shows a guardian message's status beside its reaction, and streams its changes", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      const tasks = new ConciergeTasks(repo);
+      deps.concierge = {
+        deps: { tasks },
+        onCardSettled: () => () => {},
+        // As the service fans out its one watch.
+        onMessageStatus: (listener: (event: unknown) => void) =>
+          tasks.onMessageStatus((target, status) =>
+            listener({ sessionId: target.chatId, messageId: target.messageKey, status }),
+          ),
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      for (const [id, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        await deps.webchatRepo.addMessage(
+          id,
+          "topic",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+          turn,
+        );
+      }
+      await deps.webchatRepo.setMessageReaction("topic", "g1", "👍");
+      await repo.takeMessage("turn-1", { chatId: "topic", messageKey: "g1" });
+      const app = createWebchatRuntime(deps).routes;
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const working = readSseUntil(events, '"status":"working"');
+      await repo.markWorking("topic");
+      expect(await working).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", status: "working" })}`,
+      );
+      const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
+        id: string;
+        reaction?: string;
+        status?: string;
+      }[];
+      // Both travel; the client shows the status over the reaction.
+      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+        reaction: "👍",
+        status: "working",
+      });
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("status");
+      const failed = readSseUntil(events, '"status":"failed"');
+      await repo.answerTurns("topic", [], new Date(), { failed: true });
+      expect(await failed).toContain('"messageId":"g1"');
+      await events.cancel();
     });
 
     it("hands a task card out with its card, in one read per page, and streams a card that settles", async () => {
@@ -7424,7 +8060,7 @@ describe("Webchat API", () => {
       await events.cancel();
     });
 
-    it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
+    it("names a chat thread on its messages when they arrive, and leaves a thread no task started in unnamed", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
       deps.concierge = {
         deps: { tasks: new ConciergeTasks(repo) },
@@ -7440,23 +8076,29 @@ describe("Webchat API", () => {
         "core:concierge",
       );
       const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+      const reply = async (to: string, content: string) =>
+        (
+          await deps.webchatRepo.addBackendMessage("topic", "turn-1", [{ type: "text", content }], {
+            replyTo: to,
+          })
+        ).id;
       await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
-      await deps.webchatRepo.addMessage("g2", "topic", "user", text("Thanks"), "turn-2");
+      const answer = await reply("g1", "Looking it up");
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
-      await deps.webchatRepo.placeInChatThread("topic", "g1", { starts: true, settle: true });
-      await deps.webchatRepo.placeInChatThread("topic", "g3", { starts: true, settle: true });
-      await deps.webchatRepo.createSession("tokyo-chat", "Tokyo weather");
-      const [task] = await repo.upsertMany([
-        { title: "Tokyo weather", state: "doing", chatId: "topic", sessionId: "tokyo-chat" },
-      ]);
-      await repo.setThreadRoot(task.id, "g1");
-      // Rows from before one thread per task may share a root: the thread
-      // keeps its first task's name.
-      const [later] = await repo.upsertMany(
-        [{ title: "London weather", state: "doing", chatId: "topic" }],
-        new Date(Date.now() + 1_000),
+      // A thread no task started in has a thread, and no title: a client names it.
+      const long = "Tell me a long story about a lighthouse keeper and the sea, in detail.";
+      await deps.webchatRepo.addMessage("g4", "topic", "user", text(long), "turn-4");
+      const story = await reply("g4", "Once upon a time");
+      const [tokyo] = await repo.upsertMany(
+        [{ title: "Tokyo weather", state: "doing", chatId: "topic", sourceMessageId: "g1" }],
+        new Date(1_000),
       );
-      await repo.setThreadRoot(later.id, "g1");
+      // Several tasks started in one thread: it takes the newest one's title.
+      await repo.upsertMany(
+        [{ title: "London weather", state: "doing", chatId: "topic", sourceMessageId: answer }],
+        new Date(2_000),
+      );
+      expect(tokyo).toBeDefined();
       const app = createWebchatRuntime(deps).routes;
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
@@ -7464,47 +8106,51 @@ describe("Webchat API", () => {
         chatThreadId?: string | null;
         chatThreadTitle?: string;
       }[];
-      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+      const named = (id: string) => listed.find((m) => m.id === id);
+      expect(named("g1")).toMatchObject({ chatThreadId: "g1", chatThreadTitle: "London weather" });
+      expect(named(answer)).toMatchObject({
         chatThreadId: "g1",
-        chatThreadTitle: "Tokyo weather",
-        // Its task chat, so the thread view opens it with no card in the thread.
-        chatThreadTaskChatId: "tokyo-chat",
+        chatThreadTitle: "London weather",
       });
-      // Only a task has a thread: one from before that no task has is sent as
-      // none, so every client shows it as none.
-      expect(listed.find((m) => m.id === "g3")?.chatThreadId ?? null).toBeNull();
-      expect(listed.find((m) => m.id === "g3")).not.toHaveProperty("chatThreadTitle");
-      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("chatThreadTitle");
-      const thread = (await (
-        await app.request("/chat/sessions/topic/messages?thread=g3")
-      ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
-      expect(thread.messages.map((m) => m.chatThreadId ?? null)).toEqual([null]);
+      for (const id of ["g4", story]) {
+        expect(named(id)).toMatchObject({ chatThreadId: "g4" });
+        expect(named(id)).not.toHaveProperty("chatThreadTitle");
+      }
+      // A message alone is the root of its own thread, which no task started in.
+      expect(named("g3")).toMatchObject({ chatThreadId: "g3" });
+      expect(named("g3")).not.toHaveProperty("chatThreadTitle");
+      // The thread reads whole by its root or by any message of it, as shipped apps send the one tapped.
+      for (const key of ["g1", answer]) {
+        const thread = (await (
+          await app.request(`/chat/sessions/topic/messages?thread=${key}`)
+        ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
+        expect(thread.messages.map((m) => [m.id, m.chatThreadId])).toEqual([
+          ["g1", "g1"],
+          [answer, "g1"],
+        ]);
+      }
 
+      // A message that arrives live carries its thread and the thread's name.
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
-      const placed = readSseUntil(events, "event: message_chat_thread");
-      // A placement in a thread no task has is not told; the task's next is.
-      await deps.webchatRepo.addMessage("g4", "topic", "user", text("Old"), "turn-4");
-      await deps.webchatRepo.placeInChatThread("topic", "g4", { in: "g3", settle: true });
-      await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
-      const told = await placed;
-      expect(told).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather", chatThreadTaskChatId: "tokyo-chat" })}`,
-      );
-      expect(told).not.toContain('"messageId":"g4"');
-
-      // A task that leaves the chat takes its thread's label with it.
-      const retired = readSseUntil(events, "event: chat_thread_retired");
-      await repo.upsertMany([{ id: task.id, chatId: null }]);
-      expect(await retired).toContain(
-        `data: ${JSON.stringify({ sessionId: "topic", chatThreadId: "g1" })}`,
-      );
+      const arrived = readSseUntil(events, "Same thread");
+      const live = await reply("g1", "Same thread");
+      const told = await arrived;
+      expect(told).toContain("event: message_insert");
+      expect(told).toContain(`"id":"${live}"`);
+      expect(told).toContain('"chatThreadId":"g1"');
+      expect(told).toContain('"chatThreadTitle":"London weather"');
+      // One that replies to nothing is the root of its own thread, which has no name.
+      const fresh = readSseUntil(events, "Fresh start");
+      const { id: freshId } = await deps.webchatRepo.addBackendMessage("topic", "turn-5", [
+        { type: "text", content: "Fresh start" },
+      ]);
+      const freshTold = await fresh;
+      expect(freshTold).toContain(`"chatThreadId":"${freshId}"`);
+      expect(freshTold).not.toContain("chatThreadTitle");
       await events.cancel();
     });
 
     describe("a task chat's row", () => {
-      const guardianCookie = {
-        headers: { Cookie: `${COOKIE_NAME}=${signGuardianSession("guardian-1")}` },
-      };
       let repo: ConciergeTasksRepository;
       let deleted: string[];
       let upserts: Array<{ id: string; archivedAt: number | null }>;
@@ -7531,7 +8177,7 @@ describe("Webchat API", () => {
         const [row] = await repo.upsertMany([
           { title: `Task of ${id}`, state: "doing", sessionId: id },
         ]);
-        // Its own task_upsert is told once its status is read: let it land.
+        // Let the row's own change notice land before the test starts listening.
         await new Promise((resolve) => setTimeout(resolve, 0));
         return row;
       };
@@ -7541,20 +8187,8 @@ describe("Webchat API", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ archived }),
         });
-      const panel = async () => {
-        const tasksApp = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
-          "/",
-          conciergeRoutes({
-            concierge: deps.concierge,
-            webchatRepo: deps.webchatRepo,
-          } as unknown as ApiDeps),
-        );
-        const response = await tasksApp.request("/concierge/tasks", guardianCookie);
-        expect(response.status).toBe(200);
-        return ((await response.json()) as { tasks: Array<{ title: string }> }).tasks
-          .map((task) => task.title)
-          .sort();
-      };
+      const panel = async () =>
+        (await deps.concierge!.deps.tasks.listForPanel()).map((task) => task.title).sort();
 
       beforeEach(() => {
         rs.useFakeTimers({ toFake: ["Date"] });
@@ -7577,10 +8211,8 @@ describe("Webchat API", () => {
         service.chatDeleted = (taskId: string) => void deleted.push(taskId);
         deps.concierge = service;
         upserts = [];
-        tasks.subscribe((event, payload) => {
-          if (event !== "task_upsert") return;
-          const { task } = payload as { task: { id: string; archivedAt: number | null } };
-          upserts.push({ id: task.id, archivedAt: task.archivedAt });
+        repo.onChange(({ row }) => {
+          upserts.push({ id: row.id, archivedAt: row.archivedAt?.getTime() ?? null });
         });
         app = createWebchatRuntime(deps).routes;
       });
@@ -9431,7 +10063,7 @@ describe("Webchat API", () => {
       });
     });
 
-    it("quotes a task chat card as one line", async () => {
+    it("quotes a task chat card as its title, and tells the agent which chat", async () => {
       const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
       await seed(
         "card1",
@@ -9442,7 +10074,51 @@ describe("Webchat API", () => {
 
       expect((await send({ replyToMessageId: "card1" })).status).toBe(200);
 
-      expect((await lastUser())[0].text).toBe("[Task chat] Trip (chat chat-7)");
+      // The guardian sees the card's own words; the agent's line names the chat.
+      expect((await lastUser())[0].text).toBe("Trip");
+      expect(prompts[0]).toContain("Rome: [Task chat] Trip (chat chat-7)\n</reply_context>");
+    });
+
+    it("quotes a question card as its question", async () => {
+      const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+      const render = {
+        builtin: true,
+        componentId: "question-card",
+        props: { questions: [{ question: "Which tone?" }] },
+      };
+      deps.concierge = {
+        conciergeChat: async () => null,
+        switchIfExhausted: async () => null,
+        taskCardSources: () => ({
+          taskCardsOf: async () =>
+            new Map([
+              [
+                "chat-7",
+                { questions: [{ id: "q1", messageId: "m9", render, since: 1 }], approvals: [] },
+              ],
+            ]),
+          findBySessions: async () => [],
+          waitExpiry: 24 * 60 * 60 * 1000,
+        }),
+      } as never;
+      await seed(
+        "card2",
+        "assistant",
+        [
+          {
+            type: "task_chat",
+            chatId: "chat-7",
+            title: "Trip",
+            show: "ask",
+            waitedOn: { kind: "question", id: "q1", messageId: "m9" },
+          },
+        ],
+        "t1",
+      );
+
+      expect((await send({ replyToMessageId: "card2" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Which tone?");
     });
 
     it("accepts a selection of the message and rejects text that is not in it", async () => {

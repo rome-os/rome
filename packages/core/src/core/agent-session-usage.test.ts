@@ -376,6 +376,8 @@ describe("AgentSession turn usage", () => {
       "say",
       "propose_routine",
       "connect_account",
+      "share_location",
+      "show_card",
     ]);
     expect(catalog(fork)).toEqual(catalog(source));
 
@@ -395,6 +397,13 @@ describe("AgentSession turn usage", () => {
     expect(propose.content[0].text).toContain("NOT shown");
     const connect = await fork.tools.callTool("ask_user", "connect_account", { kind: "github" });
     expect(connect).toMatchObject({ isError: true });
+    // Asking for the guardian's location would park the fork on a card nobody sees.
+    const location = await fork.tools.callTool("ask_user", "share_location", { reason: "Why" });
+    expect(location).toMatchObject({ isError: true });
+    expect(location.content[0].text).toBe("share_location is unavailable in a forked turn.");
+    // A card shown by a fork would land in a chat nobody is reading.
+    const card = await fork.tools.callTool("ask_user", "show_card", { ui: {}, text: "x" });
+    expect(card).toMatchObject({ isError: true });
   });
 
   it("leaves no position to branch at after a turn that never reached the model", async () => {

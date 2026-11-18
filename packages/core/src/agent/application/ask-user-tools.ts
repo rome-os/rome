@@ -2,7 +2,11 @@
 // `defer`, and the session's own tools after them.
 
 import type { AgentPolicy } from "../domain/agent-policy.js";
-import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
+import {
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  REPLY_TO_PARAMETER,
+} from "../domain/ask-question.js";
 import { parseDeferInput, type WakeUp } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
@@ -168,9 +172,11 @@ export function askUserTools(input: {
   widgetsShow: boolean;
   defer?: DeferTool;
   sessionTools?: readonly RomeTool[];
+  /** The card says which message it replies to (the Concierge's). */
+  repliesTo?: boolean;
   run: RomeToolRunner;
 }): RomeTool[] {
-  const { turn, widgetsShow, defer, sessionTools = [], run } = input;
+  const { turn, widgetsShow, defer, sessionTools = [], repliesTo, run } = input;
   // `ask_question` is served everywhere: where no widget shows, the handler
   // relays the questions as a plain message, so the model routes clarifying
   // questions through it wherever it runs.
@@ -242,6 +248,7 @@ export function askUserTools(input: {
               },
             },
           },
+          ...(repliesTo ? { replyTo: REPLY_TO_PARAMETER } : {}),
         },
       },
       handler: (input) =>

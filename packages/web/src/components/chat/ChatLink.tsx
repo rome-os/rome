@@ -1,14 +1,18 @@
 import { useContext, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { decodeFileBrowserRoutePath } from "@/lib/file-browser-routing";
-import { getInternalRawPath, isInternalHref } from "@/lib/internal-href";
+import { getInternalRawPath, isApiHref, isInternalHref, toInternalPath } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 import { parseAssetHref } from "@/lib/asset-links";
 import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
+import { useOutputLinks } from "./outputs/chat-outputs";
+import { ThreadLink } from "./reply/ThreadLink";
+import { threadOfLink } from "./reply/thread-link";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -86,6 +90,22 @@ function decodeProjectsHref(href: string): string | null {
   return decoded === null ? null : `/projects/${decoded}`;
 }
 
+// A same-origin link whose path names a file by its extension, such as an
+// absolute path an agent wrote (`/home/…/projects/demo/report.md`): decoded,
+// or null for anything else. The dashboard's own routes name no extension.
+function localFileHref(href: string): string | null {
+  if (!isInternalHref(href) || isApiHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  if (rawPath === null) return null;
+  const path = stripQueryAndFragment(rawPath);
+  if (!/\.[A-Za-z0-9]{1,8}$/.test(path)) return null;
+  try {
+    return decodeURI(path);
+  } catch {
+    return null;
+  }
+}
+
 // /apps/<appId>[/<route...>][?query]. `route` rides the iframe src path
 // (`/full/apps/<id>/<route>`) and `params` the query — see use-free-cells. The
 // AppsIndex page (`/apps` with no segment) is left to react-router.
@@ -147,19 +167,45 @@ function WorkspaceLink({
 // is the file itself, never a route: a react-router `<Link>` would navigate the
 // SPA to it. A video or audio file plays in place, anything else is a chip.
 function AssetLink({ children, href }: MarkdownLinkProps) {
+  const outputs = useOutputLinks();
   const asset = parseAssetHref(href);
   if (!href || !asset) return null;
   const label = linkText(children) || href.split("/").at(-1) || href;
   if (asset.kind === "video" || asset.kind === "audio") {
     return <ChatMedia src={asset.path} kind={asset.kind} label={label} />;
   }
-  return <FileChip href={href} label={label} />;
+  // A file the chat's agent showed opens in its Outputs tab; any other one saves.
+  return (
+    <FileChip
+      href={href}
+      label={label}
+      onOpen={outputs ? () => outputs.open(asset.path) : undefined}
+    />
+  );
 }
 
 function linkText(children: ReactNode): string {
   if (typeof children === "string" || typeof children === "number") return String(children);
   if (Array.isArray(children)) return children.map(linkText).join("");
   return "";
+}
+
+// A link to a local file by its path opens the file in the chat's Outputs
+// tab when it is one of them; anything else follows the link as before.
+function LocalFileLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
+  const outputs = useOutputLinks();
+  const navigate = useNavigate();
+  const href = props.href ?? "";
+  return (
+    <WorkspaceLink
+      {...props}
+      onActivate={() => {
+        void outputs?.open(path).then((opened) => {
+          if (!opened) navigate(toInternalPath(href));
+        });
+      }}
+    />
+  );
 }
 
 // A picture inside the link leaves the tap to the link.
@@ -177,8 +223,11 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   // just degrades to the default react-router link.
   const store = useContext(WorkspaceStoreContext);
   const eventBus = useWorkspaceEventBus();
+  const outputs = useOutputLinks();
   const href = props.href;
 
+  const thread = threadOfLink(href);
+  if (thread !== null) return <ThreadLink root={thread} fallback={linkText(props.children)} />;
   if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {
@@ -189,10 +238,18 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
           {...props}
           onActivate={() => {
             const path = decodeProjectsHref(projectsHref) ?? projectsHref;
-            // `force` bypasses the user's manual close of the panel — an
-            // explicit click is an explicit request to see the file.
-            eventBus?.emit("projects:opened", { paths: [path], force: true });
-            store.set("followTargetPath", path);
+            const follow = () => {
+              // `force` bypasses the user's manual close of the panel — an
+              // explicit click is an explicit request to see the file.
+              eventBus?.emit("projects:opened", { paths: [path], force: true });
+              store.set("followTargetPath", path);
+            };
+            // A file the chat's agent wrote opens in its Outputs tab. A folder
+            // and any other file follow in the Projects panel.
+            if (!outputs) return follow();
+            void outputs.open(path).then((opened) => {
+              if (!opened) follow();
+            });
           }}
         />
       );
@@ -207,6 +264,9 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
       );
     }
   }
+
+  const localFile = outputs && href ? localFileHref(href) : null;
+  if (localFile) return <LocalFileLink {...props} path={localFile} />;
 
   return <MarkdownLink {...props} />;
 }

@@ -21,10 +21,14 @@ enum MainSection: Hashable {
 /// Pages pushed inside the Settings sheet.
 enum SettingsRoute: Hashable {
     case instances
-    case requests
-    case health
-    /// iPhone use (iPad use on an iPad): Rome's use of this device.
-    case device
+    /// This phone's connections.
+    case connections
+    /// One connection's page, by its id.
+    case connection(String)
+    /// One connection's live reads, by its id.
+    case liveReads(String)
+    /// A synced connection's Sync history, by its personal-data source.
+    case syncHistory(String)
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -82,6 +86,7 @@ struct MainShell: View {
     @State private var photoViewerPreview = false
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
+    @State private var connectPreview: String?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -125,10 +130,6 @@ struct MainShell: View {
                     onSettings: {
                         settingsPath = []
                         showSettings = true
-                    },
-                    onUpdate: {
-                        closeDrawer()
-                        model.update.openPage()
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
@@ -141,6 +142,7 @@ struct MainShell: View {
                 }
                 .environment(\.chatLinkOpener, actions.linkOpener)
                 .environment(\.openUsage, actions.openUsage)
+                .environment(\.connectDevice, model.deviceConnectAction)
                 .environment(\.openTaskChat, actions.openTaskChat)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
@@ -164,19 +166,8 @@ struct MainShell: View {
             // Its own stack: a task opens inside the page, and back returns
             // to the Tasks as they were.
             NavigationStack(path: $agentPath) {
-                AgentPage(workspace: workspace, route: route, tab: $agentTab, onUse: { prompt in
-                    // Into this chat's composer, unsent, as the page closes.
-                    agentPage = nil
-                    workspace.composerPrefills[route.composerKey] = prompt
-                }, onOpenTask: { chat in
+                AgentPage(workspace: workspace, route: route, tab: $agentTab, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
-                }, onRespond: { messageId in
-                    // The page closes onto the chat it was opened from, at the card.
-                    agentPage = nil
-                    let chat = route.tasksChatId
-                    if workspace.isMainChat(chat) { show(.chat) } else if !chat.isEmpty { show(.topic(chat)) }
-                    let store = workspace.transcript(forChat: chat)
-                    Task { await store.revealCard(messageId) }
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
@@ -187,6 +178,7 @@ struct MainShell: View {
             .environment(\.chatLinkOpener, actions.linkOpener)
             // Settings is a sheet of this view: the cover closes first.
             .environment(\.openUsage, actions.openUsageFromCover)
+            .environment(\.connectDevice, model.deviceConnectAction)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -197,6 +189,12 @@ struct MainShell: View {
         }
         .sheet(isPresented: $showSettings) {
             settingsSheet
+        }
+        // A connect card's device connection: its authorization, then the card checks.
+        .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
+            ConnectDeviceSheet(request: request)
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
         }
         #if DEBUG
         .overlay {
@@ -213,6 +211,15 @@ struct MainShell: View {
             }
             if settingsPreview {
                 SheetStandIn { settingsSheet }
+            }
+            if let connectPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    ConnectDeviceSheet(request: DeviceConnectRequest(capability: connectPreview) { _ in }, standIn: true)
+                        .background(Palette.sheet)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         #endif
@@ -270,6 +277,18 @@ struct MainShell: View {
             guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
             Task { await follow(link) }
         }
+        // A tapped "sign in again" notice: Settings at Apple Health's Sync history.
+        // Taken on appear too: a tap that launched the app came before this shell.
+        .onChange(of: model.settingsRequest, initial: true) {
+            guard let routes = model.takeSettingsRequest() else { return }
+            agentPage = nil
+            page = nil
+            openApp = nil
+            settingsPage = nil
+            closeDrawer()
+            settingsPath = routes
+            showSettings = true
+        }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             agentPage = nil
@@ -292,7 +311,10 @@ struct MainShell: View {
                 if !usesSidebar { open ? openDrawer() : closeDrawer() }
             case .agent(let tab):
                 if let tab { agentTab = tab }
-                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID)
+                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
+            case .agentBlank(let tab):
+                agentTab = tab
+                agentPage = AgentRoute(tasksChatId: "", chatKey: "snapshot-blank")
             case .agentRoute(let routes):
                 agentPath = routes
             case .route(let routes):
@@ -308,6 +330,8 @@ struct MainShell: View {
                 if SnapshotRunner.directory != nil { appPreview = app } else { openApp = app }
             case .photoViewer(let open):
                 photoViewerPreview = open
+            case .connectSheet(let id):
+                connectPreview = id
             case .composerPhotos, .appIdeas, nil: break
             }
         }
@@ -350,6 +374,9 @@ struct MainShell: View {
             }
         case .apps:
             show(.apps)
+            path = []
+        case .chat:
+            show(.chat)
             path = []
         case .newApp:
             show(.chat)
@@ -400,7 +427,7 @@ struct MainShell: View {
     private func installShellActions() {
         actions.linkOpener.run = { openChatLink($0) }
         actions.toggleNavigation.run = { _ in toggleNavigation() }
-        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) }
+        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID) }
         actions.openTaskChat.run = { path.append(.taskChat(chatId: $0.chatId, title: $0.title)) }
         actions.openUsage.run = { _ in
             settingsPath = []
@@ -508,7 +535,7 @@ struct MainShell: View {
             onMenu: { toggleNavigation() },
             onAgent: { id in
                 // A blank chat has no tasks yet; its Tasks tab shows the empty state.
-                agentPage = AgentRoute(tasksChatId: id ?? "", composerKey: id ?? draftKey)
+                agentPage = AgentRoute(tasksChatId: id ?? "", chatKey: id ?? draftKey)
             },
             onArchived: { show(.chat) },
             onCreated: { id in
@@ -516,7 +543,10 @@ struct MainShell: View {
                 var instant = Transaction()
                 instant.disablesAnimations = true
                 withTransaction(instant) { section = .topic(id) }
-            }
+            },
+            // A blank chat has no id for `visibleChat`: in front, as that
+            // answer goes, means nothing over it, the drawer included.
+            inFront: !covered && !drawerOpen
         )
         .environment(\.offScreen, covered)
     }
@@ -536,15 +566,14 @@ struct MainShell: View {
         }
     }
 
-    /// Settings slides up with its own stack, so its pages (instances, Apple
-    /// Health, iPhone use) push inside the sheet and the X closes all of it.
+    /// Settings slides up with its own stack, so its pages (instances,
+    /// Connections) push inside the sheet and the X closes all of it.
     private var settingsSheet: some View {
         NavigationStack(path: $settingsPath) {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
-                onHealth: { settingsPath.append(.health) },
-                onDevice: { settingsPath.append(.device) },
+                onConnections: { settingsPath.append(.connections) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -554,12 +583,22 @@ struct MainShell: View {
                         showSettings = false
                         show(.chat)
                     })
-                case .requests:
-                    NodeRequestsScreen()
-                case .health:
-                    HealthAccessScreen()
-                case .device:
-                    NodeSettingsScreen(onRequests: { settingsPath.append(.requests) })
+                case .connections:
+                    ConnectionsScreen(
+                        isVisitor: workspace.isVisitor,
+                        onConnection: { settingsPath.append(.connection($0)) },
+                        onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
+                    )
+                case .connection(let id):
+                    ConnectionScreen(
+                        id: id,
+                        onActivity: { settingsPath.append(.liveReads(id)) },
+                        onHistory: { source in settingsPath.append(.syncHistory(source)) }
+                    )
+                case .liveReads(let id):
+                    NodeRequestsScreen(capability: id)
+                case .syncHistory(let source):
+                    SyncHistoryScreen(source: source)
                 }
             }
         }

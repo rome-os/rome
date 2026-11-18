@@ -1,0 +1,988 @@
+// The personal-data store's one way into the database. Concept: docs/personal-data.md.
+
+import { and, asc, count, desc, eq, gt, gte, isNull, lt, max, min, ne, or, sql } from "drizzle-orm";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
+import {
+  personalDataIngests,
+  personalDataPoints,
+  personalDataSources,
+  personalDataTypes,
+} from "../db/schema/system.js";
+import {
+  checkDelete,
+  checkUpsert,
+  type IngestEnvelope,
+  MAX_POINTS_PER_TYPE,
+  type PointInput,
+  type Rejected,
+  type SnapshotWindow,
+  snapshotWindow,
+} from "./domain/ingest.js";
+import type { StoredPoint } from "./domain/query.js";
+import type { Resolution, Shape, SourceSpec } from "./domain/source.js";
+import { typeSpec } from "./domain/source.js";
+
+/** How far ahead of Rome's clock a device may report a type synced. */
+const MAX_CLOCK_AHEAD_MS = 86_400_000;
+
+/** How long the ingest log keeps a row. */
+const INGEST_LOG_DAYS = 90;
+
+export type OriginState = "active" | "paused" | "off";
+
+export interface IngestResponse {
+  batchId: string;
+  status: "ok" | "partial";
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  deleted: number;
+  rejected: Rejected[];
+  receivedAt: string;
+  /** The types whose snapshot this batch committed, now or by an earlier try. */
+  committed?: string[];
+}
+
+/** The origin a query reads for one type, and how far it covers. */
+export interface OriginReading {
+  origin: string;
+  syncedThroughAt: number | null;
+  earliestAt: number | null;
+  /** The window its last committed snapshot holds whole, if it sends one. */
+  snapshotStartAt: number | null;
+  snapshotEndAt: number | null;
+}
+
+export interface CatalogType {
+  type: string;
+  shape: string;
+  unit: string | null;
+  resolutions?: string[];
+  pointCount: number;
+  earliest?: string;
+  latest?: string;
+  syncedThrough?: string;
+}
+
+export interface CatalogSource {
+  source: string;
+  title: string;
+  note: string;
+  origin: { id: string; name: string | null; platform: string | null; appVersion: string | null };
+  state: OriginState;
+  firstSyncAt?: string;
+  lastSyncAt?: string;
+  lastResult?: string;
+  lastErrorCode?: string;
+  types: CatalogType[];
+  /** The device connection that reads the same data live. */
+  connectionId?: string;
+}
+
+export interface IngestLogEntry {
+  id: number;
+  origin: string;
+  batchId: string | null;
+  trigger: string | null;
+  receivedAt: string;
+  itemCount: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  deleted: number;
+  rejected: number;
+  rangeStart?: string;
+  rangeEnd?: string;
+  durationMs: number | null;
+  status: string;
+  errorCode: string | null;
+}
+
+const iso = (at: number | null | undefined) =>
+  at === null || at === undefined ? undefined : new Date(at).toISOString();
+
+export class PersonalDataRepository {
+  constructor(
+    private readonly db: DrizzleDb,
+    private readonly sources: readonly SourceSpec[],
+  ) {}
+
+  /**
+   * Applies one batch in one transaction, the catalog included. A batch id
+   * the origin already sent returns the answer it got then and writes
+   * nothing. Each item is checked on its own: a refused item is listed in
+   * `rejected` and the rest applies.
+   */
+  ingest(
+    source: SourceSpec,
+    envelope: IngestEnvelope,
+    receivedAt: number,
+  ): { response: IngestResponse; repeated: boolean } {
+    return this.db.transaction((tx) => {
+      const origin = envelope.origin.id;
+      const earlier = tx
+        .select({ response: personalDataIngests.response })
+        .from(personalDataIngests)
+        .where(
+          and(
+            eq(personalDataIngests.source, source.source),
+            eq(personalDataIngests.origin, origin),
+            eq(personalDataIngests.batchId, envelope.batch.id),
+          ),
+        )
+        .get();
+      if (earlier?.response) {
+        return { response: earlier.response as unknown as IngestResponse, repeated: true };
+      }
+
+      upsertSource(tx, source, envelope, receivedAt);
+      const ingestId = tx
+        .insert(personalDataIngests)
+        .values({
+          source: source.source,
+          origin,
+          batchId: envelope.batch.id,
+          trigger: envelope.batch.trigger ?? null,
+          receivedAt,
+          itemCount: envelope.upserts.length + envelope.deletes.length,
+          status: "ok",
+        })
+        .returning({ id: personalDataIngests.id })
+        .get().id;
+
+      const counts = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
+      // Rows per type, counted once per batch and kept current as it inserts.
+      const stored = new Map<string, number>();
+      const rejected: Rejected[] = [];
+      const touched = new Set<string>();
+      // A type with a refused reading is not complete, whatever the device says.
+      const refusedTypes = new Set<string>();
+      let rangeStart: number | undefined;
+      let rangeEnd: number | undefined;
+
+      // A snapshot older than one this origin already sent, for a type,
+      // changes nothing there: its items are not written or stamped, and
+      // its window does not commit. Runs can overlap when the device starts
+      // one before the last finished uploading.
+      const fence = fenceSnapshot(tx, source, origin, envelope, receivedAt);
+      for (const type of fence.seen.keys()) touched.add(type);
+      // Room a snapshot may take past the type cap: the rows its commit may
+      // delete, so a calendar at the cap can still be replaced.
+      const room = new Map<string, number>();
+
+      envelope.upserts.forEach((raw, index) => {
+        const checked = checkUpsert(source, raw, receivedAt);
+        if (!checked.ok) {
+          const type = typeOfItem(raw);
+          if (type) refusedTypes.add(type);
+          rejected.push({
+            index,
+            ...(checked.key ? { key: checked.key } : {}),
+            code: checked.code,
+          });
+          return;
+        }
+        const item = checked.item;
+        if (fence.superseded.has(item.type)) {
+          counts.unchanged += 1;
+          return;
+        }
+        const spec = typeSpec(source, item.type);
+        const snapshot = spec?.syncedBackDays !== undefined ? envelope.snapshot : undefined;
+        let extra = 0;
+        if (snapshot && spec?.syncedBackDays !== undefined) {
+          extra =
+            room.get(item.type) ??
+            replaceable(tx, source.source, origin, item.type, snapshot, spec.syncedBackDays);
+          room.set(item.type, extra);
+        }
+        const outcome = writePoint(
+          tx,
+          source.source,
+          origin,
+          item,
+          { ingestId, snapshotId: snapshot?.id ?? null, room: extra },
+          receivedAt,
+          stored,
+        );
+        if (outcome === "type_cap") {
+          refusedTypes.add(item.type);
+          rejected.push({ index, key: item.key, code: "type_cap" });
+          return;
+        }
+        counts[outcome] += 1;
+        touched.add(item.type);
+        rangeStart = Math.min(rangeStart ?? item.startAt, item.startAt);
+        rangeEnd = Math.max(rangeEnd ?? item.endAt, item.endAt);
+      });
+      envelope.deletes.forEach((raw, offset) => {
+        const index = envelope.upserts.length + offset;
+        const checked = checkDelete(raw);
+        if (!checked.ok) {
+          rejected.push({
+            index,
+            ...(checked.key ? { key: checked.key } : {}),
+            code: checked.code,
+          });
+          return;
+        }
+        const gone = tx
+          .delete(personalDataPoints)
+          .where(
+            and(
+              eq(personalDataPoints.source, source.source),
+              eq(personalDataPoints.origin, origin),
+              eq(personalDataPoints.dedupeKey, checked.item.key),
+            ),
+          )
+          .returning({ type: personalDataPoints.type })
+          .all();
+        if (gone.length === 0) {
+          counts.unchanged += 1;
+          return;
+        }
+        counts.deleted += 1;
+        for (const row of gone) touched.add(row.type);
+      });
+
+      const committed: string[] = [];
+      const windows = new Map<string, SnapshotWindow>();
+      for (const window of envelope.snapshot?.windows ?? []) {
+        const spec = typeSpec(source, window.type);
+        // A type with a refused item is not whole: its last snapshot stays.
+        if (!spec || !envelope.snapshot || refusedTypes.has(window.type)) continue;
+        if (fence.superseded.has(window.type)) continue;
+        const accepted = snapshotWindow(spec, envelope.snapshot, window, receivedAt);
+        if (!accepted) continue;
+        const outcome = commitSnapshot(tx, source.source, origin, window.type, accepted);
+        if (outcome === "stale") continue;
+        committed.push(window.type);
+        if (outcome === "repeat") continue;
+        counts.deleted += outcome.deleted;
+        windows.set(window.type, accepted);
+        touched.add(window.type);
+      }
+
+      const syncedThrough = new Map<string, number>();
+      for (const entry of envelope.types) {
+        if (!typeSpec(source, entry.type) || !entry.syncedThrough) continue;
+        const at = Date.parse(entry.syncedThrough);
+        // A device clock ahead of Rome's would mark the type covered for good.
+        if (at > receivedAt + MAX_CLOCK_AHEAD_MS || refusedTypes.has(entry.type)) continue;
+        syncedThrough.set(entry.type, at);
+        touched.add(entry.type);
+      }
+      for (const type of touched) {
+        refreshType(
+          tx,
+          source,
+          origin,
+          type,
+          syncedThrough.get(type),
+          receivedAt,
+          windows.get(type),
+          fence.seen.get(type),
+        );
+      }
+
+      const status = rejected.length > 0 ? "partial" : "ok";
+      const response: IngestResponse = {
+        batchId: envelope.batch.id,
+        status,
+        ...counts,
+        rejected,
+        receivedAt: new Date(receivedAt).toISOString(),
+        ...(committed.length > 0 ? { committed } : {}),
+      };
+      tx.update(personalDataIngests)
+        .set({
+          ...counts,
+          rejected: rejected.length,
+          rangeStartAt: rangeStart ?? null,
+          rangeEndAt: rangeEnd ?? null,
+          durationMs: Date.now() - receivedAt,
+          status,
+          response: response as unknown as Record<string, unknown>,
+        })
+        .where(eq(personalDataIngests.id, ingestId))
+        .run();
+      tx.update(personalDataSources)
+        .set({ lastSyncAt: receivedAt, lastResult: status, lastErrorCode: null })
+        .where(sourceRow(source.source, origin))
+        .run();
+      tx.delete(personalDataIngests)
+        .where(lt(personalDataIngests.receivedAt, receivedAt - INGEST_LOG_DAYS * 86_400_000))
+        .run();
+      return { response, repeated: false };
+    });
+  }
+
+  /** Every source and origin with its types, the active origins first. */
+  catalog(): CatalogSource[] {
+    const sources = this.db
+      .select()
+      .from(personalDataSources)
+      .orderBy(desc(personalDataSources.lastSyncAt))
+      .all();
+    const types = this.db
+      .select()
+      .from(personalDataTypes)
+      .orderBy(asc(personalDataTypes.type))
+      .all();
+    return sources
+      .flatMap((row): CatalogSource[] => {
+        const spec = this.sources.find((s) => s.source === row.source);
+        if (!spec) return [];
+        const entry: CatalogSource = {
+          source: row.source,
+          title: spec.title,
+          note: row.note ?? spec.note,
+          origin: {
+            id: row.origin,
+            name: row.originName,
+            platform: row.platform,
+            appVersion: row.appVersion,
+          },
+          state: row.state as OriginState,
+          types: types
+            .filter((t) => t.source === row.source && t.origin === row.origin)
+            .map((t) => ({
+              type: t.type,
+              shape: t.shape,
+              unit: t.unit,
+              ...(t.shape === "bucket" ? { resolutions: t.resolutions } : {}),
+              pointCount: t.pointCount,
+              ...(iso(t.earliestAt) ? { earliest: iso(t.earliestAt) } : {}),
+              ...(iso(t.latestAt) ? { latest: iso(t.latestAt) } : {}),
+              ...(iso(t.syncedThroughAt) ? { syncedThrough: iso(t.syncedThroughAt) } : {}),
+            })),
+        };
+        if (row.firstSyncAt) entry.firstSyncAt = iso(row.firstSyncAt);
+        if (row.lastSyncAt) entry.lastSyncAt = iso(row.lastSyncAt);
+        if (row.lastResult) entry.lastResult = row.lastResult;
+        if (row.lastErrorCode) entry.lastErrorCode = row.lastErrorCode;
+        if (row.connectionId) entry.connectionId = row.connectionId;
+        return [entry];
+      })
+      .sort((a, b) => Number(b.state === "active") - Number(a.state === "active"));
+  }
+
+  /**
+   * The origin a query of `type` over a window from `windowStart` reads: one
+   * whose readings reach back to the window's start, so a device still
+   * backfilling does not hide an older one's history. Among those, and when
+   * none reaches back, the one its device reports synced furthest, then the
+   * one with the latest reading. An origin set off is never read. Undefined
+   * when no origin has the type.
+   */
+  originFor(
+    source: string,
+    type: string,
+    windowStart: number,
+    windowEnd = windowStart,
+  ): OriginReading | undefined {
+    // A snapshot that holds the whole window wins whatever else is stored,
+    // an empty one too, and the one the device read last among those, by
+    // its snapshot or a later mark.
+    const holds = sql`coalesce(${personalDataTypes.snapshotStartAt} <= ${windowStart} and ${personalDataTypes.snapshotEndAt} >= ${windowEnd}, 0)`;
+    return this.db
+      .select({
+        origin: personalDataTypes.origin,
+        syncedThroughAt: personalDataTypes.syncedThroughAt,
+        earliestAt: personalDataTypes.earliestAt,
+        snapshotStartAt: personalDataTypes.snapshotStartAt,
+        snapshotEndAt: personalDataTypes.snapshotEndAt,
+      })
+      .from(personalDataTypes)
+      .innerJoin(
+        personalDataSources,
+        and(
+          eq(personalDataSources.source, personalDataTypes.source),
+          eq(personalDataSources.origin, personalDataTypes.origin),
+        ),
+      )
+      .where(
+        and(
+          eq(personalDataTypes.source, source),
+          eq(personalDataTypes.type, type),
+          ne(personalDataSources.state, "off"),
+        ),
+      )
+      .orderBy(
+        sql`${holds} desc`,
+        // A read that found nothing new moves only synced-through: it counts too.
+        sql`case when ${holds} then max(coalesce(${personalDataTypes.snapshotReadAt}, 0), coalesce(${personalDataTypes.syncedThroughAt}, 0)) else 0 end desc`,
+        sql`coalesce(${personalDataTypes.earliestAt} <= ${windowStart}, 0) desc`,
+        sql`coalesce(${personalDataTypes.syncedThroughAt}, 0) desc`,
+        sql`coalesce(${personalDataTypes.latestAt}, 0) desc`,
+      )
+      .limit(1)
+      .get();
+  }
+
+  /** The start of an origin's earliest bucket of one type and width. */
+  earliestOf(
+    source: string,
+    origin: string,
+    type: string,
+    resolution: Resolution,
+  ): number | undefined {
+    return (
+      this.db
+        .select({ at: min(personalDataPoints.startAt) })
+        .from(personalDataPoints)
+        .where(
+          and(
+            eq(personalDataPoints.source, source),
+            eq(personalDataPoints.type, type),
+            eq(personalDataPoints.resolution, resolution),
+            eq(personalDataPoints.origin, origin),
+          ),
+        )
+        .get()?.at ?? undefined
+    );
+  }
+
+  /** An origin's points of one type that start in `[from, to)`, or end in it
+   *  with `by: "end"`, oldest first. */
+  points(
+    source: string,
+    origin: string,
+    type: string,
+    range: {
+      from: number;
+      to: number;
+      /** `overlap`: every point that overlaps the window, as entries are read. */
+      by?: "start" | "end" | "overlap";
+      /** Only points whose metadata (an entry's content) holds this text, any case. */
+      search?: string;
+      resolution?: Resolution;
+      after?: { startAt: number; id: number };
+      limit?: number;
+    },
+  ): StoredPoint[] {
+    if (range.search)
+      return this.searchPoints(source, origin, type, { ...range, search: range.search });
+    const after = range.after;
+    const query = this.db
+      .select({
+        id: personalDataPoints.id,
+        type: personalDataPoints.type,
+        shape: personalDataPoints.shape,
+        resolution: personalDataPoints.resolution,
+        startAt: personalDataPoints.startAt,
+        endAt: personalDataPoints.endAt,
+        tz: personalDataPoints.tz,
+        value: personalDataPoints.value,
+        fields: personalDataPoints.fields,
+        metadata: personalDataPoints.metadata,
+        key: personalDataPoints.dedupeKey,
+      })
+      .from(personalDataPoints)
+      .where(
+        and(
+          eq(personalDataPoints.source, source),
+          eq(personalDataPoints.type, type),
+          range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
+          eq(personalDataPoints.origin, origin),
+          ...windowFilter(range),
+          after
+            ? or(
+                gt(personalDataPoints.startAt, after.startAt),
+                and(
+                  eq(personalDataPoints.startAt, after.startAt),
+                  gt(personalDataPoints.id, after.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(personalDataPoints.startAt), asc(personalDataPoints.id));
+    const rows = range.limit ? query.limit(range.limit).all() : query.all();
+    return rows.map((row) => ({
+      ...row,
+      shape: row.shape as Shape,
+      resolution: row.resolution as Resolution | null,
+    }));
+  }
+
+  /**
+   * The points whose words hold `search`, folded for case the way
+   * JavaScript folds it, which SQLite's `lower()` does only for ASCII. Read
+   * page by page in order until enough match, so a cursor still works.
+   */
+  private searchPoints(
+    source: string,
+    origin: string,
+    type: string,
+    range: Parameters<PersonalDataRepository["points"]>[3] & { search: string },
+  ): StoredPoint[] {
+    const needle = fold(range.search);
+    const found: StoredPoint[] = [];
+    let after = range.after;
+    while (true) {
+      const page = this.points(source, origin, type, {
+        ...range,
+        search: undefined,
+        ...(after ? { after } : {}),
+        limit: SEARCH_PAGE,
+      });
+      for (const point of page) {
+        if (contentHolds(point.metadata, needle)) found.push(point);
+        if (range.limit && found.length >= range.limit) return found;
+      }
+      const last = page.at(-1);
+      if (page.length < SEARCH_PAGE || !last) return found;
+      after = { startAt: last.startAt, id: last.id };
+    }
+  }
+
+  /** Sets an origin's state. False when the origin never sent this source. */
+  setState(source: string, origin: string, state: OriginState): boolean {
+    const changed = this.db
+      .update(personalDataSources)
+      .set({ state })
+      .where(sourceRow(source, origin))
+      .returning({ origin: personalDataSources.origin })
+      .all();
+    return changed.length > 0;
+  }
+
+  /**
+   * Deletes every point and type row of an origin, sets it off and logs one
+   * `deleted` row. The ingest log stays. Undefined when the origin never sent
+   * this source.
+   */
+  deleteOrigin(source: string, origin: string, at: number): { deletedPoints: number } | undefined {
+    return this.db.transaction((tx) => {
+      const known = tx.select().from(personalDataSources).where(sourceRow(source, origin)).get();
+      if (!known) return undefined;
+      const deletedPoints =
+        tx
+          .select({ n: count() })
+          .from(personalDataPoints)
+          .where(and(eq(personalDataPoints.source, source), eq(personalDataPoints.origin, origin)))
+          .get()?.n ?? 0;
+      tx.delete(personalDataPoints)
+        .where(and(eq(personalDataPoints.source, source), eq(personalDataPoints.origin, origin)))
+        .run();
+      tx.delete(personalDataTypes)
+        .where(and(eq(personalDataTypes.source, source), eq(personalDataTypes.origin, origin)))
+        .run();
+      tx.update(personalDataSources).set({ state: "off" }).where(sourceRow(source, origin)).run();
+      tx.insert(personalDataIngests)
+        .values({
+          source,
+          origin,
+          receivedAt: at,
+          deleted: deletedPoints,
+          status: "deleted",
+          durationMs: 0,
+        })
+        .run();
+      return { deletedPoints };
+    });
+  }
+
+  /** The source's ingest log, newest first. */
+  ingests(source: string, limit: number): IngestLogEntry[] {
+    return this.db
+      .select()
+      .from(personalDataIngests)
+      .where(eq(personalDataIngests.source, source))
+      .orderBy(desc(personalDataIngests.receivedAt), desc(personalDataIngests.id))
+      .limit(limit)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        origin: row.origin,
+        batchId: row.batchId,
+        trigger: row.trigger,
+        receivedAt: new Date(row.receivedAt).toISOString(),
+        itemCount: row.itemCount,
+        inserted: row.inserted,
+        updated: row.updated,
+        unchanged: row.unchanged,
+        deleted: row.deleted,
+        rejected: row.rejected,
+        ...(iso(row.rangeStartAt) ? { rangeStart: iso(row.rangeStartAt) } : {}),
+        ...(iso(row.rangeEndAt) ? { rangeEnd: iso(row.rangeEndAt) } : {}),
+        durationMs: row.durationMs,
+        status: row.status,
+        errorCode: row.errorCode,
+      }));
+  }
+}
+
+/** The points a window reads: by when they start or end, or every one that overlaps it. */
+function windowFilter(range: { from: number; to: number; by?: "start" | "end" | "overlap" }) {
+  if (range.by === "overlap") {
+    // An entry that starts in the window, or began before it and is still
+    // going, such as a holiday; one with no length counts where it starts.
+    return [
+      lt(personalDataPoints.startAt, range.to),
+      or(gt(personalDataPoints.endAt, range.from), gte(personalDataPoints.startAt, range.from)),
+    ];
+  }
+  const at = range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt;
+  return [gte(at, range.from), lt(at, range.to)];
+}
+
+/** How many points a search reads at a time. */
+const SEARCH_PAGE = 500;
+
+/** Case folded for any script, in a normal form, so É finds é. */
+function fold(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
+}
+
+/**
+ * Whether an entry's words hold the folded `needle`: its text values only,
+ * never the content's key names ("Cal" would match every `calendar`) nor the
+ * ids a live edit takes.
+ */
+function contentHolds(content: Record<string, unknown> | null, needle: string): boolean {
+  if (!content) return false;
+  const holds = (value: unknown): boolean =>
+    typeof value === "string"
+      ? fold(value).includes(needle)
+      : Array.isArray(value)
+        ? value.some(holds)
+        : false;
+  return Object.entries(content).some(
+    ([key, value]) => key !== "id" && key !== "occurrence" && holds(value),
+  );
+}
+
+function typeOfItem(raw: unknown): string | undefined {
+  if (raw && typeof raw === "object" && "type" in raw) {
+    const type = (raw as { type: unknown }).type;
+    if (typeof type === "string") return type;
+  }
+  return undefined;
+}
+
+function sourceRow(source: string, origin: string) {
+  return and(eq(personalDataSources.source, source), eq(personalDataSources.origin, origin));
+}
+
+function upsertSource(
+  tx: DrizzleTx,
+  source: SourceSpec,
+  envelope: IngestEnvelope,
+  receivedAt: number,
+): void {
+  const refreshed = {
+    ...(envelope.origin.name !== undefined ? { originName: envelope.origin.name } : {}),
+    ...(envelope.origin.platform !== undefined ? { platform: envelope.origin.platform } : {}),
+    ...(envelope.origin.appVersion !== undefined ? { appVersion: envelope.origin.appVersion } : {}),
+    ...(envelope.connectionId !== undefined ? { connectionId: envelope.connectionId } : {}),
+    // A batch means the device syncs, so an origin set off by a delete is back.
+    state: "active",
+    note: source.note,
+  };
+  tx.insert(personalDataSources)
+    .values({
+      source: source.source,
+      origin: envelope.origin.id,
+      firstSyncAt: receivedAt,
+      ...refreshed,
+    })
+    .onConflictDoUpdate({
+      target: [personalDataSources.source, personalDataSources.origin],
+      set: {
+        ...refreshed,
+        firstSyncAt: sql`coalesce(${personalDataSources.firstSyncAt}, ${receivedAt})`,
+      },
+    })
+    .run();
+}
+
+function writePoint(
+  tx: DrizzleTx,
+  source: string,
+  origin: string,
+  item: PointInput,
+  by: { ingestId: number; snapshotId: string | null; room?: number },
+  now: number,
+  stored: Map<string, number>,
+): "inserted" | "updated" | "unchanged" | "type_cap" {
+  const { ingestId, snapshotId } = by;
+  const existing = tx
+    .select({
+      id: personalDataPoints.id,
+      hash: personalDataPoints.contentHash,
+      snapshotId: personalDataPoints.snapshotId,
+    })
+    .from(personalDataPoints)
+    .where(
+      and(
+        eq(personalDataPoints.source, source),
+        eq(personalDataPoints.origin, origin),
+        eq(personalDataPoints.dedupeKey, item.key),
+      ),
+    )
+    .get();
+  if (existing?.hash === item.contentHash) {
+    // Sent again as it is: only the snapshot that holds it changes.
+    if (snapshotId !== null && existing.snapshotId !== snapshotId) {
+      tx.update(personalDataPoints)
+        .set({ snapshotId })
+        .where(eq(personalDataPoints.id, existing.id))
+        .run();
+    }
+    return "unchanged";
+  }
+  const values = {
+    type: item.type,
+    shape: item.shape,
+    resolution: item.resolution,
+    startAt: item.startAt,
+    endAt: item.endAt,
+    tz: item.tz,
+    value: item.value,
+    unit: item.unit,
+    fields: item.fields,
+    metadata: item.metadata,
+    contentHash: item.contentHash,
+    ingestId,
+    ...(snapshotId !== null ? { snapshotId } : {}),
+    updatedAt: now,
+  };
+  if (existing) {
+    tx.update(personalDataPoints).set(values).where(eq(personalDataPoints.id, existing.id)).run();
+    return "updated";
+  }
+  let held: number | undefined;
+  if (item.shape !== "bucket") {
+    held =
+      stored.get(item.type) ??
+      tx
+        .select({ n: count() })
+        .from(personalDataPoints)
+        .where(
+          and(
+            eq(personalDataPoints.source, source),
+            eq(personalDataPoints.type, item.type),
+            eq(personalDataPoints.origin, origin),
+          ),
+        )
+        .get()?.n ??
+      0;
+    if (held >= MAX_POINTS_PER_TYPE + (by.room ?? 0)) {
+      stored.set(item.type, held);
+      return "type_cap";
+    }
+  }
+  tx.insert(personalDataPoints)
+    .values({ source, origin, dedupeKey: item.key, ...values })
+    .run();
+  if (held !== undefined) stored.set(item.type, held + 1);
+  return "inserted";
+}
+
+function refreshType(
+  tx: DrizzleTx,
+  source: SourceSpec,
+  origin: string,
+  type: string,
+  syncedThroughAt: number | undefined,
+  now: number,
+  snapshot?: SnapshotWindow,
+  seen?: SnapshotSeen,
+): void {
+  const spec = typeSpec(source, type);
+  if (!spec) return;
+  const stats = tx
+    .select({
+      n: count(),
+      earliest: min(personalDataPoints.startAt),
+      latest: max(personalDataPoints.endAt),
+    })
+    .from(personalDataPoints)
+    .where(
+      and(
+        eq(personalDataPoints.source, source.source),
+        eq(personalDataPoints.type, type),
+        eq(personalDataPoints.origin, origin),
+      ),
+    )
+    .get();
+  const values = {
+    shape: spec.shape,
+    unit: spec.unit,
+    resolutions: [...(spec.resolutions ?? [])],
+    earliestAt: stats?.earliest ?? null,
+    latestAt: stats?.latest ?? null,
+    pointCount: stats?.n ?? 0,
+    ...(snapshot
+      ? {
+          snapshotId: snapshot.id,
+          snapshotStartAt: snapshot.startAt,
+          snapshotEndAt: snapshot.endAt,
+          snapshotReadAt: snapshot.readAt,
+        }
+      : {}),
+    ...(seen ? { snapshotSeenId: seen.id, snapshotSeenReadAt: seen.readAt } : {}),
+    updatedAt: now,
+  };
+  tx.insert(personalDataTypes)
+    .values({
+      source: source.source,
+      origin,
+      type,
+      ...values,
+      syncedThroughAt: syncedThroughAt ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [personalDataTypes.source, personalDataTypes.origin, personalDataTypes.type],
+      // Synced-through only moves forward: a late batch from an older sync
+      // does not take back what a newer one reported.
+      set:
+        syncedThroughAt === undefined
+          ? values
+          : {
+              ...values,
+              syncedThroughAt: sql`max(coalesce(${personalDataTypes.syncedThroughAt}, 0), ${syncedThroughAt})`,
+            },
+    })
+    .run();
+}
+
+/**
+ * Commits one type's snapshot: deletes the origin's rows of the type inside
+ * the window that another snapshot, or none, sent. "repeat" when this
+ * snapshot is the one already committed, so a retry after a lost answer
+ * changes nothing; "stale" when a newer snapshot is committed already.
+ *
+ * Only rows strictly inside the window go: one that only touches an edge
+ * stays. The device sends every event that touches the window, edges
+ * included, so nothing still in its calendar is deleted.
+ */
+function commitSnapshot(
+  tx: DrizzleTx,
+  source: string,
+  origin: string,
+  type: string,
+  window: SnapshotWindow,
+): "repeat" | "stale" | { deleted: number } {
+  const current = tx
+    .select({ id: personalDataTypes.snapshotId, readAt: personalDataTypes.snapshotReadAt })
+    .from(personalDataTypes)
+    .where(
+      and(
+        eq(personalDataTypes.source, source),
+        eq(personalDataTypes.origin, origin),
+        eq(personalDataTypes.type, type),
+      ),
+    )
+    .get();
+  if (current?.id === window.id) return "repeat";
+  if (current?.readAt != null && window.readAt <= current.readAt) return "stale";
+  const gone = tx
+    .delete(personalDataPoints)
+    .where(
+      and(
+        eq(personalDataPoints.source, source),
+        eq(personalDataPoints.origin, origin),
+        eq(personalDataPoints.type, type),
+        lt(personalDataPoints.startAt, window.endAt),
+        gt(personalDataPoints.endAt, window.startAt),
+        or(isNull(personalDataPoints.snapshotId), ne(personalDataPoints.snapshotId, window.id)),
+      ),
+    )
+    .returning({ id: personalDataPoints.id })
+    .all();
+  return { deleted: gone.length };
+}
+
+/** The newest snapshot a type has seen batches of. */
+interface SnapshotSeen {
+  id: string;
+  readAt: number;
+}
+
+/**
+ * For each snapshot type a batch carries items or a window of: superseded
+ * when an origin already sent a newer snapshot of it (or one read at the
+ * same time under another id), else the snapshot to keep as the newest seen.
+ */
+function fenceSnapshot(
+  tx: DrizzleTx,
+  source: SourceSpec,
+  origin: string,
+  envelope: IngestEnvelope,
+  receivedAt: number,
+): { superseded: Set<string>; seen: Map<string, SnapshotSeen> } {
+  const superseded = new Set<string>();
+  const seen = new Map<string, SnapshotSeen>();
+  const snapshot = envelope.snapshot;
+  if (!snapshot) return { superseded, seen };
+  const types = new Set<string>();
+  for (const raw of envelope.upserts) {
+    const type = typeOfItem(raw);
+    if (type && typeSpec(source, type)?.syncedBackDays !== undefined) types.add(type);
+  }
+  for (const window of snapshot.windows ?? []) {
+    if (typeSpec(source, window.type)?.syncedBackDays !== undefined) types.add(window.type);
+  }
+  const readAt = Date.parse(snapshot.readAt);
+  for (const type of types) {
+    // A read stamped ahead of Rome's clock would fence every later one.
+    if (readAt > receivedAt + MAX_CLOCK_AHEAD_MS) {
+      superseded.add(type);
+      continue;
+    }
+    const newest = tx
+      .select({
+        id: personalDataTypes.snapshotSeenId,
+        readAt: personalDataTypes.snapshotSeenReadAt,
+      })
+      .from(personalDataTypes)
+      .where(
+        and(
+          eq(personalDataTypes.source, source.source),
+          eq(personalDataTypes.origin, origin),
+          eq(personalDataTypes.type, type),
+        ),
+      )
+      .get();
+    const older =
+      newest?.readAt != null &&
+      (readAt < newest.readAt || (readAt === newest.readAt && newest.id !== snapshot.id));
+    if (older) superseded.add(type);
+    else seen.set(type, { id: snapshot.id, readAt });
+  }
+  return { superseded, seen };
+}
+
+/**
+ * How many of an origin's rows of a type a snapshot's commit may delete:
+ * the ones it has not stamped that end after the earliest a window it reads
+ * may start.
+ */
+function replaceable(
+  tx: DrizzleTx,
+  source: string,
+  origin: string,
+  type: string,
+  snapshot: { id: string; readAt: string },
+  backDays: number,
+): number {
+  const from = Date.parse(snapshot.readAt) - (backDays + 2) * 86_400_000;
+  return (
+    tx
+      .select({ n: count() })
+      .from(personalDataPoints)
+      .where(
+        and(
+          eq(personalDataPoints.source, source),
+          eq(personalDataPoints.origin, origin),
+          eq(personalDataPoints.type, type),
+          gt(personalDataPoints.endAt, from),
+          or(isNull(personalDataPoints.snapshotId), ne(personalDataPoints.snapshotId, snapshot.id)),
+        ),
+      )
+      .get()?.n ?? 0
+  );
+}

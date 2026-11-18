@@ -274,6 +274,8 @@ describe("ChatsWebChatRepository", () => {
       ["in-1", "user", "turn-1"],
       ["out-1", "assistant", "turn-1"],
     ]);
+    // What the fork said before is history, not news.
+    expect((await repo.getMessages("fork-1")).map((line) => line.read)).toEqual([true, true]);
   });
   it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
@@ -831,5 +833,154 @@ describe("ChatsWebChatRepository", () => {
     } finally {
       rs.useRealTimers();
     }
+  });
+
+  describe("chat threads", () => {
+    beforeEach(async () => {
+      await repo.createSession("chat-1", "Plans");
+    });
+    const rows = () =>
+      testDb.db
+        .select({
+          key: chatMessages.key,
+          id: chatMessages.id,
+          replyTo: chatMessages.replyToMessageId,
+          root: chatMessages.rootMessageId,
+          parts: chatMessages.parts,
+        })
+        .from(chatMessages)
+        .all();
+    const row = (key: string) => rows().find((candidate) => candidate.key === key)!;
+    const said = async (words: string, replyTo?: string) =>
+      (
+        await repo.addBackendMessage("chat-1", "turn-1", [{ type: "text", content: words }], {
+          ...(replyTo ? { replyTo } : {}),
+        })
+      ).id;
+
+    it("records the message an input replies to, and its root, with no quote of its own", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      expect(
+        await repo.recordUserInput("m2", "chat-1", text("And Friday?"), undefined, undefined, "m1"),
+      ).toBe(true);
+      expect(row("m1")).toMatchObject({ replyTo: null, root: null });
+      expect(row("m2")).toMatchObject({ replyTo: row("m1").id, root: row("m1").id });
+      expect(JSON.parse(row("m2").parts)).toEqual([{ type: "text", content: "And Friday?" }]);
+      // A reply to a reply joins the same thread, and a reply to nothing the chat holds is none.
+      await repo.recordUserInput("m3", "chat-1", text("Thanks"), undefined, undefined, "m2");
+      await repo.recordUserInput("m4", "chat-1", text("Hm"), undefined, undefined, "gone");
+      expect(row("m3")).toMatchObject({ replyTo: row("m2").id, root: row("m1").id });
+      expect(row("m4")).toMatchObject({ replyTo: null, root: null });
+    });
+
+    it("sets a backend message's reply and root, and adds no reply_to part", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const answer = await said("Sunny", "m1");
+      const alone = await said("Good morning");
+      expect(row(answer)).toMatchObject({ replyTo: row("m1").id, root: row("m1").id });
+      expect(JSON.parse(row(answer).parts)).toEqual([{ type: "text", content: "Sunny" }]);
+      expect(row(alone)).toMatchObject({ replyTo: null, root: null });
+    });
+
+    it("reads each message with the key of its thread's root, the root itself with its own", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const answer = await said("Sunny", "m1");
+      const alone = await said("Good morning");
+      const threads = new Map(
+        (await repo.getMessages("chat-1")).map((message) => [message.id, message.chatThreadId]),
+      );
+      expect(threads).toEqual(
+        new Map([
+          ["m1", "m1"],
+          [answer, "m1"],
+          [alone, alone],
+        ]),
+      );
+      expect((await repo.getReplyTarget("chat-1", answer))?.chatThreadId).toBe("m1");
+    });
+
+    it("tells a message's thread when it is inserted", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const inserted: (string | null | undefined)[] = [];
+      repo.onMessageInserted((message) => inserted.push(message.chatThreadId));
+      await said("Sunny", "m1");
+      await said("Good morning");
+      expect(inserted).toEqual(["m1", expect.any(String)]);
+    });
+
+    it("reads one thread in the order its messages were said, and finds its last", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      await said("Unrelated");
+      const answer = await said("Sunny", "m1");
+      await repo.recordUserInput("m2", "chat-1", text("And Friday?"), undefined, undefined, answer);
+      expect((await repo.getChatThreadMessages("chat-1", "m1")).map((line) => line.id)).toEqual([
+        "m1",
+        answer,
+        "m2",
+      ]);
+      expect(await repo.lastInChatThread("chat-1", "m1")).toBe("m2");
+      expect(await repo.lastInChatThread("chat-1", "missing")).toBeNull();
+      // Any message of a thread names it, as a client that sends the message it tapped does.
+      for (const key of [answer, "m2"]) {
+        expect((await repo.getChatThreadMessages("chat-1", key)).map((line) => line.id)).toEqual([
+          "m1",
+          answer,
+          "m2",
+        ]);
+        expect(await repo.lastInChatThread("chat-1", key)).toBe("m2");
+      }
+    });
+
+    describe("read marks", () => {
+      const readOf = async () =>
+        new Map((await repo.getMessages("chat-1")).map((message) => [message.id, message.read]));
+
+      it("reads what the owner said as read, and what an agent said as unread", async () => {
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const answer = await said("Sunny", "m1");
+        const inserted: (boolean | undefined)[] = [];
+        repo.onMessageInserted((message) => inserted.push(message.read));
+        const later = await said("Later");
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [answer, false],
+            [later, false],
+          ]),
+        );
+        expect(inserted).toEqual([false]);
+      });
+
+      it("marks the named messages read, and only in that chat", async () => {
+        await repo.createSession("chat-2", "Other");
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const a = await said("Sunny", "m1");
+        const b = await said("Warm", "m1");
+        expect(await repo.markMessagesRead("chat-2", [a, b])).toBe(0);
+        expect(await repo.markMessagesRead("chat-1", [a, "missing"])).toBe(1);
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [a, true],
+            [b, false],
+          ]),
+        );
+        expect(await repo.markMessagesRead("no-chat", [b])).toBe(0);
+      });
+
+      it("reads the main line when the chat is opened, and leaves a thread's replies", async () => {
+        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+        const reply = await said("Sunny", "m1");
+        const alone = await said("Good morning");
+        await repo.markSessionRead("chat-1");
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [reply, false],
+            [alone, true],
+          ]),
+        );
+      });
+    });
   });
 });

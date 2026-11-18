@@ -9,7 +9,7 @@ export interface MessageRow {
   text: string;
   parts: string;
   said_at: number;
-  chat_thread_id: string | null;
+  root_message_id: number | null;
 }
 
 /** A trace row of `rome_agent_messages`: one per Concierge turn. */

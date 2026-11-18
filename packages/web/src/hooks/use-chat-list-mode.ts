@@ -9,9 +9,11 @@ import {
   type ChatListMode,
   chatListModeForRoute,
   readChatListMode,
+  readLastConciergeChatId,
   readLastOrdinaryChatId,
   subscribeChatListMode,
   writeChatListMode,
+  writeLastConciergeChatId,
   writeLastOrdinaryChatId,
 } from "@/lib/chat-list-mode";
 import { activeSessionFromPath, type ChatKind, chatKind, isChatPath } from "@/lib/chat-session";
@@ -19,6 +21,11 @@ import { activeSessionFromPath, type ChatKind, chatKind, isChatPath } from "@/li
 /** The stored mode, or null on a device that has not shown one. */
 export function useStoredChatListMode(): ChatListMode | null {
   return useSyncExternalStore(subscribeChatListMode, readChatListMode, () => null);
+}
+
+/** The Concierge chat last opened on this device (the main chat's id for the main chat), or null. */
+export function useLastConciergeChatId(): string | null {
+  return useSyncExternalStore(subscribeChatListMode, readLastConciergeChatId, () => null);
 }
 
 /** The ordinary chat last opened on this device, or null. */
@@ -70,6 +77,7 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
   const routeKey = `${location.key}:${location.pathname}`;
   const mode = route?.mode;
   const ordinaryChatId = route?.ordinaryChatId;
+  const conciergeChatId = route?.conciergeChatId;
   const onChatPage = isChatPath(location.pathname);
   useEffect(() => {
     // Leaving the chat pages forgets the last navigation, so Back to the same
@@ -83,18 +91,19 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
     writeChatListMode(mode);
     if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
   }, [mode, ordinaryChatId, routeKey, onChatPage]);
+  // The Concierge chat last opened. Apart from the mode, because the main
+  // chat's id can arrive after the navigation was applied.
+  useEffect(() => {
+    if (onChatPage && conciergeChatId) writeLastConciergeChatId(conciergeChatId);
+  }, [conciergeChatId, routeKey, onChatPage]);
 }
 
 /**
  * The mode for a caller that is not the chat list, such as the rail and the
- * new-chat shortcut. With the Concierge known to be unavailable it is Chat.
- * On a device that has not shown a mode it is `whenUnset`, which keeps what
- * the caller did before the switch existed.
+ * new-chat shortcut. It is Chat with the Concierge known to be unavailable,
+ * and on a device that has not shown a mode.
  */
-export function useChatListModeForShell(
-  conciergeAvailable: boolean,
-  whenUnset: ChatListMode,
-): ChatListMode {
+export function useChatListModeForShell(conciergeAvailable: boolean): ChatListMode {
   const stored = useStoredChatListMode();
-  return conciergeAvailable ? (stored ?? whenUnset) : "chat";
+  return conciergeAvailable ? (stored ?? "chat") : "chat";
 }

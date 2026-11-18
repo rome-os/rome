@@ -10,9 +10,14 @@ import {
   useRef,
   useState,
 } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { isLocationCard, mayAutoShare, SHARE_LOCATION_EVENT } from "@rome/api-types/location-card";
+import { ROME_STRINGS_KEY } from "@rome/api-types/prompt-card";
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
+import { formatAccuracy, geolocationPermission, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
+import { ChatNotice } from "@/components/chat/ChatNotice";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
 import { WidgetHostContext } from "./turn-fields";
@@ -45,7 +50,8 @@ export interface WidgetUiCardProps {
 }
 
 // Rome's own strings a card names with `{ string }`, shown in the guardian's
-// language. They are the question card's labels.
+// language: the question card's labels, and the device connect card's and the
+// share-location card's.
 const HOST_STRINGS: Record<string, string> = {
   send: "questionCard.send",
   dismiss: "questionCard.dismiss",
@@ -53,7 +59,33 @@ const HOST_STRINGS: Record<string, string> = {
   addOwn: "questionCard.addOwn",
   typeAnswer: "questionCard.typeAnswer",
   optional: "questionCard.optional",
+  connect: "deviceConnectCard.connect",
+  notNow: "deviceConnectCard.notNow",
+  deviceConnectNote: "deviceConnectCard.note",
+  share: "locationCard.share",
+  shareLocationTitle: "locationCard.title",
 };
+
+/**
+ * A card's data model with Rome's own words (`/romeStrings/<name>`, each
+ * stored with its English) in the guardian's language, where this reader
+ * knows the name; the English stays otherwise.
+ */
+export function withRomeWords(
+  data: Record<string, unknown> | undefined,
+  translate: (key: string) => string,
+): Record<string, unknown> | undefined {
+  const words = data?.[ROME_STRINGS_KEY];
+  if (!data || !words || typeof words !== "object" || Array.isArray(words)) return data;
+  const localized = Object.fromEntries(
+    Object.entries(words as Record<string, unknown>).map(([name, english]) => {
+      const key = HOST_STRINGS[name];
+      const word = key ? translate(key) : "";
+      return [name, word || english];
+    }),
+  );
+  return { ...data, [ROME_STRINGS_KEY]: localized };
+}
 
 /** The card's components with each `{ string }` replaced by its translation,
  *  since A2UI itself only knows literals and paths. */
@@ -110,16 +142,31 @@ export function WidgetUiCard({
   const [failed, setFailed] = useState(false);
   // A refused event, with why when core says.
   const [sendFailed, setSendFailed] = useState<string | false>(false);
+  const [autoSent, setAutoSent] = useState<number | null>(null);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [sent, setSent] = useState(false);
   const result = waiting?.result;
   const dismissed = result?.dismissed === true;
   const widgetHost = useContext(WidgetHostContext);
   const widgetHostRef = useRef(widgetHost);
   widgetHostRef.current = widgetHost;
+  // A share-location card core marked for it, which the browser may already
+  // read, answers itself: while that is decided and done it shows no
+  // buttons. Core marks only a card the guardian's own message asked for.
+  const autoShare = mayAutoShare(ui as { data?: Record<string, unknown> });
+  const [autoSharing, setAutoSharing] = useState(
+    () =>
+      autoShare &&
+      appId === "core" &&
+      waiting !== undefined &&
+      result === undefined &&
+      widgetHost.readOnly !== true &&
+      isLocationCard(cardComponents(ui)),
+  );
   // A view that only shows the chat sends nothing, so its cards stay locked.
-  const locked = result !== undefined || sent || widgetHost.readOnly === true;
+  const locked = result !== undefined || sent || autoSharing || widgetHost.readOnly === true;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
   // Buttons wait for the first read: a press before it would post a context
@@ -140,6 +187,13 @@ export function WidgetUiCard({
     );
   }, [uiKey, t]);
   const waits = waiting !== undefined;
+  // Only core's own card is the share-location card: an app's card that
+  // names the same event gets no position and never shares by itself.
+  const locationCard = useMemo(
+    () => appId === "core" && isLocationCard(parts.components),
+    [appId, parts],
+  );
+  const answerable = waits && result === undefined && !sent && widgetHost.readOnly !== true;
   // Only the newest read writes the data: a slow first read must not land
   // after a press's refresh and put back an older value.
   const reads = useRef(0);
@@ -169,8 +223,13 @@ export function WidgetUiCard({
     [appId, bindKey, toolUseId, valid],
   );
 
-  const { processor, drawable } = useMemo(() => {
-    const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
+  const { processor, drawable, fire } = useMemo(() => {
+    // `auto` is a share the card sends itself, with no press: a refusal from
+    // core then says nothing, since another client answered first.
+    const fire = async (
+      action: { name: string; context?: Record<string, unknown> },
+      auto = false,
+    ) => {
       // Core decides what every event means; the card only sends it. A turn
       // the event starts reaches the chat through live events.
       if (inFlight.current || widgetHostRef.current.readOnly) return;
@@ -179,9 +238,21 @@ export function WidgetUiCard({
       const host = waitingRef.current;
       let outcome: WidgetEventOutcome = { ok: false, status: 0 };
       try {
+        let context = action.context ?? {};
+        // Share on the share-location card carries the device's position,
+        // read on the press so the browser asks for permission then.
+        if (action.name === SHARE_LOCATION_EVENT && locationCard) {
+          setLocating(true);
+          const read = await readDevicePosition().finally(() => setLocating(false));
+          if (!read.ok) {
+            outcome = { ok: false, status: 0, error: t(`locationCard.${read.failure}`) };
+            throw new Error("No position to share");
+          }
+          context = { ...context, ...read.position };
+        }
         outcome = await postWidgetEvent(widgetId, {
           name: action.name,
-          context: action.context ?? {},
+          context,
           turn: widgetHostRef.current.turnFields(),
         });
         if (!outcome.ok) throw new Error(`The widget's event failed: ${outcome.status}`);
@@ -195,22 +266,28 @@ export function WidgetUiCard({
           if (tab) tab.opener = null;
           else setBlockedLink(outcome.open);
         }
-        if (outcome.answered && host) setSent(true);
-        else {
+        if (outcome.answered && host) {
+          setSent(true);
+          // A share sent by itself shows its quiet line until the stored
+          // answer arrives.
+          if (auto && typeof context.accuracy === "number") setAutoSent(context.accuracy);
+        } else {
           await load(p);
           setFailed(false);
         }
       } catch {
         // A refused event says the send failed; a read after it says the data did.
         if (outcome.ok) setFailed(true);
-        else setSendFailed(outcome.error ?? "");
+        else if (!auto || outcome.status === 0) setSendFailed(outcome.error ?? "");
       } finally {
         host?.onSettled?.(outcome);
         widgetHostRef.current.onSettled?.(outcome);
         inFlight.current = false;
         setBusy(false);
+        if (auto) setAutoSharing(false);
       }
-    });
+    };
+    const p = new MessageProcessor([romeWidgetCatalog], (action) => fire(action));
     // A2UI refuses some cards core accepts, such as a path through
     // `constructor`; such a card shows its fallback line instead of throwing
     // out of the transcript.
@@ -229,17 +306,17 @@ export function WidgetUiCard({
           },
         },
       ]);
-      const data = (JSON.parse(uiKey) as WidgetUi).data;
+      const data = withRomeWords((JSON.parse(uiKey) as WidgetUi).data, t);
       if (data) {
         p.processMessages([
           { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/", value: data } },
         ]);
       }
     } catch {
-      return { processor: p, drawable: false };
+      return { processor: p, drawable: false, fire };
     }
-    return { processor: p, drawable: true };
-  }, [load, widgetId, toolUseId, uiKey, parts, valid]);
+    return { processor: p, drawable: true, fire };
+  }, [load, widgetId, toolUseId, uiKey, parts, valid, locationCard, t]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather
@@ -272,16 +349,63 @@ export function WidgetUiCard({
 
   useEffect(() => () => processor.dispose(), [processor]);
 
+  // A share-location card core marked answers itself where the browser
+  // already lets this site read the position, and only in the tab the
+  // guardian is looking at; an unmarked one waits for Share.
+  // Where the browser refuses, the card says so and Not now declines.
+  useEffect(() => {
+    if (!locationCard || !answerable) {
+      setAutoSharing(false);
+      return;
+    }
+    let live = true;
+    let stopWaiting = () => {};
+    void geolocationPermission().then((permission) => {
+      if (!live) return;
+      if (permission === "denied") setSendFailed(t("locationCard.denied"));
+      if (!autoShare || permission !== "granted" || autoShared.has(widgetId)) {
+        setAutoSharing(false);
+        return;
+      }
+      const share = () => {
+        if (document.visibilityState !== "visible" || autoShared.has(widgetId)) return;
+        autoShared.add(widgetId);
+        stopWaiting();
+        void fire({ name: SHARE_LOCATION_EVENT, context: { auto: true } }, true);
+      };
+      document.addEventListener("visibilitychange", share);
+      stopWaiting = () => document.removeEventListener("visibilitychange", share);
+      share();
+    });
+    return () => {
+      live = false;
+      stopWaiting();
+    };
+  }, [locationCard, answerable, autoShare, widgetId, fire, t]);
+
   const surface = drawable ? processor.model.surfacesMap.get(toolUseId) : undefined;
   const undrawable = (
     <span className="text-aux text-destructive">
       {t("appComponent.widgetUndrawable", { text })}
     </span>
   );
+  // A share the card made by itself is no question the guardian answered:
+  // while it runs nothing shows, and once core has it, one quiet line.
+  if (locationCard && autoSharing && sendFailed === false) return null;
+  const autoOutcome =
+    result?.auto === true
+      ? result
+      : autoSent !== null && result === undefined
+        ? { status: "shared", accuracyMeters: Math.round(autoSent) }
+        : null;
+  if (locationCard && autoOutcome) {
+    // A centered line across the transcript, as a model switch is.
+    return <ChatNotice className="mb-0">{locationOutcome(autoOutcome, t)}</ChatNotice>;
+  }
   return (
     <div
       tabIndex={waiting ? -1 : undefined}
-      className="flex w-full max-w-md flex-col gap-2 rounded-16 border border-border bg-surface px-4 py-3"
+      className="flex w-full max-w-md flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3"
       aria-busy={busy}
       data-widget-app={appId}
       data-chat-pending-card={waiting && !locked ? "" : undefined}
@@ -305,14 +429,18 @@ export function WidgetUiCard({
           it, so it says how the card ended only when it did. */}
       {waiting && (result !== undefined || sent) ? (
         <span className="text-aux text-muted-foreground">
-          {t(
-            result === undefined
-              ? "questionCard.sent"
-              : dismissed
-                ? "questionCard.dismissed"
-                : "questionCard.answered",
-          )}
+          {locationCard && result !== undefined
+            ? locationOutcome(result, t)
+            : t(
+                result === undefined
+                  ? "questionCard.sent"
+                  : dismissed
+                    ? "questionCard.dismissed"
+                    : "questionCard.answered",
+              )}
         </span>
+      ) : locating ? (
+        <span className="text-aux text-muted-foreground">{t("locationCard.locating")}</span>
       ) : null}
       {blockedLink ? (
         <a
@@ -336,6 +464,25 @@ export function WidgetUiCard({
       ) : null}
     </div>
   );
+}
+
+/** The share-location cards this page answered by itself, so a card drawn
+ *  again does not send a second share. */
+const autoShared = new Set<string>();
+
+/** A card's components as stored, or none when its data cannot be read. */
+function cardComponents(ui: WidgetUi): unknown[] {
+  const components = (ui as Partial<WidgetUi> | null)?.components;
+  return Array.isArray(components) ? components : [];
+}
+
+/** How an answered share-location card ended: shared, with how precise the
+ *  position was, or not shared (declined, or skipped by a message). */
+function locationOutcome(result: Record<string, unknown>, t: TFunction<"chat">) {
+  const accuracy = result.accuracyMeters;
+  return result.status === "shared" && typeof accuracy === "number"
+    ? t("locationCard.shared", { accuracy: formatAccuracy(accuracy) })
+    : t("locationCard.notShared");
 }
 
 /**

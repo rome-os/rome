@@ -79,7 +79,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func unversionedBuildDoesNotBlock() async {
         let backend = FakeBackend()
         backend.check = .failure(APIError.server(status: 503, message: "unversioned_build"))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "local")
         #expect(!updater.blocking)
         #expect(updater.cannotCheck)
@@ -89,9 +89,9 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
         let store = makeStore()
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         var finished = false
-        updater.onFinished = { finished = true }
+        updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.blocking)
 
@@ -112,7 +112,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func aNewerReleaseAsksAgain() async {
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
 
         backend.startResults = [.failure(APIError.server(status: 409, message: "target_not_latest"))]
@@ -127,7 +127,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         store.save(PendingUpgrade(target: "0.42.0", since: .now), for: "i1")
         // While it restarts the check fails; the pending target wins.
         backend.check = .failure(APIError.network)
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         guard case .updating(let target, _) = updater.state else { Issue.record("not waiting"); return }
         #expect(target == "0.42.0")
@@ -140,9 +140,9 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
         // Someone updated it from the web; Rome Cloud says it is current.
         backend.check = .success(check(current: "0.43.0", latest: "0.43.0", available: false))
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         var finished = false
-        updater.onFinished = { finished = true }
+        updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
         #expect(finished)
@@ -154,7 +154,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         let store = makeStore()
         store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
         backend.check = .success(check(current: "0.41.0", latest: "0.43.0", available: true))
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.state == .required(current: "0.41.0", latest: "0.43.0", latestChanged: false))
         #expect(store.load("i1") == nil)
@@ -163,7 +163,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func resetLeavesNothingBehindForTheNextInstance() async {
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "a")
         #expect(updater.blocking)
 
@@ -248,21 +248,21 @@ final class Counter: @unchecked Sendable {
     private func defaults() -> UserDefaults { UserDefaults(suiteName: "SoftUpdateTests-\(UUID().uuidString)")! }
 
     private func updater(_ defaults: UserDefaults) -> InstanceUpdater {
-        InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
     }
 
     @Test func theMinimumVersionReadsReleases() {
         let floor = UpdateGate.minimumInstanceVersion
-        #expect(UpdateGate.isSupported(floor))
-        #expect(UpdateGate.isSupported("v\(floor)"))
+        #expect(UpdateGate.isSupported(floor, minimum: UpdateGate.minimumInstanceVersion))
+        #expect(UpdateGate.isSupported("v\(floor)", minimum: UpdateGate.minimumInstanceVersion))
         #expect(UpdateGate.isSupported("1.1.185", minimum: "1.1.185"))
         #expect(!UpdateGate.isSupported("1.1.184", minimum: "1.1.185"))
         #expect(!UpdateGate.isSupported("1.0.999", minimum: "1.1.185"))
         #expect(UpdateGate.isSupported("1.2.0", minimum: "1.1.185"))
         #expect(UpdateGate.isSupported("1.1.185-rc.1", minimum: "1.1.185"))
         // Unknown or unreadable versions are never held against the instance.
-        #expect(UpdateGate.isSupported(nil))
-        #expect(UpdateGate.isSupported("dev"))
+        #expect(UpdateGate.isSupported(nil, minimum: "1.1.185"))
+        #expect(UpdateGate.isSupported("dev", minimum: "1.1.185"))
     }
 
     /// The prompts name the Rome, never this app, on one line.
@@ -277,11 +277,11 @@ final class Counter: @unchecked Sendable {
 
     @Test func behindButSupportedIsOnlyOffered() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.197"), latest: .init(version: "1.1.198"), upgradeAvailable: true))
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
-        #expect(updater.offered == "1.1.195")
+        #expect(updater.offered == "1.1.198")
         #expect(updater.showsBanner)
 
         updater.openPage()
@@ -297,21 +297,21 @@ final class Counter: @unchecked Sendable {
     /// the check says; the domain alone before, with no placeholder.
     @Test func settingsNamesTheRunningRelease() async {
         #expect(InstanceLine.text(host: "yo.romeos.cc", version: nil) == "yo.romeos.cc")
-        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.195") == "v1.1.195 · yo.romeos.cc")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.197") == "v1.1.197 · yo.romeos.cc")
         #expect(InstanceLine.text(host: "yo.romeos.cc", version: "v1.1.192") == "v1.1.192 · yo.romeos.cc")
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.196"), latest: .init(version: "1.1.197"), upgradeAvailable: true))
         let updater = updater(defaults())
         #expect(updater.runningVersion == nil)
         await updater.attach(backend: backend, instanceID: "i1")
-        #expect(updater.runningVersion == "1.1.194")
+        #expect(updater.runningVersion == "1.1.196")
         updater.reset()
         #expect(updater.runningVersion == nil)
     }
 
     @Test func belowTheMinimumBlocksWithNoWayPast() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.100"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.100"), latest: .init(version: "1.1.197"), upgradeAvailable: true))
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.blocking)
@@ -326,13 +326,13 @@ final class Counter: @unchecked Sendable {
     @Test func aClosedBannerStaysClosedForThatRelease() async {
         let store = defaults()
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.196"), latest: .init(version: "1.1.197"), upgradeAvailable: true))
         let first = updater(store)
         await first.attach(backend: backend, instanceID: "i1")
         first.dismissBanner()
         #expect(!first.showsBanner)
         // The drawer's line stays while the instance is behind.
-        #expect(first.offered == "1.1.195")
+        #expect(first.offered == "1.1.197")
 
         // Next launch: still closed for this release, not for another instance.
         let again = updater(store)
@@ -343,7 +343,7 @@ final class Counter: @unchecked Sendable {
         #expect(other.showsBanner)
 
         // A newer release shows it once more.
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.196"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.196"), latest: .init(version: "1.1.198"), upgradeAvailable: true))
         let newer = updater(store)
         await newer.attach(backend: backend, instanceID: "i1")
         #expect(newer.showsBanner)
@@ -351,7 +351,7 @@ final class Counter: @unchecked Sendable {
 
     @Test func aFailedOfferedUpdateCanBeClosed() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.196"), latest: .init(version: "1.1.197"), upgradeAvailable: true))
         backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
@@ -362,7 +362,7 @@ final class Counter: @unchecked Sendable {
         #expect(updater.canClose)
         updater.closePage()
         #expect(!updater.blocking)
-        #expect(updater.offered == "1.1.195")
+        #expect(updater.offered == "1.1.197")
     }
 
     /// A visitor gets the guardian's update flow: the offer, and a start
@@ -370,19 +370,19 @@ final class Counter: @unchecked Sendable {
     @Test func visitorsAreOfferedAndCanStart() async {
         let backend = FakeBackend()
         backend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.194"), latest: .init(version: "1.1.195"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.196"), latest: .init(version: "1.1.197"), upgradeAvailable: true))
         let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-soft-\(UUID().uuidString)/Drafts"), instance: "t")
         let visitorSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
         await visitorSpace.readRole()
         #expect(visitorSpace.isVisitor)
         let updater = updater(defaults())
         await updater.attach(backend: visitorSpace.backend, instanceID: "i1")
-        #expect(updater.offered == "1.1.195" && updater.showsBanner)
+        #expect(updater.offered == "1.1.197" && updater.showsBanner)
         updater.openPage()
         #expect(updater.blocking && updater.canClose)
         await updater.updateNow()
         if case .updating(let target, _) = updater.state {
-            #expect(target == "1.1.195")
+            #expect(target == "1.1.197")
         } else {
             Issue.record("the visitor's start did not go through: \(updater.state)")
         }
@@ -402,12 +402,12 @@ final class UpdateClock: @unchecked Sendable {
     /// A relaunch resumes an update that then times out: the failure stays on
     /// the page, which closes back to the offer for a supported instance.
     @Test func aTimedOutUpdateAfterARelaunchIsSeen() async throws {
-        for (from, closes) in [("1.1.194", true), ("1.1.100", false)] {
+        for (from, closes) in [("1.1.196", true), ("1.1.100", false)] {
             let defaults = UserDefaults(suiteName: "UpdateFailureTests-\(UUID().uuidString)")!
             let store = PendingUpgradeStore(defaults: defaults)
             let clock = UpdateClock()
-            store.save(PendingUpgrade(target: "1.1.195", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: from), for: "i1")
-            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5), now: { clock.date })
+            store.save(PendingUpgrade(target: "1.1.197", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: from), for: "i1")
+            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5), now: { clock.date })
             // Restarting: neither the check nor the build answers.
             let backend = FakeBackend()
             backend.check = .failure(APIError.network)
@@ -424,7 +424,7 @@ final class UpdateClock: @unchecked Sendable {
             #expect(updater.canClose == closes)
             updater.closePage()
             #expect(updater.blocking == !closes)
-            if closes { #expect(updater.offered == "1.1.195") }
+            if closes { #expect(updater.offered == "1.1.197") }
         }
     }
 }
@@ -435,7 +435,8 @@ final class UpdateClock: @unchecked Sendable {
         let chats = (0..<30).map { ConciergeChat(id: "t\($0)", name: "", main: false, unread: 0) }
         let live = TopicChatsStore.liveIDs(chats)
         #expect(live.count == TopicChatsStore.liveNameLimit)
-        #expect(live.contains("t29") && !live.contains("t0"))
+        // The list is latest first.
+        #expect(live.contains("t0") && !live.contains("t29"))
         #expect(TopicChatsStore.liveIDs(Array(chats.prefix(3))) == ["t0", "t1", "t2"])
         // Status, tasks, the Concierge's activity, the main chat and the chat
         // on screen still fit.

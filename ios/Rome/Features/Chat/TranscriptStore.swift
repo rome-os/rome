@@ -33,10 +33,6 @@ final class TranscriptStore {
     /// once is still seen.
     @ObservationIgnored var retryHold: Duration = .seconds(1)
     private(set) var loadingOlder = false
-    /// An older page fetched and waiting for the list to place it.
-    private(set) var olderPage: MessagePage?
-    /// An older page is going in above the rows.
-    private(set) var placingOlder = false
     private(set) var hasOlder = false
     /// The chat is running a turn.
     private(set) var running = false
@@ -57,6 +53,18 @@ final class TranscriptStore {
     private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
+    /// What was unread when the chat opened, as far as the loaded pages
+    /// show it. It stays while the chat is open, once read too. Nil when
+    /// nothing was unread, and until the read mark is known.
+    private(set) var unread: UnreadSummary? {
+        didSet { if unread?.firstId != oldValue?.firstId { rebuildRows() } }
+    }
+    /// The first message that was unread when the chat opened: the rows put
+    /// "New messages" above it. Nil also while the unread run may reach into
+    /// an older page not loaded yet.
+    var unreadFrom: String? { unread?.firstId }
+    /// Whether the "N new messages" pill shows; one per open.
+    let unreadPill = UnreadPill()
     /// A short line about an action that failed (Stop, an answer), shown for a few seconds.
     private(set) var notice: String?
     @ObservationIgnored private var noticeWork: Task<Void, Never>?
@@ -77,8 +85,6 @@ final class TranscriptStore {
     /// Tool calls fetched for an expanded tool summary, by trace message id.
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
-    /// Thread placements (`message_chat_thread`) of messages not held yet, by message id.
-    private var parkedPlacements: [String: (root: String?, title: String?)] = [:]
     private var cursor: String?
     /// The order each message id was first received in.
     private var seen: [String: Int] = [:]
@@ -96,6 +102,23 @@ final class TranscriptStore {
     private var fromCache = false
     /// How many messages a page holds, the newest page included.
     static let pageSize = 40
+
+    // An open of a Concierge chat (`beginOpen`) until it closes (`endOpen`).
+    /// Reads the chat's read mark before the open marks it read.
+    @ObservationIgnored private var openRead: Task<Void, Never>?
+    /// The read mark at open, in whole seconds; nil until read, or when none.
+    @ObservationIgnored private var openMark: Int?
+    /// The rows hold what the chat held at open: the first fetch since is in.
+    @ObservationIgnored private var openFetched = false
+    /// Messages that arrived live during the open: never unread.
+    @ObservationIgnored private var openLive: Set<String> = []
+    /// The agent messages that were unread at open, fixed once both of the
+    /// above are known; older pages add theirs.
+    @ObservationIgnored private var openUnread: Set<String>?
+    /// The longest a read waits for the read mark.
+    @ObservationIgnored var readMarkWait: Duration = .seconds(2)
+    /// `start()` ran and no fetch has worked since.
+    @ObservationIgnored private var needsFetch = true
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
@@ -138,7 +161,7 @@ final class TranscriptStore {
             messages: visibleMessages,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
+            options: .init(showTools: kind == .task, showNotices: kind == .concierge, typing: showsTyping, unreadFrom: unreadFrom)
         )
         // An equal list is not stored: no reader is told of a change that is none.
         if built != rows { rows = built }
@@ -163,7 +186,7 @@ final class TranscriptStore {
     @ObservationIgnored private var holdWork: Task<Void, Never>?
 
     /// Whether the Chat shows its typing dots: the Concierge is writing a
-    /// message (docs/domains/chats.md#status-reaction). The server alone says
+    /// message (docs/domains/chats.md#reaction). The server alone says
     /// so: while an `exact` turn writes, or while a `simulated` turn's new
     /// message waits behind them. 👀 on the guardian's message says it started.
     var showsTyping: Bool {
@@ -217,6 +240,7 @@ final class TranscriptStore {
     func start() {
         guard tokens.isEmpty else { return }
         closed = false
+        needsFetch = true
         tokens.append(backend.events.subscribe(LiveTopic.chat(sessionId)) { [weak self] event in
             self?.handle(event)
         })
@@ -264,6 +288,7 @@ final class TranscriptStore {
         holdWork?.cancel()
         holdWork = nil
         held = []
+        endOpen()
     }
 
     /// Stops the store for good: its workspace closes, its chat goes, or
@@ -295,7 +320,6 @@ final class TranscriptStore {
             if gap {
                 messages = []
                 seen = [:]
-                olderPage = nil
             } else if fromCache {
                 pruneCached(against: page)
             }
@@ -313,6 +337,11 @@ final class TranscriptStore {
             loaded = true
             readOnce = true
             loadError = nil
+            needsFetch = false
+            if openRead != nil, !openFetched {
+                openFetched = true
+                settleUnread()
+            }
             if reopening != nil { await resolveReopening() }
             await refreshRunning()
         } catch let error as APIError {
@@ -344,44 +373,141 @@ final class TranscriptStore {
         return true
     }
 
-    /// Fetches the page before the oldest message held. It waits in
-    /// `olderPage` until the list places it with `placeOlderPage()`.
+    /// Fetches the page before the oldest message held and puts it above the
+    /// rows at once: the list keeps the rows in view where they are.
     func loadOlder() async {
-        guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
+        guard hasOlder, !loadingOlder, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize)
+        guard let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize) else { return }
         // A reload that found a gap started the history over while this ran;
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
-        olderPage = page
-    }
-
-    /// Puts the fetched older page above the rows. The list calls it when the
-    /// scroll is at rest: a page placed under a moving finger pushes the rows
-    /// in view down.
-    func placeOlderPage() async {
-        guard let page = olderPage else { return }
-        olderPage = nil
-        placingOlder = true
+        PerfProbe.count("olderPlaced")
         merge(page.messages)
-        cursor = page.nextCursor
+        self.cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
-        // The list keeps the rows in view still while this is set; hold it
-        // through the layout that places the page above them.
-        try? await Task.sleep(for: .milliseconds(150))
-        placingOlder = false
+        // An older page was never live: its unread messages count.
+        if var unread = openUnread, let openMark {
+            unread.formUnion(UnreadAtOpen.unread(page.messages.filter { !openLive.contains($0.id) }, mark: openMark))
+            openUnread = unread
+            summarizeUnread()
+        }
     }
 
     func markRead() {
-        Task { await backend.markRead(sessionId: sessionId) }
+        // A read before the open's read mark is known would erase it.
+        let waiting = openRead
+        Task {
+            if let waiting {
+                await waiting.value
+                // The chat closed, or opened again, while it waited: a read
+                // now would clear messages the guardian never saw.
+                guard openRead == waiting else { return }
+            }
+            await backend.markRead(sessionId: sessionId)
+        }
     }
 
     /// Whether the guardian sees this chat now. The main Chat stays mounted,
     /// hidden, under the other pages, so being mounted is not being seen:
     /// its replies count as read only while it shows, and once it shows again.
     var onScreen = false {
-        didSet { if onScreen, !oldValue { markRead() } }
+        didSet {
+            if onScreen, !oldValue {
+                beginOpen()
+                markRead()
+            }
+        }
+    }
+
+    /// The chat opened: the main Chat came on screen after being left, or a
+    /// topic chat's screen appeared. Reads the chat's read mark before the
+    /// open marks it read, so the rows can show where the unread messages
+    /// start. `markRead` waits for it, at most `readMarkWait`. Once an open:
+    /// a second call does nothing until `endOpen()`.
+    func beginOpen() {
+        guard kind == .concierge, openRead == nil else { return }
+        // A store that runs and fetched since it started is current; else
+        // what it holds waits for the next fetch.
+        openFetched = loaded && !needsFetch && !tokens.isEmpty
+        let backend = backend
+        let sessionId = sessionId
+        let wait = readMarkWait
+        openRead = Task { [weak self] in
+            let read = Task { await backend.readMark(sessionId: sessionId) }
+            let timer = Task {
+                try? await Task.sleep(for: wait)
+                read.cancel()
+            }
+            let mark = await read.value
+            timer.cancel()
+            guard let self, !Task.isCancelled else { return }
+            self.openMark = RomeDate.parse(mark).map { UnreadAtOpen.second($0) }
+            self.settleUnread()
+        }
+    }
+
+    /// The app went to the background: coming back in front opens the chat
+    /// again (`chatShown`), and that open waits for the catch-up read that
+    /// brings what arrived meanwhile.
+    func leftForBackground() {
+        guard kind == .concierge else { return }
+        endOpen()
+        needsFetch = true
+    }
+
+    /// The chat closed: the line goes, and the next open looks again.
+    func endOpen() {
+        openRead?.cancel()
+        openRead = nil
+        openMark = nil
+        openFetched = false
+        openLive = []
+        openUnread = nil
+        unread = nil
+        unreadPill.reset()
+    }
+
+    /// Fixes what was unread at open, once the read mark and the rows held
+    /// at open are both known.
+    private func settleUnread() {
+        guard openUnread == nil, openFetched, let openMark else { return }
+        openUnread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
+        summarizeUnread()
+    }
+
+    private func summarizeUnread() {
+        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder) }
+        // No line drawn yet, the run going on into an older page: the pill
+        // shows as for a line above the screen.
+        if let unread, unread.firstId == nil { unreadPill.dividerAbove(true) }
+    }
+
+    /// The pill was tapped: older pages come in until the line is drawn,
+    /// then the transcript brings it to the top. A run that cannot be
+    /// found says so briefly.
+    func revealUnread() async {
+        guard unread != nil else { return }
+        var stalled = 0
+        // The chat closing ends the search: `endOpen()` drops `unread`.
+        while unread != nil, unreadFrom == nil, hasOlder, stalled < 2 {
+            let before = messages.count
+            await loadOlder()
+            if messages.count == before {
+                stalled += 1
+                try? await Task.sleep(for: .milliseconds(150))
+            } else {
+                stalled = 0
+            }
+        }
+        guard unread != nil else { return }
+        guard unreadFrom != nil else {
+            say(String(localized: "Can't find where the new messages start"))
+            return
+        }
+        jumpTarget = TranscriptRow.unreadDivider.id
+        jumps += 1
     }
 
     /// New replies came in, or the list appeared: read, if the chat shows.
@@ -440,7 +566,7 @@ final class TranscriptStore {
     }
 
     /// An incoming copy with what the chat already knows about it: its
-    /// thread, the thread's title, a placement that came before it.
+    /// thread and the thread's title.
     private func completed(_ incoming: ChatMessage, held: ChatMessage?, threadTitle: (String) -> String?) -> ChatMessage {
         var message = incoming
         if message.knowsThreads {
@@ -459,12 +585,6 @@ final class TranscriptStore {
             } else {
                 message.chatThreadTitle = threadTitle(root)
             }
-        }
-        // A placement that came before its message lands with it.
-        if let placed = parkedPlacements.removeValue(forKey: message.id) {
-            message.chatThreadId = placed.root
-            message.chatThreadTitle = placed.title
-            message.knowsThreads = true
         }
         return message
     }
@@ -513,11 +633,13 @@ final class TranscriptStore {
             let held = messages.first { $0.id == message.id }
             let isNew = held == nil
             // A live insert leaves the mark out: keep the one already known.
-            if message.statusReaction == nil { message.statusReaction = held?.statusReaction }
+            if message.reaction == nil { message.reaction = held?.reaction }
+            if message.status == nil { message.status = held?.status }
             let newest = messages.map(\.date).max()
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
             if isNew { hold(message, after: newest) }
+            if isNew, openRead != nil { openLive.insert(message.id) }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
@@ -530,31 +652,16 @@ final class TranscriptStore {
                 // The turn's trace summary and reply are final now.
                 Task { await reload() }
             }
-        case .statusReaction(let id, let messageId, let reaction) where id == sessionId:
+        case .reaction(let id, let messageId, let reaction) where id == sessionId:
             if let index = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[index].statusReaction = reaction
+                messages[index].reaction = reaction
             }
-        case .messageThread(let id, let messageId, let root, let title) where id == sessionId:
-            if messages.contains(where: { $0.id == messageId }) {
-                editMessages { messages in
-                    guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
-                    messages[index].chatThreadId = root
-                    messages[index].chatThreadTitle = title
-                    messages[index].knowsThreads = true
-                }
-            } else {
-                parkedPlacements[messageId] = (root, title)
+        case .status(let id, let messageId, let status) where id == sessionId:
+            if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[index].status = status
             }
         case .cardSettled(let id, let card) where id == sessionId:
             settle(card)
-        case .threadRetired(let id, let root) where id == sessionId:
-            // Its task left the chat: the thread's messages lose their label.
-            editMessages { messages in
-                for index in messages.indices where messages[index].chatThreadId == root {
-                    messages[index].chatThreadId = nil
-                    messages[index].chatThreadTitle = nil
-                }
-            }
         case .reconnected:
             resync()
         default:
@@ -598,7 +705,7 @@ final class TranscriptStore {
     /// The chat thread shown over the chat, if one is open.
     private(set) var thread: ThreadStore?
     /// The instance has chat threads: a read showed `chatThreadId`, on any
-    /// message. Live inserts leave the field out, so one message cannot tell.
+    /// message.
     private(set) var instanceKnowsThreads = false
     /// A thread a restored draft was written in, being looked up because its
     /// message is not in the pages held.
@@ -628,10 +735,10 @@ final class TranscriptStore {
     /// the send goes to the thread, quoting no message.
     private(set) var repliesToThread = false
 
-    /// The task the reply bar names for a reply inside a thread view.
+    /// The thread the reply bar names for a reply inside a thread view.
     var threadReplyTitle: String? {
         guard repliesToThread, let thread else { return nil }
-        return thread.title ?? taskThreadTitle(of: thread.anchor)
+        return thread.title ?? threadTitle(of: thread.anchor)
     }
 
     /// The quoted message, when it is held.
@@ -640,16 +747,22 @@ final class TranscriptStore {
         return quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
     }
 
-    /// The title of the task whose chat thread `message` is in, or nil when
-    /// it is in no task's thread.
-    func taskThreadTitle(of message: ChatMessage) -> String? {
-        Self.taskThreadTitle(of: message, in: messages)
+    /// The name of the chat thread `message` is in, or nil when it is in none
+    /// or the thread has no name.
+    func threadTitle(of message: ChatMessage) -> String? {
+        Self.threadTitle(of: message, in: messages)
     }
 
-    static func taskThreadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
-        guard let root = message.chatThreadId else { return nil }
+    static func threadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
         if let title = message.chatThreadTitle { return title }
-        return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
+        return TranscriptBuilder.threadTitles(messages)[message.threadRoot]
+    }
+
+    /// Whether `message` is in a chat thread of more than one message: its
+    /// root is another message, or a held message replies in a thread it roots.
+    func isInThread(_ message: ChatMessage) -> Bool {
+        if let root = message.chatThreadId, root != message.id { return true }
+        return messages.contains { $0.chatThreadId == message.id && $0.id != message.id }
     }
 
     /// Reply on a message: the reply bar quotes it. An open thread view
@@ -658,7 +771,7 @@ final class TranscriptStore {
         guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
         if let thread {
             // Inside a thread view a reply goes to the thread, not to a message.
-            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.anchor.id, bare: true)
+            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.root, bare: true)
             repliesToThread = true
         } else {
             quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
@@ -674,19 +787,19 @@ final class TranscriptStore {
         closeThread()
     }
 
-    /// Opens the thread view of the task thread `messageId` is in, from its
-    /// label: the message is tinted, and a send replies to it.
+    /// Opens the thread view of the chat thread `messageId` is in: the message
+    /// is tinted, and a send goes into the thread.
     func openThread(at messageId: String) {
         guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
         open(anchor: anchor, older: [], replyTo: messageId, bare: true)
     }
 
-    /// The quote in a reply was tapped. A reply in a task's thread opens
-    /// that thread's view, replying to the original; any other goes to the
-    /// original in the chat and tints it. Nil when the quote leads nowhere.
+    /// The quote in a reply, the guardian's or the Concierge's, was tapped. A
+    /// reply is in a chat thread, so it opens that thread's view, held on the
+    /// reply. Nil when the quote leads nowhere.
     func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
-        if let host = message(replyId), taskThreadTitle(of: host) != nil {
+        if let host = message(replyId), isInThread(host) {
             // A reply in the thread view goes to the thread, quoting nothing.
             return { [weak self] in self?.open(anchor: host, older: [], tint: original, bare: true) }
         }
@@ -737,7 +850,7 @@ final class TranscriptStore {
         reopening = nil
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
         thread = opened
-        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: anchor.id, bare: bare ? true : nil)
+        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: opened.root, bare: bare ? true : nil)
         repliesToThread = false
         tint(target ?? anchor.id)
         opened.start()
@@ -769,9 +882,9 @@ final class TranscriptStore {
     /// server no longer has leaves the text to the chat.
     func reopenThread(_ target: ThreadTarget) {
         guard kind == .concierge, thread == nil else { return }
-        // A draft from before quotes was written in a thread view. With no task's
+        // A draft from before quotes was written in a thread view. With no
         // thread under its message there is none to open: it is a plain reply.
-        if target.quote == nil, let held = message(target.messageId), taskThreadTitle(of: held) == nil {
+        if target.quote == nil, let held = message(target.messageId), !isInThread(held) {
             quote = ThreadTarget(messageId: target.messageId, instanceKnowsThreads: true, quote: true)
             return
         }
@@ -793,7 +906,7 @@ final class TranscriptStore {
         guard let target = reopening, thread == nil else { return }
         do {
             let root = target.threadMessage ?? target.messageId
-            let found = try await backend.thread(sessionId: sessionId, messageId: root)
+            let found = try await backend.thread(sessionId: sessionId, root: root)
             guard reopening == target, thread == nil else { return }
             guard let anchor = found.first(where: { $0.id == root }) ?? found.last else {
                 reopening = nil
@@ -821,17 +934,6 @@ final class TranscriptStore {
     /// A stored message, by id.
     func message(_ id: String) -> ChatMessage? {
         messages.first { $0.id == id }
-    }
-
-    /// Card states a re-read was asked for already (`TaskAskView`).
-    @ObservationIgnored private var recoveredCards: Set<String> = []
-
-    /// A card stopped waiting with no outcome held: `chat_card_settled` may
-    /// have been missed, so the page is read again, once per card state, however
-    /// often the card scrolls back into view.
-    func recoverCard(_ key: String) {
-        guard recoveredCards.insert(key).inserted else { return }
-        resync()
     }
 
     /// Reloads after events may have been missed. A burst of requests (one per
@@ -899,6 +1001,8 @@ final class TranscriptStore {
     /// The chat is in front again, or entered: a load that failed before is
     /// tried at once and visibly; otherwise only the running turn is looked at.
     func chatShown() {
+        // Back in front counts as opening it; an open still under way stays.
+        beginOpen()
         if loadFailed { retryLoad() } else { recheckRunning() }
     }
 
@@ -1050,16 +1154,36 @@ final class TranscriptStore {
         }
     }
 
-    /// Where a stored message went: its task thread, and the message it replied to.
+    /// What a send from the open thread view names to the instance. The view
+    /// replies to the thread, and the app picks the message: the thread's
+    /// last with text, which a card has none of. The instance stores the reply
+    /// to that message as given, so the reply is under the message the
+    /// guardian could see. A thread with no such message loaded, or a send
+    /// that is not from the view, goes as it is.
+    func wireTarget(_ target: ThreadTarget?) -> ThreadTarget? {
+        guard let target, target.bare == true, let thread,
+              let tail = thread.messages.last(where: Self.hasQuotableText)
+        else { return target }
+        return ThreadTarget(messageId: tail.id, instanceKnowsThreads: target.instanceKnowsThreads, quote: true, thread: target.thread)
+    }
+
+    /// Whether `message` has words to quote: text, not an upload line or a card.
+    static func hasQuotableText(_ message: ChatMessage) -> Bool {
+        message.parts.contains { part in
+            guard let raw = part.textContent else { return false }
+            return !(message.isUser ? UploadLines.split(raw).text : raw)
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    /// Where a stored message went: its chat thread, and the message it replied to.
     static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
-        let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
-        guard replyTo != nil || message.chatThreadId != nil else { return nil }
+        guard let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId else { return nil }
         return ThreadTarget(
-            messageId: replyTo ?? message.chatThreadId ?? message.id,
+            messageId: replyTo,
             instanceKnowsThreads: true,
             quote: true,
-            thread: message.chatThreadId,
-            bare: replyTo == nil ? true : nil
+            thread: message.chatThreadId == message.id ? nil : message.chatThreadId
         )
     }
 
@@ -1090,6 +1214,7 @@ final class TranscriptStore {
         // Kept as the chat's draft until the server takes it.
         // Kept with the thread it was for, so a lost send comes back there.
         if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
+        let target = wireTarget(thread)
         Task {
             do {
                 let turn = try await backend.send(
@@ -1098,7 +1223,7 @@ final class TranscriptStore {
                     files: OutgoingFile.photos(images) + files,
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next,
-                    thread: thread
+                    thread: target
                 )
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent
@@ -1132,9 +1257,6 @@ final class TranscriptStore {
     }
 
     /// Shows `text` for a few seconds.
-    /// A Stop on a task card did not go through.
-    func stopTaskFailed() { say(String(localized: "Couldn't stop. Try again")) }
-
     private func say(_ text: String) {
         notice = text
         noticeWork?.cancel()
@@ -1332,5 +1454,93 @@ final class TranscriptStore {
                 toolCalls[traceMessageId] = []
             }
         }
+    }
+}
+
+/// What was unread when a Concierge chat opened, by the server's rule: an
+/// agent message is unread when it was made after the chat's read mark. Both
+/// times are whole seconds, so a message in the mark's own second is read.
+enum UnreadAtOpen {
+    static func second(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded(.down)) }
+
+    /// The agent messages of `messages` made after `mark`.
+    static func unread(_ messages: [ChatMessage], mark: Int) -> Set<String> {
+        Set(messages.filter { $0.role == "assistant" && second($0.date) > mark }.map(\.id))
+    }
+
+    /// The unread messages of `messages` the chat draws: how many, and the
+    /// first in the chat's order; nil when none is drawn. A page holds whole
+    /// turns, so while older pages remain and the oldest loaded turn has an
+    /// unread message, the run may start on an older page: no first until it
+    /// loads, and the count is a lower bound.
+    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> UnreadSummary? {
+        guard !unread.isEmpty, let oldest = messages.first else { return nil }
+        let drawn = messages.filter { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
+        guard let first = drawn.first else { return nil }
+        let oldestTurn = oldest.turnId ?? oldest.id
+        let more = hasOlder && messages.contains { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }
+        return UnreadSummary(firstId: more ? nil : first.id, count: drawn.count, more: more)
+    }
+}
+
+/// The unread messages of a chat at open, as far as its loaded pages show them.
+struct UnreadSummary: Equatable, Sendable {
+    /// The first one the chat draws; nil while the run may start on an older page.
+    var firstId: String?
+    /// How many the chat draws among the loaded messages.
+    var count: Int
+    /// More wait on an older page: the count reads "N+".
+    var more: Bool
+}
+
+/// When the "N new messages" pill shows. It appears once the unread line is
+/// above the visible transcript (under the header counts), or not loaded
+/// yet, and goes for good when tapped or when the line comes into view. A
+/// line that stays in view from the open, because the unread messages fit
+/// on screen, never shows it.
+@MainActor
+@Observable
+final class UnreadPill {
+    enum Phase: Equatable { case waiting, shown, done }
+
+    private(set) var phase: Phase = .waiting
+    /// How long a line in view must stay so before the pill gives up on it:
+    /// cards and pictures that load late can still push it up out of view.
+    @ObservationIgnored var settleDelay: Duration = .milliseconds(600)
+    @ObservationIgnored private var settle: Task<Void, Never>?
+
+    /// Where the line is against the visible transcript.
+    func dividerAbove(_ above: Bool) {
+        guard phase != .done else { return }
+        if above {
+            settle?.cancel()
+            settle = nil
+            if phase != .shown { phase = .shown }
+            return
+        }
+        if phase == .shown {
+            phase = .done
+            return
+        }
+        guard settle == nil else { return }
+        let delay = settleDelay
+        settle = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, self.phase == .waiting else { return }
+            self.phase = .done
+        }
+    }
+
+    func tapped() {
+        settle?.cancel()
+        settle = nil
+        phase = .done
+    }
+
+    /// A new open of the chat.
+    func reset() {
+        settle?.cancel()
+        settle = nil
+        if phase != .waiting { phase = .waiting }
     }
 }

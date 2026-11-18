@@ -1,0 +1,77 @@
+// The share-location card `share_location` shows, described as data. Core
+// stores it with the card and answers its events; a client draws it like any
+// card and fills in the device's position when Share is pressed.
+
+import type { WidgetUi } from "@rome-os/app-runtime";
+import { promptCardUi } from "./prompt-card.js";
+
+/** The kind of the share-location card among core's own widgets. */
+export const LOCATION_CARD_ID = "location-card";
+
+/**
+ * The event Share fires. It is the one event a client fills in itself: before
+ * sending it, the client reads the device's position and puts it in the
+ * event's context as a {@link SharedPosition}.
+ */
+export const SHARE_LOCATION_EVENT = "share-location";
+
+/** The event Not now fires. */
+export const DECLINE_LOCATION_EVENT = "decline";
+
+/** The context a client sends with {@link SHARE_LOCATION_EVENT}. */
+export interface SharedPosition {
+  latitude: number;
+  longitude: number;
+  /** The radius of the fix, in meters. */
+  accuracy: number;
+  /** When the device took the fix, in milliseconds since the epoch. */
+  timestamp: number;
+}
+
+/** What the agent waiting on the card is answered with, and what the chat stores. */
+export type LocationAnswer =
+  | {
+      status: "shared";
+      latitude: number;
+      longitude: number;
+      accuracyMeters: number;
+      /** When the device took the fix, as an ISO time. */
+      fixedAt: string;
+      /** The client shared it by itself, on a card core marked for that:
+       *  clients then show one line in place of the card. */
+      auto?: true;
+    }
+  | { status: "declined"; dismissed: true };
+
+/**
+ * The card described as data, built as the device connect card is: the
+ * map-pin and "Share your location?", the agent's reason under it, then Not
+ * now and Share, its fixed words Rome strings each reader shows in the
+ * guardian's language. `autoShare` marks a card a client may answer by itself
+ * where the device already allows the position; core sets it only for a turn
+ * the guardian's own message started, and a card without it always waits for
+ * Share.
+ */
+export function locationCardUi(reason: string, autoShare = false): WidgetUi {
+  return promptCardUi({
+    icon: "map-pin",
+    title: { rome: "shareLocationTitle", english: "Share your location?" },
+    note: reason,
+    dismiss: { label: { rome: "notNow", english: "Not now" }, event: DECLINE_LOCATION_EVENT },
+    confirm: { label: { rome: "share", english: "Share" }, event: SHARE_LOCATION_EVENT },
+    ...(autoShare ? { data: { autoShare: true } } : {}),
+  });
+}
+
+/** Whether a share-location card may answer by itself: core marked it so. */
+export function mayAutoShare(ui: { data?: Record<string, unknown> } | undefined): boolean {
+  return ui?.data?.autoShare === true;
+}
+
+/** Whether a card's components hold the share-location card's Share. */
+export function isLocationCard(components: readonly unknown[]): boolean {
+  return components.some((c) => {
+    const event = (c as { action?: { event?: { name?: unknown } } } | null)?.action?.event;
+    return event?.name === SHARE_LOCATION_EVENT;
+  });
+}

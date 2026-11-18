@@ -671,7 +671,7 @@ export function startConciergeFollowing(
       byOwner.set(owner, [...(byOwner.get(owner) ?? []), event]);
     }
     for (const [owner, ownerEvents] of byOwner) {
-      // A visitor dropped from the dashboard allow-list keeps their follows,
+      // A dashboard admin dropped from the allow-list keeps their follows,
       // but their events are not triaged or kept until they are back.
       if (!(await service.isServed(owner))) {
         log.info("following skipped an owner no longer served", { events: ownerEvents.length });

@@ -2,7 +2,7 @@
   "builtinApps": "Builtin Apps",
   "header": {
     "title": "Apps",
-    "appStore": "App store"
+    "appStore": "App Store"
   },
   "sections": {
     "my": {
@@ -12,7 +12,7 @@
     },
     "appstore": {
       "title": "Installed apps",
-      "browse": "App store",
+      "browse": "App Store",
       "browseStore": "Browse store"
     },
     "builtin": {
@@ -27,7 +27,7 @@
     "resultsCount_one": "{{count}} result",
     "resultsCount_other": "{{count}} results",
     "noResults": "No apps match “{{query}}”",
-    "noResultsHint": "Try a different search, or browse the App store."
+    "noResultsHint": "Try a different search, or browse the App Store."
   },
   "builtinDescriptions": {
     "memory": "Identity, journal, and the people Rome knows",
@@ -40,11 +40,11 @@
   "installedApps": "Installed Apps",
   "tabs": {
     "installed": "Installed",
-    "store": "App store"
+    "store": "App Store"
   },
   "pageTitle": {
     "installed": "Installed apps",
-    "store": "App store"
+    "store": "App Store"
   },
   "status": {
     "active": "Enabled",
@@ -86,9 +86,9 @@
     "enabledHint": "When off, the app is hidden and its agents, actions, and hooks stop running.",
     "chatHint": "Opens a chat in this app's source project.",
     "publishTitle": "Publish to App Store",
-    "publishHint": "Uploads the installed bundle (v{{version}}) to the Rome App Store.",
-    "publishHintListed": "Uploads the installed bundle (v{{version}}) to the Rome App Store. Latest published: v{{storeVersion}}.",
-    "publishHintUnlisted": "Uploads the installed bundle (v{{version}}) to the Rome App Store. Not published yet.",
+    "publishHint": "Publishes v{{version}} to the Rome App Store.",
+    "publishHintListed": "Publishes v{{version}} to the Rome App Store. Latest published: v{{storeVersion}}.",
+    "publishHintUnlisted": "Publishes v{{version}} to the Rome App Store. Not published yet.",
     "uninstallHint": "Remove the app. Its data is preserved for a later reinstall.",
     "uninstallPurgeHint": "The app's data is deleted permanently and cannot be recovered."
   },
@@ -139,8 +139,8 @@
     },
     "uninstallDialog": {
       "title": "Uninstall {{name}}?",
-      "descriptionKeep": "The app will be removed from your install. Its database rows and data directory are preserved so a later reinstall can pick up where it left off.",
-      "descriptionPurge": "The app will be removed, and its database rows and data directory will be erased. This cannot be undone.",
+      "descriptionKeep": "Its data is kept for a later reinstall.",
+      "descriptionPurge": "Its data is deleted permanently and cannot be recovered.",
       "confirmKeep": "Uninstall",
       "confirmPurge": "Uninstall and erase data"
     },
@@ -205,7 +205,7 @@
   "store": {
     "loading": "Loading store listings...",
     "retry": "Retry",
-    "unavailable": "App store is not available on this Rome instance.",
+    "unavailable": "The App Store is not available on this Rome instance.",
     "empty": "No apps have been published to Rome Cloud yet.",
     "installCountOne": "{{count}} install",
     "installCountOther": "{{count}} installs",
@@ -214,10 +214,10 @@
     }
   },
   "listing": {
-    "back": "← Back to App store",
+    "back": "← Back to App Store",
     "loading": "Loading listing...",
     "retry": "Retry",
-    "unavailable": "App store is not available on this Rome instance.",
+    "unavailable": "The App Store is not available on this Rome instance.",
     "installV": "Install v{{version}}",
     "installedV": "Installed v{{version}}",
     "updateToV": "Update to v{{version}}",
@@ -250,7 +250,6 @@
   "install": {
     "loading": "Loading app details...",
     "title": "Install this app?",
-    "subtitle": "This will install <strong>{{name}}</strong> on your Rome.",
     "confirm": "Install v{{version}}",
     "installing": "Installing...",
     "cancel": "Cancel",
@@ -264,7 +263,8 @@
       "loadFailed": "Failed to load app details",
       "installFailed": "Failed to install app",
       "notFound": "App not found in the store"
-    }
+    },
+    "titleNamed": "Install {{name}}?"
   },
   "embedded": {
     "failedTitle": "Failed to load app",
@@ -280,7 +280,6 @@
   },
   "accessGate": {
     "title": "{{name}} requires Rome Cloud access",
-    "description": "Sign in with Rome Cloud to continue.",
     "deniedDescription": "{{email}} is signed in, but is not on this app's access list.",
     "signIn": "Sign in with Rome Cloud",
     "signingIn": "Opening Rome Cloud...",

@@ -58,6 +58,8 @@
 
   "workspaces": {
     ".": {
+      // ios/Tools holds the iOS release scripts, run by hand before a
+      // TestFlight build and tested with node --test.
       "entry": [
         "scripts/**/*.{mjs,mts,ts,js}",
         "lint/**/*.ts",
@@ -66,7 +68,8 @@
         // tests, the fake environment and judge the tests spawn, and the judge.
         "environments/chief-of-staff/verifier/{verify.mjs,calibrate-judge.mjs,test/*.test.mjs,fake/*.mjs,lib/claude-judge.mjs}",
         // The chief of staff environment's Discord helper, run by env.sh via node.
-        "environments/chief-of-staff/discord.mjs"
+        "environments/chief-of-staff/discord.mjs",
+        "ios/Tools/**/*.mjs"
       ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
@@ -154,7 +157,7 @@
       "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
-    "packages/signer": { "entry": ["src/**/*.test.ts", "src/main.ts"] },
+    "packages/signer": { "entry": ["src/**/*.test.ts", "src/main.ts", "src/vault-entry.ts"] },
     "packages/app-web-sdk": {
       // bin/rome.js reaches the CLI through a dynamic import of the compiled
       // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless

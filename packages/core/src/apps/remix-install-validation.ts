@@ -1,13 +1,17 @@
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { parseDocument } from "yaml";
-import { parseSkillFrontmatterResult } from "./packaging/skill-frontmatter.js";
+import {
+  parseSkillFrontmatterResult,
+  parseSkillNameResult,
+} from "./packaging/skill-frontmatter.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
 import type { SpecSource } from "./lockfile.js";
 import {
   ActionConfigSchema,
   AgentConfigSchema,
+  ArtifactLocalNameSchema,
   appMigrationsTableName,
   type AppManifestData,
   parseAppManifest,
@@ -30,7 +34,7 @@ function entryPath(entry: RuntimeArtifactEntry): string {
   return typeof entry === "string" ? entry : entry.path;
 }
 
-async function readRuntimeArtifactName(
+async function readSourceArtifactName(
   kind: RuntimeArtifactKind,
   configPath: string,
   ownerId: string,
@@ -76,7 +80,7 @@ async function readSourceArtifactNames(
         entryPath(entry),
         `action path for remixed app ${manifest.id}`,
       );
-      return readRuntimeArtifactName("action", join(root, "action.yaml"), manifest.id);
+      return readSourceArtifactName("action", join(root, "action.yaml"), manifest.id);
     }),
   );
   const agents = await Promise.all(
@@ -86,7 +90,7 @@ async function readSourceArtifactNames(
         entryPath(entry),
         `agent path for remixed app ${manifest.id}`,
       );
-      return readRuntimeArtifactName("agent", path, manifest.id);
+      return readSourceArtifactName("agent", path, manifest.id);
     }),
   );
   const skills = await Promise.all(
@@ -96,12 +100,16 @@ async function readSourceArtifactNames(
         entryPath(entry),
         `skill path for remixed app ${manifest.id}`,
       );
-      return readRuntimeArtifactName("skill", join(root, "SKILL.md"), manifest.id);
+      return readSourceArtifactName("skill", join(root, "SKILL.md"), manifest.id);
     }),
   );
   return [...actions, ...agents, ...skills];
 }
 
+// An installed app only needs its artifact names for collision checks, and its
+// bundle may predate a schema rule, so reading its identity must not validate
+// the rest of the config. The source app is the code about to be installed, so
+// it still goes through the strict parsers above.
 async function readInstalledArtifactName(
   kind: RuntimeArtifactKind,
   artifact: ArtifactRef,
@@ -112,7 +120,26 @@ async function readInstalledArtifactName(
       : kind === "skill"
         ? join(artifact.absolutePath, "SKILL.md")
         : artifact.absolutePath;
-  return await readRuntimeArtifactName(kind, configPath, artifact.ownerId);
+  if (kind === "skill") {
+    const parsed = parseSkillNameResult(await readFile(configPath, "utf-8"));
+    if (!parsed.ok) {
+      throw new Error(`Cannot read installed skill name at ${configPath}: ${parsed.message}`);
+    }
+    return { kind, name: parsed.name, ownerId: artifact.ownerId, configPath };
+  }
+  const document = parseDocument(await readFile(configPath, "utf-8"));
+  if (document.errors.length > 0) {
+    throw new Error(
+      `Cannot read installed ${kind} name at ${configPath}: ${document.errors[0]?.message}`,
+    );
+  }
+  const parsed = ArtifactLocalNameSchema.safeParse(document.get("name"));
+  if (!parsed.success) {
+    throw new Error(
+      `Cannot read installed ${kind} name at ${configPath}: ${parsed.error.issues[0]?.message}`,
+    );
+  }
+  return { kind, name: parsed.data, ownerId: artifact.ownerId, configPath };
 }
 
 async function readInstalledArtifactNames(

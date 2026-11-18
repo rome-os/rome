@@ -17,6 +17,56 @@ export type SkillFrontmatterResult =
   | { ok: true; value: SkillFrontmatter }
   | { ok: false; reason: SkillFrontmatterErrorReason; message: string };
 
+export type SkillNameResult =
+  | { ok: true; name: string }
+  | {
+      ok: false;
+      reason: Exclude<SkillFrontmatterErrorReason, "missing-description">;
+      message: string;
+    };
+
+function readSkillNameText(frontmatter: string): string | undefined {
+  return unquoteScalar(frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim());
+}
+
+function validateSkillName(name: string | undefined): SkillNameResult {
+  if (!name) return { ok: false, reason: "missing-name", message: "missing a `name` field" };
+  if (/\s/.test(name)) {
+    return {
+      ok: false,
+      reason: "name-has-whitespace",
+      message: `name must be a single token with no whitespace (got ${JSON.stringify(
+        name,
+      )}); use a slug like "story_authoring" and keep the display title in the body`,
+    };
+  }
+  if (name.includes(":")) {
+    return {
+      ok: false,
+      reason: "name-has-reserved-separator",
+      message: `name must not contain ":" because it is reserved for artifact namespaces (got ${JSON.stringify(name)})`,
+    };
+  }
+  return { ok: true, name };
+}
+
+/**
+ * The skill's name from its frontmatter, without requiring the rest of the
+ * frontmatter. Installed skills only need their identity for name-collision
+ * checks, so an older bundle's missing description must not fail the check.
+ */
+export function parseSkillNameResult(content: string): SkillNameResult {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) {
+    return {
+      ok: false,
+      reason: "missing-frontmatter",
+      message: "missing a leading `---` frontmatter block",
+    };
+  }
+  return validateSkillName(readSkillNameText(match[1]));
+}
+
 export function parseSkillFrontmatterResult(content: string): SkillFrontmatterResult {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
@@ -28,7 +78,7 @@ export function parseSkillFrontmatterResult(content: string): SkillFrontmatterRe
   }
 
   const frontmatter = match[1];
-  const name = unquoteScalar(frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim());
+  const name = readSkillNameText(frontmatter);
   const description = unquoteScalar(frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim());
   const toolsMatch = frontmatter.match(/^tools:\s*\[([^\]]*)\]$/m)?.[1];
   const tools = toolsMatch
@@ -46,23 +96,9 @@ export function parseSkillFrontmatterResult(content: string): SkillFrontmatterRe
       message: "missing a `description` field",
     };
   }
-  if (/\s/.test(name)) {
-    return {
-      ok: false,
-      reason: "name-has-whitespace",
-      message: `name must be a single token with no whitespace (got ${JSON.stringify(
-        name,
-      )}); use a slug like "story_authoring" and keep the display title in the body`,
-    };
-  }
-  if (name.includes(":")) {
-    return {
-      ok: false,
-      reason: "name-has-reserved-separator",
-      message: `name must not contain ":" because it is reserved for artifact namespaces (got ${JSON.stringify(name)})`,
-    };
-  }
-  return { ok: true, value: { name, description, tools } };
+  const validName = validateSkillName(name);
+  if (!validName.ok) return validName;
+  return { ok: true, value: { name: validName.name, description, tools } };
 }
 
 /**

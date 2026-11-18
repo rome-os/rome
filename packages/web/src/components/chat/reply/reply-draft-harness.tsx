@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import {
   ReplyDraftProvider,
   type ReplyTarget,
-  type ReplyThread,
+  type FocusedThread,
   useReplyDraftState,
 } from "./reply-draft";
 
@@ -13,8 +13,8 @@ export function ReplyDraftHarness({
   children,
 }: {
   initial?: ReplyTarget;
-  /** The chat keeps chat threads, and its thread view is open on this thread. */
-  thread?: ReplyThread;
+  /** The chat is focused on this thread: the draft sends into it. */
+  thread?: FocusedThread;
   children: ReactNode;
 }) {
   const draft = useReplyDraftState({
@@ -23,12 +23,11 @@ export function ReplyDraftHarness({
     messageIds: new Set(),
     jump: () => {},
     focusComposer: () => {},
-    threads: thread !== undefined,
+    thread,
   });
-  const { set, openThread } = draft;
+  const { set } = draft;
   useEffect(() => {
-    if (thread) openThread(thread);
-    else if (initial) set(initial);
-  }, [initial, thread, set, openThread]);
+    if (initial) set(initial);
+  }, [initial, set]);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
 }

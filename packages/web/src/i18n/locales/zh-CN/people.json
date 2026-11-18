@@ -115,7 +115,7 @@
     "composerPlaceholder": "给 {{name}} 发消息…",
     "missingTitle": "找不到这个人",
     "missingBody": "该人物可能已被合并到其他人名下或已被删除。返回人物页面即可找到他们。",
-    "linkDescription": "你选择的账号将归属到此人名下，其历史记录会显示在该账号下。",
+    "linkDescription": "该账号及其历史记录将归到此人名下。",
     "noAccounts": "暂无账号",
     "delegate": "代理"
   },
@@ -172,7 +172,7 @@
   },
   "transfer": {
     "title": "移动这个账号？",
-    "description": "{{account}} 目前解析到 {{owner}}。移动后其上的所有消息都会重新归属，{{owner}} 仍保留其余账号。"
+    "description": "{{account}} 目前属于 {{owner}}。其上的所有消息会一并移动，{{owner}} 仍保留其余账号。"
   },
   "linkCode": {
     "open": "关联我的账号",

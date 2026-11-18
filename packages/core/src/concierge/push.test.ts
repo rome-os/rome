@@ -77,6 +77,10 @@ describe("pushBody", () => {
   it("shows characters Markdown escapes as themselves", () => {
     expect(pushBody('Tom & Jerry\'s <draft> "plan"')).toBe('Tom & Jerry\'s "plan"');
     expect(pushBody("`a < b && c`")).toBe("a < b && c");
+    // A link to a chat thread reads as its label.
+    expect(pushBody("The flights are in [Tokyo trip](#rome-thread=m1) now.")).toBe(
+      "The flights are in Tokyo trip now.",
+    );
   });
 
   it("shows a pictures block as each picture's title and note, without addresses", () => {

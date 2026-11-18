@@ -22,7 +22,6 @@ import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
   type ConciergeChatWorkResponse,
-  type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
@@ -52,8 +51,14 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
 import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import {
+  AGENT_CARD_HEALTH,
+  AGENT_CARD_ITINERARY,
+  CONNECT_CARD_A2UI,
+} from "../fixtures/agent-cards";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -97,6 +102,7 @@ import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
+import { chatOutputHandlers } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -353,6 +359,89 @@ const turn = (
   return rows;
 };
 
+// The Concierge's afternoon, as the server sends it: a reply chain per topic.
+// Every message in a thread of more than one carries the root's key, and a
+// reply, the guardian's or the Concierge's, carries the quote of the message it
+// replies to. The three task threads interleave with each other and with the
+// Concierge's own messages, so there is a lot to fold away. The plumber thread
+// is a plain back-and-forth with nothing between its messages. The turns above
+// are one message and its answer in no thread.
+const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
+const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
+const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
+// No task started in the plumber thread, so it has no title: a client names it
+// from its root's text.
+const PLUMBER_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-17` };
+const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
+
+\`\`\`bash
+# Every day at 03:00: over 85% full, delete the oldest snapshot
+used=$(df --output=pcent /Volumes/Backup | tail -1 | tr -dc '0-9')
+if [ "$used" -gt 85 ]; then
+  tmutil delete "$(tmutil listbackups | head -1)"
+fi
+\`\`\`
+
+Want me to set it up as a daily routine?`;
+const guardianSender: NonNullable<ChatMessage["sender"]> = {
+  kind: "guardian",
+  name: identity.displayName,
+  avatarUrl: identity.avatarUrl,
+};
+// Which afternoon message each one replies to, by number.
+const AFTERNOON_REPLIES: Record<number, number> = {
+  2: 1,
+  4: 3,
+  5: 1,
+  6: 5,
+  7: 3,
+  9: 6,
+  10: 7,
+  11: 10,
+  12: 8,
+  13: 12,
+  14: 13,
+  15: 9,
+  16: 15,
+  18: 17,
+  19: 18,
+  20: 19,
+};
+const afternoonSaid = new Map<number, { from: "guardian" | "agent"; content: string }>();
+const afternoon = (
+  n: number,
+  at: string,
+  from: "guardian" | "agent",
+  content: string,
+  thread?: { id: string; title?: string },
+): ChatMessage => {
+  afternoonSaid.set(n, { from, content });
+  const quoted = AFTERNOON_REPLIES[n];
+  const original = quoted === undefined ? undefined : afternoonSaid.get(quoted);
+  const quote =
+    quoted === undefined || !original
+      ? []
+      : [
+          {
+            type: "reply_to",
+            messageId: `${CONCIERGE_CHAT_ID}-pm-${quoted}`,
+            author: original.from === "guardian" ? "guardian" : "agent",
+            text: original.content,
+          } as TranscriptPart,
+        ];
+  return {
+    id: `${CONCIERGE_CHAT_ID}-pm-${n}`,
+    sessionId: CONCIERGE_CHAT_ID,
+    turnId: `${CONCIERGE_CHAT_ID}-pm-turn-${n}`,
+    role: from === "guardian" ? "user" : "assistant",
+    content: JSON.stringify([...quote, text(content)]),
+    createdAt: `2026-08-07T${at}:00.000Z`,
+    ...(from === "guardian" ? { sender: guardianSender } : {}),
+    ...(thread ? { chatThreadId: thread.id } : {}),
+    ...(thread?.title ? { chatThreadTitle: thread.title } : {}),
+  };
+};
+
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
 // ChatEntries exactly as the real API stores it, so what renders here goes
@@ -364,10 +453,33 @@ const turn = (
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
+/**
+ * The thread a message that replies to `target` is in: the target's, or, when
+ * the target is alone, the one it now starts, as the server records it.
+ */
+const joinThread = (target: ChatMessage) => {
+  target.chatThreadId ??= target.id;
+  return {
+    chatThreadId: target.chatThreadId,
+    ...(target.chatThreadTitle ? { chatThreadTitle: target.chatThreadTitle } : {}),
+  };
+};
+
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
   [CONCIERGE_CHAT_ID]: [
+    // Cards the Concierge composed itself, each a message of its own. They come
+    // first, so the later turns the layout checks wait for stay in view.
+    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-04T19:00:00.000Z", "Open an issue in the repo", [
+      CONNECT_CARD_A2UI,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-04T19:05:00.000Z", "How did I do today?", [
+      AGENT_CARD_HEALTH,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-04T19:10:00.000Z", "周六在东京怎么安排？", [
+      AGENT_CARD_ITINERARY,
+    ]),
     ...turn(
       CONCIERGE_CHAT_ID,
       1,
@@ -421,17 +533,43 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
       } as TranscriptPart,
     ]),
-    // A task's thread: the Concierge's reply in it carries the task's label.
-    {
-      id: `${CONCIERGE_CHAT_ID}-thread-1`,
-      sessionId: CONCIERGE_CHAT_ID,
-      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
-      role: "assistant",
-      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
-      createdAt: "2026-08-07T13:01:00.000Z",
-      chatThreadId: "mock-thread-table",
-      chatThreadTitle: "Book a table for Friday",
-    },
+    afternoon(
+      1,
+      "13:10",
+      "guardian",
+      "Can you book a table for 4 on Friday evening, somewhere close to the office?",
+      TABLE_THREAD,
+    ),
+    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7.", TABLE_THREAD),
+    afternoon(
+      3,
+      "13:12",
+      "guardian",
+      "Also check flights to Berlin next Tuesday, back on Thursday.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      4,
+      "13:12",
+      "agent",
+      "On it. I'll compare fares and tell you what I find.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      5,
+      "13:20",
+      "agent",
+      "All three take a booking for 4. Osteria 23 has a quiet back room, and it is the closest at 9 minutes on foot. Shall I take that one?",
+      TABLE_THREAD,
+    ),
+    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?", TABLE_THREAD),
+    afternoon(
+      7,
+      "13:30",
+      "agent",
+      "Round trip, Tuesday 11/17 to Thursday 11/19, economy:\n\n1. **Lufthansa LH1135** · 08:40 out, 18:30 back · €210\n2. **Eurowings EW9021** · 07:15 out, 20:50 back · €148, no bag\n3. **Ryanair FR1832** · 06:10 out, 21:40 back · €96, no bag",
+      FLIGHT_THREAD,
+    ),
     // A routine made the Concierge speak: its reply carries the routine's name.
     {
       id: `${CONCIERGE_CHAT_ID}-routine-trace`,
@@ -439,7 +577,7 @@ const transcripts: Record<string, ChatMessage[]> = {
       turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
       role: "trace",
       content: "[]",
-      createdAt: "2026-08-07T13:02:00.000Z",
+      createdAt: "2026-08-07T13:32:00.000Z",
       traceSummary: {
         distinctApps: [],
         invocationCounts: {},
@@ -453,13 +591,62 @@ const transcripts: Record<string, ChatMessage[]> = {
       turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
       role: "assistant",
       content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
-      createdAt: "2026-08-07T13:02:01.000Z",
+      createdAt: "2026-08-07T13:32:01.000Z",
     },
+    afternoon(
+      8,
+      "13:40",
+      "agent",
+      "Last night's NAS backup failed. I'm looking into why.",
+      NAS_THREAD,
+    ),
+    afternoon(
+      9,
+      "13:41",
+      "agent",
+      "Yes, there is a €200 minimum for the back room, which fits a table of 4.",
+      TABLE_THREAD,
+    ),
+    afternoon(
+      10,
+      "13:50",
+      "guardian",
+      "Anything that gets me back on Thursday afternoon?",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      11,
+      "13:51",
+      "agent",
+      "Lufthansa has a 14:30 back on Thursday. With the Tuesday morning flight it is €190 round trip.",
+      FLIGHT_THREAD,
+    ),
+    afternoon(
+      12,
+      "14:00",
+      "agent",
+      "The backup disk is full: Time Machine kept 14 months of snapshots and never cleared the old ones. I deleted the ones before 2025, which freed 820 GB, and last night's backup has run again.",
+      NAS_THREAD,
+    ),
+    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?", NAS_THREAD),
+    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT, NAS_THREAD),
+    afternoon(15, "14:15", "guardian", "Book the back room.", TABLE_THREAD),
+    afternoon(
+      16,
+      "14:16",
+      "agent",
+      "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
+      TABLE_THREAD,
+    ),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?", PLUMBER_THREAD),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
     // The owner's latest message, which the Concierge is still working on: it
-    // carries the working status reaction, as a live turn sets it.
+    // carries the working status, which Rome derives.
     {
-      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
-      statusReaction: "working",
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T14:40:00.000Z", "Book the 9:40 one", [])[0]!,
+      status: "working",
     },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
@@ -885,6 +1072,23 @@ const transcripts: Record<string, ChatMessage[]> = {
     ),
   ],
 };
+
+// The Concierge's topic chats, each with a short exchange, so opening one loads
+// like a real chat rather than answering its messages with a 404.
+transcripts["mock-topic-travel"] = turn(
+  "mock-topic-travel",
+  1,
+  "2026-08-04T09:00:00.000Z",
+  "Where should we stay in Lisbon?",
+  [text("Alfama is walkable and quiet at night. I can compare three places if you like.")],
+);
+transcripts["mock-topic-news"] = turn(
+  "mock-topic-news",
+  1,
+  "2026-08-03T07:30:00.000Z",
+  "Send me a weekly news digest.",
+  [text("Done. Every Monday at 7:30 I will send the week's top stories.")],
+);
 
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
@@ -1350,14 +1554,6 @@ export const handlers = [
   http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
     HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
   ),
-  http.get("/api/concierge/tasks", () =>
-    HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
-  ),
-  // Held open without events: mock mode runs no tasks.
-  http.get("/api/concierge/tasks/events", () => {
-    const stream = new ReadableStream({ start() {} });
-    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
-  }),
   // Held open without events: mock mode runs no turns, so no chat's activity changes.
   http.get("/api/concierge/activity/events", () => {
     const stream = new ReadableStream({ start() {} });
@@ -1415,6 +1611,55 @@ export const handlers = [
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
+  // A sent message is only recorded: no turn starts, so nothing answers it. It
+  // replies to the message the owner picked, else, with a thread in focus, to
+  // that thread's last message, else to nothing, and joins the thread of the
+  // message it replies to, as the server records it.
+  http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
+    const sessionId = String(params.sessionId);
+    const messages = transcripts[sessionId];
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const form = await request.formData();
+    const picked = form.get("replyToMessageId");
+    const thread = form.get("chatThread");
+    const focused = thread ? messages.filter((message) => message.chatThreadId === thread) : [];
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : focused.at(-1);
+    const sentAt = new Date().toISOString();
+    // A reply shows the quote of what it replies to.
+    const original = repliesTo ? JSON.parse(repliesTo.content) : [];
+    const quote = original.find((part: { type: string }) => part.type === "text");
+    const content = JSON.stringify([
+      ...(repliesTo && quote
+        ? [
+            {
+              type: "reply_to",
+              messageId: repliesTo.id,
+              author: repliesTo.role === "user" ? "guardian" : "agent",
+              text: quote.content,
+            },
+          ]
+        : []),
+      text(String(form.get("text") ?? "")),
+    ]);
+    messages.push({
+      id: String(form.get("inputId")),
+      sessionId,
+      turnId: null,
+      role: "user",
+      content,
+      createdAt: sentAt,
+      sender: guardianSender,
+      ...(repliesTo ? joinThread(repliesTo) : {}),
+    });
+    return HttpResponse.json({
+      turnId: null,
+      inputId: String(form.get("inputId")),
+      inputState: "consumed",
+      sessionId,
+      startedAt: sentAt,
+      content,
+    });
+  }),
   http.post("/api/chat/sessions/:sessionId/read", ({ params }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
@@ -1425,6 +1670,20 @@ export const handlers = [
       lastSeenActivityAt: found.lastSeenActivityAt,
       unread: found.unread,
     });
+  }),
+  // The messages the owner has seen, as the server marks them read.
+  http.post("/api/chat/sessions/:sessionId/messages/read", async ({ params, request }) => {
+    const messages = transcripts[String(params.sessionId)];
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { ids } = (await request.json()) as { ids: string[] };
+    let marked = 0;
+    for (const message of messages) {
+      if (ids.includes(message.id) && message.read === false) {
+        message.read = true;
+        marked += 1;
+      }
+    }
+    return HttpResponse.json({ marked });
   }),
   // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
   // into the Pinned section and stays there until the page reloads.
@@ -1737,6 +1996,7 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...taskListHandlers,
+  ...chatOutputHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,
@@ -1751,6 +2011,7 @@ export const handlers = [
   ...mealPlannerHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
+  ...vaultHandlers,
   ...liveEventsHandlers,
   ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects

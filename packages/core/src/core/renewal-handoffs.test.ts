@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { createRenewalHandoffs, recentMessagesOf, type ChatRow } from "./renewal-handoffs.js";
+import {
+  createRenewalHandoffs,
+  recentMessagesOf,
+  rowsSince,
+  type ChatRow,
+} from "./renewal-handoffs.js";
 import type { ModelResolver } from "../agent/index.js";
 
 const row = (role: string, text: string, turnId: string | null): ChatRow => ({
@@ -46,7 +51,10 @@ describe("createRenewalHandoffs", () => {
       timeoutMs: 30_000,
       fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
-      rows: async () => [row("user", "Book dinner", "t1"), row("user", "Now?", "t2")],
+      page: async () => ({
+        rows: [row("user", "Book dinner", "t1"), row("user", "Now?", "t2")],
+        next: null,
+      }),
       openTasks: async () => "- t-1 · Book dinner · active",
     });
     const context = await handoffs.context("chat-1", "t2");
@@ -59,7 +67,7 @@ describe("createRenewalHandoffs", () => {
       timeoutMs: 30_000,
       fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
-      rows: async () => [],
+      page: async () => ({ rows: [], next: null }),
       openTasks: async () => null,
     });
     expect(await handoffs.fallback(undefined, "concierge")).toBeNull();
@@ -88,7 +96,7 @@ describe("createRenewalHandoffs", () => {
       timeoutMs: 30_000,
       fallbackTimeoutMs: 20,
       modelResolver: stalled,
-      rows: async () => [row("user", "dinner at 7", "t1")],
+      page: async () => ({ rows: [row("user", "dinner at 7", "t1")], next: null }),
       openTasks: async () => null,
     });
     const started = Date.now();
@@ -102,7 +110,7 @@ describe("createRenewalHandoffs", () => {
       timeoutMs: 30_000,
       fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
-      rows: async () => [],
+      page: async () => ({ rows: [], next: null }),
       openTasks: async () => null,
       tidying: async (chatId, work) => {
         tidied.push(chatId);
@@ -112,5 +120,63 @@ describe("createRenewalHandoffs", () => {
     expect(await handoffs.tidying("chat-1", async () => "note")).toBe("note");
     expect(await handoffs.tidying(undefined, async () => "none")).toBe("none");
     expect(tidied).toEqual(["chat-1"]);
+  });
+});
+
+describe("every message since a time", () => {
+  const at = (role: string, text: string, turnId: string | null, seconds: number): ChatRow => ({
+    ...row(role, text, turnId),
+    createdAt: new Date(seconds * 1_000),
+  });
+
+  it("keeps a turn whole when any of its rows is at or after the time", () => {
+    const rows = [
+      at("user", "Old", "t1", 10),
+      at("assistant", "Old reply", "t1", 11),
+      // Saved before the session opened at 20.5 s, answered after.
+      at("user", "Opening request", "t2", 20),
+      at("assistant", "Opening reply", "t2", 25),
+      at("user", "Later", "t3", 30),
+    ];
+    expect(rowsSince(rows, new Date(20_500)).map((r) => r.content)).toEqual(
+      rows.slice(2).map((r) => r.content),
+    );
+  });
+
+  it("pages back only until a page reaches before the time", async () => {
+    const pages: ChatRow[][] = [
+      [at("user", "Newest", "t3", 30)],
+      [at("user", "Middle", "t2", 20)],
+      [at("user", "Oldest", "t1", 10)],
+    ];
+    let reads = 0;
+    const handoffs = createRenewalHandoffs({
+      timeoutMs: 30_000,
+      fallbackTimeoutMs: 30_000,
+      modelResolver: unusedResolver,
+      page: async (_chatId, _turns, before) => {
+        const index = (before as number | undefined) ?? 0;
+        reads += 1;
+        return { rows: pages[index]!, next: index + 1 < pages.length ? index + 1 : null };
+      },
+      openTasks: async () => null,
+    });
+    const context = await handoffs.context("chat-1", "t-now", new Date(15_000));
+    expect(context.recent.map((m) => m.text)).toEqual(["Middle", "Newest"]);
+    expect(reads).toBe(3);
+    const near = await handoffs.context("chat-1", "t-now", new Date(25_000));
+    expect(near.recent.map((m) => m.text)).toEqual(["Newest"]);
+    expect(reads).toBe(5);
+  });
+});
+
+describe("recentMessagesOf cut eligibility", () => {
+  it("marks only the agent's messages as cuttable, since a notice may be the guardian's", () => {
+    const rows = [
+      row("user", "a", "t1"),
+      row("assistant", "b", "t1"),
+      row("notification", "c", "t2"),
+    ];
+    expect(recentMessagesOf(rows).map((m) => m.agent === true)).toEqual([false, true, false]);
   });
 });

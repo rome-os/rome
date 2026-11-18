@@ -1,4 +1,5 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import type { ComponentType, LazyExoticComponent } from "react";
+import { lazy } from "@/lib/lazy-with-reload";
 
 // Single source of truth for the dev-only pages under `src/pages/dev/`.
 //

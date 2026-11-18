@@ -1,5 +1,7 @@
 import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
+import { personalDataRoutes } from "../personal-data/routes.js";
+import { deviceConnectionRoutes } from "./routes/device-connections.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +19,8 @@ import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
 import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
 import { attachAppWebSocket } from "./routes/app-websocket-server.js";
+import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
+import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
@@ -43,6 +47,7 @@ import { conciergeRoutes } from "./routes/concierge.js";
 import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
+import { vaultRoutes } from "./routes/vault.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
@@ -196,10 +201,14 @@ export function buildApp(
   api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", voiceInputRoutes(deps));
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
+  api.route("/", personalDataRoutes(deps));
+  api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
+  api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", peopleRoutes(deps));
@@ -247,6 +256,7 @@ export function buildApp(
     widgetEventRoutes({
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
+      chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
     }),
   );
   // The backend-turn orchestrator is the single holder of the webchat runtime
@@ -356,6 +366,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
+            voiceInput.close();
             await webchatRuntime.flushAll();
             // Force-close any active HTTP connections so shutdown is not
             // blocked by in-flight requests (e.g. long-lived SSE streams).
@@ -366,11 +377,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, deps.db, {
-        onAuthCommandExit: () => {
-          void deps.modelAccounts.refresh().catch(() => {});
+      const terminalServer = attachTerminalServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          onAuthCommandExit: () => {
+            void deps.modelAccounts.refresh().catch(() => {});
+          },
         },
-      });
+      );
       const liveEvents = attachLiveEventsServer(
         server as Server,
         deps.db,
@@ -383,8 +399,6 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (owner, emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
           hasChatTasks: async (chatId, owner) =>
@@ -396,8 +410,15 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
-      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
+      const voiceInput = attachVoiceInputServer(
+        server as Server,
+        deps.db,
+        deps.voiceInput ?? NO_VOICE_INPUT,
+        deps.transcriptionUsage ?? null,
+        deps.dashboardAccessState,
+      );
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });
         reject(err);

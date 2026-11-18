@@ -73,7 +73,7 @@ describe("resolveBootstrapState — cloud-default", () => {
     expect(state).toEqual({ phase: "needs-signin", method: "cloud", localPasswordAvailable: true });
   });
 
-  it("threads dashboard visitor access through cloud sign-in state", async () => {
+  it("threads dashboard admin access through cloud sign-in state", async () => {
     insertGuardian({ passwordHash: "real-bcrypt-hash", accountId: "A" });
     const state = await resolveBootstrapState(testDb.db, {
       ...CLOUD,
@@ -131,7 +131,7 @@ describe("resolveBootstrapState — local-first", () => {
     expect(state).toEqual({ phase: "needs-signin", method: "local" });
   });
 
-  it("threads dashboard visitor access through local sign-in state", async () => {
+  it("threads dashboard admin access through local sign-in state", async () => {
     insertGuardian({ onboardingComplete: true });
     const state = await resolveBootstrapState(testDb.db, {
       ...LOCAL,

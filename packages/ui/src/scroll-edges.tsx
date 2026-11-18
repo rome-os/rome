@@ -67,10 +67,20 @@ export function useScrollEdges(ref: RefObject<HTMLElement | null>): ScrollEdges 
 // unmounts once its end is reached, dropping focus to the body.
 const keepFocus = (event: MouseEvent) => event.preventDefault();
 
-// Solid behind the chevron, so a half-shown item under it does not read as
-// overlapping text. Stops 1px short of the bottom to leave a row's border line.
+// Solid behind the chevron and fading toward the row, so a half-shown item
+// under it does not read as overlapping text and the edge has no hard line.
+// Stops 1px short of the bottom to leave a row's border line.
 const SCROLL_BUTTON_CLASS =
-  "absolute top-0 bottom-px flex w-8 items-center bg-background text-muted-foreground hover:text-foreground [&_svg]:size-4";
+  "absolute top-0 bottom-px flex w-8 items-center text-muted-foreground hover:text-foreground [&_svg]:size-4";
+
+/**
+ * The fade behind a chevron, from the surface the row sits on: the page's
+ * background unless an ancestor sets `--scroll-edge-bg`, as a pane or a sheet
+ * of another colour does.
+ */
+const edgeFade = (toward: "right" | "left") => ({
+  backgroundImage: `linear-gradient(to ${toward}, var(--scroll-edge-bg, var(--color-background)) 55%, transparent)`,
+});
 
 /**
  * A chevron on each clipped end that scrolls the row most of a width. Renders
@@ -105,6 +115,7 @@ export function ScrollEdgeButtons({
           onMouseDown={keepFocus}
           onClick={() => scrollBy(-1)}
           className={cn(SCROLL_BUTTON_CLASS, outset ? "-left-1" : "left-0", "justify-start")}
+          style={edgeFade("right")}
         >
           <ChevronLeft />
         </button>
@@ -118,6 +129,7 @@ export function ScrollEdgeButtons({
           onMouseDown={keepFocus}
           onClick={() => scrollBy(1)}
           className={cn(SCROLL_BUTTON_CLASS, outset ? "-right-1" : "right-0", "justify-end")}
+          style={edgeFade("left")}
         >
           <ChevronRight />
         </button>

@@ -114,6 +114,7 @@ Inline content sits inside a line of text or a table cell. It answers to the tex
 - The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
 - Typography is `text-aux` or smaller, never `text-ui`. `[mech]`
+- The guardian sidebar's unread count is a compact `Badge`: a 16px-high pill with 11px/16px type. Its inset, typography, and ink read host-owned `--row-count-*` tokens. Its ink mixes 60% primary with foreground in OKLab, preserving the accent hue with AA contrast on its tint. `[human]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
 
 > Prefer: a dismissible `Badge` at `--badge-h`, 22px tall in a table cell, carrying a focus edge.
@@ -223,6 +224,7 @@ Naming the gap beats a wrong assignment.
 | Calendar `root`, `dropdowns`, `month_caption`, label-mode `caption_label`, `day` | Calendar parts that do not meet one existing role contract. See [Composites](#composites). |
 | `Command` | Composite root. Deliberately takes no role of its own. |
 | `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandList`, `CommandSeparator` | Internal states, grouping, rows, scrolling, and separators of the `Command` composite. The caller-owned popup boundary is its Surface. |
+| `InputOTP`, `InputOTPGroup`, `InputOTPSlot` | A code field of slightly tall slots over one invisible input. The slots read the size tokens and the control radius, but the composite is not surveyed against the Control contract. |
 | `EmptyState`, `Stepper` | Not yet surveyed against the contracts. |
 | The page layout tier | `Page`, `Section`, `PageNav` with its `PageNavLink`, and the body components each layout in [layouts.md](layouts.md) contributes — List's `ListToolbar`, `ListCollection`, `ListGrid`, and `ListFooter`, and Form's `FormRows` with the `FormRow` anatomy of `FormRowIcon`, `FormRowHeading`, `FormRowLabel`, `FormRowDescription`, and `FormRowControl`. They own the space between regions of a page rather than between a component's children, which is a tier above Layout. `FormRows` also paints its own border and fill, which Layout rules out. Naming that tier is a roster decision the catalogue has not taken yet. |
 | `Toolbar` | Owns the space between its children and paints nothing, which reads as Layout. It also takes keyboard input, which the Layout contract rules out. |

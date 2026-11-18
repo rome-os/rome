@@ -32,6 +32,7 @@
 @source "./filter-chip-group.tsx";
 @source "./icon-button.tsx";
 @source "./input.tsx";
+@source "./input-otp.tsx";
 @source "./layout-form.tsx";
 @source "./layout-list.tsx";
 @source "./list-row.tsx";
@@ -39,6 +40,7 @@
 @source "./mermaid-download-menu.tsx";
 @source "./page.tsx";
 @source "./popover.tsx";
+@source "./progressive-blur.tsx";
 @source "./radio-group.tsx";
 @source "./scroll-edges.tsx";
 @source "./segmented-control.tsx";

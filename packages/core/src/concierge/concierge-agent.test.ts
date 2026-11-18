@@ -21,6 +21,16 @@ const actionName = (action: string) =>
   ).name;
 
 describe("the Concierge agent", () => {
+  it("reads a device itself through the device actions, with no task chat", () => {
+    expect(concierge.actions).toEqual(
+      expect.arrayContaining(["core:device_describe", "core:device_run"]),
+    );
+    expect(concierge.systemPromptPrefix).toContain(
+      "Call the actions listed for you yourself, with `execute_action`: they are not tasks.",
+    );
+    expect(concierge.systemPromptPrefix).not.toContain("hand a live read to a task chat");
+  });
+
   it("renames through the core action instead of editing the setting-owned identity line", () => {
     expect(concierge.actions).toContain("core:set_agent_name");
     for (const prompt of [
@@ -48,6 +58,28 @@ describe("the Concierge agent", () => {
     expect(prompt).not.toContain("Do what it asks as the guardian's standing request");
   });
 
+  it("handles each guardian message in one way: a reply, a task, a card, or only a reaction", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("# Handling a guardian message");
+    expect(prompt).toContain("Handle each guardian message in exactly one of these ways:");
+    expect(prompt).toContain("Start a task with `card: true`, with no text and no reaction");
+    expect(prompt).toContain("A turn that only reacts is silent.");
+    expect(prompt).toContain("👍 for a plain yes or an instruction you only need to note");
+    // A thanks or an OK never starts a task.
+    expect(prompt).toContain(
+      "Answer a thanks or an OK with ❤️ or 👍, or one short sentence, and never start a task for it.",
+    );
+    // The memory-note example is gone: the Concierge may say what it noted.
+    expect(prompt).not.toContain("such as noting something in memory");
+    // Rome derives 👀 (docs/domains/chats.md#status): the Concierge neither sets nor clears it.
+    expect(prompt).toContain("Rome marks the message as being worked on");
+    expect(prompt).not.toContain("👀");
+    expect(prompt).not.toContain("`react` with `emoji: null`");
+    expect(prompt).toContain("Then call `chat_stop` and react 👍 to their call-off, with no text");
+    expect(prompt).not.toContain("confirm in one bubble");
+    expect(prompt).not.toContain("Set `card: true` only when the guardian asks");
+  });
+
   it("makes recurring work a scheduled task, never a routine posting into this chat", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("is a scheduled task: `chat_start` with a `schedule`");
@@ -56,11 +88,25 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("The brief says what to do, never where to send it");
   });
 
-  it("never tells the Concierge a forward needs `answers` or passes the guardian's words on", () => {
+  it("tells the Concierge a message can reply to one earlier message, and that routing changes no thread", () => {
     const prompt = concierge.systemPromptPrefix;
-    expect(prompt).not.toMatch(/`chat_forward` (?:are|is) refused/);
-    expect(prompt).not.toContain("with `chat_send` or `chat_forward`");
-    expect(prompt).toContain("`chat_forward` passes nothing on");
+    expect(prompt).toContain('`<chat_thread message_id="…" root="…"/>`');
+    expect(prompt).toContain("set `replyTo` on `say`");
+    expect(prompt).toContain("the task's `start_message_id`");
+    expect(prompt).toContain("a `say` without `replyTo` replies to nothing");
+    expect(prompt).toContain("a `say` without `replyTo` replies there");
+    expect(prompt).toContain("`[thread name](#rome-thread=ID)`");
+    expect(prompt).toContain("Sending a message to a task changes no thread");
+    // Rome sets threads from replies, so no rule asks the Concierge to place a message.
+    for (const removed of [
+      "never place a message",
+      "never send it to another task",
+      "joins that thread",
+      "`answers`",
+      "task_title",
+    ]) {
+      expect(prompt).not.toContain(removed);
+    }
   });
 
   it("reports a finished task by forwarding its conclusion, never its whole report", () => {
@@ -69,16 +115,17 @@ describe("the Concierge agent", () => {
     const finished = rule("- A turn that ended `by=concierge`");
     for (const text of [
       "forward the conclusion with `chat_forward`",
-      "the forwarded message shows its source chat, which opens the details",
       "Never paste or retell the rest of the answer",
+      "never tell the guardian to open the task chat for details",
       "refuses because the answer has no conclusion or it is too long",
-      "at most two short sentences",
-      "with `task` set to the task's id so it joins the task's thread",
+      "a few sentences with the key specifics",
+      "with `replyTo` set to the task's `start_message_id`",
       "deliver the result in ONE message",
       "(`full: true`) only when the guardian explicitly asked for the full text in a message they sent this turn",
       "A failed or stopped task: say so plainly",
     ])
       expect(finished).toContain(text);
+    expect(finished).not.toContain("opens the details");
     expect(rule("- In a task event, `conclusion:`")).toContain(
       "the task chat's own conclusion, whole",
     );
@@ -248,12 +295,15 @@ describe("the Concierge agent", () => {
     expect(concierge.systemPromptPrefix).not.toContain("Each message can ring their phone");
   });
 
-  it("shows a task card only when the guardian asks for one", () => {
+  it("shows a task card for long, detailed or multi-round work, or when the guardian asks, with no 👀", () => {
     const rule =
       concierge.systemPromptPrefix
         .split("\n")
-        .find((line) => line.startsWith("- Start a task whenever the work needs one")) ?? "";
-    expect(rule).toContain("Set `card: true` only when the guardian asks to see or watch the task");
+        .find((line) => line.startsWith("- Start a task with `card: true`")) ?? "";
+    expect(rule).toContain("with no text and no reaction");
+    expect(rule).toContain("long work with many details");
+    expect(rule).toContain("several rounds");
+    expect(rule).toContain("whenever they ask to see or watch it");
     expect(rule).not.toContain("complex or long-running");
   });
 

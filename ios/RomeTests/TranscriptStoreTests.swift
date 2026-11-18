@@ -17,9 +17,9 @@ final class FakeBackend: RomeBackend {
 
     /// Runs while an older page is in flight, after the page was read.
     var duringOlderFetch: (() async -> Void)?
-    /// How many times the newest page and the task list were fetched.
+    /// How many times the newest page and the chat list were fetched.
     var newestFetches = 0
-    var taskFetches = 0
+    var sessionFetches = 0
     /// Runs while the newest page is in flight.
     var duringNewestFetch: (() async -> Void)?
 
@@ -101,6 +101,23 @@ final class FakeBackend: RomeBackend {
     func deleteChat(_ id: String) async throws {
         calls.append("delete \(id)")
         topicChats.removeAll { $0.id == id }
+    }
+
+    /// What a topic chat's delete would move; nil, the read fails, as on an
+    /// older instance. `chatWorkDelay` holds the answer back.
+    var chatWorkAnswer: ConciergeChatWork?
+    var chatWorkDelay: Duration?
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        calls.append("work \(chatId)")
+        if let chatWorkDelay { try await Task.sleep(for: chatWorkDelay) }
+        guard let chatWorkAnswer else { throw APIError.notFound }
+        return chatWorkAnswer
     }
 
     /// Share links: what each create asked for, the answer it gets, the
@@ -187,7 +204,7 @@ final class FakeBackend: RomeBackend {
 
     /// What each send asked for its chat thread, in order.
     var sentThreads: [ThreadTarget?] = []
-    /// A thread read's answer, by the message asked for; missing ones fail.
+    /// A thread read's answer, by the root asked for; missing ones fail.
     var threads: [String: [ChatMessage]] = [:]
     var threadReads: [String] = []
 
@@ -197,11 +214,11 @@ final class FakeBackend: RomeBackend {
     var duringThreadRead: (() async -> Void)?
 
 
-    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
-        threadReads.append(messageId)
+    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
+        threadReads.append(root)
         await duringThreadRead?()
         if let threadError { throw threadError }
-        guard let thread = threads[messageId] else { throw APIError.notFound }
+        guard let thread = threads[root] else { throw APIError.notFound }
         return thread
     }
 
@@ -241,20 +258,19 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    /// The chats and tasks the lists hold.
-    var sessionRows: [ChatSession] = []
-    var taskRows: [ConciergeTask] = []
-    var stoppedTasks: [String] = []
-    func sessions() async throws -> [ChatSession] { sessionRows }
-    func tasks() async throws -> [ConciergeTask] {
-        taskFetches += 1
-        return taskRows
+    /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
+    /// many reads had gone out each time it was asked for.
+    var readMarkValue: String?
+    var readsBeforeMark: [Int] = []
+    func readMark(sessionId: String) async -> String? {
+        readsBeforeMark.append(reads.count)
+        return readMarkValue
     }
-    /// What a stop on a task fails with; nil lets it through.
-    var stopError: APIError?
-    func stopTask(id: String) async throws {
-        if let stopError { throw stopError }
-        stoppedTasks.append(id)
+    /// The chats the list holds.
+    var sessionRows: [ChatSession] = []
+    func sessions() async throws -> [ChatSession] {
+        sessionFetches += 1
+        return sessionRows
     }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
     /// What a decision on an approval fails with; nil lets it through.
@@ -282,7 +298,13 @@ final class FakeBackend: RomeBackend {
     var connectCalls: [(method: String, path: String, body: JSONValue?)] = []
     var notified: [(chatId: String, service: String)] = []
 
+    /// Runs inside a connector read, before it answers, once.
+    var duringConnectorRead: (() async -> Void)?
     func connectors() async throws -> [ConnectorState] {
+        if let during = duringConnectorRead {
+            duringConnectorRead = nil
+            await during()
+        }
         guard !connectorReads.isEmpty else { return [] }
         let index = min(connectorReadCount, connectorReads.count - 1)
         connectorReadCount += 1
@@ -306,8 +328,13 @@ final class FakeBackend: RomeBackend {
     var startResults: [Result<UpgradeStarted, Error>] = []
     var started: [String] = []
     var buildVersion: String?
+    /// How long the upgrade check takes to answer.
+    var checkDelay: Duration?
 
-    func upgradeCheck() async throws -> UpgradeCheck { try check.get() }
+    func upgradeCheck() async throws -> UpgradeCheck {
+        if let checkDelay { try? await Task.sleep(for: checkDelay) }
+        return try check.get()
+    }
 
     func startUpgrade(target: String) async throws -> UpgradeStarted {
         started.append(target)
@@ -334,7 +361,7 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         return backend
     }
 
-    @Test func olderPageWaitsUntilPlaced() async {
+    @Test func anOlderPageGoesInAtOnce() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
@@ -342,11 +369,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.hasOlder)
 
         await store.loadOlder()
-        #expect(store.olderPage != nil)
-        #expect(store.messages.count == 40)
-
-        await store.placeOlderPage()
-        #expect(store.olderPage == nil)
         #expect(store.messages.count == 50)
         #expect(!store.hasOlder)
     }
@@ -356,7 +378,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
         await store.loadOlder()
-        await store.placeOlderPage()
 
         backend.stored.append(chatMessage(50))
         await store.reload()
@@ -371,8 +392,136 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.brief == nil)
 
         await store.loadOlder()
-        await store.placeOlderPage()
         #expect(store.brief?.id == "m0")
+    }
+
+    /// The read mark at `seconds` past the base time of `chatMessage`.
+    private func readMark(at seconds: TimeInterval) -> String {
+        RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
+    }
+
+    @Test func theUnreadLineIsReadBeforeTheChatIsMarkedReadAndOutlivesIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<4).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0])
+        #expect(backend.reads == ["task"])
+        #expect(store.unreadFrom == "m2")
+        let ids = store.rows.map(\.id)
+        #expect(ids.firstIndex(of: "unread-divider").map { ids[$0 + 1] } == "m2:0")
+
+        // Read now, and still marked while the chat stays open; closed, it goes.
+        store.markRead()
+        #expect(store.unreadFrom == "m2")
+        store.endOpen()
+        #expect(store.unreadFrom == nil)
+        #expect(!store.rows.contains(.unreadDivider))
+    }
+
+    @Test func aMessageThatArrivesLiveWhileTheChatOpensIsNeverUnread() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        backend.duringNewestFetch = {
+            backend.bus.emit(LiveTopic.chat("task"), .messageInsert(chatMessage(5)))
+        }
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.messages.map(\.id).contains("m5"))
+        #expect(store.unreadFrom == nil)
+        store.stop()
+    }
+
+    @Test func thePillPagesOlderMessagesInUntilTheLineIsDrawnThenGoesToIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<60).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // The newest page is all unread, and older pages remain.
+        #expect(store.unread == UnreadSummary(firstId: nil, count: 40, more: true))
+        #expect(!store.rows.contains(.unreadDivider))
+        #expect(store.unreadPill.phase == .shown)
+
+        let jumps = store.jumps
+        await store.revealUnread()
+        #expect(store.unread == UnreadSummary(firstId: "m6", count: 54, more: false))
+        #expect(store.rows.contains(.unreadDivider))
+        #expect(store.jumps == jumps + 1)
+        #expect(store.jumpTarget == TranscriptRow.unreadDivider.id)
+    }
+
+    @Test func comingBackFromTheBackgroundOpensTheChatAgain() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unreadFrom == nil)
+
+        // A reply comes while the app is away; back in front, the read waits
+        // for the read mark, and the catch-up read brings the reply.
+        store.leftForBackground()
+        backend.stored.append(chatMessage(2))
+        store.chatShown()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0, 1])
+        #expect(store.unreadFrom == "m2")
+        store.stop()
+    }
+
+    @Test func thePillsSearchStopsWhenTheChatCloses() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<200).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unread?.more == true)
+        backend.duringOlderFetch = { store.endOpen() }
+        await store.revealUnread()
+        // One page went in, the one already asked for; no more were fetched.
+        #expect(store.messages.count == 80)
+        #expect(store.notice == nil)
+    }
+
+    @Test func aTaskChatHasNoUnreadLine() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 0)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        #expect(backend.readsBeforeMark.isEmpty)
+        #expect(store.unreadFrom == nil)
     }
 
     @Test func stopEndsRunningWithoutALiveEvent() async throws {
@@ -450,7 +599,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         }
         await store.loadOlder()
 
-        #expect(store.olderPage == nil)
         #expect(store.messages.allSatisfy { Int($0.id.dropFirst())! >= 100 })
         #expect(store.hasOlder)
     }

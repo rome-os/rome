@@ -49,6 +49,12 @@
     "remove": "Remove",
     "cancel": "Cancel"
   },
+  "deviceConnect": {
+    "title": "Connect {{title}}",
+    "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and say it's done.",
+    "connected": "{{title}} is connected on {{device}}. Go back to the chat and say it's done.",
+    "yourDevice": "your device"
+  },
   "connections": {
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
@@ -320,6 +326,8 @@
       "nameHint": "Uppercase letters, digits, and underscores.",
       "valueField": "Secret value",
       "valueHint": "Rome does not show this value again. To change it, retype it.",
+      "showValue": "Show value",
+      "hideValue": "Hide value",
       "valueRequired": "Enter the secret value.",
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
@@ -350,7 +358,54 @@
     "batchSaved_other": "Saved {{count}} keys for all apps.",
     "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use.",
     "summary": "Secrets apps can read, like a database password or an API key.",
-    "manage": "Manage"
+    "manage": "Edit keys"
+  },
+  "vault": {
+    "title": "Vault",
+    "openLabel": "Open Vault",
+    "keyCount_one": "{{count}} secret",
+    "keyCount_other": "{{count}} secrets",
+    "loading": "Loading the vault",
+    "errorTitle": "The vault couldn't be loaded",
+    "emptyTitle": "Nothing in the vault yet",
+    "emptyBody": "Add a secret, like an access token, so an agent can use it once you approve.",
+    "add": "Add secret",
+    "removeBody": "Agents will no longer be able to use this secret. This can't be undone.",
+    "form": {
+      "titleAdd": "New secret",
+      "labelField": "What is this secret for?",
+      "labelPlaceholder": "e.g. GitHub token for releases",
+      "nameField": "Name",
+      "namePlaceholder": "e.g. GITHUB_TOKEN",
+      "nameHint": "Uppercase letters, digits, and underscores. Commands read the secret under this name.",
+      "consent": "An agent can use this only after you approve it.",
+      "save": "Save",
+      "inputMethod": "How to add secrets",
+      "singleKey": "Single secret",
+      "back": "Back to the vault",
+      "pin": "PIN",
+      "confirmPin": "Confirm PIN",
+      "newPin": "New PIN",
+      "pinMismatch": "The PINs do not match."
+    },
+    "pinStep": {
+      "setTitle": "Set PIN",
+      "enterTitle": "Enter PIN",
+      "continue": "Continue"
+    },
+    "forgotPin": "Forgot PIN?",
+    "reset": {
+      "title_one": "Delete {{count}} secret? This cannot be undone.",
+      "title_other": "Delete all {{count}} secrets? This cannot be undone.",
+      "confirm": "Reset"
+    },
+    "saved": "Saved {{name}}.",
+    "batchSaved_one": "Saved {{count}} secret.",
+    "batchSaved_other": "Saved {{count}} secrets.",
+    "summary": "Secrets agents can use with your approval.",
+    "lastUsed": "Used {{time}}",
+    "neverUsed": "Never used",
+    "grantedUntil": "Granted until {{time}}"
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -360,7 +415,7 @@
     },
     "replyToLevels": {
       "title": "Reply to messages",
-      "description": "Rome replies only to incoming messages from these bond levels. Sender mapping still runs before this rule."
+      "description": "Rome replies only to incoming messages from these bond levels."
     },
     "levels": {
       "guardian": "guardian",
@@ -535,7 +590,7 @@
   "publicAccess": {
     "title": "Access and privacy",
     "dashboardEmails": {
-      "title": "Allowed emails",
+      "title": "Admins",
       "description": "These accounts get the full dashboard.",
       "accountCount_one": "{{count}} account",
       "accountCount_other": "{{count}} accounts",
@@ -545,8 +600,8 @@
       "empty": "No accounts yet. Shared dashboard access stays off until you add one.",
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
-      "savedFlash": "Allowed emails saved",
-      "saveFailedFallback": "Failed to save allowed emails.",
+      "savedFlash": "Admins saved",
+      "saveFailedFallback": "Failed to save admins.",
       "tooMany": "Up to {{limit}} emails allowed",
       "emailTooLong": "Email longer than {{limit}} characters"
     }
@@ -563,7 +618,7 @@
       "manageCredits": "View ChatGPT usage",
       "settingsButton": "Settings",
       "label": "Allow credit usage",
-      "description": "When your subscription quota runs out, allow use of available ChatGPT / Codex credits. Enabling this automatically resumes eligible chats paused by a usage limit and may spend credits immediately. No credits are purchased automatically.",
+      "description": "Uses ChatGPT credits when your subscription runs out. Turning this on resumes chats paused by a usage limit, and may spend credits right away. Never buys credits.",
       "saveFailed": "Could not load or save the ChatGPT credits setting. Please try again."
     },
     "title": "AI Tools",
@@ -622,12 +677,12 @@
     "loggingOut": "Logging out…",
     "codexLogout": {
       "title": "Log out of ChatGPT?",
-      "description": "Signs out on this server only.",
+      "description": "Logs out on this server only.",
       "failed": "Could not log out of ChatGPT. Please try again."
     },
     "claudeLogout": {
       "title": "Log out of Claude?",
-      "description": "Signs out on this server only.",
+      "description": "Logs out on this server only.",
       "failed": "Could not log out of Claude. Please try again."
     },
     "methods": {
@@ -903,12 +958,23 @@
     "targetChanged": "A newer version ({{version}}) was published in the meantime — confirm again to upgrade to it.",
     "upgradeFailed": "Upgrade request failed: {{message}}",
     "upgradeFailedFallback": "Upgrade request failed.",
-    "restartingTitle": "{{name}} is restarting",
     "restartingBody": "Upgrading to {{version}}.",
-    "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",
-    "close": "Close"
+    "voiceInput": {
+      "title": "Voice input",
+      "loadFailed": "Failed to load voice input",
+      "romeCloudUnreachable": "Rome Cloud can't be reached right now, so voice input may not work.",
+      "romeCloudNotConfigured": "Voice input isn't set up in Rome Cloud yet, so it won't work.",
+      "romeCloudSignedOut": "Rome Cloud doesn't accept this Rome's sign-in. Sign in to Rome Cloud again to use voice input.",
+      "microphone": {
+        "title": "Microphone",
+        "description": "Voice input in this browser records from this microphone.",
+        "systemDefault": "System default",
+        "show": "Show microphones",
+        "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings."
+      }
+    }
   },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",
@@ -919,7 +985,6 @@
   },
   "devices": {
     "title": "Devices",
-    "description": "Devices linked to your Rome account.",
     "loadFailed": "Failed to load devices",
     "connectionLabel": "Rome connection",
     "connection": {
@@ -945,7 +1010,7 @@
     "startFailed": "Could not start the device service",
     "setup": {
       "title": "Connect a computer",
-      "description": "The device service runs on your Rome instance. Each computer you want to use needs its own connection.",
+      "description": "Connect each computer separately.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"

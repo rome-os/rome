@@ -180,6 +180,17 @@ export class TaskChecks {
     return later;
   }
 
+  /** The tasks of `taskIds` with a repeating schedule's next run pending, not a one-off check. */
+  async recurringOf(taskIds: readonly string[]): Promise<Set<string>> {
+    const wanted = new Set(taskIds);
+    const recurring = new Set<string>();
+    if (wanted.size === 0) return recurring;
+    for (const check of await this.pending()) {
+      if (check.recurring && check.taskId && wanted.has(check.taskId)) recurring.add(check.taskId);
+    }
+    return recurring;
+  }
+
   /** How many checks were scheduled for each task, fired ones included. */
   async timesScheduled(taskIds: readonly string[]): Promise<Map<string, number>> {
     const wanted = new Set(taskIds);
@@ -240,22 +251,13 @@ export class TaskChecks {
    * Cancels every check of task `taskId` that a chat of its owner `owner`
    * scheduled, as when it is stopped or archived. Answers how many.
    */
-  async cancelFor(
-    taskId: string,
-    owner: string,
-    options: { keepSchedule?: boolean } = {},
-  ): Promise<number> {
+  async cancelFor(taskId: string, owner: string): Promise<number> {
     // One whose time passed is cancelled too: still enabled, it would fire.
     const checks = (await this.pending(true)).filter(
       (check) => check.taskId === taskId && check.owner === owner,
     );
     for (const check of checks) {
-      // Cancelled from the task's row, a schedule only skips its next run.
-      if (check.recurring && options.keepSchedule) {
-        const routine = (await this.readRoutines()).find((found) => found.id === check.id);
-        this.routines = null;
-        if (routine) await this.deps.schedules?.skipNext(routine);
-      } else if (check.recurring && this.deps.schedules) {
+      if (check.recurring && this.deps.schedules) {
         this.routines = null;
         await this.deps.schedules.remove(taskId);
       } else await this.remove(check.id);

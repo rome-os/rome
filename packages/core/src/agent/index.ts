@@ -66,6 +66,7 @@ export {
   type Question,
   questionCardFromAnswers,
   questionCardUi,
+  REPLY_TO_PARAMETER,
 } from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
@@ -125,6 +126,7 @@ export {
   buildWorkspaceContextSection,
   FETCH_CHANNEL_HISTORY_ACTION,
   type WorkspaceContextSnapshot,
+  withoutRepeatedHeaders,
 } from "./domain/prompt.js";
 export {
   buildSlashSkillPrompt,
@@ -152,6 +154,11 @@ export {
   type ModelAccountReport,
   type ProviderAvailabilityState,
 } from "./domain/model-account-report.js";
+export {
+  codexStrongSelection,
+  selectionOfStrength,
+  type ModelStrength,
+} from "./domain/model-strength.js";
 export {
   sameProviderTarget,
   soleProviderAtUsageLimit,
@@ -225,6 +232,13 @@ export {
   type SubmitOptions,
 } from "./application/agent-input-queue.js";
 export type { PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
+export { sameActor } from "./domain/turn-facts.js";
+export {
+  type Audience,
+  messagingAudience,
+  narrowerAudience,
+  turnAudience,
+} from "./domain/turn-audience.js";
 export type { DeferTool } from "./application/ask-user-tools.js";
 export {
   parentTurnSession,

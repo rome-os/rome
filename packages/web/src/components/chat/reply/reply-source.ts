@@ -28,16 +28,32 @@ export interface ReplySource {
 }
 
 /**
- * Quoted markdown as plain reading text for a chip or a quote block: heading,
- * list, and quote markers, emphasis, and code ticks are dropped and lines
- * run together. The stored quote keeps the source text.
+ * Quoted markdown as plain reading text for a chip or a quote block: a link
+ * reads as its text, and heading, list, and quote markers, emphasis, and code
+ * ticks are dropped and lines run together. The stored quote keeps the source
+ * text.
  */
 export function plainQuote(markdown: string): string {
   return markdown
+    .replace(/(?<!!)\[([^\]]*)\]\([^)\s]*\)/g, "$1")
     .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/gm, "")
     .replace(/\*\*|__|`/g, "")
     .replace(/\s*\n\s*/g, " ")
     .trim();
+}
+
+/**
+ * The line of a quoted message a quote shows: its first line with text, as
+ * plain reading text. A fence line holds no words, so the first line inside it
+ * counts. The rest of the message is not quoted.
+ */
+export function quoteLine(markdown: string): string {
+  for (const line of markdown.split("\n")) {
+    if (!line.trim() || /^\s*(?:```|~~~)/.test(line)) continue;
+    const plain = plainQuote(line);
+    if (plain) return plain;
+  }
+  return "";
 }
 
 /**

@@ -15,10 +15,6 @@ export interface ResolveAuthoringAppRootOptions {
   preferCustom?: boolean;
 }
 
-export function getCoreAgentsRoot(projectRoot: string = getProjectRoot()): string {
-  return join(projectRoot, "packages", "core", "agents");
-}
-
 export function getFirstPartySeedAppPath(projectRoot: string, appId: string): string {
   return join(getRepoAppsDir(projectRoot), appId);
 }

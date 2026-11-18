@@ -229,15 +229,15 @@ final class DeadThenAliveProtocol: URLProtocol, @unchecked Sendable {
         #expect(store.arrivals == 0)
     }
 
-    @Test func taskListRefreshesOnceForABurst() async {
+    @Test func taskChatsRefreshOnceForABurst() async {
         let backend = FakeBackend()
-        let store = TasksStore(backend: backend)
+        let store = TaskChatsStore(backend: backend)
         store.start()
         await settle()
-        let before = backend.taskFetches
-        backend.bus.emit(LiveTopic.conciergeTasks, .reconnected)
+        let before = backend.sessionFetches
+        backend.bus.emit(LiveTopic.chatStatus, .reconnected)
         backend.bus.emit(LiveTopic.chatStatus, .reconnected)
         await settle()
-        #expect(backend.taskFetches - before == 1)
+        #expect(backend.sessionFetches - before == 1)
     }
 }

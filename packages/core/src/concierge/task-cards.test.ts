@@ -5,6 +5,7 @@ import {
   cardAt,
   openCards,
   settledCard,
+  taskCardLine,
   type TaskCardSources,
   withTaskCards,
 } from "./task-cards.js";
@@ -91,6 +92,63 @@ describe("cardAt", () => {
       since: T + DAY,
       outcome: { kind: "turned_down", reason: "no_response" },
       closed: false,
+    });
+  });
+
+  it("titles a secret-access approval by its preview, like a generic one", () => {
+    const preview = {
+      kind: "secret_access",
+      name: "GITHUB_TOKEN",
+      ttlMinutes: 15,
+      reason: "Push the tag",
+      title: "Use GITHUB_TOKEN for 15 min",
+      summary: "Push the tag",
+    };
+    const cards: TaskChatCards = {
+      questions: [],
+      approvals: [
+        {
+          id: "a9",
+          status: "pending",
+          description: "Run vault_apply",
+          payload: { actionName: "system:vault_apply", preview },
+          since: T,
+        },
+      ],
+    } as unknown as TaskChatCards;
+    expect(cardAt(cards, T + 60_000, undefined, DAY)).toMatchObject({
+      kind: "approval",
+      id: "a9",
+      title: "Use GITHUB_TOKEN for 15 min",
+      preview,
+    });
+  });
+
+  it("titles a request for several secrets by all its names, and keeps `names` in the preview", () => {
+    const preview = {
+      kind: "secret_access",
+      name: "GITHUB_TOKEN",
+      names: ["GITHUB_TOKEN", "STRIPE_KEY"],
+      ttlMinutes: 15,
+      reason: "Release",
+      title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+      summary: "Release",
+    };
+    const cards = {
+      questions: [],
+      approvals: [
+        {
+          id: "a10",
+          status: "pending",
+          description: "Run vault_apply",
+          payload: { actionName: "system:vault_apply", preview },
+          since: T,
+        },
+      ],
+    } as unknown as TaskChatCards;
+    expect(cardAt(cards, T + 60_000, undefined, DAY)).toMatchObject({
+      title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+      preview,
     });
   });
 
@@ -273,6 +331,18 @@ describe("settledCard", () => {
       outcome: { kind: "answered" },
     });
     expect(await settledCard(read, "task-1", { kind: "question", id: "nope" })).toBeNull();
+  });
+});
+
+describe("taskCardLine", () => {
+  it("reads a question as its words and an approval as its title", async () => {
+    const { read } = sources(new Map([["task-1", asked()]]));
+    expect(
+      await taskCardLine(read, "task-1", { kind: "question", id: "q1", messageId: "m1" }),
+    ).toBe("Which tone?");
+    expect(await taskCardLine(read, "task-1", { kind: "approval", id: "a1" })).toBe("Send it");
+    expect(await taskCardLine(read, "task-1", { kind: "approval", id: "nope" })).toBeNull();
+    expect(await taskCardLine(read, "task-1", undefined)).toBeNull();
   });
 });
 

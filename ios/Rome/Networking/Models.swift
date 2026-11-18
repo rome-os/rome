@@ -32,23 +32,28 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
-    /// The first message of the chat thread this one is in; nil when it is
-    /// alone, or on an instance without chat threads.
+    /// The root of the chat thread this one is in: the first message of its
+    /// reply chain, which is the message itself when it replies to nothing.
+    /// Nil on an instance without chat threads.
     var chatThreadId: String? = nil
     /// The instance sent `chatThreadId`, null included: it has chat threads.
     /// An older instance leaves the field out.
     var knowsThreads = false
-    /// The title of the task whose chat thread the message is in. The server
-    /// sends a thread only when a task has it, so a message with a thread and
-    /// no title is from an instance before task threads.
+    /// The thread's name when a task's start message is in it: the newest
+    /// such task's title. A thread no task started in has none here: the app
+    /// names it from its root's text.
     var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
     /// Where a guardian message stands with the agent: `failed` and `unknown`
     /// mean it was not (or may not have been) handed over. Nil from older instances.
     var inputState: String? = nil
-    /// Rome's mark on a guardian message in a Chat: `working` or `failed`.
-    var statusReaction: String? = nil
+    /// The emoji the Concierge reacted to a guardian message of its chat with.
+    /// Nil when it has none, and from older instances.
+    var reaction: String? = nil
+    /// Rome's status on a guardian message of its Chat: `working` or `failed`.
+    /// It shows over the reaction. Nil when it has none, and from older instances.
+    var status: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -64,7 +69,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, statusReaction
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status
     }
 }
 
@@ -100,7 +105,8 @@ extension ChatMessage {
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
-        statusReaction = (try? container.decodeIfPresent(String.self, forKey: .statusReaction)) ?? nil
+        reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
+        status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -118,17 +124,20 @@ extension ChatMessage {
         try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
-        try container.encodeIfPresent(statusReaction, forKey: .statusReaction)
+        try container.encodeIfPresent(reaction, forKey: .reaction)
+        try container.encodeIfPresent(status, forKey: .status)
     }
 
-    /// The chat thread it is in, by its first message: its own id when alone.
+    /// The root of the thread it is in: its own id when it is the root.
     var threadRoot: String { chatThreadId ?? id }
 }
 
 /// What a message the guardian sends replies to: the quoted message, and
-/// the thread view it was sent from, if one was open. The server places the
-/// reply in a task's thread when either is in one
-/// (docs/domains/chats.md#chat-thread).
+/// the root of the thread view it was sent from, if one was open. The
+/// instance replies to the message named, so the message is in that thread
+/// (docs/domains/chats.md#chat-thread). A send from a thread view names the
+/// thread's last message with text (`TranscriptStore.wireTarget`); only a
+/// thread with none loaded sends the root alone, which the instance resolves.
 struct ThreadTarget: Codable, Hashable, Sendable {
     /// The message replied to, quoted in the reply bar.
     let messageId: String
@@ -136,7 +145,7 @@ struct ThreadTarget: Codable, Hashable, Sendable {
     /// Written by a build where Reply quoted; absent from drafts written
     /// when Reply opened the thread view.
     var quote: Bool? = nil
-    /// A message of the thread view the reply was sent from.
+    /// The root of the thread view the reply was sent from.
     var thread: String? = nil
     /// Aimed at the thread only: opened from its label, with no message
     /// replied to, so there is no reply bar and the send names no message.
@@ -144,8 +153,8 @@ struct ThreadTarget: Codable, Hashable, Sendable {
 
     var isQuote: Bool { quote == true }
 
-    /// The message whose thread view the reply was written in. A draft from
-    /// before quotes was always written in one, at `messageId`.
+    /// The message whose thread view the reply was written in: the thread's
+    /// root. A draft from before quotes was always written in one, at `messageId`.
     var threadMessage: String? { isQuote ? thread : messageId }
 
     var body: [String: JSONValue] {
@@ -254,6 +263,11 @@ struct ConciergeSessionInfo: Codable, Sendable {
     var unread: Int
 }
 
+/// `GET /chat/sessions/:id`, the one field read from it.
+struct SessionReadMark: Decodable, Sendable {
+    var lastSeenActivityAt: String?
+}
+
 /// `POST /chat/sessions/:id/turns`.
 struct CreatedTurn: Codable, Sendable {
     var turnId: String?
@@ -319,6 +333,41 @@ struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
         try container.encodeIfPresent(unread, forKey: .unread)
         try container.encodeIfPresent(activity?.json, forKey: .activity)
     }
+}
+
+/// What deleting a topic chat would move to the main chat, from
+/// `GET /concierge/chats/:chatId/follows-and-tasks`: its follows and its open
+/// tasks. A missing list reads as empty.
+struct ConciergeChatWork: Codable, Hashable, Sendable {
+    struct Follow: Codable, Hashable, Sendable {
+        var source: String
+        /// The source's name, as the connectors list shows it.
+        var label: String
+        var target: String
+    }
+
+    struct OpenTask: Codable, Hashable, Sendable {
+        var id: String
+        var title: String
+    }
+
+    var follows: [Follow]
+    var openTasks: [OpenTask]
+
+    private enum CodingKeys: String, CodingKey { case follows, openTasks }
+
+    init(follows: [Follow] = [], openTasks: [OpenTask] = []) {
+        self.follows = follows
+        self.openTasks = openTasks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        follows = try container.decodeIfPresent([Follow].self, forKey: .follows) ?? []
+        openTasks = try container.decodeIfPresent([OpenTask].self, forKey: .openTasks) ?? []
+    }
+
+    var isEmpty: Bool { follows.isEmpty && openTasks.isEmpty }
 }
 
 /// What the Concierge is doing in one of its chats, as the server works it
@@ -412,7 +461,8 @@ enum TaskState: String, Codable, Sendable, CaseIterable {
     case next, doing, watching, needsUser = "needs_user", done, dropped
 }
 
-/// One row of the Concierge's own todo list (`GET /concierge/tasks`). Times are epoch ms.
+/// One task of the Concierge's, as a task row of `GET /chats/:chatId/tasks`
+/// carries it. Times are epoch ms.
 struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     struct LinkedChat: Codable, Hashable, Sendable {
         var id: String
@@ -435,8 +485,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var completedAt: Double?
     var archivedAt: Double?
     var notSynced: Bool?
-    /// The first message of the task's chat thread in its Concierge chat.
-    var threadRoot: String?
     /// How the task stands, derived by the server: `needs_you`, `active`,
     /// `later` or `ended`.
     var status: String?
@@ -453,11 +501,11 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, state, summary, waitingOn, dueAt, rank, chat, conciergeChat, sourceMessageId
-        case createdAt, updatedAt, completedAt, archivedAt, notSynced, threadRoot, status, endReason, openWait
+        case createdAt, updatedAt, completedAt, archivedAt, notSynced, status, endReason, openWait
         case waitingSince, laterAt
     }
 
-    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, threadRoot: String? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
+    init(id: String, title: String, state: TaskState, summary: String? = nil, waitingOn: String? = nil, dueAt: Double? = nil, rank: Double? = nil, chat: LinkedChat? = nil, conciergeChat: ConciergeChat? = nil, sourceMessageId: String? = nil, createdAt: Double, updatedAt: Double, completedAt: Double? = nil, archivedAt: Double? = nil, notSynced: Bool? = nil, status: String? = nil, endReason: String? = nil, openWait: JSONValue? = nil) {
         self.id = id
         self.title = title
         self.state = state
@@ -473,7 +521,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         self.completedAt = completedAt
         self.archivedAt = archivedAt
         self.notSynced = notSynced
-        self.threadRoot = threadRoot
         self.status = status
         self.endReason = endReason
         self.openWait = openWait
@@ -505,7 +552,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         completedAt = try c.decodeIfPresent(Double.self, forKey: .completedAt)
         archivedAt = try c.decodeIfPresent(Double.self, forKey: .archivedAt)
         notSynced = try c.decodeIfPresent(Bool.self, forKey: .notSynced)
-        threadRoot = try c.decodeIfPresent(String.self, forKey: .threadRoot)
         status = try c.decodeIfPresent(String.self, forKey: .status)
         endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
         // A shape this build cannot read drops only the wait, never the task.
@@ -513,20 +559,6 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
         waitingSince = try? c.decodeIfPresent(Double.self, forKey: .waitingSince)
         laterAt = try? c.decodeIfPresent(Double.self, forKey: .laterAt)
     }
-}
-
-extension ConciergeTask {
-    /// The id of the card or approval the task waits on: the card it shows
-    /// takes an answer only while this names it.
-    var waitId: String? { openWait?["id"]?.string }
-}
-
-struct ConciergeTasksResponse: Codable, Sendable {
-    var tasks: [ConciergeTask]
-}
-
-struct TaskUpsertEvent: Codable, Sendable {
-    var task: ConciergeTask
 }
 
 // MARK: - Approvals
@@ -766,11 +798,11 @@ enum RomeDate {
 
 /// Who is signed in, as `GET /auth/me` names them, read the way the web
 /// dashboard's profile menu reads it: the guardian's display name, else
-/// "Guardian"; a visitor's email; the Rome Cloud picture when there is one.
+/// "Guardian"; a dashboard admin's email; the Rome Cloud picture when there is one.
 struct AccountIdentity: Equatable, Sendable {
     let name: String
     let avatarURL: URL?
-    /// The instance's guardian, not an allow-listed visitor.
+    /// The instance's guardian, not a dashboard admin.
     let isGuardian: Bool
 
     init(name: String, avatarURL: URL? = nil, isGuardian: Bool = true) {
@@ -807,4 +839,67 @@ struct ChatShareLink: Codable, Identifiable, Hashable, Sendable {
     var createdAt: String?
 
     var date: Date? { createdAt.flatMap(RomeDate.parse) }
+}
+
+// MARK: - Personal data
+
+/// The answer of `POST /personal-data/ingest`.
+struct PersonalDataIngestReply: Codable, Equatable, Sendable {
+    var batchId: String?
+    /// `ok` or `partial`.
+    var status: String?
+    var inserted: Int?
+    var updated: Int?
+    var unchanged: Int?
+    var deleted: Int?
+    var rejected: [Rejected]?
+    var receivedAt: String?
+    /// The types whose snapshot this batch committed. Absent from an older
+    /// Rome, which commits none.
+    var committed: [String]? = nil
+
+    struct Rejected: Codable, Equatable, Sendable {
+        /// Upserts first, then deletes after the last upsert.
+        var index: Int?
+        var key: String?
+        /// `unknown_type`, `bad_unit`, `bad_range`, `type_cap`, `too_large`, `bad_item`.
+        var code: String?
+    }
+}
+
+/// One source in `GET /personal-data/sources`: what the Rome holds from one device.
+struct PersonalDataCatalogSource: Codable, Equatable, Sendable {
+    var source: String
+    var title: String?
+    var origin: Origin?
+    /// `active`, `paused` or `off`.
+    var state: String?
+    var firstSyncAt: String?
+    var lastSyncAt: String?
+    var lastResult: String?
+    var types: [CatalogType]?
+
+    struct Origin: Codable, Equatable, Sendable {
+        var id: String?
+        var name: String?
+        var platform: String?
+    }
+
+    struct CatalogType: Codable, Equatable, Sendable {
+        var type: String
+        var shape: String?
+        var pointCount: Int?
+        var earliest: String?
+        var latest: String?
+        var syncedThrough: String?
+    }
+}
+
+struct PersonalDataCatalog: Codable, Equatable, Sendable {
+    var sources: [PersonalDataCatalogSource]?
+}
+
+/// The answer of `DELETE /personal-data/sources/:source/origins/:origin`.
+struct PersonalDataDeleteReply: Codable, Equatable, Sendable {
+    var deletedPoints: Int?
 }

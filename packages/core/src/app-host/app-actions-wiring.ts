@@ -13,6 +13,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import {
+  type ArtifactRef,
   type CatalogEvent,
   isResolvedApp,
   type ResolvedApp,
@@ -57,14 +58,6 @@ export function assertNoAppActionLoadFailures(
   throw new Error(
     `Failed to load app actions in ${processName}: ${formatAppActionLoadFailures(failures)}`,
   );
-}
-
-export function createNoopChannelMessageHook(): ChannelMessageHook {
-  return {
-    async register() {},
-    async addChannels() {},
-    unregister() {},
-  };
 }
 
 export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared & {
@@ -322,18 +315,14 @@ export function createAppActionsSubscriber(
 
 const hookLog = createLogger("channel-message-hook-loader");
 
-export async function createChannelMessageHookFromCatalog(
-  catalog: AppCatalog,
+/** Import one app's `channel-message` hook and create it with `deps`. Throws
+ *  when the module exports no `createHook`. */
+export async function createChannelMessageHook(
+  artifact: Pick<ArtifactRef, "absolutePath" | "ownerId" | "publicName">,
   deps: ChannelMessageHookDeps,
   log: Pick<Logger, "warn"> = hookLog,
-): Promise<ChannelMessageHook | null> {
-  const hooks = catalog.listArtifacts("hook");
-  const hookRef = hooks.find((artifact) => artifact.publicName === "channel-message");
-  if (!hookRef) {
-    return null;
-  }
-
-  const entryPath = await resolveModuleEntryPath(hookRef.absolutePath);
+): Promise<ChannelMessageHook> {
+  const entryPath = await resolveModuleEntryPath(artifact.absolutePath);
   const module = await importModuleWithCacheBuster(entryPath);
 
   if (typeof module.createHook === "function") {
@@ -346,51 +335,13 @@ export async function createChannelMessageHookFromCatalog(
     if (typeof (hook as { registerConnection?: unknown }).registerConnection === "function") {
       log.warn(
         "channel-message hook defines the removed registerConnection; subscribe through deps.channels in register()",
-        { owner: hookRef.ownerId },
+        { owner: artifact.ownerId },
       );
     }
     return hook;
   }
 
   throw new Error(
-    `Hook "${hookRef.publicName}" must export createHook(deps) from ${hookRef.absolutePath}`,
+    `Hook "${artifact.publicName}" must export createHook(deps) from ${artifact.absolutePath}`,
   );
-}
-
-/**
- * Rebuilds the live channel-message hook from the catalog — the app-keys
- * refresh path. The hook is instantiated once at boot and retained by
- * subscription closures, so recreating it is the only way a module-scope env
- * capture in its module graph follows a key change. The swap is
- * double-dispatch-safe: the old instance detaches before the new one
- * registers, and a hook without `unregister()` is left in place (stale but
- * single) rather than doubled. If the fresh instance fails to register, the
- * previous one is re-registered so inbound messages keep flowing; the error
- * propagates for the caller to report.
- */
-export function createChannelMessageHookReloader(options: {
-  catalog: AppCatalog;
-  deps: ChannelMessageHookDeps;
-  getCurrent: () => ChannelMessageHook;
-  setCurrent: (hook: ChannelMessageHook) => void;
-  onSkip?: (reason: string) => void;
-}): () => Promise<void> {
-  return async () => {
-    const previous = options.getCurrent();
-    if (typeof previous.unregister !== "function") {
-      options.onSkip?.("channel-message hook has no unregister(); keeping the current instance");
-      return;
-    }
-    const reloaded = await createChannelMessageHookFromCatalog(options.catalog, options.deps);
-    if (!reloaded) return;
-    previous.unregister();
-    options.setCurrent(reloaded);
-    try {
-      await reloaded.register();
-    } catch (err) {
-      options.setCurrent(previous);
-      await previous.register();
-      throw err;
-    }
-  };
 }

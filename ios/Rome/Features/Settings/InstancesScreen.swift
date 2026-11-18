@@ -314,13 +314,13 @@ struct VisitorBadge: View {
     var fill = Palette.fill
 
     var body: some View {
-        Text("Visitor")
+        Text("Admin")
             .romeFont(11, .semibold)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(fill, in: Capsule())
-            .accessibilityLabel(Text("Visitor"))
+            .accessibilityLabel(Text("Admin"))
     }
 }
 

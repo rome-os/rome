@@ -145,7 +145,7 @@ export function approvalCard(
     | { kind?: unknown; title?: unknown; summary?: unknown }
     | undefined;
   const title =
-    preview?.kind === "generic" &&
+    (preview?.kind === "generic" || preview?.kind === "secret_access") &&
     typeof preview.title === "string" &&
     typeof preview.summary === "string"
       ? preview.title
@@ -328,6 +328,25 @@ export async function settledCard(
   // The newest card asked under that id: a later turn can ask again under it.
   const question = asked?.questions.filter((each) => each.id === item.id).at(-1);
   return question ? questionCard(question, row, sources.waitExpiry) : null;
+}
+
+/**
+ * What the question or approval an `ask` card shows says, in one line: the
+ * question, or the approval's title. Null when the chat asked no such thing,
+ * or it has no words.
+ */
+export async function taskCardLine(
+  sources: TaskCardSources,
+  chatId: string,
+  waitedOn: TaskChatWaitedOn | undefined,
+): Promise<string | null> {
+  if (!waitedOn) return null;
+  const card = await settledCard(sources, chatId, waitedOn).catch(() => null);
+  if (!card) return null;
+  if (card.kind === "approval") return card.title || null;
+  const props = (card.render?.props ?? {}) as { questions?: { question?: unknown }[] };
+  const question = props.questions?.[0]?.question;
+  return typeof question === "string" && question.trim() ? question : null;
 }
 
 /**

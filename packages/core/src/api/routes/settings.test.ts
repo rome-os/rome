@@ -314,7 +314,7 @@ describe("Settings API", () => {
       });
     }
 
-    // An allow-listed dashboard visitor also reaches `phase: "ready"`, so the
+    // A dashboard admin also reaches `phase: "ready"`, so the
     // SPA posts its browser zone too and the edge forwards it. The zone belongs
     // to the guardian, so the route refuses anyone without a guardian session.
     it("refuses a caller with no guardian session", async () => {

@@ -67,7 +67,7 @@ describe("AppInstallConfirm", () => {
     mockListingFetch(listingPayload({ iconUrl: "https://cdn.example/icons/customer-service.png" }));
     const { container } = renderConfirm();
 
-    await screen.findByText("Install this app?");
+    await screen.findByText("Install Customer Service?");
     const icon = container.querySelector("img");
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("src")).toBe("https://cdn.example/icons/customer-service.png");
@@ -77,7 +77,7 @@ describe("AppInstallConfirm", () => {
     mockListingFetch(listingPayload({ iconUrl: "/icons/customer-service.png" }));
     const { container } = renderConfirm();
 
-    await screen.findByText("Install this app?");
+    await screen.findByText("Install Customer Service?");
     expect(container.querySelector("img")?.getAttribute("src")).toBe(
       "https://store.example/icons/customer-service.png",
     );
@@ -87,7 +87,7 @@ describe("AppInstallConfirm", () => {
     mockListingFetch(listingPayload());
     const { container } = renderConfirm();
 
-    await screen.findByText("Install this app?");
+    await screen.findByText("Install Customer Service?");
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("C")).toBeTruthy();
   });

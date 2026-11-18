@@ -26,6 +26,16 @@ export function isElectronShell(): boolean {
   return typeof window !== "undefined" && window.rome !== undefined;
 }
 
+/**
+ * Whether the page may use the microphone where it runs: always in a browser,
+ * and in the Mac app only when the app says it gives the microphone to the
+ * dashboard. An older app does not.
+ */
+export function shellAllowsMicrophone(): boolean {
+  if (!isElectronShell()) return true;
+  return (window.rome as { microphone?: unknown }).microphone === true;
+}
+
 /** This computer as a device of the signed-in account, as the Mac app reports it. */
 export type DesktopDeviceStatus =
   | { state: "off" }

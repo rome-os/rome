@@ -79,6 +79,30 @@ echo "restored $(cat "$S/created-at")"
 `;
 
 /**
+ * Puts the snapshot's Concierge memory back while the backend runs, so a
+ * scenario never reads what an earlier one saved. Only the memory files
+ * change: a new chat's session reads them when it opens.
+ */
+const RESTORE_MEMORY_SCRIPT = String.raw`
+set -eu
+S="${SNAPSHOTS}/$NAME/default/memory"
+[ -d "$S" ] || { echo "no memory in snapshot $NAME" >&2; exit 3; }
+rm -rf "${PROFILE}/memory.tmp" && cp -a "$S" "${PROFILE}/memory.tmp"
+rm -rf "${PROFILE}/memory" && mv "${PROFILE}/memory.tmp" "${PROFILE}/memory"
+`;
+
+/**
+ * The snapshot's memory about the owner, as the judge reads it: every note
+ * but the folder guides and templates.
+ */
+const MEMORY_FACTS_SCRIPT = String.raw`
+set -eu
+cd "${SNAPSHOTS}/$NAME/default/memory"
+find . -name '*.md' -not -path './.git/*' -not -name README.md -not -name TEMPLATE.md | sort |
+  while read -r f; do printf "### %s\n" "$f"; cat "$f"; printf '\n'; done
+`;
+
+/**
  * Reads the stack's database inside its container, read-only, with the
  * backend's own SQLite driver. Each query runs with its parameters and
  * returns its rows.
@@ -184,6 +208,34 @@ export class Stack {
 
   restore(name: string): Promise<string> {
     return this.withBackendStopped(RESTORE_SCRIPT, name);
+  }
+
+  /** Puts back the snapshot's Concierge memory, with the backend running. */
+  restoreMemory(name: string): void {
+    checkSnapshotName(name);
+    run("docker", [
+      "exec",
+      "-e",
+      `NAME=${name}`,
+      this.options.container,
+      "bash",
+      "-c",
+      RESTORE_MEMORY_SCRIPT,
+    ]);
+  }
+
+  /** The snapshot's memory notes, joined, for the judge. */
+  memoryFacts(name: string): string {
+    checkSnapshotName(name);
+    return run("docker", [
+      "exec",
+      "-e",
+      `NAME=${name}`,
+      this.options.container,
+      "bash",
+      "-c",
+      MEMORY_FACTS_SCRIPT,
+    ]).trim();
   }
 
   /** Waits for `/api/health` to answer ok. */

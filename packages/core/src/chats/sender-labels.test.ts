@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { Account } from "@rome-os/app-runtime";
 import type { Person } from "../db/repositories/people.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
-import { SenderLabels, whoSaid } from "./sender-labels.js";
+import { SenderLabels, whoIs, whoSaid } from "./sender-labels.js";
 
 const at = new Date("2026-11-14T03:00:00.000Z");
 const ana: Account = { platform: "discord", id: "ana" };
@@ -86,5 +86,20 @@ describe("SenderLabels", () => {
       },
     ]);
     expect(asked.map((account) => account.id).sort()).toEqual(["ana", "bob"]);
+  });
+});
+
+describe("whoIs", () => {
+  it("answers the person, the delegate link and the label together", () => {
+    expect(whoIs(ana, ANA)).toEqual({
+      person: { id: "p-ana", name: "Ana Lopez", bondLevel: "inner-circle" },
+      delegate: false,
+      label: "Ana Lopez, inner circle",
+    });
+    expect(whoIs(bot, ANA)).toMatchObject({
+      delegate: true,
+      label: "agent acting for Ana Lopez, inner circle",
+    });
+    expect(whoIs(ana, null)).toEqual({ person: null, delegate: false, label: "not linked" });
   });
 });

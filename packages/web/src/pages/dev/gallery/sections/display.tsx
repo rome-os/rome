@@ -47,6 +47,7 @@ import { Markdown } from "@rome-os/ui/markdown";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProgressiveBlur } from "@/components/ui/progressive-blur";
 import {
   Table,
   TableBody,
@@ -112,6 +113,33 @@ export function DisplaySection() {
       title="Display"
       description="Containers and read-only surfaces — panels, chips, callouts, tables and the pieces that carry status."
     >
+      <Component id="progressive-blur" name="ProgressiveBlur" source="@rome-os/ui/progressive-blur">
+        <Specimen
+          label="Direction and strength"
+          note="The blur grows toward the named edge. Coverage follows the frame; the tint reads the active theme."
+        >
+          <Row>
+            {(["top", "bottom", "left", "right"] as const).map((direction) => (
+              <Item key={direction} label={direction}>
+                <div className="relative isolate h-40 w-56 overflow-hidden rounded-12 border border-border bg-background">
+                  <div className="space-y-2 p-3 text-ui">
+                    <p>Morning briefing</p>
+                    <p className="text-primary">Three tasks need a review.</p>
+                    <p>The build passed its checks.</p>
+                    <p className="text-muted-foreground">The next update arrives at noon.</p>
+                    <p>Everything else is up to date.</p>
+                  </div>
+                  <ProgressiveBlur
+                    direction={direction}
+                    maxBlur={16}
+                    tint="color-mix(in srgb, var(--background) 60%, transparent)"
+                  />
+                </div>
+              </Item>
+            ))}
+          </Row>
+        </Specimen>
+      </Component>
       <Component id="card" name="Card" source="@rome-os/ui/card">
         {/* On `background`, because that is what a dashboard panel sits on —
             inside the specimen's own `surface` fill the card's fill would be

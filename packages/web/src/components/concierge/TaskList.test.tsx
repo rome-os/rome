@@ -7,6 +7,7 @@ import { type TaskListParts, groupTaskList, pageTaskList } from "@rome/api-types
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
+import { keyboardFocus } from "@/test/keyboard-focus";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { onConciergeJump } from "./concierge-jump";
@@ -297,9 +298,7 @@ describe("TaskList", () => {
       expect(button.textContent).toBe("");
       expect(button.querySelector("svg")).toBeTruthy();
     }
-    fireEvent.focus(
-      within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }),
-    );
+    keyboardFocus(within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }));
     // Its tooltip names it; the row says it nowhere else.
     expect((await screen.findAllByText("Stop")).length).toBeGreaterThan(0);
   });
@@ -311,7 +310,7 @@ describe("TaskList", () => {
     expect(within(rowOf("Plan a trip")).getByText("Not started · Created 3 days ago")).toBeTruthy();
     // A scheduled one keeps its schedule line.
     expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
-    fireEvent.focus(screen.getByText("Plan a trip"));
+    keyboardFocus(screen.getByText("Plan a trip"));
     expect((await screen.findAllByText(/^Created /)).length).toBeGreaterThan(0);
   });
 
@@ -344,13 +343,15 @@ describe("TaskList", () => {
     stop();
   });
 
-  it("jumps to the card's message on Respond, pending until it lands", async () => {
+  it("jumps to the card's message and its thread on Respond, pending until it lands", async () => {
     let land!: (landed: boolean) => void;
     const jumps: string[] = [];
+    const focuses: boolean[] = [];
     const stop = onConciergeJump(
-      (id) =>
+      (id, focusThread) =>
         new Promise((resolve) => {
           jumps.push(id);
+          focuses.push(focusThread);
           land = resolve;
         }),
     );
@@ -358,6 +359,8 @@ describe("TaskList", () => {
     await screen.findByRole("region", { name: "Needs you" });
     fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
     expect(jumps).toEqual(["card-message"]);
+    // The card is in a chat thread, which the chat focuses.
+    expect(focuses).toEqual([true]);
     expect(within(rowOf("Pick a hotel")).getByText("Opening…")).toBeTruthy();
     // Pending: both buttons stay shown and take no other press.
     const row = rowOf("Pick a hotel");

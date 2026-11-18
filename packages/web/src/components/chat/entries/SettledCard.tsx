@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { secretNamesText } from "@/components/chat/approval/secret-names";
 
 /** An answer short enough to repeat on a folded card. */
 const SHORT_ANSWER = 24;
@@ -51,6 +52,26 @@ export function approvalOutcome(
   return t("concierge.ask.approved");
 }
 
+/**
+ * How a decided secret-access request reads folded: that the secret is allowed
+ * for how long, or rejected. A turn-down by Rome and a failed run read as any
+ * approval's do.
+ */
+export function secretAccessOutcome(
+  t: TFunction<"chat">,
+  preview: { name: string; names?: string[]; ttlMinutes: number },
+  status: string,
+  resolvedBy: string | null | undefined,
+): string {
+  if (resolvedBy?.startsWith("rome:") || status === "failed") {
+    return approvalOutcome(t, status, resolvedBy);
+  }
+  const name = secretNamesText(t, preview);
+  return status === "rejected"
+    ? t("approvals.secretAccess.rejected", { name })
+    : t("approvals.secretAccess.allowed", { name, minutes: preview.ttlMinutes });
+}
+
 const CARD =
   "flex w-full min-w-0 flex-col rounded-12 border border-border bg-surface px-4 py-2 text-left";
 
@@ -80,7 +101,7 @@ export function SettledCard({
       {title ? (
         <span className="w-full truncate text-aux text-muted-foreground">{title}</span>
       ) : null}
-      <span className="flex items-center gap-1 text-ui text-foreground">
+      <span className="flex items-center gap-1 text-ui text-foreground wrap-anywhere">
         {outcome}
         {chevron ? <ChevronRight className="size-3.5 shrink-0" aria-hidden /> : null}
       </span>

@@ -1,9 +1,10 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ChatLink } from "./ChatLink";
+import { OutputLinksContext } from "./outputs/chat-outputs";
 import ChatMarkdown from "./ChatMarkdown";
 import {
   WorkspaceStoreContext,
@@ -45,6 +46,86 @@ function renderInWorkspace(
     </MemoryRouter>,
   );
 }
+
+describe("ChatLink and the chat's outputs", () => {
+  const ASSET = "/api/assets/0123456789abcdef0123456789abcdef.zip";
+  function withOutputs(ui: React.ReactElement, outputs: string[]) {
+    const opened: string[] = [];
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const followed: unknown[] = [];
+    bus.on("projects:opened", (p) => followed.push(p));
+    renderInWorkspace(
+      <OutputLinksContext.Provider
+        value={{
+          open: async (path) => {
+            if (!outputs.includes(path)) return false;
+            opened.push(path);
+            return true;
+          },
+        }}
+      >
+        {ui}
+      </OutputLinksContext.Provider>,
+      { store, bus },
+    );
+    return { opened, followed, store };
+  }
+
+  it("opens a file the agent wrote in the Outputs tab, not the Projects panel", async () => {
+    const { opened, followed, store } = withOutputs(
+      <ChatLink href="/projects/default/notes.md">notes</ChatLink>,
+      ["/projects/default/notes.md"],
+    );
+    fireEvent.click(screen.getByText("notes"));
+    await waitFor(() => expect(opened).toEqual(["/projects/default/notes.md"]));
+    expect(followed).toEqual([]);
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
+  it("keeps following a folder or another file in the Projects panel", async () => {
+    const { opened, followed } = withOutputs(<ChatLink href="/projects/default">folder</ChatLink>, [
+      "/projects/default/notes.md",
+    ]);
+    fireEvent.click(screen.getByText("folder"));
+    await waitFor(() => expect(followed).toEqual([{ paths: ["/projects/default"], force: true }]));
+    expect(opened).toEqual([]);
+  });
+
+  it("opens a file the reply linked by its absolute path in the Outputs tab", async () => {
+    const path = "/home/rome/projects/demo/report.md";
+    const { opened } = withOutputs(<ChatLink href={path}>report</ChatLink>, [path]);
+    fireEvent.click(screen.getByText("report"));
+    await waitFor(() => expect(opened).toEqual([path]));
+  });
+
+  it("follows an absolute path that is none of the outputs as before", async () => {
+    function Where() {
+      return <span data-testid="where">{useLocation().pathname}</span>;
+    }
+    const { opened } = withOutputs(
+      <>
+        <ChatLink href="/home/rome/elsewhere/notes.md">notes</ChatLink>
+        <Where />
+      </>,
+      [],
+    );
+    fireEvent.click(screen.getByText("notes"));
+    await waitFor(() =>
+      expect(screen.getByTestId("where").textContent).toBe("/home/rome/elsewhere/notes.md"),
+    );
+    expect(opened).toEqual([]);
+  });
+
+  it("opens a shown file's chip in the Outputs tab instead of saving it", async () => {
+    const { opened } = withOutputs(<ChatLink href={ASSET}>bundle.zip</ChatLink>, [ASSET]);
+    const chip = screen.getByRole("link", { name: "bundle.zip" });
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    chip.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    await waitFor(() => expect(opened).toEqual([ASSET]));
+  });
+});
 
 describe("ChatLink", () => {
   it("opens the projects panel and follows the file for a /projects link", () => {
@@ -448,12 +529,54 @@ describe("ChatLink", () => {
     expect(screen.getByText("report.pdf").closest("a")?.getAttribute("href")).toBe(href);
   });
 
-  it("leaves a look-alike link to the router", () => {
+  it("opens a malformed asset link outside the app, so the chat stays", () => {
+    const href = "/api/assets/report.md";
+
     render(
       <MemoryRouter>
-        <ChatLink href="/api/assets/x.png">x</ChatLink>
+        <ChatLink href={href}>report.md</ChatLink>
       </MemoryRouter>,
     );
-    expect(screen.getByText("x").closest("a")?.hasAttribute("download")).toBe(false);
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    // The browser follows the server response; the SPA does not move.
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it("keeps a query on a malformed asset link, and still opens it outside the app", () => {
+    const href = "/api/assets/report.md?version=2";
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.md</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it("opens a same-origin absolute malformed asset link outside the app", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const href = "https://staging.romeos.cc/api/assets/report.md";
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.md</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("report.md").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.hasAttribute("download")).toBe(false);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(fireEvent.click(link)).toBe(true);
   });
 });

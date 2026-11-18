@@ -4,63 +4,76 @@ import type { ReplyToPart } from "@rome/api-types/chat";
 import { cn } from "@/lib/utils";
 import { useChatThreads } from "./chat-threads";
 import { useReplyDraft } from "./reply-draft";
-import { plainQuote } from "./reply-source";
+import { quoteLine } from "./reply-source";
+
+const FOCUS_RING =
+  "outline-1 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 /**
- * The quote a reply carries, inside the reply's bubble: a gray left edge, a
- * reply arrow, and the first two lines of what was quoted. A reply in a task's
- * chat thread opens the thread view, as does any inside the open view. Any
- * other jumps to the original when the loaded transcript holds it, and is
- * plain text otherwise (docs/domains/chats.md#chat-thread).
+ * What a click on a reply's quote does, and its accessible name:
+ * focus the chat on the reply's thread, held on the reply, while no thread is
+ * in focus. While one is, go to the original when the transcript shows it.
+ * Without either, the quote is plain.
  */
-export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
+function useQuoteTarget(part: ReplyToPart, hostId: string | undefined) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   const threads = useChatThreads();
-  // The thread view's own transcript has no threads provider: all of it is the task's.
-  const inTaskThread = threads
-    ? hostId !== undefined && threads.taskThreads.has(hostId)
-    : draft?.thread !== null && draft?.thread !== undefined;
-  const opensThread = draft?.threads === true && inTaskThread;
-  // The task the thread is, for the reply bar: from the timeline's threads,
-  // or the open view's own.
-  const threadOf = threads && hostId !== undefined ? threads.taskThreads.get(hostId) : undefined;
-  const threadTitle = threadOf ? threads?.titles.get(threadOf) : draft?.threadTitle;
-  const jumpable = opensThread || draft?.has(part.messageId) === true;
-  const body = (
+  const threadOf = threads && hostId !== undefined ? threads.roots.get(hostId) : undefined;
+  const opensThread = draft?.threads === true && draft.thread === null && threadOf !== undefined;
+  const threadTitle = threadOf ? threads?.titles.get(threadOf) : undefined;
+  if (!draft || !(opensThread || draft.has(part.messageId))) return null;
+  return {
+    label: t(opensThread ? "reply.openThread" : "reply.jump"),
+    onClick: () =>
+      opensThread
+        ? draft.openThread({ thread: hostId ?? part.messageId, title: threadTitle ?? "" })
+        : draft.jump(part.messageId),
+  };
+}
+
+/**
+ * The quote a reply carries when it does not sit under what it answers
+ * (docs/domains/chats.md#chat-thread): a small reply arrow and one muted line
+ * of the quoted message, at the top of the reply's bubble. A message from an
+ * automation names it first.
+ */
+export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
+  const { t } = useTranslation("chat");
+  const target = useQuoteTarget(part, hostId);
+  const className =
+    "mb-1 flex w-full max-w-72 items-center gap-1 text-left text-aux text-muted-foreground transition-colors";
+  const quoted = (
     <>
-      <span className="flex h-5 shrink-0 items-center" role="img" aria-label={t("reply.action")}>
-        <Reply className="size-3.5" aria-hidden />
-      </span>
-      <span className="min-w-0 text-ui">
+      <Reply aria-hidden className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
+      <span className="min-w-0 truncate">
         {part.author === "automated" ? (
-          <span className="block truncate text-aux">{part.name ?? t("senderAutomation")}</span>
+          <>
+            <span className="text-badge">{part.name ?? t("senderAutomation")}</span>
+            <span aria-hidden> · </span>
+          </>
         ) : null}
-        <span className="line-clamp-2 break-words">{plainQuote(part.text)}</span>
+        {quoteLine(part.text)}
       </span>
     </>
   );
-  const frame =
-    "mb-2 flex w-full gap-2 rounded-8 border-l-3 border-muted-foreground bg-muted px-2 py-1 text-left text-muted-foreground";
-  if (!draft || !jumpable) return <div className={frame}>{body}</div>;
+  if (!target) {
+    return (
+      <div data-reply-quote={part.messageId} className={className}>
+        {quoted}
+      </div>
+    );
+  }
   return (
     <button
       type="button"
-      aria-label={t(opensThread ? "reply.openThread" : "reply.jump")}
-      className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
-      onClick={() =>
-        opensThread
-          ? draft.openThread({
-              // The reply is in the task's thread; the original it quotes may
-              // be in none, as when the reply started the task. The view and
-              // what is sent from it follow the reply.
-              thread: hostId ?? part.messageId,
-              title: threadTitle ?? "",
-            })
-          : draft.jump(part.messageId)
-      }
+      data-reply-quote={part.messageId}
+      aria-label={target.label}
+      title={part.text}
+      className={cn(className, "cursor-pointer hover:text-foreground", FOCUS_RING)}
+      onClick={target.onClick}
     >
-      {body}
+      {quoted}
     </button>
   );
 }

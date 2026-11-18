@@ -79,6 +79,8 @@ describe("webchat channel", () => {
       text: "Draft the plan",
       attachments: [],
       timestamp: rows[0]!.createdAt,
+      // A message that replies to nothing is its own thread.
+      chatThread: "msg-guardian",
       thread: { kind: "dm", name: "Planner Session" },
       raw: rows[0],
     });

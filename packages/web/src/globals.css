@@ -139,6 +139,24 @@
   animation: rome-mascot-poke-blink 420ms ease-out;
 }
 
+/* A spoken character arriving in the message field (VoiceInputSpokenText). */
+@keyframes voice-input-char-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.voice-input-char-in {
+  animation: voice-input-char-in 280ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-input-char-in {
+    animation: none;
+  }
+}
+
 @keyframes rome-mascot-squash {
   0%,
   100% {
@@ -294,6 +312,16 @@
   }
 }
 
+[data-concierge-unread] {
+  --row-count-font-size: 0.6875rem;
+  --row-count-line-height: calc(16 / 11);
+  --row-count-px: 0.125rem;
+  --row-count-fg: color-mix(in oklab, var(--primary) 60%, var(--foreground));
+  font-size: var(--row-count-font-size);
+  line-height: var(--row-count-line-height);
+  color: var(--row-count-fg);
+}
+
 .rome-sidebar-icon {
   transform-origin: center;
   will-change: transform;
@@ -309,6 +337,26 @@
 
 .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="chat"] {
   transform: rotate(-8deg);
+}
+
+/* The sidebar's upgrade row: a light tint of the theme's success green, with
+   ink from the same hue taken most of the way to the text color, so it clears
+   AA on the tint in every theme and mode (themes-contrast.test.ts measures it). */
+.rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--success) 15%, transparent);
+  color: color-mix(in oklab, var(--success) 60%, var(--foreground));
+}
+
+.dark .rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--success) 22%, transparent);
+}
+
+.dark button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--success) 28%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -678,6 +726,34 @@
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
+    /* Equal insets around the icon keep both text columns at x=48. A link
+       subtracts its transparent border from the same content inset. */
+    --row-px: var(--row-px-md);
+    --row-link-px: calc(var(--row-px) - 1px);
+    --row-icon-gap: var(--row-px);
+    --row-text-offset: calc(var(--row-px) + var(--rome-size-16) + var(--row-icon-gap));
+    /* The gap between rows. */
+    --row-gap: 0.125rem;
+    /* Child rows clear the folder's guide while their text keeps the parent
+       column. The Tasks card also subtracts its padding and border. */
+    --row-child-ml: calc(var(--row-px) + var(--rome-space-3));
+    --row-child-pl: calc(var(--row-text-offset) - var(--row-child-ml) - 1px);
+    --row-load-ml: calc(var(--row-text-offset) - 1px);
+    --row-card-px: calc(var(--row-link-px) - var(--rome-space-1) - 1px);
+    --row-card-text-pl: calc(var(--row-text-offset) - var(--rome-space-1) - 2px);
+    --row-child-rename-ml: calc(var(--row-child-pl) - var(--rome-space-1));
+    --row-card-rename-ml: calc(var(--row-card-text-pl) - var(--rome-space-1));
+    /* The selected child's marker on the guide: 3px wide, inset from the row's
+       top and bottom, centred on the guide. */
+    --row-indicator-inset: var(--row-py-md);
+    --row-indicator-mr: 0.125rem;
+    /* The trailing glyph keeps the same inset as the leading icon. */
+    --row-trail-mr: var(--row-px-sm);
+    /* One knob for every sidebar row's height: 2.25rem (36px). A compact list
+       would set 2rem (32px) here. */
+    --row-h: var(--rome-size-36);
+    /* A Concierge chat's floating header, centred on the sidebar's 56px top bar. */
+    --control-header-pt: 0.375rem;
     /* A Concierge chat's floating header: the mascot's badge, the name tag
        under it, the status capsule under that, and the gaps around them. The
        messages start below it. */
@@ -979,54 +1055,62 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
-/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
-   it. The ring shows around the bubble. */
-[data-concierge-transcript] [data-timeline-anchor] {
-  transition:
-    background 300ms ease-out,
-    box-shadow 300ms ease-out;
-}
+/* A Concierge bubble's anchor is not as wide as the bubble: it takes up to 90%
+   of the column, where the bubble stops at its reading width, and a touch
+   device's details row sits in it. So the anchor draws nothing of its own, and
+   the tint alone would hide behind the bubble. The ring shows around the
+   bubble or card itself, the first thing in its box, so it is exactly as wide. */
 [data-concierge-transcript] [data-timeline-landed] {
+  background: none;
+}
+[data-concierge-transcript] [data-bubble-box] > :first-child {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease-out;
+}
+/* A bubble with a thread's stack under it is wide enough for the stack's
+   avatar, a few words of the newest message and the count, which sit inside
+   the bubble's width less 1rem of inset each side (ThreadStack.tsx). A bubble
+   with no thread keeps the width of its content. */
+[data-bubble-box]:has(> [data-thread-stack-slot]) > :first-child {
+  min-width: 14rem;
+}
+[data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
+  border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A status reaction grows in from 0.6, as a tapback does, and fades out
-   (status-reaction.tsx, MARK_FADE_MS). */
+/* A chat thread in focus hides what is outside it (ConciergeTranscript).
+   use-thread-focus.ts makes the change as a view transition, the old picture
+   fading into the new one. Every view transition of the dashboard takes 200ms. */
+[data-concierge-transcript] [data-thread-out] {
+  display: none;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+}
+/* A reaction grows in from 0.6, as a tapback does, and fades out
+   (reaction.tsx, MARK_FADE_MS). */
 @keyframes rome-mark-pop-in {
   from {
     opacity: 0;
     transform: scale(0.6);
   }
 }
-[data-status-reaction] {
+[data-reaction] {
   animation: rome-mark-pop-in 150ms ease-out;
   transition: opacity 150ms ease-in;
 }
-[data-status-reaction][data-leaving] {
+[data-reaction][data-leaving] {
   opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-status-reaction] {
+  [data-reaction] {
     animation: none;
     transition: none;
   }
 }
 
-/* The chat thread view fades in on open, each layer on its own
-   (ChatThreadView.tsx), and closes at once: a backdrop blur does not fade
-   out cleanly. 180ms is THREAD_FADE_MS in reply/thread-anchor.ts. */
-@keyframes rome-thread-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-[data-chat-thread-fade] {
-  animation: rome-thread-fade-in 180ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-chat-thread-fade] {
-    animation: none;
-  }
-}
 [data-chat-pending-card]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
   outline-offset: -1px;
