@@ -35,9 +35,9 @@ async function openChat(page: Page) {
 async function measure(page: Page) {
   return page.evaluate((composerSelector) => {
     const composer = document.querySelector(composerSelector)!.getBoundingClientRect();
-    // The phone header; from the md breakpoint up the sidebar replaces it and
-    // the chat starts at the top of the screen.
-    const header = document.querySelector("header[data-mobile-header]")!;
+    // A chat floats its own header over its messages on a phone; from the md
+    // breakpoint up it sits in the chat column, the sidebar beside it.
+    const header = document.querySelector("[data-concierge-header]")!;
     const headerRect = header.getBoundingClientRect();
     const headerShown = getComputedStyle(header).display !== "none";
     // Timeline anchors wrap only the person's turns. Their parent is the
