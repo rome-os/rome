@@ -22,10 +22,27 @@ describe("RunningCost", () => {
     expect(cost.next(0.4)).toBeCloseTo(0.3);
   });
 
-  it("keeps its place across a result with no total", () => {
+  it("prices a result with no total from its tokens, and the next one too", () => {
     const cost = new RunningCost(true);
-    cost.next(1);
+    cost.next(0.5);
     expect(cost.next(undefined)).toBeUndefined();
+    // The total now includes the turn priced from its tokens.
+    expect(cost.next(1)).toBeUndefined();
     expect(cost.next(1.5)).toBeCloseTo(0.5);
+  });
+
+  it("starts a resumed thread from its first total that isn't a zeroed placeholder", () => {
+    const cost = new RunningCost(false);
+    expect(cost.next(0)).toBeUndefined();
+    expect(cost.next(42)).toBeUndefined();
+    expect(cost.next(42.5)).toBeCloseTo(0.5);
+  });
+
+  it("does not take a zeroed result partway through as a restart", () => {
+    const cost = new RunningCost(true);
+    cost.next(2);
+    expect(cost.next(0)).toBeUndefined();
+    expect(cost.next(2.5)).toBeUndefined();
+    expect(cost.next(3)).toBeCloseTo(0.5);
   });
 });
