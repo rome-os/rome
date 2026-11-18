@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "96a6d056-e7bd-4d51-b815-d85d9a7e51f1",
+  "id": "de6597b6-5c2e-42cb-b73b-72e11002ae45",
   "prevId": "fa102b81-9bb1-4c8d-9b30-f77c0d3b2948",
   "tables": {
     "account_profiles": {
@@ -3375,6 +3375,20 @@
         },
         "snapshot_read_at": {
           "name": "snapshot_read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snapshot_seen_id": {
+          "name": "snapshot_seen_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snapshot_seen_read_at": {
+          "name": "snapshot_seen_read_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

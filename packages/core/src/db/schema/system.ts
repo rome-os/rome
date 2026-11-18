@@ -1599,6 +1599,10 @@ export const personalDataTypes = sqliteTable(
     snapshotStartAt: integer("snapshot_start_at"),
     snapshotEndAt: integer("snapshot_end_at"),
     snapshotReadAt: integer("snapshot_read_at"),
+    // The newest snapshot any batch has brought, committed or not, so a late
+    // batch of an older one changes nothing.
+    snapshotSeenId: text("snapshot_seen_id"),
+    snapshotSeenReadAt: integer("snapshot_seen_read_at"),
     pointCount: integer("point_count").notNull().default(0),
     updatedAt: integer("updated_at").notNull(),
   },

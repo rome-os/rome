@@ -3,9 +3,10 @@
 // snapshot did not send. Invented events, no real person's data.
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { personalDataPoints, personalDataTypes } from "../db/schema/system.js";
-import type { IngestEnvelope } from "./domain/ingest.js";
+import { type IngestEnvelope, MAX_POINTS_PER_TYPE } from "./domain/ingest.js";
 import { queryPersonalData } from "./read.js";
 import { PersonalDataRepository } from "./repository.js";
 import { APPLE_CALENDAR } from "./sources/apple-calendar.js";
@@ -257,7 +258,115 @@ describe("snapshots", () => {
       }),
     );
     expect(late.committed).toBeUndefined();
-    expect(keys()).toEqual(["events:new", "events:old"]);
+    // Its items are not written either.
+    expect(keys()).toEqual(["events:new"]);
+  });
+
+  it("ignores late batches of an older snapshot once a newer one committed", () => {
+    ingest(
+      batch("new", {
+        upserts: [event("a", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-new", readAt: NOW, window: WINDOW },
+      }),
+    );
+    const late = ingest(
+      batch("old", {
+        upserts: [
+          { ...event("a", TOMORROW, TOMORROW + HOUR), content: { id: "a", title: "Old title" } },
+          event("canceled", TOMORROW + 2 * HOUR, TOMORROW + 3 * HOUR),
+        ],
+        snapshot: { id: "snap-old", readAt: NOW - HOUR, window: WINDOW },
+      }),
+    );
+    expect(late).toMatchObject({ inserted: 0, updated: 0, unchanged: 2, deleted: 0 });
+    expect(late.committed).toBeUndefined();
+    expect(keys()).toEqual(["events:a"]);
+    const [row] = testDb.db.select().from(personalDataPoints).all();
+    expect(row).toMatchObject({ snapshotId: "snap-new" });
+    expect((row.metadata as { title?: string }).title).toBe("Event a");
+  });
+
+  it("keeps an event both of two overlapping runs sent, whichever batch comes last", () => {
+    // The newer run sends E, then a late batch of the older one sends it too.
+    ingest(
+      batch("new-1", {
+        upserts: [event("e", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-new", readAt: NOW },
+      }),
+    );
+    ingest(
+      batch("old-1", {
+        upserts: [event("e", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-old", readAt: NOW - HOUR, window: WINDOW },
+      }),
+    );
+    const done = ingest(
+      batch("new-2", { snapshot: { id: "snap-new", readAt: NOW, window: WINDOW } }),
+    );
+    expect(done).toMatchObject({ deleted: 0, committed: ["events"] });
+    expect(keys()).toEqual(["events:e"]);
+
+    // The other order: the older run's commit comes after the newer one began.
+    ingest(
+      batch("old-2", {
+        upserts: [event("f", TOMORROW + 2 * HOUR, TOMORROW + 3 * HOUR)],
+        snapshot: { id: "snap-older", readAt: NOW + HOUR },
+      }),
+    );
+    ingest(
+      batch("newer-1", {
+        upserts: [
+          event("e", TOMORROW, TOMORROW + HOUR),
+          event("f", TOMORROW + 2 * HOUR, TOMORROW + 3 * HOUR),
+        ],
+        snapshot: { id: "snap-newer", readAt: NOW + 2 * HOUR },
+      }),
+      NOW + 2 * HOUR,
+    );
+    const stale = ingest(
+      batch("old-3", { snapshot: { id: "snap-older", readAt: NOW + HOUR, window: WINDOW } }),
+      NOW + 2 * HOUR,
+    );
+    expect(stale.committed).toBeUndefined();
+    expect(keys()).toEqual(["events:e", "events:f"]);
+  });
+
+  it("orders two reads in one second by their milliseconds", () => {
+    ingest(
+      batch("s1", {
+        upserts: [event("a", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-1", readAt: NOW + 250, window: WINDOW },
+      }),
+    );
+    const second = ingest(
+      batch("s2", { snapshot: { id: "snap-2", readAt: NOW + 750, window: WINDOW } }),
+      NOW + 1000,
+    );
+    expect(second).toMatchObject({ deleted: 1, committed: ["events"] });
+    expect(keys()).toEqual([]);
+  });
+
+  it("replaces a calendar at the type cap", () => {
+    testDb.db.run(sql`
+      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${MAX_POINTS_PER_TYPE})
+      INSERT INTO personal_data_points
+        (source, origin, type, shape, start_at, end_at, tz, dedupe_key, content_hash, ingest_id, updated_at)
+      SELECT 'apple_calendar', ${PHONE}, 'events', 'entry', ${TOMORROW} + i, ${TOMORROW} + i + 1000,
+        'UTC', 'events:seed-' || i, 'seed', 0, ${NOW}
+      FROM n`);
+    const answer = ingest(
+      batch("s1", {
+        upserts: [event("new", TOMORROW, TOMORROW + HOUR)],
+        snapshot: { id: "snap-1", window: WINDOW },
+      }),
+    );
+    expect(answer).toMatchObject({
+      inserted: 1,
+      deleted: MAX_POINTS_PER_TYPE,
+      rejected: [],
+      committed: ["events"],
+    });
+    expect(keys()).toEqual(["events:new"]);
   });
 
   it("deletes only what lies inside the window, and keeps an edge event the snapshot sent", () => {
@@ -330,6 +439,22 @@ describe("snapshots", () => {
     const answer = list("2026-11-18", "2026-11-18");
     expect(records(answer)).toEqual([]);
     expect(answer.freshness.events).toMatchObject({ coversWindow: true });
+  });
+
+  it("ranks a phone that read its calendar again, unchanged, over a snapshot read before that", () => {
+    ingest(batch("s1", { snapshot: { id: "snap-1", window: WINDOW }, syncedThrough: NOW }));
+    ingest(
+      batch("other", {
+        origin: OLD_PHONE,
+        upserts: [event("meeting", TOMORROW + 10 * HOUR, TOMORROW + 11 * HOUR)],
+        snapshot: { id: "snap-other", readAt: NOW + HOUR, window: WINDOW },
+        syncedThrough: NOW + HOUR,
+      }),
+      NOW + HOUR,
+    );
+    // The first phone reads its empty calendar again and sends only its mark.
+    ingest(batch("m1", { syncedThrough: NOW + 2 * HOUR }), NOW + 2 * HOUR);
+    expect(records(list("2026-11-18", "2026-11-18", NOW + 2 * HOUR))).toEqual([]);
   });
 
   it("reads a fresh snapshot whose first event is inside the window over an older phone", () => {

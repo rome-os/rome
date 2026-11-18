@@ -160,6 +160,16 @@ export class PersonalDataRepository {
       let rangeStart: number | undefined;
       let rangeEnd: number | undefined;
 
+      // A snapshot older than one this origin already sent, for a type,
+      // changes nothing there: its items are not written or stamped, and
+      // its window does not commit. Runs can overlap when the device starts
+      // one before the last finished uploading.
+      const fence = fenceSnapshot(tx, source, origin, envelope, receivedAt);
+      for (const type of fence.seen.keys()) touched.add(type);
+      // Room a snapshot may take past the type cap: the rows its commit may
+      // delete, so a calendar at the cap can still be replaced.
+      const room = new Map<string, number>();
+
       envelope.upserts.forEach((raw, index) => {
         const checked = checkUpsert(source, raw, receivedAt);
         if (!checked.ok) {
@@ -173,16 +183,25 @@ export class PersonalDataRepository {
           return;
         }
         const item = checked.item;
-        const stamp =
-          envelope.snapshot && typeSpec(source, item.type)?.syncedBackDays !== undefined
-            ? envelope.snapshot.id
-            : null;
+        if (fence.superseded.has(item.type)) {
+          counts.unchanged += 1;
+          return;
+        }
+        const spec = typeSpec(source, item.type);
+        const snapshot = spec?.syncedBackDays !== undefined ? envelope.snapshot : undefined;
+        let extra = 0;
+        if (snapshot && spec?.syncedBackDays !== undefined) {
+          extra =
+            room.get(item.type) ??
+            replaceable(tx, source.source, origin, item.type, snapshot, spec.syncedBackDays);
+          room.set(item.type, extra);
+        }
         const outcome = writePoint(
           tx,
           source.source,
           origin,
           item,
-          { ingestId, snapshotId: stamp },
+          { ingestId, snapshotId: snapshot?.id ?? null, room: extra },
           receivedAt,
           stored,
         );
@@ -232,6 +251,7 @@ export class PersonalDataRepository {
         const spec = typeSpec(source, window.type);
         // A type with a refused item is not whole: its last snapshot stays.
         if (!spec || !envelope.snapshot || refusedTypes.has(window.type)) continue;
+        if (fence.superseded.has(window.type)) continue;
         const accepted = snapshotWindow(spec, envelope.snapshot, window, receivedAt);
         if (!accepted) continue;
         const outcome = commitSnapshot(tx, source.source, origin, window.type, accepted);
@@ -261,6 +281,7 @@ export class PersonalDataRepository {
           syncedThrough.get(type),
           receivedAt,
           windows.get(type),
+          fence.seen.get(type),
         );
       }
 
@@ -361,7 +382,8 @@ export class PersonalDataRepository {
     windowEnd = windowStart,
   ): OriginReading | undefined {
     // A snapshot that holds the whole window wins whatever else is stored,
-    // an empty one too, and the one the device read last among those.
+    // an empty one too, and the one the device read last among those, by
+    // its snapshot or a later mark.
     const holds = sql`coalesce(${personalDataTypes.snapshotStartAt} <= ${windowStart} and ${personalDataTypes.snapshotEndAt} >= ${windowEnd}, 0)`;
     return this.db
       .select({
@@ -388,7 +410,8 @@ export class PersonalDataRepository {
       )
       .orderBy(
         sql`${holds} desc`,
-        sql`case when ${holds} then ${personalDataTypes.snapshotReadAt} else 0 end desc`,
+        // A read that found nothing new moves only synced-through: it counts too.
+        sql`case when ${holds} then max(coalesce(${personalDataTypes.snapshotReadAt}, 0), coalesce(${personalDataTypes.syncedThroughAt}, 0)) else 0 end desc`,
         sql`coalesce(${personalDataTypes.earliestAt} <= ${windowStart}, 0) desc`,
         sql`coalesce(${personalDataTypes.syncedThroughAt}, 0) desc`,
         sql`coalesce(${personalDataTypes.latestAt}, 0) desc`,
@@ -680,7 +703,7 @@ function writePoint(
   source: string,
   origin: string,
   item: PointInput,
-  by: { ingestId: number; snapshotId: string | null },
+  by: { ingestId: number; snapshotId: string | null; room?: number },
   now: number,
   stored: Map<string, number>,
 ): "inserted" | "updated" | "unchanged" | "type_cap" {
@@ -746,7 +769,7 @@ function writePoint(
         )
         .get()?.n ??
       0;
-    if (held >= MAX_POINTS_PER_TYPE) {
+    if (held >= MAX_POINTS_PER_TYPE + (by.room ?? 0)) {
       stored.set(item.type, held);
       return "type_cap";
     }
@@ -766,6 +789,7 @@ function refreshType(
   syncedThroughAt: number | undefined,
   now: number,
   snapshot?: SnapshotWindow,
+  seen?: SnapshotSeen,
 ): void {
   const spec = typeSpec(source, type);
   if (!spec) return;
@@ -799,6 +823,7 @@ function refreshType(
           snapshotReadAt: snapshot.readAt,
         }
       : {}),
+    ...(seen ? { snapshotSeenId: seen.id, snapshotSeenReadAt: seen.readAt } : {}),
     updatedAt: now,
   };
   tx.insert(personalDataTypes)
@@ -869,4 +894,95 @@ function commitSnapshot(
     .returning({ id: personalDataPoints.id })
     .all();
   return { deleted: gone.length };
+}
+
+/** The newest snapshot a type has seen batches of. */
+interface SnapshotSeen {
+  id: string;
+  readAt: number;
+}
+
+/**
+ * For each snapshot type a batch carries items or a window of: superseded
+ * when an origin already sent a newer snapshot of it (or one read at the
+ * same time under another id), else the snapshot to keep as the newest seen.
+ */
+function fenceSnapshot(
+  tx: DrizzleTx,
+  source: SourceSpec,
+  origin: string,
+  envelope: IngestEnvelope,
+  receivedAt: number,
+): { superseded: Set<string>; seen: Map<string, SnapshotSeen> } {
+  const superseded = new Set<string>();
+  const seen = new Map<string, SnapshotSeen>();
+  const snapshot = envelope.snapshot;
+  if (!snapshot) return { superseded, seen };
+  const types = new Set<string>();
+  for (const raw of envelope.upserts) {
+    const type = typeOfItem(raw);
+    if (type && typeSpec(source, type)?.syncedBackDays !== undefined) types.add(type);
+  }
+  for (const window of snapshot.windows ?? []) {
+    if (typeSpec(source, window.type)?.syncedBackDays !== undefined) types.add(window.type);
+  }
+  const readAt = Date.parse(snapshot.readAt);
+  for (const type of types) {
+    // A read stamped ahead of Rome's clock would fence every later one.
+    if (readAt > receivedAt + MAX_CLOCK_AHEAD_MS) {
+      superseded.add(type);
+      continue;
+    }
+    const newest = tx
+      .select({
+        id: personalDataTypes.snapshotSeenId,
+        readAt: personalDataTypes.snapshotSeenReadAt,
+      })
+      .from(personalDataTypes)
+      .where(
+        and(
+          eq(personalDataTypes.source, source.source),
+          eq(personalDataTypes.origin, origin),
+          eq(personalDataTypes.type, type),
+        ),
+      )
+      .get();
+    const older =
+      newest?.readAt != null &&
+      (readAt < newest.readAt || (readAt === newest.readAt && newest.id !== snapshot.id));
+    if (older) superseded.add(type);
+    else seen.set(type, { id: snapshot.id, readAt });
+  }
+  return { superseded, seen };
+}
+
+/**
+ * How many of an origin's rows of a type a snapshot's commit may delete:
+ * the ones it has not stamped that end after the earliest a window it reads
+ * may start.
+ */
+function replaceable(
+  tx: DrizzleTx,
+  source: string,
+  origin: string,
+  type: string,
+  snapshot: { id: string; readAt: string },
+  backDays: number,
+): number {
+  const from = Date.parse(snapshot.readAt) - (backDays + 2) * 86_400_000;
+  return (
+    tx
+      .select({ n: count() })
+      .from(personalDataPoints)
+      .where(
+        and(
+          eq(personalDataPoints.source, source),
+          eq(personalDataPoints.origin, origin),
+          eq(personalDataPoints.type, type),
+          gt(personalDataPoints.endAt, from),
+          or(isNull(personalDataPoints.snapshotId), ne(personalDataPoints.snapshotId, snapshot.id)),
+        ),
+      )
+      .get()?.n ?? 0
+  );
 }
