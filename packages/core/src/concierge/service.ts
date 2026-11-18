@@ -580,6 +580,15 @@ export class ConciergeService {
     return chat ? ownerOf(chat) : null;
   }
 
+  /**
+   * Whether `chatId` is a topic chat of `owner`, archived or not: what its
+   * archive, unarchive or delete asks about.
+   */
+  async isTopicChatOf(chatId: string, owner: ConciergeOwner): Promise<boolean> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    return !!chat && isConciergeChat(chat) && !this.isMainChat(chat) && ownerOf(chat) === owner;
+  }
+
   /** A Concierge chat that is not archived, as a list shows it, or null. */
   async conciergeChat(chatId: string): Promise<ConciergeChatRef | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);

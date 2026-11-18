@@ -4687,6 +4687,59 @@ describe("Chat header archive of a Concierge topic chat", () => {
     );
   });
 
+  it("asks before unarchiving an archived topic chat that opens as an ordinary chat", async () => {
+    // An archived topic chat is in no active list, so the chat page opens it
+    // without the Concierge variant; the session itself says what it is.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: "2026-11-01T00:00:00.000Z",
+      isConciergeSession: true,
+    });
+    work.answer = {
+      follows: [],
+      openTasks: [],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "archived.unarchive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatUnarchiveTitle",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.unarchive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: false, follows: "moveBack" },
+        },
+      ]),
+    );
+    expect(workReads).toEqual(["/api/concierge/chats/topic-1/follows-and-tasks"]);
+  });
+
+  it("never treats the main chat as a topic chat, even read from its session", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Main chat",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      isConciergeSession: true,
+    });
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="concierge" conciergeMainChatId="concierge" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        { url: "/api/chat/sessions/concierge/archive", body: { archived: true } },
+      ]),
+    );
+    expect(workReads).toEqual([]);
+  });
+
   it("archives a chat that is not a topic chat without reading anything", async () => {
     const user = userEvent.setup();
     renderChat(<Chat sessionId="session-1" />);

@@ -634,6 +634,7 @@ export function Chat({
     forkable,
     isTaskChat,
     projectPath,
+    isConciergeSession,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -1388,7 +1389,10 @@ export function Chat({
   const topicArchive = useTopicChatArchive({
     chatId: mainSessionId ?? null,
     name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
-    topic: concierge && !isMainChat,
+    // An archived topic chat is in no active list, so it opens as an ordinary
+    // chat: the session itself says it is a topic chat.
+    topic:
+      !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession),
     onArchive: (stopWork) => void handleArchive(stopWork),
     onUnarchive: (moveBack) => void handleUnarchive(moveBack),
   });

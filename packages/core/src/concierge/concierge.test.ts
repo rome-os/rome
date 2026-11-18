@@ -5000,6 +5000,18 @@ describe("Concierge chats", () => {
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
   });
 
+  it("knows a topic chat of its owner whether it is archived or not, and never the main chat or another person's", async () => {
+    const s = setup({ startEvents: false });
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
+    // An archived topic chat is in no list, but its unarchive asks about it.
+    s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
+    expect(await s.service.conciergeChat(TOPIC_CHAT)).toBeNull();
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
+    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "visitor:acct-ann")).toBe(false);
+    expect(await s.service.isTopicChatOf(CONCIERGE_CHAT, "guardian")).toBe(false);
+    expect(await s.service.isTopicChatOf("gone", "guardian")).toBe(false);
+  });
+
   it("restoring an archived topic chat reads its rows as its own again, and moves its follows back only when asked", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");

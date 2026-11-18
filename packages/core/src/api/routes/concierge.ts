@@ -101,17 +101,18 @@ export function conciergeRoutes(
     return c.json({ chats } satisfies ConciergeChatsResponse);
   });
 
-  // What deleting one of the caller's topic chats moves to the main chat:
-  // its follows and open tasks. 404 for the main chat, another person's chat
-  // and without the Concierge service.
+  // What archiving or deleting one of the caller's topic chats moves to the
+  // main chat: its follows and open tasks, and, while it is archived, the
+  // follows its archive moved. An archived topic chat answers too, for its
+  // unarchive. 404 for the main chat, another person's chat and without the
+  // Concierge service.
   app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
     if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
     const chatId = c.req.param("chatId");
-    const chat = await concierge.conciergeChat(chatId);
-    if (!chat || chat.main || (await concierge.ownerOfChat(chatId)) !== owner) {
+    if (!(await concierge.isTopicChatOf(chatId, owner))) {
       return c.json({ error: "No such topic chat" }, 404);
     }
     const { follows, openTasks, movedFollows } = await concierge.followsAndTasksOf(chatId, owner);

@@ -255,22 +255,18 @@ describe("/concierge/chats", () => {
 describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
   let testDb: TestDb;
   const asked: [string, string][] = [];
-  const chats = new Map([
-    ["concierge", { id: "concierge", name: "Concierge", main: true }],
-    ["topic-1", { id: "topic-1", name: "Calendar", main: false }],
-    ["ann-topic", { id: "ann-topic", name: "Trips", main: false }],
-  ]);
-  const owners = new Map([
-    ["concierge", "guardian"],
+  // The topic chats and their owners, archived ones included: the service
+  // answers for those as for the others.
+  const topics = new Map([
     ["topic-1", "guardian"],
+    ["archived-topic", "guardian"],
     ["ann-topic", "visitor:acct-ann"],
   ]);
   const app = () =>
     mount(
       testDb,
       {
-        conciergeChat: async (id: string) => chats.get(id) ?? null,
-        ownerOfChat: async (id: string) => owners.get(id) ?? null,
+        isTopicChatOf: async (id: string, owner: string) => topics.get(id) === owner,
         followsAndTasksOf: async (id: string, owner: string) => {
           asked.push([id, owner]);
           return {
@@ -297,6 +293,15 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
       movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
     });
     expect(asked).toEqual([["topic-1", "guardian"]]);
+  });
+
+  it("answers for an archived topic chat, whose unarchive reads the follows its archive moved", async () => {
+    const res = await app().request("/concierge/chats/archived-topic/follows-and-tasks", guardian);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    });
+    expect(asked).toEqual([["archived-topic", "guardian"]]);
   });
 
   it("answers 404 for the main chat, another person's topic chat and a chat that is not there", async () => {
