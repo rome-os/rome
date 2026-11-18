@@ -199,7 +199,7 @@ export interface ChatMessagePage {
    * paging.
    */
   concierge?: {
-    /** The messages of the page but the unread replies of threads whose root is older. */
+    /** The main line and the replies of its threads: what says where the loaded history stands. The waiting replies and trace rows are not in it. */
     body: ChatMessage[];
     /** When the oldest main-line message of the page was said, in ms; null for an empty page. */
     oldestAt: number | null;
@@ -212,11 +212,13 @@ export interface ChatMessagePage {
 interface ConciergeWirePage {
   mainLine: { message: ChatMessage; thread: { replies: ChatMessage[] } | null }[];
   outside: { root: string; title: string | null; latestUnread: ChatMessage }[];
+  /** The trace rows of the turns on the page. */
+  traces?: ChatMessage[];
   nextCursor: string | null;
   layout?: unknown[] | null;
 }
 
-/** Reads a Concierge page into the messages the transcript keeps: the main line, the replies of each thread, and the one unread reply of each thread that waits outside it. */
+/** Reads a Concierge page into the messages the transcript keeps: the main line, the replies of each thread, the one unread reply of each thread that waits outside it, and the trace rows of their turns. */
 export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
   const body = wire.mainLine.flatMap(({ message, thread }) => [
     message,
@@ -224,7 +226,7 @@ export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
   ]);
   const times = wire.mainLine.map(({ message }) => Date.parse(message.createdAt));
   return {
-    messages: [...body, ...wire.outside.map((entry) => entry.latestUnread)],
+    messages: [...body, ...wire.outside.map((entry) => entry.latestUnread), ...(wire.traces ?? [])],
     nextCursor: wire.nextCursor,
     ...(wire.layout === undefined ? {} : { layout: wire.layout }),
     concierge: {

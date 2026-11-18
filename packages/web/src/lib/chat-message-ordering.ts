@@ -88,3 +88,33 @@ export function mergeLatestMessagePage(
     dropMessageIds: new Set([...history, ...(options.dropMessageIds ?? [])]),
   });
 }
+
+/**
+ * Replaces the loaded transcript with a page that read the whole of it again,
+ * as after a reconnect: a loaded message the page does not hold is gone from
+ * the server (a deletion), unless it is in `keepIds`, a row still on its way
+ * to the server, or newer than anything the page holds. The page's messages
+ * replace the ones loaded; `dropMessageIds` go whatever the page holds.
+ */
+export function replaceLoadedMessages(
+  currentMessages: ChatMessage[],
+  fetchedMessages: ChatMessage[],
+  options: { keepIds?: ReadonlySet<string>; dropMessageIds?: ReadonlySet<string> } = {},
+): ChatMessage[] {
+  if (fetchedMessages.length === 0) {
+    return mergeFetchedChatMessages(currentMessages, fetchedMessages, options);
+  }
+  const fetchedIds = new Set(fetchedMessages.map((message) => message.id));
+  const newestFetched = Math.max(...fetchedMessages.map(messageTimestamp));
+  const gone = currentMessages
+    .filter(
+      (message) =>
+        !fetchedIds.has(message.id) &&
+        !options.keepIds?.has(message.id) &&
+        messageTimestamp(message) <= newestFetched,
+    )
+    .map((message) => message.id);
+  return mergeFetchedChatMessages(currentMessages, fetchedMessages, {
+    dropMessageIds: new Set([...gone, ...(options.dropMessageIds ?? [])]),
+  });
+}

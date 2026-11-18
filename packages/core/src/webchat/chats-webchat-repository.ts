@@ -828,7 +828,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * reply never counts toward `limit`. Each carries the whole thread it
    * roots, so a reply never comes without its root. The newest page, the one
    * with no `before`, also names the threads with unread replies whose root
-   * is on none of it. No trace row is read.
+   * is on none of it. The trace rows of the turns on the page come with it.
    */
   override async getConciergePage(
     sessionId: string,
@@ -856,11 +856,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const oldest = page[page.length - 1];
     const nextCursor: ConciergePageCursor | null =
       found.length > limit && oldest ? { saidAt: oldest.said_at, key: oldest.key } : null;
-    return {
-      mainLine: this.threadsOf(sessionId, page),
-      outside: before ? [] : this.threadsWaiting(sessionId, new Set(page.map((m) => m.key))),
-      nextCursor,
-    };
+    const mainLine = this.threadsOf(sessionId, page);
+    const outside = before ? [] : this.threadsWaiting(sessionId, new Set(page.map((m) => m.key)));
+    return { mainLine, outside, traces: this.tracesOf(sessionId, mainLine, outside), nextCursor };
   }
 
   /** The chat thread of the message keyed `key`, any message of it, as a page of its root alone: empty when the chat holds none. */
@@ -873,7 +871,13 @@ export class ChatsWebChatRepository extends WebChatRepository {
           AND m.key = ${key}
       )
     `);
-    return { mainLine: this.threadsOf(sessionId, root), outside: [], nextCursor: null };
+    const mainLine = this.threadsOf(sessionId, root);
+    return {
+      mainLine,
+      outside: [],
+      traces: this.tracesOf(sessionId, mainLine, []),
+      nextCursor: null,
+    };
   }
 
   /** The session's place in its chat, to read `m`, a message it has seen: the
@@ -936,14 +940,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
   /**
    * The main-line messages `roots` with every message that has one as its
    * root, read together over {@link sessionLines}. The counts follow the
-   * client's stack: a reply counts when a user or an assistant said it and no
-   * automation did; it is unread when the assistant said it and the owner has
-   * not seen it.
+   * client's stack, by {@link COUNTED_REPLY} and {@link UNREAD_REPLY}.
    */
   private threadsOf(sessionId: string, roots: readonly MainLineKey[]): ConciergeMainLine[] {
     if (roots.length === 0) return [];
-    const replies = this.db.all<{ key: string }>(sql`
-      SELECT m.key AS key
+    const replies = this.db.all<{ key: string; counted: number; unread: number }>(sql`
+      SELECT m.key AS key, ${COUNTED_REPLY} AS counted, ${UNREAD_REPLY} AS unread
       ${this.repliesPlace(
         sessionId,
         roots.map((root) => root.id),
@@ -961,9 +963,10 @@ export class ChatsWebChatRepository extends WebChatRepository {
         repliesOf.set(row.chat_thread_id, [...(repliesOf.get(row.chat_thread_id) ?? []), row]);
       }
     }
+    const flags = new Map(replies.map((reply) => [reply.key, reply]));
     return [...mainLine.values()].map((row): ConciergeMainLine => {
       const own = repliesOf.get(row.id) ?? [];
-      const counted = own.filter((reply) => !reply.sender_id?.startsWith("automated::"));
+      const counted = own.filter((reply) => flags.get(reply.id)?.counted === 1);
       return {
         message: storedLine(row),
         thread:
@@ -971,8 +974,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
             ? null
             : {
                 replyCount: counted.length,
-                unreadCount: counted.filter((r) => r.role === "assistant" && r.is_read === 0)
-                  .length,
+                unreadCount: counted.filter((reply) => flags.get(reply.id)?.unread === 1).length,
                 replies: own.map(storedLine),
               },
       };
@@ -998,7 +1000,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         m.root_message_id AS root_id,
         (SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id) AS root
       ${this.repliesPlace(sessionId)}
-        AND m.read_at IS NULL AND m.sender_agent IS NOT NULL
+        AND ${UNREAD_REPLY}
     `,
     );
     const waiting = new Map<
@@ -1024,7 +1026,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         .all<{ root_id: number; n: number }>(sql`
           SELECT m.root_message_id AS root_id, count(*) AS n
           ${this.repliesPlace(sessionId, [...waiting.keys()])}
-            AND COALESCE(m.sender_account_id, '') NOT GLOB 'automated::*'
+            AND ${COUNTED_REPLY}
           GROUP BY m.root_message_id
         `)
         .map((row) => [row.root_id, row.n]),
@@ -1053,6 +1055,36 @@ export class ChatsWebChatRepository extends WebChatRepository {
       })
       .sort((a, b) => a.at - b.at || a.order - b.order)
       .map(({ at: _at, order: _order, ...outside }) => outside);
+  }
+
+  /**
+   * The trace rows of the turns the lines of a page belong to, as
+   * {@link sessionLines} reads them, in the order they were said. A turn's
+   * trace is where a client reads its source, its model switch and whether it
+   * failed. Found by turn, not by walking the session's traces.
+   */
+  private tracesOf(
+    sessionId: string,
+    mainLine: readonly ConciergeMainLine[],
+    outside: readonly ConciergeOutside[],
+  ): TranscriptLine[] {
+    const turns = new Set(
+      [
+        ...mainLine.flatMap(({ message, thread }) => [message, ...(thread?.replies ?? [])]),
+        ...outside.map((entry) => entry.latestUnread),
+      ].flatMap((line) => line.turnId ?? []),
+    );
+    if (turns.size === 0) return [];
+    return this.db
+      .all<LineRow>(sql`
+        SELECT ${OWN_LINE_COLUMNS}
+        FROM rome_sessions s
+        CROSS JOIN json_each(${JSON.stringify([...turns])}) j
+        CROSS JOIN rome_agent_messages r
+        WHERE s.id = ${sessionId} AND r.session_id = s.id AND r.role = 'trace' AND r.turn_id = j.value
+        ORDER BY r.created_at, r.rowid
+      `)
+      .map(storedLine);
   }
 
   /** The transcript lines keyed `keys`, in the order they were said. */
@@ -1452,6 +1484,14 @@ interface MainLineKey {
   said_at: number;
 }
 
+/**
+ * What a reply the reader's stack counts is, on `m`: not said by an
+ * automation. An unread one is also from Rome and not yet seen by the owner.
+ * One definition for every count a Concierge page gives.
+ */
+const COUNTED_REPLY = sql`(COALESCE(m.sender_account_id, '') NOT GLOB 'automated::*')`;
+const UNREAD_REPLY = sql`(m.read_at IS NULL AND m.sender_agent IS NOT NULL)`;
+
 /** A message that replies to none: its own root. */
 const MAIN_LINE = sql`(m.root_message_id IS NULL OR m.root_message_id = m.id)`;
 
@@ -1495,6 +1535,22 @@ function storedLine(row: LineRow): TranscriptLine {
     createdAt: new Date(row.created_at * 1000),
   };
 }
+
+/**
+ * The columns of a session's own row, `r` in `rome_agent_messages`, as a line
+ * of {@link sessionLines}, read beside its session `s`.
+ */
+const OWN_LINE_COLUMNS = sql.raw(`r.id, r.session_id, r.turn_id, r.input_state, r.role,
+      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
+      r.created_at,
+      CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
+        WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
+      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
+      NULL AS chat_thread_id, NULL AS reaction, 1 AS is_read,
+      -- A session in no chat keeps its rows in the order they were written;
+      -- beside a chat's lines, a trace goes after its turn's first prompt.
+      CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
+      r.rowid AS seq`);
 
 /**
  * The transcript lines of `sessionIds`, as one table: what was said where
@@ -1555,17 +1611,7 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
-    SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
-      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
-      r.created_at,
-      CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
-        WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
-      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      NULL AS chat_thread_id, NULL AS reaction, 1 AS is_read,
-      -- A session in no chat keeps its rows in the order they were written;
-      -- beside a chat's lines, a trace goes after its turn's first prompt.
-      CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
-      r.rowid AS seq
+    SELECT ${OWN_LINE_COLUMNS}
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role = 'trace')

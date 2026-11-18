@@ -977,10 +977,22 @@ describe("ChatsWebChatRepository", () => {
         expect(waiting).toContain("idx_chat_messages_root");
       });
 
+      it("finds the traces of the page's turns by turn", async () => {
+        await repo.addMessage("u1", "chat-1", "user", text("Hello"), "turn-1");
+
+        const [traces] = await plansOf("r.turn_id = j.value", () =>
+          repo.getConciergePage("chat-1", { limit: 5 }),
+        );
+
+        expect(traces).toContain("idx_rome_agent_messages_turn_id");
+        expect(traces).not.toMatch(/SCAN r/);
+      });
+
       it("reads no thread for a message the chat does not hold", async () => {
         expect(await repo.getConciergeThread("chat-1", "missing")).toEqual({
           mainLine: [],
           outside: [],
+          traces: [],
           nextCursor: null,
         });
       });

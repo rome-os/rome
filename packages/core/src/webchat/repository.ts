@@ -389,6 +389,8 @@ export interface ConciergePage {
   mainLine: ConciergeMainLine[];
   /** Only on the newest page, oldest waiting first. */
   outside: ConciergeOutside[];
+  /** The trace rows of the turns of every message above, in the order they were said. */
+  traces: StoredChatLine[];
   nextCursor: ConciergePageCursor | null;
 }
 
@@ -971,12 +973,12 @@ export class WebChatRepository {
     _sessionId: string,
     _options: ConciergePageOptions,
   ): Promise<ConciergePage> {
-    return { mainLine: [], outside: [], nextCursor: null };
+    return { mainLine: [], outside: [], traces: [], nextCursor: null };
   }
 
   /** The chat thread of the message keyed `key`, as a page of its root alone. Empty here, as {@link getConciergePage}. */
   async getConciergeThread(_sessionId: string, _key: string): Promise<ConciergePage> {
-    return { mainLine: [], outside: [], nextCursor: null };
+    return { mainLine: [], outside: [], traces: [], nextCursor: null };
   }
 
   /** The key of the last message of the chat thread of the message keyed

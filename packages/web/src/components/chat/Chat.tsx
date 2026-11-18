@@ -194,6 +194,7 @@ import {
   mergeChatMessage,
   mergeLatestMessagePage,
   orderChatMessages,
+  replaceLoadedMessages,
   startsNewHistory,
 } from "@/lib/chat-message-ordering";
 import {
@@ -476,6 +477,25 @@ export interface ChatProps {
   conciergeMainChatId?: string;
   /** The Concierge's name, which every Concierge chat's header shows in place of the chat's own name. */
   conciergeName?: string;
+}
+
+/**
+ * The key of the oldest message of a Concierge chat's main line among the
+ * loaded ones: a message that replies to none, the server holds already.
+ * Undefined when none is loaded.
+ */
+function oldestMainLineKey(
+  messages: readonly ChatMessage[],
+  unsent: ReadonlySet<string> | undefined,
+): string | undefined {
+  let oldest: ChatMessage | undefined;
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    if (unsent?.has(message.id)) continue;
+    if (message.chatThreadId && message.chatThreadId !== message.id) continue;
+    if (!oldest || Date.parse(message.createdAt) < Date.parse(oldest.createdAt)) oldest = message;
+  }
+  return oldest?.id;
 }
 
 // The summary persisted for a turn's trace, once the turn has one.
@@ -769,6 +789,8 @@ export function Chat({
   // Whether the last page of the main session came by main-line messages, so
   // a topic chat the list has not named yet stacks its threads in its first frame.
   const [pagedConcierge, setPagedConcierge] = useState<string | null>(null);
+  // The sessions whose loaded history came by main-line messages.
+  const conciergePagedRef = useRef(new Set<string>());
   // The names of threads that wait with a root that is not loaded, by root.
   const [threadHints, setThreadHints] = useState<ReadonlyMap<string, string>>(() => new Map());
 
@@ -1408,7 +1430,10 @@ export function Chat({
 
   // Fetch messages for a session
   const loadMessages = useCallback(
-    async (id: string, options: { force?: boolean; dropLocalOptimistic?: boolean } = {}) => {
+    async (
+      id: string,
+      options: { force?: boolean; dropLocalOptimistic?: boolean; resync?: boolean } = {},
+    ) => {
       if (!options.force && loadedSessionsRef.current.has(id)) return;
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
@@ -1421,9 +1446,20 @@ export function Chat({
         : undefined;
       try {
         const askConcierge = !shareMode && mayBeConcierge;
+        // After a reconnect, a Concierge chat reads the whole loaded range
+        // again in one request, through its oldest main-line message, so a
+        // reply that came while it was away reaches a thread loaded long ago.
+        const resyncFrom =
+          options.resync && askConcierge && conciergePagedRef.current.has(id)
+            ? oldestMainLineKey(
+                messagesRef.current.get(id) ?? [],
+                localOptimisticMessageIdsRef.current.get(id),
+              )
+            : undefined;
         const fetchPage = () =>
           listSessionMessagePage(id, {
             limit: askConcierge ? CONCIERGE_PAGE_MESSAGES : pageTurns,
+            ...(resyncFrom ? { through: resyncFrom } : {}),
             ...(askConcierge ? { concierge: { fallbackLimit: pageTurns } } : {}),
           });
         let page = await fetchPage();
@@ -1439,10 +1475,14 @@ export function Chat({
         // An outside reply stands for a thread whose root is older, so only the
         // page's own messages say whether the loaded history is still the same.
         const newestMessages = page.concierge?.body ?? page.messages;
-        const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
-          messages: newestMessages,
-          hasOlder: page.nextCursor !== null,
-        });
+        // A page that read the loaded range again replaces it, whatever it holds.
+        const replaceRange = resyncFrom !== undefined && page.concierge !== undefined;
+        const restart =
+          replaceRange ||
+          startsNewHistory(messagesRef.current.get(id) ?? [], {
+            messages: newestMessages,
+            hasOlder: page.nextCursor !== null,
+          });
         const fetchedMessages = orderChatMessages(page.messages);
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
@@ -1452,17 +1492,25 @@ export function Chat({
         const commitMessages = () => {
           setMessages((prev) => {
             const next = new Map(prev);
+            const current = next.get(id) ?? [];
             next.set(
               id,
-              mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
-                restart,
-                dropMessageIds,
-                // History older than the page's main line goes, not older than an outside reply.
-                ...(page.concierge?.oldestAt != null ? { since: page.concierge.oldestAt } : {}),
-              }),
+              replaceRange
+                ? replaceLoadedMessages(current, fetchedMessages, {
+                    keepIds: localOptimisticMessageIdsRef.current.get(id),
+                    dropMessageIds,
+                  })
+                : mergeLatestMessagePage(current, fetchedMessages, {
+                    restart,
+                    dropMessageIds,
+                    // History older than the page's main line goes, not older than an outside reply.
+                    ...(page.concierge?.oldestAt != null ? { since: page.concierge.oldestAt } : {}),
+                  }),
             );
             return next;
           });
+          if (page.concierge) conciergePagedRef.current.add(id);
+          else conciergePagedRef.current.delete(id);
           setPagedConcierge(page.concierge ? id : null);
           if (titles && titles.size > 0) setThreadHints((hints) => new Map([...hints, ...titles]));
         };
@@ -1551,8 +1599,8 @@ export function Chat({
     [notifySessionsChanged],
   );
   const resyncSessionMessages = useCallback(
-    (sid: string) => {
-      void loadMessages(sid, { force: true });
+    (sid: string, options: { resync?: boolean } = {}) => {
+      void loadMessages(sid, { force: true, ...options });
     },
     [loadMessages],
   );
@@ -1970,7 +2018,8 @@ export function Chat({
         next.delete(sid);
         return next;
       });
-      resyncSessionMessages(sid);
+      // Replies may have come while the stream was down, to threads loaded long ago.
+      resyncSessionMessages(sid, { resync: true });
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
     [resyncSessionMessages, kickTurnPoll],

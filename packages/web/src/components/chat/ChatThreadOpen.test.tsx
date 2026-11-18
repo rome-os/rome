@@ -6,6 +6,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { conciergePageOf } from "@/lib/chat-api";
+import { orderChatMessages } from "@/lib/chat-message-ordering";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
@@ -537,6 +539,23 @@ describe("the source label in the transcript", () => {
     expect(label.closest("[data-source-label]")?.querySelector("svg")).toBeNull();
     expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
     expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows after a cold load by Concierge pages, whose trace rows come with the messages", () => {
+    const wire = {
+      mainLine: [{ message: reply("r1", 10), thread: null }],
+      outside: [],
+      traces: [trace("t-r1", 10, { type: "routine", name: "Daily summary" })],
+      nextCursor: null,
+    };
+
+    renderTranscript(orderChatMessages(conciergePageOf(wire).messages));
+    expect(screen.getByText("Routine · Daily summary")).toBeTruthy();
+    cleanup();
+
+    // A page without the trace rows loses the label, which is why they come.
+    renderTranscript(orderChatMessages(conciergePageOf({ ...wire, traces: [] }).messages));
+    expect(screen.queryByText("Routine · Daily summary")).toBeNull();
   });
 
   it("shows nothing for an agent's input the Concierge did not answer", () => {

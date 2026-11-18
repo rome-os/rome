@@ -244,6 +244,21 @@ describe("conciergePageOf", () => {
     expect(page.concierge?.titles).toEqual(new Map([["old", "Trip"]]));
   });
 
+  it("brings the trace rows of the page's turns in with the messages, apart from the main line", () => {
+    const trace = { ...line("trace-1", 4), role: "trace" } as ChatMessage;
+    const page = conciergePageOf({
+      mainLine: [{ message: line("m1", 5), thread: null }],
+      outside: [],
+      traces: [trace],
+      nextCursor: null,
+    });
+
+    expect(page.messages.map((message) => message.id)).toEqual(["m1", "trace-1"]);
+    // A trace says nothing of where the loaded history stands.
+    expect(page.concierge?.body.map((message) => message.id)).toEqual(["m1"]);
+    expect(page.concierge?.oldestAt).toBe(Date.parse(line("m1", 5).createdAt));
+  });
+
   it("reads an empty page", () => {
     const page = conciergePageOf({ mainLine: [], outside: [], nextCursor: null });
     expect(page.messages).toEqual([]);

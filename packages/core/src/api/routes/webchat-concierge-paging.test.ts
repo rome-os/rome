@@ -17,6 +17,7 @@ interface WireMessage {
 
 interface WirePage {
   type: string;
+  traces: WireMessage[];
   mainLine: {
     message: WireMessage;
     thread: {
@@ -343,5 +344,74 @@ describe("GET /chat/sessions/:id/messages?type=concierge", () => {
       `?type=concierge&limit=3&before=${encodeURIComponent(first.nextCursor ?? "")}`,
     );
     expect("layout" in older).toBe(false);
+  });
+  it("counts an unread reply the same way on the page and outside it", async () => {
+    const seeded = await seedChat();
+    await deps.webchatRepo.markMessagesRead(CHAT, [seeded.r5]);
+
+    const outside = await getPage("?type=concierge&limit=3");
+    const wide = await getPage("?type=concierge&limit=100");
+
+    expect(outside.outside.find((entry) => entry.root === "m5")).toMatchObject({
+      replyCount: 3,
+      unreadCount: 1,
+    });
+    expect(wide.mainLine.find((entry) => entry.message.id === "m5")?.thread).toMatchObject({
+      replyCount: 3,
+      unreadCount: 1,
+    });
+    // An automation's reply is counted by neither.
+    expect(outside.outside.find((entry) => entry.root === "m2")?.replyCount).toBe(1);
+    expect(wide.mainLine.find((entry) => entry.message.id === "m2")?.thread?.replyCount).toBe(1);
+  });
+
+  describe("trace rows", () => {
+    /** Four turns, each a prompt and its trace, said ten seconds apart. */
+    async function seedTurns() {
+      for (let i = 1; i <= 4; i += 1) {
+        const turnId = `turn-${i}`;
+        await deps.webchatRepo.addMessage(`p${i}`, CHAT, "user", text(`prompt ${i}`), turnId);
+        await deps.webchatRepo.appendTraceBlocks({
+          messageId: `trace-${i}`,
+          sessionId: CHAT,
+          turnId,
+          startSeq: 0,
+          blocks: [{ type: "turn_end", turnId, status: "completed", durationMs: 1000 + i }],
+        });
+        setSaidAt(`p${i}`, BASE_SECONDS + i * 10);
+        testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${BASE_SECONDS + i * 10 + 1}
+          WHERE id = ${`trace-${i}`}`);
+      }
+    }
+
+    it("brings back the traces of the turns on the page, and no other", async () => {
+      await seedTurns();
+
+      const first = await getPage("?type=concierge&limit=2");
+      expect(ids(first)).toEqual(["p3", "p4"]);
+      expect(first.traces.map((trace) => trace.id)).toEqual(["trace-3", "trace-4"]);
+      expect(first.traces.every((trace) => trace.role === "trace")).toBe(true);
+      // The trace carries what the client reads of the turn.
+      expect(first.traces[0]).toHaveProperty("traceSummary");
+
+      const older = await getPage(
+        `?type=concierge&limit=2&before=${encodeURIComponent(first.nextCursor ?? "")}`,
+      );
+      expect(older.traces.map((trace) => trace.id)).toEqual(["trace-1", "trace-2"]);
+    });
+
+    it("brings the traces of a thread's turns in thread mode", async () => {
+      await seedTurns();
+
+      const page = await getPage("?type=concierge&thread=p2");
+
+      expect(page.traces.map((trace) => trace.id)).toEqual(["trace-2"]);
+    });
+
+    it("has no traces for a page whose turns have none", async () => {
+      await seedChat();
+
+      expect((await getPage("?type=concierge&limit=100")).traces).toEqual([]);
+    });
   });
 });

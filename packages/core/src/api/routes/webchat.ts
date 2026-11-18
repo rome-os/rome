@@ -1963,20 +1963,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stored = [
       ...page.mainLine.flatMap(({ message, thread }) => [message, ...(thread?.replies ?? [])]),
       ...page.outside.map((entry) => entry.latestUnread),
+      ...page.traces,
     ];
     const enriched = new Map(
       (await enrichStoredMessages(sessionId, stored)).map((message) => [message.id, message]),
     );
-    const shown = (message: { id: string }) => enriched.get(message.id) ?? message;
-    // A thread whose root is not on the page is named by its task, else by the
-    // start of what its newest unread reply quotes.
-    const titles =
-      page.outside.length === 0
-        ? new Map<string, { id: string; title: string }>()
-        : ((await deps.concierge?.deps.tasks.repo.threadTasks(
-            sessionId,
-            page.outside.map((entry) => entry.root),
-          )) ?? new Map<string, { id: string; title: string }>());
+    const shown = <T extends { id: string }>(message: T) => enriched.get(message.id) ?? message;
+    // A thread whose root is not on the page is named by its task, which its
+    // reply carries once enriched, else by the start of what that reply quotes.
+    const titleOf = (entry: (typeof page.outside)[number]) => {
+      const reply = shown(entry.latestUnread);
+      const title = "chatThreadTitle" in reply ? reply.chatThreadTitle : undefined;
+      return title ?? storedQuoteLine(entry.latestUnread.content);
+    };
     return c.json({
       type: "concierge",
       mainLine: page.mainLine.map(({ message, thread }) => ({
@@ -1992,11 +1991,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       })),
       outside: page.outside.map((entry) => ({
         root: entry.root,
-        title: titles.get(entry.root)?.title ?? storedQuoteLine(entry.latestUnread.content),
+        title: titleOf(entry),
         replyCount: entry.replyCount,
         unreadCount: entry.unreadCount,
         latestUnread: shown(entry.latestUnread),
       })),
+      // The trace rows of the turns on the page, which a client reads their
+      // source, model switch and failure from.
+      traces: page.traces.map(shown),
       nextCursor: page.nextCursor ? encodeConciergeCursor(page.nextCursor) : null,
       hasMore: page.nextCursor !== null,
       ...(withLayout && !before && threadParam === undefined

@@ -1642,6 +1642,32 @@ describe("Chat history paging", () => {
     }
   });
 
+  it("reads a thread loaded long ago again after a reconnect, so the replies that came meanwhile are in its stack", async () => {
+    const main = (n: number) => ({ ...userMessage(n), chatThreadId: `user-${n}` });
+    const owner = { ...userMessage(4), chatThreadId: "user-1" };
+    const answer = { ...waiting(), id: "user-5" };
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce(conciergePage([main(1), main(7), main(9)], null))
+      .mockResolvedValueOnce(conciergePage([main(1), owner, answer, main(9)], null));
+    renderChat(concierge());
+    await waitFor(() => expect(shownKeys()).toEqual(["user-1", "user-7", "user-9"]));
+    expect(document.querySelector('[data-thread-pill="user-1"]')).toBeNull();
+
+    act(() => MockEventSource.instances[0]!.emitLifecycle("error", MockEventSource.CLOSED));
+
+    // The whole loaded range in one read, through its oldest main-line message.
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]?.[1]).toEqual({
+      limit: CONCIERGE_PAGE_MESSAGES,
+      through: "user-1",
+      concierge: { fallbackLimit: CHAT_PAGE_TURNS },
+    });
+    // The reply the owner had seen and the one it had not, and a deleted message gone.
+    await waitFor(() => expect(shownKeys()).toEqual(["user-1", "user-4", "user-9"]));
+    expect(threadFrames.at(-1)?.stacked).toEqual(["user-4", "user-5"]);
+    expect(document.querySelector('[data-thread-pill="user-1"]')).not.toBeNull();
+  });
+
   it("restarts a disconnected history from its oldest main-line message, not an older reply that waits", async () => {
     const outsideReply = { ...waiting(), createdAt: userMessage(1).createdAt };
     rs.mocked(listSessionMessagePage)

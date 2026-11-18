@@ -4,6 +4,7 @@ import {
   mergeFetchedChatMessages,
   mergeLatestMessagePage,
   orderChatMessages,
+  replaceLoadedMessages,
   startsNewHistory,
 } from "./chat-message-ordering";
 
@@ -116,5 +117,53 @@ describe("refetching the newest page of a paged chat", () => {
     const merged = mergeLatestMessagePage([...older, optimistic], newest, { restart: true });
 
     expect(merged.map((item) => item.id)).toEqual(["n-user", "n-assistant", "local-user"]);
+  });
+});
+
+describe("replacing the loaded transcript with a page that read all of it", () => {
+  const at = (minute: number) => `2026-01-01T00:0${minute}:00.000Z`;
+
+  it("drops a loaded message the page does not hold, and keeps a row still on its way", () => {
+    const current = [
+      message("kept", null, at(1), "user"),
+      message("deleted", null, at(2), "user"),
+      message("sending", null, at(3), "user"),
+      message("newer", null, at(9), "user"),
+    ];
+    const fetched = [message("kept", null, at(1), "user"), message("added", null, at(4), "user")];
+
+    const next = replaceLoadedMessages(current, fetched, { keepIds: new Set(["sending"]) });
+
+    // `newer` is later than anything the page holds, so it cannot be a deletion.
+    expect(next.map((item) => item.id)).toEqual(["kept", "sending", "added", "newer"]);
+  });
+
+  it("changes nothing for an empty page but the messages it is told to drop", () => {
+    const current = [message("a", null, at(1)), message("b", null, at(2))];
+    expect(
+      replaceLoadedMessages(current, [], { dropMessageIds: new Set(["b"]) }).map((item) => item.id),
+    ).toEqual(["a"]);
+  });
+});
+
+describe("restarting from a named time", () => {
+  it("drops the history older than `since`, not older than the oldest message the page holds", () => {
+    const current = [
+      message("old", null, "2026-01-01T00:01:00.000Z", "user"),
+      message("main", null, "2026-01-01T00:05:00.000Z", "user"),
+    ];
+    // A waiting reply older than everything loaded rides on the page.
+    const fetched = [
+      message("waiting", null, "2026-01-01T00:00:00.000Z"),
+      message("fresh", null, "2026-01-01T00:09:00.000Z", "user"),
+    ];
+    const since = Date.parse("2026-01-01T00:09:00.000Z");
+
+    expect(
+      mergeLatestMessagePage(current, fetched, { restart: true, since }).map((item) => item.id),
+    ).toEqual(["waiting", "fresh"]);
+    expect(
+      mergeLatestMessagePage(current, fetched, { restart: true }).map((item) => item.id),
+    ).toEqual(["waiting", "old", "main", "fresh"]);
   });
 });
