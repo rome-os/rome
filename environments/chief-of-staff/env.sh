@@ -75,6 +75,12 @@ CHAT_SETTINGS="${COS_CHAT_SETTINGS:-${SAVED_CHAT_SETTINGS:-}}"
 if [ -z "$CHAT_SETTINGS" ]; then
   if [ "$HEAR_EVERY_MESSAGE" = 1 ]; then CHAT_SETTINGS=every; else CHAT_SETTINGS=hear-bots; fi
 fi
+# How members' messages reach Rome. "discord" posts them on the test Discord
+# server. "inject" does without Discord: inject.mjs hands each message to the
+# app's test-only record route, and the app's stub send step keeps the replies.
+TRANSPORT="${COS_TRANSPORT:-${SAVED_TRANSPORT:-discord}}"
+case "$TRANSPORT" in discord | inject) ;; *) echo "env: COS_TRANSPORT is discord or inject, not $TRANSPORT" >&2 && exit 1 ;; esac
+INJECT_STATE_FILE="$RUN_DIR/inject.json"
 # A note `version` carries for a ref, as JSON keyed by the ref, for what the
 # ref's own state does not say.
 REF_NOTES="${COS_REF_NOTES:-}"
@@ -149,9 +155,11 @@ load_secrets() {
     die "no secrets: write $SECRETS_FILE, or put a 1Password service account token in $OP_TOKEN_FILE. README.md lists what either holds."
   fi
   local name
-  for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_DRIVER_BOT_TOKEN; do
-    [ -n "${!name:-}" ] || die "$source does not set $name"
-  done
+  if [ "$TRANSPORT" = discord ]; then
+    for name in COS_DISCORD_SERVER_ID COS_AGENT_BOT_TOKEN COS_DRIVER_BOT_TOKEN; do
+      [ -n "${!name:-}" ] || die "$source does not set $name"
+    done
+  fi
   if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
     die "$source sets both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN. Keep the one model login the run should use."
   fi
@@ -180,6 +188,33 @@ chat_members() {
 # Runs the Discord helper as the driver bot.
 discord() {
   COS_STATE="$STATE_FILE" COS_TOKEN="${COS_TOKEN:-$COS_DRIVER_BOT_TOKEN}" node "$ENV_DIR/discord.mjs" "$@"
+}
+
+inject() {
+  COS_STATE="$INJECT_STATE_FILE" COS_ROME="$ROME" COS_APP="$COS_AGENT_APP" COS_PLAN="$(chat_plan)" \
+    node "$ENV_DIR/inject.mjs" "$@"
+}
+
+# The members' messages go where TRANSPORT says.
+transport() {
+  if [ "$TRANSPORT" = inject ]; then inject "$@"; else discord "$@"; fi
+}
+
+inject_only() {
+  [ "$TRANSPORT" = inject ] || die "$1 needs COS_TRANSPORT=inject; this environment runs on Discord"
+}
+
+discord_only() {
+  [ "$TRANSPORT" = discord ] || die "$1 needs Discord; this environment runs with COS_TRANSPORT=inject"
+}
+
+# Every chat and its members as JSON {chat: [member, ...]}.
+chat_plan() {
+  local chat plan=""
+  while IFS= read -r chat; do
+    plan+="${plan:+,}\"$chat\":$(chat_members "$chat" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))')"
+  done < <(all_chat_names)
+  printf '{%s}' "$plan"
 }
 
 # One field of the JSON on stdin, by a dotted path. Prints nothing when absent.
@@ -562,6 +597,7 @@ cos_chat() {
     every) patch='{"activation":{"botMessages":"all","mode":"all"}}' ;;
     *) die "usage: cos-env chat <name> default|mentions-only|ignore-others|off|every" ;;
   esac
+  discord_only chat
   [ -n "$(state "chats.$name" 2>/dev/null)" ] || die "no chat \"$name\". Chats: $(all_chat_names | tr '\n' ' ')"
   claim_ownership
   reset_chat "$name" || die "Rome refused to reset #$name"
@@ -622,8 +658,9 @@ save_settings() {
     printf 'SAVED_APP_REF=%q\n' "$APP_REF"
     printf 'SAVED_LINK_UNLOADED_AGENT=%q\n' "$UNLOADED_AGENT"
     printf 'SAVED_CHAT_SETTINGS=%q\n' "$CHAT_SETTINGS"
+    printf 'SAVED_TRANSPORT=%q\n' "$TRANSPORT"
   } >"$SETTINGS_FILE"
-  log "settings: Rome refs \"$AGENT_REFS\", app $APP_REPO at $APP_REF, linked agent ${UNLOADED_AGENT:-$COS_AGENT_NAME}, chat settings $CHAT_SETTINGS, second bot $([ -n "${COS_SECOND_BOT_TOKEN:-}" ] && echo yes || echo no)"
+  log "settings: transport $TRANSPORT, Rome refs \"$AGENT_REFS\", app $APP_REPO at $APP_REF, linked agent ${UNLOADED_AGENT:-$COS_AGENT_NAME}, chat settings $CHAT_SETTINGS, second bot $([ -n "${COS_SECOND_BOT_TOKEN:-}" ] && echo yes || echo no)"
 }
 
 # Fails unless Rome runs the app at APP_REF and the connected account links the
@@ -632,12 +669,36 @@ check_settings_took() {
   local want_agent="${UNLOADED_AGENT:-$COS_AGENT_NAME}" agent app_ref
   app_ref="$(state app.ref)"
   [ "$app_ref" = "$APP_REF" ] || die "the installed app is at \"$app_ref\", not COS_APP_REF \"$APP_REF\""
+  [ "$TRANSPORT" = discord ] || return 0
   agent="$(api GET /connected-accounts | node -e '
     let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
       const a = JSON.parse(s).accounts.find((x) => x.account.platform === "discord" && x.account.id === process.argv[1]);
       process.stdout.write(a?.agent ?? "");
     });' "$(state agent.id)")"
   [ "$agent" = "$want_agent" ] || die "the connected account links \"$agent\", not \"$want_agent\""
+}
+
+# Rome and the app with no connected account. The members' messages arrive
+# through the app's record route and the replies stay in its stub send step.
+up_without_discord() {
+  write_rome_env
+  log "starting Rome ..."
+  start_rome
+  [ -z "$(api GET /connected-accounts | json accounts.0)" ] ||
+    die "this Rome still holds a Discord connection. Switch it with: COS_TRANSPORT=inject env.sh reset"
+  install_app
+  set_model
+  let_agent_answer_team
+  set_send_mode stub
+  check_settings_took
+  log "ready, without Discord. Drive it with environments/chief-of-staff/cos-env. Hand it the team with: cos-env seed <dir>"
+}
+
+# How the app's send step answers: stub keeps each reply, fail refuses it, hang
+# never answers, platform sends through Rome's connection.
+set_send_mode() {
+  inject send "$1" || die "the app has no stub send step. COS_TRANSPORT=inject needs an app build with its test-only debug routes."
+  log "the app's send step is now $1"
 }
 
 cmd_up() {
@@ -648,6 +709,10 @@ cmd_up() {
   load_secrets
   save_settings
   if [ "$build" = 1 ] || [ -z "$(image_sha)" ]; then build_rome_image; fi
+  if [ "$TRANSPORT" = inject ]; then
+    up_without_discord
+    return
+  fi
   log "reading the bots and chats on Discord ..."
   write_discord_state
   write_rome_env
@@ -716,8 +781,12 @@ cmd_reset() {
   mkdir -p "$RUN_DIR"
   claim_ownership
   load_secrets
-  write_discord_state
-  clear_chats
+  if [ "$TRANSPORT" = inject ]; then
+    rm -f "$INJECT_STATE_FILE"
+  else
+    write_discord_state
+    clear_chats
+  fi
   node -e '
     const fs = require("fs"); const f = process.argv[1];
     const s = JSON.parse(fs.readFileSync(f, "utf8")); delete s.members; delete s.connection;
@@ -730,7 +799,7 @@ cmd_reset() {
 
 cmd_down() {
   claim_ownership
-  if [ -f "$STATE_FILE" ] && (load_secrets) 2>/dev/null; then
+  if [ "$TRANSPORT" = discord ] && [ -f "$STATE_FILE" ] && (load_secrets) 2>/dev/null; then
     load_secrets
     discord delete-webhooks || log "could not delete the members' webhooks; the next seed replaces them"
   fi
@@ -771,14 +840,14 @@ forget_team() {
     api DELETE "/people/$id" </dev/null >/dev/null || die "Rome did not delete $id"
   done < <(api GET /people | node -e '
     const fs = require("fs");
-    const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const s = fs.existsSync(process.argv[1]) ? JSON.parse(fs.readFileSync(process.argv[1], "utf8")) : {};
     const team = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
     const hooks = new Set(Object.values(s.webhooks ?? {}).flatMap((h) => Object.values(h).map((w) => w.id)));
     const names = new Set((team.members ?? []).map((m) => m.name));
     let raw = ""; process.stdin.on("data", (d) => (raw += d)).on("end", () => {
       for (const p of JSON.parse(raw).people ?? []) {
         if (p.bondLevel === "guardian") continue;
-        if (names.has(p.displayName) || p.accounts.some((a) => a.channel === "discord" && hooks.has(a.channelUserId)))
+        if (names.has(p.displayName) || p.accounts.some((a) => a.channel === "discord" && (hooks.has(a.channelUserId) || a.channelUserId.startsWith("inject-"))))
           console.log(p.id);
       }
     });' "$STATE_FILE" "$1")
@@ -793,13 +862,11 @@ cmd_seed() {
   for file in team.json roster.md goals.md; do
     [ -f "$dir/$file" ] || die "$dir has no $file"
   done
-  local chat members plan="" member display bond accounts
-  log "making the members' webhooks ..."
-  while IFS= read -r chat; do
-    members="$(chat_members "$chat" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))')"
-    plan+="${plan:+,}\"$chat\":$members"
-  done < <(all_chat_names)
-  printf '{%s}' "$plan" | discord webhooks
+  local member display bond accounts
+  if [ "$TRANSPORT" = discord ]; then
+    log "making the members' webhooks ..."
+    chat_plan | discord webhooks
+  fi
   forget_team "$dir/team.json"
   for member in "${MEMBERS[@]}"; do
     read -r bond display < <(node -e '
@@ -807,7 +874,15 @@ cmd_seed() {
       const m = (team.members ?? []).find((m) => m.account === process.argv[2]);
       if (m?.name) process.stdout.write(`${m.bondLevel ?? "inner-circle"} ${m.name}\n`);' \
       "$dir/team.json" "$member") || die "team.json names no person for $member"
-    # Every webhook of the member, its second account's included, is one of its accounts.
+    # Every webhook of the member, its second account's included, is one of its
+    # accounts. Without Discord, the member's stand-in accounts are.
+    if [ "$TRANSPORT" = inject ]; then
+      accounts="$(inject accounts "$member" | node -e '
+        let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+          const ids = JSON.parse(s)[process.argv[1]];
+          process.stdout.write(JSON.stringify(ids.map((id) => ({ channel: "discord", channelUserId: id }))));
+        });' "$member")"
+    else
     accounts="$(node -e '
       const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       const member = process.argv[2];
@@ -815,11 +890,12 @@ cmd_seed() {
         Object.entries(hooks).filter(([m]) => m.split(":")[0] === member).map(([, h]) => h.id));
       process.stdout.write(JSON.stringify(ids.map((id) => ({ channel: "discord", channelUserId: id }))));' \
       "$STATE_FILE" "$member")"
+    fi
     log "linking $member to $display ..."
     printf '{"displayName":"%s","bondLevel":"%s","accounts":%s}' "$display" "$bond" "$accounts" |
       api POST /people >/dev/null || die "Rome did not create a person for $display"
-    discord rename "$member" "$display"
-    [ "$member" != member1 ] || discord rename "member1:2" "$display"
+    transport rename "$member" "$display"
+    [ "$member" != member1 ] || transport rename "member1:2" "$display"
   done
   log "handing the roster and goals to the agent ..."
   put_document roster "$dir/roster.md"
@@ -1047,6 +1123,7 @@ JS
 # Stops Rome, posts the script's messages spread over the given minutes while
 # it is down, then starts it again.
 cos_offline() {
+  discord_only offline
   local file="$1" minutes="${2:-60}" count gap
   [ -f "$file" ] || die "no script file $file"
   [[ "$minutes" =~ ^[0-9]+$ ]] || die "--for takes whole minutes"
@@ -1113,6 +1190,7 @@ JS
 # `cos-env unlink` takes the agent off its connected account; `cos-env link`
 # links it again, as `up` does.
 cos_link() {
+  discord_only "$1"
   claim_ownership
   if [ "$1" = unlink ]; then
     echo '{"agent":null}' | api PUT "/connected-accounts/discord/$(state agent.id)/agent" >/dev/null ||
@@ -1211,6 +1289,14 @@ cos_renew_session() {
   done
   [ -n "$chat" ] || die "usage: cos-env rome renew-session --chat <name>"
   load_secrets
+  if [ "$TRANSPORT" = inject ]; then
+    # Every test chat is in the one server, whose session the app keys by it.
+    printf '{"session":"server:%s"}' "$(inject server "$chat")" |
+      api POST "/apps/$COS_AGENT_APP/debug/renew-session" >/dev/null ||
+      die "the app refused to renew the session"
+    log "renewed. The agent's next turn in #$chat starts a new session."
+    return
+  fi
   log "arming a session renewal on #$chat ..."
   set_chat "$chat" '{"session":{"reset":{"mode":"idle","idleMinutes":1}}}'
   bring_rome_back restart

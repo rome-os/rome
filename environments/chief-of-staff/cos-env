@@ -26,6 +26,7 @@ usage() {
   cos-env memory --file [<server|dm>/<id>]
   cos-env crash-at before-commit|after-commit-before-send|mid-outbox
   cos-env handled
+  cos-env send stub|fail|hang
   cos-env chat <name> default|mentions-only|ignore-others|off|every
   cos-env link | unlink
   cos-env reset
@@ -73,13 +74,13 @@ case "$command" in
     [ -n "$as" ] && [ -n "$chat" ] && [ ${#args[@]} -gt 0 ] || usage
     [ "$as" = driver ] || check_member "$as"
     load_secrets
-    discord post "$as" "$chat" "$thread" "$mention" "${args[*]}"
+    transport post "$as" "$chat" "$thread" "$mention" "${args[*]}"
     ;;
   dm)
     [ -n "$as" ] && [ ${#args[@]} -gt 0 ] || usage
     check_member "$as"
     load_secrets
-    discord post "$as" "$COS_DM_CHAT_PREFIX${as%%:*}" "" 0 "${args[*]}"
+    transport post "$as" "$COS_DM_CHAT_PREFIX${as%%:*}" "" 0 "${args[*]}"
     ;;
   read)
     if [ -n "$dm" ]; then
@@ -88,13 +89,13 @@ case "$command" in
     fi
     [ -n "$chat" ] || [ -n "$thread" ] || die "read needs --chat <name>, --dm <member> or --thread <id>"
     load_secrets
-    discord read "$chat" "$thread" "$since"
+    transport read "$chat" "$thread" "$since"
     ;;
   rename)
     [ -n "$as" ] && [ ${#args[@]} -gt 0 ] || usage
     check_member "$as"
     load_secrets
-    discord rename "$as" "${args[*]}"
+    transport rename "$as" "${args[*]}"
     ;;
   rome) cos_rome "${args[0]:-}" ${chat:+--chat "$chat"} ${since:+--since "$since"} ;;
   logs)
@@ -104,7 +105,7 @@ case "$command" in
   replay)
     [ ${#args[@]} -eq 1 ] || usage
     load_secrets
-    discord replay "${args[0]}" "$gap" 0
+    transport replay "${args[0]}" "$gap" 0
     ;;
   offline)
     [ ${#args[@]} -eq 1 ] || usage
@@ -124,6 +125,12 @@ case "$command" in
     cos_crash_at "${args[0]}"
     ;;
   handled) cos_handled ;;
+  send)
+    [ ${#args[@]} -eq 1 ] || usage
+    case "${args[0]}" in stub | fail | hang) ;; *) usage ;; esac
+    inject_only send
+    set_send_mode "${args[0]}"
+    ;;
   chat)
     [ ${#args[@]} -eq 2 ] || usage
     load_secrets

@@ -63,13 +63,25 @@ Run them from the repository root inside `nix develop`.
 
 The agent's app lives in its own private repository, `zhangfand/chief-of-staff`. Once Rome is up, `up` fetches it on the devbox with `gh`, at `COS_APP_REF` (default `main`), copies the checkout into the container at `/home/rome/app-sources/chief-of-staff`, and installs it from source through `POST /api/apps`, the install `system:app_management` runs. The devbox's GitHub sign-in does the fetch, so no GitHub token enters the container. `COS_APP_REPO` points at another repository. `version` reports the app's repository, ref and commit under `app`. The installed app lives on Rome's home volume, so it survives restarts.
 
-`up` saves the COS_* settings it ran with (`COS_AGENT_REF`, `COS_APP_REPO`, `COS_APP_REF`, `COS_LINK_UNLOADED_AGENT`, `COS_CHAT_SETTINGS`) in the state folder. A later `up`, `reset` or `clock` that leaves a setting unset keeps the saved one; a setting given in the environment wins. `up` logs the settings it uses, and fails unless the installed app is at `COS_APP_REF` and the connected account links the agent the settings name.
+`up` saves the COS_* settings it ran with (`COS_AGENT_REF`, `COS_APP_REPO`, `COS_APP_REF`, `COS_LINK_UNLOADED_AGENT`, `COS_CHAT_SETTINGS`, `COS_TRANSPORT`) in the state folder. A later `up`, `reset` or `clock` that leaves a setting unset keeps the saved one; a setting given in the environment wins. `up` logs the settings it uses, and fails unless the installed app is at `COS_APP_REF` and the connected account links the agent the settings name.
 
 Two switches serve test runs only:
 
 - `COS_LINK_UNLOADED_AGENT=<agent name>` links the agent's connected account to that name in place of `COS_AGENT_NAME`. No loaded agent has the name, so a message the bot hears wakes no agent, and the installed app handles it on its own. Rome's API refuses such a link and Rome does not support this setup, so `up` stops Rome, writes the link into its database, and starts it again.
 - `COS_CHAT_SETTINGS` sets what `up` does to each of the agent's chats, every run: `default` leaves each at Rome's defaults, `hear-bots` (the default) lets each hear bots and the `dm-*` chats answer every message, and `every` makes every chat answer every message (the older `COS_HEAR_EVERY_MESSAGE=1`). `cos-env chat` changes one chat afterwards.
 - `COS_SECOND_BOT_TOKEN`, in the secrets file, adds a second Rome bot: `up` connects it as a second connected account linked to no agent, and makes the chat `second-bot-only`, which the second bot reads and the agent's bot cannot, so a fact said there reaches Rome only through the second bot. `seed` gives the members webhooks there.
+
+### Without Discord
+
+`COS_TRANSPORT=inject` runs the environment with no Discord at all. It is saved like the other settings, and the default is `discord`. Only the model login is needed from the secrets.
+
+- `up` starts Rome with no connected account, installs the app, and switches the app's send step to its stub.
+- `post`, `dm` and `replay` hand each message to the app's test-only `POST /debug/record-message`, the same `record_message` call the app's Discord hearing makes. The env fills in what Discord and Rome would: chat and server ids, the person and label Rome's people give the member's stand-in account, and `addressed` for a mention. As on Discord, a mention from `--as driver` is no ping, and `member1:2` is a second account of member1's person.
+- The stub send step keeps the agent's replies. `read` merges them with the members' messages and prints the same shape as on Discord, with `author: "agent"` on replies. Ids are Discord-style, so they sort by time across chats.
+- `chat`, `link`, `unlink`, `offline` and `--mention-second` need Discord and refuse to run.
+- It needs an app build with the debug routes. A Rome that already holds a Discord connection switches over with `COS_TRANSPORT=inject env.sh reset`.
+
+Two copies run side by side under different names, each with its own container, volumes, state folder and settings: `ROME_ENV_NAME=<name> env.sh up`, then `ROME_ENV_NAME=<name> cos-env ...`.
 
 ### cos-env
 
@@ -98,6 +110,7 @@ The one command the verifier drives, and the only one it may call. Its contract 
 | `cos-env memory --file [<server\|dm>/<id>]` | The agent's `memory.md` for one place, printed as it is. With no place, one JSON line `{place, text}` for each place that has one |
 | `cos-env crash-at <point>` | Arms the app to end its action worker, with exit code 70, when the next turn reaches `<point>`: `before-commit`, `after-commit-before-send` or `mid-outbox`. It fires once and Rome stays up. Run `cos-env rome restart` after the crash, since the dead run holds the queue for up to 3 minutes. Needs an app build with the debug routes (chief-of-staff branch `fresh-context` or later); every environment Rome runs with `CHIEF_OF_STAFF_UNSAFE_TEST_SWITCHES=1`, which opens them |
 | `cos-env handled` | The app's `GET /debug/handled`: `{events: {<id>: committedTurns}, outbox: {sent, found}}`. An event with more than one committed turn was handled twice |
+| `cos-env send stub\|fail\|hang` | Injection mode only. Sets how the app's stub send step answers the agent's next replies: `stub` keeps each reply for `read` (what `up` sets), `fail` refuses it, and `hang` never answers until the mode changes. The mode lives in Rome's home, so it survives a restart and `reset` clears it |
 | `cos-env rome held [--since <time>]` | Prints as JSON the agent's replies envoy held for the guardian's approval or rejected since `<time>` (an ISO time), oldest first: `status` (`pending`, `rejected`, or `approved` if the guardian let it through), `time`, the `question` message id, the `reply`, and envoy's `reason`. Read from Rome's own record of approvals inside the container, since the approvals API asks for the guardian's sign-in |
 | `cos-env reset` | The same as `env.sh reset` |
 | `cos-env version` | Prints as JSON the commit and dirty flag of the Rome under test (`rome`), of the agent (`agent`, the first ref merged, with `agent.merged` listing every ref in the build and `tree` the commit built), of the verifier (`verifier`) and of the environment (`environment`), plus the model login, the instance's tier-to-model mapping, and `memory`: the current container's limit, peak and out-of-memory kills (`hitLimit`), and the same for the container before it (`previous`), so a run can tell whether the last one ran out of memory. The verifier stamps every report with it |
