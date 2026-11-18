@@ -311,6 +311,39 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("prices a resumed turn from its tokens when an empty result came first", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield result("", [], "task-notification", 0);
+        yield { ...prompt, isReplay: true };
+        yield say("PONG", prompt.uuid);
+        yield {
+          ...result("PONG", [prompt.uuid], "human"),
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          // The total the resumed transcript saved, earlier turns included.
+          total_cost_usd: 42,
+        };
+      });
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          config: { model: "claude-sonnet-5" },
+          thread: { kind: "resume", modelThreadId: "thread-1" },
+        }),
+      );
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: p });
+      const turn = await nextTurn(session.events[Symbol.asyncIterator]());
+      await session.close();
+
+      const reply = turn.find((m) => m.type === "result") as { accounting?: { costUsd?: number } };
+      expect(reply.accounting?.costUsd).toBeGreaterThan(0);
+      expect(reply.accounting?.costUsd).toBeLessThan(42);
+    });
+
     it("reports a compaction the SDK made partway through a turn", async () => {
       scripted(async function* (sent) {
         const prompt = await sent();
@@ -358,6 +391,43 @@ describe("AnthropicProvider", () => {
         { type: "text", content: "It printed MARKER-1", turnPhase: "final" },
       ]);
       expect(second.at(-1)).toMatchObject({ type: "result", content: "It printed MARKER-1" });
+    });
+
+    it("records the spend of a turn the SDK starts while idle in Rome's next turn", async () => {
+      const costed = (text: string, echo: string[], origin: string, total: number) => ({
+        ...result(text, echo, origin),
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        total_cost_usd: total,
+      });
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield costed("DONE", [first.uuid], "human", 0.5);
+        yield say("The background command finished.");
+        yield costed("The background command finished.", [], "task-notification", 0.75);
+        const second = await sent();
+        yield { ...second, isReplay: true };
+        yield say("It printed MARKER-1", second.uuid);
+        yield costed("It printed MARKER-1", [second.uuid], "human", 1);
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "start it", inputId: a });
+      const first = await nextTurn(events);
+      await session.sendUserInput({ text: "what did it print?", inputId: p });
+      const second = await nextTurn(events);
+      await session.close();
+
+      const costOf = (turn: ModelSessionEvent[]) =>
+        (turn.at(-1) as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costOf(first)).toBeCloseTo(0.5);
+      expect(costOf(second)).toBeCloseTo(0.5);
     });
 
     it("hands an SDK-started turn to the Rome send it folds in", async () => {
@@ -2754,6 +2824,40 @@ describe("AnthropicProvider", () => {
         (messages[0] as { type: "result"; accounting?: { usage: Record<string, unknown> } })
           .accounting?.usage,
       ).not.toHaveProperty("reasoningTokens");
+    });
+
+    it("prices a resumed thread's first result from its tokens, not the SDK's running total", async () => {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          num_turns: 1,
+          stop_reason: "end_turn",
+          // The total the resumed transcript saved, earlier turns included.
+          total_cost_usd: 42,
+          duration_ms: 5,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          config: { model: "claude-sonnet-5" },
+          thread: { kind: "resume", modelThreadId: "thread-1" },
+        }),
+      );
+      const messages = await collectEvents(session);
+      await session.close();
+
+      const costUsd = (messages[0] as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costUsd).toBeGreaterThan(0);
+      expect(costUsd).toBeLessThan(42);
     });
 
     it("reads reasoning tokens from output_tokens_details and maps the stop reason", async () => {

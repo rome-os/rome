@@ -49,6 +49,7 @@ import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
+import { RunningCost } from "./running-cost.js";
 import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
@@ -304,6 +305,7 @@ function buildAnthropicAccounting(
   result: SDKResultMessage,
   model: string,
   providerId: string,
+  costUsd: number | undefined,
   context?: AgentContextUsage,
   aborted = false,
 ) {
@@ -325,7 +327,7 @@ function buildAnthropicAccounting(
       cacheWriteTokens: readPositiveNumber(usage.cache_creation_input_tokens) ?? 0,
       ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     },
-    reportedCostUsd: readPositiveNumber(result.total_cost_usd),
+    reportedCostUsd: costUsd,
     numTurns: readPositiveNumber(result.num_turns),
     stop: anthropicStop(result, aborted),
     stopReason: result.stop_reason ?? undefined,
@@ -569,6 +571,7 @@ export class AnthropicProvider implements ModelProvider {
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();
+    const runningCost = new RunningCost(params.thread.kind === "new");
     const { abortController } = queryProcess;
     const pendingSteers = new Set<string>();
     const deferredInputs = new Set<string>();
@@ -929,6 +932,10 @@ export class AnthropicProvider implements ModelProvider {
               message,
               effectiveModel,
               providerId,
+              // An SDK-owned result ends no Rome turn, so nothing records its
+              // accounting. Leaving the tracker where it was puts its spend in
+              // the next Rome turn's difference.
+              sdkOwned ? undefined : runningCost.next(readPositiveNumber(message.total_cost_usd)),
               contextUsage,
               abortController.signal.aborted,
             );
