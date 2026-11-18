@@ -8,7 +8,7 @@ import { replyContextLine } from "./reply-context.js";
 /** About how many tokens of the chat's recent messages a successor's first turn carries. */
 export const HANDOFF_RECENT_TOKENS = 16_000;
 
-/** About how many tokens of one agent or Rome message a handoff keeps; the guardian's are never cut. */
+/** About how many tokens of one agent message a handoff keeps; the guardian's are never cut. */
 export const HANDOFF_AGENT_MESSAGE_TOKENS = 1_500;
 
 /** Ends an agent message that was cut to {@link HANDOFF_AGENT_MESSAGE_TOKENS}. */
@@ -49,7 +49,7 @@ export interface RecentMessage {
   readonly senderName: string | null;
   readonly text: string;
   readonly at: Date;
-  /** True for the agent's or Rome's message, which a handoff may cut; absent for the guardian's. */
+  /** True for a message the agent said, which a handoff may cut; absent for the guardian's and for a notice, whose author is not certain. */
   readonly agent?: boolean;
 }
 
@@ -158,7 +158,7 @@ function headWithin(text: string, maxTokens: number): string {
 /**
  * The latest of `messages` (oldest first) that fit in `maxTokens`, oldest
  * first, and how many earlier ones were left out. The guardian's messages are
- * kept whole; an agent's or Rome's message over
+ * kept whole; an agent's message over
  * {@link HANDOFF_AGENT_MESSAGE_TOKENS} is cut to its start and marked. The
  * newest message is kept even when it alone is over the cap, cut to fit.
  */

@@ -123,7 +123,14 @@ export function recentMessagesOf(
     if (!senderName || (exceptTurnId && row.turnId === exceptTurnId)) return [];
     const text = messageContentText(row.content);
     return text
-      ? [{ senderName, text, at: row.createdAt, ...(row.role === "user" ? {} : { agent: true }) }]
+      ? [
+          {
+            senderName,
+            text,
+            at: row.createdAt,
+            ...(row.role === "assistant" ? { agent: true } : {}),
+          },
+        ]
       : [];
   });
 }

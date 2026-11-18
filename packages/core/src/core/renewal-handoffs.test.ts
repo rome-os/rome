@@ -169,3 +169,14 @@ describe("every message since a time", () => {
     expect(reads).toBe(5);
   });
 });
+
+describe("recentMessagesOf cut eligibility", () => {
+  it("marks only the agent's messages as cuttable, since a notice may be the guardian's", () => {
+    const rows = [
+      row("user", "a", "t1"),
+      row("assistant", "b", "t1"),
+      row("notification", "c", "t2"),
+    ];
+    expect(recentMessagesOf(rows).map((m) => m.agent === true)).toEqual([false, true, false]);
+  });
+});
