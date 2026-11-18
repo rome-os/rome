@@ -273,6 +273,27 @@ describe("voice input socket", () => {
     ]);
   });
 
+  it("keeps a dictation that is nothing but a filler", async () => {
+    const fake = await fakeSoniox();
+    fake.onText = (text) =>
+      text === ""
+        ? [{ tokens: [{ text: "嗯", is_final: true }] }, { tokens: [], finished: true }]
+        : [];
+    const { client, messages, closed } = await dictation(fake);
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.from([1, 2]));
+    await until(() => fake.received.some((frame) => frame.kind === "audio"));
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+
+    expect(messages).toEqual([
+      { type: "text", settled: "", pending: "" },
+      { type: "text", settled: "嗯", pending: "" },
+      { type: "ended" },
+    ]);
+  });
+
   it("names a refused credential as the reason listening stopped", async () => {
     const fake = await fakeSoniox();
     fake.onText = (text) =>

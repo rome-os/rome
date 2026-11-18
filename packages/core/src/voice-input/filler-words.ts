@@ -1,14 +1,20 @@
 // Filler sounds, such as 嗯, 呃, um and uh, are transcribed word for word.
 // They are dropped before the text reaches the message field. Only a filler
 // that stands alone goes: 好啊 and 额度 stay, and so do umbrella and UM.
+// A filler that asks, as in 嗯？, stays, and so does a dictation that is
+// nothing but fillers, such as a lone 嗯 that means yes.
 
-// 嗯 and 呃 are never part of a Mandarin word, so they go wherever they are.
-// 啊 and 唔 are, as in 好啊, so they go only between punctuation or spaces.
-// An English filler is lower case or capitalized: UM and UH are acronyms.
+// 嗯 and 呃 go wherever they are, except in 嗯哼, which means uh-huh.
+// 啊 and 唔 are part of words, as in 好啊, so they go only between
+// punctuation or spaces. An English filler is lower case or capitalized:
+// UM and UH are acronyms.
 const FILLER =
-  /[嗯呃]+|[啊唔]+|(?<![\p{Script=Latin}\p{N}'’-])(?:[Uu](?:m+|h+|hm)|[Ee]rm+|[Hh]m+)(?![\p{Script=Latin}\p{N}'’-])/gu;
-// The English pattern checks its own word edges.
+  /[嗯呃]+(?![嗯呃哼])|[啊唔]+|(?<![\p{Script=Latin}\p{N}'’-])(?:[Uu](?:m+|h+|hm)|[Ee]rm+|[Hh]m+)(?![\p{Script=Latin}\p{N}'’-])/gu;
 const NEEDS_SEPARATORS = /^[啊唔]+$/u;
+const ENGLISH = /^[A-Za-z]/;
+// A word an English filler would be the end of, as in premi|um.
+const IN_WORD = /[\p{Script=Latin}\p{N}'’-]/u;
+const QUESTION = /^\s*[?？]/u;
 const SEPARATOR = /[\s\p{P}]/u;
 // A pause inside a sentence, which goes with the filler before it.
 const PAUSE = /^\s*(?:[,，、;；:：]|\.\.\.|…+|--|—+)\s*/u;
@@ -38,6 +44,9 @@ export function removeFillerWords(text: string, before = ""): string {
       ((prev !== "" && !SEPARATOR.test(prev)) || (next !== "" && !SEPARATOR.test(next)))
     )
       continue;
+    // The text can start inside a word that began in the text before it.
+    if (ENGLISH.test(filler) && IN_WORD.test(prev)) continue;
+    if (QUESTION.test(text.slice(end))) continue;
     out += text.slice(at, start);
     const shown = before + out;
     const pause = PAUSE.exec(text.slice(end));
@@ -92,6 +101,11 @@ const OPEN_TAIL =
 export interface FillerFilter {
   /** Takes a provider update and gives the one to show. */
   update(settled: string, pending: string): { settled: string; pending: string };
+  /**
+   * The update to show once the provider is done, or null for none. A
+   * dictation that is nothing but fillers, such as a lone 嗯, is shown as said.
+   */
+  finish(): { settled: string; pending: string } | null;
 }
 
 /**
@@ -102,9 +116,11 @@ export function createFillerFilter(): FillerFilter {
   let heard = "";
   let shownUpTo = 0;
   let shown = "";
+  let lastPending = "";
   return {
     update(settled, pending) {
       heard += settled;
+      lastPending = pending;
       // Shown text ends in a word, so the tail is all in what is not shown.
       // A tail longer than its last 64 characters is not worth the search.
       const tail = OPEN_TAIL.exec(heard.slice(Math.max(shownUpTo, heard.length - 64)))?.[0] ?? "";
@@ -119,6 +135,12 @@ export function createFillerFilter(): FillerFilter {
         settled: newlySettled,
         pending: removeFillerWords(heard.slice(shownUpTo) + pending, shown),
       };
+    },
+    finish() {
+      const said = (heard + lastPending).trim();
+      const spoken = /[^\s\p{P}]/u;
+      if (shown !== "" || !spoken.test(said) || spoken.test(removeFillerWords(said))) return null;
+      return { settled: said, pending: "" };
     },
   };
 }

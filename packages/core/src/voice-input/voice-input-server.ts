@@ -229,6 +229,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       termCount: terms.length,
     });
     const fillers = createFillerFilter();
+    const showLast = () => {
+      const last = fillers.finish();
+      if (last && !closed) reply({ type: "text", ...last });
+    };
     stream = transcriber.open(
       { sampleRate, ...(terms.length ? { terms } : {}) },
       {
@@ -243,9 +247,13 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
           lastPending = pending;
           reply({ type: "text", ...fillers.update(settled, pending) });
         },
-        onEnd: () => close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" }),
+        onEnd: () => {
+          showLast();
+          close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" });
+        },
         onFailure: (failure, detail) => {
           log.warn("voice input provider failed", { failure, detail });
+          showLast();
           close({ type: "error", reason: STOP_REASON[failure] });
         },
       },

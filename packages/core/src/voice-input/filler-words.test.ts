@@ -37,6 +37,10 @@ describe("removeFillerWords", () => {
     "Ahh, I see",
     "hum along",
     "Mm, 5 mm wide",
+    "嗯？我没听清",
+    "Hmm? Say that again",
+    "啊？你说什么",
+    "嗯哼，好的",
   ])("keeps %j", (text) => {
     expect(removeFillerWords(text)).toBe(text);
   });
@@ -44,6 +48,7 @@ describe("removeFillerWords", () => {
   it("reads the text before it without changing it", () => {
     expect(removeFillerWords(" um, works", "I think it")).toBe(" works");
     expect(removeFillerWords("啊，好的", "可以")).toBe("啊，好的");
+    expect(removeFillerWords("um plan", "The premi")).toBe("um plan");
   });
 });
 
@@ -113,6 +118,52 @@ describe("createFillerFilter", () => {
         ["，走吧", ""],
       ]),
     ).toEqual(["好", "好啊", "好啊，走吧"]);
+  });
+
+  it("keeps an English word split before a filler-like ending", () => {
+    expect(
+      show([
+        ["The premi", ""],
+        ["um plan", ""],
+        [" works.", ""],
+      ]).at(-1),
+    ).toBe("The premium plan works.");
+    expect(
+      show([
+        ["The alb", ""],
+        ["um is", ""],
+        [" out.", ""],
+      ]).at(-1),
+    ).toBe("The album is out.");
+    expect(
+      show([
+        ["Long t", ""],
+        ["erm goal", ""],
+      ]).at(-1),
+    ).toBe("Long term goal");
+    expect(
+      show([
+        ["I visited the muse", ""],
+        ["um yesterday.", ""],
+      ]).at(-1),
+    ).toBe("I visited the museum yesterday.");
+    expect(show([["The premi", "um plan"]])).toEqual(["The premium plan"]);
+  });
+
+  it("shows a dictation that is nothing but fillers as said", () => {
+    const yes = createFillerFilter();
+    yes.update("嗯", "");
+    yes.update("嗯。", "");
+    expect(yes.finish()).toEqual({ settled: "嗯嗯。", pending: "" });
+
+    const asked = createFillerFilter();
+    expect(asked.update("Hmm", "?")).toEqual({ settled: "", pending: "Hmm?" });
+    expect(asked.finish()).toBeNull();
+
+    const spoken = createFillerFilter();
+    spoken.update("嗯，", "");
+    spoken.update("好的", "");
+    expect(spoken.finish()).toBeNull();
   });
 
   it("only appends to settled text", () => {
