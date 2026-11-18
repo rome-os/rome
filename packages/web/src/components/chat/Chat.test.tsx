@@ -30,6 +30,7 @@ import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   acceptLatestSocket,
   FakeWebSocket,
@@ -2669,6 +2670,57 @@ describe("Chat turn stream lifecycle", () => {
     });
 
     await waitFor(() => expect(screen.queryByTestId("user-row")).toBeNull());
+  });
+
+  it("says Rome may be restarting when its proxy answers a send in its place", async () => {
+    // A proxy's HTML error page reads as no message (see plainErrorText).
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, status: 502, message: "" });
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.unreachable"),
+    );
+  });
+
+  it("says Rome is updating when its proxy answers a send while this page knows of an upgrade", async () => {
+    function UpgradeUnderWay() {
+      useUpgradeUnderWay(true);
+      return null;
+    }
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, status: 502, message: "" });
+    renderChat(
+      <>
+        <UpgradeUnderWay />
+        <Chat sessionId="session-1" />
+      </>,
+    );
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.updating"),
+    );
+  });
+
+  it("says it is reconnecting when the turn's stream meets Rome's proxy", async () => {
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(new Response("<!DOCTYPE html><html></html>", { status: 522 })),
+    );
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.reconnecting"),
+      );
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
   });
 
   it("keeps backing off when resumed streams keep closing right away", async () => {

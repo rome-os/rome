@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatMessage } from "./chat-types";
 import {
   conciergePageOf,
+  isUnreachableStatus,
   listSessionMessagePage,
   listSessionThread,
+  plainErrorText,
   postSessionTurn,
+  postSessionTurnJson,
 } from "./chat-api";
 
 afterEach(() => {
@@ -227,6 +230,69 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+// The page Cloudflare answers with while Rome behind it restarts.
+const PROXY_ERROR_PAGE = `<!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<html class="no-js" lang="en-US"><head><title>Bad gateway</title></head><body></body></html>`;
+
+describe("error bodies that are not JSON", () => {
+  it("keeps a proxy's HTML error page out of a refused send's message", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs
+        .fn()
+        .mockResolvedValue(
+          new Response(PROXY_ERROR_PAGE, { status: 502, headers: { "content-type": "text/html" } }),
+        ),
+    );
+
+    await expect(postSessionTurnJson("session-1", { text: "hi" })).resolves.toEqual({
+      ok: false,
+      status: 502,
+      message: "",
+    });
+  });
+
+  it("keeps a plain-text error as the message", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockResolvedValue(new Response("upstream timed out", { status: 504 })),
+    );
+
+    await expect(postSessionTurnJson("session-1", { text: "hi" })).resolves.toEqual({
+      ok: false,
+      status: 504,
+      message: "upstream timed out",
+    });
+  });
+
+  it("drops HTML whatever it starts with, and shortens plain text", () => {
+    expect(plainErrorText(`  ${PROXY_ERROR_PAGE}`)).toBe("");
+    expect(plainErrorText("<html><body>Error</body></html>")).toBe("");
+    expect(plainErrorText("x".repeat(300))).toHaveLength(200);
+  });
+
+  it("refuses a listing with its status, not the page, when the proxy answers", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockResolvedValue(new Response(PROXY_ERROR_PAGE, { status: 502 })),
+    );
+
+    await expect(listSessionThread("session-1", "m-1")).rejects.toThrow(
+      "Request failed with status 502",
+    );
+  });
+
+  it("tells the proxy's statuses from Rome's own", () => {
+    for (const status of [502, 503, 504, 520, 522, 524, 530]) {
+      expect(isUnreachableStatus(status)).toBe(true);
+    }
+    for (const status of [400, 404, 409, 500, 501, 505, 519, 531]) {
+      expect(isUnreachableStatus(status)).toBe(false);
+    }
+  });
+});
 
 describe("conciergePageOf", () => {
   it("flattens the main line, each thread's newest reply and the waiting replies into the messages the chat keeps", () => {

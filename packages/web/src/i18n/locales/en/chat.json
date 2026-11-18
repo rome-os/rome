@@ -658,7 +658,11 @@
       "sendInvalidResponse": "Failed to send message: invalid response.",
       "sendFallback": "Failed to send message.",
       "stopFallback": "Failed to stop generation.",
-      "stopStatus": "Stop failed ({{status}})."
+      "stopStatus": "Stop failed ({{status}}).",
+      "reconnecting": "Can't reach Rome, reconnecting…",
+      "unreachable": "Can't reach Rome, try again soon.",
+      "updating": "Updating now, try again soon.",
+      "updatingReconnecting": "Updating now, reconnecting…"
     }
   },
   "empty": {

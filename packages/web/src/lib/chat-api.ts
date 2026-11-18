@@ -51,6 +51,24 @@ export class ChatApiError extends Error {
   }
 }
 
+/**
+ * A non-JSON error body as text the chat can show, or "" for a web page. While
+ * Rome restarts, the proxy in front of it answers with its own HTML error page,
+ * and its markup is not a message.
+ */
+export function plainErrorText(raw: string): string {
+  const text = raw.trim();
+  return text.startsWith("<") ? "" : text.slice(0, 200);
+}
+
+/**
+ * The statuses a proxy answers with when Rome behind it does not, as during a
+ * restart: bad gateway, unavailable, gateway timeout, and Cloudflare's 52x.
+ */
+export function isUnreachableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 530);
+}
+
 async function readErrorPayload(res: Response): Promise<unknown> {
   try {
     const raw = (await res.text()).trim();
@@ -58,7 +76,8 @@ async function readErrorPayload(res: Response): Promise<unknown> {
     try {
       return JSON.parse(raw);
     } catch {
-      return { error: raw.slice(0, 200) };
+      const text = plainErrorText(raw);
+      return text ? { error: text } : null;
     }
   } catch {
     return null;
@@ -755,7 +774,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
       provider = payload.provider;
       reason = payload.reason;
     } catch {
-      message = trimmed.slice(0, 200);
+      message = plainErrorText(trimmed);
     }
   }
   return {
