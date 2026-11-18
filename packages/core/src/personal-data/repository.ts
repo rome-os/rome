@@ -401,9 +401,7 @@ export class PersonalDataRepository {
           range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
           eq(personalDataPoints.origin, origin),
           ...windowFilter(range),
-          range.search
-            ? sql`lower(${personalDataPoints.metadata}) like ${`%${escapeLike(range.search.toLowerCase())}%`} escape '\\'`
-            : undefined,
+          range.search ? contentMatches(range.search) : undefined,
           after
             ? or(
                 gt(personalDataPoints.startAt, after.startAt),
@@ -513,6 +511,19 @@ function windowFilter(range: { from: number; to: number; by?: "start" | "end" | 
   }
   const at = range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt;
   return [gte(at, range.from), lt(at, range.to)];
+}
+
+/**
+ * Whether an entry's words hold `search`: its text values only, never the
+ * JSON's key names ("Cal" would match every `calendar`) nor the ids a live
+ * edit takes. Both sides go through SQLite's `lower()`, so a letter it does
+ * not fold (É) still matches itself as written.
+ */
+function contentMatches(search: string) {
+  const pattern = `%${escapeLike(search)}%`;
+  return sql`exists (select 1 from json_tree(${personalDataPoints.metadata}) as part
+    where part.type = 'text' and coalesce(part.key, '') not in ('id', 'occurrence')
+    and lower(part.value) like lower(${pattern}) escape '\\')`;
 }
 
 function escapeLike(text: string): string {

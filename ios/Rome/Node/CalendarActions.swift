@@ -212,10 +212,11 @@ struct CalendarActions: Sendable {
 
     private func integer(_ value: JSONValue?, _ name: String, in range: ClosedRange<Int>) throws -> Int? {
         guard let value, value != .null else { return nil }
-        guard let number = value.number, number == number.rounded(), range.contains(Int(number)) else {
+        // `Int(exactly:)` before the range: `Int(1e100)` traps.
+        guard let number = value.number, let whole = Int(exactly: number), range.contains(whole) else {
             throw ActionFailure.invalid("\(name) must be a whole number from \(range.lowerBound) to \(range.upperBound).")
         }
-        return Int(number)
+        return whole
     }
 
     /// `HH:mm`, as minutes after midnight.

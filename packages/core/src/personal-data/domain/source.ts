@@ -57,6 +57,12 @@ export interface TypeSpec {
    * reading is never in the future; an entry such as a calendar event is.
    */
   aheadDays?: number;
+  /**
+   * How many days past each sync the device sends, for a type it sends ahead
+   * of time. A window that ends past the last sync plus this is not covered,
+   * so the Agent reads the device live. Absent, a sync covers up to itself.
+   */
+  syncedAheadDays?: number;
 }
 
 export interface SourceSpec {

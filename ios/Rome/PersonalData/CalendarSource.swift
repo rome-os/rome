@@ -12,6 +12,12 @@ struct CalendarSource: PersonalDataSource {
     /// Notes are cut here: the Rome keeps at most 1,000 characters.
     static let notesLength = 1000
     static let maxAttendees = 20
+    /// The Rome's own cuts: 200 characters for a text, 100 for each attendee.
+    static let textLength = 200
+    static let attendeeLength = 100
+    /// Below the Rome's 4,096 characters of JSON per item, which it refuses
+    /// whole: what goes past it is cut from the notes, then the attendees.
+    static let itemLength = 4000
 
     let reader: CalendarReading
     let store: ProgressStoring
@@ -46,10 +52,17 @@ struct CalendarSource: PersonalDataSource {
         await pending.take()
     }
 
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, rejected: Set<String>) async {
         // A Rome that refused events keeps nothing new: they are sent again next time.
         guard unsupported.isEmpty else { return }
-        await store.save(chunk.commit)
+        var commit = chunk.commit
+        if !rejected.isEmpty {
+            // An event the Rome refused keeps what it last had, or nothing:
+            // the next run sends it again, and a delete still follows it.
+            let before = await store.load().entries ?? [:]
+            for key in rejected { commit.entries?[key] = before[key] }
+        }
+        await store.save(commit)
     }
 
     func reset() async { await store.removeAll() }
@@ -117,8 +130,9 @@ struct CalendarSource: PersonalDataSource {
 
     static func point(_ event: CalendarEventItem, calendar: Calendar) -> PersonalDataPoint {
         var key = "events:\(event.id)"
+        func text(_ value: String) -> JSONValue { .string(String(value.prefix(textLength))) }
         var content: [String: JSONValue] = [
-            "id": .string(event.id), "title": .string(event.title), "calendar": .string(event.calendar),
+            "id": .string(event.id), "title": text(event.title), "calendar": text(event.calendar),
             "allDay": .bool(event.allDay), "availability": .string(event.availability), "status": .string(event.status),
         ]
         if let occurrence = event.occurrence {
@@ -127,15 +141,42 @@ struct CalendarSource: PersonalDataSource {
             content["occurrence"] = .string(HealthDates.iso(occurrence, calendar))
             content["recurring"] = .bool(true)
         }
-        if let location = event.location { content["location"] = .string(location) }
-        if let notes = event.notes { content["notes"] = .string(String(notes.prefix(notesLength))) }
-        if !event.attendees.isEmpty { content["attendees"] = .array(event.attendees.prefix(maxAttendees).map(JSONValue.string)) }
+        if let location = event.location { content["location"] = text(location) }
         if let url = event.url { content["url"] = .string(String(url.prefix(500))) }
-        return PersonalDataPoint(
-            key: String(key.prefix(200)), type: "events", shape: .entry,
-            start: WireTime.string(event.start), end: WireTime.string(max(event.end, event.start)),
-            tz: calendar.timeZone.identifier, content: content
-        )
+        var notes = event.notes.map { String($0.prefix(notesLength)) }
+        var attendees = event.attendees.prefix(maxAttendees).map { String($0.prefix(attendeeLength)) }
+        func build() -> PersonalDataPoint {
+            var full = content
+            if let notes, !notes.isEmpty { full["notes"] = .string(notes) }
+            if !attendees.isEmpty { full["attendees"] = .array(attendees.map(JSONValue.string)) }
+            return PersonalDataPoint(
+                key: String(key.prefix(200)), type: "events", shape: .entry,
+                start: WireTime.string(event.start), end: WireTime.string(max(event.end, event.start)),
+                tz: calendar.timeZone.identifier, content: full
+            )
+        }
+        var point = build()
+        while let over = overLength(point) {
+            if let current = notes, !current.isEmpty {
+                notes = String(current.prefix(max(0, current.count - over)))
+            } else if !attendees.isEmpty {
+                attendees.removeLast()
+            } else {
+                break
+            }
+            point = build()
+        }
+        return point
+    }
+
+    /// How many characters the item's JSON is past `itemLength`, counted
+    /// as the Rome counts them (UTF-16 units), or nil when it fits.
+    private static func overLength(_ point: PersonalDataPoint) -> Int? {
+        guard let data = try? PersonalDataClient.encoder.encode(point),
+              let json = String(data: data, encoding: .utf8)
+        else { return nil }
+        let over = json.utf16.count - itemLength
+        return over > 0 ? over : nil
     }
 
 }

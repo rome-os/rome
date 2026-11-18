@@ -150,6 +150,12 @@ describe("entries", () => {
         upserts: [
           event("a", TOMORROW + 9 * HOUR, TOMORROW + 10 * HOUR, { title: "Design review" }),
           event("b", TOMORROW + 11 * HOUR, TOMORROW + 12 * HOUR, { title: "Lunch with 50% off" }),
+          event("c", TOMORROW + 13 * HOUR, TOMORROW + 14 * HOUR, {
+            title: "Coffee",
+            calendar: "Work",
+            allDay: false,
+            attendees: ["Émile"],
+          }),
         ],
       }),
       NOW,
@@ -163,6 +169,11 @@ describe("entries", () => {
     expect(ids({ search: "REVIEW" })).toEqual(["a"]);
     expect(ids({ search: "50%" })).toEqual(["b"]);
     expect(ids({ search: "_" })).toEqual([]);
+    // Key names and ids are not words: "Cal" would match every `calendar`.
+    expect(ids({ search: "Cal" })).toEqual([]);
+    expect(ids({ search: "allday" })).toEqual([]);
+    expect(ids({ search: "work" })).toEqual(["c"]);
+    expect(ids({ search: "Émile" })).toEqual(["c"]);
   });
 
   it("removes an event the phone deleted", () => {
@@ -198,6 +209,29 @@ describe("entries", () => {
     const atSync = list({ start: "2026-11-18T12:00", end: "2026-11-18T18:00" }, NOW);
     expect(atSync.freshness.events).toMatchObject({ coversWindow: true });
     expect(atSync.connection).toBeUndefined();
+  });
+
+  it("does not cover a window past the 30 days the phone sends, however recent the sync", () => {
+    repo.ingest(
+      APPLE_CALENDAR,
+      batch("b1", {
+        upserts: [event("old", NOW - 5 * DAY, NOW - 5 * DAY + HOUR)],
+        syncedThrough: NOW,
+      }),
+      NOW,
+    );
+    const inside = list({ start: "2026-12-10", end: "2026-12-10" }, NOW);
+    expect(inside.freshness.events).toMatchObject({ coversWindow: true });
+    const past = list({ start: "2027-01-20", end: "2027-01-20" }, NOW);
+    expect(past.freshness.events).toMatchObject({
+      coversWindow: false,
+      missingFrom: iso(Date.parse("2027-01-19T16:00:00Z")),
+    });
+    const straddling = list({ start: "2026-12-10", end: "2026-12-20" }, NOW);
+    expect(straddling.freshness.events).toMatchObject({
+      coversWindow: false,
+      missingFrom: iso(NOW + 30 * DAY),
+    });
   });
 
   it("refuses interval, aggregate and unit for entries, and search for readings", () => {

@@ -213,11 +213,11 @@ enum CalendarFixtures {
         #expect(first.upserts.map(\.key) == ["events:a", "events:b"])
         #expect(first.upserts.allSatisfy { $0.shape == .entry })
         #expect(first.marks.map(\.type) == ["events"])
-        await source.confirm(first, unsupported: [])
+        await source.confirm(first, unsupported: [], rejected: [])
 
         let same = try await run(source)
         #expect(same.upserts.isEmpty && same.deletes.isEmpty, "nothing changed")
-        await source.confirm(same, unsupported: [])
+        await source.confirm(same, unsupported: [], rejected: [])
 
         fake.events[0].title = "Moved"
         fake.events.remove(at: 1)
@@ -231,11 +231,44 @@ enum CalendarFixtures {
         fake.events = [CalendarFixtures.event("a", 9, 10)]
         let source = source(fake)
         let first = try await run(source)
-        await source.confirm(first, unsupported: [])
+        await source.confirm(first, unsupported: [], rejected: [])
         let later = CalendarFixtures.now.addingTimeInterval(10 * 86_400)
         let after = try await run(source, at: later)
         #expect(after.deletes.isEmpty)
         #expect(after.commit.entries?["events:a"] == nil)
+    }
+
+    @Test func anEventTheRomeRefusedIsSentAgain() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10), CalendarFixtures.event("b", 14, 15)]
+        let store = MemoryProgressStore()
+        let source = source(fake, store)
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+
+        // b changes and the Rome refuses the new version: b keeps its old
+        // hash, so it is sent again, and a later delete still follows it.
+        fake.events[1].title = "Changed"
+        await source.confirm(try await run(source), unsupported: [], rejected: ["events:b"])
+        let again = try await run(source)
+        #expect(again.upserts.map(\.key) == ["events:b"])
+
+        // A new event the Rome refused is not remembered at all.
+        fake.events.append(CalendarFixtures.event("c", 16, 17))
+        await source.confirm(try await run(source), unsupported: [], rejected: ["events:b", "events:c"])
+        #expect(try await run(source).upserts.map(\.key) == ["events:b", "events:c"])
+    }
+
+    @Test func aLongEventFitsTheRomesItemLimit() throws {
+        var event = CalendarFixtures.event("a", 9, 10, title: String(repeating: "t", count: 500))
+        event.location = String(repeating: "l", count: 500)
+        event.notes = String(repeating: "\"n\"", count: 400)
+        event.attendees = (0..<20).map { "\($0)" + String(repeating: "会", count: 200) }
+        let point = CalendarSource.point(event, calendar: CalendarFixtures.calendar)
+        let json = try #require(String(data: try PersonalDataClient.encoder.encode(point), encoding: .utf8))
+        #expect(json.utf16.count <= CalendarSource.itemLength)
+        #expect(point.content?["title"]?.string?.count == CalendarSource.textLength)
+        #expect(point.content?["location"]?.string?.count == CalendarSource.textLength)
+        #expect(point.content?["attendees"]?.array?.isEmpty == false, "attendees kept once the notes are cut")
     }
 
     @Test func aRefusedBatchKeepsTheOldRecord() async throws {
@@ -243,7 +276,7 @@ enum CalendarFixtures {
         fake.events = [CalendarFixtures.event("a", 9, 10)]
         let store = MemoryProgressStore()
         let source = source(fake, store)
-        await source.confirm(try await run(source), unsupported: ["events"])
+        await source.confirm(try await run(source), unsupported: ["events"], rejected: [])
         let again = try await run(source)
         #expect(again.upserts.map(\.key) == ["events:a"], "sent again after the Rome refused it")
     }

@@ -99,18 +99,29 @@ export function queryPersonalData(
     // reaches, so the earliest reading stands in for that: a window that
     // starts before it is not known to be covered.
     const reachesBack = earliest !== undefined && earliest <= plan.start;
+    // A type the device sends only so far ahead of each sync (calendar
+    // events, 30 days) does not cover a window that ends past that, however
+    // recent the sync: no events there means nothing was sent, not a free day.
+    const aheadUntil =
+      at !== undefined && spec.syncedAheadDays !== undefined
+        ? at + spec.syncedAheadDays * DAY_MS
+        : undefined;
+    const reachesAhead =
+      spec.syncedAheadDays === undefined || (aheadUntil !== undefined && plan.end <= aheadUntil);
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
       ...(reading?.earliestAt != null
         ? { earliest: new Date(reading.earliestAt).toISOString() }
         : {}),
       ...(hourlyFrom !== undefined ? { hourlyFrom: new Date(hourlyFrom).toISOString() } : {}),
-      coversWindow: at !== undefined && at >= windowEnd && reachesBack,
+      coversWindow: at !== undefined && at >= windowEnd && reachesBack && reachesAhead,
       ...(at === undefined || !reachesBack
         ? { missingFrom: new Date(plan.start).toISOString() }
         : at < windowEnd
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
-          : {}),
+          : !reachesAhead && aheadUntil !== undefined
+            ? { missingFrom: new Date(Math.max(aheadUntil, plan.start)).toISOString() }
+            : {}),
     };
     if (!freshness[spec.type].coversWindow) {
       if (gapOrigin === undefined) gapOrigin = reading?.origin ?? null;
@@ -119,7 +130,9 @@ export function queryPersonalData(
       // does not reach back, or no sync at all, has no bound.
       gapMs = Math.max(
         gapMs,
-        at === undefined || !reachesBack ? Number.POSITIVE_INFINITY : windowEnd - at,
+        at === undefined || !reachesBack || !reachesAhead
+          ? Number.POSITIVE_INFINITY
+          : windowEnd - at,
       );
     }
     return answered.result;

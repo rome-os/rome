@@ -280,6 +280,12 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         context.coordinator.makeView()
     }
 
+    /// A chat closed mid-fold still turns UIKit's animations back on and
+    /// stops the hold's display link.
+    static func dismantleUIView(_ view: UICollectionView, coordinator: TranscriptCoordinator<Row>) {
+        coordinator.endHold()
+    }
+
     func updateUIView(_ view: UICollectionView, context: Context) {
         let coordinator = context.coordinator
         coordinator.row = row
@@ -543,7 +549,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let now = CACurrentMediaTime()
         held = (id, heightOf(id) ?? 0, now, now)
         if holdLink == nil {
-            let link = CADisplayLink(target: HoldTarget { [weak self] in self?.watchHeld() }, selector: #selector(HoldTarget.tick))
+            let link = CADisplayLink(target: HoldTarget { [weak self] in
+                guard let self else { return false }
+                self.watchHeld()
+                return true
+            }, selector: #selector(HoldTarget.tick))
             link.add(to: .main, forMode: .common)
             holdLink = link
         }
@@ -582,7 +592,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         UIView.setAnimationsEnabled(true)
     }
 
-    private func endHold() {
+    func endHold() {
         releaseAnimations()
         holdLink?.invalidate()
         holdLink = nil
@@ -746,10 +756,18 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
 /// A display link's target that calls back: the link holds its target
 /// strongly, so the list is never kept alive by it.
+/// The hold's display link target. The action answers false once its
+/// coordinator is gone: the link then stops itself, and the animations the
+/// hold turned off come back on.
+@MainActor
 private final class HoldTarget: NSObject {
-    let action: () -> Void
-    init(_ action: @escaping () -> Void) { self.action = action }
-    @objc func tick() { action() }
+    let action: () -> Bool
+    init(_ action: @escaping () -> Bool) { self.action = action }
+    @objc func tick(_ link: CADisplayLink) {
+        guard !action() else { return }
+        link.invalidate()
+        UIView.setAnimationsEnabled(true)
+    }
 }
 
 #if DEBUG

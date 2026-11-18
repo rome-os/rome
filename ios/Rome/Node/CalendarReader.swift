@@ -164,12 +164,14 @@ actor LiveCalendar: CalendarReading {
         return item
     }
 
-    /// One event, or the one occurrence of a series that started at `occurrence`.
+    /// One event, or the one occurrence of a series that started at
+    /// `occurrence`. An occurrence that is not there (moved, detached or
+    /// deleted) finds nothing: `event(withIdentifier:)` would return the
+    /// series' first occurrence, and the edit would land on another meeting.
     private func find(id: String, occurrence: Date?) -> EKEvent? {
         guard let occurrence else { return store.event(withIdentifier: id) }
         let predicate = store.predicateForEvents(withStart: occurrence.addingTimeInterval(-86_400), end: occurrence.addingTimeInterval(86_400), calendars: nil)
         return store.events(matching: predicate).first { $0.eventIdentifier == id && $0.occurrenceDate == occurrence }
-            ?? store.event(withIdentifier: id)
     }
 
     /// The calendar a new event goes in: one named by id or title, else the default.
