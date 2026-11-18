@@ -81,7 +81,7 @@ export function queryPersonalData(
   const results = plan.types.map((spec) => {
     // Each type reads the origin that covers the window, so a second device
     // or a new origin after a sign-in takes over once it has caught up.
-    const reading = repo.originFor(source.source, spec.type, plan.start);
+    const reading = repo.originFor(source.source, spec.type, plan.start, plan.end);
     const at = reading?.syncedThroughAt ?? undefined;
     const answered = reading
       ? resultFor(repo, source, reading.origin, spec, plan, defaults.now)
@@ -99,20 +99,29 @@ export function queryPersonalData(
     // reaches, so the earliest reading stands in for that: a window that
     // starts before it is not known to be covered.
     // A rolling snapshot covers only what the last sync read: an empty
-    // calendar is covered, and a gap between syncs is not.
-    const reachesBack =
-      spec.syncedBackDays !== undefined
+    // calendar is covered, and a gap between syncs is not. A committed
+    // snapshot says which window it read; a device that sends changes
+    // instead is taken to read the span its type declares.
+    const snapshot =
+      reading?.snapshotStartAt != null && reading.snapshotEndAt != null
+        ? { start: reading.snapshotStartAt, end: reading.snapshotEndAt }
+        : undefined;
+    const reachesBack = snapshot
+      ? plan.start >= snapshot.start
+      : spec.syncedBackDays !== undefined
         ? at !== undefined && plan.start >= at - spec.syncedBackDays * DAY_MS
         : earliest !== undefined && earliest <= plan.start;
     // A type the device sends only so far ahead of each sync (calendar
-    // events, 30 days) does not cover a window that ends past that, however
+    // events, 15 days) does not cover a window that ends past that, however
     // recent the sync: no events there means nothing was sent, not a free day.
-    const aheadUntil =
-      at !== undefined && spec.syncedAheadDays !== undefined
+    const aheadUntil = snapshot
+      ? snapshot.end
+      : at !== undefined && spec.syncedAheadDays !== undefined
         ? at + spec.syncedAheadDays * DAY_MS
         : undefined;
     const reachesAhead =
-      spec.syncedAheadDays === undefined || (aheadUntil !== undefined && plan.end <= aheadUntil);
+      (spec.syncedAheadDays === undefined && !snapshot) ||
+      (aheadUntil !== undefined && plan.end <= aheadUntil);
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
       ...(reading?.earliestAt != null

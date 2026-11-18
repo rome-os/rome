@@ -69,6 +69,23 @@ export const ingestEnvelopeSchema = z.object({
     .array(z.object({ type: z.string().min(1), syncedThrough: isoTime.optional() }))
     .max(200)
     .default([]),
+  // A snapshot of a window, for a type the device sends whole each sync
+  // (`syncedBackDays`). Every batch of the run carries the same id, which
+  // stamps the rows it sends. The last batch adds `windows` and commits:
+  // each type's rows in its window that this snapshot did not send are
+  // deleted. A run cut off before it deletes nothing. Absent, a batch
+  // applies its upserts and deletes as they are.
+  snapshot: z
+    .object({
+      id: z.string().min(1).max(100),
+      // When the device read the window: an older snapshot never replaces a newer one.
+      readAt: isoTime,
+      windows: z
+        .array(z.object({ type: z.string().min(1), start: isoTime, end: isoTime }))
+        .max(200)
+        .optional(),
+    })
+    .optional(),
   // Items are checked one by one, so one bad item does not refuse the batch.
   upserts: z.array(z.unknown()).default([]),
   deletes: z.array(z.unknown()).default([]),
@@ -282,4 +299,35 @@ function canonicalJson(value: unknown): string {
     .filter(([, entry]) => entry !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+}
+
+/** A committed snapshot window, as the store keeps it. */
+export interface SnapshotWindow {
+  id: string;
+  startAt: number;
+  endAt: number;
+  readAt: number;
+}
+
+/**
+ * The window a snapshot commits for one type, or undefined when the type is
+ * not sent as a snapshot or the window is not one the device could have read:
+ * no further back or ahead of its read than the type declares, give or take
+ * two days for whole local days and a daylight-saving hour, so a skewed clock
+ * cannot clear the type's history.
+ */
+export function snapshotWindow(
+  spec: TypeSpec,
+  snapshot: { id: string; readAt: string },
+  window: { start: string; end: string },
+  receivedAt: number,
+): SnapshotWindow | undefined {
+  if (spec.syncedBackDays === undefined) return undefined;
+  const readAt = Date.parse(snapshot.readAt);
+  const startAt = Date.parse(window.start);
+  const endAt = Date.parse(window.end);
+  if (readAt > receivedAt + DAY_MS || startAt >= endAt) return undefined;
+  if (startAt < readAt - (spec.syncedBackDays + 2) * DAY_MS) return undefined;
+  if (endAt > readAt + ((spec.syncedAheadDays ?? 0) + 2) * DAY_MS) return undefined;
+  return { id: snapshot.id, startAt, endAt, readAt };
 }

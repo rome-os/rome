@@ -25,22 +25,12 @@ struct SyncProgress: Codable, Equatable, Sendable {
     var deltaThrough: Date?
     /// Types this Rome refused as unknown: not sent again until it updates.
     var unsupported: Set<String> = []
-    /// For a source of entries (Calendar): what the Rome holds of each entry
-    /// this phone sent, by key, so a sync sends only what changed and deletes
-    /// what is gone. Optional, so progress saved before it still decodes.
-    var entries: [String: SentEntry]?
-    /// Entries a run began sending that the Rome has not confirmed: an
-    /// interrupted run may have stored some, so one gone from the phone is
-    /// deleted next time whether or not the Rome had it. Cleared on confirm.
-    var attempted: [String: SentEntry]?
-
-    struct SentEntry: Codable, Equatable, Sendable {
-        /// A hash of the item as sent.
-        var hash: String
-        /// When it ends: an event that has aged out of the window is
-        /// forgotten here, and the Rome keeps it.
-        var end: Date
-    }
+    /// For a source sent as snapshots (Calendar): a digest of the last
+    /// snapshot the Rome said it committed, its window included, and when
+    /// it was read. A run that reads the same again sends nothing, for up to
+    /// a day. Set only once the Rome answers the commit.
+    var snapshotDigest: String?
+    var snapshotAt: Date?
 
     struct Backfill: Codable, Equatable, Sendable {
         /// When sync was turned on: the backfill reads back from here.

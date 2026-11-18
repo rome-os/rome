@@ -344,8 +344,8 @@ enum FreeBusy {
         var parts: [DateInterval] = []
         var day = calendar.startOfDay(for: window.start)
         while day < window.end {
-            let from = calendar.date(byAdding: .minute, value: hours.0, to: day) ?? day
-            let to = calendar.date(byAdding: .minute, value: hours.1, to: day) ?? day
+            let from = clockTime(hours.0, on: day, calendar: calendar)
+            let to = clockTime(hours.1, on: day, calendar: calendar)
             let start = max(from, window.start)
             let end = min(to, window.end)
             if start < end { parts.append(DateInterval(start: start, end: end)) }
@@ -353,5 +353,15 @@ enum FreeBusy {
             day = next
         }
         return parts
+    }
+
+    /// The wall-clock time `minutes` after midnight on `day`, as the phone's
+    /// clock reads it on that day, so 09:00 stays 09:00 on a daylight-saving
+    /// day. 24:00 is the next midnight.
+    private static func clockTime(_ minutes: Int, on day: Date, calendar: Calendar) -> Date {
+        if minutes >= 24 * 60 {
+            return calendar.date(byAdding: .day, value: 1, to: day).map { calendar.startOfDay(for: $0) } ?? day
+        }
+        return calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day) ?? day
     }
 }

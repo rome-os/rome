@@ -5,6 +5,12 @@
       "reason": "Agent page Outputs tab reads GET /chat/sessions/:id/outputs",
       "pr": 2357,
       "server": "#2340"
+    },
+    {
+      "tier": "background",
+      "reason": "Calendar sync sends snapshots of its window; an older instance never deletes events removed on the phone, and reads days 16 to 30 as covered though the phone sends only 15.",
+      "pr": 2356,
+      "server": "#2356"
     }
   ]
 }

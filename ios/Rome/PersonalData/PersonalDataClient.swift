@@ -54,6 +54,20 @@ struct PersonalDataEnvelope: Encodable, Sendable {
         let key: String
     }
 
+    /// A snapshot of a window: the id on every batch of the run, and the
+    /// windows on the last, which commits them.
+    struct Snapshot: Encodable, Sendable, Equatable {
+        struct Window: Encodable, Sendable, Equatable {
+            let type: String
+            let start: String
+            let end: String
+        }
+
+        let id: String
+        let readAt: String
+        var windows: [Window]?
+    }
+
     var version = 1
     let source: String
     let origin: Origin
@@ -62,6 +76,8 @@ struct PersonalDataEnvelope: Encodable, Sendable {
     var connectionId: String? = nil
     let batch: Batch
     let types: [TypeMark]
+    /// Absent for a chunk that is not a snapshot.
+    var snapshot: Snapshot? = nil
     let upserts: [PersonalDataPoint]
     let deletes: [Delete]
 }
