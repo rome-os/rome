@@ -618,7 +618,7 @@
       "manageCredits": "View ChatGPT usage",
       "settingsButton": "Settings",
       "label": "Allow credit usage",
-      "description": "Uses ChatGPT credits when your subscription runs out. Turning this on resumes chats paused by a usage limit, and may spend credits right away.",
+      "description": "Uses ChatGPT credits when your subscription runs out. Turning this on resumes chats paused by a usage limit, and may spend credits right away. Never buys credits.",
       "saveFailed": "Could not load or save the ChatGPT credits setting. Please try again."
     },
     "title": "AI Tools",
