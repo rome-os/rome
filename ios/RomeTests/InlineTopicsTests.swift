@@ -195,7 +195,9 @@ private func msg(
         backend.stored = messages
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
-        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        // A follow-up fetch after a send is the test's to ask for: by default it never comes.
+        store.acceptedFetchDelay = .seconds(3600)
         return store
     }
 
@@ -248,13 +250,16 @@ private func msg(
         backend.stored = messages
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
-        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
         store.onScreen = true
+        // A follow-up fetch after a send is the test's to ask for: by default it never comes.
+        store.acceptedFetchDelay = .seconds(3600)
         return store
     }
 
     private func settle(_ until: () -> Bool) async {
-        for _ in 0..<100 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
+        // Until the state holds, up to ten seconds: a slow simulator clone is slower, never wrong.
+        for _ in 0..<1000 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     private var unreadChat: [ChatMessage] {
@@ -359,7 +364,7 @@ private func msg(
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.cache = cache
         store.start()
-        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
         store.markThreadRead("r")
         // Something else changes the chat, and the cache is written.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(msg("z", "later", at: 99, thread: "z", read: true)))
@@ -452,7 +457,7 @@ private func msg(
         #expect(store.threads.stacks["r"]?.total == 2 && store.threads.stacks["r"]?.unread == 0)
         #expect(store.pills.isEmpty && store.stackWatch.isEmpty)
         store.openChatThread("r")
-        await settle { false }
+        try? await Task.sleep(for: .milliseconds(100))
         #expect(backend.markedRead.isEmpty)
     }
 
@@ -487,12 +492,15 @@ private func msg(
         backend.stored = messages
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
-        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        // A follow-up fetch after a send is the test's to ask for: by default it never comes.
+        store.acceptedFetchDelay = .seconds(3600)
         return store
     }
 
     private func settle(_ until: () -> Bool) async {
-        for _ in 0..<100 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
+        // Until the state holds, up to ten seconds: a slow simulator clone is slower, never wrong.
+        for _ in 0..<1000 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     @Test func theThreadOpensWhenTheServerAcceptsTheReply() async {

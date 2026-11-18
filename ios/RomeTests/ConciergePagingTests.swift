@@ -202,13 +202,16 @@ final class ConciergeWireRecorder: URLProtocol, @unchecked Sendable {
     private func chat(_ backend: FakeBackend) async -> TranscriptStore {
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
         store.start()
-        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
         store.onScreen = true
+        // A follow-up fetch after a send is the test's to ask for: by default it never comes.
+        store.acceptedFetchDelay = .seconds(3600)
         return store
     }
 
     private func settle(_ until: () -> Bool) async {
-        for _ in 0..<100 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
+        // Until the state holds, up to ten seconds: a slow simulator clone is slower, never wrong.
+        for _ in 0..<1000 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     private let root = cmsg("r", role: "user", "plan the trip", at: 0, read: true)

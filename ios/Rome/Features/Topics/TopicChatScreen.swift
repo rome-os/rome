@@ -148,7 +148,7 @@ struct TopicChatScreen: View {
         // page reads nothing, and is read when this one comes back.
         .onChange(of: "\(store?.sessionId ?? "")|\(visibleChat ?? "")", initial: true) { updateOnScreen() }
         .onDisappear {
-            store?.onScreen = false
+            store?.viewed = false
             store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
@@ -159,7 +159,9 @@ struct TopicChatScreen: View {
     /// Tells the store whether the guardian sees the chat.
     private func updateOnScreen() {
         guard let store else { return }
-        store.onScreen = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
+        // Only what is seen: this screen opens and reads the chat itself (`markRead`), so the
+        // store's own opening, which the main Chat relies on, is not asked twice.
+        store.viewed = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
     }
 
     /// Read only while it is the chat on screen: never under an instance

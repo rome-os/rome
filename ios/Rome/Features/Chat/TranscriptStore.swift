@@ -604,9 +604,15 @@ final class TranscriptStore {
     /// The app is in front. Left for the background, the chat reads nothing it was not seen to show.
     @ObservationIgnored private var foreground = true
 
+    /// The chat is the one on screen, as a screen that owns its own opening and reading says
+    /// (a topic chat's screen): unlike `onScreen`, setting it opens and reads nothing by itself.
+    var viewed = false {
+        didSet { if viewed, !oldValue { readOpenThread() } }
+    }
+
     /// The guardian sees the chat: it is the one on screen and the app is in front. Only
     /// then is a reply of the open thread read as it comes.
-    var isSeen: Bool { onScreen && foreground }
+    var isSeen: Bool { (onScreen || viewed) && foreground }
 
     /// The chat opened: the main Chat came on screen after being left, or a
     /// topic chat's screen appeared. Reads the chat's read mark before the
