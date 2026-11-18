@@ -1,4 +1,5 @@
 // Runs the selected scenarios against the environment and writes the report.
+import { turnReport } from "./turn-report.mjs";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -368,9 +369,22 @@ export async function verify({
     memory = { notObserved: error.message };
   }
 
+  // Reported, never scored: every turn's tokens, cache use and cost.
+  let turns;
+  try {
+    turns = turnReport(
+      await env.usage(new Date(0).toISOString()),
+      startedAt.toISOString(),
+      ctx.model,
+    );
+  } catch (error) {
+    turns = { notMeasured: error.message };
+  }
+
   const report = {
     ...head(),
     memory,
+    turns,
     stoppedByEnvoy,
     logs,
     summary: summarize(results),

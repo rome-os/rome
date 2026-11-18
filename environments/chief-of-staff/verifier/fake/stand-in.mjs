@@ -123,10 +123,12 @@ function answer(state, message, breaks) {
     hearing.a10.unlinkedFact,
     hearing.a11.fact,
     hearing.a12,
+    ...hearing.k8Facts,
   ].find((f) => f.question === text);
   if (fact) {
     const said = state.messages.find((m) => m.text === fact.text);
-    return said && !said.unheard && remembers(state, said, breaks)
+    const forgets = breaks === "K8" && hearing.k8Facts.includes(fact);
+    return said && !said.unheard && !forgets && remembers(state, said, breaks)
       ? `${fact.text} (${link(said)})`
       : "I don't know; nobody has told me that.";
   }

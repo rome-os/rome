@@ -80,8 +80,11 @@ The rules and their pass bars come from the rules doc, version R4. `scenarios/in
 | A10 Unlinking turns it off | Phase 3, proposed. `cos-env unlink`; a member mentions the agent in `general`, and another says a fact there. `cos-env link`; a member mentions it again | No reply to the first mention within the A1 wait, and a reply to the second within it. Reported, not scored until Ouou decides: whether the fact said while unlinked stays unknown |
 | A11 Hears only its own connected account | Phase 3, proposed. A member says a fact in `second-bot-only`, which only the second Rome bot reads, and another mentions the second bot in `general` | No reply from the agent to the mention within the A1 wait, and an answer about the fact in `general` that does not hold it. Without the second bot, A11 is not checked |
 | A12 Another bot never pings it | Phase 3, proposed. The driver bot, posting as itself, mentions the agent in `general` with a fact | No reply within the A1 wait, and a member asking about the fact later gets it |
+| K8 Keeps what it was told | Phase 3, for the fresh-context prototype (design thread, 2026-11-18). Members tell the agent 5 facts in `general` with a mention, facts in no document. Then 30 K5 questions with answers are asked there, by each member in turn. Then other members ask for each fact | The answer holds the fact's distinctive words for at least 4 of 5 |
 
 Rules that wait "a day" or "an hour" in the rules doc run on the waits above, and the report states them.
+
+Every report ends with each agent turn's tokens and cost: uncached input, cache reads and writes, output, and cost from the tokens at Rome's rates, with input as minimum, median and maximum. The turns are split by whether each started less than 5 minutes after the one before, within the prompt cache's life. Rome's recorded `cost_usd` is a running total per session and is never summed. Reported, never scored.
 
 Phase 3 runs with `COS_CHAT_SETTINGS=default`, so A2 hears facts in chats on Rome's defaults, which only the chief of staff's hearing every message lets through. A9 to A12 run after K4 and before A3, since A9 changes a chat's settings and A10 unlinks the agent, each putting it back before it ends.
 

@@ -16,6 +16,7 @@ import k4 from "./k4-stays-current.mjs";
 import k5 from "./k5-no-invention.mjs";
 import k6 from "./k6-survives-restart.mjs";
 import k7 from "./k7-private.mjs";
+import k8 from "./k8-keeps-what-it-was-told.mjs";
 
 /** The rules version the scenarios encode. Change it with the rules doc. */
 export const RULES_VERSION = "R4";
@@ -25,4 +26,23 @@ export const RULES_VERSION = "R4";
 // K4 share the move of the clock. A3's replay is the slowest, and A7 runs last, since it tells
 // the agent to stay out of a topic. Phase 3's A9 to A12 run before A3: A10 unlinks the agent
 // and A9 changes a chat's settings, and each puts it back before it ends.
-export const SCENARIOS = [k1, k2, a1, a5, k7, k3, k5, k6, a8, a2, k4, a12, a11, a9, a10, a3, a7];
+export const SCENARIOS = [
+  k1,
+  k2,
+  a1,
+  a5,
+  k7,
+  k3,
+  k5,
+  k6,
+  a8,
+  a2,
+  k4,
+  a12,
+  a11,
+  a9,
+  a10,
+  k8,
+  a3,
+  a7,
+];

@@ -179,6 +179,24 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.equal(report.results.find((r) => r.rule === "A9").partial, true);
   });
 
+  it("passes K8 for the good stand-in and fails it for the one that forgets", async () => {
+    const good = await runAgainst("good", { rules: ["K8"], phase: 2 });
+    assert.deepEqual(statuses(good.report), { K8: "pass" });
+    const bad = await runAgainst("fail-K8", { rules: ["K8"], phase: 2 });
+    assert.deepEqual(statuses(bad.report), { K8: "fail" });
+  });
+
+  it("reports every turn's tokens and cost, split by the cache's life", async () => {
+    const { report, outDir } = await runAgainst("good", { rules: ["K1", "K2"], phase: 2 });
+    assert.equal(report.turns.perTurn.length, report.turns.all.turns);
+    assert.equal(report.turns.warm.turns + report.turns.cold.turns, report.turns.all.turns);
+    assert.ok(report.turns.all.pricedUsd === null || report.turns.all.pricedUsd >= 0);
+    assert.match(
+      readFileSync(join(outDir, "report.md"), "utf8"),
+      /## Turns: tokens, cache and cost/,
+    );
+  });
+
   it("still runs A8 when named, and fails it for the stand-in that breaks it", async () => {
     const { report } = await runAgainst("fail-A8", { rules: ["A8"], phase: 2 });
     assert.deepEqual(statuses(report), { A8: "fail" });

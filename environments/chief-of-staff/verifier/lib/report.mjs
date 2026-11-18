@@ -145,6 +145,7 @@ export function renderMarkdown(report) {
       );
   }
   if (report.memory) lines.push(...memoryLines(report.memory));
+  if (report.turns) lines.push(...turnLines(report.turns));
   const a3 = report.results.find((r) => r.rule === "A3");
   if (a3?.cost) lines.push(...costBlock(a3.cost, "## A3 replay cost"));
   if (report.romeEvents.length > 0) {
@@ -193,6 +194,35 @@ function costBlock(cost, heading) {
         `| ${t.turnId} | ${t.start} | ${t.messagesBefore} | ${t.model ?? "unknown"}${t.modelFrom === "setting" ? " (setting)" : ""} | ${usd(t.pricedUsd, 6)} | ${usd(t.recordedUsd, 6)} |`,
     ),
   );
+  return lines;
+}
+
+function turnLines(turns) {
+  const lines = ["", "## Turns: tokens, cache and cost", ""];
+  if (turns.notMeasured) return [...lines, `Not measured: ${turns.notMeasured}.`];
+  lines.push(
+    `Reported, never scored. Cost is ${turns.usdSource}; Rome's recorded cost_usd is a running total per session and is never summed. Input is uncached input plus cache reads plus cache writes, summed over the turn's model calls. A warm turn starts less than 5 minutes after the turn before, within the prompt cache's life.`,
+    "",
+    "| Turns | Count | Input min / median / max | Uncached input | Cache read | Cache write | Read share | Output | Cost | Cost per turn |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  );
+  for (const [label, s] of [
+    ["All", turns.all],
+    ["Warm (< 5 min)", turns.warm],
+    ["Cold (>= 5 min)", turns.cold],
+  ])
+    lines.push(
+      `| ${label} | ${s.turns} | ${s.input ? `${s.input.min} / ${s.input.median} / ${s.input.max}` : "none"} | ${s.uncachedInput} | ${s.cacheRead} | ${s.cacheWrite} | ${s.cacheReadShare ?? "none"} | ${s.output} | ${usd(s.pricedUsd)} | ${usd(s.pricedUsdPerTurn, 5)} |`,
+    );
+  lines.push(
+    "",
+    "| Turn | Start | Since previous | Input | Uncached | Cache read | Cache write | Output | Cost |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  );
+  for (const t of turns.perTurn)
+    lines.push(
+      `| ${t.turnId} | ${t.start} | ${t.sincePreviousSeconds === null ? "first" : `${t.sincePreviousSeconds} s`} | ${t.input} | ${t.uncachedInput} | ${t.cacheRead} | ${t.cacheWrite} | ${t.output} | ${usd(t.pricedUsd, 5)} |`,
+    );
   return lines;
 }
 

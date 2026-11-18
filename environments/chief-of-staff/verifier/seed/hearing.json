@@ -278,5 +278,42 @@
     "text": "build 6620 of the ingest service passed on runner Wexcombe-3.",
     "question": "Which runner did build 6620 of the ingest service pass on?",
     "tokens": [["Wexcombe-3"]]
-  }
+  },
+  "k8Facts": [
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "please note: the Orkney pier install crew uses van registration SV-73 KTR from Monday.",
+      "question": "Which van registration does the Orkney pier install crew use?",
+      "tokens": [["SV-73"]]
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "for your records: the salinity dashboard's on-call pager rotates through slot Delta-14.",
+      "question": "Which slot does the salinity dashboard's on-call pager rotate through?",
+      "tokens": [["Delta-14"]]
+    },
+    {
+      "as": "member3",
+      "chat": "general",
+      "text": "remember this: the Kelpie-7 field test kit is stored in crate C-208 at the Lerwick store.",
+      "question": "Which crate is the Kelpie-7 field test kit stored in?",
+      "tokens": [["C-208"]]
+    },
+    {
+      "as": "member1",
+      "chat": "general",
+      "text": "worth keeping: our supplier contact at Brannock Marine is reachable on extension 4471.",
+      "question": "Which extension is our supplier contact at Brannock Marine on?",
+      "tokens": [["4471"]]
+    },
+    {
+      "as": "member2",
+      "chat": "general",
+      "text": "keep in mind: the quarterly ops review moved to the Thurso boardroom, room T-9.",
+      "question": "Which room is the quarterly ops review in now?",
+      "tokens": [["T-9"]]
+    }
+  ]
 }
