@@ -1406,7 +1406,8 @@ export function Chat({
           hasOlder: page.nextCursor !== null,
         });
         let olderMessages: ChatMessage[] = [];
-        if (concierge && !shareMode && !loadedSessionsRef.current.has(id) && page.nextCursor) {
+        // A topic chat's thread metadata can arrive before the Concierge list sets its variant.
+        if (!shareMode && !loadedSessionsRef.current.has(id) && page.nextCursor) {
           const missing = missingThreadRoots(newestMessages);
           if (missing.length > 0) {
             try {
@@ -1478,7 +1479,6 @@ export function Chat({
       }
     },
     [
-      concierge,
       shareMode,
       isReadVisibleSession,
       markSessionRead,

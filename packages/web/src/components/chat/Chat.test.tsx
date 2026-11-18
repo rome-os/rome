@@ -1603,7 +1603,12 @@ describe("Chat history paging", () => {
     "no cursor",
   ])("skips the root read for %s", async (scenario) => {
     rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-      messages: scenario === "loaded root" ? [root(), reply()] : [reply()],
+      messages:
+        scenario === "regular"
+          ? [{ ...userMessage(4), chatThreadId: null }]
+          : scenario === "loaded root"
+            ? [root(), reply()]
+            : [reply()],
       nextCursor: scenario === "no cursor" ? null : "c1",
     });
     renderChat(scenario === "regular" ? <Chat sessionId="session-1" /> : concierge());
