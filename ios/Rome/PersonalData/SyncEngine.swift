@@ -377,7 +377,7 @@ actor SyncEngine {
     /// A snapshot as a batch carries it: the windows only on the last batch
     /// (`committing` the types left out), the id alone on the others.
     static func envelope(_ snapshot: SyncChunk.Snapshot, committing incomplete: Set<String>?) -> PersonalDataEnvelope.Snapshot {
-        var wire = PersonalDataEnvelope.Snapshot(id: snapshot.id, readAt: WireTime.string(snapshot.readAt))
+        var wire = PersonalDataEnvelope.Snapshot(id: snapshot.id, readAt: WireTime.precise(snapshot.readAt))
         if let incomplete {
             wire.windows = snapshot.windows.keys.sorted().filter { !incomplete.contains($0) }.compactMap { type in
                 snapshot.windows[type].map { .init(type: type, start: WireTime.string($0.start), end: WireTime.string($0.end)) }

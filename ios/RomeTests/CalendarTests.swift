@@ -340,6 +340,40 @@ enum CalendarFixtures {
         #expect(await backend.envelopes.last?.upserts.isEmpty == true, "committed and answered: only the mark")
     }
 
+    @Test func aCalendarChangedBackAfterALostCommitIsSentWhole() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let backend = FakePersonalDataBackend()
+        let clock = Clock(CalendarFixtures.now)
+        let engine = engine(fake, backend, clock)
+        await engine.sync(.manual)
+        // A change goes out; the Rome commits it, and the answer is lost.
+        fake.events[0].title = "Moved"
+        await backend.loseAnswer()
+        clock.advance(60)
+        await engine.sync(.manual)
+        // Back as the Rome first had it, which it no longer holds.
+        fake.events[0].title = "Event a"
+        clock.advance(60)
+        await engine.sync(.manual)
+        let last = try #require(await backend.envelopes.last)
+        #expect(last.upserts.map(\.key) == ["events:a"], "not a bare mark")
+        #expect(last.snapshot?.windows?.map(\.type) == ["events"])
+    }
+
+    @Test func twoReadsInOneSecondKeepTheirOrder() async throws {
+        let fake = FakeCalendar()
+        let backend = FakePersonalDataBackend()
+        let clock = Clock(CalendarFixtures.now.addingTimeInterval(0.25))
+        let engine = engine(fake, backend, clock)
+        await engine.sync(.manual)
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        clock.advance(0.5)
+        await engine.sync(.manual)
+        let reads = await backend.envelopes.compactMap(\.snapshot?.readAt)
+        #expect(reads == ["2026-11-17T01:00:00.250Z", "2026-11-17T01:00:00.750Z"])
+    }
+
     @Test func theWindowIsWholeDaysFifteenAhead() {
         let window = CalendarSource.window(now: CalendarFixtures.now, calendar: CalendarFixtures.calendar)
         let today = CalendarFixtures.calendar.startOfDay(for: CalendarFixtures.now)

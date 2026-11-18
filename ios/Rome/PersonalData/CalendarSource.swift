@@ -57,6 +57,15 @@ struct CalendarSource: PersonalDataSource {
             await pending.set(SyncChunk(kind: .delta, marks: chunk.marks, commit: progress))
             return
         }
+        // Forgotten before a full snapshot goes: its commit may reach the
+        // Rome with the answer lost, and then the Rome no longer holds what
+        // the saved digest says. Only the answer to this commit saves one.
+        if progress.snapshotDigest != nil {
+            var forgotten = progress
+            forgotten.snapshotDigest = nil
+            forgotten.snapshotAt = nil
+            await store.save(forgotten)
+        }
         await pending.set(chunk)
     }
 

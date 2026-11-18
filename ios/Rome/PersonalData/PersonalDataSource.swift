@@ -80,10 +80,23 @@ enum WireTime {
         return formatter
     }()
 
+    nonisolated(unsafe) private static let precise: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
     private static let lock = NSLock()
 
     static func string(_ date: Date) -> String {
         lock.withLock { formatter.string(from: date) }
+    }
+
+    /// With milliseconds, for an order that two reads in one second must
+    /// keep, such as a snapshot's `readAt`. Never for a key.
+    static func precise(_ date: Date) -> String {
+        lock.withLock { precise.string(from: date) }
     }
 
     /// `YYYY-MM-DD` in the calendar's zone.
