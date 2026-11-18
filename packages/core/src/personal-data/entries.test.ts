@@ -174,6 +174,22 @@ describe("entries", () => {
     expect(ids({ search: "allday" })).toEqual([]);
     expect(ids({ search: "work" })).toEqual(["c"]);
     expect(ids({ search: "Émile" })).toEqual(["c"]);
+    // Any script folds for case, not ASCII alone.
+    expect(ids({ search: "émile" })).toEqual(["c"]);
+    expect(ids({ search: "ÉMILE" })).toEqual(["c"]);
+  });
+
+  it("finds a match past a page of entries that do not hold the words", () => {
+    const upserts = Array.from({ length: 520 }, (_, i) =>
+      event(`n${i}`, TOMORROW + 9 * HOUR + i * 1000, TOMORROW + 10 * HOUR, { title: "Standup" }),
+    );
+    upserts.push(event("z", TOMORROW + 20 * HOUR, TOMORROW + 21 * HOUR, { title: "Встреча" }));
+    repo.ingest(APPLE_CALENDAR, batch("b1", { upserts }), NOW);
+    const found = list({ start: "2026-11-18", end: "2026-11-18", search: "встреча" })
+      .results[0] as unknown as {
+      records: { id: string }[];
+    };
+    expect(found.records.map((r) => r.id)).toEqual(["z"]);
   });
 
   it("removes an event the phone deleted", () => {

@@ -378,6 +378,8 @@ export class PersonalDataRepository {
       limit?: number;
     },
   ): StoredPoint[] {
+    if (range.search)
+      return this.searchPoints(source, origin, type, { ...range, search: range.search });
     const after = range.after;
     const query = this.db
       .select({
@@ -401,7 +403,6 @@ export class PersonalDataRepository {
           range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
           eq(personalDataPoints.origin, origin),
           ...windowFilter(range),
-          range.search ? contentMatches(range.search) : undefined,
           after
             ? or(
                 gt(personalDataPoints.startAt, after.startAt),
@@ -420,6 +421,37 @@ export class PersonalDataRepository {
       shape: row.shape as Shape,
       resolution: row.resolution as Resolution | null,
     }));
+  }
+
+  /**
+   * The points whose words hold `search`, folded for case the way
+   * JavaScript folds it, which SQLite's `lower()` does only for ASCII. Read
+   * page by page in order until enough match, so a cursor still works.
+   */
+  private searchPoints(
+    source: string,
+    origin: string,
+    type: string,
+    range: Parameters<PersonalDataRepository["points"]>[3] & { search: string },
+  ): StoredPoint[] {
+    const needle = fold(range.search);
+    const found: StoredPoint[] = [];
+    let after = range.after;
+    while (true) {
+      const page = this.points(source, origin, type, {
+        ...range,
+        search: undefined,
+        ...(after ? { after } : {}),
+        limit: SEARCH_PAGE,
+      });
+      for (const point of page) {
+        if (contentHolds(point.metadata, needle)) found.push(point);
+        if (range.limit && found.length >= range.limit) return found;
+      }
+      const last = page.at(-1);
+      if (page.length < SEARCH_PAGE || !last) return found;
+      after = { startAt: last.startAt, id: last.id };
+    }
   }
 
   /** Sets an origin's state. False when the origin never sent this source. */
@@ -513,21 +545,30 @@ function windowFilter(range: { from: number; to: number; by?: "start" | "end" | 
   return [gte(at, range.from), lt(at, range.to)];
 }
 
-/**
- * Whether an entry's words hold `search`: its text values only, never the
- * JSON's key names ("Cal" would match every `calendar`) nor the ids a live
- * edit takes. Both sides go through SQLite's `lower()`, so a letter it does
- * not fold (É) still matches itself as written.
- */
-function contentMatches(search: string) {
-  const pattern = `%${escapeLike(search)}%`;
-  return sql`exists (select 1 from json_tree(${personalDataPoints.metadata}) as part
-    where part.type = 'text' and coalesce(part.key, '') not in ('id', 'occurrence')
-    and lower(part.value) like lower(${pattern}) escape '\\')`;
+/** How many points a search reads at a time. */
+const SEARCH_PAGE = 500;
+
+/** Case folded for any script, in a normal form, so É finds é. */
+function fold(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
 }
 
-function escapeLike(text: string): string {
-  return text.replace(/[\\%_]/g, (char) => `\\${char}`);
+/**
+ * Whether an entry's words hold the folded `needle`: its text values only,
+ * never the content's key names ("Cal" would match every `calendar`) nor the
+ * ids a live edit takes.
+ */
+function contentHolds(content: Record<string, unknown> | null, needle: string): boolean {
+  if (!content) return false;
+  const holds = (value: unknown): boolean =>
+    typeof value === "string"
+      ? fold(value).includes(needle)
+      : Array.isArray(value)
+        ? value.some(holds)
+        : false;
+  return Object.entries(content).some(
+    ([key, value]) => key !== "id" && key !== "occurrence" && holds(value),
+  );
 }
 
 function typeOfItem(raw: unknown): string | undefined {
