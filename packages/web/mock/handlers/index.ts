@@ -102,6 +102,7 @@ import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
+import { chatOutputHandlers } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -1995,6 +1996,7 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...taskListHandlers,
+  ...chatOutputHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,

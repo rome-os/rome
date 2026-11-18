@@ -3,6 +3,11 @@ import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { MessageReactionEvent } from "@rome/api-types/concierge";
 import { canOpenSql, privateChildren } from "./privacy.js";
+import {
+  ChatOutputsRepository,
+  OutputCalls,
+  recordTraceOutputs,
+} from "../chats/outputs/repository.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -1283,6 +1288,7 @@ export class WebChatRepository {
       .where(inArray(romeAgentMessagePlatformIds.sessionId, ids))
       .run();
     tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, ids)).run();
+    ChatOutputsRepository.deleteIn(tx, ids);
     tx.delete(webchatWorkspaceLayouts).where(inArray(webchatWorkspaceLayouts.sessionId, ids)).run();
     // Kill the chat's public shares too. They're keyed by sessionId and only
     // discoverable via listSharedChatsBySession, so leaving them behind would
@@ -2329,6 +2335,9 @@ export class WebChatRepository {
     await this.writeTraceBatch(input);
   }
 
+  /** The output calls of the turns being written, until each ends. */
+  private readonly outputCalls = new OutputCalls();
+
   /**
    * Write a trace batch in one transaction, its transcript lines stamped
    * against `now`. A subclass that writes more with the batch calls this
@@ -2435,6 +2444,13 @@ export class WebChatRepository {
       }
       insertTranscriptMessages(
         transcriptMessages.filter((message) => message.role === "assistant"),
+      );
+      recordTraceOutputs(
+        tx,
+        this.outputCalls,
+        { sessionId: input.sessionId, turnId: input.turnId ?? null, messageId: input.messageId },
+        input.blocks,
+        now,
       );
     });
   }
@@ -3306,6 +3322,7 @@ export class WebChatRepository {
       tx.delete(romeAgentMessagePlatformIds)
         .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
         .run();
+      ChatOutputsRepository.deleteIn(tx, [sessionId]);
     });
   }
 

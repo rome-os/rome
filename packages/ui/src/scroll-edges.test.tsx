@@ -106,4 +106,16 @@ describe("scroll edge hints", () => {
     expect(frame?.classList.contains("flex-1")).toBe(true);
     expect(chevrons(frame as Element)).toHaveLength(1);
   });
+
+  it("fades the chevron's edge from the surface the row sits on, the page's by default", () => {
+    fakeOverflowingRows();
+    const { container } = render(<SettingsNav active="Appearance" />);
+
+    const [chevron] = chevrons(container) as NodeListOf<HTMLElement>;
+    expect(chevron.className).not.toContain("bg-background");
+    expect(chevron.style.backgroundImage).toContain(
+      "var(--scroll-edge-bg, var(--color-background))",
+    );
+    expect(chevron.style.backgroundImage).toContain("transparent");
+  });
 });

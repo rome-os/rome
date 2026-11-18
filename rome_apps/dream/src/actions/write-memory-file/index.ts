@@ -7,6 +7,7 @@ import type {
   AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { profileMemoryDir, resolveMemoryFile } from "../../lib/memory-dir.js";
+import { voiceTermsSendError } from "../../lib/voice-terms-send.js";
 
 export interface MemoryFileDeps {
   /** The profile's memory directory. Tests point it at a temp dir. */
@@ -37,6 +38,8 @@ export function createAction(
       }
       const target = await resolveMemoryFile(memoryDir, args.path);
       if ("error" in target) return { status: "error", error: target.error };
+      const sendError = await voiceTermsSendError(memoryDir, args.path, args.content);
+      if (sendError) return { status: "error", error: sendError };
       await mkdir(dirname(target.path), { recursive: true });
       await writeFile(target.path, args.content);
       return { status: "ok", data: { path: target.path, bytes: Buffer.byteLength(args.content) } };

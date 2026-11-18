@@ -126,6 +126,131 @@ describe("memory file actions", () => {
   });
 });
 
+describe("voice terms send guard", () => {
+  const vocabulary = (send: string) =>
+    `---\nsend: ${send}\n---\n# Voice terms\n## Mine\n## Learned\n- Soniox\n## Never\n`;
+
+  it.each([
+    "write",
+    "edit",
+  ])("refuses changing send with %s and leaves the file intact", async (mode) => {
+    const path = join(memory, "voice-terms.md");
+    const text = vocabulary("off");
+    writeFileSync(path, text);
+    const result =
+      mode === "write"
+        ? await createWrite(config, deps()).execute({ path, content: vocabulary("on") })
+        : await createEdit(config, deps()).execute({
+            path,
+            old_string: "send: off",
+            new_string: "send: on",
+          });
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("Only the guardian"),
+    });
+    expect(readFileSync(path, "utf8")).toBe(text);
+  });
+
+  it.each([
+    "off",
+    "on",
+    "true",
+    "YeS",
+  ])("allows unchanged send %s in writes and Learned-only edits", async (send) => {
+    const path = join(memory, "voice-terms.md");
+    writeFileSync(path, vocabulary(send));
+    expect(
+      await createWrite(config, deps()).execute({ path, content: vocabulary(send) }),
+    ).toMatchObject({ status: "ok" });
+    expect(
+      await createEdit(config, deps()).execute({
+        path,
+        old_string: "- Soniox",
+        new_string: "- Paraformer",
+      }),
+    ).toMatchObject({ status: "ok" });
+    expect(readFileSync(path, "utf8")).toBe(vocabulary(send).replace("- Soniox", "- Paraformer"));
+  });
+
+  it.each([
+    "on",
+    "true",
+    "YES",
+    '\"on\"',
+  ])("refuses creating an opted-in file with send %s", async (send) => {
+    const path = join(memory, "voice-terms.md");
+    expect(
+      await createWrite(config, deps()).execute({ path, content: vocabulary(send) }),
+    ).toMatchObject({ status: "error" });
+    expect(() => readFileSync(path)).toThrow();
+  });
+
+  it.each([
+    vocabulary("off"),
+    vocabulary("false"),
+    vocabulary("NO"),
+    "# Voice terms\n## Learned\n",
+    "---\n---\n## Learned\n",
+  ])("allows creation without send or with an explicit off value", async (content) => {
+    const path = join(memory, "voice-terms.md");
+    expect(await createWrite(config, deps()).execute({ path, content })).toMatchObject({
+      status: "ok",
+    });
+    expect(readFileSync(path, "utf8")).toBe(content);
+  });
+
+  it("allows appending a missing Learned section without changing send", async () => {
+    const path = join(memory, "voice-terms.md");
+    const text = "---\nsend: off\n---\n## Mine\n## Never\n";
+    writeFileSync(path, text);
+    expect(
+      await createEdit(config, deps()).execute({
+        path,
+        old_string: text,
+        new_string: `${text}## Learned\n`,
+      }),
+    ).toMatchObject({ status: "ok" });
+    expect(readFileSync(path, "utf8")).toBe(`${text}## Learned\n`);
+  });
+
+  it("refuses malformed front matter and removing an existing send value", async () => {
+    const path = join(memory, "voice-terms.md");
+    const text = vocabulary("off");
+    writeFileSync(path, text);
+    const write = createWrite(config, deps());
+    for (const content of [vocabulary("["), vocabulary("on\nsend: off"), "# Voice terms\n"]) {
+      expect(await write.execute({ path, content })).toMatchObject({ status: "error" });
+      expect(readFileSync(path, "utf8")).toBe(text);
+    }
+  });
+
+  it.each(["MEMORY.md", "topics/voice-terms.md"])("leaves %s unaffected", async (file) => {
+    const path = join(memory, file);
+    expect(
+      await createWrite(config, deps()).execute({ path, content: vocabulary("on") }),
+    ).toMatchObject({ status: "ok" });
+    expect(
+      await createEdit(config, deps()).execute({
+        path,
+        old_string: "send: on",
+        new_string: "send: off",
+      }),
+    ).toMatchObject({ status: "ok" });
+  });
+
+  it("protects the memory root even when the directory itself is a symlink", async () => {
+    const alias = join(root, "memory-alias");
+    symlinkSync(memory, alias);
+    const path = join(alias, "voice-terms.md");
+    const aliasDeps = { memoryDir: alias } as unknown as AppActionRuntimeDeps<MemoryFileDeps>;
+    expect(
+      await createWrite(config, aliasDeps).execute({ path, content: vocabulary("on") }),
+    ).toMatchObject({ status: "error" });
+    expect(() => readFileSync(join(memory, "voice-terms.md"))).toThrow();
+  });
+});
+
 describe("recording memory actions", () => {
   it("drops a refused call whatever shape the provider gives its result", async () => {
     const { RunRecorder } = await import("./run-recorder.js");

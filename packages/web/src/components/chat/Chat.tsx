@@ -11,6 +11,7 @@ import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { flushSync } from "react-dom";
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
   useMemo,
@@ -28,6 +29,10 @@ import {
   ArchiveRestore,
   ArrowDown,
   ChevronLeft,
+  Cpu,
+  FileOutput,
+  FolderOpen,
+  ListChecks,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -41,6 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
@@ -52,8 +58,7 @@ import { extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { useFileDropArea } from "@/hooks/use-file-drop-area";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { SessionAvatar } from "@/components/chat/SessionAvatar";
-import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
+import { modelDisplayName } from "@/lib/model-display";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
@@ -151,8 +156,19 @@ import {
   CONCIERGE_TITLEBAR_SLOT,
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
+  type HeaderMenu,
+  type HeaderMenuItem,
 } from "@/components/concierge/ConciergeHeaderStatus";
+import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 import { useTaskList } from "@/components/concierge/TaskListPane";
+import { useOutputsPane } from "./outputs/OutputsPane";
+import {
+  chatOutputsKey,
+  chatOutputsQuery,
+  OutputLinksContext,
+  type OutputLinks,
+  outputOfLink,
+} from "./outputs/chat-outputs";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
@@ -204,7 +220,7 @@ import {
 } from "@/pages/free/workspace-context";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
-import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
+import { DEFAULT_LARGE_MODEL_SELECTION, DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 
 // What a click inside the scroller does not count as blank for: the composer
 // floor, the header, and anything clickable or editable (a message is judged apart).
@@ -609,11 +625,11 @@ export function Chat({
     model,
     largeModelSelection: storedModelSelection,
     isForkChat,
-    reasoningEffort,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     forkable,
     isTaskChat,
+    projectPath,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -2543,7 +2559,8 @@ export function Chat({
   }, [setToolTrace, traceOwner, traceOpen, traceStreaming]);
   useEffect(() => () => setToolTrace(traceOwner, null), [setToolTrace, traceOwner]);
 
-  const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
+  // Read through context, not the throwing hook: a chat may render outside a workspace.
+  const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
   // The agent's logo in the header opens the chat's task list: what runs for it.
@@ -2552,9 +2569,49 @@ export function Chat({
   useEffect(() => {
     if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [taskList.sheetOpen, composerRef]);
-  // A Concierge chat's header buttons sit on round badges like its pill, except
-  // in the Mac app's title bar, where they are any chat's.
-  const floating = concierge && !navbarSlot;
+  // The files the chat's agent produced, opened from the header's button or
+  // from a message's link to one of them. docs/domains/chats.md#outputs
+  // Every chat has them, from the menu on its header's badge.
+  const outputsChatId = mainSessionId ?? null;
+  const outputsPane = useOutputsPane(outputsChatId, { taskChats: concierge });
+  useEffect(() => {
+    if (outputsPane.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [outputsPane.sheetOpen, composerRef]);
+  // A finished turn may have written or shown a file.
+  useEffect(() => {
+    if (turnEnds > 0 && outputsChatId) {
+      void queryClient.invalidateQueries({ queryKey: chatOutputsKey(outputsChatId) });
+    }
+  }, [turnEnds, outputsChatId, queryClient]);
+  // Read through a ref, so the context stays the same object and the
+  // memoized transcript does not draw again when the list or pane changes.
+  const outputsLatest = useRef({ chatId: outputsChatId, open: outputsPane.open });
+  outputsLatest.current = { chatId: outputsChatId, open: outputsPane.open };
+  const outputLinks = useMemo<OutputLinks>(
+    () => ({
+      open: async (path) => {
+        const { chatId, open } = outputsLatest.current;
+        if (!chatId) return false;
+        try {
+          // The list is read only when a link asks, and kept briefly for the next one.
+          const list = await queryClient.fetchQuery({
+            ...chatOutputsQuery(chatId),
+            staleTime: 30_000,
+          });
+          const output = outputOfLink(list.outputs, path);
+          if (!output) return false;
+          open(output.id);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    }),
+    [queryClient],
+  );
+  // The header's buttons sit on round badges like its name tag, except in the
+  // Mac app's title bar, where they are any window's.
+  const floating = !navbarSlot;
   const actionBadge = floating
     ? cn("rounded-full text-foreground", FLOATING_SURFACE)
     : "text-muted-foreground hover:text-foreground";
@@ -2564,8 +2621,71 @@ export function Chat({
   // A blank topic chat, before its first message, shows nothing in the
   // header: its empty state speaks for it, and it has no tasks yet.
   const blankTopicChat = conciergeEmpty && !isMainChat;
-  const conciergeStatus =
-    concierge && !blankTopicChat ? (
+  // A chat started in a project the guardian chose names it in the menu. The
+  // default project is where a chat goes when none was chosen.
+  const chosenProject =
+    !concierge && projectPath && projectPath !== DEFAULT_PROJECT_NAME ? projectPath : null;
+  const openProject = (path: string) => {
+    const logical = `/projects/${path}`;
+    // Where the pane would cover the chat, the Projects page opens instead.
+    if (toolTasksHost?.compact) {
+      navigate(logical);
+      return;
+    }
+    workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
+    workspaceStore?.set("followTargetPath", logical);
+  };
+  // The badge's menu: what opens in the side pane, and the model that answered
+  // last at its foot. No counts or marks.
+  const menuItems: HeaderMenuItem[] = mainSessionId
+    ? [
+        ...(concierge
+          ? [
+              {
+                key: "tasks",
+                icon: <ListChecks />,
+                label: t("concierge.menu.tasks"),
+                run: taskList.open,
+              },
+            ]
+          : []),
+        {
+          key: "outputs",
+          icon: <FileOutput />,
+          label: t("concierge.menu.outputs"),
+          run: () => outputsPane.open(),
+        },
+        ...(chosenProject
+          ? [
+              {
+                key: "project",
+                icon: <FolderOpen />,
+                label: t("chatHeader.project", {
+                  name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
+                }),
+                run: () => openProject(chosenProject),
+              },
+            ]
+          : []),
+      ]
+    : [];
+  const headerMenu: HeaderMenu | undefined =
+    menuItems.length > 0
+      ? {
+          items: menuItems,
+          caption: model ? (
+            <span
+              className="flex min-w-0 items-center gap-2"
+              title={t("chatHeader.lastModel", { model })}
+            >
+              <Cpu aria-hidden />
+              <span className="truncate">{modelDisplayName(model)}</span>
+            </span>
+          ) : undefined,
+        }
+      : undefined;
+  const headerBadge = concierge ? (
+    blankTopicChat ? null : (
       <ConciergeHeaderStatus
         // Every Concierge chat, main or topic, goes by the Concierge's name
         // here; a topic chat's own name is in the chat list.
@@ -2573,36 +2693,27 @@ export function Chat({
         activity={conciergeActivity}
         // A chat with no messages yet draws its own large mascot.
         badge={!conciergeEmpty}
-        onOpenTasks={taskList.open}
+        menu={headerMenu}
       />
-    ) : null;
-
-  const navbarTitle = (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      {untitledEmptyChat ? null : (
-        <>
-          <SessionAvatar
-            iconUrl={pinnedAgentMention?.iconUrl}
-            label={pinnedAgentMention?.appLabel}
-            model={model}
-            reasoningEffort={reasoningEffort}
+    )
+  ) : (
+    <ConciergeHeaderStatus
+      // Nothing while the chat's name loads, so "New chat" never flashes first.
+      name={sessionLoading ? null : sessionName?.trim() || t("sidebar.newChat")}
+      // The same mascot as the Concierge's; the tag names the chat instead.
+      // A chat bound to an app's agent shows that app's icon, as its agent.
+      avatar={
+        pinnedAgentMention?.iconUrl ? (
+          <AgentAvatar
+            iconUrl={pinnedAgentMention.iconUrl}
+            label={pinnedAgentMention.appLabel}
+            size="sm"
           />
-          {sessionLoading ? (
-            <SessionLoadingTitle />
-          ) : (
-            <span className="truncate text-ui text-foreground">
-              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-            </span>
-          )}
-          {/* The agent's app beside a titled chat. */}
-          {sessionName?.trim() && pinnedAgentMention && (
-            <span className="shrink-0 truncate text-aux text-muted-foreground">
-              {pinnedAgentMention.appLabel}
-            </span>
-          )}
-        </>
-      )}
-    </div>
+        ) : undefined
+      }
+      menu={headerMenu}
+      showsActivity={false}
+    />
   );
 
   const navbarActions = (
@@ -2729,7 +2840,7 @@ export function Chat({
           )}
         />
       )}
-      {conciergeStatus}
+      {headerBadge}
       <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
         {trailing}
       </div>
@@ -2747,22 +2858,17 @@ export function Chat({
             {trailing}
           </SlotContent>
           {paneCoversChat ? null : (
-            <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>{conciergeStatus}</SlotContent>
+            <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>{headerBadge}</SlotContent>
           )}
         </>
       )
     : floatingHeader;
-  const conciergeHeader = concierge ? (
+  // Every chat floats the same header: its agent's badge, its name, and its
+  // buttons either side.
+  const chatHeader = (
     <>
       {conciergeHeaderWith(navbarActions)}
       {taskList.sheet}
-    </>
-  ) : null;
-
-  const navbar = (
-    <>
-      {navbarTitle}
-      {navbarActions}
     </>
   );
 
@@ -2800,18 +2906,7 @@ export function Chat({
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-            {concierge ? (
-              conciergeHeader
-            ) : navbarSlot ? (
-              <SlotContent name={navbarSlot}>{navbar}</SlotContent>
-            ) : (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-12 max-md:hidden">
-                <ChatEdgeBlur edge="top" className="z-10" />
-                <div className="pointer-events-none relative z-20 flex h-full items-center gap-1 [&>*]:pointer-events-auto pl-4 pr-2">
-                  {navbar}
-                </div>
-              </div>
-            )}
+            {chatHeader}
             {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or
@@ -2839,7 +2934,7 @@ export function Chat({
                   // below it, and a jump to a message stops below it too.
                   concierge
                     ? "concierge-header-clear"
-                    : cn("@min-[48rem]/transcript:pl-8", !navbarSlot && "md:pt-12 md:scroll-pt-12"),
+                    : "concierge-header-clear @min-[48rem]/transcript:pl-8",
                 )}
               >
                 {conciergeEmpty ? (
@@ -3156,7 +3251,12 @@ export function Chat({
       <MessageSharingContext.Provider value={shareMessageTurn}>
         <LiveReactionsProvider value={liveReactions}>
           <LiveMessageStatusesProvider value={liveStatuses}>
-            <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
+            <LiveTaskCardsProvider value={liveCards}>
+              <OutputLinksContext.Provider value={outputLinks}>
+                {page}
+                {outputsPane.sheet}
+              </OutputLinksContext.Provider>
+            </LiveTaskCardsProvider>
           </LiveMessageStatusesProvider>
         </LiveReactionsProvider>
       </MessageSharingContext.Provider>

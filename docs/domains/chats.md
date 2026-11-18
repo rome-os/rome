@@ -215,7 +215,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 ## Task list
 
-The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?". The dashboard labels it Tasks. It lists the chat's tasks, its checks, the follows whose alerts come to it, and the routines that work for it: those that send into it, those made in it that send into no chat, and those that work so for one of its [task chats](#task-chat). Nothing else does. Its owner opens it from the agent's logo in the chat's header.
+The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?". The dashboard labels it Tasks. It lists the chat's tasks, its checks, the follows whose alerts come to it, and the routines that work for it: those that send into it, those made in it that send into no chat, and those that work so for one of its [task chats](#task-chat). Nothing else does. Its owner opens it from the menu on the agent's logo in the chat's header.
 
 - It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and a Stop on another person's chat is refused as if the chat did not exist. A common chat has none for now.
 - It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a schedule, a follow and a routine show as their own record says.
@@ -329,6 +329,22 @@ Rome's own widget whose look the agent composes, to show structured content laid
 - Any agent may show one: the Concierge in its chats, and every other agent in its chat or task chat, such as a routine's daily summary. Only Rome's own card tool shows one. Anything else that looks like one, such as an app's action, a command's output or another tool with the same name, is not a card.
 - The agent uses one only for content with a real structure, at most one per reply, and its messages around the card never repeat it.
 
+## Outputs
+
+The files a chat's agent produced: those it wrote, and those it showed in the chat. The dashboard labels them Outputs, "产出" in Chinese.
+
+- Only what the agent produced is an output. A file the agent wrote is **written**, and a file it showed is **shown**. A helper agent working for the chat's agent produces for the chat too. A file the owner attached, a picture they sent, a web picture the agent linked and an agent card are not outputs.
+- Rome records an output when it happens: a write once it succeeds, and a show once the file is copied into the chat. A write that failed or was refused records nothing.
+- A file the agent wrote with a shell command counts when the command plainly names it: a `>` or `>>` redirect, `tee`, `touch`, or where `cp` or `mv` put it. So does a local file the agent's reply links and that changed during the turn. A file the reply only cites does not count. Either counts only when the command or turn succeeded and the file is there, in the projects or memory folder. A log in a temporary folder or the owner's upload does not count. A relative path after the command changed folder is not read, as there is no telling where it went. A file a script or program wrote from inside, which no reply links, is not seen.
+- A link only stands in for a file nothing else recorded. When a [Concierge chat](#concierge-chat)'s reply passes on a task chat's file, the output stays the task chat's.
+- A file is one output however often it was written or shown, and it reads as the latest time: its kind, its time and the chat it came from are that time's. A file written and then shown is one output, shown.
+- A written file can move or go after it was written. Rome does not follow it: the output stays, marked moved or deleted, and nothing can be opened from it.
+- A [Concierge chat](#concierge-chat)'s outputs hold its own and those of every [task chat](#task-chat) it started, each of a task chat's named after that task chat. A task chat lists its own.
+- Outputs are as private as their chat, and go when the chat is deleted.
+- A chat from before outputs were recorded is read back once, in the background, from the first time its outputs are listed: the files its stored traces still show it wrote or its replies link, and the files its agent's messages link from the chat's own store, except one the owner attached. Until it is done, the list shows what is recorded and says it is still finding earlier files. A trace that was archived, or stored whole from before traces were stored step by step, is not read back, so an old chat can miss a write.
+- On the dashboard every chat's header shows its agent in a round badge with the chat's name under it. The badge holds the Rome mascot, or the app's icon in a chat bound to an app's agent. The name is the Concierge's name in a Concierge chat, the chat's title or "New chat" elsewhere. Hovering the badge, or a click or tap on it, shows a small menu beside it. The badge opens nothing itself. A Concierge chat's menu holds Tasks and Outputs. Any other chat's holds Outputs, and its project when it was started in one the owner chose. Each opens in the side panel. At the menu's foot, the model that answered the chat's last turn shows as text. The menu shows no counts or marks.
+- The Outputs tab lists the chat's outputs with their total, filtered to all, documents, spreadsheets or pages, under Today and Earlier. A row names the file without its extension, says what kind of file it is, and either how the chat's agent made it or the task chat it came from, which opens that chat. Choosing a row previews it in its place: a picture as a picture, Markdown rendered, other text as text, anything else as a download. Nothing in it runs. Opening a link to a file in a message opens that file there when it is one of the chat's outputs, whichever time it was written or shown the link names, by its project path, its copy or its absolute path. Nothing marks a new output.
+
 ## Client
 
 One of the apps a person uses to reach a [platform](#platform): the dashboard in a browser and the Rome app on a phone are two clients of the dashboard.
@@ -435,6 +451,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.
+- **"Artifacts" for a chat's outputs.** Artifacts already names an app's agents, actions and skills, so one word would name two things.
 - **The Concierge setting 👀 itself.** The rule of #2191. 👀 then meant only that the model remembered to set and clear it: a failed turn showed nothing, and a missed clear left 👀 for good. Rome derives it, so it holds whatever the prompt says (#2209).
 - **👀 as soon as a turn takes a message.** A "thanks" flashed 👀 before its ❤️. Working starts once a working tool call has run half a second, or at the turn's second working tool call.
 - **Working after 5 seconds without an answer.** A reply that took long to write flashed 👀 just before it landed, and a "thanks" that joined a busy turn could show 👀 by its own timer before its 🙏. Working comes only from real work ([status](#status)).

@@ -51,7 +51,9 @@ export function parseVoiceTerms(markdown: string): string[] {
     if (
       seen.has(key) ||
       term.length > MAX_VOICE_TERM_CHARS ||
-      /@|:\/\/|www\.|[/\\]|[A-Za-z0-9_-]{24}/i.test(term) ||
+      /@|:\/\/|www\.|[A-Za-z0-9_-]{24}/i.test(term) ||
+      /^(?:[/\\]|\.\.?[/\\]|~[/\\]|[A-Za-z]:[/\\])/.test(term) ||
+      (term.match(/[/\\]/g)?.length ?? 0) >= 2 ||
       (term.match(/\d/g)?.length ?? 0) >= 6
     )
       continue;

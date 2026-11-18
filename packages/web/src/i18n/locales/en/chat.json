@@ -176,6 +176,10 @@
       },
       "created": "Created {{when}}",
       "endedAt": "Ended {{when}}"
+    },
+    "menu": {
+      "tasks": "Tasks",
+      "outputs": "Outputs"
     }
   },
   "reply": {
@@ -745,5 +749,47 @@
       "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
       "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
     }
+  },
+  "outputs": {
+    "title": "Outputs",
+    "close": "Close outputs",
+    "loading": "Loading outputs",
+    "loadFailed": "Failed to load outputs",
+    "emptyTitle": "No outputs yet",
+    "emptyDescription": "Files the agent writes or shows in this chat appear here.",
+    "written": "Written",
+    "shown": "Shown",
+    "from": "from {{name}}",
+    "missing": "Moved or deleted",
+    "download": "Download",
+    "noPreview": "This file has no preview.",
+    "unavailable": "This file cannot be opened here.",
+    "previewFailed": "Failed to load the file",
+    "truncated": "Showing the first {{count}} characters.",
+    "back": "Back to outputs",
+    "filterLabel": "Show",
+    "noneOfType": "No outputs of this kind yet.",
+    "today": "Today",
+    "earlier": "Earlier",
+    "filters": {
+      "all": "All",
+      "document": "Documents",
+      "spreadsheet": "Spreadsheets",
+      "page": "Pages"
+    },
+    "types": {
+      "document": "Document",
+      "spreadsheet": "Spreadsheet",
+      "page": "Page",
+      "image": "Picture",
+      "code": "Code",
+      "file": "File"
+    },
+    "indexing": "Still finding earlier files."
+  },
+  "chatHeader": {
+    "menu": "Chat menu",
+    "project": "Project · {{name}}",
+    "lastModel": "Last answered by {{model}}"
   }
 }
