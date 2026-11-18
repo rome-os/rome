@@ -128,9 +128,12 @@ function deviceConnectCardUi(kind: string, words: DeviceLabel, icon?: string): W
   return promptCardUi({
     ...(icon && isWidgetIcon(icon) ? { icon } : {}),
     title: words.title,
-    note: words.summary ?? { string: "deviceConnectNote" },
-    dismiss: { label: { string: "notNow" }, event: "dismiss", context },
-    confirm: { label: { string: "connect" }, event: "connect", context },
+    note: words.summary ?? {
+      rome: "deviceConnectNote",
+      english: "So your Rome can read the data you allow.",
+    },
+    dismiss: { label: { rome: "notNow", english: "Not now" }, event: "dismiss", context },
+    confirm: { label: { rome: "connect", english: "Connect" }, event: "connect", context },
   });
 }
 

@@ -101,10 +101,18 @@ describe("connect_account for a device kind", () => {
     const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
     expect(texts).toEqual([
       "Apple Health",
-      { string: "deviceConnectNote" },
-      { string: "notNow" },
-      { string: "connect" },
+      { path: "/romeStrings/deviceConnectNote" },
+      { path: "/romeStrings/notNow" },
+      { path: "/romeStrings/connect" },
     ]);
+    // An app that does not know these words draws the English the card carries.
+    expect(ui?.data).toEqual({
+      romeStrings: {
+        deviceConnectNote: "So your Rome can read the data you allow.",
+        notNow: "Not now",
+        connect: "Connect",
+      },
+    });
     expect(deviceConnectToolOutput(device, false)).toContain("Rome app");
   });
 
@@ -156,7 +164,10 @@ describe("connect_account for a device kind", () => {
     expect(shape(connect)).toEqual(shape(location));
     expect(location.components.find((c) => c.id === "title")).toMatchObject({
       icon: "map-pin",
-      text: { string: "shareLocationTitle" },
+      text: { path: "/romeStrings/shareLocationTitle" },
+    });
+    expect(location.data).toMatchObject({
+      romeStrings: { shareLocationTitle: "Share your location?" },
     });
     expect(checkWidgetUi(location)).toEqual([]);
   });

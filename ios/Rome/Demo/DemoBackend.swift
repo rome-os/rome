@@ -635,16 +635,21 @@ final class DemoBackend: RomeBackend {
             "render": .object([
                 "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
                 "props": .object(autoShare ? ["reason": .string(reason), "autoShare": .bool(true)] : ["reason": .string(reason)]),
-                "ui": .object((autoShare ? ["data": .object(["autoShare": .bool(true)])] : [:]).merging(["components": .array([
+                "ui": .object([
+                    "data": .object((autoShare ? ["autoShare": .bool(true)] : [:]).merging([
+                        "romeStrings": .object(["shareLocationTitle": .string("Share your location?"), "notNow": .string("Not now"), "share": .string("Share")]),
+                    ]) { a, _ in a }),
+                    "components": .array([
                     c("root", "Column", ["children": ids(["title", "note", "actions"])]),
-                    c("title", "Text", ["text": .object(["string": .string("shareLocationTitle")]), "variant": .string("h4"), "icon": .string("map-pin")]),
+                    c("title", "Text", ["text": .object(["path": .string("/romeStrings/shareLocationTitle")]), "variant": .string("h4"), "icon": .string("map-pin")]),
                     c("note", "Text", ["text": .string(reason), "variant": .string("caption")]),
                     c("actions", "Row", ["children": ids(["dismiss", "confirm"]), "justify": .string("end")]),
                     c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": event("decline")]),
-                    c("dismiss-label", "Text", ["text": .object(["string": .string("notNow")])]),
+                    c("dismiss-label", "Text", ["text": .object(["path": .string("/romeStrings/notNow")])]),
                     c("confirm", "Button", ["child": .string("confirm-label"), "variant": .string("primary"), "action": event("share-location")]),
-                    c("confirm-label", "Text", ["text": .object(["string": .string("share")])]),
-                ])]) { a, _ in a }),
+                    c("confirm-label", "Text", ["text": .object(["path": .string("/romeStrings/share")])]),
+                    ]),
+                ]),
             ]),
         ])
     }
@@ -1308,15 +1313,15 @@ final class DemoBackend: RomeBackend {
                 "type": .string("pending_interaction"), "toolUseId": .string(id), "appId": .string("core"),
                 "render": .object(["kind": .string("inline"), "componentId": .string("connect-card"), "builtin": .bool(true),
                     "props": .object(["kind": .string(kind), "label": .string(label), "title": .string(title), "summary": .string(summary), "device": .bool(true)]),
-                    "ui": .object(["components": .array([
+                    "ui": .object(["data": .object(["romeStrings": .object(["notNow": .string("Not now"), "connect": .string("Connect")])]), "components": .array([
                         c("root", "Column", ["children": .array([.string("title"), .string("note"), .string("actions")])]),
                         c("title", "Text", ["text": .string(title), "variant": .string("h4"), "icon": .string(icon)]),
                         c("note", "Text", ["text": .string(summary), "variant": .string("caption")]),
                         c("actions", "Row", ["children": .array([.string("dismiss"), .string("connect")]), "justify": .string("end")]),
                         c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
-                        c("dismiss-label", "Text", ["text": .object(["string": .string("notNow")])]),
+                        c("dismiss-label", "Text", ["text": .object(["path": .string("/romeStrings/notNow")])]),
                         c("connect", "Button", ["child": .string("connect-label"), "variant": .string("primary"), "action": .object(["event": .object(["name": .string("connect"), "context": context])])]),
-                        c("connect-label", "Text", ["text": .object(["string": .string("connect")])]),
+                        c("connect-label", "Text", ["text": .object(["path": .string("/romeStrings/connect")])]),
                     ])]),
                 ]),
             ])

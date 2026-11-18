@@ -376,6 +376,13 @@ enum CalendarFixtures {
         #expect(connection.icon == "calendar")
     }
 
+    @MainActor @Test func romeWordsFallBackToTheCardsEnglish() {
+        let words: JSONValue = .object(["connect": .string("Connect"), "someday": .string("Someday")])
+        let localized = WidgetSurface.withRomeWords(words)
+        #expect(localized["connect"]?.string == String(localized: "Connect"))
+        #expect(localized["someday"]?.string == "Someday", "a word this app does not know keeps the English")
+    }
+
     @Test func theDeviceCardsRomeStringsHaveWords() {
         for name in ["connect", "notNow", "deviceConnectNote"] {
             #expect(!WidgetPaths.hostString(name).isEmpty, "no words for \(name)")

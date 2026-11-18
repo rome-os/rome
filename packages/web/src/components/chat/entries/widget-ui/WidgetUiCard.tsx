@@ -13,6 +13,7 @@ import {
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { isLocationCard, mayAutoShare, SHARE_LOCATION_EVENT } from "@rome/api-types/location-card";
+import { ROME_STRINGS_KEY } from "@rome/api-types/prompt-card";
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { formatAccuracy, geolocationPermission, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
@@ -64,6 +65,27 @@ const HOST_STRINGS: Record<string, string> = {
   share: "locationCard.share",
   shareLocationTitle: "locationCard.title",
 };
+
+/**
+ * A card's data model with Rome's own words (`/romeStrings/<name>`, each
+ * stored with its English) in the guardian's language, where this reader
+ * knows the name; the English stays otherwise.
+ */
+export function withRomeWords(
+  data: Record<string, unknown> | undefined,
+  translate: (key: string) => string,
+): Record<string, unknown> | undefined {
+  const words = data?.[ROME_STRINGS_KEY];
+  if (!data || !words || typeof words !== "object" || Array.isArray(words)) return data;
+  const localized = Object.fromEntries(
+    Object.entries(words as Record<string, unknown>).map(([name, english]) => {
+      const key = HOST_STRINGS[name];
+      const word = key ? translate(key) : "";
+      return [name, word || english];
+    }),
+  );
+  return { ...data, [ROME_STRINGS_KEY]: localized };
+}
 
 /** The card's components with each `{ string }` replaced by its translation,
  *  since A2UI itself only knows literals and paths. */
@@ -284,7 +306,7 @@ export function WidgetUiCard({
           },
         },
       ]);
-      const data = (JSON.parse(uiKey) as WidgetUi).data;
+      const data = withRomeWords((JSON.parse(uiKey) as WidgetUi).data, t);
       if (data) {
         p.processMessages([
           { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/", value: data } },

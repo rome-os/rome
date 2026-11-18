@@ -55,10 +55,10 @@ export type LocationAnswer =
 export function locationCardUi(reason: string, autoShare = false): WidgetUi {
   return promptCardUi({
     icon: "map-pin",
-    title: { string: "shareLocationTitle" },
+    title: { rome: "shareLocationTitle", english: "Share your location?" },
     note: reason,
-    dismiss: { label: { string: "notNow" }, event: DECLINE_LOCATION_EVENT },
-    confirm: { label: { string: "share" }, event: SHARE_LOCATION_EVENT },
+    dismiss: { label: { rome: "notNow", english: "Not now" }, event: DECLINE_LOCATION_EVENT },
+    confirm: { label: { rome: "share", english: "Share" }, event: SHARE_LOCATION_EVENT },
     ...(autoShare ? { data: { autoShare: true } } : {}),
   });
 }
