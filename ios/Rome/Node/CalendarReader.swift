@@ -76,6 +76,8 @@ enum CalendarFailure: Error, Equatable {
     case notFound(String)
     case readOnly(String)
     case unknownList(String)
+    /// An edit to a repeating event that names no occurrence.
+    case needsOccurrence(String)
     case failed(String)
 }
 
@@ -143,6 +145,9 @@ actor LiveCalendar: CalendarReading {
     func updateEvent(id: String, occurrence: Date?, changes: EventChanges) throws -> CalendarEventItem {
         guard Self.state() == .granted else { throw CalendarFailure.denied }
         guard let event = find(id: id, occurrence: occurrence) else { throw CalendarFailure.notFound(id) }
+        // Without an occurrence, EventKit hands back the series' first one:
+        // the edit would land on a meeting long past, or re-anchor the series.
+        if occurrence == nil, Self.repeats(event) { throw CalendarFailure.needsOccurrence(id) }
         guard event.calendar.allowsContentModifications else { throw CalendarFailure.readOnly(event.calendar.title) }
         if let title = changes.title { event.title = title }
         if let allDay = changes.allDay { event.isAllDay = allDay }
@@ -190,11 +195,17 @@ actor LiveCalendar: CalendarReading {
 
     // MARK: Items
 
+    /// One of a series, including an occurrence edited on its own, which
+    /// may no longer report the series' rules but shares its id.
+    private static func repeats(_ event: EKEvent) -> Bool {
+        event.hasRecurrenceRules || event.isDetached
+    }
+
     private static func item(_ event: EKEvent) -> CalendarEventItem? {
         guard let id = event.eventIdentifier, let start = event.startDate, let end = event.endDate else { return nil }
         return CalendarEventItem(
             id: id,
-            occurrence: event.hasRecurrenceRules ? event.occurrenceDate : nil,
+            occurrence: repeats(event) ? event.occurrenceDate : nil,
             title: event.title ?? "",
             start: start,
             end: end,

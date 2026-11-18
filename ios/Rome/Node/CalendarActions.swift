@@ -28,7 +28,7 @@ struct CalendarActions: Sendable {
             "calendar.free_busy": "Busy and free times in a window. Args: \(window) dayStart, dayEnd (HH:mm, optional: free time only between them each day), includeTentative (default true). Busy counts events that are not free and not canceled; all-day events are listed apart in allDay, not as busy. Example: {\"start\":\"2026-11-18T12:00\",\"end\":\"2026-11-18T18:00\"}",
             "calendar.calendars": "The \(name)'s calendars: id, title, account, writable, isDefault. No arguments.",
             "calendar.create_event": "Adds an event. \(writeRule) Args: title (required), start (required), end (default an hour after start), allDay, location, notes, url, calendar (a title or id from calendar.calendars; default the \(name)'s default calendar). Returns the event. Example: {\"title\":\"Dentist\",\"start\":\"2026-11-20T15:00\",\"end\":\"2026-11-20T16:00\"}",
-            "calendar.update_event": "Changes an event. \(writeRule) Args: id (required, from calendar.events or the synced events), occurrence (for one occurrence of a repeating event), and what changes: title, start, end (a new start alone keeps the length), allDay, location, notes (an empty string clears it), future (true: this and later occurrences). Example: {\"id\":\"…\",\"start\":\"2026-11-20T16:00\"}",
+            "calendar.update_event": "Changes an event. \(writeRule) Args: id (required, from calendar.events or the synced events), occurrence (required for a repeating event: the one to change), and what changes: title, start, end (a new start alone keeps the length), allDay, location, notes (an empty string clears it), future (true: this and later occurrences). Example: {\"id\":\"…\",\"start\":\"2026-11-20T16:00\"}",
         ]
     }
 
@@ -68,6 +68,8 @@ struct CalendarActions: Sendable {
             return .failed(code: "read_only", message: "\"\(title)\" cannot be changed from this \(device.name). Use a writable calendar from calendar.calendars.")
         case .unknownList(let name):
             return .failed(code: "invalid_args", message: name == "default" ? "The \(device.name) has no default calendar. Name one from calendar.calendars." : "No calendar is named \"\(name)\". Use a title or id from calendar.calendars.")
+        case .needsOccurrence(let id):
+            return .failed(code: "invalid_args", message: "\"\(id)\" repeats. Pass the occurrence you mean, from calendar.events, and future: true to change the series from it on.")
         case .failed(let reason):
             return .failed(code: "calendar_failed", message: "The calendar refused the change: \(reason)")
         }

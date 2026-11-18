@@ -30,6 +30,8 @@ final class FakeCalendar: CalendarReading, @unchecked Sendable {
     func updateEvent(id: String, occurrence: Date?, changes: EventChanges) async throws -> CalendarEventItem {
         lock.withLock { updated.append((id, occurrence, changes)) }
         guard var event = lock.withLock({ events.first { $0.id == id } }) else { throw CalendarFailure.notFound(id) }
+        // As LiveCalendar: a repeating event needs the occurrence.
+        if occurrence == nil, event.occurrence != nil { throw CalendarFailure.needsOccurrence(id) }
         if let title = changes.title { event.title = title }
         if let start = changes.start { event.start = start }
         return event
@@ -142,6 +144,19 @@ enum CalendarFixtures {
         let gone = await actions.run("calendar.update_event", args: .object(["id": .string("zzz"), "title": .string("x")]))
         guard case .failed(let code, _) = gone else { throw Failure(gone) }
         #expect(code == "not_found")
+    }
+
+    @Test func aRepeatingEventIsEditedOnlyByItsOccurrence() async throws {
+        let fake = FakeCalendar()
+        var standup = CalendarFixtures.event("s", 9, 10)
+        standup.occurrence = CalendarFixtures.tomorrow(9)
+        fake.events = [standup]
+        let answer = await CalendarFixtures.actions(fake).run("calendar.update_event", args: .object([
+            "id": .string("s"), "start": .string("2026-11-18T10:00"),
+        ]))
+        guard case .failed(let code, let message) = answer else { throw Failure(answer) }
+        #expect(code == "invalid_args")
+        #expect(message.contains("occurrence"))
     }
 
     @Test func aRefusalSaysWhereToAllowIt() async throws {
