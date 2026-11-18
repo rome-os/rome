@@ -241,6 +241,25 @@ enum CalendarFixtures {
         #expect(next.deletes == ["events:b"])
     }
 
+    @Test func anEventSentInAnInterruptedRunIsStillDeletedWhenGone() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let store = MemoryProgressStore()
+        let source = source(fake, store)
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+        // "b" goes out, but the run is cut off before the Rome confirms it.
+        fake.events.append(CalendarFixtures.event("b", 14, 15))
+        let cut = try await run(source)
+        #expect(cut.upserts.map(\.key) == ["events:b"])
+        // Then "b" is deleted on the phone.
+        fake.events.removeLast()
+        let next = try await run(source)
+        #expect(next.deletes == ["events:b"], "the Rome may hold it")
+        await source.confirm(next, unsupported: [], rejected: [])
+        let after = try await run(source)
+        #expect(after.deletes.isEmpty, "confirmed: nothing left to retry")
+    }
+
     @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10)]

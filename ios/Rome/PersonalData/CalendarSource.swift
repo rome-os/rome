@@ -39,6 +39,13 @@ struct CalendarSource: PersonalDataSource {
         let window = Self.window(now: now, calendar: calendar)
         let items = try await read { try await reader.events(in: window) }.map { Self.point($0, window: window, calendar: calendar) }
         let chunk = Self.chunk(items, progress: progress, window: window, now: now)
+        // Kept before anything is sent: a run cut off midway may leave some
+        // of these on the Rome, and the next one must still delete them.
+        var attempting = progress
+        attempting.attempted = (progress.attempted ?? [:]).merging(chunk.commit.entries?.filter { key, _ in
+            chunk.upserts.contains { $0.key == key }
+        } ?? [:]) { _, new in new }
+        if attempting.attempted?.isEmpty == false { await store.save(attempting) }
         await pending.set(chunk)
     }
 
@@ -61,6 +68,7 @@ struct CalendarSource: PersonalDataSource {
         // A Rome that refused events keeps nothing new: they are sent again next time.
         guard unsupported.isEmpty else { return }
         var commit = chunk.commit
+        commit.attempted = nil
         if !rejected.isEmpty {
             // An event the Rome refused keeps what it last had, or nothing:
             // the next run sends it again, and a delete still follows it.
@@ -106,7 +114,10 @@ struct CalendarSource: PersonalDataSource {
             )
         }
         var deletes: [String] = []
-        for (key, entry) in old where next[key] == nil {
+        // What the Rome may hold: what it confirmed, and what an interrupted
+        // run began sending.
+        let held = (progress.attempted ?? [:]).merging(old) { _, confirmed in confirmed }
+        for (key, entry) in held where next[key] == nil {
             // Aged out: the Rome keeps it as history, and nothing here tracks it.
             if entry.end < window.start { continue }
             deletes.append(key)

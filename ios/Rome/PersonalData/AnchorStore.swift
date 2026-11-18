@@ -29,6 +29,10 @@ struct SyncProgress: Codable, Equatable, Sendable {
     /// this phone sent, by key, so a sync sends only what changed and deletes
     /// what is gone. Optional, so progress saved before it still decodes.
     var entries: [String: SentEntry]?
+    /// Entries a run began sending that the Rome has not confirmed: an
+    /// interrupted run may have stored some, so one gone from the phone is
+    /// deleted next time whether or not the Rome had it. Cleared on confirm.
+    var attempted: [String: SentEntry]?
 
     struct SentEntry: Codable, Equatable, Sendable {
         /// A hash of the item as sent.
