@@ -11,7 +11,7 @@ import { parseAssetHref } from "@/lib/asset-links";
 import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
 import { MemoryFileSheet } from "./MemoryFileSheet";
-import { useOutputLinks } from "./outputs/chat-outputs";
+import { type OutputLinks, useOutputLinks } from "./outputs/chat-outputs";
 import { ThreadLink } from "./reply/ThreadLink";
 import { threadOfLink } from "./reply/thread-link";
 
@@ -227,8 +227,11 @@ function LocalFileLink({ path, ...props }: MarkdownLinkProps & { path: string })
 
 // A link to a memory file or folder: one of the chat's outputs opens in its
 // Outputs tab, anything else in a sheet beside the chat.
-function MemoryLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
-  const outputs = useOutputLinks();
+function MemoryLink({
+  path,
+  outputs,
+  ...props
+}: MarkdownLinkProps & { path: string; outputs: OutputLinks }) {
   const [open, setOpen] = useState(false);
   const href = props.href ?? "";
   return (
@@ -236,7 +239,6 @@ function MemoryLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
       <WorkspaceLink
         {...props}
         onActivate={() => {
-          if (!outputs) return setOpen(true);
           void outputs.open(`/${path}`).then((opened) => {
             if (!opened) setOpen(true);
           });
@@ -310,7 +312,7 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
 
   // Outside a chat, a memory link opens the Memory page as before.
   const memoryPath = outputs && href ? memoryLogicalPath(href) : null;
-  if (memoryPath) return <MemoryLink {...props} path={memoryPath} />;
+  if (outputs && memoryPath) return <MemoryLink {...props} path={memoryPath} outputs={outputs} />;
 
   const localFile = outputs && href ? localFileHref(href) : null;
   if (localFile) return <LocalFileLink {...props} path={localFile} />;

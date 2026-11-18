@@ -18,11 +18,26 @@ import {
 } from "@/pages/free/workspace-event-bus";
 
 // The sheet's file browser is the Memory page's own; here it shows what it was
-// asked to select.
+// asked to select, whether it saves by itself, and holds the sheet's close
+// until `canLeave` says it may.
+const browser = { canLeave: true };
 rs.mock("@/components/file-browser-page", () => ({
-  FileBrowserPage: ({ externalSelection }: { externalSelection: { path: string } | null }) => (
-    <div data-testid="memory-browser">{externalSelection?.path}</div>
-  ),
+  FileBrowserPage: ({
+    externalSelection,
+    autoSave,
+    leaveGuard,
+  }: {
+    externalSelection: { path: string } | null;
+    autoSave?: unknown;
+    leaveGuard?: { current: (() => Promise<boolean>) | null };
+  }) => {
+    if (leaveGuard) leaveGuard.current = async () => browser.canLeave;
+    return (
+      <div data-testid="memory-browser" data-autosave={autoSave ? "on" : "off"}>
+        {externalSelection?.path}
+      </div>
+    );
+  },
 }));
 
 const autoPlaceApp = rs.fn();
@@ -163,6 +178,37 @@ describe("ChatLink and the chat's outputs", () => {
     ]);
     expect(screen.getByTestId("where").textContent).toBe(before);
     expect(opened).toEqual([]);
+  });
+
+  it("saves sheet edits as the Memory page does, and closes only once they are settled", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(JSON.stringify({ type: "file" }), { status: 200 })),
+    );
+    const outer = rs.fn();
+    withOutputs(
+      // Stands in for the message bubble, whose tap opens its menu.
+      <div onClick={outer}>
+        <ChatLink href="/memory/topics/health.md">health</ChatLink>
+      </div>,
+      [],
+    );
+    fireEvent.click(screen.getByText("health"));
+    outer.mockClear();
+    const sheetBrowser = await screen.findByTestId("memory-browser");
+    expect(sheetBrowser.dataset.autosave).toBe("on");
+    // A tap in the sheet stays out of the message under it.
+    fireEvent.click(sheetBrowser);
+    expect(outer).not.toHaveBeenCalled();
+
+    browser.canLeave = false;
+    fireEvent.click(screen.getByRole("button", { name: "memoryFile.close" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("memory-browser")).toBeTruthy();
+
+    browser.canLeave = true;
+    fireEvent.click(screen.getByRole("button", { name: "memoryFile.close" }));
+    await waitFor(() => expect(screen.queryByTestId("memory-browser")).toBeNull());
   });
 
   it("opens a shown file's chip in the Outputs tab instead of saving it", async () => {
