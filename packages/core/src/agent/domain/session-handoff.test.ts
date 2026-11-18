@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   estimateTokens,
+  HANDOFF_CUT_MARKER,
   HANDOFF_RECENT_TOKENS,
   handoffSections,
   type RecentMessage,
@@ -44,7 +45,61 @@ describe("recentWithin", () => {
   });
 });
 
+describe("recentWithin for a full handoff", () => {
+  const agent = (text: string, minute = 0): RecentMessage => ({
+    ...message(text, minute),
+    senderName: "You",
+    agent: true,
+  });
+
+  it("keeps the guardian's long messages whole", () => {
+    const long = message("x".repeat(20_000));
+    expect(recentWithin([long], HANDOFF_RECENT_TOKENS).shown[0]?.text).toBe(long.text);
+  });
+
+  it("cuts a long agent reply to about 1,500 tokens and marks it", () => {
+    const { shown } = recentWithin([agent("x".repeat(20_000))], HANDOFF_RECENT_TOKENS);
+    expect(shown[0]?.text).toBe(`${"x".repeat(6_000)}${HANDOFF_CUT_MARKER}`);
+  });
+
+  it("cuts CJK agent text at one token per character", () => {
+    const { shown } = recentWithin([agent("字".repeat(5_000))], HANDOFF_RECENT_TOKENS);
+    expect(shown[0]?.text).toBe(`${"字".repeat(1_500)}${HANDOFF_CUT_MARKER}`);
+  });
+
+  it("leaves a short agent reply alone", () => {
+    const short = agent("x".repeat(400));
+    expect(recentWithin([short], HANDOFF_RECENT_TOKENS).shown[0]).toBe(short);
+  });
+
+  it("budgets about 16,000 tokens and counts the omitted messages", () => {
+    expect(HANDOFF_RECENT_TOKENS).toBe(16_000);
+    const messages = Array.from({ length: 300 }, (_, index) => message("x".repeat(400), index));
+    const { shown, omitted } = recentWithin(messages, HANDOFF_RECENT_TOKENS);
+    // 100 tokens of text plus the line's 12 each.
+    expect(shown).toHaveLength(142);
+    expect(omitted).toBe(158);
+    expect(shown.at(-1)).toBe(messages.at(-1));
+  });
+
+  it("spends the budget on the cut agent reply, not its full length", () => {
+    const messages = [message("earlier", 0), agent("x".repeat(40_000), 1), message("now", 2)];
+    const { shown, omitted } = recentWithin(messages, HANDOFF_RECENT_TOKENS);
+    expect(shown).toHaveLength(3);
+    expect(omitted).toBe(0);
+  });
+});
+
 describe("handoffSections", () => {
+  it("leaves a light handoff's messages whole, however long", () => {
+    const long: RecentMessage = { ...message("x".repeat(20_000)), agent: true };
+    const text = handoffSections(null, { openTasks: null, recent: [long] }, { all: true }).join(
+      "\n",
+    );
+    expect(text).toContain("x".repeat(20_000));
+    expect(text).not.toContain(HANDOFF_CUT_MARKER);
+  });
+
   it("renders the handoff, the open tasks and the recent messages", () => {
     const text = handoffSections(" - Agreed: Friday. ", {
       openTasks: "- t-1 · Book dinner · active",
