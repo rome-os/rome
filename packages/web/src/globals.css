@@ -746,7 +746,7 @@ button.rome-upgrade-row:hover {
     /* The selected child's marker on the guide: 3px wide, inset from the row's
        top and bottom, centred on the guide. */
     --row-indicator-inset: var(--row-py-md);
-    --row-indicator-mr: 0.15625rem;
+    --row-indicator-mr: 0.125rem;
     /* The trailing glyph keeps the same inset as the leading icon. */
     --row-trail-mr: var(--row-px-sm);
     /* One knob for every sidebar row's height: 2.25rem (36px). A compact list
