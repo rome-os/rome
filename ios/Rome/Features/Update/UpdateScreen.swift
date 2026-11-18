@@ -44,32 +44,35 @@ struct UpdateScreen: View {
                         .background(Palette.bg)
                 }
             } else {
-                ZStack {
-                    Palette.bg
-                    // The mascot stays exactly where the opening screen has it; the
-                    // text hangs below it.
-                    Mascot(alive: isWaiting)
-                        .frame(width: Mascot.width)
-                        .overlay(alignment: .top) {
-                            center
-                                .frame(width: 320)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
-                        }
-                }
-                .ignoresSafeArea()
-                .overlay(alignment: .top) {
+                VStack(spacing: 0) {
                     topBar
                         .padding(.horizontal, 16)
                         .padding(.top, 4)
-                }
-                .overlay(alignment: .bottom) {
+                    // The mascot and its text sit a little above the middle of
+                    // the room between the bar and the button, and scroll
+                    // rather than reach the button when larger text fills it.
+                    GeometryReader { room in
+                        ScrollView {
+                            AboveCenter(minHeight: room.size.height) {
+                                VStack(spacing: 20) {
+                                    Mascot(alive: isWaiting).frame(width: Mascot.width)
+                                    center
+                                        .frame(maxWidth: 320)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 16)
+                            }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    }
                     bottom
                         .frame(maxWidth: Metrics.buttonWidth)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }
+                .background(Palette.bg.ignoresSafeArea())
             }
         }
         // VoiceOver hears each step of the update as it comes.
@@ -284,5 +287,25 @@ struct UpdateScreen: View {
         case .starting, .updating: return true
         default: return false
         }
+    }
+}
+
+/// Places its one view at 45% of the room left around it, from the top: a
+/// little above the middle, which reads as balanced. Never shorter than
+/// `minHeight`, and as tall as the view when the view needs more.
+private struct AboveCenter: Layout {
+    var minHeight: CGFloat
+    var fraction: CGFloat = 0.45
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let content = subviews.first?.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) ?? .zero
+        return CGSize(width: proposal.width ?? content.width, height: max(minHeight, content.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let view = subviews.first else { return }
+        let content = view.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let top = bounds.minY + max(0, (bounds.height - content.height) * fraction)
+        view.place(at: CGPoint(x: bounds.midX, y: top), anchor: .top, proposal: ProposedViewSize(width: bounds.width, height: content.height))
     }
 }

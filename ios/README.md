@@ -205,4 +205,4 @@ The app follows the system language: English, or Simplified Chinese on a Chinese
 ROME_SNAPSHOT_DIR=/tmp/rome-shots-zh /tmp/rome-cat/Build/Products/Debug-maccatalyst/Rome.app/Contents/MacOS/Rome -AppleLanguages "(zh-Hans)"
 ```
 
-`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.
+`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. When every PNG of a style comes out the same image, the window stopped redrawing while hidden behind other windows (App Nap): run it again with `-NSAppSleepDisabled YES` after the binary's path, which turns App Nap off for that launch only. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.
