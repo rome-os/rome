@@ -1214,7 +1214,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
-            {isStreaming && onStop && (
+            {/* Hidden while voice input is on, so its square is never mistaken for voice input's. */}
+            {isStreaming && onStop && !voice.active && (
               <Button
                 type="button"
                 variant="outline"
