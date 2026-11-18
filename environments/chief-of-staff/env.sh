@@ -59,6 +59,10 @@ AGENT_REFS="${COS_AGENT_REF-${SAVED_AGENT_REF-#2173}}"
 # GitHub sign-in fetches it, so no token enters the container.
 APP_REPO="${COS_APP_REPO:-${SAVED_APP_REPO:-zhangfand/chief-of-staff}}"
 APP_REF="${COS_APP_REF:-${SAVED_APP_REF:-main}}"
+# The commit the copy's app was installed at. A later up or reset that does not
+# set COS_APP_REF keeps it, even when the branch has moved on.
+APP_PIN=""
+[ -n "${COS_APP_REF:-}" ] || [ "${SAVED_APP_REF:-}" != "$APP_REF" ] || APP_PIN="${SAVED_APP_COMMIT:-}"
 APP_SRC="$RUN_DIR/app-src"
 APP_PATH_IN_ROME=/home/rome/app-sources/chief-of-staff
 # Test only. An agent name to link the connected account to in place of
@@ -511,6 +515,12 @@ install_app() {
   local commit
   commit="$(git -C "$APP_SRC" rev-parse --verify --quiet "origin/$APP_REF^{commit}" || git -C "$APP_SRC" rev-parse --verify --quiet "$APP_REF^{commit}")" ||
     die "$APP_REPO has no ref \"$APP_REF\". Set COS_APP_REF to a branch or commit."
+  if [ -n "$APP_PIN" ] && [ "$APP_PIN" != "$commit" ]; then
+    log "WARNING: keeping the app at ${APP_PIN:0:9}, where this copy was made; $APP_REF is now at ${commit:0:9}. Set COS_APP_REF=$APP_REF to move to it."
+    commit="$APP_PIN"
+  fi
+  sed -i '/^SAVED_APP_COMMIT=/d' "$SETTINGS_FILE" 2>/dev/null || true
+  printf 'SAVED_APP_COMMIT=%q\n' "$commit" >>"$SETTINGS_FILE"
   git -C "$APP_SRC" checkout --quiet --detach "$commit"
   git -C "$APP_SRC" clean --quiet -fdx
   log "installing $APP_REPO at ${commit:0:9} into Rome ..."
