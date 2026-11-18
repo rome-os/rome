@@ -24,9 +24,10 @@ import { threadOfLink } from "./reply/thread-link";
 //                              → open the projects panel + select the file
 //                                (reuses the same follow signal ChatWidget
 //                                publishes when an agent links a file).
-//   /apps/<appId>[/<route>][?q]  → open that app's workspace tile, preserving
-//                                 the in-app sub-route and query params so the
-//                                 tile lands on the exact linked page.
+//   /apps/<appId>[/<route>][?q] or an absolute same-origin form
+//                              → open that app's workspace tile, preserving
+//                                the in-app sub-route and query params so the
+//                                tile lands on the exact linked page.
 //   /memory/<path>             → open the file or folder in a sheet beside
 //                                the chat.
 //
@@ -299,7 +300,9 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
         />
       );
     }
-    const app = parseAppHref(href);
+    // A same-origin absolute URL names the same app as its `/apps/...` path.
+    const appPath = isInternalHref(href) ? getInternalRawPath(href) : null;
+    const app = appPath ? parseAppHref(appPath) : null;
     if (app) {
       return (
         <WorkspaceLink
