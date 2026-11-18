@@ -934,6 +934,47 @@ describe("Chat unread divider", () => {
       renderChat(<Chat sessionId="concierge" loadReadMark={() => Promise.resolve(MARK)} />);
       await waitFor(() => expect(unreadFrom()).toBe("a3"));
     });
+
+    it("has no divider while a thread is in focus, and divides the main line again after", async () => {
+      // The owner's u-1 starts a thread that a3 answers; a4 is on the main line.
+      rs.stubGlobal(
+        "matchMedia",
+        (query: string) =>
+          ({
+            matches: query === "(prefers-reduced-motion: reduce)",
+            media: query,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+          }) as MediaQueryList,
+      );
+      rs.mocked(listSessionMessages).mockResolvedValue([
+        {
+          ...transcript[0]!,
+          id: "u-1",
+          turnId: "turn-u-1",
+          role: "user",
+          chatThreadId: "u-1",
+        },
+        transcript[1]!,
+        { ...transcript[2]!, chatThreadId: "u-1" },
+        transcript[3]!,
+      ]);
+      renderChat(
+        <Chat
+          sessionId="concierge"
+          variant="concierge"
+          loadReadMark={() => Promise.resolve(MARK)}
+        />,
+      );
+      await waitFor(() => expect(unreadFrom()).toBe("a4"));
+
+      fireEvent.click(screen.getByTestId("open-thread"));
+      await waitFor(() => expect(screen.getByTestId("chat-composer").dataset.thread).toBe("u-1"));
+      expect(unreadFrom()).toBe("");
+
+      fireEvent.click(document.querySelector<HTMLElement>("[data-thread-back]")!);
+      await waitFor(() => expect(unreadFrom()).toBe("a4"));
+    });
   });
 
   it("places the divider by the read mark when a message arrives while the mark is pending", async () => {
