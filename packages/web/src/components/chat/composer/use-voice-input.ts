@@ -280,7 +280,9 @@ export function useVoiceInput({
       if (document.visibilityState !== "visible") return;
       wakeLock.request("screen").then(
         (sentinel) => {
-          if (ended) void sentinel.release();
+          // Requests made across a hide and show can both resolve; one lock
+          // is kept, so cleanup releases every lock taken.
+          if (ended || (held && !held.released)) void sentinel.release();
           else held = sentinel;
         },
         // A refused lock, as on low battery, leaves dictation as it was.

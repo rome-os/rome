@@ -528,6 +528,43 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     }
   });
 
+  it("lets the screen sleep after voice input when the page was shown again while the lock was pending", async () => {
+    const locks: Array<{ released: boolean; release: () => Promise<void> }> = [];
+    const answers: Array<() => void> = [];
+    const request = rs.fn(
+      () =>
+        new Promise<WakeLockSentinel>((resolve) => {
+          const lock = {
+            released: false,
+            release: async () => {
+              lock.released = true;
+            },
+          };
+          locks.push(lock);
+          answers.push(() => resolve(lock as unknown as WakeLockSentinel));
+        }),
+    );
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request } });
+    try {
+      renderComposer(kind);
+      await screen.findByRole("button", { name: "Start voice input" });
+      const socket = await startListening();
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      // The page hides and shows before the browser grants the first lock.
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(request).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        for (const answer of answers) answer();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+      await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+      socket.say({ type: "ended" });
+      await waitFor(() => expect(locks.every((lock) => lock.released)).toBe(true));
+    } finally {
+      Reflect.deleteProperty(navigator, "wakeLock");
+    }
+  });
+
   it("gives the field back when Rome never answers a stop", async () => {
     const { field } = renderComposer(kind);
     const start = await screen.findByRole("button", { name: "Start voice input" });
