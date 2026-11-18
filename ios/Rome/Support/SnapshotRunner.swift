@@ -77,6 +77,38 @@ enum HealthDemo {
     }
 }
 
+/// Calendar's demo: syncs, and a read and a change an Agent made.
+enum CalendarDemo {
+    static func history(now: Date) -> [SyncLogEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, events: Int) -> SyncLogEntry {
+            let time = now.addingTimeInterval(-minutesAgo * 60)
+            var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok)
+            if events > 0 { entry.types["events"] = SyncTypeCount(items: events, start: time.addingTimeInterval(-7 * 86_400), end: time.addingTimeInterval(30 * 86_400)) }
+            entry.inserted = events
+            return entry
+        }
+        return [
+            entry(4, minutesAgo: 6, .manual, events: 1),
+            entry(3, minutesAgo: 40, .foreground, events: 3),
+            entry(2, minutesAgo: 60 * 5, .observer, events: 1),
+            entry(1, minutesAgo: 60 * 26, .manual, events: 48),
+        ]
+    }
+
+    static func liveReads(now: Date) -> [NodeAuditEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ action: String, _ args: String, count: Int? = nil) -> NodeAuditEntry {
+            NodeAuditEntry(
+                seq: seq, time: now.addingTimeInterval(-minutesAgo * 60), from: "rome", action: action, args: args,
+                outcome: .ok, errorCode: nil, count: count, windowStart: nil, windowEnd: nil, durationMs: 90
+            )
+        }
+        return [
+            entry(2, minutesAgo: 6, "calendar.create_event", #"{"title":"Lunch with Sam","start":"2026-11-20T12:30"}"#, count: 1),
+            entry(1, minutesAgo: 8, "calendar.free_busy", #"{"start":"2026-11-18T12:00","end":"2026-11-18T18:00"}"#, count: 1),
+        ]
+    }
+}
+
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
 /// walks every screen in light and dark, and writes a PNG of each. It lets the
 /// UI be reviewed where no simulator runs (Mac Catalyst).
@@ -250,7 +282,7 @@ enum SnapshotRunner {
             await capture("13d-live-reads", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .liveReads(health)]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory]) }
+            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory(HealthSettings.sourceId)]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // The expired session: the status line offers a sign-in.
@@ -282,6 +314,26 @@ enum SnapshotRunner {
             await capture("13f-connection-device-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Calendar: not connected, then connected with Sync on,
+            // a read and a change it made, and its Sync history.
+            let calendar = CalendarCapability.id
+            model.calendarSync.showDemo([], enabled: false)
+            await capture("13g-connection-calendar", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.calendarSync.showDemo(CalendarDemo.history(now: .now))
+            model.connections.showDemo(authorized: [health: true, calendar: true])
+            model.node.showDemo(live: [calendar: true], recent: CalendarDemo.liveReads(now: .now))
+            await capture("13h-connection-calendar-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            await capture("13i-connection-calendar-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13j-calendar-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar), .syncHistory(CalendarSync.sourceId)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.connections.showDemo(authorized: [health: true])
             model.node.showDemo(live: [:], recent: [])
             model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.

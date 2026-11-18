@@ -262,6 +262,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         ]) && (part.data.object ?? [:]).allSatisfy { key, value in
             // A key is one JSON Pointer token: `~` and `/` are escaped.
             let token = key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+            let value = key == Self.romeStringsKey ? Self.withRomeWords(value) : value
             return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
         }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
@@ -289,6 +290,21 @@ final class WidgetSurface: ObservableObject, ActionHandling {
               answers.allSatisfy({ $0["questionId"] == nil && $0["values"] != nil })
         else { return nil }
         return .array(answers)
+    }
+
+    /// Where a card keeps Rome's own words with their English, in its data
+    /// model (`/romeStrings/<name>`), as `promptCardUi` writes them.
+    static let romeStringsKey = "romeStrings"
+
+    /// Rome's own words in the guardian's language where this app knows the
+    /// name, else the English the card carries. An older app, which knows
+    /// no such key, draws the English.
+    static func withRomeWords(_ value: Rome.JSONValue) -> Rome.JSONValue {
+        guard case .object(let words) = value else { return value }
+        return .object(Dictionary(uniqueKeysWithValues: words.map { name, english in
+            let word = WidgetPaths.hostString(name)
+            return (name, word.isEmpty ? english : .string(word))
+        }))
     }
 
     /// The card's components with each `{ string }` replaced by Rome's own

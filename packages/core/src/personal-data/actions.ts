@@ -51,7 +51,8 @@ export function registerPersonalDataActions(
       name: PERSONAL_DATA_CATALOG_ACTION,
       type: "system",
       description:
-        "List the guardian's personal data that their devices sync to Rome, such as Apple Health: " +
+        "List the guardian's personal data that their devices sync to Rome, such as Apple Health " +
+        "or their phone's calendar: " +
         "each source, the device it comes from, when it last synced, each type with its unit, " +
         "range and how far it is synced, and the device connection that reads the source live, " +
         `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${CURRENT_ONLY} ` +
@@ -91,10 +92,14 @@ export function registerPersonalDataActions(
       type: "system",
       description:
         "Aggregate or list the guardian's synced personal data, such as Apple Health steps, sleep, " +
-        "heart rate or workouts, over a time window. The input and reply follow the iPhone's " +
-        "health.stats: types, start, end, interval, aggregate, unit. A bucket with no value is left " +
-        "out, never 0. Week, month and total averages are the mean of daily averages " +
-        `(aggregate avg_of_days). The reply's freshness says how far each type is synced. ${CONNECTION} ` +
+        "heart rate or workouts, or calendar events, over a time window. The input " +
+        "and reply follow the iPhone's health.stats: types, start, end, interval, aggregate, unit. " +
+        "A bucket with no value is left out, never 0. Week, month and total averages are the mean " +
+        "of daily averages (aggregate avg_of_days). A type of entries, such as calendar events, is " +
+        "listed, never aggregated: send type, start and end, and search to match words; each entry " +
+        "in the window, or overlapping it, comes with its content. Answers such as whether the " +
+        "guardian is free come from these entries even while their device is away. The reply's " +
+        `freshness says how far each type is synced. ${CONNECTION} ` +
         `${CURRENT_ONLY} ` +
         "Runs only in a private chat with the guardian.",
       complexity: "simple",
@@ -109,7 +114,7 @@ export function registerPersonalDataActions(
         source: {
           type: "string",
           enum: sourceNames,
-          description: "The source, such as apple_health.",
+          description: "The source, such as apple_health or apple_calendar.",
         },
         types: {
           type: "array",
@@ -145,12 +150,17 @@ export function registerPersonalDataActions(
         records: {
           type: "object",
           description:
-            "For one sample or record type (sleep, workouts, body readings): list the records instead of aggregating.",
+            "For one sample or record type (sleep, workouts, body readings): list the records instead of aggregating. A type of entries is always listed; this sets its page.",
           properties: {
             limit: { type: "integer", description: "At most 500. Default 100." },
             cursor: { type: "string", description: "The nextCursor of the previous page." },
           },
           additionalProperties: false,
+        },
+        search: {
+          type: "string",
+          description:
+            "For a type of entries: only those whose words hold this text, any case, such as a person's name.",
         },
       },
       additionalProperties: false,

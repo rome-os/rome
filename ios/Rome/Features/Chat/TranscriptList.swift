@@ -240,6 +240,25 @@ private final class CellContext {
     var footer: AnyView?
     /// Cards' surfaces, kept while their cells are reused for other rows.
     @ObservationIgnored let surfaces = WidgetSurfaces()
+    /// Keeps a row's top where it is on screen while it changes height.
+    @ObservationIgnored let topHold = RowTopHold()
+}
+
+/// Asked by a row about to change its own height, such as a long reply
+/// unfolding: the list keeps the row's top where it is, so the row opens
+/// downward instead of pushing what is above it up. One per list, so the
+/// environment value never changes and no row redraws for it.
+@MainActor
+final class RowTopHold {
+    fileprivate var action: ((String) -> Void)?
+
+    func hold(_ rowID: String) { action?(rowID) }
+}
+
+extension EnvironmentValues {
+    @Entry var rowTopHold: RowTopHold? = nil
+    /// The transcript row a view is drawn in.
+    @Entry var transcriptRowID: String? = nil
 }
 
 private struct ChatCollection<Row: View>: UIViewRepresentable {
@@ -259,6 +278,12 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UICollectionView {
         context.coordinator.makeView()
+    }
+
+    /// A chat closed mid-fold still turns UIKit's animations back on and
+    /// stops the hold's display link.
+    static func dismantleUIView(_ view: UICollectionView, coordinator: TranscriptCoordinator<Row>) {
+        coordinator.endHold()
     }
 
     func updateUIView(_ view: UICollectionView, context: Context) {
@@ -317,6 +342,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     func makeView() -> UICollectionView {
         layout.delegate = self
+        cells.topHold.action = { [weak self] id in self?.holdTop(of: id) }
         layout.settings.estimatedItemSize = CGSize(width: 300, height: Self.estimate)
         // Updates keep what is on screen anchored to the bottom of the
         // visible area: a page above, or a row above that grows, moves
@@ -491,6 +517,94 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         layout.restoreContentOffset(with: ChatLayoutPositionSnapshot(indexPath: IndexPath(item: items.count - 1, section: 0), edge: .bottom))
     }
 
+    // MARK: Holding a row's top
+
+    /// The row whose top stays put, its last height, and since when.
+    private var held: (id: String, height: CGFloat, steadySince: CFTimeInterval, started: CFTimeInterval)?
+    private var holdLink: CADisplayLink?
+    /// How long the row's height must stay the same before the list holds
+    /// its bottom again: past a spring's tail and a cell's late resize.
+    private static var steadyTime: CFTimeInterval { 0.2 }
+    /// The shortest a hold lasts: a fold's spring has begun by then.
+    private static var minHoldTime: CFTimeInterval { 0.35 }
+    /// The longest a hold lasts, whatever the row does.
+    private static var maxHoldTime: CFTimeInterval { 2 }
+
+    /// Lets a row change height with its top, and every row above it, where
+    /// they are: the list otherwise keeps its bottom still, so a row that
+    /// grows pushes what is above it up. It stops compensating for size
+    /// changes until the row's height has settled, then holds its bottom
+    /// again; resuming then moves nothing, since nothing is changing.
+    func holdTop(of id: String) {
+        guard items.contains(id) else { return }
+        transcriptScrollLog.debug("holding a row's top while it changes height")
+        layout.keepContentOffsetAtBottomOnBatchUpdates = false
+        // Nothing pulls the list to its bottom while the row changes.
+        scroll?.set(following: false)
+        // The layout animates a cell's new size from where its bottom-held
+        // offset would put it: the row jumps up, then slides back. The
+        // change lands in place instead, until the row has its new height.
+        UIView.setAnimationsEnabled(false)
+        holdsAnimations = true
+        let now = CACurrentMediaTime()
+        held = (id, heightOf(id) ?? 0, now, now)
+        if holdLink == nil {
+            let link = CADisplayLink(target: HoldTarget { [weak self] in
+                guard let self else { return false }
+                self.watchHeld()
+                return true
+            }, selector: #selector(HoldTarget.tick))
+            link.add(to: .main, forMode: .common)
+            holdLink = link
+        }
+    }
+
+    private func heightOf(_ id: String) -> CGFloat? {
+        guard let item = items.firstIndex(of: id) else { return nil }
+        return layout.layoutAttributesForItem(at: IndexPath(item: item, section: 0))?.frame.height
+    }
+
+    /// Each frame: ends the hold once the row has kept one height for a
+    /// moment, or the guardian drags, or it has lasted long enough.
+    private func watchHeld() {
+        guard var held else { return endHold() }
+        let now = CACurrentMediaTime()
+        let height = heightOf(held.id) ?? held.height
+        if abs(height - held.height) > 0.5 {
+            held.height = height
+            held.steadySince = now
+            self.held = held
+        } else if holdsAnimations, now - held.steadySince > 0.05, held.steadySince > held.started {
+            releaseAnimations()
+        }
+        let settled = now - held.started >= Self.minHoldTime && now - held.steadySince >= Self.steadyTime
+        if settled || now - held.started >= Self.maxHoldTime || isUserScrolling {
+            endHold()
+        }
+    }
+
+    /// Whether the hold has turned UIKit's animations off.
+    private var holdsAnimations = false
+
+    private func releaseAnimations() {
+        guard holdsAnimations else { return }
+        holdsAnimations = false
+        UIView.setAnimationsEnabled(true)
+    }
+
+    func endHold() {
+        releaseAnimations()
+        holdLink?.invalidate()
+        holdLink = nil
+        guard held != nil else { return }
+        held = nil
+        layout.keepContentOffsetAtBottomOnBatchUpdates = true
+        readScroll()
+        // Opened below the screen, the list no longer follows the newest
+        // row, as after a drag: a bar that moves next must not pull it back.
+        scroll?.set(following: scroll?.atBottom ?? true)
+    }
+
     // MARK: ChatLayoutDelegate
 
     func sizeForItem(_ chatLayout: CollectionViewChatLayout, at indexPath: IndexPath) -> ItemSize {
@@ -640,6 +754,22 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 }
 
+/// A display link's target that calls back: the link holds its target
+/// strongly, so the list is never kept alive by it.
+/// The hold's display link target. The action answers false once its
+/// coordinator is gone: the link then stops itself, and the animations the
+/// hold turned off come back on.
+@MainActor
+private final class HoldTarget: NSObject {
+    let action: () -> Bool
+    init(_ action: @escaping () -> Bool) { self.action = action }
+    @objc func tick(_ link: CADisplayLink) {
+        guard !action() else { return }
+        link.invalidate()
+        UIView.setAnimationsEnabled(true)
+    }
+}
+
 #if DEBUG
 /// `ROME_PERF` only: while a fling rests, how far a row mid-screen drifts on
 /// screen as pages go in and rows above it grow. Ideally 0.
@@ -693,6 +823,9 @@ private struct RowHost: View {
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
             .environment(\.widgetSurfaces, cells.surfaces.row(box.row.id))
+            // Inside the list's environment, which replaces the whole set.
+            .environment(\.rowTopHold, cells.topHold)
+            .environment(\.transcriptRowID, box.row.id)
             .environment(\.self, cells.environment)
     }
 }
@@ -731,6 +864,13 @@ private final class TranscriptCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         taken = 0
+    }
+
+    /// A newer row draws over an older one: a bubble's mark sits half over
+    /// its top edge, into the row above, and must not slip under that row.
+    override func apply(_ layoutAttributes: UICollectionViewLayoutAttributes) {
+        super.apply(layoutAttributes)
+        layer.zPosition = CGFloat(layoutAttributes.zIndex) * 100_000 + CGFloat(layoutAttributes.indexPath.item)
     }
 
     override func preferredLayoutAttributesFitting(_ attributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {

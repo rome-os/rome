@@ -325,6 +325,17 @@ final class NodeHost {
         self.recent = recent
         capabilitySerial += 1
     }
+
+    /// Runs one request as the Rome would send it, through the executor and
+    /// its audit log, with no Gateway: for a Simulator signed in to a local
+    /// Rome, which has no Rome Cloud device to reach. The reply, as JSON.
+    func debugRun(_ action: String, args: String) async -> String? {
+        let text = #"{"id":"debug","from":"debug","payload":{"type":"request","action":"\#(action)","args":\#(args)}}"#
+        let reply = await executor.respond(to: text, session: NodeSession())
+        requestSerial += 1
+        onAnswered?(action)
+        return reply
+    }
     #endif
 
     // MARK: Connection

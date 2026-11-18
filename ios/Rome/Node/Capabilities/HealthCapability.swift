@@ -20,6 +20,7 @@ struct HealthCapability: NodeCapability {
     let name = "Apple Health"
     var title: LocalizedStringResource { "Apple Health" }
     let symbol = "heart"
+    var cardIcon: String? { "heart" }
     var summary: LocalizedStringResource { "Your Rome reads the Health data you allow." }
     var examples: [CapabilityExample] {
         [

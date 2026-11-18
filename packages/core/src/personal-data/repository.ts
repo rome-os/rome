@@ -369,12 +369,17 @@ export class PersonalDataRepository {
     range: {
       from: number;
       to: number;
-      by?: "start" | "end";
+      /** `overlap`: every point that overlaps the window, as entries are read. */
+      by?: "start" | "end" | "overlap";
+      /** Only points whose metadata (an entry's content) holds this text, any case. */
+      search?: string;
       resolution?: Resolution;
       after?: { startAt: number; id: number };
       limit?: number;
     },
   ): StoredPoint[] {
+    if (range.search)
+      return this.searchPoints(source, origin, type, { ...range, search: range.search });
     const after = range.after;
     const query = this.db
       .select({
@@ -388,6 +393,7 @@ export class PersonalDataRepository {
         value: personalDataPoints.value,
         fields: personalDataPoints.fields,
         metadata: personalDataPoints.metadata,
+        key: personalDataPoints.dedupeKey,
       })
       .from(personalDataPoints)
       .where(
@@ -396,11 +402,7 @@ export class PersonalDataRepository {
           eq(personalDataPoints.type, type),
           range.resolution ? eq(personalDataPoints.resolution, range.resolution) : undefined,
           eq(personalDataPoints.origin, origin),
-          gte(
-            range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt,
-            range.from,
-          ),
-          lt(range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt, range.to),
+          ...windowFilter(range),
           after
             ? or(
                 gt(personalDataPoints.startAt, after.startAt),
@@ -419,6 +421,37 @@ export class PersonalDataRepository {
       shape: row.shape as Shape,
       resolution: row.resolution as Resolution | null,
     }));
+  }
+
+  /**
+   * The points whose words hold `search`, folded for case the way
+   * JavaScript folds it, which SQLite's `lower()` does only for ASCII. Read
+   * page by page in order until enough match, so a cursor still works.
+   */
+  private searchPoints(
+    source: string,
+    origin: string,
+    type: string,
+    range: Parameters<PersonalDataRepository["points"]>[3] & { search: string },
+  ): StoredPoint[] {
+    const needle = fold(range.search);
+    const found: StoredPoint[] = [];
+    let after = range.after;
+    while (true) {
+      const page = this.points(source, origin, type, {
+        ...range,
+        search: undefined,
+        ...(after ? { after } : {}),
+        limit: SEARCH_PAGE,
+      });
+      for (const point of page) {
+        if (contentHolds(point.metadata, needle)) found.push(point);
+        if (range.limit && found.length >= range.limit) return found;
+      }
+      const last = page.at(-1);
+      if (page.length < SEARCH_PAGE || !last) return found;
+      after = { startAt: last.startAt, id: last.id };
+    }
   }
 
   /** Sets an origin's state. False when the origin never sent this source. */
@@ -496,6 +529,46 @@ export class PersonalDataRepository {
         errorCode: row.errorCode,
       }));
   }
+}
+
+/** The points a window reads: by when they start or end, or every one that overlaps it. */
+function windowFilter(range: { from: number; to: number; by?: "start" | "end" | "overlap" }) {
+  if (range.by === "overlap") {
+    // An entry that starts in the window, or began before it and is still
+    // going, such as a holiday; one with no length counts where it starts.
+    return [
+      lt(personalDataPoints.startAt, range.to),
+      or(gt(personalDataPoints.endAt, range.from), gte(personalDataPoints.startAt, range.from)),
+    ];
+  }
+  const at = range.by === "end" ? personalDataPoints.endAt : personalDataPoints.startAt;
+  return [gte(at, range.from), lt(at, range.to)];
+}
+
+/** How many points a search reads at a time. */
+const SEARCH_PAGE = 500;
+
+/** Case folded for any script, in a normal form, so É finds é. */
+function fold(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
+}
+
+/**
+ * Whether an entry's words hold the folded `needle`: its text values only,
+ * never the content's key names ("Cal" would match every `calendar`) nor the
+ * ids a live edit takes.
+ */
+function contentHolds(content: Record<string, unknown> | null, needle: string): boolean {
+  if (!content) return false;
+  const holds = (value: unknown): boolean =>
+    typeof value === "string"
+      ? fold(value).includes(needle)
+      : Array.isArray(value)
+        ? value.some(holds)
+        : false;
+  return Object.entries(content).some(
+    ([key, value]) => key !== "id" && key !== "occurrence" && holds(value),
+  );
 }
 
 function typeOfItem(raw: unknown): string | undefined {

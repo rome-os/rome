@@ -470,9 +470,14 @@
   },
   "deviceConnectCard": {
     "connected": "已连接",
-    "notConnected": "未连接"
+    "notConnected": "未连接",
+    "connect": "连接",
+    "notNow": "暂不",
+    "note": "让你的 Rome 读取你允许的数据。"
   },
   "locationCard": {
+    "title": "共享你的位置？",
+    "share": "共享",
     "shared": "已共享位置 · ±{{accuracy}}",
     "notShared": "未共享",
     "locating": "正在获取你的位置…",

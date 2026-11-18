@@ -131,7 +131,7 @@ export {
   TASK_CHAT_TRIGGER_KIND,
 };
 /** The dashboard language the guardian picked: `en` or `zh-CN`. */
-const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
+export const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };

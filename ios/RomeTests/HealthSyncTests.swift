@@ -107,12 +107,15 @@ actor FakePersonalDataBackend: PersonalDataBackend {
     var rejectUnknown: Set<String> = []
     /// Types the Rome holds the most of: refused with `type_cap`.
     var rejectCapped: Set<String> = []
+    /// Items refused by key with `too_large`.
+    var rejectKeys: Set<String> = []
     var gate: CheckedContinuation<Void, Never>?
     var holding = false
 
     func fail(_ failures: PersonalDataFailure...) { self.failures = failures }
     func reject(_ types: Set<String>) { rejectUnknown = types }
     func cap(_ types: Set<String>) { rejectCapped = types }
+    func refuse(keys: Set<String>) { rejectKeys = keys }
     func hold() { holding = true }
     func release() {
         holding = false
@@ -130,6 +133,7 @@ actor FakePersonalDataBackend: PersonalDataBackend {
         let rejected = envelope.upserts.enumerated().compactMap { item -> PersonalDataIngestReply.Rejected? in
             if rejectUnknown.contains(item.element.type) { return .init(index: item.offset, key: item.element.key, code: "unknown_type") }
             if rejectCapped.contains(item.element.type) { return .init(index: item.offset, key: item.element.key, code: "type_cap") }
+            if rejectKeys.contains(item.element.key) { return .init(index: item.offset, key: item.element.key, code: "too_large") }
             return nil
         }
         return PersonalDataIngestReply(

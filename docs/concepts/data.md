@@ -77,14 +77,14 @@ Personal data is data about the guardian that only they should see, which their 
 
 - **Source**: where personal data comes from, such as `apple_health`. Each source declares its types in core.
 - **Origin**: the device that sent a source's data, such as the guardian's iPhone. A query reads one origin per source.
-- **Type**: one kind of reading inside a source, such as `stepCount`, with one unit and one shape: bucket, sample or record.
+- **Type**: one kind of reading or entry inside a source, such as `stepCount` or calendar `events`, with one shape: bucket, sample, record or entry.
 - **Sync**: one run on the device that reads changes and sends them.
 - **Ingest**: one batch as the server received it.
 - **Personal-data action**: an action that reads the store. It runs only in a private turn, and is refused in a shared one.
 
 **Contracts:**
 
-- A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, is not personal data.
+- A source joins the store when each item is a reading, with a time range and a numeric value that a query aggregates, or an entry, a document with a time, such as a calendar event, that a query lists. Document data with no time, such as contacts or notes, is not personal data.
 - An ingest is idempotent per batch and per item, so a device may resend a batch after a lost answer.
 - Rome keeps personal data until the guardian deletes it. Deleting an origin removes its readings and keeps the ingest log, which holds counts and never a value.
 - Facts an agent already wrote into memory or a chat are not personal data anymore, and nothing checks where they go next.

@@ -98,3 +98,11 @@ import UIKit
         #expect(BackToBottom.distance(contentHeight: 2878, offset: 2062, viewHeight: 874, bottomInset: 98) == 40)
     }
 }
+
+@Suite struct UserBubbleMarkTests {
+    @Test func aMessageWithTextKeepsItsMarkOnTheBubble() {
+        #expect(!UserBubble.badgeOnPhotos(text: "厨房这样改可以吗？", quoteInBubble: false))
+        #expect(!UserBubble.badgeOnPhotos(text: "", quoteInBubble: true), "a quote draws a bubble too")
+        #expect(UserBubble.badgeOnPhotos(text: "", quoteInBubble: false), "photos alone carry it")
+    }
+}

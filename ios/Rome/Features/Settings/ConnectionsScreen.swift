@@ -103,7 +103,7 @@ struct ConnectionsScreen: View {
     }
 
     private func value(_ capability: any NodeCapability) -> String {
-        let sync = capability.syncSource == HealthSettings.sourceId && model.health.canSync ? model.health.status : nil
+        let sync = model.sourceSync(capability.syncSource).flatMap { $0.canSync ? $0.status : nil }
         return ConnectionRowValue.text(
             connected: model.connections.isConnected(capability),
             live: model.node.liveSwitches[capability.id] ?? false,
@@ -147,7 +147,8 @@ enum NodeStatusLine {
 struct ConnectionScreen: View {
     let id: String
     let onActivity: () -> Void
-    let onHistory: () -> Void
+    /// Opens Sync history, for the personal-data source it names.
+    let onHistory: (String) -> Void
     @Environment(AppModel.self) private var model
     @State private var connecting = false
 
@@ -160,8 +161,8 @@ struct ConnectionScreen: View {
                         ConnectionHeader(capability: capability)
                         if model.connections.isConnected(capability) {
                             LiveAccessSection(capability: capability, onActivity: onActivity)
-                            if capability.syncSource == HealthSettings.sourceId {
-                                HealthSyncSection(onHistory: onHistory)
+                            if let source = capability.syncSource, let sync = model.sourceSync(source) {
+                                SourceSyncSection(sync: sync, source: source, onHistory: { onHistory(source) })
                             }
                         } else {
                             PrimaryButton(title: "Connect", loading: connecting) { connect() }
@@ -297,7 +298,7 @@ struct DataFlowSection: View {
             .accessibilityLabel(device.dataFlowLabel)
             // What the Rome does with it, in the same card under the flow.
             Group {
-                if capability.syncSource == HealthSettings.sourceId {
+                if capability.syncSource != nil {
                     Text("Sent to your Rome and your AI model, whose terms apply · Never sold or used for ads · Delete anytime · [Privacy Policy](https://romeos.cc/privacy)")
                 } else {
                     Text("Read only when you ask · [Privacy Policy](https://romeos.cc/privacy)")

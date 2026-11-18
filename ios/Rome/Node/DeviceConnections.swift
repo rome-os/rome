@@ -51,6 +51,19 @@ struct DeviceConnectionReport: Encodable, Sendable, Equatable {
         /// `granted`, `denied`, `not_needed` or `unknown`.
         let permission: String
         let live: Bool
+        /// What it lets the Rome do, in English, as its page says. Optional
+        /// on the Rome, which builds a connect card from it.
+        var summary: String? = nil
+        /// Its name and summary in each language the app has, by the Rome's
+        /// language code (`en`, `zh-CN`), so the card reads in the guardian's.
+        var labels: [String: Label]? = nil
+        /// The icon its chat card shows, by a name the readers draw.
+        var icon: String? = nil
+    }
+
+    struct Label: Encodable, Sendable, Equatable {
+        let title: String
+        let summary: String
     }
 
     var version = 1

@@ -27,8 +27,8 @@ enum SettingsRoute: Hashable {
     case connection(String)
     /// One connection's live reads, by its id.
     case liveReads(String)
-    /// Apple Health → Sync history.
-    case syncHistory
+    /// A synced connection's Sync history, by its personal-data source.
+    case syncHistory(String)
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -594,12 +594,12 @@ struct MainShell: View {
                     ConnectionScreen(
                         id: id,
                         onActivity: { settingsPath.append(.liveReads(id)) },
-                        onHistory: { settingsPath.append(.syncHistory) }
+                        onHistory: { source in settingsPath.append(.syncHistory(source)) }
                     )
                 case .liveReads(let id):
                     NodeRequestsScreen(capability: id)
-                case .syncHistory:
-                    SyncHistoryScreen()
+                case .syncHistory(let source):
+                    SyncHistoryScreen(source: source)
                 }
             }
         }

@@ -645,6 +645,7 @@ final class AppModel {
             // Back on a Rome after the session ran out: Health sync goes on.
             if phase == .ready, oldValue != .ready {
                 health.instanceOpened()
+                calendarSync.instanceOpened()
                 // A report the gate held back before the app was ready goes now.
                 connections.reportIfUnsent()
             }
@@ -672,7 +673,9 @@ final class AppModel {
         // Each Rome has its own Health sync: the one open now syncs.
         didSet {
             guard currentInstanceID != oldValue else { return }
-            health.select(currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) })
+            let open = currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) }
+            health.select(open)
+            calendarSync.select(open)
         }
     }
     private(set) var signInError: String?
@@ -718,6 +721,8 @@ final class AppModel {
     let node: NodeHost
     /// Apple Health's Sync with Rome.
     let health: HealthSettings
+    /// Calendar's Sync with Rome.
+    let calendarSync: CalendarSync
     /// This phone's device connections, reported to the open Rome.
     let connections: DeviceConnections
     /// A connect card's link into the authorization, for the shell to hand its cards.
@@ -772,9 +777,15 @@ final class AppModel {
             target: { await target.resolve($0) }
         )
         self.health = health
+        let calendarSync = CalendarSync(
+            instance: Self.rememberedInstance().map(Self.healthInstance),
+            target: { await target.resolve($0) }
+        )
+        self.calendarSync = calendarSync
         let device = DeviceKind.current
         node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
             HealthCapability(health: HealthActions(reader: health.reader, device: device), live: NodeFlag()),
+            CalendarCapability(actions: CalendarActions(reader: calendarSync.reader, device: device), live: NodeFlag()),
             DeviceCapability(live: NodeFlag(), device: device),
         ]), device: device)
         connections = DeviceConnections(node: node)
@@ -782,8 +793,10 @@ final class AppModel {
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
         // A live Health answer leaves the app in front: the sync catches up,
         // at most every 15 minutes. Live results themselves are never stored.
-        node.onAnswered = { [weak health] action in
+        node.onAnswered = { [weak health, weak calendarSync] action in
             if action.hasPrefix("health.") { health?.foreground() }
+            // A change made live reaches the Rome's store now, not at the next open.
+            if CalendarActions.writes.contains(action) { calendarSync?.changedLive() }
         }
         connections.originId = { [weak health] in health?.originId() }
         // Rome Cloud's word on an instance an upgrade waits on: one it no
@@ -825,6 +838,7 @@ final class AppModel {
         Task { await push.launch() }
         #if DEBUG
         if HealthSeed.requested { Task { await HealthSeed.run() } }
+        if CalendarSeed.requested { Task { await CalendarSeed.run() } }
         let environment = ProcessInfo.processInfo.environment
         if environment["ROME_DEMO"] == "1" {
             openDemo()
@@ -854,6 +868,15 @@ final class AppModel {
            let user = environment["ROME_LOCAL_USER"],
            let password = environment["ROME_LOCAL_PASSWORD"] {
             await openLocal(origin: origin, user: user, password: password)
+            // `-RomeConnect <capability>`: the authorization Connect runs, with no tap.
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-RomeConnect"), ProcessInfo.processInfo.arguments.count > index + 1 {
+                await connect(ProcessInfo.processInfo.arguments[index + 1])
+            }
+            if let request = CalendarSeed.nodeAction {
+                // Once the app has settled and its connections are on.
+                try? await Task.sleep(for: .seconds(3))
+                CalendarSeed.logReply(await node.debugRun(request.action, args: request.args))
+            }
             return
         }
         #endif
@@ -1350,6 +1373,7 @@ final class AppModel {
         connections.forgetAccount()
         // Health sync's switch, anchors, history and origin; the Rome keeps what it has.
         health.forgetAccount()
+        calendarSync.forgetAccount()
     }
 
     // MARK: Session expiry
@@ -1475,14 +1499,23 @@ final class AppModel {
         // Sync's upload then runs on its own, behind it.
         await connections.connect(id)
         guard currentInstanceID == instance else { return }
-        if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
-            health.setEnabled(true)
+        if let sync = sourceSync(capability.syncSource), sync.canSync, !sync.isEnabled {
+            sync.setEnabled(true)
+        }
+    }
+
+    /// The Sync with Rome of a personal-data source, by its id.
+    func sourceSync(_ source: String?) -> (any SourceSyncing)? {
+        switch source {
+        case HealthSettings.sourceId?: return health
+        case CalendarSync.sourceId?: return calendarSync
+        default: return nil
         }
     }
 
     /// Settings, at Apple Health's Sync history.
     func openHealthHistory() {
-        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory])
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory(HealthSettings.sourceId)])
     }
 
     /// The pages to open, once: the shell takes them when it shows.
@@ -1553,6 +1586,8 @@ final class AppModel {
 
     func appDidEnterBackground() {
         foreground.enteredBackground(at: .now)
+        // Calendar has no background delivery: iOS wakes the app to refresh it.
+        if calendarSync.isEnabled { CalendarSync.scheduleRefresh() }
         // Replies under way go out, then the device disconnects.
         node.setActive(false)
         // Drafts are written before the app may be killed.
@@ -1640,6 +1675,7 @@ final class AppModel {
         appearance.apply()
         node.setActive(true)
         health.foreground()
+        calendarSync.foreground()
         // iOS Settings may have changed a permission meanwhile.
         node.permissionsChanged()
         connections.report()

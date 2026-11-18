@@ -65,7 +65,7 @@ import Testing
         let sent = Box<[JSONValue]>([])
         let surface = try await surface(locator, sent: sent)
         #expect(locator.reads == 0)
-        press("share", on: surface)
+        press("confirm", on: surface)
         for _ in 0..<50 where sent.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(sent.value.first?["name"]?.string == "share-location")
         let context = sent.value.first?["context"]
@@ -79,7 +79,7 @@ import Testing
     @Test func aRefusedPositionSendsNothingAndSaysWhy() async throws {
         let sent = Box<[JSONValue]>([])
         let surface = try await surface(StubLocator(.failure(.denied)), sent: sent)
-        press("share", on: surface)
+        press("confirm", on: surface)
         for _ in 0..<50 where !surface.sendFailed { try await Task.sleep(for: .milliseconds(10)) }
         #expect(sent.value.isEmpty)
         #expect(surface.refusal == LocationCard.failureText(.denied))
@@ -90,7 +90,7 @@ import Testing
         let locator = StubLocator(.failure(.unavailable))
         let sent = Box<[JSONValue]>([])
         let surface = try await surface(locator, sent: sent)
-        press("decline", on: surface)
+        press("dismiss", on: surface)
         for _ in 0..<50 where sent.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(sent.value.first?["name"]?.string == "decline")
         #expect(locator.reads == 0)

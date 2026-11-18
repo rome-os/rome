@@ -1016,6 +1016,13 @@
       "when": 1794951787296,
       "tag": "0145_chat_outputs",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "6",
+      "when": 1794969799444,
+      "tag": "0146_device_connection_labels",
+      "breakpoints": true
     }
   ]
 }

@@ -28,6 +28,8 @@ struct SyncHistoryFormatter {
     var calendar: Calendar = .current
     var locale: Locale = .current
     var device: DeviceKind = .iPhone
+    /// A source of entries (Calendar): its counts are items, not readings.
+    var entries = false
 
     /// Newest first, by day. Past the newest one, a sync that went well adds
     /// no row when it found nothing new or ran in the background, which it
@@ -65,7 +67,7 @@ struct SyncHistoryFormatter {
         case .deleted:
             return SyncHistoryRow(id: entry.seq, symbol: "trash", title: triggerText(entry), detail: time, count: nil, failed: false)
         case .ok, .partial, .interrupted:
-            let count = entry.itemCount == 0 ? String(localized: "Up to date") : String(localized: "\(entry.itemCount) readings")
+            let count = entry.itemCount == 0 ? String(localized: "Up to date") : entries ? String(localized: "\(entry.itemCount) items") : String(localized: "\(entry.itemCount) readings")
             return SyncHistoryRow(id: entry.seq, symbol: symbol(entry), title: triggerText(entry), detail: time, count: count, failed: false)
         }
     }
@@ -106,6 +108,8 @@ struct SyncHistoryFormatter {
         case "network": return String(localized: "Couldn't reach your Rome")
         case "rate_limited": return String(localized: "Too many syncs, trying later")
         case "health_failed": return String(localized: "Couldn't read Health")
+        case "calendar_denied": return String(localized: "No access to Calendar")
+        case "calendar_failed": return String(localized: "Couldn't read Calendar")
         default: return String(localized: "Your Rome couldn't take it")
         }
     }
@@ -126,14 +130,17 @@ struct SyncHistoryFormatter {
 }
 
 struct SyncHistoryScreen: View {
+    /// The personal-data source whose syncs it lists.
+    let source: String
     @Environment(AppModel.self) private var model
     @State private var confirmDelete = false
     @State private var deleting = false
     @State private var deleteFailed = false
 
     var body: some View {
-        let health = model.health
-        let days = SyncHistoryFormatter(device: model.node.device).days(health.history)
+        let isHealth = source == HealthSettings.sourceId
+        let sync = model.sourceSync(source)
+        let days = SyncHistoryFormatter(device: model.node.device, entries: !isHealth).days(sync?.history ?? [])
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 if days.isEmpty {
@@ -146,7 +153,7 @@ struct SyncHistoryScreen: View {
                         }
                     }
                 }
-                if health.canSync {
+                if sync?.canSync == true {
                     deleteButton
                         .padding(.top, 14)
                 }
@@ -160,8 +167,8 @@ struct SyncHistoryScreen: View {
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
-        .task { await health.reloadHistory() }
-        .alert("Delete all Apple Health data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
+        .task { await sync?.reloadHistory() }
+        .alert(isHealth ? "Delete all Apple Health data this \(model.node.device.name) sent to your Rome?" : "Delete all calendar data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { delete() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -207,7 +214,7 @@ struct SyncHistoryScreen: View {
     private func delete() {
         deleting = true
         Task {
-            let done = await model.health.deleteUploaded()
+            let done = await model.sourceSync(source)?.deleteUploaded() ?? false
             deleting = false
             if !done { deleteFailed = true }
         }

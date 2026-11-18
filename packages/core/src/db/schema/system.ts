@@ -1553,7 +1553,7 @@ export const personalDataPoints = sqliteTable(
     value: real("value"),
     unit: text("unit"),
     fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
-    metadata: text("metadata", { mode: "json" }).$type<Record<string, string>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
     dedupeKey: text("dedupe_key").notNull(),
     // A hash of the stored fields: an upsert with the same hash changes nothing.
     contentHash: text("content_hash").notNull(),
@@ -1689,6 +1689,16 @@ export const deviceConnections = sqliteTable(
     // `apple_health`: opaque here, so a reader of that data can find the
     // connection before the first sync. Null when it syncs nothing.
     feeds: text("feeds"),
+    // What the capability lets Rome do, in English, as the device's page says.
+    // Null for an app that reports none.
+    summary: text("summary"),
+    // Its name and summary by language (`en`, `zh-CN`), as the device has
+    // them, so a connect card reads in the guardian's language.
+    labels: text("labels", { mode: "json" }).$type<
+      Record<string, { title: string; summary?: string }>
+    >(),
+    // The icon for its card, by a name the readers draw, such as `calendar`.
+    icon: text("icon"),
     // The personal-data origin of the app install that reports the row, which
     // stays the same across its sign-ins while the device id does not. Null
     // for an app that reports none.
