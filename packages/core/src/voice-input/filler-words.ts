@@ -94,8 +94,9 @@ export function removeFillerWords(text: string, before = ""): string {
 
 // The end of the settled text that could still become, or lose, a filler:
 // pauses, a filler or the start of one, such as `U` before `m`, and spaces.
+// Each part matches one way only, so a long run of them never backtracks.
 const OPEN_TAIL =
-  /(?:[\s\p{P}]*(?:[嗯呃啊唔]|(?<![\p{Script=Latin}\p{N}'’-])(?:[Uu](?:m*|h*|hm)|[Ee](?:r|rm+)?|[Hh]m*)))*[\s\p{P}]*$/u;
+  /(?:[\s\p{P}]*(?:[嗯呃啊唔]|(?<![\p{Script=Latin}\p{N}'’-])(?:[Uu](?:m+|h+|hm)?|[Ee](?:r|rm+)?|[Hh]m*)))*[\s\p{P}]*$/u;
 
 /** One dictation's text, settled and pending, with its fillers dropped. */
 export interface FillerFilter {

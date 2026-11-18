@@ -166,6 +166,14 @@ describe("createFillerFilter", () => {
     expect(spoken.finish()).toBeNull();
   });
 
+  it("handles a long run of filler-like sounds quickly", () => {
+    const started = performance.now();
+    const said = `${"u ".repeat(40)}okay`;
+    expect(createFillerFilter().update(said, "")).toEqual({ settled: said, pending: "" });
+    // Without a single way to match each sound, this run takes hours.
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it("only appends to settled text", () => {
     const filter = createFillerFilter();
     const settled = ["Hmm", ", ", "I ", "uh", " think", " um", ".", " Yes"].map(
