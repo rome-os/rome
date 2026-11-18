@@ -197,6 +197,7 @@ final class DemoBackend: RomeBackend {
     func apiFile(path: String, query: String?) async throws -> Data {
         // App icons are SVG, as apps ship them.
         if let svg = Self.appIcons[path] { return Data(svg.utf8) }
+        if path.hasPrefix("/chat/sessions/") { return try await chatOutputFile(path: path) }
         var components = URLComponents()
         components.percentEncodedQuery = query
         guard path.hasPrefix("/projects/asset") || path.hasPrefix("/memory/asset"),
@@ -439,6 +440,41 @@ final class DemoBackend: RomeBackend {
     }
 
     /// Stops a demo task: it ends as stopped, and its list reads again.
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
+        try await pause(0.2)
+        if variant == .empty || variant == .conciergeOff { return ChatOutputsResponse(outputs: []) }
+        return ChatOutputsResponse(outputs: Self.outputs(chatId: chatId))
+    }
+
+    func chatOutputFile(path: String) async throws -> Data {
+        try await pause(0.2)
+        guard let output = Self.outputs(chatId: conciergeChatID).first(where: { $0.contentUrl == "/api" + path }) else { throw APIError.notFound }
+        if let link = output.link, let data = assets[String(link.dropFirst())] { return data }
+        return Data("# \(output.title)\n\n周六：伏见稻荷、清水寺；周日：岚山、金阁寺。\n".utf8)
+    }
+
+    /// The main chat's outputs, newest first: a task chat's among them, one moved.
+    private static func outputs(chatId: String) -> [ChatOutput] {
+        if chatId.hasPrefix("topic-") { return [] }
+        func output(_ id: String, _ kind: String, _ name: String, link: String? = nil, mime: String?, minutesAgo: Double, missing: Bool = false, from: ChatOutput.Source? = nil) -> ChatOutput {
+            ChatOutput(
+                id: id, kind: kind, name: name, link: link, mimeType: mime,
+                at: RomeDate.string(.now.addingTimeInterval(-minutesAgo * 60)),
+                missing: missing, from: from,
+                contentUrl: missing ? nil : "/api/chat/sessions/\(conciergeChatID)/outputs/\(id)/content"
+            )
+        }
+        let price = ChatOutput.Source(chatId: "chat-price", name: "价格追踪：发提醒邮件")
+        return [
+            output("out-plan", "written", "京都行程.md", mime: "text/markdown", minutesAgo: 12),
+            output("out-hotel", "shown", "hotel.jpg", link: "/projects/demo/trip/hotel.jpg", mime: "image/jpeg", minutesAgo: 40),
+            output("out-prices", "written", "price-history.csv", mime: "text/csv", minutesAgo: 150, from: price),
+            output("out-kitchen", "shown", "kitchen.jpg", link: "/projects/demo/home/kitchen.jpg", mime: "image/jpeg", minutesAgo: 2 * 1440),
+            output("out-report", "written", "weekly_report.pdf", mime: "application/pdf", minutesAgo: 3 * 1440),
+            output("out-script", "written", "rename-photos.py", mime: "text/x-python", minutesAgo: 5 * 1440, missing: true),
+        ]
+    }
+
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await pause(0.4)
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }

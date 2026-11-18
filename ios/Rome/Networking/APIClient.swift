@@ -83,17 +83,22 @@ final class APIClient: Sendable {
 
     /// The bytes behind an `/api/…` URL a reply wrote, sent as written: the
     /// query is not decoded and encoded again.
-    func getFile(apiPath: String, percentEncodedQuery: String?) async throws -> Data {
+    /// `limit`: stop past this many bytes; an image's by default.
+    func getFile(apiPath: String, percentEncodedQuery: String?, limit: Int = imageLimit, accept: String = "image/*") async throws -> Data {
         guard let url = Self.fileURL(origin: origin, apiPath: apiPath, percentEncodedQuery: percentEncodedQuery) else { throw APIError.notFound }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         signIn(&request)
-        return try await send(request, limit: Self.imageLimit)
+        return try await send(request, limit: limit)
     }
 
     /// Images past this are not shown: a reply can point at any file.
     static let imageLimit = 20 * 1024 * 1024
+
+    /// A chat's output past this is not opened on the phone: a video or a
+    /// large export is for the web.
+    static let outputLimit = 100 * 1024 * 1024
 
     /// A GET's body, stopped as soon as it passes `limit` bytes: the declared
     /// length decides first, the bytes received after.
