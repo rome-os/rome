@@ -483,6 +483,27 @@ export class ConciergeTasksRepository {
     });
   }
 
+  /**
+   * The task chats `owner`'s Concierge chat `conciergeChatId` started, ended
+   * and archived tasks included, each with its chat's name. The main chat
+   * started a task that names no chat. A task whose chat is gone has none.
+   */
+  async taskChatsStartedBy(
+    conciergeChatId: string,
+    owner: string,
+  ): Promise<Array<{ chatId: string; name: string }>> {
+    const startedBy =
+      conciergeChatId === mainChatIdOf(owner)
+        ? or(isNull(conciergeTasks.chatId), eq(conciergeTasks.chatId, conciergeChatId))
+        : eq(conciergeTasks.chatId, conciergeChatId);
+    const rows = await this.db
+      .select({ chatId: romeSessions.id, chatName: romeSessions.name, title: conciergeTasks.title })
+      .from(conciergeTasks)
+      .innerJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
+      .where(and(eq(conciergeTasks.ownerKey, owner), startedBy));
+    return rows.map((row) => ({ chatId: row.chatId, name: row.chatName.trim() || row.title }));
+  }
+
   /** The Concierge's own view: not archived, finished rows only on request. */
   async listForAgent(includeDone: boolean): Promise<ConciergeTaskWithChat[]> {
     return this.withChat(

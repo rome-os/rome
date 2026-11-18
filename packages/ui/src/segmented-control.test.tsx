@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { SegmentedControl, type SegmentedControlOption } from "./segmented-control.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+});
 
 const OPTIONS = [
   { value: "overview", label: "Overview" },
@@ -213,6 +216,11 @@ describe("SegmentedControl", () => {
     // Arrow-key navigation lands focus on the segment; the explanation has to
     // arrive there too, or it is pointer-only and invisible to a keyboard user.
     const open = screen.getByRole("radio", { name: "Open" });
+    // Keyboard focus, which the browser draws a ring for.
+    const matches = Element.prototype.matches;
+    rs.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector) {
+      return selector === ":focus-visible" || matches.call(this, selector);
+    });
     fireEvent.focus(open);
 
     const tooltip = await screen.findByRole("tooltip");

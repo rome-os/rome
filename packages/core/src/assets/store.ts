@@ -1,6 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, mkdir, open, realpath, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  type FileHandle,
+  link,
+  mkdir,
+  open,
+  realpath,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { getAssetsDir, getProfileMemoryDir, getProjectsRoot } from "../paths.js";
@@ -130,17 +139,15 @@ export interface StoreAssetFromPathOptions extends StoreAssetOptions {
 }
 
 /**
- * Copy a local file into the asset store, as `core:show_file` does. The path
- * must be absolute and, once its links are resolved, inside the projects
- * folder, the memory folder or the assets folder, and not a sensitive file.
- * The resolved path is opened once without following links and the bytes are
- * copied from that descriptor, so the file cannot be swapped after the check.
+ * The real path of local file `path` when chat may show it: absolute and,
+ * once its links are resolved, inside the projects folder, the memory folder
+ * or the assets folder, and not a sensitive file. Throws
+ * {@link AssetSourceError} saying why not.
  */
-export async function storeAssetFromPath(
+export async function resolveShowablePath(
   path: string,
-  options: StoreAssetFromPathOptions = {},
-): Promise<StoredAsset> {
-  const maxBytes = options.maxBytes ?? MAX_ASSET_BYTES;
+  roots: string[] = [getProjectsRoot(), getProfileMemoryDir(), getAssetsDir()],
+): Promise<string> {
   if (!isAbsolute(path)) throw new AssetSourceError("Path must be an absolute path");
 
   let resolved: string;
@@ -150,13 +157,9 @@ export async function storeAssetFromPath(
     throw new AssetSourceError(`File not found: ${path}`);
   }
 
-  const roots = await Promise.all(
-    (options.roots ?? [getProjectsRoot(), getProfileMemoryDir(), getAssetsDir()]).map((root) =>
-      realpath(root).catch(() => null),
-    ),
-  );
+  const realRoots = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
   let inside: string[] | null = null;
-  for (const root of roots) {
+  for (const root of realRoots) {
     if (!root) continue;
     const rel = relative(root, resolved);
     if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
@@ -167,24 +170,31 @@ export async function storeAssetFromPath(
   if (!inside) {
     throw new AssetSourceError("File is outside the folders chat can show (projects, memory)");
   }
-  const name = basename(resolved);
   if (
     inside.some((part) => SENSITIVE_DIRECTORIES.has(part.toLowerCase())) ||
-    isSensitiveName(name)
+    isSensitiveName(basename(resolved))
   ) {
     throw new AssetSourceError(`Refused: ${basename(path)} looks like a sensitive file`);
   }
+  return resolved;
+}
 
-  // O_NONBLOCK so that a FIFO cannot hang the open; fstat then refuses it.
-  const handle = await open(
-    resolved,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  ).catch(() => {
-    throw new AssetSourceError(`File not found: ${path}`);
-  });
+/**
+ * Copy a local file into the asset store, as `core:show_file` does, when
+ * {@link resolveShowablePath} allows it. The resolved path is opened once
+ * without following links and the bytes are copied from that descriptor, so
+ * the file cannot be swapped after the check.
+ */
+export async function storeAssetFromPath(
+  path: string,
+  options: StoreAssetFromPathOptions = {},
+): Promise<StoredAsset> {
+  const maxBytes = options.maxBytes ?? MAX_ASSET_BYTES;
+  const resolved = await resolveShowablePath(path, options.roots);
+  const name = basename(resolved);
+  const { handle, size } = await openRegularFile(resolved, path);
+  const info = { size };
   try {
-    const info = await handle.stat();
-    if (!info.isFile()) throw new AssetSourceError(`Not a regular file: ${path}`);
     if (info.size > maxBytes) throw new AssetTooLargeError(basename(path), maxBytes);
     return await publish(name, options, async (tmpPath) => {
       if (info.size === 0) {
@@ -205,6 +215,32 @@ export async function storeAssetFromPath(
     });
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * Opens regular file `path` for reading without following a link at its last
+ * step, and answers the open descriptor and its size as `fstat` reads it, so
+ * what is read is the file that was checked. A FIFO cannot hang the open
+ * (`O_NONBLOCK`), and `fstat` refuses it. The caller closes the handle.
+ */
+export async function openRegularFile(
+  path: string,
+  label = path,
+): Promise<{ handle: FileHandle; size: number }> {
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch(() => {
+    throw new AssetSourceError(`File not found: ${label}`);
+  });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new AssetSourceError(`Not a regular file: ${label}`);
+    return { handle, size: info.size };
+  } catch (error) {
+    await handle.close();
+    throw error;
   }
 }
 

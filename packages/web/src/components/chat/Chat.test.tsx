@@ -57,6 +57,7 @@ const conciergeInsertText = rs.hoisted(() => rs.fn());
 // Which composer took the caret: the thread it sends into, or "" for the chat's own.
 const conciergeFocus = rs.hoisted(() => rs.fn());
 const touch = rs.hoisted(() => ({ coarse: false }));
+import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 rs.mock("@/hooks/use-coarse-pointer", () => ({ useCoarsePointer: () => touch.coarse }));
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
@@ -175,7 +176,8 @@ rs.mock("@/components/agent-trace/TraceDrawer", () => ({
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
-  AgentAvatar: () => null,
+  AgentAvatar: ({ iconUrl }: { iconUrl?: string | null }) =>
+    iconUrl ? <span data-agent-avatar={iconUrl} /> : null,
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
@@ -287,6 +289,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     <>
       <div
         data-testid="message-list"
+        data-output-links={useOutputLinks() ? "true" : ""}
         data-unread-from={unreadFrom ?? ""}
         data-writing={live.writing?.writing ? "true" : ""}
       >
@@ -1087,7 +1090,8 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
-  it("marks the header avatar with the session model's vendor", () => {
+  it("names the model that answered last at the foot of the header's menu", async () => {
+    const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -1095,23 +1099,62 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    const avatar = screen.getByRole("button", { name: "navbar.sessionModel" });
-    expect(avatar.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
+    const caption = document.querySelector("[data-concierge-menu-caption]");
+    expect(caption?.textContent).toBeTruthy();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+    ]);
   });
 
-  it("names the effort the session's last turn ran with", () => {
+  it("shows no model in the menu before the chat's first turn", async () => {
+    const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
-      model: "gpt-5.5",
-      reasoningEffort: "max",
+      model: null,
       pinnedAgentMention: null,
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
+    expect(document.querySelector("[data-concierge-menu-caption]")).toBeNull();
   });
 
-  it("shows a spinner and Loading… instead of New Chat while an existing session loads", () => {
+  it("opens a message's link to one of its files in Outputs, in an ordinary chat too", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByTestId("message-list").dataset.outputLinks).toBe("true");
+  });
+
+  it("offers the chat's project in its menu only when one was chosen", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      projectPath: "rome-releases",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "chatHeader.project",
+    ]);
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      projectPath: "default",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+    ]);
+  });
+
+  it("shows no name, not New Chat, while an existing session loads", () => {
     mockUseSessionIdentity.mockReturnValue({
       loading: true,
       sessionName: null,
@@ -1119,8 +1162,8 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByRole("status", { name: "sidebar.loading" })).toBeTruthy();
-    expect(screen.getByText("sidebar.loading")).toBeTruthy();
+    // The name tag waits for the name rather than saying New Chat first.
+    expect(document.querySelector("[data-concierge-header-name]")?.textContent).toBe("");
     expect(screen.queryByText("sidebar.newChat")).toBeNull();
   });
 
@@ -1174,6 +1217,36 @@ describe("Chat agent identity", () => {
     renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  Atlas  " />);
 
     expect(screen.getByTestId("message-list").textContent).toBe("Atlas");
+  });
+
+  it("shows a chat's app agent in the header's badge, and the mascot otherwise", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: "/api/apps/workflow-studio/icon",
+      },
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="session-1" />);
+    const badge = document.querySelector("[data-concierge-header-badge]")!;
+    expect(badge.querySelector("[data-agent-avatar]")?.getAttribute("data-agent-avatar")).toBe(
+      "/api/apps/workflow-studio/icon",
+    );
+    expect(badge.querySelector(".rome-mascot")).toBeNull();
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    const plain = document.querySelector("[data-concierge-header-badge]")!;
+    expect(plain.querySelector("[data-agent-avatar]")).toBeNull();
+    expect(plain.querySelector(".rome-mascot")).not.toBeNull();
   });
 
   it("keeps a session-pinned app agent ahead of the main agent display name", () => {
@@ -2782,7 +2855,7 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
     expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "concierge.taskList.open" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "chatHeader.menu" })).toBeNull();
     view.unmount();
 
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
@@ -2796,7 +2869,7 @@ describe("Chat Concierge empty state", () => {
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByTestId("user-row");
-    expect(await screen.findByRole("button", { name: "concierge.taskList.open" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "chatHeader.menu" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -2855,11 +2928,17 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(await screen.findByText("Plan the launch")).toBeTruthy();
-    expect(document.querySelector("[data-concierge-header]")).toBeNull();
-    expect(screen.getByRole("button", { name: "navbar.more" }).className).not.toContain(
-      "rounded-full",
-    );
+    // An ordinary chat floats the same header, with its title in the tag.
+    const name = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header-name]");
+      if (!found?.textContent) throw new Error("no name");
+      return found;
+    });
+    expect(name.textContent).toBe("Plan the launch");
+    // The same mascot as the Concierge's, and no status capsule under the name.
+    expect(document.querySelector("[data-concierge-header-badge] .rome-mascot")).not.toBeNull();
+    expect(document.querySelector("[data-concierge-header-activity]")).toBeNull();
+    expect(screen.getByRole("button", { name: "navbar.more" }).className).toContain("rounded-full");
   });
 
   it("hangs the Concierge's mascot from the Mac app's title bar and puts its buttons in the bar", async () => {
@@ -2959,7 +3038,7 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from the agent's logo in a Concierge chat's header, not its menu", async () => {
+  it("opens the task list from the menu on the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
@@ -2977,10 +3056,11 @@ describe("Chat Concierge empty state", () => {
       },
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    // The header settles once the chat loads; press the button it settles on.
-    await screen.findByRole("button", { name: "concierge.taskList.open" });
+    // The header settles once the chat loads; its menu holds Tasks.
+    await screen.findByRole("button", { name: "chatHeader.menu" });
     await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "concierge.taskList.open" }));
+      fireEvent.click(screen.getByRole("button", { name: "chatHeader.menu" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.tasks" }));
       expect(mockOpenTaskList).toHaveBeenCalled();
     });
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
@@ -3947,7 +4027,7 @@ describe("Chat Concierge empty state", () => {
     );
   });
 
-  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+  it("names neither the Concierge's app nor an ordinary chat's, whose tag shows its title", async () => {
     // Core agents all report "Rome" as their app, so the Concierge's label never varies.
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -3977,7 +4057,9 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(await screen.findByText("Workflow Studio")).toBeTruthy();
+    // The tag names the chat; the app is the badge's avatar.
+    expect(await screen.findByText("Plan the launch")).toBeTruthy();
+    expect(screen.queryByText("Workflow Studio")).toBeNull();
   });
 
   it("is only for Concierge: an empty normal chat keeps its message list", async () => {

@@ -144,7 +144,8 @@ test.describe("phone", () => {
 
   test("the drawer is the rail, and back opens the chat list over the chat", async ({ page }) => {
     await page.goto("/chat/mock-chat-build-app");
-    const header = page.locator("header[data-mobile-header]");
+    // A chat floats its own header, and the shell's buttons move into it.
+    const header = page.locator("[data-concierge-header]");
     await expect(header).toBeVisible({ timeout: 30_000 });
 
     // Back comes first, then the menu.

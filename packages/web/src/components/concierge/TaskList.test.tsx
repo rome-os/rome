@@ -7,6 +7,7 @@ import { type TaskListParts, groupTaskList, pageTaskList } from "@rome/api-types
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
+import { keyboardFocus } from "@/test/keyboard-focus";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { onConciergeJump } from "./concierge-jump";
@@ -297,9 +298,7 @@ describe("TaskList", () => {
       expect(button.textContent).toBe("");
       expect(button.querySelector("svg")).toBeTruthy();
     }
-    fireEvent.focus(
-      within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }),
-    );
+    keyboardFocus(within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }));
     // Its tooltip names it; the row says it nowhere else.
     expect((await screen.findAllByText("Stop")).length).toBeGreaterThan(0);
   });
@@ -311,7 +310,7 @@ describe("TaskList", () => {
     expect(within(rowOf("Plan a trip")).getByText("Not started · Created 3 days ago")).toBeTruthy();
     // A scheduled one keeps its schedule line.
     expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
-    fireEvent.focus(screen.getByText("Plan a trip"));
+    keyboardFocus(screen.getByText("Plan a trip"));
     expect((await screen.findAllByText(/^Created /)).length).toBeGreaterThan(0);
   });
 
