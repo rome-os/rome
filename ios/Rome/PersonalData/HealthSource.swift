@@ -215,7 +215,7 @@ actor AppleHealthSource: PersonalDataSource {
         return nil
     }
 
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, rejected: Set<String>) async {
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
         // Reset meanwhile: what the chunk read belongs to progress that is gone.
         guard run != nil else { return }
         let before = await store.load()

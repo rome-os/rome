@@ -9,13 +9,18 @@ final class FakeCalendar: CalendarReading, @unchecked Sendable {
     var events: [CalendarEventItem] = []
     var created: [EventDraft] = []
     var updated: [(id: String, occurrence: Date?, changes: EventChanges)] = []
+    /// Each window a sync asked for.
+    var reads: [DateInterval] = []
 
     func access() -> CalendarAccessState { lock.withLock { accessState } }
     func requestAccess() async {}
 
     func events(in window: DateInterval) async throws -> [CalendarEventItem] {
         guard access() == .granted else { throw CalendarFailure.denied }
-        return lock.withLock { events.filter { $0.start < window.end && $0.end > window.start } }
+        return lock.withLock {
+            reads.append(window)
+            return events.filter { $0.start < window.end && $0.end > window.start }
+        }
     }
 
     func lists() async -> [CalendarListItem] {
@@ -109,6 +114,36 @@ enum CalendarFixtures {
         let free = try #require(answer["free"]?.array)
         #expect(free.map { $0["start"]?.string } == ["2026-11-18T09:00:00+08:00", "2026-11-18T11:00:00+08:00"])
         #expect(free.map { $0["minutes"]?.number } == [60, 60])
+    }
+
+    /// Free time in New York on a daylight-saving day, between 09:00 and 17:00.
+    private func freeOnAClockChange(_ date: String, dayEnd: String = "17:00") async throws -> [JSONValue] {
+        var newYork = Calendar(identifier: .gregorian)
+        newYork.timeZone = TimeZone(identifier: "America/New_York")!
+        let calendar = newYork
+        let actions = CalendarActions(reader: FakeCalendar(), now: { CalendarFixtures.now }, calendar: { calendar })
+        let answer = try result(await actions.run("calendar.free_busy", args: .object([
+            "start": .string(date), "end": .string(date), "dayStart": .string("09:00"), "dayEnd": .string(dayEnd),
+        ])))
+        return try #require(answer["free"]?.array)
+    }
+
+    @Test func freeTimeKeepsTheClockHoursWhenClocksGoForward() async throws {
+        let free = try await freeOnAClockChange("2027-03-14")
+        #expect(free.map { $0["start"]?.string } == ["2027-03-14T09:00:00-04:00"])
+        #expect(free.map { $0["end"]?.string } == ["2027-03-14T17:00:00-04:00"])
+    }
+
+    @Test func freeTimeKeepsTheClockHoursWhenClocksGoBack() async throws {
+        let free = try await freeOnAClockChange("2027-11-07")
+        #expect(free.map { $0["start"]?.string } == ["2027-11-07T09:00:00-05:00"])
+        #expect(free.map { $0["end"]?.string } == ["2027-11-07T17:00:00-05:00"])
+    }
+
+    @Test func freeTimeUntil24MeansTheNextMidnight() async throws {
+        let free = try await freeOnAClockChange("2027-11-07", dayEnd: "24:00")
+        #expect(free.map { $0["end"]?.string } == ["2027-11-08T00:00:00-05:00"])
+        #expect(free.map { $0["minutes"]?.number } == [15 * 60])
     }
 
     @Test func createEventDefaultsToAnHourAndNeedsATitle() async throws {
@@ -218,150 +253,74 @@ enum CalendarFixtures {
         CalendarSource(reader: fake, store: store, calendar: { CalendarFixtures.calendar })
     }
 
-    @Test func sendsOnlyWhatChangedAndDeletesWhatIsGone() async throws {
+    @Test func sendsEveryEventInTheWindowAsOneSnapshot() async throws {
         let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10), CalendarFixtures.event("b", 14, 15)]
-        let store = MemoryProgressStore()
-        let source = source(fake, store)
+        fake.events = [CalendarFixtures.event("b", 14, 15), CalendarFixtures.event("a", 9, 10)]
+        let source = source(fake)
 
         let first = try await run(source)
+        #expect(first.kind == .snapshot)
         #expect(first.upserts.map(\.key) == ["events:a", "events:b"])
         #expect(first.upserts.allSatisfy { $0.shape == .entry })
+        #expect(first.deletes.isEmpty, "the Rome deletes what a snapshot leaves out")
         #expect(first.marks.map(\.type) == ["events"])
-        await source.confirm(first, unsupported: [], rejected: [])
+        let snapshot = try #require(first.snapshot)
+        #expect(snapshot.windows == ["events": window])
+        #expect(snapshot.readAt == CalendarFixtures.now)
+        await source.confirm(first, unsupported: [])
 
+        // Unchanged, it is all sent again, under a new id: nothing here
+        // remembers what the Rome has.
         let same = try await run(source)
-        #expect(same.upserts.isEmpty && same.deletes.isEmpty, "nothing changed")
-        await source.confirm(same, unsupported: [], rejected: [])
+        #expect(same.upserts.map(\.key) == ["events:a", "events:b"])
+        #expect(same.snapshot?.id != snapshot.id)
 
-        fake.events[0].title = "Moved"
-        fake.events.remove(at: 1)
-        let next = try await run(source)
-        #expect(next.upserts.map(\.key) == ["events:a"])
-        #expect(next.deletes == ["events:b"])
-    }
-
-    @Test func anEventSentInAnInterruptedRunIsStillDeletedWhenGone() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let store = MemoryProgressStore()
-        let source = source(fake, store)
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-        // "b" goes out, but the run is cut off before the Rome confirms it.
-        fake.events.append(CalendarFixtures.event("b", 14, 15))
-        let cut = try await run(source)
-        #expect(cut.upserts.map(\.key) == ["events:b"])
-        // Then "b" is deleted on the phone.
         fake.events.removeLast()
-        let next = try await run(source)
-        #expect(next.deletes == ["events:b"], "the Rome may hold it")
-        await source.confirm(next, unsupported: [], rejected: [])
-        let after = try await run(source)
-        #expect(after.deletes.isEmpty, "confirmed: nothing left to retry")
+        #expect(try await run(source).upserts.map(\.key) == ["events:b"])
     }
 
-    @Test func anUnconfirmedChangeIsSentAgainEvenWhenItLooksUnchanged() async throws {
+    @Test func anEmptyCalendarIsAnEmptySnapshot() async throws {
+        let chunk = try await run(source(FakeCalendar()))
+        #expect(chunk.upserts.isEmpty)
+        #expect(chunk.snapshot?.windows["events"] == window)
+        #expect(SyncEngine.batches(chunk).count == 1, "one batch still carries the commit")
+    }
+
+    @Test func anEventTouchingAnEdgeIsSentSoTheCommitKeepsIt() async throws {
         let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let source = source(fake, MemoryProgressStore())
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-        // An edit goes out, and the run is cut off before the Rome confirms it.
-        fake.events[0].title = "Moved"
-        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
-        // Unchanged since that try: still sent, since the Rome may not have it.
-        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
+        func event(_ id: String, _ start: Date, _ end: Date) -> CalendarEventItem {
+            var event = CalendarFixtures.event(id, 9, 10)
+            event.start = start
+            event.end = end
+            return event
+        }
+        let hour: TimeInterval = 3600
+        fake.events = [
+            event("straddles", window.start.addingTimeInterval(-hour), window.start.addingTimeInterval(hour)),
+            event("ends-at-start", window.start.addingTimeInterval(-hour), window.start),
+            event("starts-at-end", window.end, window.end.addingTimeInterval(hour)),
+            event("before", window.start.addingTimeInterval(-3 * hour), window.start.addingTimeInterval(-hour)),
+            event("after", window.end.addingTimeInterval(hour), window.end.addingTimeInterval(2 * hour)),
+        ]
+        let chunk = try await run(source(fake))
+        #expect(chunk.upserts.map(\.key) == ["events:ends-at-start", "events:starts-at-end", "events:straddles"])
+        #expect(fake.reads.first.map { $0.start < window.start && $0.end > window.end } == true, "read wider than the window")
     }
 
-    @Test func aChangeRevertedAfterAnUnconfirmedTryIsSentAgain() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let source = source(fake, MemoryProgressStore())
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-        fake.events[0].title = "Moved"
-        _ = try await run(source)
-        // Back to what the Rome last confirmed, which it may have lost to the try.
-        fake.events[0].title = "Event a"
-        let next = try await run(source)
-        #expect(next.upserts.map(\.key) == ["events:a"])
-        await source.confirm(next, unsupported: [], rejected: [])
-        #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
+    @Test func progressSavedWithTheOldLedgerStillLoads() throws {
+        let saved = #"{"instanceId":"inst-1","anchors":{},"sleepNights":{},"syncedThrough":{},"unsupported":[],"entries":{"events:a":{"hash":"ab","end":0}},"attempted":{}}"#
+        let progress = try JSONDecoder().decode(SyncProgress.self, from: Data(saved.utf8))
+        #expect(progress.instanceId == "inst-1")
     }
 
-    @Test func anEventRestoredAfterAnUnconfirmedDeleteIsSentAgain() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let source = source(fake, MemoryProgressStore())
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-        // The delete goes out, and the Rome's answer is lost.
-        let restored = fake.events.removeLast()
-        #expect(try await run(source).deletes == ["events:a"])
-        // Back as the Rome last confirmed it, which the delete may have removed.
-        fake.events.append(restored)
-        let next = try await run(source)
-        #expect(next.upserts.map(\.key) == ["events:a"])
-        #expect(next.deletes.isEmpty)
-        await source.confirm(next, unsupported: [], rejected: [])
-        #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
-    }
-
-    @Test func anEventMovedLaterInAnUnconfirmedRunIsDeletedPastTheOldCutoff() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let source = source(fake, MemoryProgressStore())
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-        // Moved 8 days later; the move reaches the Rome, its answer is lost.
-        fake.events[0] = CalendarFixtures.event("a", 9 + 8 * 24, 10 + 8 * 24)
-        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
-        // Then deleted, read once the confirmed day has aged out but the moved one has not.
-        fake.events.removeAll()
-        let later = CalendarFixtures.now.addingTimeInterval(10 * 86_400)
-        let next = try await run(source, at: later)
-        #expect(next.deletes == ["events:a"], "the Rome may hold the moved event")
-        await source.confirm(next, unsupported: [], rejected: [])
-        #expect(try await run(source, at: later).deletes.isEmpty, "confirmed: nothing left to retry")
-    }
-
-    @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10)]
-        let source = source(fake)
-        let first = try await run(source)
-        await source.confirm(first, unsupported: [], rejected: [])
-        let later = CalendarFixtures.now.addingTimeInterval(10 * 86_400)
-        let after = try await run(source, at: later)
-        #expect(after.deletes.isEmpty)
-        #expect(after.commit.entries?["events:a"] == nil)
-    }
-
-    @Test func anEventTheRomeRefusedIsSentAgain() async throws {
-        let fake = FakeCalendar()
-        fake.events = [CalendarFixtures.event("a", 9, 10), CalendarFixtures.event("b", 14, 15)]
-        let store = MemoryProgressStore()
-        let source = source(fake, store)
-        await source.confirm(try await run(source), unsupported: [], rejected: [])
-
-        // b changes and the Rome refuses the new version: b keeps its old
-        // hash, so it is sent again, and a later delete still follows it.
-        fake.events[1].title = "Changed"
-        await source.confirm(try await run(source), unsupported: [], rejected: ["events:b"])
-        let again = try await run(source)
-        #expect(again.upserts.map(\.key) == ["events:b"])
-
-        // A new event the Rome refused is not remembered at all.
-        fake.events.append(CalendarFixtures.event("c", 16, 17))
-        await source.confirm(try await run(source), unsupported: [], rejected: ["events:b", "events:c"])
-        #expect(try await run(source).upserts.map(\.key) == ["events:b", "events:c"])
-    }
-
-    @Test func aRefusalInAnEarlierBatchHoldsTheMarkBack() async throws {
+    @Test func aRefusalInAnyBatchLeavesTheWindowOutOfTheCommit() async throws {
         let fake = FakeCalendar()
         // More events than one batch carries: the refused one goes first.
         fake.events = (0...SyncEngine.maxItems).map { CalendarFixtures.event(String(format: "e%05d", $0), 9, 10) }
         let backend = FakePersonalDataBackend()
         await backend.refuse(keys: ["events:e00000"])
-        let store = MemoryProgressStore()
         let engine = SyncEngine(
-            source: source(fake, store),
+            source: source(fake),
             target: { PersonalDataTarget(instanceId: "inst-1", backend: backend) },
             log: MemorySyncLog(),
             origin: { .init(id: "origin-1", name: "iPhone", platform: "ios", appVersion: "1.6.0") },
@@ -374,12 +333,17 @@ enum CalendarFixtures {
         await engine.sync(.manual)
         let envelopes = await backend.envelopes
         #expect(envelopes.count == 2)
-        #expect(envelopes.last?.types.isEmpty == true, "events are not synced while one is refused")
+        let id = try #require(envelopes.first?.snapshot?.id)
+        #expect(envelopes.allSatisfy { $0.snapshot?.id == id }, "every batch carries the snapshot")
+        #expect(envelopes.first?.snapshot?.windows == nil, "only the last batch commits")
+        #expect(envelopes.last?.snapshot?.windows == [], "a refused event holds the commit back")
+        #expect(envelopes.last?.types.isEmpty == true)
 
         await backend.refuse(keys: [])
         await engine.sync(.manual)
-        let retry = await backend.envelopes.dropFirst(2)
-        #expect(retry.flatMap(\.upserts).map(\.key) == ["events:e00000"])
+        let retry = Array(await backend.envelopes.dropFirst(2))
+        #expect(retry.flatMap(\.upserts).count == SyncEngine.maxItems + 1, "the whole window again")
+        #expect(retry.last?.snapshot?.windows?.map(\.type) == ["events"])
         #expect(retry.last?.types.map(\.type) == ["events"])
     }
 
@@ -419,7 +383,7 @@ enum CalendarFixtures {
         fake.events = [CalendarFixtures.event("a", 9, 10)]
         let store = MemoryProgressStore()
         let source = source(fake, store)
-        await source.confirm(try await run(source), unsupported: ["events"], rejected: [])
+        await source.confirm(try await run(source), unsupported: ["events"])
         let again = try await run(source)
         #expect(again.upserts.map(\.key) == ["events:a"], "sent again after the Rome refused it")
     }

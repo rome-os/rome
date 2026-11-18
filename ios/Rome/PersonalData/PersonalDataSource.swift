@@ -15,6 +15,16 @@ struct SyncChunk: Sendable {
         case reconcile
         /// A month of history, newest first.
         case backfill
+        /// Everything in a window, which the Rome takes in place of what it held there.
+        case snapshot
+    }
+
+    /// A snapshot's id, when the phone read it, and the window of each type
+    /// it holds whole. Every batch carries the id; the last commits the windows.
+    struct Snapshot: Sendable {
+        let id: String
+        let readAt: Date
+        let windows: [String: DateInterval]
     }
 
     let kind: Kind
@@ -26,6 +36,8 @@ struct SyncChunk: Sendable {
     var counts: [String: SyncTypeCount] = [:]
     /// The month a history chunk reads, for "Syncing history · Aug 2026".
     var historyMonth: Date?
+    /// Set when the chunk is a snapshot of a window.
+    var snapshot: Snapshot?
     /// The progress to keep once the Rome has the whole chunk.
     var commit: SyncProgress
 
@@ -49,9 +61,7 @@ protocol PersonalDataSource: Sendable {
     func nextChunk() async throws -> SyncChunk?
     /// The Rome has the chunk: its progress is kept. Types the Rome refused
     /// as unknown keep their old anchors and are left out from now on.
-    /// `rejected` holds the keys of the items it refused for any other
-    /// reason, for a source that remembers what it sent item by item.
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, rejected: Set<String>) async
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async
     /// Forgets all progress: the next run starts a new backfill.
     func reset() async
     /// The backfill's cursor while history is still being sent, else nil.

@@ -234,11 +234,11 @@ actor SyncEngine {
                 guard let chunk = try await source.nextChunk() else { break }
                 if chunk.kind == .backfill { entry.history = true }
                 await onActivity(SyncActivity(running: true, historyMonth: chunk.historyMonth))
-                let (unsupported, rejected) = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
+                let unsupported = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
                 // Off or Delete meanwhile: the chunk is not kept, so
                 // a reset that follows is never undone by it.
                 try await checkGoing(myGeneration, deadline: nil)
-                await source.confirm(chunk, unsupported: unsupported, rejected: rejected)
+                await source.confirm(chunk, unsupported: unsupported)
                 for (type, count) in chunk.counts { entry.types[type] = Self.merged(entry.types[type], count) }
                 if !unsupported.isEmpty { entry.outcome = .partial }
             }
@@ -322,15 +322,15 @@ actor SyncEngine {
 
     /// Sends a chunk in batches, one after the other. The type marks go with
     /// the last batch, so the Rome counts a type as synced only once it has
-    /// all of it. Returns the types the Rome does not know, and the keys of
-    /// the upserts it refused for any other reason.
+    /// all of it, and so do a snapshot's windows: a type with an item refused
+    /// in any batch commits none, and the Rome keeps its last snapshot.
+    /// Returns the types the Rome does not know.
     private func send(
         _ chunk: SyncChunk, origin: PersonalDataEnvelope.Origin, trigger: SyncTrigger, backend: any PersonalDataBackend,
         index: inout Int, entry: inout SyncLogEntry, generation: Int, deadline: Date?
-    ) async throws -> (unsupported: Set<String>, rejected: Set<String>) {
+    ) async throws -> Set<String> {
         let batches = Self.batches(chunk)
         var unsupported = Set<String>()
-        var refused = Set<String>()
         // Types an earlier batch had an item refused for. The Rome withholds
         // a type's mark only for refusals in the same request, so the last
         // batch leaves out these marks itself: a type is synced only once
@@ -346,6 +346,7 @@ actor SyncEngine {
                 source: source.id, origin: origin, connectionId: connectionId,
                 batch: .init(id: UUID().uuidString.lowercased(), trigger: trigger.rawValue, index: index, last: last),
                 types: last ? chunk.marks.filter { !incomplete.contains($0.type) } : [],
+                snapshot: chunk.snapshot.map { Self.envelope($0, committing: last ? incomplete : nil) },
                 upserts: batch.upserts, deletes: batch.deletes.map { .init(key: $0) }
             )
             index += 1
@@ -365,12 +366,22 @@ actor SyncEngine {
                 incomplete.insert(batch.upserts[index].type)
                 if let code = rejected.code, Self.heldBack.contains(code) {
                     unsupported.insert(batch.upserts[index].type)
-                } else {
-                    refused.insert(batch.upserts[index].key)
                 }
             }
         }
-        return (unsupported, refused)
+        return unsupported
+    }
+
+    /// A snapshot as a batch carries it: the windows only on the last batch
+    /// (`committing` the types left out), the id alone on the others.
+    static func envelope(_ snapshot: SyncChunk.Snapshot, committing incomplete: Set<String>?) -> PersonalDataEnvelope.Snapshot {
+        var wire = PersonalDataEnvelope.Snapshot(id: snapshot.id, readAt: WireTime.string(snapshot.readAt))
+        if let incomplete {
+            wire.windows = snapshot.windows.keys.sorted().filter { !incomplete.contains($0) }.compactMap { type in
+                snapshot.windows[type].map { .init(type: type, start: WireTime.string($0.start), end: WireTime.string($0.end)) }
+            }
+        }
+        return wire
     }
 
     /// At most `maxItems` items and about `maxBytes` of JSON per request. A

@@ -1,10 +1,11 @@
-import CryptoKit
 import Foundation
 
 // Calendar as a personal-data source: each run reads the phone's events from
-// 7 days ago to 30 days ahead and sends what changed since the Rome last had
-// it, with a delete for each one that is gone. An event that has aged out of
-// the window is forgotten here and stays on the Rome as history.
+// 7 days ago to 30 days ahead and sends them all as one snapshot of that
+// window. The Rome replaces what it holds there once the last batch commits,
+// so the phone keeps no record of what the Rome has: a lost answer is mended
+// by the next run, and a run cut off leaves the last snapshot in place. An
+// event that has aged out of the window stays on the Rome as history.
 
 struct CalendarSource: PersonalDataSource {
     static let pastDays = 7
@@ -37,19 +38,13 @@ struct CalendarSource: PersonalDataSource {
         guard reader.access() == .granted else { throw SourceReadFailure(code: "calendar_denied") }
         let calendar = calendar()
         let window = Self.window(now: now, calendar: calendar)
-        let items = try await read { try await reader.events(in: window) }.map { Self.point($0, window: window, calendar: calendar) }
-        let chunk = Self.chunk(items, progress: progress, window: window, now: now)
-        // Kept before anything is sent: a run cut off midway may leave some
-        // of these done on the Rome and some not, so the next run sends each
-        // again, an upsert or a delete, whatever the phone has by then.
-        let held = Self.held(progress)
-        var trying: [String: SyncProgress.SentEntry] = [:]
-        for item in chunk.upserts { trying[item.key] = chunk.commit.entries?[item.key] }
-        for key in chunk.deletes { trying[key] = held[key] }
-        var attempting = progress
-        attempting.attempted = (progress.attempted ?? [:]).merging(trying) { _, new in new }
-        if attempting.attempted?.isEmpty == false { await store.save(attempting) }
-        await pending.set(chunk)
+        // A day wider, then every event that touches the window, its edges
+        // included: the Rome's commit deletes only what lies inside it, so it
+        // never deletes an event the phone still has.
+        let wide = DateInterval(start: window.start.addingTimeInterval(-86_400), end: window.end.addingTimeInterval(86_400))
+        let events = try await read { try await reader.events(in: wide) }.filter { Self.touches($0, window) }
+        let items = events.map { Self.point($0, window: window, calendar: calendar) }
+        await pending.set(Self.chunk(items, progress: progress, window: window, now: now))
     }
 
     /// EventKit's refusals, as the sync history words them.
@@ -67,18 +62,10 @@ struct CalendarSource: PersonalDataSource {
         await pending.take()
     }
 
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, rejected: Set<String>) async {
-        // A Rome that refused events keeps nothing new: they are sent again next time.
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
+        // A Rome that does not know events keeps nothing: tried again next time.
         guard unsupported.isEmpty else { return }
-        var commit = chunk.commit
-        commit.attempted = nil
-        if !rejected.isEmpty {
-            // An event the Rome refused keeps what it last had, or nothing:
-            // the next run sends it again, and a delete still follows it.
-            let before = await store.load().entries ?? [:]
-            for key in rejected { commit.entries?[key] = before[key] }
-        }
-        await store.save(commit)
+        await store.save(chunk.commit)
     }
 
     func reset() async { await store.removeAll() }
@@ -95,64 +82,30 @@ struct CalendarSource: PersonalDataSource {
         return DateInterval(start: start, end: end)
     }
 
-    /// What changed against what the Rome holds: new and changed events, and
-    /// deletes for the ones that are gone.
+    /// Whether an event touches the window, either edge included.
+    static func touches(_ event: CalendarEventItem, _ window: DateInterval) -> Bool {
+        event.start <= window.end && max(event.end, event.start) >= window.start
+    }
+
+    /// Every event in the window, and the window itself, which the last
+    /// batch commits.
     static func chunk(_ items: [PersonalDataPoint], progress: SyncProgress, window: DateInterval, now: Date) -> SyncChunk {
-        let old = progress.entries ?? [:]
-        var next: [String: SyncProgress.SentEntry] = [:]
-        var upserts: [PersonalDataPoint] = []
-        var counts: [String: SyncTypeCount] = [:]
+        var count = SyncTypeCount(items: 0, start: nil, end: nil)
         for item in items {
-            let hash = hash(item)
-            let end = RomeDate.parse(item.end) ?? now
-            next[item.key] = .init(hash: hash, end: end)
-            // Sent before but never confirmed, the Rome may hold that try or
-            // the one before: it goes again, whichever this phone has now.
-            let uncertain = progress.attempted?[item.key] != nil
-            guard uncertain || old[item.key]?.hash != hash else { continue }
-            upserts.append(item)
-            let start = RomeDate.parse(item.start)
-            let count = counts[item.type] ?? SyncTypeCount(items: 0, start: nil, end: nil)
-            counts[item.type] = SyncTypeCount(
+            count = SyncTypeCount(
                 items: count.items + 1,
-                start: [count.start, start].compactMap { $0 }.min(),
-                end: [count.end, end].compactMap { $0 }.max()
+                start: [count.start, RomeDate.parse(item.start)].compactMap { $0 }.min(),
+                end: [count.end, RomeDate.parse(item.end)].compactMap { $0 }.max()
             )
         }
-        var deletes: [String] = []
-        let held = Self.held(progress)
-        for (key, entry) in held where next[key] == nil {
-            // Aged out: the Rome keeps it as history, and nothing here tracks it.
-            if entry.end < window.start { continue }
-            deletes.append(key)
-            let count = counts["events"] ?? SyncTypeCount(items: 0, start: nil, end: nil)
-            counts["events"] = SyncTypeCount(items: count.items + 1, start: count.start, end: count.end)
-        }
-        var commit = progress
-        commit.entries = next
-        let through = WireTime.string(now)
         return SyncChunk(
-            kind: .delta,
-            upserts: upserts.sorted { $0.key < $1.key },
-            deletes: deletes.sorted(),
-            marks: [.init(type: "events", syncedThrough: through)],
-            counts: counts,
-            commit: commit
+            kind: .snapshot,
+            upserts: items.sorted { $0.key < $1.key },
+            marks: [.init(type: "events", syncedThrough: WireTime.string(now))],
+            counts: ["events": count],
+            snapshot: .init(id: UUID().uuidString.lowercased(), readAt: now, windows: ["events": window]),
+            commit: progress
         )
-    }
-
-    /// What the Rome may hold: what it confirmed, and what an interrupted
-    /// run began sending or deleting. A key in both ends at the later of the
-    /// two, so it ages out only once every version the Rome may hold has.
-    static func held(_ progress: SyncProgress) -> [String: SyncProgress.SentEntry] {
-        (progress.attempted ?? [:]).merging(progress.entries ?? [:]) { tried, confirmed in
-            .init(hash: confirmed.hash, end: max(tried.end, confirmed.end))
-        }
-    }
-
-    static func hash(_ point: PersonalDataPoint) -> String {
-        let data = (try? PersonalDataClient.encoder.encode(point)) ?? Data(point.key.utf8)
-        return SHA256.hash(data: data).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: Items
