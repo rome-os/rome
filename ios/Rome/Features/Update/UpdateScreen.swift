@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The update page. Below the app's minimum version it covers the app with no
-/// way past it but updating; switching instance and signing out stay. A
-/// release the instance can do without opens it from the banner or the
-/// drawer, and it closes again.
+/// The update page. Below the app's blocking minimum it covers the app with no
+/// way past it but updating; switching instance and signing out stay. Below
+/// the background minimum only, it asks once and hands the upgrade to the
+/// drawer, which shows how it goes. A release the instance can do without
+/// opens it from the banner or the drawer, and it closes again.
 struct UpdateScreen: View {
     @Environment(AppModel.self) private var model
     @State private var showInstances = false
@@ -200,17 +201,27 @@ struct UpdateScreen: View {
                         .foregroundStyle(Palette.primaryText)
                 }
                 if let release {
-                    Group {
-                        if updater.belowMinimum {
-                            if let current = release.current {
-                                Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                    VStack(spacing: 12) {
+                        Group {
+                            if updater.belowMinimum {
+                                if let current = release.current {
+                                    Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                                } else {
+                                    Text("The latest is \(release.latest). This app needs a newer Rome.")
+                                }
+                            } else if let current = release.current {
+                                Text("Your Rome is on \(current). The latest is \(release.latest).")
                             } else {
-                                Text("The latest is \(release.latest). This app needs a newer Rome.")
+                                Text("The latest is \(release.latest).")
                             }
-                        } else if let current = release.current {
-                            Text("Your Rome is on \(current). The latest is \(release.latest).")
-                        } else {
-                            Text("The latest is \(release.latest).")
+                        }
+                        switch updater.pageVariant {
+                        case .blocking:
+                            Text("The app cannot be used during this update, which takes a few minutes.")
+                        case .background:
+                            Text("This update runs in the background. Chat and the main features keep working. A few new features may not work until it finishes.")
+                        case nil:
+                            EmptyView()
                         }
                     }
                     .romeFont(16)
@@ -227,8 +238,14 @@ struct UpdateScreen: View {
     private var bottom: some View {
         switch updater.state {
         case .required:
-            PrimaryButton(title: "Update now") {
-                Task { await updater.updateNow() }
+            if updater.pageVariant == .background {
+                PrimaryButton(title: "Update in background") {
+                    Task { await updater.updateFromBackgroundPage() }
+                }
+            } else {
+                PrimaryButton(title: "Update now") {
+                    Task { await updater.updateNow() }
+                }
             }
         case .failed:
             PrimaryButton(title: "Try again") {
