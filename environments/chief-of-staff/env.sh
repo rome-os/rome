@@ -338,6 +338,8 @@ write_rome_env() {
       echo "WEB_HOST=0.0.0.0"
       echo "ROME_JWT_SECRET=$jwt"
       echo "ROME_OAUTH_TOKEN_ENCRYPTION_KEY=$key"
+      # Opens the app's test-only crash switch and debug routes.
+      echo "CHIEF_OF_STAFF_UNSAFE_TEST_SWITCHES=1"
       [ -z "${ANTHROPIC_API_KEY:-}" ] || echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
       [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
     } >"$ROME_ENV_FILE.new"
@@ -1123,6 +1125,50 @@ cos_link() {
 
 # Prints the roster or the goals document exactly as the app holds it, read
 # through the app's own API, where `seed` writes them.
+# Arms the app to end its worker at that point of the next turn, once.
+cos_crash_at() {
+  case "${1:-}" in
+    before-commit | after-commit-before-send | mid-outbox) ;;
+    *) die "usage: cos-env crash-at before-commit|after-commit-before-send|mid-outbox" ;;
+  esac
+  printf '{"point":"%s"}' "$1" | api PUT "/apps/$COS_AGENT_APP/debug/crash-at"
+  echo
+}
+
+cos_handled() {
+  api GET "/apps/$COS_AGENT_APP/debug/handled"
+  echo
+}
+
+# Prints one place's memory.md, named <server|dm>/<id>; with no place, one
+# JSON line {place, text} per memory.md.
+cos_memory_file() {
+  docker exec -i -u rome "$ROME" node - "${1:-}" <<'JS'
+const fs = require("fs");
+const MEMORY = "/home/rome/.rome/default/apps/data/chief-of-staff/memory";
+const place = process.argv[2];
+if (place) {
+  if (!/^(server|dm)\/[^/]+$/.test(place)) throw new Error(`not <server|dm>/<id>: ${place}`);
+  const file = `${MEMORY}/${place}/memory.md`;
+  if (!fs.existsSync(file)) {
+    process.stderr.write(`cos-env: no memory.md for ${place}\n`);
+    process.exit(1);
+  }
+  process.stdout.write(fs.readFileSync(file, "utf8"));
+  process.exit(0);
+}
+for (const kind of ["server", "dm"]) {
+  const dir = `${MEMORY}/${kind}`;
+  if (!fs.existsSync(dir)) continue;
+  for (const id of fs.readdirSync(dir).sort()) {
+    const file = `${dir}/${id}/memory.md`;
+    if (!fs.existsSync(file)) continue;
+    process.stdout.write(`${JSON.stringify({ place: `${kind}/${id}`, text: fs.readFileSync(file, "utf8") })}\n`);
+  }
+}
+JS
+}
+
 cos_doc() {
   local name="${1:-}"
   [ "$name" = roster ] || [ "$name" = goals ] || die "usage: cos-env doc roster|goals"

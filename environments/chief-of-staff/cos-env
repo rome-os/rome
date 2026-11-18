@@ -23,13 +23,16 @@ usage() {
   cos-env usage [--per-call] [--since <time>]
   cos-env doc roster|goals
   cos-env memory [--since <time>]
+  cos-env memory --file [<server|dm>/<id>]
+  cos-env crash-at before-commit|after-commit-before-send|mid-outbox
+  cos-env handled
   cos-env chat <name> default|mentions-only|ignore-others|off|every
   cos-env link | unlink
   cos-env reset
   cos-env version"
 }
 
-as="" chat="" dm="" thread="" since="" mention=0 gap=1 minutes=60 per_call=0
+as="" chat="" dm="" thread="" since="" mention=0 gap=1 minutes=60 per_call=0 memory_file=0
 args=()
 command="${1:-}"
 [ -n "$command" ] || usage
@@ -45,6 +48,7 @@ while [ $# -gt 0 ]; do
     --mention-second) mention=second && shift ;;
     --gap) gap="${2:?--gap needs seconds}" && shift 2 ;;
     --per-call) per_call=1 && shift ;;
+    --file) memory_file=1 && shift ;;
     --for) minutes="${2:?--for needs minutes}" && shift 2 ;;
     --) shift && args+=("$@") && break ;;
     *) args+=("$1") && shift ;;
@@ -112,7 +116,14 @@ case "$command" in
     if [ "$per_call" = 1 ]; then cos_usage_per_call "$since"; else cos_usage "$since"; fi
     ;;
   doc) cos_doc "${args[0]:-}" ;;
-  memory) cos_memory "$since" ;;
+  memory)
+    if [ "$memory_file" = 1 ]; then cos_memory_file "${args[0]:-}"; else cos_memory "$since"; fi
+    ;;
+  crash-at)
+    [ ${#args[@]} -eq 1 ] || usage
+    cos_crash_at "${args[0]}"
+    ;;
+  handled) cos_handled ;;
   chat)
     [ ${#args[@]} -eq 2 ] || usage
     load_secrets
