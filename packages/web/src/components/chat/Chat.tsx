@@ -209,6 +209,7 @@ import {
   createSession,
   deleteSession,
   interruptTurn,
+  isUnreachableStatus,
   listChatAgents,
   listSessionMessagePage,
   listSessionThread,
@@ -216,6 +217,7 @@ import {
   markMessagesRead as apiMarkMessagesRead,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
+  plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
@@ -2196,7 +2198,11 @@ export function Chat({
           } else if (sessionId === mainSessionIdRef.current) {
             // The composer banner belongs to the chat's own turn; a background
             // turn retries quietly.
-            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            // Rome answering nothing behind its proxy, as while it restarts,
+            // is a dropped connection, and this loop already reconnects.
+            shownError = isUnreachableStatus(res.status)
+              ? t("stream.errors.reconnecting")
+              : t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
         } catch {
@@ -2414,7 +2420,9 @@ export function Chat({
           result.message ||
           (result.status === 0
             ? t("stream.errors.sendInvalidResponse")
-            : t("stream.errors.sendStatus", { status: result.status }));
+            : isUnreachableStatus(result.status)
+              ? t("stream.errors.unreachable")
+              : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
           ...(result.code ? { code: result.code } : {}),
@@ -2760,8 +2768,13 @@ export function Chat({
         // within moments; the grace-period check only fires on a dead one.
         forceReleaseIfStuck(STOP_FORCE_RELEASE_GRACE_MS);
       } else {
-        const message = await res.text().catch(() => "");
-        setStreamError(message || t("stream.errors.stopStatus", { status: res.status }));
+        const message = plainErrorText(await res.text().catch(() => ""));
+        setStreamError(
+          message ||
+            (isUnreachableStatus(res.status)
+              ? t("stream.errors.unreachable")
+              : t("stream.errors.stopStatus", { status: res.status })),
+        );
       }
     } catch {
       setStreamError(t("stream.errors.stopFallback"));

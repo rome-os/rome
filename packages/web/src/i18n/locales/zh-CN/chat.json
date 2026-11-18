@@ -658,7 +658,9 @@
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
       "stopFallback": "停止生成失败。",
-      "stopStatus": "停止失败({{status}})。"
+      "stopStatus": "停止失败({{status}})。",
+      "reconnecting": "与 Rome 的连接断了，可能正在重启，正在自动重连…",
+      "unreachable": "暂时连不上 Rome，可能正在重启，请稍后再试。"
     }
   },
   "empty": {
