@@ -99,7 +99,7 @@ Only `send: on` (also `true` or `yes`, case-insensitive) enables sending terms t
 
 `Mine` holds guardian-written terms. `Learned` holds automatically maintained terms. `Never` excludes terms from both sections, case-insensitively. Use `- ` or `* ` bullets. Mine comes first, with duplicates removed. Do not put secrets or private information in the list.
 
-Rome filters email addresses, URLs, paths, items with six or more digits, long token-like strings, and items over 40 characters. It sends at most 150 terms and 3,000 characters, stopping before the next term exceeds either cap. These filters are defense in depth, not a guarantee that a term is safe to share. The file is read once per listening session and does not belong in `MEMORY.md`.
+Rome keeps single-slash terms such as `CI/CD` and `I/O`. It filters path prefixes (`/`, `\`, `./`, `../`, `~/`, `~\`, or a Windows drive) and terms with two or more separators. It also filters email addresses, URLs, items with six or more digits, long token-like strings, and items over 40 characters. It sends at most 150 terms and 3,000 characters, stopping before the next term exceeds either cap. These filters are defense in depth, not a guarantee that a term is safe to share. The file is read once per listening session and does not belong in `MEMORY.md`.
 
 ### Topic File (`memory/topics/<topic>.md`)
 

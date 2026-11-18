@@ -69,8 +69,6 @@ describe("voice terms", () => {
       "a@b.test",
       "https://example.test",
       "WWW.example.test",
-      "a/b",
-      "a\\b",
       "1a2b3c4d5e6",
       "a".repeat(24),
       "key " + "A_0-".repeat(6),
@@ -88,6 +86,25 @@ describe("voice terms", () => {
         enabled(`## Mine\n${[...rejected, ...accepted].map((t) => `- ${t}`).join("\n")}`),
       ),
     ).toEqual(accepted);
+  });
+
+  it("keeps slash terms but drops path-looking terms", () => {
+    const kept = ["CI/CD", "A/B testing", "I/O", "TCP/IP", "PL/SQL", "a\\b"];
+    const paths = [
+      "/etc/hosts",
+      "~/notes",
+      "~\\notes",
+      "./a",
+      "../x",
+      "a/b/c",
+      "C:\\Users",
+      "C:/Users",
+      "\\Users",
+      "a/b\\c",
+    ];
+    expect(
+      parseVoiceTerms(enabled(`## Mine\n${[...paths, ...kept].map((t) => `- ${t}`).join("\n")}`)),
+    ).toEqual(kept);
   });
 
   it("caps the count at 150 with Mine ahead of Learned", () => {
