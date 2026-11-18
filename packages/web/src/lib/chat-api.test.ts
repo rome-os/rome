@@ -354,17 +354,6 @@ describe("listSessionMessagePage", () => {
     expect(page?.messages.map((message) => message.id)).toEqual(["m1"]);
   });
 
-  it("takes an answer by turns from a server that does not know the paging mode", async () => {
-    stub(json({ messages: [line("m1", 1)], nextCursor: "t1" }));
-
-    const page = await listSessionMessagePage("s1", {
-      limit: 40,
-      concierge: { fallbackLimit: 10 },
-    });
-
-    expect(page).toEqual({ messages: [line("m1", 1)], nextCursor: "t1" });
-  });
-
   it("reads by turns again when the chat says it is not a Concierge chat", async () => {
     const fetchMock = stub(
       json({ error: "Not a Concierge chat", code: "not_concierge" }, 400),

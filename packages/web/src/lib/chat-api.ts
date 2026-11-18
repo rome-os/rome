@@ -322,11 +322,7 @@ export async function listSessionMessagePage(
   if (options.concierge) {
     const res = await read(query(options.limit, true));
     if (res.status === 404) return null;
-    if (res.ok) {
-      const body = (await res.json()) as ConciergeWirePage | ChatMessagePage;
-      // A server that does not know the paging mode answers by turns.
-      return "mainLine" in body ? conciergePageOf(body) : body;
-    }
+    if (res.ok) return conciergePageOf((await res.json()) as ConciergeWirePage);
     const payload = await readErrorPayload(res);
     const code = payload && typeof payload === "object" && "code" in payload ? payload.code : null;
     if (res.status !== 400 || code !== "not_concierge") {

@@ -539,12 +539,13 @@ export function Chat({
   conciergeMainChatId = CONCIERGE_CHAT_ID,
   conciergeName,
 }: ChatProps) {
-  const concierge = variant === "concierge";
   const pageTurns = CHAT_PAGE_TURNS;
-  // A topic chat opened from a cold start may be a Concierge chat before the
-  // list says so. Its first read asks for the Concierge paging, and a chat
-  // that is not one refuses and is read by turns.
-  const mayBeConcierge = concierge || loadReadMark !== undefined;
+  // The host knows a chat as a Concierge chat once its list has loaded. A topic
+  // chat opened from a cold start may be one before that: its first read asks
+  // for the Concierge paging, and a chat that is not one refuses and is read by
+  // turns. The answer settles which it is (`concierge` below).
+  const listedConcierge = variant === "concierge";
+  const mayBeConcierge = listedConcierge || loadReadMark !== undefined;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -566,6 +567,19 @@ export function Chat({
   const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
   const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
+  // How the first read of the main session was answered: by main-line messages
+  // or by turns. It is what a chat the host has not listed as a Concierge chat
+  // is, so the mode comes from the one request and the chat draws once.
+  const [answeredMode, setAnsweredMode] = useState<{ session: string; concierge: boolean } | null>(
+    null,
+  );
+  const answered = !!mainSessionId && answeredMode?.session === mainSessionId;
+  // Whether this is a Concierge chat. Everything that differs between the two
+  // kinds of chat reads this one value, never the prop.
+  const concierge = listedConcierge || (answered && answeredMode?.concierge === true);
+  // A chat that may be a Concierge chat draws nothing until its first read says
+  // which it is, so the first frame is already the final one.
+  const modePending = !!mainSessionId && !listedConcierge && mayBeConcierge && !answered;
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -810,9 +824,6 @@ export function Chat({
     onOlderPage,
     paused: threadFocus.shown !== null,
   });
-  // Whether the last page of the main session came by main-line messages, so
-  // a topic chat the list has not named yet stacks its threads in its first frame.
-  const [pagedConcierge, setPagedConcierge] = useState<string | null>(null);
   // The sessions whose loaded history came by main-line messages.
   const conciergePagedRef = useRef(new Set<string>());
 
@@ -844,7 +855,7 @@ export function Chat({
   const chatThreads = useChatThreadsValue(
     displayMessages,
     threadFocus.shown,
-    (concierge || pagedConcierge === mainSessionId) && !shareMode,
+    concierge && !shareMode,
     threadKnowledge,
   );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
@@ -1030,6 +1041,70 @@ export function Chat({
     },
     [mainSessionId, t],
   );
+  // The threads read whole, by root: every reply of one is loaded, and the
+  // replies that come live after keep it so. Nothing else is known of a
+  // thread's replies beyond the newest, so a thread is read whole before it
+  // comes into focus or is marked read. A read sets the thread's summary from
+  // what it brought.
+  const fetchedThreadsRef = useRef(new Set<string>());
+  const threadReadsRef = useRef(new Map<string, Promise<ChatMessagePage | null>>());
+  // Reads the thread of the message `key`, any message of it, without taking it
+  // in. Null when it cannot be read or the chat holds no such message.
+  const readThread = useCallback((key: string): Promise<ChatMessagePage | null> => {
+    const session = mainSessionIdRef.current;
+    if (!session) return Promise.resolve(null);
+    const pending = threadReadsRef.current.get(key);
+    if (pending) return pending;
+    const read = (async () => {
+      try {
+        const page = await listSessionThread(session, key);
+        return page && page.messages.length > 0 ? page : null;
+      } catch {
+        return null;
+      } finally {
+        threadReadsRef.current.delete(key);
+      }
+    })();
+    threadReadsRef.current.set(key, read);
+    return read;
+  }, []);
+  // Takes a thread read whole in: its messages, its summary from the replies it
+  // brought, and that it is whole. Answers the thread's messages.
+  const takeInThread = useCallback((root: string, page: ChatMessagePage): ChatMessage[] => {
+    const session = mainSessionIdRef.current;
+    if (!session) return [];
+    setMessages((prev) => {
+      const next = new Map(prev);
+      next.set(session, mergeFetchedChatMessages(next.get(session) ?? [], page.messages));
+      return next;
+    });
+    const thread = page.messages.filter((message) => message.chatThreadId === root);
+    const summary = summariesOfLoaded(thread).get(root);
+    setThreadSummaries((prev) => {
+      const next = new Map(prev);
+      if (summary) next.set(root, summary);
+      else next.delete(root);
+      return next;
+    });
+    fetchedThreadsRef.current.add(root);
+    return thread;
+  }, []);
+  // The messages of the thread rooted at `root`, read whole once. Null when it
+  // cannot be read.
+  const ensureThreadWhole = useCallback(
+    async (root: string, options: { force?: boolean } = {}): Promise<ChatMessage[] | null> => {
+      const session = mainSessionIdRef.current;
+      if (!session) return null;
+      if (!options.force && fetchedThreadsRef.current.has(root)) {
+        return (messagesRef.current.get(session) ?? []).filter(
+          (message) => message.chatThreadId === root,
+        );
+      }
+      const page = await readThread(root);
+      return page ? takeInThread(root, page) : null;
+    },
+    [readThread, takeInThread],
+  );
   const showSourceMessage = useCallback(
     async (messageId: string, focusThread = false) => {
       const scroller = scrollerEl;
@@ -1045,14 +1120,44 @@ export function Chat({
           ? root
           : null;
       };
-      const landed = await revealWhenLoaded(
-        () => {
-          const root = hiddenIn();
-          return (
-            findMessageAnchor(scroller, messageId) ??
-            (root ? findMessageAnchor(scroller, root) : null)
+      const find = () => {
+        const root = hiddenIn();
+        return (
+          findMessageAnchor(scroller, messageId) ??
+          (root ? findMessageAnchor(scroller, root) : null)
+        );
+      };
+      const session = mainSessionIdRef.current;
+      const loaded = (id: string) =>
+        (messagesRef.current.get(session ?? "") ?? []).some((message) => message.id === id);
+      // A page brings only the newest reply of a thread. A message that is not
+      // loaded is read with its thread, which names its root: when the root is
+      // older than the loaded history it is read down to first, so the history
+      // has no gap, and then the thread is taken in whole.
+      if (!loaded(messageId)) {
+        const page = await readThread(messageId);
+        const root = page?.concierge?.body[0]?.id;
+        if (!page || !root) {
+          toast.error(t("concierge.tasks.sourceMissing"));
+          return false;
+        }
+        if (!loaded(root)) {
+          const placed = await revealWhenLoaded(
+            () => findMessageAnchor(scroller, root),
+            () => {},
+            t("concierge.tasks.sourceMissing"),
+            root,
           );
-        },
+          if (!placed) return false;
+        }
+        takeInThread(root, page);
+        // The thread lands in state first and renders a moment later.
+        for (let wait = 0; wait < 40 && !find(); wait++) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      const landed = await revealWhenLoaded(
+        find,
         async () => {
           const root = hiddenIn();
           if (root) {
@@ -1072,7 +1177,7 @@ export function Chat({
       if (!focusRef.current) openThreadRef.current({ thread: messageId, title: "" });
       return landed;
     },
-    [scrollerEl, revealWhenLoaded, jumpToMessage, t],
+    [scrollerEl, readThread, takeInThread, revealWhenLoaded, jumpToMessage, t],
   );
   // The unread divider's pill: scrolls to the divider, paging in older
   // messages first when it is still on one.
@@ -1134,54 +1239,6 @@ export function Chat({
     countedLiveRef.current.add(message.id);
     setThreadSummaries((prev) => withLiveReply(prev, message));
   }, []);
-  // The threads read whole, by root: every reply of one is loaded, and the
-  // replies that come live after keep it so. Nothing else is known of a
-  // thread's replies beyond the newest, so a thread is read whole before it
-  // comes into focus or is marked read. A read sets the thread's summary from
-  // what it brought.
-  const fetchedThreadsRef = useRef(new Set<string>());
-  const threadReadsRef = useRef(new Map<string, Promise<ChatMessage[] | null>>());
-  const ensureThreadWhole = useCallback(
-    (root: string, options: { force?: boolean } = {}): Promise<ChatMessage[] | null> => {
-      const session = mainSessionIdRef.current;
-      if (!session) return Promise.resolve(null);
-      const inThread = (list: readonly ChatMessage[]) =>
-        list.filter((message) => message.chatThreadId === root);
-      if (!options.force && fetchedThreadsRef.current.has(root)) {
-        return Promise.resolve(inThread(messagesRef.current.get(session) ?? []));
-      }
-      const pending = threadReadsRef.current.get(root);
-      if (pending) return pending;
-      const read = (async () => {
-        try {
-          const page = await listSessionThread(session, root);
-          if (!page || page.messages.length === 0) return null;
-          setMessages((prev) => {
-            const next = new Map(prev);
-            next.set(session, mergeFetchedChatMessages(next.get(session) ?? [], page.messages));
-            return next;
-          });
-          const thread = inThread(page.messages);
-          const summary = summariesOfLoaded(thread).get(root);
-          setThreadSummaries((prev) => {
-            const next = new Map(prev);
-            if (summary) next.set(root, summary);
-            else next.delete(root);
-            return next;
-          });
-          fetchedThreadsRef.current.add(root);
-          return thread;
-        } catch {
-          return null;
-        } finally {
-          threadReadsRef.current.delete(root);
-        }
-      })();
-      threadReadsRef.current.set(root, read);
-      return read;
-    },
-    [],
-  );
   // Opening a thread reads it, and so does a message that arrives in it while
   // it is open.
   useEffect(() => {
@@ -1299,15 +1356,73 @@ export function Chat({
     thread: focus,
   });
 
+  // A Concierge chat's pages bring each thread's newest reply, but a share is
+  // of whole turns, and the picker must show every message it will publish.
+  // So before the picker opens, the loaded range is read again by turns, which
+  // are whole, and replaces what was loaded. Leaving share mode reads it again
+  // by main-line messages. A chat that is not a Concierge chat loads by turns
+  // already.
+  const sharePendingRef = useRef(false);
+  const readByTurnsRef = useRef(false);
+  const hydrateForShare = useCallback(async (): Promise<boolean> => {
+    const id = mainSessionIdRef.current;
+    if (!id) return true;
+    const from = oldestMainLineKey(
+      messagesRef.current.get(id) ?? [],
+      localOptimisticMessageIdsRef.current.get(id),
+    );
+    if (!from) return true;
+    try {
+      const page = await listSessionMessagePage(id, { limit: pageTurns, through: from });
+      if (!page) return false;
+      setMessages((prev) => {
+        const next = new Map(prev);
+        next.set(
+          id,
+          replaceLoadedMessages(next.get(id) ?? [], orderChatMessages(page.messages), {
+            keepIds: localOptimisticMessageIdsRef.current.get(id),
+          }),
+        );
+        return next;
+      });
+      // Older history now pages in by turns too, until share mode ends.
+      setOlderCursor(id, page.nextCursor, false);
+      readByTurnsRef.current = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }, [pageTurns, setOlderCursor]);
+  const startShare = useCallback(
+    async (selected: Set<string>) => {
+      if (concierge) {
+        if (sharePendingRef.current) return;
+        sharePendingRef.current = true;
+        const loading = toast.loading(t("share.loading"));
+        try {
+          if (!(await hydrateForShare())) {
+            toast.error(t("share.hydrateError"));
+            return;
+          }
+        } finally {
+          toast.dismiss(loading);
+          sharePendingRef.current = false;
+        }
+      }
+      setSelectedShareTurns(selected);
+      setShareMode(true);
+    },
+    [concierge, hydrateForShare, t],
+  );
+
   // Share chat picks every turn in a common chat. A Concierge chat holds its
   // owner's private history, so there it starts with none picked. A share is
   // of whole turns, which can hold messages of other threads, so a thread in
   // focus closes first and the picker shows every message a turn holds.
   const enterShareMode = useCallback(() => {
     void closeFocus(true);
-    setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
-    setShareMode(true);
-  }, [concierge, mainTurnIds, closeFocus]);
+    void startShare(new Set(concierge ? [] : mainTurnIds));
+  }, [concierge, mainTurnIds, closeFocus, startShare]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -1321,10 +1436,9 @@ export function Chat({
           (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
       void closeFocus(true);
-      setSelectedShareTurns(new Set(turnId ? [turnId] : []));
-      setShareMode(true);
+      void startShare(new Set(turnId ? [turnId] : []));
     },
-    [mainSessionId, closeFocus],
+    [mainSessionId, closeFocus, startShare],
   );
 
   const exitShareMode = useCallback(() => {
@@ -1629,9 +1743,13 @@ export function Chat({
             );
             return next;
           });
-          if (page.concierge) conciergePagedRef.current.add(id);
-          else conciergePagedRef.current.delete(id);
-          setPagedConcierge(page.concierge ? id : null);
+          // A read by turns that was not a question of the mode, as in share
+          // mode, says nothing of it.
+          if (askConcierge) {
+            if (page.concierge) conciergePagedRef.current.add(id);
+            else conciergePagedRef.current.delete(id);
+            setAnsweredMode({ session: id, concierge: !!page.concierge });
+          }
           // A page that starts the history over also says what every loaded
           // thread is, and what was read of a thread whole may be out of date.
           noteThreads(page, { replace: restart });
@@ -1696,6 +1814,15 @@ export function Chat({
     },
     [loadMessages],
   );
+
+  // Leaving share mode, by whatever way, puts a Concierge chat back as its
+  // pages bring it.
+  useEffect(() => {
+    if (shareMode || !readByTurnsRef.current) return;
+    readByTurnsRef.current = false;
+    const id = mainSessionIdRef.current;
+    if (id) void loadMessages(id, { force: true, resync: true });
+  }, [shareMode, loadMessages]);
 
   // Load messages when the main session changes (also covers initial mount).
   useEffect(() => {
@@ -2190,8 +2317,6 @@ export function Chat({
         const localIds =
           localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
         localIds.add(message.id);
-        // The owner's reply into a thread is one more reply of it.
-        noteReply(message);
         localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
         setMessages((prev) => {
           const next = new Map(prev);
@@ -2282,6 +2407,9 @@ export function Chat({
         sender: viewerSenderRef.current,
         ...(chatThreadId ? { chatThreadId } : {}),
       };
+      // The owner's reply into a thread is one more reply of it once the server
+      // has taken it: a row that was sent and dropped never counted.
+      noteReply(userMsg);
       putUserMessage(userMsg, immediateInputId);
 
       // Appending input does not own a second stream or replace the live tail.
@@ -3229,7 +3357,7 @@ export function Chat({
                           actions={blockActions}
                           feedback
                           fork={forkable}
-                          variant={variant}
+                          variant={concierge ? "concierge" : variant}
                           unreadFrom={unread?.firstId ?? null}
                         />
                       </TaskChatContext.Provider>
@@ -3485,6 +3613,17 @@ export function Chat({
       </TooltipProvider>
     </WidgetHostContext.Provider>
   );
+
+  if (modePending) {
+    // Nothing of either kind of chat until the first read has answered.
+    return (
+      <div
+        data-chat-pending
+        aria-busy
+        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
+      />
+    );
+  }
 
   return (
     <ReplyDraftProvider value={replyDraft}>

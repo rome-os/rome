@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { ThemeProvider } from "@/hooks/use-theme";
 import { romeNewsConfig } from "@/config/quick-entries";
 import { LAST_CONCIERGE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
@@ -12,6 +13,7 @@ import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
+import * as listModule from "./MessageList" with { rstest: "importActual" };
 import type { MessageListProps } from "./MessageList";
 import { useChatThreads } from "./reply/chat-threads";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
@@ -97,8 +99,11 @@ function TranscriptProbe({ rows, variant }: MessageListProps) {
   return <div data-testid="message-list" data-variant={variant} data-message-ids={ids.join(",")} />;
 }
 
+// The cold-start tests draw the real transcript, to see what each frame shows.
+const realList = rs.hoisted(() => ({ enabled: false }));
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: TranscriptProbe,
+  MessageList: (props: MessageListProps) =>
+    realList.enabled ? <listModule.MessageList {...props} /> : <TranscriptProbe {...props} />,
 }));
 
 function LocationProbe() {
@@ -125,6 +130,7 @@ beforeAll(async () => {
 afterEach(async () => {
   cleanup();
   chatStub.enabled = false;
+  realList.enabled = false;
   transcriptFrames.length = 0;
   romeNewsConfig.enabled = false;
   localStorage.clear();
@@ -208,6 +214,8 @@ function renderChatComponent(
     conciergeCreated?: Promise<void>;
     conciergeChatsGate?: Promise<void>;
     messagePage?: (url: string) => unknown;
+    // Answers the Concierge paging mode of a chat as one that is not a Concierge chat does.
+    refuseConcierge?: boolean;
   },
   initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
@@ -256,8 +264,25 @@ function renderChatComponent(
       if (url.includes("/concierge/messages") && !conciergeExists) {
         return Response.json({ error: "Session not found" }, { status: 404 });
       }
+      if (homeData?.refuseConcierge && url.includes("type=concierge")) {
+        return Response.json(
+          { error: "Not a Concierge chat", code: "not_concierge" },
+          { status: 400 },
+        );
+      }
+      // A chat with nothing said answers the Concierge paging mode with nothing.
+      const nothing = url.includes("type=concierge")
+        ? {
+            type: "concierge",
+            mainLine: [],
+            outside: [],
+            traces: [],
+            nextCursor: null,
+            hasMore: false,
+          }
+        : { messages: [], nextCursor: null };
       return url.includes("limit=")
-        ? Response.json((await homeData?.messagePage?.(url)) ?? { messages: [], nextCursor: null })
+        ? Response.json((await homeData?.messagePage?.(url)) ?? nothing)
         : Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
@@ -293,9 +318,11 @@ function renderChatComponent(
   const result = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <ToolTraceContext.Provider value={toolPane}>
-          <ChatHost {...props} />
-        </ToolTraceContext.Provider>
+        <ThemeProvider>
+          <ToolTraceContext.Provider value={toolPane}>
+            <ChatHost {...props} />
+          </ToolTraceContext.Provider>
+        </ThemeProvider>
         <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
@@ -332,57 +359,116 @@ describe("ChatComponent draft file drops", () => {
 });
 
 describe("ChatComponent topic chat reload", () => {
-  it("reads a topic chat by its main line before the Concierge list names it, and stacks its replies from the first frame", async () => {
+  const stamp = (n: number) => new Date(Date.UTC(2026, 10, 9, 9, n)).toISOString();
+  const root = {
+    id: "root",
+    sessionId: "topic-1",
+    turnId: "turn-1",
+    role: "user" as const,
+    content: JSON.stringify([{ type: "text", content: "Plan a trip" }]),
+    createdAt: stamp(0),
+    chatThreadId: "root",
+    read: true,
+  };
+  const reply = {
+    ...root,
+    id: "reply",
+    turnId: "turn-2",
+    role: "assistant" as const,
+    content: JSON.stringify([{ type: "text", content: "Booked it" }]),
+    createdAt: stamp(5),
+    read: false,
+  };
+  // What the screen holds at each change of the document: a chat is drawn as
+  // a Concierge chat, or as another, and which one tells by its bubbles.
+  function watchFrames() {
+    const seen = { concierge: false, other: false, pending: false };
+    const look = () => {
+      const text = document.body.textContent ?? "";
+      if (document.querySelector("[data-chat-pending]")) seen.pending = true;
+      if (document.querySelector("[data-thread-entry]")) seen.concierge = true;
+      else if (text.includes("Plan a trip")) seen.other = true;
+    };
+    const observer = new MutationObserver(look);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    return { seen, stop: () => observer.disconnect() };
+  }
+
+  it("draws a topic chat once, as a Concierge chat, from the one read that tells what it is", async () => {
+    realList.enabled = true;
     let releaseChats!: () => void;
     const conciergeChatsGate = new Promise<void>((resolve) => {
       releaseChats = resolve;
     });
-    const root = {
-      id: "root",
-      sessionId: "topic-1",
-      turnId: null,
-      role: "user" as const,
-      content: JSON.stringify([{ type: "text", content: "Plan a trip" }]),
-      createdAt: "2026-11-09T09:00:00.000Z",
-      chatThreadId: "root",
-    };
-    const reply = { ...root, id: "reply", createdAt: "2026-11-09T10:00:00.000Z" };
-    // The page carries the newest reply of the thread, which stacks, and no second read looks for the rest.
+    // The thread comes with the root as a summary: its newest reply, which stacks.
     const messagePage = rs.fn((_url: string) => ({
       type: "concierge",
-      mainLine: [
-        {
-          message: root,
-          thread: { replyCount: 1, unreadCount: 0, latestReply: reply },
-        },
-      ],
+      mainLine: [{ message: root, thread: { replyCount: 1, unreadCount: 1, latestReply: reply } }],
       outside: [],
+      traces: [],
       nextCursor: null,
       hasMore: false,
     }));
+    const frames = watchFrames();
     renderChatComponent(
       { sessionId: "topic-1" },
       { sessions: [], projects: [], conciergeChatsGate, messagePage },
       "/chat/topic-1",
     );
-    await waitFor(() =>
-      expect(screen.getByTestId("message-list").dataset.messageIds).toBe("root,reply"),
-    );
+
+    // Nothing of a chat is drawn while the one read is on its way.
+    expect(document.querySelector("[data-chat-pending]")).not.toBeNull();
+    expect(document.querySelector("[data-thread-entry]")).toBeNull();
+    await waitFor(() => expect(document.querySelector("[data-thread-entry]")).not.toBeNull());
+    // The list has not named the chat, and its first frame already stacks and has its pill.
+    expect(document.querySelector('[data-thread-stack="root"]')).not.toBeNull();
+    expect(document.querySelector('[data-thread-entry="reply"]')).toBeNull();
+    expect(document.querySelector('[data-thread-pill="root"]')).not.toBeNull();
+    await act(async () => releaseChats());
+    await act(async () => {});
+    frames.stop();
+
+    expect(frames.seen).toEqual({ concierge: true, other: false, pending: true });
     expect(messagePage).toHaveBeenCalledOnce();
     expect(messagePage.mock.calls[0]?.[0]).toContain("type=concierge");
     expect(messagePage.mock.calls[0]?.[0]).toContain("limit=40");
-    expect(screen.getByTestId("message-list").dataset.variant).toBe("default");
-    expect(transcriptFrames[0]?.stacked).toEqual(["reply"]);
+  });
 
-    await act(async () => releaseChats());
-    await waitFor(() =>
-      expect(screen.getByTestId("message-list").dataset.variant).toBe("concierge"),
+  it("draws a chat that is not a Concierge chat once, after its refusal, by turns", async () => {
+    realList.enabled = true;
+    const fetchTurns = rs.fn();
+    const frames = watchFrames();
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "session-1" },
+      {
+        sessions: [],
+        projects: [],
+        messagePage: (url) => {
+          fetchTurns(url);
+          return {
+            messages: [{ ...root, sessionId: "session-1", chatThreadId: null }],
+            nextCursor: null,
+          };
+        },
+        // A chat that is not a Concierge chat refuses the paging mode.
+        refuseConcierge: true,
+      },
+      "/chat/session-1",
     );
-    const conciergeFrames = transcriptFrames.filter((frame) => frame.variant === "concierge");
-    expect(conciergeFrames.length).toBeGreaterThan(0);
-    expect(transcriptFrames.every((frame) => frame.stacked.includes("reply"))).toBe(true);
-    expect(transcriptFrames.every((frame) => frame.ids.includes("root"))).toBe(true);
-    expect(messagePage).toHaveBeenCalledOnce();
+
+    await waitFor(() => expect(document.body.textContent).toContain("Plan a trip"));
+    frames.stop();
+
+    expect(document.querySelector("[data-thread-entry]")).toBeNull();
+    expect(frames.seen.concierge).toBe(false);
+    expect(frames.seen.pending).toBe(true);
+    const asked = fetchSpy.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => /\/messages\?/.test(url));
+    expect(asked).toHaveLength(2);
+    expect(asked[0]).toContain("type=concierge");
+    expect(asked[1]).not.toContain("type=concierge");
+    expect(asked[1]).toContain("limit=10");
   });
 });
 

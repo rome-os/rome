@@ -3777,6 +3777,35 @@ describe("Chat Concierge empty state", () => {
         expect(listSessionThread).toHaveBeenCalledTimes(2);
       });
 
+      it("counts the owner's reply into a thread once the server has taken it, and never when the send is turned down", async () => {
+        threaded();
+        rs.mocked(postSessionTurn)
+          .mockResolvedValueOnce({ ok: false, status: 500, error: "boom" } as never)
+          .mockResolvedValueOnce({ ok: true, data: { turnId: "turn-new" } } as never);
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+        const total = () =>
+          document.querySelector<HTMLElement>('[data-thread-stack="u-2"]')?.dataset.total;
+        const sendInto = async (sent: number) => {
+          fireEvent.click(screen.getByTestId("open-other-thread"));
+          await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
+          fireEvent.click(screen.getByTestId("concierge-send-button"));
+          await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(sent));
+          await act(async () => {});
+          fireEvent.click(back()!);
+          await waitFor(() => expect(composer().dataset.thread).toBe(""));
+        };
+        expect(total()).toBe("1");
+
+        await sendInto(1);
+        // The send was turned down, and the stack is as it was.
+        expect(total()).toBe("1");
+
+        await sendInto(2);
+        // The one the server took counts once.
+        expect(total()).toBe("2");
+      });
+
       it("reads the thread in focus again after a reconnect, and keeps it in focus", async () => {
         threaded();
         threaded();
@@ -4088,6 +4117,45 @@ describe("Chat Concierge empty state", () => {
         expect(back()?.textContent).toBe("Task two");
       });
 
+      it("reads the thread of a message that is not its newest reply, so Respond lands on a card with a later reply after it", async () => {
+        const thread = (id: string, role: "user" | "assistant", at: number) => ({
+          id,
+          sessionId: "session-1",
+          turnId: `turn-${id}`,
+          role,
+          content: JSON.stringify([{ type: "text", content: id }]),
+          createdAt: `2026-11-10T10:0${at}:00Z`,
+          chatThreadId: "u-1",
+          chatThreadTitle: "Task one",
+          read: true,
+        });
+        const root = thread("u-1", "user", 0);
+        const card = thread("card-1", "assistant", 1);
+        const later = thread("ar-9", "assistant", 2);
+        // The page brings the thread's newest reply, and the card is before it.
+        rs.mocked(listSessionMessages).mockResolvedValueOnce([root, later]);
+        rs.mocked(listSessionThread).mockResolvedValueOnce({
+          messages: [root, card, later],
+          nextCursor: null,
+          concierge: {
+            body: [root, card, later],
+            oldestAt: null,
+            titles: new Map(),
+            threads: summariesOfLoaded([root, card, later]),
+          },
+        });
+        renderChat(concierge());
+        await screen.findAllByTestId("user-row");
+
+        act(() => void requestConciergeJump("card-1", { focusThread: true }));
+
+        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
+        expect(listSessionThread).toHaveBeenCalledExactlyOnceWith("session-1", "card-1");
+        // The thread is whole now, so the focus needs no second read.
+        expect(back()?.textContent).toBe("Task one");
+        expect(toast.error).not.toHaveBeenCalled();
+      });
+
       it("closes the thread in focus first when the message is in another", async () => {
         threaded();
         renderChat(concierge());
@@ -4284,6 +4352,91 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     await user.click(screen.getByRole("menuitem", { name: "share.title" }));
     expect((await screen.findByTestId("share-bar")).textContent).toBe("");
+  });
+
+  it("reads a Concierge chat's loaded range again by whole turns before the picker opens, and by main-line messages after it", async () => {
+    const user = userEvent.setup();
+    const said = (id: string, thread: string, at: number) => ({
+      id,
+      sessionId: "session-1",
+      turnId: "turn-a",
+      role: "user" as const,
+      content: JSON.stringify([{ type: "text", content: id }]),
+      createdAt: `2026-11-10T10:0${at}:00Z`,
+      chatThreadId: thread,
+    });
+    // A root and two replies make one turn; the page brings the root and the newest reply.
+    const root = said("u-1", "u-1", 0);
+    const middle = said("u-2", "u-1", 1);
+    const latest = said("u-3", "u-1", 2);
+    const concierged = (list: (typeof root)[]) => ({
+      messages: list,
+      nextCursor: null,
+      concierge: {
+        body: list,
+        oldestAt: null,
+        titles: new Map(),
+        threads: summariesOfLoaded(list),
+      },
+    });
+    let releaseTurns!: (page: { messages: (typeof root)[]; nextCursor: null }) => void;
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce(concierged([root, latest]))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseTurns = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(concierged([root, latest]));
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId("user-row").map((row) => row.dataset.rowKey)).toEqual([
+        "u-1",
+        "u-3",
+      ]),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+
+    // The picker waits for the whole turn.
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId("share-bar")).toBeNull();
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]).toEqual([
+      "session-1",
+      { limit: expect.any(Number), through: "u-1" },
+    ]);
+    await act(async () => releaseTurns({ messages: [root, middle, latest], nextCursor: null }));
+    await screen.findByTestId("share-bar");
+    expect(screen.getAllByTestId("user-row").map((row) => row.dataset.rowKey)).toEqual([
+      "u-1",
+      "u-2",
+      "u-3",
+    ]);
+
+    // Leaving share mode reads the loaded range by main-line messages again.
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(3));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toEqual({
+      limit: expect.any(Number),
+      through: "u-1",
+      concierge: { fallbackLimit: expect.any(Number) },
+    });
+  });
+
+  it("does not open the picker, and says so, when the whole turns cannot be read", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    rs.mocked(listSessionMessagePage).mockRejectedValueOnce(new Error("offline"));
+
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("share.hydrateError"));
+    expect(screen.queryByTestId("share-bar")).toBeNull();
   });
 
   it("picks an older thread message's own turn, which the timeline has not loaded", async () => {
@@ -4615,7 +4768,21 @@ describe("Chat Concierge jump to a message", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
+  /** The thread of `thread`, read whole, as the server answers one. */
+  const threadPage = (thread: ReturnType<typeof message>[]) => ({
+    messages: thread,
+    nextCursor: null,
+    concierge: {
+      body: thread,
+      oldestAt: null,
+      titles: new Map(),
+      threads: summariesOfLoaded(thread),
+    },
+  });
+
   it("reads from the oldest loaded turn through the message in one page, says so meanwhile, then jumps", async () => {
+    // The message's thread is read first, which names its root.
+    rs.mocked(listSessionThread).mockResolvedValueOnce(threadPage([message(1)]));
     rs.mocked(listSessionMessagePage)
       .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
       .mockResolvedValueOnce({
@@ -4655,32 +4822,34 @@ describe("Chat Concierge jump to a message", () => {
   });
 
   it("says it can't find a message the one read does not bring", async () => {
-    rs.mocked(listSessionMessagePage)
-      .mockResolvedValueOnce({ messages: [message(9)], nextCursor: "c1" })
-      .mockResolvedValueOnce({ messages: [message(8)], nextCursor: "c2" });
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(9)],
+      nextCursor: "c1",
+    });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(1));
 
     act(() => void requestConciergeJump("m-missing"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
-    // The newest page, then one read through the message.
-    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    // The chat holds no such message, so no history is read for it.
+    expect(listSessionThread).toHaveBeenCalledWith("concierge", "m-missing");
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(toast.dismiss).toHaveBeenCalledWith("finding");
   });
 
   it("says it can't find a message when all the history is loaded and it is not there", async () => {
-    rs.mocked(listSessionMessagePage)
-      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c1" })
-      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(3), message(4)],
+      nextCursor: null,
+    });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(rows()).toBe(2));
 
     act(() => void requestConciergeJump("m-gone"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
-    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
