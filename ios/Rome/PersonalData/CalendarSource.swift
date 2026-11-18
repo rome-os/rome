@@ -20,7 +20,8 @@ struct CalendarSource: PersonalDataSource {
     static let itemLength = 4000
     /// The Rome refuses an entry longer than 366 days, and a refused event
     /// holds the whole calendar back from counting as synced: a longer one
-    /// is sent cut to this.
+    /// is sent as its part from the read window's start, cut to this, so
+    /// what is stored still overlaps every day it was read for.
     static let maxEventLength: TimeInterval = 366 * 86_400
 
     let reader: CalendarReading
@@ -36,7 +37,7 @@ struct CalendarSource: PersonalDataSource {
         guard reader.access() == .granted else { throw SourceReadFailure(code: "calendar_denied") }
         let calendar = calendar()
         let window = Self.window(now: now, calendar: calendar)
-        let items = try await read { try await reader.events(in: window) }.map { Self.point($0, calendar: calendar) }
+        let items = try await read { try await reader.events(in: window) }.map { Self.point($0, window: window, calendar: calendar) }
         let chunk = Self.chunk(items, progress: progress, window: window, now: now)
         await pending.set(chunk)
     }
@@ -132,7 +133,7 @@ struct CalendarSource: PersonalDataSource {
 
     // MARK: Items
 
-    static func point(_ event: CalendarEventItem, calendar: Calendar) -> PersonalDataPoint {
+    static func point(_ event: CalendarEventItem, window: DateInterval, calendar: Calendar) -> PersonalDataPoint {
         var key = "events:\(event.id)"
         func text(_ value: String) -> JSONValue { .string(String(value.prefix(textLength))) }
         var content: [String: JSONValue] = [
@@ -149,14 +150,16 @@ struct CalendarSource: PersonalDataSource {
         if let url = event.url { content["url"] = .string(String(url.prefix(500))) }
         var notes = event.notes.map { String($0.prefix(notesLength)) }
         var attendees = event.attendees.prefix(maxAttendees).map { String($0.prefix(attendeeLength)) }
+        let realEnd = max(event.end, event.start)
+        let start = realEnd.timeIntervalSince(event.start) > maxEventLength ? max(event.start, window.start) : event.start
+        let end = min(realEnd, start.addingTimeInterval(maxEventLength))
         func build() -> PersonalDataPoint {
             var full = content
             if let notes, !notes.isEmpty { full["notes"] = .string(notes) }
             if !attendees.isEmpty { full["attendees"] = .array(attendees.map(JSONValue.string)) }
             return PersonalDataPoint(
                 key: String(key.prefix(200)), type: "events", shape: .entry,
-                start: WireTime.string(event.start),
-                end: WireTime.string(min(max(event.end, event.start), event.start.addingTimeInterval(maxEventLength))),
+                start: WireTime.string(start), end: WireTime.string(end),
                 tz: calendar.timeZone.identifier, content: full
             )
         }

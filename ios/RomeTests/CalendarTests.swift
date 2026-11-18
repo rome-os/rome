@@ -288,12 +288,30 @@ enum CalendarFixtures {
         #expect(retry.last?.types.map(\.type) == ["events"])
     }
 
+    private var window: DateInterval { CalendarSource.window(now: CalendarFixtures.now, calendar: CalendarFixtures.calendar) }
+
+    @Test func aLongRunningEventKeepsThePartThatWasRead() {
+        let day: TimeInterval = 86_400
+        var event = CalendarFixtures.event("long", 9, 10)
+        event.start = CalendarFixtures.now.addingTimeInterval(-400 * day)
+        event.end = CalendarFixtures.now.addingTimeInterval(20 * day)
+        let point = CalendarSource.point(event, window: window, calendar: CalendarFixtures.calendar)
+        #expect(point.start == WireTime.string(window.start))
+        #expect(point.end == WireTime.string(event.end), "still running: its real end is kept")
+
+        // A short event keeps its own start, even one before the window.
+        var short = CalendarFixtures.event("short", 9, 10)
+        short.start = window.start.addingTimeInterval(-day)
+        short.end = window.start.addingTimeInterval(day)
+        #expect(CalendarSource.point(short, window: window, calendar: CalendarFixtures.calendar).start == WireTime.string(short.start))
+    }
+
     @Test func aLongEventFitsTheRomesItemLimit() throws {
         var event = CalendarFixtures.event("a", 9, 10, title: String(repeating: "t", count: 500))
         event.location = String(repeating: "l", count: 500)
         event.notes = String(repeating: "\"n\"", count: 400)
         event.attendees = (0..<20).map { "\($0)" + String(repeating: "会", count: 200) }
-        let point = CalendarSource.point(event, calendar: CalendarFixtures.calendar)
+        let point = CalendarSource.point(event, window: window, calendar: CalendarFixtures.calendar)
         let json = try #require(String(data: try PersonalDataClient.encoder.encode(point), encoding: .utf8))
         #expect(json.utf16.count <= CalendarSource.itemLength)
         #expect(point.content?["title"]?.string?.count == CalendarSource.textLength)
@@ -322,7 +340,7 @@ enum CalendarFixtures {
     @Test func aRepeatingEventsOccurrencesAreEntriesOfTheirOwn() {
         var event = CalendarFixtures.event("s", 9, 10)
         event.occurrence = CalendarFixtures.tomorrow(9)
-        let point = CalendarSource.point(event, calendar: CalendarFixtures.calendar)
+        let point = CalendarSource.point(event, window: window, calendar: CalendarFixtures.calendar)
         #expect(point.key == "events:s@2026-11-18T01:00:00Z")
         #expect(point.content?["occurrence"]?.string == "2026-11-18T09:00:00+08:00")
         #expect(point.content?["recurring"]?.bool == true)
