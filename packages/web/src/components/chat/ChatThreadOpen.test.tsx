@@ -16,6 +16,7 @@ import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
   chatThreadsOf,
+  missingThreadRoots,
   type ThreadTimelineMessage,
   threadsOf,
   threadTail,
@@ -78,6 +79,24 @@ const a = (id: string, thread: string | null) => sent(id, "assistant", thread);
 /** A message in no thread: nothing replies to it. */
 const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage =>
   sent(id, role, null);
+
+describe("missingThreadRoots", () => {
+  it("returns a reply's root when it is outside the page, once per root", () => {
+    expect(missingThreadRoots([a("a1", "q1"), g("g1", "q2"), a("a2", "q1")])).toEqual(["q1", "q2"]);
+  });
+
+  it("does not return a root in the page, even when it follows its reply", () => {
+    expect(missingThreadRoots([a("a1", "q1"), g("q1")])).toEqual([]);
+  });
+
+  it("does not return a message that is its own root", () => {
+    expect(missingThreadRoots([g("q1", "q1")])).toEqual([]);
+  });
+
+  it("does not return messages with no thread", () => {
+    expect(missingThreadRoots([free("q1"), { id: "q2", role: "assistant" }])).toEqual([]);
+  });
+});
 
 describe("threadsOf", () => {
   it("puts a message in the thread its chatThreadId names, and a root delivered with none in it once a reply says so", () => {

@@ -5,6 +5,8 @@ import { forwardRef, memo, useImperativeHandle, useRef, type ReactNode } from "r
 import { createPortal } from "react-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChatMessagePage } from "@/lib/chat-api";
+import { CONCIERGE_ROOT_PAGE_TURNS } from "./use-older-messages";
 import type { ChatSession } from "@/lib/chat-types";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -205,9 +207,14 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
   WidgetPicker: () => null,
 }));
 
+const threadFrames = rs.hoisted(() => [] as Array<{ roots: string[]; stacked: string[] }>);
+
 /** The stacks the transcript would draw, as markers a pill can take the reader to. */
 function Stacks() {
   const threads = useChatThreads();
+  if (threads && threads.roots.size > 0) {
+    threadFrames.push({ roots: [...threads.roots.keys()], stacked: [...threads.stacked] });
+  }
   return [...(threads?.stacks.keys() ?? [])].map((root) => (
     <div key={root} data-thread-stack={root} data-testid="thread-stack" />
   ));
@@ -638,6 +645,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  threadFrames.length = 0;
   mockConciergeActivity.mockReturnValue({ kind: "idle" });
   appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
@@ -1472,6 +1480,210 @@ describe("Chat history paging", () => {
     observers = [];
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     rs.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+  });
+
+  const root = () => ({ ...userMessage(1), chatThreadId: "user-1" });
+  const reply = () => ({ ...userMessage(4), chatThreadId: "user-1" });
+  const concierge = () => <Chat sessionId="session-1" variant="concierge" />;
+
+  it("commits the first Concierge transcript with its roots and stacks, then pages from the older cursor", async () => {
+    let resolveOlder!: (page: ChatMessagePage) => void;
+    const layout = [{ id: "files", type: "projects", order: 0 }];
+    const onSessionLayout = rs.fn();
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [reply()], nextCursor: "c1", layout })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ messages: [userMessage(0)], nextCursor: null });
+    renderChat(
+      <Chat sessionId="session-1" variant="concierge" onSessionLayout={onSessionLayout} />,
+    );
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]).toEqual([
+      "session-1",
+      { limit: CONCIERGE_ROOT_PAGE_TURNS, before: "c1" },
+    ]);
+    expect(screen.queryAllByTestId("user-row")).toHaveLength(0);
+    expect(threadFrames).toEqual([]);
+    expect(onSessionLayout).not.toHaveBeenCalled();
+    expect(markSessionRead).not.toHaveBeenCalled();
+    await act(async () => resolveOlder({ messages: [root()], nextCursor: "c0", layout: [] }));
+
+    expect(shownKeys()).toEqual(["user-1", "user-4"]);
+    expect(threadFrames.length).toBeGreaterThan(0);
+    expect(
+      threadFrames.every(
+        (frame) => frame.roots.includes("user-1") && frame.stacked.includes("user-4"),
+      ),
+    ).toBe(true);
+    expect(screen.getByTestId("thread-stack").dataset.threadStack).toBe("user-1");
+    expect(onSessionLayout).toHaveBeenCalledExactlyOnceWith("session-1", layout);
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await reachTop();
+    await waitFor(() => expect(shownKeys()).toEqual(["user-0", "user-1", "user-4"]));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c0" });
+  });
+
+  it("loads every missing root in the bounded page, regardless of the order replies name them", async () => {
+    const anotherRoot = { ...userMessage(2), chatThreadId: "user-2" };
+    const anotherReply = { ...userMessage(3), chatThreadId: "user-2" };
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [anotherReply, reply()], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [root(), anotherRoot], nextCursor: null });
+    renderChat(concierge());
+    await waitFor(() => expect(screen.getAllByTestId("thread-stack")).toHaveLength(2));
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    expect(threadFrames[0]?.stacked).toEqual(["user-3", "user-4"]);
+  });
+
+  it("commits bounded history and stacks nearby replies even when another root is beyond the cap", async () => {
+    const capped = Array.from({ length: CONCIERGE_ROOT_PAGE_TURNS }, (_, n) => userMessage(n - 60));
+    const beyondCap = { ...userMessage(5), chatThreadId: "outside" };
+    const farRoot = { ...userMessage(-100), id: "outside", chatThreadId: "outside" };
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [reply(), beyondCap], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [root(), ...capped.slice(1)], nextCursor: "cap" })
+      .mockResolvedValueOnce({ messages: [farRoot], nextCursor: null });
+    renderChat(concierge());
+    await waitFor(() =>
+      expect(shownKeys()).toEqual([
+        ...capped.slice(1).map((message) => message.id),
+        "user-1",
+        "user-4",
+        "user-5",
+      ]),
+    );
+    expect(screen.getByTestId("thread-stack").dataset.threadStack).toBe("user-1");
+    expect(threadFrames.length).toBeGreaterThan(0);
+    expect(
+      threadFrames.every(
+        (frame) => frame.stacked.includes("user-4") && !frame.stacked.includes("user-5"),
+      ),
+    ).toBe(true);
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]?.[1]).toEqual({
+      limit: CONCIERGE_ROOT_PAGE_TURNS,
+      before: "c1",
+    });
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    await reachTop();
+    await waitFor(() => expect(screen.getAllByTestId("thread-stack")).toHaveLength(2));
+    expect(threadFrames.at(-1)?.stacked).toEqual(["user-4", "user-5"]);
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "cap" });
+  });
+
+  it.each([
+    "error",
+    "missing",
+  ])("loads the newest page after an optional root read returns %s", async (failure) => {
+    const mock = rs
+      .mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [reply()], nextCursor: "c1" });
+    if (failure === "error") mock.mockRejectedValueOnce(new Error("offline"));
+    else mock.mockResolvedValueOnce(null);
+    mock.mockResolvedValueOnce({ messages: [root()], nextCursor: null });
+    const onSessionNotFound = rs.fn();
+    renderChat(
+      <Chat sessionId="session-1" variant="concierge" onSessionNotFound={onSessionNotFound} />,
+    );
+    await waitFor(() => expect(shownKeys()).toEqual(["user-4"]));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+    await reachTop();
+    await waitFor(() => expect(screen.getByTestId("thread-stack")).toBeTruthy());
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c1" });
+  });
+
+  it.each([
+    "regular",
+    "loaded root",
+    "no cursor",
+  ])("skips the root read for %s", async (scenario) => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: scenario === "loaded root" ? [root(), reply()] : [reply()],
+      nextCursor: scenario === "no cursor" ? null : "c1",
+    });
+    renderChat(scenario === "regular" ? <Chat sessionId="session-1" /> : concierge());
+    await screen.findAllByTestId("user-row");
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hydrate roots on reconnect and still restarts a disconnected history", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [root(), reply()], nextCursor: "c1" })
+      .mockResolvedValueOnce({
+        messages: [{ ...userMessage(9), chatThreadId: "missing" }],
+        nextCursor: "c9",
+      })
+      .mockResolvedValueOnce({ messages: [userMessage(8)], nextCursor: null });
+    renderChat(concierge());
+    await waitFor(() => expect(shownKeys()).toEqual(["user-1", "user-4"]));
+    act(() => MockEventSource.instances[0]!.emitLifecycle("error", MockEventSource.CLOSED));
+    await waitFor(() => expect(shownKeys()).toEqual(["user-9"]));
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    await reachTop();
+    await waitFor(() => expect(shownKeys()).toEqual(["user-8", "user-9"]));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c9" });
+  });
+
+  it("does not count a live arrival in the root page as unread at open", async () => {
+    let resolveOlder!: (page: ChatMessagePage) => void;
+    const live = {
+      ...userMessage(5),
+      role: "assistant" as const,
+      content: JSON.stringify([{ type: "text", content: "Live answer" }]),
+    };
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [reply()], nextCursor: "c1" })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve;
+          }),
+      );
+    renderChat(
+      <Chat
+        sessionId="session-1"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:03:00.000Z")}
+      />,
+    );
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    act(() => MockEventSource.instances[0]!.emit("message_insert", live));
+    await act(async () => resolveOlder({ messages: [root(), live], nextCursor: null }));
+    await waitFor(() => expect(screen.getByTestId("thread-stack")).toBeTruthy());
+    expect(screen.getByTestId("message-list").dataset.unreadFrom).toBe("");
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts unread history and archived traces from the root page", async () => {
+    const olderAnswer = {
+      ...userMessage(2),
+      role: "assistant" as const,
+      content: JSON.stringify([{ type: "text", content: "Earlier answer" }]),
+    };
+    const trace = { ...userMessage(3), role: "trace" as const, traceArchived: true };
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [reply()], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [root(), olderAnswer, trace], nextCursor: null })
+      .mockResolvedValueOnce({ messages: [reply()], nextCursor: "c1" });
+    renderChat(
+      <Chat
+        sessionId="session-1"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:00:00.000Z")}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("message-list").dataset.unreadFrom).toBe("user-2"),
+    );
+    act(() => MockEventSource.instances[0]!.emit("message_insert", userMessage(5)));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(3));
+    expect(shownKeys()).toContain("user-1");
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toEqual({ limit: 30 });
   });
 
   it("opens on the newest page and pages older turns in above it", async () => {
