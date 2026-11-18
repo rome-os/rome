@@ -7,7 +7,6 @@ export default {
   title: "No invention",
   phase: 1,
   async run(ctx) {
-    const as = ctx.team.members[0].account;
     // An answer may add true facts from the team's documents; only facts found nowhere invent.
     const documents = `${rosterSheet(ctx.team)}\n\n${goalsSheet(ctx.team)}`;
     const invented = [];
@@ -15,8 +14,7 @@ export default {
     const ungraded = [];
     const evidence = [];
     const answers = [];
-    for (const question of ctx.k5Questions) {
-      const { questionId, reply } = await ask(ctx, { as, text: question.q });
+    for (const { question, questionId, reply } of await askInLanes(ctx, ctx.k5Questions)) {
       evidence.push(questionId, reply?.id);
       if (!reply) {
         // Silence invents nothing, but leaves a known question without a sourced answer.
@@ -106,6 +104,30 @@ export default {
     return ruleResult([{ ...inventionCheck, answers }, sourceCheck, linkCheck]);
   },
 };
+
+/**
+ * Asks the questions in every member's private chat at once, each member's questions one
+ * after another (planner, 2026-11-18). Every question is still graded alone, so asking three
+ * at a time changes how long K5 takes, not what it checks. Resolves in the questions' order.
+ */
+async function askInLanes(ctx, questions) {
+  const members = ctx.team.members.map((m) => m.account);
+  const lanes = members.map((as, lane) =>
+    questions
+      .map((question, i) => ({ question, i }))
+      .filter(({ i }) => i % members.length === lane)
+      .map((q) => ({ ...q, as })),
+  );
+  const asked = await Promise.all(
+    lanes.map(async (lane) => {
+      const out = [];
+      for (const { question, i, as } of lane)
+        out.push({ i, question, ...(await ask(ctx, { as, text: question.q })) });
+      return out;
+    }),
+  );
+  return asked.flat().sort((a, b) => a.i - b.i);
+}
 
 const MESSAGE_LINKS = "whether the agent is given links to the messages it cites (a core change)";
 

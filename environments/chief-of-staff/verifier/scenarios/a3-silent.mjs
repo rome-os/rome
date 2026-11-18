@@ -120,11 +120,17 @@ const chatsOf = (messages) => [...new Set(messages.map((m) => m.chat))];
 const readArgs = (chat) => (chat.startsWith("dm-") ? { dm: chat.slice(3) } : { chat });
 
 /**
- * Posts the replay, pausing `after` ms after each message, or keeping `apart` ms between the
- * starts of two messages, waits the reply wait for
- * late replies, and resolves to `{ posted, from, to }`, each posted message with its time.
+ * One second between replayed messages (planner, 2026-11-18). The agent wakes on a ping or
+ * after 6 h or 50 waiting messages, so the pace of the replay does not change when it wakes.
  */
-async function replayOnce(ctx, replay, { after = 0, apart }) {
+const REPLAY_GAP_MS = 1000;
+
+/**
+ * Posts the replay, keeping `REPLAY_GAP_MS` between the starts of two messages, waits the A1
+ * wait for late replies, and resolves to `{ posted, from, to, agentMessages }`, each posted
+ * message with its time.
+ */
+async function replayOnce(ctx, replay) {
   const { env } = ctx;
   const from = new Date().toISOString();
   const posted = [];
@@ -134,11 +140,11 @@ async function replayOnce(ctx, replay, { after = 0, apart }) {
       ? await env.dm({ as: m.as, text: m.text })
       : await env.post({ as: m.as, chat: m.chat, mentionAgent: Boolean(m.mention), text: m.text });
     posted.push({ id, chat: m.chat, mention: Boolean(m.mention) });
-    const left = apart === undefined ? after : apart - (Date.now() - started);
+    const left = REPLAY_GAP_MS - (Date.now() - started);
     if (left > 0) await sleep(left);
   }
-  // Late replies count too: wait the reply wait after the last message.
-  await sleep(ctx.waits.replyMs);
+  // Late replies count too: wait the A1 wait, the time a ping has to be answered in.
+  await sleep(ctx.waits.a1Ms);
   const to = new Date().toISOString();
   const agentMessages = [];
   for (const chat of chatsOf(replay)) {
@@ -178,8 +184,10 @@ async function pingAfterQuiet(ctx, replay) {
   const quiet = replay.filter((m) => !m.mention && !m.chat.startsWith("dm-")).slice(0, BEFORE_PING);
   const ids = [];
   for (const m of quiet) {
+    const started = Date.now();
     ids.push(await ctx.env.post({ as: m.as, chat: m.chat, text: m.text }));
-    if (ctx.waits.gapMs) await sleep(ctx.waits.gapMs);
+    const left = REPLAY_GAP_MS - (Date.now() - started);
+    if (left > 0) await sleep(left);
   }
   const { questionId, reply } = await ask(ctx, {
     as: ctx.team.members[0].account,
@@ -198,16 +206,13 @@ async function pingAfterQuiet(ctx, replay) {
   );
 }
 
-/** The pacing of the second, cost-only replay: 1 s between messages (planner, 2026-11-17). */
-const FAST_GAP_MS = 1000;
-
 export default {
   rule: "A3",
   title: "Silent by default",
   phase: 2,
   async run(ctx) {
     const replay = loadReplay();
-    const scored = await replayOnce(ctx, replay, { after: ctx.waits.gapMs ?? 0 });
+    const scored = await replayOnce(ctx, replay);
     const { posted, agentMessages } = scored;
     const first = posted[0].id;
     const mentions = posted.filter((p) => p.mention);
@@ -217,7 +222,7 @@ export default {
       ctx.answered.answered += answers.size;
     }
     const cost = await costOf(ctx, scored);
-    cost.pacing = `${(ctx.waits.gapMs ?? 0) / 1000} s after each message is posted`;
+    cost.pacing = `${REPLAY_GAP_MS / 1000} s from one message to the next`;
 
     // A private chat stands in for a direct message, which is addressed to the agent, so A3
     // scores only the shared chats and reports replies in private chats apart.
@@ -248,15 +253,9 @@ export default {
       },
     ]);
 
-    // Cost only, never scored: the same replay 1 s apart, to show what batching saves.
-    const fast = await replayOnce(ctx, replay, { apart: FAST_GAP_MS });
-    const fastCost = await costOf(ctx, fast);
-    fastCost.pacing = `${FAST_GAP_MS / 1000} s from one message to the next`;
-
     return {
       ...result,
       cost,
-      fastCost,
       replies: { shared: shared.length, private: inPrivate },
     };
   },

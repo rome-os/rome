@@ -2,7 +2,7 @@
 // A fake `cos-env` for the verifier's own tests: the same commands, with a scripted stand-in
 // agent instead of Discord and Rome. State lives in the JSON file COS_FAKE_STATE. The
 // stand-in is COS_FAKE_AGENT: "good", or "fail-<rule>" to break exactly that rule.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { goalsDocument, respond, rosterDocument } from "./stand-in.mjs";
@@ -13,6 +13,20 @@ if (!statePath) {
   process.exit(2);
 }
 const agent = process.env.COS_FAKE_AGENT ?? "good";
+
+// The verifier runs some commands at once, as K5 does, and each one reads and rewrites the
+// whole state file, so one command holds the state at a time.
+const lockPath = `${statePath}.lock`;
+for (;;) {
+  try {
+    mkdirSync(lockPath);
+    break;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmdirSync(lockPath));
 
 const fresh = () => ({
   nextId: 1000,
