@@ -1,3 +1,10 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "tier": "background",
+      "reason": "Calendar sync sends snapshots of its window; an older instance never deletes events removed on the phone.",
+      "pr": 2356,
+      "server": "#2356"
+    }
+  ]
 }
