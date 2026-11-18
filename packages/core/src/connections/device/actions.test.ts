@@ -11,6 +11,9 @@ import { DeviceConnectionsRepository } from "./repository.js";
 
 const NOW = Date.parse("2026-11-14T09:00:00Z");
 
+/** The guardian, signed in: a turn their own message started. */
+const GUARDIAN = { kind: "guardian" as const, userId: "guardian-1", via: "cookie" as const };
+
 const STATUS = {
   name: "device.status",
   access: "read" as const,
@@ -214,10 +217,38 @@ describe("device actions", () => {
     const own = await engine.run(
       DEVICE_RUN_ACTION,
       { operation: "lights.set", args: { on: true } },
-      { audience: "private" },
+      { audience: "private", actor: GUARDIAN },
     );
     expect(own).toMatchObject({ status: "ok" });
     expect(calls).toEqual([{ deviceId: "dev-1", action: "lights.set", args: { on: true } }]);
+  });
+
+  it("runs a write only in a turn the guardian's own message started", async () => {
+    devices.report(
+      report("dev-1", "iPhone", [
+        {
+          ...deviceConnection(true),
+          operations: [{ name: "device.ring", access: "write", description: "Rings it." }],
+        },
+      ]),
+      NOW,
+    );
+    // A routine or a followed mail runs with no actor; a loopback caller is
+    // the guardian's seat, but not the guardian asking.
+    for (const actor of [undefined, { ...GUARDIAN, via: "loopback" as const }]) {
+      const result = await engine.run(
+        DEVICE_RUN_ACTION,
+        { operation: "device.ring" },
+        { audience: "private", ...(actor ? { actor } : {}) },
+      );
+      expect((result as { error: string }).error).toMatch(/^write_needs_guardian:/);
+    }
+    expect(calls).toEqual([]);
+    // A read still runs in such a turn.
+    devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
+    expect(
+      await engine.run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" }),
+    ).toMatchObject({ status: "ok" });
   });
 
   it("says a write did nothing when the device does not answer", async () => {
@@ -234,7 +265,7 @@ describe("device actions", () => {
     const result = await engine.run(
       DEVICE_RUN_ACTION,
       { operation: "device.ring" },
-      { audience: "private" },
+      { audience: "private", actor: GUARDIAN },
     );
     const error = (result as { error: string }).error;
     expect(error).toMatch(/^target_unavailable:/);
