@@ -56,7 +56,7 @@ struct DrawerUpdateRow: View {
             case .offered(let version):
                 Button { confirming = true } label: {
                     row {
-                        Image(systemName: "arrow.down.circle")
+                        Image(systemName: "arrow.up.circle")
                             .romeFont(16, .medium)
                             .frame(width: 22)
                         Text(verbatim: UpdateCopy.banner(name))
