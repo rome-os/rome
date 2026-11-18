@@ -312,16 +312,6 @@
     "emptyAppsTitle": "尚未打开应用",
     "emptyAppsDescription": "打开一个应用，在聊天时查看和使用它。"
   },
-  "connectChatApp": {
-    "title": "连接你的聊天应用",
-    "description": "通过 Telegram、WhatsApp、Discord 或微信跟你的智能体聊天。",
-    "dismiss": "关闭"
-  },
-  "visitAppStore": {
-    "title": "去应用商店看看",
-    "description": "发现为 Rome 打造的 AI 原生应用。",
-    "dismiss": "关闭"
-  },
   "feedback": {
     "open": "反馈",
     "title": "分享反馈",

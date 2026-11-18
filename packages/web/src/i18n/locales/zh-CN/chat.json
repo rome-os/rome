@@ -79,7 +79,7 @@
     },
     "topicEmpty": {
       "title": "开一个长期话题",
-      "description": "给反复出现的事开个专门的地方，比如日历、某个项目、一次旅行。这里的提醒和任务只出现在这个对话里。",
+      "description": "这里的提醒和任务只出现在这个对话里。",
       "starters": {
         "life": "当我的生活小助手：日程、账单、快递这些琐事都放这里",
         "work": "帮我跟进工作上的事：项目进度、PR、会议都放这里",
@@ -259,7 +259,7 @@
       "thumbsUp": "标记为有帮助",
       "thumbsDown": "标记为无帮助",
       "commentPlaceholder": "可选：哪里有问题，或哪里做得好？",
-      "submit": "提交",
+      "submit": "发送反馈",
       "submitting": "提交中…",
       "submitFailed": "提交失败",
       "recorded": "反馈已记录"
@@ -310,12 +310,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "重新连接 {{provider}}",
-      "description": "你的 {{provider}} 登录已过期或被撤销。请在 AI Tools 中重新连接，然后重新发送消息。",
+      "description": "你的 {{provider}} 登录已过期或被撤销。重新连接后再发送一次消息。",
       "action": "重新连接"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} 尚未登录",
-      "description": "请前往 AI Tools 登录 {{provider}}，然后重新发送消息。",
+      "description": "登录后再发送一次消息。",
       "action": "前往登录"
     },
     "providerQuotaExhausted": {

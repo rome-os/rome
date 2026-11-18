@@ -89,7 +89,6 @@ export type NameDialogState =
   | {
       confirmLabel: string;
       currentName: string;
-      description: string;
       error?: string | null;
       initialValue: string;
       inputLabel: string;

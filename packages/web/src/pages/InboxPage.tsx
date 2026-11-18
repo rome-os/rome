@@ -136,7 +136,7 @@ export default function InboxPage() {
       <PageBody>
         {/* Header renders above the load switch so a slow read leaves the page
             identity in place instead of blanking the route. */}
-        <PageHeader title={t("page.title")} description={t("page.description")} />
+        <PageHeader title={t("page.title")} />
 
         {toast && (
           <div className="fixed right-4 top-4 z-50 rounded-8 border border-success-border bg-success-bg px-4 py-2 text-ui text-success-fg shadow-10">
@@ -308,8 +308,7 @@ function TriagePolicySection({
 
   return (
     <section>
-      <h2 className="text-section text-foreground">{t("policy.title")}</h2>
-      <p className="mb-6 mt-1 text-ui text-muted-foreground">{t("policy.description")}</p>
+      <h2 className="mb-6 text-section text-foreground">{t("policy.title")}</h2>
 
       <div className="space-y-8">
         {/* Trusted levels */}

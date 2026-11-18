@@ -1024,7 +1024,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 nameDialog: {
                   confirmLabel: config.t("dialog.renameConfirm"),
                   currentName,
-                  description: config.t("dialog.renameDescription", { path }),
                   initialValue: currentName,
                   inputLabel: config.t("dialog.nameLabel"),
                   mode: "rename",
@@ -1319,7 +1318,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
               nameDialog: {
                 confirmLabel: config.t("dialog.renameConfirm"),
                 currentName,
-                description: config.t("dialog.renameDescription", { path }),
                 initialValue: currentName,
                 inputLabel: config.t("dialog.nameLabel"),
                 mode: "rename",

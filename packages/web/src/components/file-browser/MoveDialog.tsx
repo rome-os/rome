@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogTitle } from "@/components/ui/dialog";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { getBaseName, getParentPath, isPathWithin } from "./store/utils";
@@ -133,7 +133,6 @@ export function MoveDialog() {
     >
       <div>
         <DialogTitle>{t("moveDialog.title", { name: movingName })}</DialogTitle>
-        <DialogDescription className="mt-2">{t("moveDialog.description")}</DialogDescription>
       </div>
 
       <nav
