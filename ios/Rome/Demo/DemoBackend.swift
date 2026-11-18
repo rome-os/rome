@@ -1467,7 +1467,6 @@ final class DemoBackend: RomeBackend {
         approvals["ap-login"] = ApprovalRecord(id: "ap-login", status: "approved", executionState: "succeeded", resolvedAt: RomeDate.string(at(10, 32, daysAgo: 3)))
     }
 }
-#endif
 
 extension UpdateGate.Minimums {
     /// The minimums the demo's versions are set against, and the update
@@ -1476,3 +1475,4 @@ extension UpdateGate.Minimums {
     /// minimums (`Tools/bump-minimum.mjs`) moves neither.
     static let demo = UpdateGate.Minimums(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.offeredFromVersion)
 }
+#endif
