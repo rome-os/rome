@@ -442,6 +442,93 @@ const afternoon = (
   };
 };
 
+/**
+ * A Concierge chat's transcript as the server pages it by main-line messages
+ * (docs/domains/chats.md#chat-thread): newest first by `limit`, each main-line
+ * message with a summary of its thread, or with every reply when one thread is
+ * asked for. The cursor is the index of the page's first main-line message.
+ */
+function conciergePage(transcript: ChatMessage[], query: URLSearchParams) {
+  const said = transcript.filter((m) => m.role === "user" || m.role === "assistant");
+  const isRoot = (m: ChatMessage) => !m.chatThreadId || m.chatThreadId === m.id;
+  const mainLine = said.filter(isRoot);
+  const repliesOf = (root: string) => said.filter((m) => m.chatThreadId === root && m.id !== root);
+  const counted = (m: ChatMessage) => m.sender?.kind !== "automated";
+  const summary = (root: string, whole: boolean) => {
+    const replies = repliesOf(root);
+    const own = replies.filter(counted);
+    const latestReply = own.at(-1) ?? (whole ? replies.at(-1) : undefined);
+    if (!latestReply) return null;
+    return {
+      replyCount: own.length,
+      unreadCount: own.filter((m) => m.role === "assistant" && m.read === false).length,
+      latestReply,
+      ...(whole ? { replies } : {}),
+    };
+  };
+  const traces = (shown: ChatMessage[]) => {
+    const turns = new Set(shown.flatMap((m) => m.turnId ?? []));
+    return transcript.filter((m) => m.role === "trace" && m.turnId && turns.has(m.turnId));
+  };
+  const thread = query.get("thread");
+  if (thread) {
+    const key = transcript.find((m) => m.id === thread);
+    const root = mainLine.find((m) => m.id === (key?.chatThreadId ?? thread));
+    const entry = root ? { message: root, thread: summary(root.id, true) } : null;
+    const shown = entry ? [root!, ...(entry.thread?.replies ?? [])] : [];
+    return {
+      type: "concierge",
+      mainLine: entry ? [entry] : [],
+      outside: [],
+      traces: traces(shown),
+      nextCursor: null,
+      hasMore: false,
+    };
+  }
+  const limit = Number(query.get("limit")) || 40;
+  const end = query.has("before") ? Number(query.get("before")) : mainLine.length;
+  const through = query.get("through");
+  const target = through ? transcript.find((m) => m.id === through) : undefined;
+  const at = target ? mainLine.findIndex((m) => m.id === (target.chatThreadId ?? target.id)) : -1;
+  const start = Math.max(0, Math.min(end - limit, at >= 0 && at < end ? at - 2 : end));
+  const page = mainLine.slice(start, end);
+  const entries = page.map((message) => ({ message, thread: summary(message.id, false) }));
+  const onPage = new Set(page.map((m) => m.id));
+  const outside = query.has("before")
+    ? []
+    : mainLine.flatMap((root) => {
+        if (onPage.has(root.id)) return [];
+        const waiting = repliesOf(root.id).filter(
+          (m) => counted(m) && m.role === "assistant" && m.read === false,
+        );
+        const latestUnread = waiting.at(-1);
+        return latestUnread
+          ? [
+              {
+                root: root.id,
+                title: null,
+                replyCount: repliesOf(root.id).filter(counted).length,
+                unreadCount: waiting.length,
+                latestUnread,
+              },
+            ]
+          : [];
+      });
+  const shown = [
+    ...page,
+    ...entries.flatMap((entry) => (entry.thread ? [entry.thread.latestReply] : [])),
+    ...outside.map((entry) => entry.latestUnread),
+  ];
+  return {
+    type: "concierge",
+    mainLine: entries,
+    outside,
+    traces: traces(shown),
+    nextCursor: start > 0 ? String(start) : null,
+    hasMore: start > 0,
+  };
+}
+
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
 // ChatEntries exactly as the real API stores it, so what renders here goes
@@ -1592,6 +1679,18 @@ export const handlers = [
     const messages = transcripts[String(params.sessionId)];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const query = new URL(request.url).searchParams;
+    if (query.get("type") === "concierge") {
+      const id = String(params.sessionId);
+      const chat = chatSessions.find((candidate) => candidate.id === id);
+      // Only a Concierge chat takes the paging mode, as the server answers.
+      if (id !== "concierge" && !chat?.agentName?.includes("concierge")) {
+        return HttpResponse.json(
+          { error: "Not a Concierge chat", code: "not_concierge" },
+          { status: 400 },
+        );
+      }
+      return HttpResponse.json(conciergePage(messages, query));
+    }
     const limit = Number(query.get("limit"));
     if (!limit) return HttpResponse.json(messages);
     // Pages by turn like the server; the cursor is the index of the page's first turn.
