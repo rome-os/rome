@@ -788,10 +788,10 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "1.1.197"
+    nonisolated static let releasedVersion = "1.1.197"
     /// Below the app's minimum, and between it and the latest.
-    static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.196"
+    nonisolated static let tooOldVersion = "1.1.120"
+    nonisolated static let offeredFromVersion = "1.1.196"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion
@@ -1466,5 +1466,13 @@ final class DemoBackend: RomeBackend {
         ]
         approvals["ap-login"] = ApprovalRecord(id: "ap-login", status: "approved", executionState: "succeeded", resolvedAt: RomeDate.string(at(10, 32, daysAgo: 3)))
     }
+}
+
+extension UpdateGate.Minimums {
+    /// The minimums the demo's versions are set against, and the update
+    /// tests with them: `tooOldVersion` blocks, `offeredFromVersion` is only
+    /// offered `releasedVersion`. Fixed, so a release's raise of the real
+    /// minimums (`Tools/bump-minimum.mjs`) moves neither.
+    static let demo = UpdateGate.Minimums(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.offeredFromVersion)
 }
 #endif

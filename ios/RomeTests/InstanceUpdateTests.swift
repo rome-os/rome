@@ -79,7 +79,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func unversionedBuildDoesNotBlock() async {
         let backend = FakeBackend()
         backend.check = .failure(APIError.server(status: 503, message: "unversioned_build"))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "local")
         #expect(!updater.blocking)
         #expect(updater.cannotCheck)
@@ -89,7 +89,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
         let store = makeStore()
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         var finished = false
         updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
@@ -112,7 +112,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func aNewerReleaseAsksAgain() async {
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
 
         backend.startResults = [.failure(APIError.server(status: 409, message: "target_not_latest"))]
@@ -127,7 +127,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         store.save(PendingUpgrade(target: "0.42.0", since: .now), for: "i1")
         // While it restarts the check fails; the pending target wins.
         backend.check = .failure(APIError.network)
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         guard case .updating(let target, _) = updater.state else { Issue.record("not waiting"); return }
         #expect(target == "0.42.0")
@@ -140,7 +140,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
         // Someone updated it from the web; Rome Cloud says it is current.
         backend.check = .success(check(current: "0.43.0", latest: "0.43.0", available: false))
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         var finished = false
         updater.onFinished = { _ in finished = true }
         await updater.attach(backend: backend, instanceID: "i1")
@@ -154,7 +154,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         let store = makeStore()
         store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
         backend.check = .success(check(current: "0.41.0", latest: "0.43.0", available: true))
-        let updater = InstanceUpdater(store: store)
+        let updater = InstanceUpdater(store: store, minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.state == .required(current: "0.41.0", latest: "0.43.0", latestChanged: false))
         #expect(store.load("i1") == nil)
@@ -163,7 +163,7 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func resetLeavesNothingBehindForTheNextInstance() async {
         let backend = FakeBackend()
         backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
-        let updater = InstanceUpdater(store: makeStore())
+        let updater = InstanceUpdater(store: makeStore(), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "a")
         #expect(updater.blocking)
 
@@ -248,7 +248,7 @@ final class Counter: @unchecked Sendable {
     private func defaults() -> UserDefaults { UserDefaults(suiteName: "SoftUpdateTests-\(UUID().uuidString)")! }
 
     private func updater(_ defaults: UserDefaults) -> InstanceUpdater {
-        InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
     }
 
     @Test func theMinimumVersionReadsReleases() {
@@ -407,7 +407,7 @@ final class UpdateClock: @unchecked Sendable {
             let store = PendingUpgradeStore(defaults: defaults)
             let clock = UpdateClock()
             store.save(PendingUpgrade(target: "1.1.197", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: from), for: "i1")
-            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5), now: { clock.date })
+            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5), now: { clock.date })
             // Restarting: neither the check nor the build answers.
             let backend = FakeBackend()
             backend.check = .failure(APIError.network)
