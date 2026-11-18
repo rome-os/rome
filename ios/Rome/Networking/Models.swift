@@ -854,6 +854,9 @@ struct PersonalDataIngestReply: Codable, Equatable, Sendable {
     var deleted: Int?
     var rejected: [Rejected]?
     var receivedAt: String?
+    /// The types whose snapshot this batch committed. Absent from an older
+    /// Rome, which commits none.
+    var committed: [String]? = nil
 
     struct Rejected: Codable, Equatable, Sendable {
         /// Upserts first, then deletes after the last upsert.

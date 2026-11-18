@@ -227,7 +227,7 @@ describe("entries", () => {
     expect(atSync.connection).toBeUndefined();
   });
 
-  it("does not cover a window past the 30 days the phone sends, however recent the sync", () => {
+  it("does not cover a window past the 15 days the phone sends, however recent the sync", () => {
     repo.ingest(
       APPLE_CALENDAR,
       batch("b1", {
@@ -236,17 +236,17 @@ describe("entries", () => {
       }),
       NOW,
     );
-    const inside = list({ start: "2026-12-10", end: "2026-12-10" }, NOW);
+    const inside = list({ start: "2026-11-30", end: "2026-11-30" }, NOW);
     expect(inside.freshness.events).toMatchObject({ coversWindow: true });
     const past = list({ start: "2027-01-20", end: "2027-01-20" }, NOW);
     expect(past.freshness.events).toMatchObject({
       coversWindow: false,
       missingFrom: iso(Date.parse("2027-01-19T16:00:00Z")),
     });
-    const straddling = list({ start: "2026-12-10", end: "2026-12-20" }, NOW);
+    const straddling = list({ start: "2026-11-30", end: "2026-12-05" }, NOW);
     expect(straddling.freshness.events).toMatchObject({
       coversWindow: false,
-      missingFrom: iso(NOW + 30 * DAY),
+      missingFrom: iso(NOW + 15 * DAY),
     });
   });
 

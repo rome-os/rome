@@ -4,7 +4,7 @@
 import type { SourceSpec } from "../domain/source.js";
 
 /** How far ahead of and back from each sync the phone sends events. */
-const SYNCED_AHEAD_DAYS = 30;
+const SYNCED_AHEAD_DAYS = 15;
 const SYNCED_BACK_DAYS = 7;
 /** A year past Rome's clock, so a skewed phone clock or a long event still
  *  ingests: what the phone sends is bounded by SYNCED_AHEAD_DAYS. */
@@ -15,7 +15,7 @@ export const APPLE_CALENDAR: SourceSpec = {
   title: "Calendar",
   note:
     "Pushed from the guardian's iPhone: every calendar on it, whichever account it comes from, " +
-    "from 7 days ago to 30 days ahead. It syncs when the Rome app opens and a few times a day in the " +
+    "from 7 days ago to 15 days ahead; later dates are read live. It syncs when the Rome app opens and a few times a day in the " +
     "background, so it can be hours behind: freshness.syncedThrough is the last sync. Events " +
     "deleted on the phone are removed at the next sync.",
   types: [

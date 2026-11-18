@@ -234,13 +234,13 @@ actor SyncEngine {
                 guard let chunk = try await source.nextChunk() else { break }
                 if chunk.kind == .backfill { entry.history = true }
                 await onActivity(SyncActivity(running: true, historyMonth: chunk.historyMonth))
-                let unsupported = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
+                let sent = try await send(chunk, origin: origin, trigger: trigger, backend: target.backend, index: &index, entry: &entry, generation: myGeneration, deadline: deadline)
                 // Off or Delete meanwhile: the chunk is not kept, so
                 // a reset that follows is never undone by it.
                 try await checkGoing(myGeneration, deadline: nil)
-                await source.confirm(chunk, unsupported: unsupported)
+                await source.confirm(chunk, unsupported: sent.unsupported, committed: sent.committed)
                 for (type, count) in chunk.counts { entry.types[type] = Self.merged(entry.types[type], count) }
-                if !unsupported.isEmpty { entry.outcome = .partial }
+                if !sent.unsupported.isEmpty { entry.outcome = .partial }
             }
             if entry.rejected > 0, entry.outcome == .ok { entry.outcome = .partial }
             failures = 0
@@ -324,13 +324,14 @@ actor SyncEngine {
     /// the last batch, so the Rome counts a type as synced only once it has
     /// all of it, and so do a snapshot's windows: a type with an item refused
     /// in any batch commits none, and the Rome keeps its last snapshot.
-    /// Returns the types the Rome does not know.
+    /// Returns the types the Rome does not know, and those whose snapshot it committed.
     private func send(
         _ chunk: SyncChunk, origin: PersonalDataEnvelope.Origin, trigger: SyncTrigger, backend: any PersonalDataBackend,
         index: inout Int, entry: inout SyncLogEntry, generation: Int, deadline: Date?
-    ) async throws -> Set<String> {
+    ) async throws -> (unsupported: Set<String>, committed: Set<String>) {
         let batches = Self.batches(chunk)
         var unsupported = Set<String>()
+        var committed = Set<String>()
         // Types an earlier batch had an item refused for. The Rome withholds
         // a type's mark only for refusals in the same request, so the last
         // batch leaves out these marks itself: a type is synced only once
@@ -356,6 +357,7 @@ actor SyncEngine {
             entry.updated += reply.updated ?? 0
             entry.unchanged += reply.unchanged ?? 0
             entry.deleted += reply.deleted ?? 0
+            committed.formUnion(reply.committed ?? [])
             for rejected in reply.rejected ?? [] {
                 entry.rejected += 1
                 // A type the Rome does not know, or one it holds the most of
@@ -369,7 +371,7 @@ actor SyncEngine {
                 }
             }
         }
-        return unsupported
+        return (unsupported, committed)
     }
 
     /// A snapshot as a batch carries it: the windows only on the last batch

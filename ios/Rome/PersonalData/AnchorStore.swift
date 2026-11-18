@@ -25,6 +25,12 @@ struct SyncProgress: Codable, Equatable, Sendable {
     var deltaThrough: Date?
     /// Types this Rome refused as unknown: not sent again until it updates.
     var unsupported: Set<String> = []
+    /// For a source sent as snapshots (Calendar): a digest of the last
+    /// snapshot the Rome said it committed, its window included, and when
+    /// it was read. A run that reads the same again sends nothing, for up to
+    /// a day. Set only once the Rome answers the commit.
+    var snapshotDigest: String?
+    var snapshotAt: Date?
 
     struct Backfill: Codable, Equatable, Sendable {
         /// When sync was turned on: the backfill reads back from here.

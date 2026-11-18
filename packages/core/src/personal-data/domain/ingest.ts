@@ -313,7 +313,8 @@ export interface SnapshotWindow {
  * The window a snapshot commits for one type, or undefined when the type is
  * not sent as a snapshot or the window is not one the device could have read:
  * no further back or ahead of its read than the type declares, give or take
- * a day, so a skewed clock cannot clear the type's history.
+ * two days for whole local days and a daylight-saving hour, so a skewed clock
+ * cannot clear the type's history.
  */
 export function snapshotWindow(
   spec: TypeSpec,
@@ -326,7 +327,7 @@ export function snapshotWindow(
   const startAt = Date.parse(window.start);
   const endAt = Date.parse(window.end);
   if (readAt > receivedAt + DAY_MS || startAt >= endAt) return undefined;
-  if (startAt < readAt - (spec.syncedBackDays + 1) * DAY_MS) return undefined;
-  if (endAt > readAt + ((spec.syncedAheadDays ?? 0) + 1) * DAY_MS) return undefined;
+  if (startAt < readAt - (spec.syncedBackDays + 2) * DAY_MS) return undefined;
+  if (endAt > readAt + ((spec.syncedAheadDays ?? 0) + 2) * DAY_MS) return undefined;
   return { id: snapshot.id, startAt, endAt, readAt };
 }

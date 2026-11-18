@@ -18,9 +18,10 @@ const DAY = 24 * HOUR;
 const NOW = Date.parse("2026-11-17T01:00:00Z");
 /** 2026-11-18T00:00:00+08:00: tomorrow. */
 const TOMORROW = Date.parse("2026-11-17T16:00:00Z");
-/** The window a phone reads at NOW: 7 days before today's midnight to 30 days ahead. */
+/** The window a phone reads at NOW: 7 days before today's midnight to the
+ *  end of the 15th day ahead, both local midnights. */
 const START = Date.parse("2026-11-09T16:00:00Z");
-const END = NOW + 30 * DAY;
+const END = Date.parse("2026-12-02T16:00:00Z");
 const iso = (at: number) => new Date(at).toISOString();
 
 const PHONE = "origin-calendar-phone";
@@ -139,10 +140,10 @@ describe("snapshots", () => {
     expect(stored.every((row) => row.snapshotId === null)).toBe(true);
     const type = testDb.db.select().from(personalDataTypes).all()[0];
     expect(type).toMatchObject({ snapshotId: null, snapshotStartAt: null, snapshotEndAt: null });
-    // Coverage still reads the 30 days the type declares past the sync.
-    expect(list("2026-12-10", "2026-12-20").freshness.events).toMatchObject({
+    // Coverage still reads the 15 days the type declares past the sync.
+    expect(list("2026-11-30", "2026-12-05").freshness.events).toMatchObject({
       coversWindow: false,
-      missingFrom: iso(NOW + 30 * DAY),
+      missingFrom: iso(NOW + 15 * DAY),
     });
   });
 
@@ -284,7 +285,7 @@ describe("snapshots", () => {
     expect(records(tomorrow)).toEqual([]);
     const later = list("2027-01-15", "2027-01-15");
     expect(later.freshness.events).toMatchObject({ coversWindow: false });
-    const straddling = list("2026-12-10", "2026-12-20");
+    const straddling = list("2026-11-30", "2026-12-10");
     expect(straddling.freshness.events).toMatchObject({
       coversWindow: false,
       missingFrom: iso(END),

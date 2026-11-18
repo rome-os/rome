@@ -50,7 +50,7 @@ A state change or a delete for an origin Rome never heard from answers 404.
   "deletes": [{ "key": "workouts:3A9D…" }],
   // A snapshot of a window, for calendar events. Windows only on the last batch.
   "snapshot": { "id": "<uuid>", "readAt": "2026-11-13T09:00:00Z",
-    "windows": [{ "type": "events", "start": "2026-11-05T16:00:00Z", "end": "2026-12-13T09:00:00Z" }] }
+    "windows": [{ "type": "events", "start": "2026-11-05T16:00:00Z", "end": "2026-11-28T16:00:00Z" }] }
 }
 ```
 
@@ -65,7 +65,7 @@ A state change or a delete for an origin Rome never heard from answers 404.
 - The metadata keys a source allows are kept, and others are dropped.
 - An entry carries `content` and no `value`, `unit` or `fields`. Content fields its type does not declare, or of the wrong kind, are dropped, and a text is cut at its declared length. An entry may end up to its type's horizon past Rome's clock (400 days for calendar events) and last up to 366 days.
 - A device may send a type it reads as a rolling window (calendar events) as a snapshot: every entry in the window, in one or more batches that carry the same `snapshot.id`, which stamps each row they send. The last batch adds `snapshot.windows`, and the store then deletes the origin's rows of that type that lie strictly inside the window and were not sent by this snapshot. A row that only touches an edge stays. The device sends every entry that touches the window, edges included, so the commit never deletes one it still has.
-- A run cut off before its last batch deletes nothing, and the rows it sent stay, stamped. The next commit cleans them up. A commit retried with the same `snapshot.id` changes nothing and answers the type in `committed` again. A snapshot read before the committed one (`snapshot.readAt`) does not commit. A window further back or ahead of `readAt` than the type reads, give or take a day, does not commit either. Nor does a type with a refused item in the same batch. The device leaves out the window of a type refused in an earlier batch.
+- A run cut off before its last batch deletes nothing, and the rows it sent stay, stamped. The next commit cleans them up. A commit retried with the same `snapshot.id` changes nothing and answers the type in `committed` again. A snapshot read before the committed one (`snapshot.readAt`) does not commit. A window further back or ahead of `readAt` than the type reads, give or take two days, does not commit either. Nor does a type with a refused item in the same batch. The device leaves out the window of a type refused in an earlier batch.
 - A batch without `snapshot` applies its upserts and deletes as they are. An older app sends calendar events this way: what changed, and a delete for each event gone from the phone.
 
 | Code | Why the item is refused |

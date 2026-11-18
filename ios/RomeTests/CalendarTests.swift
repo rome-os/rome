@@ -267,16 +267,83 @@ enum CalendarFixtures {
         let snapshot = try #require(first.snapshot)
         #expect(snapshot.windows == ["events": window])
         #expect(snapshot.readAt == CalendarFixtures.now)
-        await source.confirm(first, unsupported: [])
+        // An older Rome commits nothing.
+        await source.confirm(first, unsupported: [], committed: [])
 
-        // Unchanged, it is all sent again, under a new id: nothing here
-        // remembers what the Rome has.
+        // Unchanged, it is all sent again, under a new id: only a commit the
+        // Rome answered lets a run skip.
         let same = try await run(source)
         #expect(same.upserts.map(\.key) == ["events:a", "events:b"])
         #expect(same.snapshot?.id != snapshot.id)
 
         fake.events.removeLast()
         #expect(try await run(source).upserts.map(\.key) == ["events:b"])
+    }
+
+    private func engine(_ fake: FakeCalendar, _ backend: FakePersonalDataBackend, _ clock: Clock) -> SyncEngine {
+        SyncEngine(
+            source: source(fake),
+            target: { PersonalDataTarget(instanceId: "inst-1", backend: backend) },
+            log: MemorySyncLog(),
+            origin: { .init(id: "origin-1", name: "iPhone", platform: "ios", appVersion: "1.6.0") },
+            switches: { SyncSwitches(enabled: true) },
+            protectedData: { true },
+            now: { clock.now },
+            random: { 0.5 },
+            pause: { _ in try await Task.sleep(for: .seconds(3600)) }
+        )
+    }
+
+    @Test func anUnchangedCalendarSendsNothingUntilItChangesOrTheDayTurns() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let backend = FakePersonalDataBackend()
+        let clock = Clock(CalendarFixtures.now)
+        let engine = engine(fake, backend, clock)
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 1)
+
+        clock.advance(3600)
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 1, "the Rome has this snapshot already")
+
+        fake.events[0].title = "Moved"
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 2, "a change sends it all again")
+
+        // 09:00 in Shanghai plus 16 hours: past midnight, the window moves on.
+        clock.advance(16 * 3600)
+        await engine.sync(.manual)
+        let envelopes = await backend.envelopes
+        #expect(envelopes.count == 3, "a new day sends the snapshot again")
+        #expect(envelopes.last?.upserts.map(\.key) == ["events:a"])
+    }
+
+    @Test func aLostCommitAnswerSendsTheSnapshotAgain() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let backend = FakePersonalDataBackend()
+        let clock = Clock(CalendarFixtures.now)
+        let engine = engine(fake, backend, clock)
+        await backend.loseAnswer()
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 1, "it reached the Rome, its answer did not come back")
+
+        clock.advance(60)
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 2, "sent whole again")
+        clock.advance(60)
+        await engine.sync(.manual)
+        #expect(await backend.envelopes.count == 2, "committed and answered: skipped")
+    }
+
+    @Test func theWindowIsWholeDaysFifteenAhead() {
+        let window = CalendarSource.window(now: CalendarFixtures.now, calendar: CalendarFixtures.calendar)
+        let today = CalendarFixtures.calendar.startOfDay(for: CalendarFixtures.now)
+        #expect(window.start == today.addingTimeInterval(-7 * 86_400))
+        #expect(window.end == today.addingTimeInterval(16 * 86_400))
+        let later = CalendarSource.window(now: CalendarFixtures.now.addingTimeInterval(3600), calendar: CalendarFixtures.calendar)
+        #expect(later == window, "the same all day")
     }
 
     @Test func anEmptyCalendarIsAnEmptySnapshot() async throws {
@@ -383,7 +450,7 @@ enum CalendarFixtures {
         fake.events = [CalendarFixtures.event("a", 9, 10)]
         let store = MemoryProgressStore()
         let source = source(fake, store)
-        await source.confirm(try await run(source), unsupported: ["events"])
+        await source.confirm(try await run(source), unsupported: ["events"], committed: [])
         let again = try await run(source)
         #expect(again.upserts.map(\.key) == ["events:a"], "sent again after the Rome refused it")
     }

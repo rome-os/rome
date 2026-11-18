@@ -112,7 +112,7 @@ export function queryPersonalData(
         ? at !== undefined && plan.start >= at - spec.syncedBackDays * DAY_MS
         : earliest !== undefined && earliest <= plan.start;
     // A type the device sends only so far ahead of each sync (calendar
-    // events, 30 days) does not cover a window that ends past that, however
+    // events, 15 days) does not cover a window that ends past that, however
     // recent the sync: no events there means nothing was sent, not a free day.
     const aheadUntil = snapshot
       ? snapshot.end

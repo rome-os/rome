@@ -25,6 +25,8 @@ struct SyncChunk: Sendable {
         let id: String
         let readAt: Date
         let windows: [String: DateInterval]
+        /// What the snapshot holds, window included, to keep once committed.
+        var digest: String?
     }
 
     let kind: Kind
@@ -61,7 +63,8 @@ protocol PersonalDataSource: Sendable {
     func nextChunk() async throws -> SyncChunk?
     /// The Rome has the chunk: its progress is kept. Types the Rome refused
     /// as unknown keep their old anchors and are left out from now on.
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async
+    /// `committed` holds the types whose snapshot window the Rome committed.
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, committed: Set<String>) async
     /// Forgets all progress: the next run starts a new backfill.
     func reset() async
     /// The backfill's cursor while history is still being sent, else nil.

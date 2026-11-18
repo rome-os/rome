@@ -111,6 +111,10 @@ actor FakePersonalDataBackend: PersonalDataBackend {
     var rejectKeys: Set<String> = []
     var gate: CheckedContinuation<Void, Never>?
     var holding = false
+    /// Ingests that arrive but whose answer is lost on the way back.
+    var losing = 0
+
+    func loseAnswer() { losing += 1 }
 
     func fail(_ failures: PersonalDataFailure...) { self.failures = failures }
     func reject(_ types: Set<String>) { rejectUnknown = types }
@@ -136,9 +140,17 @@ actor FakePersonalDataBackend: PersonalDataBackend {
             if rejectKeys.contains(item.element.key) { return .init(index: item.offset, key: item.element.key, code: "too_large") }
             return nil
         }
+        if losing > 0 {
+            losing -= 1
+            throw .retryable("the answer was lost")
+        }
+        // As the Rome: a window commits unless an item of its type was refused here.
+        let refusedTypes = Set(rejected.compactMap { $0.index.map { envelope.upserts[$0].type } })
+        let committed = envelope.snapshot?.windows?.map(\.type).filter { !refusedTypes.contains($0) }
         return PersonalDataIngestReply(
             batchId: envelope.batch.id, status: rejected.isEmpty ? "ok" : "partial", inserted: envelope.upserts.count - rejected.count,
-            updated: 0, unchanged: 0, deleted: envelope.deletes.count, rejected: rejected, receivedAt: nil
+            updated: 0, unchanged: 0, deleted: envelope.deletes.count, rejected: rejected, receivedAt: nil,
+            committed: committed
         )
     }
 

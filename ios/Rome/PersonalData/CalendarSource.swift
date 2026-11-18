@@ -1,15 +1,20 @@
+import CryptoKit
 import Foundation
 
 // Calendar as a personal-data source: each run reads the phone's events from
-// 7 days ago to 30 days ahead and sends them all as one snapshot of that
+// 7 days ago to 15 days ahead and sends them all as one snapshot of that
 // window. The Rome replaces what it holds there once the last batch commits,
 // so the phone keeps no record of what the Rome has: a lost answer is mended
 // by the next run, and a run cut off leaves the last snapshot in place. An
-// event that has aged out of the window stays on the Rome as history.
+// event that has aged out of the window stays on the Rome as history. A run
+// that reads what the Rome last committed, window included, sends nothing,
+// except once a day, so the Rome's copy never looks more than a day old.
 
 struct CalendarSource: PersonalDataSource {
     static let pastDays = 7
-    static let aheadDays = 30
+    static let aheadDays = 15
+    /// How long an unchanged calendar goes without a snapshot.
+    static let resendAfter: TimeInterval = 86_400
     /// Notes are cut here: the Rome keeps at most 1,000 characters.
     static let notesLength = 1000
     static let maxAttendees = 20
@@ -44,7 +49,13 @@ struct CalendarSource: PersonalDataSource {
         let wide = DateInterval(start: window.start.addingTimeInterval(-86_400), end: window.end.addingTimeInterval(86_400))
         let events = try await read { try await reader.events(in: wide) }.filter { Self.touches($0, window) }
         let items = events.map { Self.point($0, window: window, calendar: calendar) }
-        await pending.set(Self.chunk(items, progress: progress, window: window, now: now))
+        let chunk = Self.chunk(items, progress: progress, window: window, now: now)
+        if let at = progress.snapshotAt, progress.snapshotDigest == chunk.snapshot?.digest,
+           now >= at, now.timeIntervalSince(at) < Self.resendAfter {
+            await pending.clear()
+            return
+        }
+        await pending.set(chunk)
     }
 
     /// EventKit's refusals, as the sync history words them.
@@ -62,10 +73,20 @@ struct CalendarSource: PersonalDataSource {
         await pending.take()
     }
 
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async {
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, committed: Set<String>) async {
         // A Rome that does not know events keeps nothing: tried again next time.
         guard unsupported.isEmpty else { return }
-        await store.save(chunk.commit)
+        var commit = chunk.commit
+        // Only a commit the Rome answered is one it holds: anything else is
+        // sent whole next time.
+        if committed.contains("events"), let snapshot = chunk.snapshot {
+            commit.snapshotDigest = snapshot.digest
+            commit.snapshotAt = snapshot.readAt
+        } else {
+            commit.snapshotDigest = nil
+            commit.snapshotAt = nil
+        }
+        await store.save(commit)
     }
 
     func reset() async { await store.removeAll() }
@@ -74,11 +95,12 @@ struct CalendarSource: PersonalDataSource {
 
     // MARK: The chunk
 
-    /// From 7 days before today's midnight to 30 days after now.
+    /// From 7 days before today's midnight to the end of the 15th day
+    /// ahead: whole days, so the window moves once a day.
     static func window(now: Date, calendar: Calendar) -> DateInterval {
         let today = calendar.startOfDay(for: now)
         let start = calendar.date(byAdding: .day, value: -pastDays, to: today) ?? today
-        let end = calendar.date(byAdding: .day, value: aheadDays, to: now) ?? now
+        let end = calendar.date(byAdding: .day, value: aheadDays + 1, to: today) ?? now
         return DateInterval(start: start, end: end)
     }
 
@@ -103,9 +125,23 @@ struct CalendarSource: PersonalDataSource {
             upserts: items.sorted { $0.key < $1.key },
             marks: [.init(type: "events", syncedThrough: WireTime.string(now))],
             counts: ["events": count],
-            snapshot: .init(id: UUID().uuidString.lowercased(), readAt: now, windows: ["events": window]),
+            snapshot: .init(
+                id: UUID().uuidString.lowercased(), readAt: now, windows: ["events": window],
+                digest: digest(items, window: window)
+            ),
             commit: progress
         )
+    }
+
+    /// A digest of the window and every item in it, in key order.
+    static func digest(_ items: [PersonalDataPoint], window: DateInterval) -> String {
+        var hash = SHA256()
+        hash.update(data: Data("\(WireTime.string(window.start))|\(WireTime.string(window.end))\n".utf8))
+        for item in items.sorted(by: { $0.key < $1.key }) {
+            hash.update(data: (try? PersonalDataClient.encoder.encode(item)) ?? Data(item.key.utf8))
+            hash.update(data: Data("\n".utf8))
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: Items
@@ -171,6 +207,8 @@ actor PendingChunk {
     private var chunk: SyncChunk?
 
     func set(_ chunk: SyncChunk) { self.chunk = chunk }
+
+    func clear() { chunk = nil }
 
     func take() -> SyncChunk? {
         defer { chunk = nil }
