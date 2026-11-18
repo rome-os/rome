@@ -297,21 +297,6 @@
   }
 }
 
-
-@keyframes rome-sidebar-apps-hover {
-  0% {
-    transform: rotate(0deg) scale(1);
-  }
-
-  45% {
-    transform: rotate(-7deg) scale(1.12);
-  }
-
-  100% {
-    transform: rotate(0deg) scale(1);
-  }
-}
-
 [data-concierge-unread] {
   --row-count-font-size: 0.6875rem;
   --row-count-line-height: calc(16 / 11);
@@ -327,16 +312,14 @@
   will-change: transform;
 }
 
-.rome-sidebar-icon[data-motion="chat"] {
-  transition: transform 150ms ease-out;
-}
+@media (prefers-reduced-motion: no-preference) {
+  .rome-sidebar-icon[data-motion="tilt"] {
+    transition: transform 150ms ease-out;
+  }
 
-.rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="apps"] {
-  animation: rome-sidebar-apps-hover 420ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="chat"] {
-  transform: rotate(-8deg);
+  .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="tilt"] {
+    transform: rotate(-8deg);
+  }
 }
 
 /* The sidebar's upgrade row: a light tint of the theme's success green, with
@@ -362,11 +345,6 @@ button.rome-upgrade-row:hover {
 @media (prefers-reduced-motion: reduce) {
   .rome-sidebar-icon {
     will-change: auto;
-  }
-
-  .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion] {
-    animation: none;
-    transform: none;
   }
 }
 

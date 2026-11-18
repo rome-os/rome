@@ -18,7 +18,7 @@ export interface BuiltinNavEntry {
   href: string;
   labelKey: string;
   Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
-  sidebarIconMotion?: "apps" | "chat";
+  sidebarIconMotion?: "tilt";
   /** Extra search terms, matched alongside the translated label and the id. */
   aliases?: readonly string[];
 }
@@ -29,9 +29,15 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     href: "/apps",
     labelKey: "nav.apps",
     Icon: DashboardIcon,
-    sidebarIconMotion: "apps",
+    sidebarIconMotion: "tilt",
   },
-  { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: FolderKanban },
+  {
+    id: "projects",
+    href: "/projects",
+    labelKey: "nav.projects",
+    Icon: FolderKanban,
+    sidebarIconMotion: "tilt",
+  },
   { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
   { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
   // Off the sidebar until the guardian pins it: main answers assistants, so
@@ -64,7 +70,7 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     href: "/message",
     labelKey: "nav.chat",
     Icon: Pencil2Icon,
-    sidebarIconMotion: "chat",
+    sidebarIconMotion: "tilt",
   },
   { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },
 ] as const;

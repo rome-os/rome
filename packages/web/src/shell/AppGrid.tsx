@@ -153,10 +153,7 @@ function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
       data-motion={entry.sidebarIconMotion}
       aria-hidden
     >
-      <Icon
-        className={`h-4 w-4 shrink-0 ${entry.id === "projects" ? "stroke-[1.5]" : ""}`}
-        aria-hidden
-      />
+      <Icon className="h-4 w-4 shrink-0" aria-hidden />
     </span>
   );
 }
