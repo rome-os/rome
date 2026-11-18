@@ -63,6 +63,13 @@ export interface TypeSpec {
    * so the Agent reads the device live. Absent, a sync covers up to itself.
    */
   syncedAheadDays?: number;
+  /**
+   * How many days before each sync the device reads, for a type it sends
+   * as a rolling snapshot. Only that span counts as covered: older dates
+   * were read only if every sync in between ran, which nothing records.
+   * Absent, history reaches back as far as the earliest stored item.
+   */
+  syncedBackDays?: number;
 }
 
 export interface SourceSpec {

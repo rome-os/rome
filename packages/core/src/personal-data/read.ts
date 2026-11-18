@@ -98,7 +98,12 @@ export function queryPersonalData(
     // The device reports how far it is synced, not how far back its history
     // reaches, so the earliest reading stands in for that: a window that
     // starts before it is not known to be covered.
-    const reachesBack = earliest !== undefined && earliest <= plan.start;
+    // A rolling snapshot covers only what the last sync read: an empty
+    // calendar is covered, and a gap between syncs is not.
+    const reachesBack =
+      spec.syncedBackDays !== undefined
+        ? at !== undefined && plan.start >= at - spec.syncedBackDays * DAY_MS
+        : earliest !== undefined && earliest <= plan.start;
     // A type the device sends only so far ahead of each sync (calendar
     // events, 30 days) does not cover a window that ends past that, however
     // recent the sync: no events there means nothing was sent, not a free day.

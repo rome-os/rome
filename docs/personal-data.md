@@ -121,6 +121,7 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 - `latest` for a bucket type reads the last hour, not a day's average.
 - A type of entries is always listed, one type per query, and takes no `interval`, `aggregate` or `unit`. It lists every entry that overlaps the window, such as a holiday that began before it, with its `key`, `startISO`, `endISO` and content.
 - `freshness` says a type covers the window only when its earliest stored reading reaches back to the window's start and the device reports it synced up to the end. A query that reads only hours (`hour`, a window that starts mid-day, `latest`) reaches back only to `hourlyFrom`, the earliest hour bucket. Otherwise `missingFrom` says where coverage is not known.
+- A type the device sends as a rolling snapshot, such as calendar events, declares how far back and ahead of each sync it reads (`syncedBackDays`, `syncedAheadDays`). It covers only that span around the last sync, whatever older entries the store holds: dates between two syncs far apart were never read, and an empty calendar the phone synced is covered.
 - Each type is read from one origin: one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
 
 ```json

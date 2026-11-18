@@ -3,8 +3,9 @@
 
 import type { SourceSpec } from "../domain/source.js";
 
-/** How far ahead of each sync the phone sends events. */
+/** How far ahead of and back from each sync the phone sends events. */
 const SYNCED_AHEAD_DAYS = 30;
+const SYNCED_BACK_DAYS = 7;
 /** A year past Rome's clock, so a skewed phone clock or a long event still
  *  ingests: what the phone sends is bounded by SYNCED_AHEAD_DAYS. */
 const AHEAD_DAYS = 400;
@@ -25,6 +26,7 @@ export const APPLE_CALENDAR: SourceSpec = {
       rollup: "sum",
       aheadDays: AHEAD_DAYS,
       syncedAheadDays: SYNCED_AHEAD_DAYS,
+      syncedBackDays: SYNCED_BACK_DAYS,
       note:
         "One entry per event, each occurrence of a repeating one on its own: title, location, " +
         "notes, calendar, allDay, availability (busy, free, tentative, unavailable), status, " +

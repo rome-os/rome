@@ -331,6 +331,11 @@ actor SyncEngine {
         let batches = Self.batches(chunk)
         var unsupported = Set<String>()
         var refused = Set<String>()
+        // Types an earlier batch had an item refused for. The Rome withholds
+        // a type's mark only for refusals in the same request, so the last
+        // batch leaves out these marks itself: a type is synced only once
+        // the Rome has all of it.
+        var incomplete = Set<String>()
         let connectionId = await connectionId()
         for (number, batch) in batches.enumerated() {
             // Before every request: a long chunk stops as soon as sync is
@@ -340,7 +345,7 @@ actor SyncEngine {
             let envelope = PersonalDataEnvelope(
                 source: source.id, origin: origin, connectionId: connectionId,
                 batch: .init(id: UUID().uuidString.lowercased(), trigger: trigger.rawValue, index: index, last: last),
-                types: last ? chunk.marks : [],
+                types: last ? chunk.marks.filter { !incomplete.contains($0.type) } : [],
                 upserts: batch.upserts, deletes: batch.deletes.map { .init(key: $0) }
             )
             index += 1
@@ -357,6 +362,7 @@ actor SyncEngine {
                 // says the Rome has readings it refused. It is left out until
                 // Sync now tries it again.
                 guard let index = rejected.index, index < batch.upserts.count else { continue }
+                incomplete.insert(batch.upserts[index].type)
                 if let code = rejected.code, Self.heldBack.contains(code) {
                     unsupported.insert(batch.upserts[index].type)
                 } else {

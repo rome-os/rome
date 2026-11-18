@@ -258,6 +258,36 @@ enum CalendarFixtures {
         #expect(try await run(source).upserts.map(\.key) == ["events:b", "events:c"])
     }
 
+    @Test func aRefusalInAnEarlierBatchHoldsTheMarkBack() async throws {
+        let fake = FakeCalendar()
+        // More events than one batch carries: the refused one goes first.
+        fake.events = (0...SyncEngine.maxItems).map { CalendarFixtures.event(String(format: "e%05d", $0), 9, 10) }
+        let backend = FakePersonalDataBackend()
+        await backend.refuse(keys: ["events:e00000"])
+        let store = MemoryProgressStore()
+        let engine = SyncEngine(
+            source: source(fake, store),
+            target: { PersonalDataTarget(instanceId: "inst-1", backend: backend) },
+            log: MemorySyncLog(),
+            origin: { .init(id: "origin-1", name: "iPhone", platform: "ios", appVersion: "1.6.0") },
+            switches: { SyncSwitches(enabled: true) },
+            protectedData: { true },
+            now: { CalendarFixtures.now },
+            random: { 0.5 },
+            pause: { _ in try await Task.sleep(for: .seconds(3600)) }
+        )
+        await engine.sync(.manual)
+        let envelopes = await backend.envelopes
+        #expect(envelopes.count == 2)
+        #expect(envelopes.last?.types.isEmpty == true, "events are not synced while one is refused")
+
+        await backend.refuse(keys: [])
+        await engine.sync(.manual)
+        let retry = await backend.envelopes.dropFirst(2)
+        #expect(retry.flatMap(\.upserts).map(\.key) == ["events:e00000"])
+        #expect(retry.last?.types.map(\.type) == ["events"])
+    }
+
     @Test func aLongEventFitsTheRomesItemLimit() throws {
         var event = CalendarFixtures.event("a", 9, 10, title: String(repeating: "t", count: 500))
         event.location = String(repeating: "l", count: 500)

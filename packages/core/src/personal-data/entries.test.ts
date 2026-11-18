@@ -234,6 +234,30 @@ describe("entries", () => {
     });
   });
 
+  it("covers only the 7 days a sync reads back, whatever older events it holds", () => {
+    repo.ingest(
+      APPLE_CALENDAR,
+      batch("b1", {
+        upserts: [event("old", NOW - 70 * DAY, NOW - 70 * DAY + HOUR)],
+        syncedThrough: NOW - 70 * DAY,
+      }),
+      NOW - 70 * DAY,
+    );
+    repo.ingest(APPLE_CALENDAR, batch("b2", { syncedThrough: NOW }), NOW);
+    // 20 days ago fell between the two syncs: no event there is not a free day.
+    const gap = list({ start: "2026-10-28", end: "2026-10-28" }, NOW);
+    expect(gap.freshness.events).toMatchObject({ coversWindow: false });
+    const recent = list({ start: "2026-11-12", end: "2026-11-12" }, NOW);
+    expect(recent.freshness.events).toMatchObject({ coversWindow: true });
+  });
+
+  it("covers an empty calendar the phone synced", () => {
+    repo.ingest(APPLE_CALENDAR, batch("b1", { syncedThrough: NOW }), NOW);
+    const answer = list({ start: "2026-11-18", end: "2026-11-18" }, NOW);
+    expect(answer.freshness.events).toMatchObject({ coversWindow: true });
+    expect((answer.results[0] as { records: unknown[] }).records).toEqual([]);
+  });
+
   it("refuses interval, aggregate and unit for entries, and search for readings", () => {
     const answer = queryPersonalData(
       repo,

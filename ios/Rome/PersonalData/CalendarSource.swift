@@ -18,6 +18,10 @@ struct CalendarSource: PersonalDataSource {
     /// Below the Rome's 4,096 characters of JSON per item, which it refuses
     /// whole: what goes past it is cut from the notes, then the attendees.
     static let itemLength = 4000
+    /// The Rome refuses an entry longer than 366 days, and a refused event
+    /// holds the whole calendar back from counting as synced: a longer one
+    /// is sent cut to this.
+    static let maxEventLength: TimeInterval = 366 * 86_400
 
     let reader: CalendarReading
     let store: ProgressStoring
@@ -151,7 +155,8 @@ struct CalendarSource: PersonalDataSource {
             if !attendees.isEmpty { full["attendees"] = .array(attendees.map(JSONValue.string)) }
             return PersonalDataPoint(
                 key: String(key.prefix(200)), type: "events", shape: .entry,
-                start: WireTime.string(event.start), end: WireTime.string(max(event.end, event.start)),
+                start: WireTime.string(event.start),
+                end: WireTime.string(min(max(event.end, event.start), event.start.addingTimeInterval(maxEventLength))),
                 tz: calendar.timeZone.identifier, content: full
             )
         }
