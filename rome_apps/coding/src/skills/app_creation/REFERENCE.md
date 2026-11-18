@@ -253,6 +253,11 @@ actions. On Codex, any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent a
 shell that can run commands and write files. Leave all four out of an agent
 that reads untrusted input.
 
+`skills` controls whether the agent gets the skill tools (`list_skills`,
+`search_skills`, `read_skill`). It defaults to `true`, even when `actions` is
+omitted. Set `skills: false` on agents that read untrusted input so prompt
+injection cannot read installed skills.
+
 #### Structured output: `outputSchema`
 
 When you want the agent to return **structured JSON** rather than free-form

@@ -174,6 +174,7 @@ describe("AgentLoader", () => {
       expect(sentinel.tier).toBe("small");
       expect(sentinel.permissionMode).toBe("bypassPermissions");
       expect(sentinel.tools).toEqual(["Read", "Glob"]);
+      expect(sentinel.skills).toBe(false);
 
       const allActions = agents.get("core:test-all-actions")!.definition;
       expect(allActions.actions).toEqual(["*"]);

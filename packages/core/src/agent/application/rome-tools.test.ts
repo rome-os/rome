@@ -2,6 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { AgentAction } from "../domain/agent-action.js";
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import type { RomeTool } from "../domain/rome-tools.js";
+import type { Skill } from "../domain/skill.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
 import { createRomeTools, type RomeToolsOptions } from "./rome-tools.js";
 
@@ -498,5 +499,48 @@ describe("execute_action", () => {
     const unknown = await read("nope");
     expect(unknown).toMatchObject({ isError: true });
     expect(unknown.content[0].text).toBe("Unknown action: nope");
+  });
+});
+
+describe("skills", () => {
+  const SKILL: Skill = {
+    name: "notes:filing",
+    localName: "filing",
+    description: "How the guardian files notes",
+    content: "# Filing\n\nThe guardian's private filing steps.",
+    ownerType: "app",
+    ownerId: "notes",
+  };
+  const catalog = { list: () => [SKILL] };
+  const listed = async (served: ReturnType<typeof tools>) =>
+    JSON.parse((await served.callTool("skills", "list_skills", {})).content[0].text) as Array<{
+      name: string;
+    }>;
+
+  it("omits skill tools when skills is null", async () => {
+    const served = tools({ skills: null });
+
+    expect(served.listTools("skills")).toEqual([]);
+    for (const [name, input] of [
+      ["list_skills", {}],
+      ["search_skills", { query: "." }],
+      ["read_skill", { skill_name: SKILL.name }],
+    ] as const) {
+      const result = await served.callTool("skills", name, input);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`Unknown tool: ${name}`);
+      expect(result.content[0].text).not.toContain("private filing steps");
+    }
+  });
+
+  it("keeps every skill even when the agent declares no actions", async () => {
+    const served = tools({ turn: { ...TURN, actions: [] }, skills: catalog });
+
+    expect(await listed(served)).toEqual([
+      { name: SKILL.name, description: SKILL.description, ownerType: "app", ownerId: "notes" },
+    ]);
+    const read = await served.callTool("skills", "read_skill", { skill_name: SKILL.name });
+    expect(read.isError).toBeUndefined();
+    expect(JSON.parse(read.content[0].text)).toEqual({ name: SKILL.name, content: SKILL.content });
   });
 });

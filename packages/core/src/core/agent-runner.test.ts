@@ -47,7 +47,7 @@ const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
 import type { ModelSessionEvent, RenewalHandoffs, RomeTools } from "../agent/index.js";
-import { ROME_TOOL_GROUPS } from "../agent/index.js";
+import { ROME_TOOL_GROUPS, type Skill } from "../agent/index.js";
 import {
   executeActionTool,
   executeSubagentTool,
@@ -8937,6 +8937,50 @@ describe("AgentRunner", () => {
         sideEffects: "write",
         requiresApproval: false,
       });
+    });
+
+    it("omits skill tools only when an agent sets skills: false", async () => {
+      const skill: Skill = {
+        name: "notes:filing",
+        localName: "filing",
+        description: "How the guardian files notes",
+        content: "# Filing\n\nThe guardian's private filing steps.",
+        ownerType: "app",
+        ownerId: "notes",
+      };
+      const listSpy = rs.spyOn(SkillLoader.prototype, "list").mockReturnValue([skill]);
+      try {
+        const provider = new MockModelProvider([
+          [{ type: "result", content: "Done" }],
+          [{ type: "result", content: "Done" }],
+          [{ type: "result", content: "Done" }],
+        ]);
+        const runner = createRunner(provider);
+
+        // Agent with actions and default skills sees skills.
+        await collectMessages(runner.run({ agentName: "test-main", prompt: "Use tools" }));
+        const mainListed = parseToolText(
+          await provider.calls[0]!.tools.callTool("skills", "list_skills", {}),
+        ) as Array<{ name: string }>;
+        expect(mainListed.map((entry) => entry.name)).toEqual([skill.name]);
+
+        // Agent with no actions and default skills still sees skills.
+        await collectMessages(runner.run({ agentName: "test-explore", prompt: "Inspect" }));
+        const exploreListed = parseToolText(
+          await provider.calls[1]!.tools.callTool("skills", "list_skills", {}),
+        ) as Array<{ name: string }>;
+        expect(exploreListed.map((entry) => entry.name)).toEqual([skill.name]);
+
+        // Agent with skills: false gets no skill tools and fails closed.
+        await collectMessages(runner.run({ agentName: "test-sentinel", prompt: "Triage" }));
+        const sentinel = provider.calls[2]!.tools;
+        expect(sentinel.listTools("skills")).toEqual([]);
+        const read = await sentinel.callTool("skills", "read_skill", { skill_name: skill.name });
+        expect(read.isError).toBe(true);
+        expect(read.content[0].text).toBe("Unknown tool: read_skill");
+      } finally {
+        listSpy.mockRestore();
+      }
     });
 
     it("expands wildcard action access to public agent-callable actions", async () => {
