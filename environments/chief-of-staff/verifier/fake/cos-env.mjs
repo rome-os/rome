@@ -108,6 +108,7 @@ const { values, positionals } = parseArgs({
     since: { type: "string" },
     "mention-agent": { type: "boolean", default: false },
     "mention-second": { type: "boolean", default: false },
+    "per-call": { type: "boolean", default: false },
   },
 });
 
@@ -233,7 +234,22 @@ switch (command) {
     console.log(JSON.stringify({ files: [], toolUses: [] }));
     break;
   case "usage":
-    for (const turn of state.turns ?? []) console.log(JSON.stringify(turn));
+    for (const turn of state.turns ?? [])
+      console.log(
+        JSON.stringify(
+          values["per-call"]
+            ? {
+                time: turn.start,
+                turnId: turn.turnId,
+                session: turn.sessionId,
+                inputTokens: turn.inputTokens,
+                cacheReadTokens: turn.cacheReadTokens,
+                cacheWriteTokens: turn.cacheWriteTokens,
+                outputTokens: turn.outputTokens,
+              }
+            : turn,
+        ),
+      );
     break;
   case "logs":
     mkdirSync(positionals[0], { recursive: true });

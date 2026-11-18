@@ -372,11 +372,20 @@ export async function verify({
   // Reported, never scored: every turn's tokens, cache use and cost.
   let turns;
   try {
+    let calls = null;
+    let callsMissing = null;
+    try {
+      calls = await env.usagePerCall(startedAt.toISOString());
+    } catch (error) {
+      callsMissing = error.message;
+    }
     turns = turnReport(
       await env.usage(new Date(0).toISOString()),
       startedAt.toISOString(),
       ctx.model,
+      calls,
     );
+    if (callsMissing) turns.perCallNotMeasured = callsMissing;
   } catch (error) {
     turns = { notMeasured: error.message };
   }

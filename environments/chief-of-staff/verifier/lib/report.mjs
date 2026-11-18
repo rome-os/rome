@@ -201,10 +201,13 @@ function turnLines(turns) {
   const lines = ["", "## Turns: tokens, cache and cost", ""];
   if (turns.notMeasured) return [...lines, `Not measured: ${turns.notMeasured}.`];
   lines.push(
-    `Reported, never scored. Cost is ${turns.usdSource}; Rome's recorded cost_usd is a running total per session and is never summed. Input is uncached input plus cache reads plus cache writes, summed over the turn's model calls. A warm turn starts less than 5 minutes after the turn before, within the prompt cache's life.`,
+    `Reported, never scored. Cost is ${turns.usdSource}; Rome's recorded cost_usd is a running total per session and is never summed. Input is uncached input plus cache reads plus cache writes, summed over the turn's model calls. A warm turn starts less than 5 minutes after the turn before, within the prompt cache's life. Start input is the turn's first model call's input; start cache read is how much of it the cache held, the prefix unchanged since an earlier call.`,
+    ...(turns.perCallNotMeasured
+      ? ["", `Per-call usage not measured: ${turns.perCallNotMeasured}.`]
+      : []),
     "",
-    "| Turns | Count | Input min / median / max | Uncached input | Cache read | Cache write | Read share | Output | Cost | Cost per turn |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Turns | Count | Input min / median / max | Start input min / median / max | Start cache read min / median / max | Uncached input | Cache read | Cache write | Read share | Output | Cost | Cost per turn |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const [label, s] of [
     ["All", turns.all],
@@ -212,19 +215,26 @@ function turnLines(turns) {
     ["Cold (>= 5 min)", turns.cold],
   ])
     lines.push(
-      `| ${label} | ${s.turns} | ${s.input ? `${s.input.min} / ${s.input.median} / ${s.input.max}` : "none"} | ${s.uncachedInput} | ${s.cacheRead} | ${s.cacheWrite} | ${s.cacheReadShare ?? "none"} | ${s.output} | ${usd(s.pricedUsd)} | ${usd(s.pricedUsdPerTurn, 5)} |`,
+      `| ${label} | ${s.turns} | ${range(s.input)} | ${range(s.startInput)} | ${range(s.startCacheRead)} | ${s.uncachedInput} | ${s.cacheRead} | ${s.cacheWrite} | ${s.cacheReadShare ?? "none"} | ${s.output} | ${usd(s.pricedUsd)} | ${usd(s.pricedUsdPerTurn, 5)} |`,
+    );
+  if (turns.warm.startUncached.length > 0)
+    lines.push(
+      "",
+      `Flag: ${turns.warm.startUncached.length} warm turns read nothing from the cache on their first call, so the start of the prompt changed since the turn before: ${turns.warm.startUncached.join(", ")}.`,
     );
   lines.push(
     "",
-    "| Turn | Start | Since previous | Input | Uncached | Cache read | Cache write | Output | Cost |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Turn | Start | Since previous | Start input | Start cache read | Input | Uncached | Cache read | Cache write | Output | Cost |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const t of turns.perTurn)
     lines.push(
-      `| ${t.turnId} | ${t.start} | ${t.sincePreviousSeconds === null ? "first" : `${t.sincePreviousSeconds} s`} | ${t.input} | ${t.uncachedInput} | ${t.cacheRead} | ${t.cacheWrite} | ${t.output} | ${usd(t.pricedUsd, 5)} |`,
+      `| ${t.turnId} | ${t.start} | ${t.sincePreviousSeconds === null ? "first" : `${t.sincePreviousSeconds} s`} | ${t.startInput ?? "unknown"} | ${t.startCacheRead ?? "unknown"} | ${t.input} | ${t.uncachedInput} | ${t.cacheRead} | ${t.cacheWrite} | ${t.output} | ${usd(t.pricedUsd, 5)} |`,
     );
   return lines;
 }
+
+const range = (r) => (r ? `${r.min} / ${r.median} / ${r.max}` : "none");
 
 function memoryLines(memory) {
   const lines = [

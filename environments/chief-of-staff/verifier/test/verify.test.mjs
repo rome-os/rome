@@ -191,6 +191,8 @@ describe("verify against the stand-in agents", { concurrency: true }, () => {
     assert.equal(report.turns.perTurn.length, report.turns.all.turns);
     assert.equal(report.turns.warm.turns + report.turns.cold.turns, report.turns.all.turns);
     assert.ok(report.turns.all.pricedUsd === null || report.turns.all.pricedUsd >= 0);
+    assert.ok(report.turns.all.startInput.max > 0, "each turn's first call gives its start input");
+    assert.equal(report.turns.perCallNotMeasured, undefined);
     assert.match(
       readFileSync(join(outDir, "report.md"), "utf8"),
       /## Turns: tokens, cache and cost/,

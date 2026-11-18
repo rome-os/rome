@@ -109,6 +109,18 @@ export function cosEnv({ command, agentAuthor = "agent", env = process.env }) {
         .map((l) => JSON.parse(l));
     },
     /**
+     * Each model call since `since`, one per line as `cos-env usage --per-call` prints them:
+     * `{ time, turnId, session, claudeSession, requestId, model, inputTokens, cacheReadTokens,
+     * cacheWriteTokens, outputTokens }`. Throws when the environment has no such command.
+     */
+    async usagePerCall(since) {
+      const out = await call(["usage", "--per-call", "--since", since]);
+      return out
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+    },
+    /**
      * What the agent did with its memory folder since `since`, as `cos-env memory` prints it:
      * `{ files: [{ path, bytes, modified }], toolUses: [{ time, tool, path }] }`. An
      * observation only, never evidence. Throws when the environment has no such command.

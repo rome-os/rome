@@ -12,8 +12,13 @@ export const CACHE_LIFE_MS = 5 * 60 * 1000;
  * starting at `since` or later are reported. The cost never sums Rome's recorded `cost_usd`,
  * which is a running total per session.
  */
-export function turnReport(turns, since, fallbackModel) {
+export function turnReport(turns, since, fallbackModel, calls = null) {
   const all = turnCosts(turns, fallbackModel);
+  // Each turn's first model call: what the turn's input started at, and how much of it the
+  // cache already held, which is the prefix that stayed the same since the turn before.
+  const firstCall = new Map();
+  for (const c of [...(calls ?? [])].sort((a, b) => Date.parse(a.time) - Date.parse(b.time)))
+    if (!firstCall.has(c.turnId)) firstCall.set(c.turnId, c);
   const rows = [];
   let before = null;
   for (const t of all) {
@@ -37,6 +42,7 @@ export function turnReport(turns, since, fallbackModel) {
       input: uncached + cacheRead + cacheWrite,
       output: Number(t.outputTokens) || 0,
       pricedUsd: t.pricedUsd,
+      ...startOf(firstCall.get(t.turnId)),
     });
     before = start;
   }
@@ -53,9 +59,28 @@ export function turnReport(turns, since, fallbackModel) {
   };
 }
 
+function startOf(call) {
+  if (!call) return { startInput: null, startCacheRead: null };
+  const n = (field) => Number(call[field]) || 0;
+  return {
+    startInput: n("inputTokens") + n("cacheReadTokens") + n("cacheWriteTokens"),
+    startCacheRead: n("cacheReadTokens"),
+  };
+}
+
+/** The minimum, median and maximum of `values`, or null when there are none. */
+function spread(values) {
+  const sorted = values.filter((v) => v !== null).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  return {
+    min: sorted[0],
+    median: sorted[Math.floor((sorted.length - 1) / 2)],
+    max: sorted.at(-1),
+  };
+}
+
 function summary(rows) {
   const sum = (field) => rows.reduce((s, r) => s + r[field], 0);
-  const inputs = rows.map((r) => r.input).sort((a, b) => a - b);
   const usd = rows.some((r) => r.pricedUsd === null) ? null : +sum("pricedUsd").toFixed(4);
   return {
     turns: rows.length,
@@ -65,13 +90,12 @@ function summary(rows) {
     output: sum("output"),
     // The share of input read from the cache.
     cacheReadShare: sum("input") ? +(sum("cacheRead") / sum("input")).toFixed(3) : null,
-    input: inputs.length
-      ? {
-          min: inputs[0],
-          median: inputs[Math.floor((inputs.length - 1) / 2)],
-          max: inputs.at(-1),
-        }
-      : null,
+    input: spread(rows.map((r) => r.input)),
+    startInput: spread(rows.map((r) => r.startInput)),
+    startCacheRead: spread(rows.map((r) => r.startCacheRead)),
+    // Turns whose first call read nothing from the cache: within the cache's life, the start
+    // of the prompt changed since the turn before.
+    startUncached: rows.filter((r) => r.startCacheRead === 0).map((r) => r.turnId),
     pricedUsd: usd,
     pricedUsdPerTurn: usd === null || rows.length === 0 ? null : +(usd / rows.length).toFixed(5),
   };
