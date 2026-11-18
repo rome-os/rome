@@ -43,8 +43,8 @@ export function createSonioxTranscriber(options: {
     place: { provider: "Soniox", host: new URL(url).host },
     model,
     providerId: "soniox",
-    open: ({ sampleRate }, listener) =>
-      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs),
+    open: ({ sampleRate, terms }, listener) =>
+      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs, terms),
   };
 }
 
@@ -55,6 +55,7 @@ function openSonioxStream(
   sampleRate: number,
   listener: TranscriptionListener,
   connectTimeoutMs: number,
+  terms?: readonly string[],
 ): TranscriptionStream {
   // A long-lived key and a temporary one both go in the header. Soniox
   // refuses the old `api_key` field of the start request from January 2027.
@@ -100,6 +101,7 @@ function openSonioxStream(
         sample_rate: sampleRate,
         num_channels: 1,
         language_hints: ["en", "zh"],
+        ...(terms?.length ? { context: { terms } } : {}),
       }),
     );
     for (const frame of queued.splice(0)) deliver(frame);

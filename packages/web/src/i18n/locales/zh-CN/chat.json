@@ -176,6 +176,10 @@
       },
       "created": "创建于 {{when}}",
       "endedAt": "结束于 {{when}}"
+    },
+    "menu": {
+      "tasks": "任务",
+      "outputs": "产出"
     }
   },
   "reply": {
@@ -750,5 +754,47 @@
       "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
       "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
     }
+  },
+  "outputs": {
+    "title": "产出",
+    "close": "关闭产出",
+    "loading": "正在加载产出",
+    "loadFailed": "无法加载产出",
+    "emptyTitle": "还没有产出",
+    "emptyDescription": "Agent 在这个聊天里写入或展示的文件会出现在这里。",
+    "written": "写入",
+    "shown": "展示",
+    "from": "来自 {{name}}",
+    "missing": "已移动或删除",
+    "download": "下载",
+    "noPreview": "这个文件没有预览。",
+    "unavailable": "这个文件无法在这里打开。",
+    "previewFailed": "无法加载文件",
+    "truncated": "只显示前 {{count}} 个字符。",
+    "back": "返回产出",
+    "filterLabel": "显示",
+    "noneOfType": "还没有这类产出。",
+    "today": "今天",
+    "earlier": "更早",
+    "filters": {
+      "all": "全部",
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面"
+    },
+    "types": {
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面",
+      "image": "图片",
+      "code": "代码",
+      "file": "文件"
+    },
+    "indexing": "还在查找更早的文件。"
+  },
+  "chatHeader": {
+    "menu": "聊天菜单",
+    "project": "项目 · {{name}}",
+    "lastModel": "上次回答：{{model}}"
   }
 }

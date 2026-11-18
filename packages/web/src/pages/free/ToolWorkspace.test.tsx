@@ -8,6 +8,7 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
+import { useToolOutputs } from "./tool-outputs";
 import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
@@ -17,6 +18,14 @@ rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
 rs.mock("@/components/concierge/TaskList", () => ({
   TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
+}));
+
+rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
+  OutputsPanel: ({ chatId, selectedId }: { chatId: string; selectedId?: string | null }) => (
+    <p>
+      Outputs body {chatId} {selectedId ?? "none"}
+    </p>
+  ),
 }));
 
 let viewportWidth = 1200;
@@ -951,5 +960,66 @@ describe("ToolWorkspace Tasks tab", () => {
     cleanup();
     render(<TasksHarness />);
     expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).compact).toBe(false);
+  });
+});
+
+// Stands in for the chat's header button and a message link: it asks the pane for the Outputs tab.
+function OutputsOwner() {
+  const pane = useToolOutputs();
+  return (
+    <>
+      <button type="button" onClick={() => pane?.show("chat-1")}>
+        Show outputs
+      </button>
+      <button type="button" onClick={() => pane?.show("chat-1", "out-2")}>
+        Open output
+      </button>
+      <output data-testid="outputs-host">{JSON.stringify({ active: pane?.active })}</output>
+    </>
+  );
+}
+
+function OutputsHarness({ withTasks = false }: { withTasks?: boolean }) {
+  const [view, setView] = useState<ToolView>({ activeId: "a", collapsed: false, unreadIds: [] });
+  return (
+    <ToolWorkspace
+      placements={placements}
+      view={view}
+      selectTool={(id) => setView((v) => ({ ...v, activeId: id, collapsed: false }))}
+      setCollapsed={(collapsed) => setView((v) => ({ ...v, collapsed }))}
+      addWidget={rs.fn()}
+      removeWidget={rs.fn()}
+      label={(widget) => widget.type}
+      icon={() => null}
+      content={(widget) => <ToolContent id={widget.id} />}
+      fullHref={() => null}
+    >
+      <OutputsOwner />
+      {withTasks && <TasksOwner />}
+    </ToolWorkspace>
+  );
+}
+
+describe("ToolWorkspace Outputs tab", () => {
+  it("adds an Outputs tab beside the other built-in tabs and selects it", async () => {
+    const user = userEvent.setup();
+    render(<OutputsHarness withTasks />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Show outputs" }));
+    expect(tabNames()).toEqual(["Tasks", "Outputs", "desktop", "projects"]);
+    expect(screen.getByRole("tab", { name: "Outputs" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByText("Outputs body chat-1 none")).toBeTruthy();
+    expect(JSON.parse(screen.getByTestId("outputs-host").textContent!)).toEqual({ active: true });
+  });
+
+  it("opens on the output a link names, and goes with its close button", async () => {
+    const user = userEvent.setup();
+    render(<OutputsHarness />);
+    await user.click(screen.getByRole("button", { name: "Open output" }));
+    expect(screen.getByText("Outputs body chat-1 out-2")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close Outputs" }));
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+    expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe("true");
   });
 });

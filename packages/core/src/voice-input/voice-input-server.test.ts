@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceInputServerMessage } from "@rome/api-types/voice-input";
 import { createSonioxTranscriber } from "./soniox.js";
@@ -25,6 +25,7 @@ interface FakeSoniox {
 const servers: Array<{ close(): void }> = [];
 afterEach(() => {
   for (const server of servers.splice(0)) server.close();
+  rs.restoreAllMocks();
 });
 
 async function fakeSoniox(): Promise<FakeSoniox> {
@@ -87,7 +88,13 @@ async function dictation(
   const http: Server = createServer();
   const wss = new WebSocketServer({ server: http });
   wss.on("connection", (ws) =>
-    serve(ws, { source: grantedSource(fake), maxDictationMs, finishTimeoutMs, ...options }),
+    serve(ws, {
+      source: grantedSource(fake),
+      voiceTerms: async () => [],
+      maxDictationMs,
+      finishTimeoutMs,
+      ...options,
+    }),
   );
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   servers.push({
@@ -116,7 +123,86 @@ async function until(check: () => boolean): Promise<void> {
   expect(check()).toBe(true);
 }
 
+describe("Soniox start message", () => {
+  it.each([
+    undefined,
+    [],
+    ["Soniox", "混合术语"],
+  ])("sends context only for non-empty terms: %j", async (terms) => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
+    const stream = transcriber.open(
+      { sampleRate: 16000, terms },
+      {
+        onText() {},
+        onEnd() {},
+        onFailure() {},
+      },
+    );
+    try {
+      await until(() => fake.received.length === 1);
+      expect(fake.received[0]).toEqual({
+        kind: "text",
+        text: JSON.stringify({
+          model: "stt-rt-v6",
+          audio_format: "pcm_s16le",
+          sample_rate: 16000,
+          num_channels: 1,
+          language_hints: ["en", "zh"],
+          ...(terms?.length ? { context: { terms } } : {}),
+        }),
+      });
+    } finally {
+      stream.abort();
+    }
+  });
+});
+
 describe("voice input socket", () => {
+  it("reads terms once per session and passes them through to the transcriber", async () => {
+    const fake = await fakeSoniox();
+    let reads = 0;
+    const { client, closed } = await dictation(fake, undefined, undefined, {
+      voiceTerms: async () => {
+        reads += 1;
+        return ["Soniox", "Paraformer"];
+      },
+    });
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.from([1, 2]));
+    await until(() => fake.received.length === 2);
+    expect(reads).toBe(1);
+    expect(JSON.parse((fake.received[0] as { text: string }).text).context).toEqual({
+      terms: ["Soniox", "Paraformer"],
+    });
+    client.close();
+    await closed;
+  });
+
+  it("continues dictation without terms when the reader throws", async () => {
+    const warning = rs.spyOn(console, "warn").mockImplementation(() => {});
+    const fake = await fakeSoniox();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+    const { client, messages, closed } = await dictation(fake, undefined, undefined, {
+      voiceTerms: () => {
+        throw new Error("private file content");
+      },
+    });
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    client.send(Buffer.from([1, 2]));
+    await until(() => fake.received.length === 2);
+    expect(JSON.parse((fake.received[0] as { text: string }).text)).not.toHaveProperty("context");
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+    expect(messages).toEqual([{ type: "ended" }]);
+    const readWarnings = warning.mock.calls.filter(
+      ([line]) =>
+        JSON.parse(line).message === "could not read voice terms; continuing without terms",
+    );
+    expect(readWarnings).toHaveLength(1);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain("private file content");
+  });
+
   it("relays audio to the provider and streams the text back until the provider finishes", async () => {
     const fake = await fakeSoniox();
     fake.onText = (text) =>

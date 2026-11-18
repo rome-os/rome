@@ -1187,6 +1187,43 @@ export const romeAgentTraceBlocks = sqliteTable(
   ],
 );
 
+// A chat's outputs: the files its agent wrote or showed, one row each time it
+// did. Vocabulary: docs/domains/chats.md#outputs. Not a FK, as with the trace
+// blocks above: rows are recorded with the trace, whose session row may not
+// exist yet, and session-scoped deletes remove them explicitly.
+export const chatOutputs = sqliteTable(
+  "chat_outputs",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id"),
+    // The rome_agent_messages row that records it: the turn's trace, or the
+    // reply that links a shown file.
+    messageId: text("message_id"),
+    // What recorded it, unique within the chat, so a backfill or a replay
+    // records it once: the tool call's id, or `link:<message id>:<url>`.
+    sourceKey: text("source_key").notNull(),
+    kind: text("kind", { enum: ["written", "shown"] }).notNull(),
+    // The path written, as the tool named it, or the shown copy's asset URL.
+    path: text("path").notNull(),
+    // The local file a shown copy was made from, when known.
+    sourcePath: text("source_path"),
+    name: text("name").notNull(),
+    mimeType: text("mime_type"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_outputs_source").on(table.sessionId, table.sourceKey),
+    index("idx_chat_outputs_session_created").on(table.sessionId, table.createdAt),
+  ],
+);
+
+// The chats whose outputs from before chat_outputs existed were read back once.
+export const chatOutputBackfills = sqliteTable("chat_output_backfills", {
+  sessionId: text("session_id").primaryKey(),
+  backfilledAt: integer("backfilled_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 // UI-state mirror only — the canonical feedback record ships via OTLP logs
 // to rome-obs, since the user's SQLite never leaves their VM. The session_id
 // FK + ON DELETE CASCADE guarantees feedback can't outlive its session even

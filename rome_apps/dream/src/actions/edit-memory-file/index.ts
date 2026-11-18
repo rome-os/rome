@@ -6,6 +6,7 @@ import type {
   AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { profileMemoryDir, resolveMemoryFile } from "../../lib/memory-dir.js";
+import { voiceTermsSendError } from "../../lib/voice-terms-send.js";
 import type { MemoryFileDeps } from "../write-memory-file/index.js";
 
 export function createAction(
@@ -45,7 +46,10 @@ export function createAction(
           error: "old_string appears more than once; include more context",
         };
       }
-      await writeFile(target.path, text.slice(0, at) + newText + text.slice(at + oldText.length));
+      const next = text.slice(0, at) + newText + text.slice(at + oldText.length);
+      const sendError = await voiceTermsSendError(memoryDir, path, next, text);
+      if (sendError) return { status: "error", error: sendError };
+      await writeFile(target.path, next);
       return { status: "ok", data: { path: target.path } };
     },
   };

@@ -22,7 +22,6 @@ import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
   type ConciergeChatWorkResponse,
-  type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
@@ -103,6 +102,7 @@ import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
+import { chatOutputHandlers } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -1554,14 +1554,6 @@ export const handlers = [
   http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
     HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
   ),
-  http.get("/api/concierge/tasks", () =>
-    HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
-  ),
-  // Held open without events: mock mode runs no tasks.
-  http.get("/api/concierge/tasks/events", () => {
-    const stream = new ReadableStream({ start() {} });
-    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
-  }),
   // Held open without events: mock mode runs no turns, so no chat's activity changes.
   http.get("/api/concierge/activity/events", () => {
     const stream = new ReadableStream({ start() {} });
@@ -2004,6 +1996,7 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...taskListHandlers,
+  ...chatOutputHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,
