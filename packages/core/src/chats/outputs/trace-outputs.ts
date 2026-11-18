@@ -32,8 +32,8 @@ export interface OutputScope {
   projectsRoot: string;
   /** The folders a loosely named file must be in: the projects and memory folders. */
   roots: readonly string[];
-  /** Whether absolute path `path` is a regular file now. */
-  isFile: (path: string) => boolean;
+  /** When regular file `path` was last changed, in milliseconds; null when it is not one. */
+  changedAt: (path: string) => number | null;
 }
 
 /** Where a stretch of trace comes from, and what reading its loosely named files needs. */
@@ -44,15 +44,30 @@ export interface TraceContext {
   findUse?: (toolUseId: string) => ToolUseBlock | null;
   /** Without it, shell commands and replies are not read. */
   files?: OutputScope;
+  /**
+   * When the turn began. A file the reply links counts only when it changed
+   * since, so a file the agent only cites is not one it produced.
+   */
+  startedAt?: Date;
 }
 
-/** Whether `path`, named loosely, is a file the agent could have produced. */
-function producible(path: string, scope: OutputScope): boolean {
+// How much earlier than the turn's start a file's change time may read, for a
+// file system that keeps it coarsely.
+const CHANGE_TIME_SLACK_MS = 2000;
+
+/**
+ * Whether `path`, named loosely, is a file the agent could have produced: a
+ * file in one of the scope's folders, changed since `since` when one is given.
+ */
+function producible(path: string, scope: OutputScope, since?: Date): boolean {
   const inRoot = scope.roots.some((root) => {
     const base = resolve(root);
     return path === base || path.startsWith(base + sep);
   });
-  return inRoot && scope.isFile(path);
+  if (!inRoot) return false;
+  const changedAt = scope.changedAt(path);
+  if (changedAt === null) return false;
+  return !since || changedAt >= since.getTime() - CHANGE_TIME_SLACK_MS;
 }
 
 interface ToolResultBlock {
@@ -198,7 +213,7 @@ export function outputsOfToolCall(
  * call an earlier stretch recorded.
  */
 export function outputsInTrace(blocks: readonly unknown[], context: TraceContext): OutputFound[] {
-  const { traceId, findUse = () => null, files } = context;
+  const { traceId, findUse = () => null, files, startedAt } = context;
   const uses = new Map<string, ToolUseBlock>();
   const found: OutputFound[] = [];
   for (const raw of blocks) {
@@ -210,7 +225,7 @@ export function outputsInTrace(blocks: readonly unknown[], context: TraceContext
     }
     // A turn's reply: the local files it links.
     if (block.type === "result" && files && typeof block.content === "string") {
-      found.push(...outputsInReply(traceId, block.content, files));
+      found.push(...outputsInReply(traceId, block.content, files, startedAt));
       continue;
     }
     if (block.type !== "tool_result" || typeof block.toolUseId !== "string") continue;
@@ -307,16 +322,22 @@ function messageText(content: string): string {
 /**
  * The local files a turn's reply links, by Markdown link: a `/projects/<path>`
  * route or an absolute path, each kept only while it is a file in the
- * projects or memory folder. An asset, a web page or a relative link is not
- * one of them.
+ * projects or memory folder that changed since the turn began (`startedAt`):
+ * a file the reply only cites is not one. An asset, a web page or a relative
+ * link is not one of them.
  */
-export function outputsInReply(traceId: string, reply: string, scope: OutputScope): OutputFound[] {
+export function outputsInReply(
+  traceId: string,
+  reply: string,
+  scope: OutputScope,
+  startedAt?: Date,
+): OutputFound[] {
   const found = new Map<string, OutputFound>();
   // `[label](href)` or `[label](<href>)`, an image's `![label](href)` too.
   const link = /\[(?:\\.|[^\]\\])*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))/g;
   for (const match of reply.matchAll(link)) {
     const path = localPath(match[1] ?? match[2], scope.projectsRoot);
-    if (path && !found.has(path) && producible(path, scope)) {
+    if (path && !found.has(path) && producible(path, scope, startedAt)) {
       found.set(path, writtenFile(`reply:${traceId}:${path}`, path));
     }
   }

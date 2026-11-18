@@ -8,10 +8,14 @@ const FILES = new Set([
   "/tmp/out.csv",
   "/home/assets/upload.pdf",
 ]);
+/** When each file changed; one not named here changed at noon. */
+const CHANGED = new Map([["/home/p/test/old.md", Date.parse("2026-11-01T00:00:00Z")]]);
+FILES.add("/home/p/test/old.md");
+const NOON = Date.parse("2026-11-17T12:00:00Z");
 const SCOPE = {
   projectsRoot: "/home/p",
   roots: ["/home/p", "/home/mem"],
-  isFile: (path: string) => FILES.has(path),
+  changedAt: (path: string) => (FILES.has(path) ? (CHANGED.get(path) ?? NOON) : null),
 };
 /** A trace's context, without reading shell commands or replies. */
 const T = { traceId: "tr1" };
@@ -238,6 +242,16 @@ describe("outputsInTrace, for shell commands and replies", () => {
     expect(
       outputsInReply("tr1", "[a](/projects/test/hello.txt) [b](/projects/test/hello.txt)", SCOPE),
     ).toHaveLength(1);
+  });
+
+  it("leaves out a file the reply only cites, unchanged since the turn began", () => {
+    const reply =
+      "I wrote [hello.txt](/projects/test/hello.txt) after reading [old.md](/projects/test/old.md).";
+    const found = outputsInTrace([{ type: "result", content: reply }], {
+      ...CTX,
+      startedAt: new Date(NOON - 60_000),
+    });
+    expect(found.map((output) => output.name)).toEqual(["hello.txt"]);
   });
 });
 

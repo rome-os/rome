@@ -7,6 +7,7 @@ import { getProfileMemoryDir, getProjectsRoot } from "../../paths.js";
 import {
   chatOutputBackfills,
   chatOutputs,
+  romeAgentMessages,
   romeAgentTraceBlocks,
   romeSessions,
   settings,
@@ -52,11 +53,12 @@ function localFiles(): OutputScope {
   return {
     projectsRoot: getProjectsRoot(),
     roots: [getProjectsRoot(), getProfileMemoryDir()],
-    isFile: (path) => {
+    changedAt: (path) => {
       try {
-        return statSync(path).isFile();
+        const stats = statSync(path);
+        return stats.isFile() ? stats.mtimeMs : null;
       } catch {
-        return false;
+        return null;
       }
     },
   };
@@ -102,6 +104,8 @@ const REMEMBERED_TRACES = 256;
  */
 export class OutputCalls {
   private byTrace = new Map<string, Map<string, ToolUseBlock>>();
+  /** When each trace's first stretch was stored: its turn's start. */
+  private startedAt = new Map<string, Date>();
   /** Whether this process has made sure when recording began is stored. */
   startStored = false;
 
@@ -123,6 +127,21 @@ export class OutputCalls {
     }
   }
 
+  /** Notes `at` as trace `messageId`'s start, unless an earlier stretch did. */
+  noteStart(messageId: string, at: Date): void {
+    if (this.startedAt.has(messageId)) return;
+    this.startedAt.set(messageId, at);
+    if (this.startedAt.size > REMEMBERED_TRACES) {
+      const oldest = this.startedAt.keys().next().value;
+      if (oldest !== undefined) this.startedAt.delete(oldest);
+    }
+  }
+
+  /** When trace `messageId` began, or null when this process did not see it begin. */
+  startOf(messageId: string): Date | null {
+    return this.startedAt.get(messageId) ?? null;
+  }
+
   find(messageId: string, toolUseId: string): ToolUseBlock | null {
     return this.byTrace.get(messageId)?.get(toolUseId) ?? null;
   }
@@ -131,6 +150,7 @@ export class OutputCalls {
   endIfDone(messageId: string, blocks: readonly unknown[]): void {
     if (blocks.some((block) => (block as { type?: unknown } | null)?.type === "turn_end")) {
       this.byTrace.delete(messageId);
+      this.startedAt.delete(messageId);
     }
   }
 }
@@ -160,6 +180,19 @@ function storedToolUse(db: Writer, messageId: string, toolUseId: string): ToolUs
 }
 
 /**
+ * When trace `messageId`'s message was stored, which its turn's start is: for
+ * a turn whose start this process did not see, as after a restart.
+ */
+function storedTraceStart(db: Writer, messageId: string): Date | null {
+  const row = db
+    .select({ createdAt: romeAgentMessages.createdAt })
+    .from(romeAgentMessages)
+    .where(eq(romeAgentMessages.id, messageId))
+    .get();
+  return row?.createdAt ?? null;
+}
+
+/**
  * Records the outputs a stretch of trace `messageId` made, in the transaction
  * that stores the stretch, so an output is recorded exactly when its trace is.
  * A result's call comes from the stretch itself or from `calls`, which earlier
@@ -180,11 +213,16 @@ export function recordTraceOutputs(
       calls.startStored = true;
     }
     calls.remember(place.messageId, blocks);
+    if (blocks.some((block) => (block as { type?: unknown } | null)?.type === "turn_start")) {
+      calls.noteStart(place.messageId, at);
+    }
     if (mayHoldOutputs(blocks)) {
       const found = outputsInTrace(blocks, {
         traceId: place.messageId,
         findUse: (id) => calls.find(place.messageId, id) ?? storedToolUse(tx, place.messageId, id),
         files: localFiles(),
+        startedAt:
+          calls.startOf(place.messageId) ?? storedTraceStart(tx, place.messageId) ?? undefined,
       });
       insertOutputs(tx, place, found, at);
     }
@@ -325,7 +363,7 @@ export class ChatOutputsRepository {
           );
           insertOutputs(tx, place, shown, message.createdAt);
         } else if (message.role === "trace") {
-          const found = this.traceOutputs(tx, message.id);
+          const found = this.traceOutputs(tx, message.id, message.createdAt);
           insertOutputs(tx, place, found, message.createdAt);
         }
       }
@@ -337,7 +375,7 @@ export class ChatOutputsRepository {
   }
 
   /** A stored trace's outputs, from its block rows. */
-  private traceOutputs(tx: DrizzleTx, messageId: string): OutputFound[] {
+  private traceOutputs(tx: DrizzleTx, messageId: string, startedAt: Date): OutputFound[] {
     const rows = tx
       .select({ content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
@@ -357,7 +395,7 @@ export class ChatOutputsRepository {
         // A block that does not parse made no output.
       }
     }
-    return outputsInTrace(blocks, { traceId: messageId, files: localFiles() });
+    return outputsInTrace(blocks, { traceId: messageId, files: localFiles(), startedAt });
   }
 
   /** Removes chats' outputs with the chats, in their delete's transaction. */
