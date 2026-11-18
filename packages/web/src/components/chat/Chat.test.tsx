@@ -57,6 +57,7 @@ const conciergeInsertText = rs.hoisted(() => rs.fn());
 // Which composer took the caret: the thread it sends into, or "" for the chat's own.
 const conciergeFocus = rs.hoisted(() => rs.fn());
 const touch = rs.hoisted(() => ({ coarse: false }));
+import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 rs.mock("@/hooks/use-coarse-pointer", () => ({ useCoarsePointer: () => touch.coarse }));
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
@@ -287,6 +288,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     <>
       <div
         data-testid="message-list"
+        data-output-links={useOutputLinks() ? "true" : ""}
         data-unread-from={unreadFrom ?? ""}
         data-writing={live.writing?.writing ? "true" : ""}
       >
@@ -1115,6 +1117,11 @@ describe("Chat agent identity", () => {
     renderChat(<Chat sessionId="session-1" />);
     await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
     expect(document.querySelector("[data-concierge-menu-caption]")).toBeNull();
+  });
+
+  it("opens a message's link to one of its files in Outputs, in an ordinary chat too", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByTestId("message-list").dataset.outputLinks).toBe("true");
   });
 
   it("offers the chat's project in its menu only when one was chosen", async () => {

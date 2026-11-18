@@ -3241,7 +3241,7 @@ export function Chat({
         <LiveReactionsProvider value={liveReactions}>
           <LiveMessageStatusesProvider value={liveStatuses}>
             <LiveTaskCardsProvider value={liveCards}>
-              <OutputLinksContext.Provider value={concierge ? outputLinks : null}>
+              <OutputLinksContext.Provider value={outputLinks}>
                 {page}
                 {outputsPane.sheet}
               </OutputLinksContext.Provider>
