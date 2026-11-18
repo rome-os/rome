@@ -80,7 +80,7 @@ struct VoiceInputWaveform: View {
         TimelineView(.animation(minimumInterval: reduceMotion ? 0.2 : nil)) { timeline in
             Canvas { context, size in
                 let now = timeline.date
-                bars.advance(to: now, meter: meter, steps: steps)
+                bars.advance(to: now, meter: meter, steps: steps, keeping: Self.capacity(width: size.width) + 1)
                 Self.draw(bars.values, in: &context, size: size, slide: reduceMotion ? 0 : bars.slide(at: now))
             }
         }
@@ -100,7 +100,7 @@ struct VoiceInputWaveform: View {
     /// in from the right, so the row moves smoothly between steps.
     static func draw(_ values: [Float], in context: inout GraphicsContext, size: CGSize, slide: CGFloat = 0) {
         let pitch = barWidth + gap
-        let capacity = max(1, Int((size.width / pitch).rounded(.up)))
+        let capacity = capacity(width: size.width)
         // A row of dots shifted by a whole step looks the same, so silence
         // holds one steady image instead of sliding.
         let slide = values.suffix(capacity + 1).allSatisfy { $0 == 0 } ? 0 : slide
@@ -117,6 +117,11 @@ struct VoiceInputWaveform: View {
                 context.fill(Path(ellipseIn: rect), with: .color(Palette.sub))
             }
         }
+    }
+
+    /// How many steps fit across a row this wide.
+    static func capacity(width: CGFloat) -> Int {
+        max(1, Int((width / (barWidth + gap)).rounded(.up)))
     }
 
     /// The bars drawn so far, oldest first. A reference type, so that stepping
@@ -137,8 +142,9 @@ struct VoiceInputWaveform: View {
         private var nextDue: Date?
 
         /// Takes each step of the meter due by `now`, `steps` readings a bar,
-        /// and adds a bar for the loudest of each. Silence adds a dot.
-        func advance(to now: Date, meter: VoiceLevelMeter, steps: Int) {
+        /// and adds a bar for the loudest of each. Silence adds a dot. Keeps
+        /// the newest `keeping` bars, enough to fill the row.
+        func advance(to now: Date, meter: VoiceLevelMeter, steps: Int, keeping: Int) {
             let period = 0.05 * Double(steps)
             var due = nextDue ?? now
             // A millisecond's slack for timestamps that land a hair early.
@@ -153,18 +159,16 @@ struct VoiceInputWaveform: View {
                     nextDue = now
                     return
                 }
-                add(peak, steps: steps)
+                add(peak, keeping: keeping)
                 steppedAt = due
                 due += period
             }
             nextDue = due
         }
 
-        private func add(_ peak: Float, steps: Int) {
+        private func add(_ peak: Float, keeping: Int) {
             values.append(peak > VoiceInputWaveform.silence ? peak : 0)
-            // The last 5 s, whatever the width: each value holds `steps` of 50 ms.
-            let kept = 100 / steps
-            if values.count > kept { values.removeFirst(values.count - kept) }
+            if values.count > keeping { values.removeFirst(values.count - keeping) }
         }
     }
 }

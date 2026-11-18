@@ -491,8 +491,10 @@ final class VoiceInputTests: XCTestCase {
     /// Pixels two photographs may differ by and still look the same: one point at 3x.
     static let pixelSlack = 9
 
-    /// Rule 14 on iOS: while listening, the message field moves with sound, and from 5 s into a
-    /// silence it shows no spikes or curves. XCUITest photographs a second or so apart, with no
+    /// Rule 14 on iOS: while listening, the message field moves with sound, and once the last sound
+    /// has scrolled off the row, silence shows no spikes or curves. The waveform keeps as many
+    /// steps as the row holds, so that takes about 2 s on a phone and longer with Reduce Motion,
+    /// which this test does not turn on. XCUITest photographs a second or so apart, with no
     /// clock shared with the recording, so the test plays cycles of 8 s of quiet room noise and
     /// 3 s of sound, and scores what it sees. The steady silent look is the photograph that
     /// repeats most, and every cycle must show it at least once and something else at least
