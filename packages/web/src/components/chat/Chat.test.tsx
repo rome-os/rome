@@ -1757,6 +1757,39 @@ describe("Chat history paging", () => {
     expect(stackOf("user-1")?.dataset.total).toBe("6");
   });
 
+  it("applies a message that arrives while the first read decides what the chat is, once it is shown", async () => {
+    let answer!: (page: ChatMessagePage) => void;
+    rs.mocked(listSessionMessagePage).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderChat(<Chat sessionId="session-1" loadReadMark={() => Promise.resolve(null)} />);
+    // Nothing is drawn yet, but the live subscription is already there.
+    expect(document.querySelector("[data-chat-pending]")).not.toBeNull();
+    await waitFor(() => expect(MockEventSource.instances[0]).toBeTruthy());
+    const eventSource = MockEventSource.instances[0]!;
+
+    act(() => eventSource.emit("message_insert", { ...userMessage(7), chatThreadId: "user-7" }));
+    await act(async () =>
+      answer(conciergePage([{ ...userMessage(3), chatThreadId: "user-3" }], null)),
+    );
+
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-7"]));
+    // The subscription was never torn down for the change from waiting to drawn.
+    expect(MockEventSource.instances).toHaveLength(1);
+  });
+
+  it("draws the chat, with its composer, when its first read fails, and takes the list's word for what it is", async () => {
+    rs.mocked(listSessionMessagePage).mockRejectedValueOnce(new Error("offline"));
+    renderChat(<Chat sessionId="session-1" loadReadMark={() => Promise.resolve(null)} />);
+
+    await waitFor(() => expect(document.querySelector("[data-chat-pending]")).toBeNull());
+    expect(screen.getByTestId("chat-composer")).toBeTruthy();
+    expect(screen.getByTestId("message-list")).toBeTruthy();
+  });
+
   it("takes a reply the owner sent into a thread, which is read already, as one more reply", async () => {
     rs.mocked(listSessionMessagePage).mockResolvedValueOnce(conciergePage([root()], null));
     renderChat(concierge());
@@ -3086,6 +3119,27 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat draft that may be a Concierge chat", () => {
+  it("keeps its composer mounted through the first send, though the first read of the new chat is slow", async () => {
+    rs.mocked(createSession).mockResolvedValueOnce({ id: "created-1" } as Awaited<
+      ReturnType<typeof createSession>
+    >);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    // The new chat's first read never lands while the test looks.
+    rs.mocked(listSessionMessagePage).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat emptyState={<p>Empty home</p>} loadReadMark={() => Promise.resolve(null)} />);
+    const composer = screen.getByTestId("chat-composer");
+
+    fireEvent.click(screen.getByTestId("send-button"));
+
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalled());
+    // The draft knows what it is, so nothing is held back for the read.
+    expect(document.querySelector("[data-chat-pending]")).toBeNull();
+    expect(screen.getByTestId("chat-composer")).toBe(composer);
   });
 });
 

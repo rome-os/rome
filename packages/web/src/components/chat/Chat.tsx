@@ -578,8 +578,12 @@ export function Chat({
   // kinds of chat reads this one value, never the prop.
   const concierge = listedConcierge || (answered && answeredMode?.concierge === true);
   // A chat that may be a Concierge chat draws nothing until its first read says
-  // which it is, so the first frame is already the final one.
-  const modePending = !!mainSessionId && !listedConcierge && mayBeConcierge && !answered;
+  // which it is, so the first frame is already the final one. A chat this one
+  // made from its draft is not asked: the draft knows what it is, and drawing
+  // nothing would unmount the composer on the first send.
+  const madeHere = createdSessionId !== null && mainSessionId === createdSessionId;
+  const modePending =
+    !!mainSessionId && !listedConcierge && mayBeConcierge && !answered && !madeHere;
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -1790,7 +1794,12 @@ export function Chat({
         }
       } catch {
         // Leave the session unmarked so callers (auto-load + post-stream
-        // refresh) can retry on the next trigger.
+        // refresh) can retry on the next trigger. The chat is not held back for
+        // a read that failed: it is what is known of it, a Concierge chat when
+        // the list says so, and the list arriving later still corrects that.
+        setAnsweredMode((prev) =>
+          prev?.session === id ? prev : { session: id, concierge: listedConcierge },
+        );
       }
     },
     [
@@ -1800,6 +1809,7 @@ export function Chat({
       noteOpened,
       noteThreads,
       ensureThreadWhole,
+      listedConcierge,
       mayBeConcierge,
       pageTurns,
       setOlderCursor,
@@ -3240,23 +3250,27 @@ export function Chat({
     </>
   );
 
+  // The live subscriptions stay mounted from the first render, while the chat
+  // waits for its first read too, so an event that comes between that read and
+  // the first frame is applied to the messages and not lost.
+  const sessionEvents = sessionEventIds.map((sid) => (
+    <ChatSessionEvents
+      key={sid}
+      sessionId={sid}
+      onMessageInsert={handleMessageInsert}
+      onMessageReaction={handleMessageReaction}
+      onMessageStatus={handleMessageStatus}
+      onChatCardSettled={handleChatCardSettled}
+      onSessionName={handleSessionName}
+      onSessionRunning={handleSessionRunning}
+      onMessageWriting={handleMessageWriting}
+      onReconnect={handleSessionEventsReconnect}
+    />
+  ));
+
   const page = (
     <WidgetHostContext.Provider value={widgetHost}>
       <TooltipProvider delayDuration={150}>
-        {sessionEventIds.map((sid) => (
-          <ChatSessionEvents
-            key={sid}
-            sessionId={sid}
-            onMessageInsert={handleMessageInsert}
-            onMessageReaction={handleMessageReaction}
-            onMessageStatus={handleMessageStatus}
-            onChatCardSettled={handleChatCardSettled}
-            onSessionName={handleSessionName}
-            onSessionRunning={handleSessionRunning}
-            onMessageWriting={handleMessageWriting}
-            onReconnect={handleSessionEventsReconnect}
-          />
-        ))}
         <div
           className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
           {...fileDrop.dropAreaProps}
@@ -3617,28 +3631,34 @@ export function Chat({
   if (modePending) {
     // Nothing of either kind of chat until the first read has answered.
     return (
-      <div
-        data-chat-pending
-        aria-busy
-        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
-      />
+      <>
+        {sessionEvents}
+        <div
+          data-chat-pending
+          aria-busy
+          className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
+        />
+      </>
     );
   }
 
   return (
-    <ReplyDraftProvider value={replyDraft}>
-      <MessageSharingContext.Provider value={shareMessageTurn}>
-        <LiveReactionsProvider value={liveReactions}>
-          <LiveMessageStatusesProvider value={liveStatuses}>
-            <LiveTaskCardsProvider value={liveCards}>
-              <OutputLinksContext.Provider value={outputLinks}>
-                {page}
-                {outputsPane.sheet}
-              </OutputLinksContext.Provider>
-            </LiveTaskCardsProvider>
-          </LiveMessageStatusesProvider>
-        </LiveReactionsProvider>
-      </MessageSharingContext.Provider>
-    </ReplyDraftProvider>
+    <>
+      {sessionEvents}
+      <ReplyDraftProvider value={replyDraft}>
+        <MessageSharingContext.Provider value={shareMessageTurn}>
+          <LiveReactionsProvider value={liveReactions}>
+            <LiveMessageStatusesProvider value={liveStatuses}>
+              <LiveTaskCardsProvider value={liveCards}>
+                <OutputLinksContext.Provider value={outputLinks}>
+                  {page}
+                  {outputsPane.sheet}
+                </OutputLinksContext.Provider>
+              </LiveTaskCardsProvider>
+            </LiveMessageStatusesProvider>
+          </LiveReactionsProvider>
+        </MessageSharingContext.Provider>
+      </ReplyDraftProvider>
+    </>
   );
 }
