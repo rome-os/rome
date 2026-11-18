@@ -93,6 +93,7 @@ Rome Cloud provides the transcription service behind dictation in message fields
 - `GET /api/voice-input` names the provider and its host from `GET /v1/transcription/provider`, which mints no credential. When Rome Cloud cannot be reached or has no provider set up, it says so and names none. Settings never names the provider or its host: it shows a Voice input row only when Rome Cloud cannot serve voice input, saying why.
 - The audio goes from the browser to the guardian's own Rome and from there to the provider. It never passes through Rome Cloud, and Rome keeps none of it.
 - When the guardian turns on voice terms, the instance also sends the list from `voice-terms.md` to the provider. Rome Cloud sees neither the audio nor the terms. The list is off by default. See the [file format](../../packages/core/memory.example/README.md#voice-terms-memoryvoice-termsmd).
+- The instance drops filler sounds that stand alone, such as 嗯, 呃, um and uh, before the text reaches the message field. Words that hold the same characters, such as 好啊 or umbrella, stay.
 - A refusal carries a reason code, such as `voice_input_rate_limited`. The message field shows it and keeps the words heard so far.
 - Rome Cloud allows voice input per account. For an account it does not allow, both routes answer 403 `voice_input_not_allowed`, and the dashboard shows no voice control and no voice input row in Settings.
 - An instance that is not signed in has no voice control. One whose credential Rome Cloud refuses asks the guardian to sign in again.
