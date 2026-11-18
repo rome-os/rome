@@ -6,7 +6,13 @@
 import { replyContextLine } from "./reply-context.js";
 
 /** About how many tokens of the chat's recent messages a successor's first turn carries. */
-export const HANDOFF_RECENT_TOKENS = 8_000;
+export const HANDOFF_RECENT_TOKENS = 16_000;
+
+/** About how many tokens of one agent message a handoff keeps; the guardian's are never cut. */
+export const HANDOFF_AGENT_MESSAGE_TOKENS = 1_500;
+
+/** Ends an agent message that was cut to {@link HANDOFF_AGENT_MESSAGE_TOKENS}. */
+export const HANDOFF_CUT_MARKER = "… [cut; the full reply is in the chat history]";
 
 /** What a message's line costs besides its text: its time and sender. */
 const LINE_TOKENS = 12;
@@ -43,6 +49,8 @@ export interface RecentMessage {
   readonly senderName: string | null;
   readonly text: string;
   readonly at: Date;
+  /** True for a message the agent said, which a handoff may cut; absent for the guardian's and for a notice, whose author is not certain. */
+  readonly agent?: boolean;
 }
 
 /**
@@ -133,10 +141,26 @@ export function lightHandoffCap(contextLimitTokens: number): number {
   return Math.floor(contextLimitTokens / 2);
 }
 
+/** The first `maxTokens` tokens of `text`, by the same estimate as {@link estimateTokens}. */
+function headWithin(text: string, maxTokens: number): string {
+  let ascii = 0;
+  let other = 0;
+  let end = 0;
+  for (const char of text) {
+    if (char.charCodeAt(0) < 0x80) ascii += 1;
+    else other += 1;
+    if (Math.ceil(ascii / 4) + other > maxTokens) break;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
+
 /**
  * The latest of `messages` (oldest first) that fit in `maxTokens`, oldest
- * first, and how many earlier ones were left out. The newest message is kept
- * even when it alone is over the cap, cut to fit.
+ * first, and how many earlier ones were left out. The guardian's messages are
+ * kept whole; an agent's message over
+ * {@link HANDOFF_AGENT_MESSAGE_TOKENS} is cut to its start and marked. The
+ * newest message is kept even when it alone is over the cap, cut to fit.
  */
 export function recentWithin(
   messages: readonly RecentMessage[],
@@ -146,7 +170,13 @@ export function recentWithin(
   let used = 0;
   let first = messages.length;
   while (first > 0) {
-    const message = messages[first - 1];
+    let message = messages[first - 1];
+    if (message.agent && estimateTokens(message.text) > HANDOFF_AGENT_MESSAGE_TOKENS) {
+      message = {
+        ...message,
+        text: `${headWithin(message.text, HANDOFF_AGENT_MESSAGE_TOKENS)}${HANDOFF_CUT_MARKER}`,
+      };
+    }
     const cost = estimateTokens(message.text) + LINE_TOKENS;
     if (used + cost > maxTokens) {
       if (shown.length === 0) {

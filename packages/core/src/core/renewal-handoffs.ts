@@ -122,7 +122,16 @@ export function recentMessagesOf(
     const senderName = row.role === "user" && ownerLabel ? ownerLabel : SENDER[row.role];
     if (!senderName || (exceptTurnId && row.turnId === exceptTurnId)) return [];
     const text = messageContentText(row.content);
-    return text ? [{ senderName, text, at: row.createdAt }] : [];
+    return text
+      ? [
+          {
+            senderName,
+            text,
+            at: row.createdAt,
+            ...(row.role === "assistant" ? { agent: true } : {}),
+          },
+        ]
+      : [];
   });
 }
 
