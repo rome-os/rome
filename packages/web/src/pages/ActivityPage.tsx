@@ -916,7 +916,6 @@ export default function ActivityPage({
         ) : sorted.length === 0 ? (
           <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-12 text-center">
             <p className="text-ui text-muted-foreground">{t("page.empty.title")}</p>
-            <p className="mt-1 text-aux text-subtle-foreground">{t("page.empty.hint")}</p>
           </div>
         ) : (
           <>

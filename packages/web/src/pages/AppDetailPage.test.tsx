@@ -462,9 +462,7 @@ describe("AppDetailPage manage section", () => {
     renderPage("weather");
 
     expect(
-      await screen.findByText(
-        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
-      ),
+      await screen.findByText("Publishes v1.0.0 to the Rome App Store. Latest published: v1.0.0."),
     ).toBeTruthy();
   });
 
@@ -479,9 +477,7 @@ describe("AppDetailPage manage section", () => {
 
     const manage = await screen.findByRole("region", { name: "Manage" });
     expect(
-      await within(manage).findByText(
-        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
-      ),
+      await within(manage).findByText("Publishes v1.0.0 to the Rome App Store. Not published yet."),
     ).toBeTruthy();
 
     await user.click(within(manage).getByRole("button", { name: "Publish" }));
@@ -490,7 +486,7 @@ describe("AppDetailPage manage section", () => {
 
     expect(
       await within(manage).findByText(
-        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+        "Publishes v1.0.0 to the Rome App Store. Latest published: v1.0.0.",
       ),
     ).toBeTruthy();
   });
@@ -502,9 +498,7 @@ describe("AppDetailPage manage section", () => {
 
     renderPage("weather");
 
-    expect(
-      await screen.findByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Publishes v1.0.0 to the Rome App Store.")).toBeTruthy();
   });
 
   it.each([
@@ -526,9 +520,7 @@ describe("AppDetailPage manage section", () => {
       ),
     );
     await waitFor(() => expect(client.isFetching()).toBe(0));
-    expect(
-      screen.getByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
-    ).toBeTruthy();
+    expect(screen.getByText("Publishes v1.0.0 to the Rome App Store.")).toBeTruthy();
   });
 
   it("re-reads the App Store on revisit after a publish made outside the dashboard", async () => {
@@ -557,9 +549,7 @@ describe("AppDetailPage manage section", () => {
     );
     try {
       expect(
-        await screen.findByText(
-          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
-        ),
+        await screen.findByText("Publishes v1.0.0 to the Rome App Store. Not published yet."),
       ).toBeTruthy();
 
       await user.click(screen.getByRole("link", { name: "Leave details" }));
@@ -572,14 +562,12 @@ describe("AppDetailPage manage section", () => {
       });
       await user.click(screen.getByRole("link", { name: "Reopen details" }));
       // While the fresh read is in flight, the first visit's answer must not show.
-      expect(
-        await screen.findByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
-      ).toBeTruthy();
+      expect(await screen.findByText("Publishes v1.0.0 to the Rome App Store.")).toBeTruthy();
       releaseStoreRead();
 
       expect(
         await screen.findByText(
-          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+          "Publishes v1.0.0 to the Rome App Store. Latest published: v1.0.0.",
         ),
       ).toBeTruthy();
       expect(screen.queryByText(/Not published yet/)).toBeNull();
@@ -598,9 +586,7 @@ describe("AppDetailPage manage section", () => {
     renderPage("weather");
 
     expect(
-      await screen.findByText(
-        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
-      ),
+      await screen.findByText("Publishes v1.0.0 to the Rome App Store. Not published yet."),
     ).toBeTruthy();
 
     storeVersionByAppId.weather = "1.0.0";
@@ -609,7 +595,7 @@ describe("AppDetailPage manage section", () => {
 
       expect(
         await screen.findByText(
-          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+          "Publishes v1.0.0 to the Rome App Store. Latest published: v1.0.0.",
         ),
       ).toBeTruthy();
     } finally {

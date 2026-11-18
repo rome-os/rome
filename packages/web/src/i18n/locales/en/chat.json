@@ -79,7 +79,7 @@
     },
     "topicEmpty": {
       "title": "Start an ongoing topic",
-      "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
+      "description": "Alerts and tasks here show up only in this chat.",
       "starters": {
         "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
         "work": "Keep track of work here: project progress, PRs and meetings",
@@ -259,7 +259,7 @@
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",
       "commentPlaceholder": "Optional: what went wrong, or what was great?",
-      "submit": "Submit",
+      "submit": "Send feedback",
       "submitting": "Submitting…",
       "submitFailed": "Couldn't submit feedback",
       "recorded": "Feedback recorded"
@@ -310,12 +310,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "Reconnect {{provider}}",
-      "description": "Your {{provider}} login has expired or was revoked. Reconnect it in AI Tools, then try your message again.",
+      "description": "Your {{provider}} login has expired or was revoked. Send your message again after reconnecting.",
       "action": "Reconnect"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} is not signed in",
-      "description": "Sign in to {{provider}} in AI Tools, then try your message again.",
+      "description": "Send your message again after signing in.",
       "action": "Go to sign in"
     },
     "providerQuotaExhausted": {

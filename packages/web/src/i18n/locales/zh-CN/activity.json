@@ -5,8 +5,7 @@
     "refresh": "刷新",
     "loading": "加载中…",
     "empty": {
-      "title": "暂无动态",
-      "hint": "审批、动作执行和 webhook 回调都会显示在这里"
+      "title": "暂无动态"
     },
     "pendingCallout": {
       "single": "{{count}} 个待审批",

@@ -1140,7 +1140,7 @@ describe("AppsIndexPage ghost tiles", () => {
 
     await user.click(await screen.findByRole("button", { name: "Browse store" }));
 
-    expect(await screen.findByRole("dialog", { name: "App store" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "App Store" })).toBeTruthy();
   });
 
   it("appends the ghost tile after the real tiles, and hides it while searching", async () => {
@@ -1185,7 +1185,7 @@ describe("AppsIndexPage in the Mac app's title bar", () => {
     await screen.findByText("Weather");
     const bar = within(screen.getByTestId("titlebar"));
     expect(bar.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
-    expect(bar.getByRole("button", { name: "App store" })).toBeTruthy();
+    expect(bar.getByRole("button", { name: "App Store" })).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(document.querySelector('[data-slot="page-header"]')).toBeNull();
   });

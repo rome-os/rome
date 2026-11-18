@@ -721,7 +721,7 @@ describe("ChatComponent empty home", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Draft from Cloud");
 
     await user.click(screen.getByRole("button", { name: "Cloud App Store" }));
-    expect(screen.getByTitle("App store").getAttribute("src")).toBe(
+    expect(screen.getByTitle("App Store").getAttribute("src")).toBe(
       "https://romeos.cc/store/rome/example",
     );
     await user.click(screen.getByRole("button", { name: "Cancel" }));

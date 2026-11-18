@@ -312,16 +312,6 @@
     "emptyAppsTitle": "No apps open",
     "emptyAppsDescription": "Open an app to use it alongside this chat."
   },
-  "connectChatApp": {
-    "title": "Connect your chat app",
-    "description": "Talk to your agent from Telegram, WhatsApp, Discord, or WeChat.",
-    "dismiss": "Dismiss"
-  },
-  "visitAppStore": {
-    "title": "Visit the app store",
-    "description": "Discover AI-native apps built for Rome.",
-    "dismiss": "Dismiss"
-  },
   "feedback": {
     "open": "Feedback",
     "title": "Share feedback",
