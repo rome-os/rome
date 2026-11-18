@@ -34,9 +34,9 @@ export interface ChatThreads {
   titles: ReadonlyMap<string, string>;
   /** The root of the thread the transcript is filtered to, or null when it shows every message. */
   focus: string | null;
-  /** Every thread that has replies, by its root. Empty where the timeline shows each message itself. */
+  /** Every thread that has replies, by its root, but the one in focus. Empty where the timeline shows each message itself. */
   stacks: ReadonlyMap<string, ThreadStack>;
-  /** The replies the main timeline leaves out for their thread's stack. Empty with a thread in focus. */
+  /** The replies the main timeline leaves out for their thread's stack. Those of the thread in focus are shown. */
   stacked: ReadonlySet<string>;
 }
 
@@ -152,7 +152,9 @@ function stacksOf(
  * What a loaded timeline shows of its chat threads, with the thread in `focus`.
  * Unless `stacking` is off, as in a share, where a message is shown itself
  * and not as a stack, the main timeline leaves the replies out for stacks. A thread
- * in focus shows its replies itself, so then there are no stacks.
+ * in focus shows its own replies in place of its stack. The other threads'
+ * replies stay out: the focus hides their threads anyway, so drawing them
+ * would only be work, and a flash while the chat changes.
  */
 export function chatThreadsOf(
   messages: readonly ThreadTimelineMessage[],
@@ -160,10 +162,13 @@ export function chatThreadsOf(
   stacking = true,
 ): ChatThreads {
   const { roots, titles } = threadsOf(messages);
-  const { stacks, stacked } =
-    stacking && focus === null
-      ? stacksOf(messages, roots)
-      : { stacks: new Map<string, ThreadStack>(), stacked: new Set<string>() };
+  const { stacks, stacked } = stacking
+    ? stacksOf(messages, roots)
+    : { stacks: new Map<string, ThreadStack>(), stacked: new Set<string>() };
+  if (focus !== null) {
+    stacks.delete(focus);
+    for (const id of stacked) if (roots.get(id) === focus) stacked.delete(id);
+  }
   return { roots, titles, focus, stacks, stacked };
 }
 

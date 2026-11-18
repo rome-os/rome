@@ -1,15 +1,13 @@
 // Focusing a Concierge chat on one chat thread, in place
-// (docs/domains/chats.md#chat-thread). The messages outside the thread fold
-// away and back over MOTION_MS while the message the reader clicked stays where
-// it is on screen. Which messages are outside is ConciergeTranscript's rule
-// (`focusHidden`); this folds them and keeps the position.
+// (docs/domains/chats.md#chat-thread). The chat changes in one view transition,
+// the old picture fading into the new one, while the message the reader clicked
+// stays where it is on screen. Which messages are outside is
+// ConciergeTranscript's rule (`focusHidden`); this switches and keeps the position.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import type { FocusedThread } from "./reply-draft";
-
-const MOTION_MS = 200;
 
 /** A thread in focus: the message it is held on, its name, and its root. */
 export type ThreadFocus = FocusedThread;
@@ -17,9 +15,9 @@ export type ThreadFocus = FocusedThread;
 export interface Env {
   scroller: HTMLElement;
   content: HTMLElement;
-  /** Blank kept above the messages, when the scroll cannot absorb what folded above the anchor. */
+  /** Blank kept above the messages, when the scroll cannot absorb what left above the anchor. */
   top: HTMLElement;
-  /** Blank kept below them, so the scroll is never clamped while rows fold. */
+  /** Blank kept below them, so the scroll is never clamped while the chat changes. */
   bottom: HTMLElement;
 }
 
@@ -30,7 +28,7 @@ const setSpace = (el: HTMLElement, height: number) => {
 const yOf = ({ scroller }: Env, el: HTMLElement) =>
   el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 
-/** The box of message `id`, the unit a thread folds. */
+/** The box of message `id`, the unit a thread hides. */
 function entryOf(scroller: HTMLElement, id: string): HTMLElement | null {
   const entries = scroller.querySelectorAll<HTMLElement>("[data-thread-entry]");
   return [...entries].find((entry) => entry.dataset.threadEntry === id) ?? null;
@@ -86,65 +84,6 @@ function trimBottom(env: Env, anchor: HTMLElement) {
 }
 
 /**
- * Fades and folds `rows` away (or back, with `away` false) over `ms`, easing
- * out, while `anchor` stays `y` below the scroller's top. The rows keep the
- * motion's inline styles when it resolves, for `release`. A row's own gap to
- * its neighbour folds with it.
- */
-function fold(
-  env: Env,
-  rows: HTMLElement[],
-  away: boolean,
-  ms: number,
-  anchor: HTMLElement | null,
-  y: number,
-) {
-  const parts = rows.map((row) => ({
-    row,
-    height: row.getBoundingClientRect().height,
-    gap: Number.parseFloat(getComputedStyle(row.parentElement ?? row).rowGap) || 0,
-    margin: Number.parseFloat(getComputedStyle(row).marginBottom) || 0,
-  }));
-  // How far folded the rows are: 0 shown, 1 gone.
-  const apply = (folded: number) => {
-    for (const { row, height, gap, margin } of parts) {
-      row.style.overflow = "hidden";
-      row.style.height = `${height * (1 - folded)}px`;
-      row.style.opacity = String(1 - Math.min(1, folded * 1.4));
-      row.style.marginBottom = `${margin + (-gap - margin) * folded}px`;
-    }
-    if (anchor) pin(env, anchor, y);
-    hold(env);
-  };
-  return new Promise<void>((resolve) => {
-    if (ms === 0) {
-      apply(away ? 1 : 0);
-      resolve();
-      return;
-    }
-    apply(away ? 0 : 1);
-    const start = performance.now();
-    const step = (now: number) => {
-      const t = Math.min(1, Math.max(0, (now - start) / ms));
-      const eased = 1 - (1 - t) ** 3;
-      apply(away ? eased : 1 - eased);
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
-    };
-    requestAnimationFrame(step);
-  });
-}
-
-function release(rows: HTMLElement[]) {
-  for (const { style } of rows) {
-    style.removeProperty("height");
-    style.removeProperty("opacity");
-    style.removeProperty("margin-bottom");
-    style.removeProperty("overflow");
-  }
-}
-
-/**
  * The message to hold still while the focus closes: the one it was opened
  * from while that is on screen, else the first of the thread's messages that is.
  */
@@ -164,6 +103,44 @@ function anchorOf(env: Env, focus: ThreadFocus): HTMLElement | null {
 const reducedMotion = () =>
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => void) => { finished: Promise<void> };
+};
+
+/**
+ * Makes `update`, a change of what the chat shows, as one view transition:
+ * the browser fades the old picture into the new one, and no frame lays out
+ * the transcript for the motion. Until it ends `keep` runs every frame, and
+ * once more after, because what is shown again can still settle after the
+ * update, such as a long message that measures itself once it shows, and the
+ * held message must not move with it. Without view transitions, or with
+ * reduced motion, the change is at once.
+ */
+export async function transition(update: () => void, keep: () => void) {
+  const start = (document as ViewTransitionDocument).startViewTransition?.bind(document);
+  if (!start || reducedMotion()) {
+    update();
+    keep();
+    return;
+  }
+  let running = true;
+  const tick = () => {
+    if (!running) return;
+    keep();
+    requestAnimationFrame(tick);
+  };
+  const motion = start(() => {
+    update();
+    // The browser takes the new picture right after this: hold the message in it.
+    keep();
+    requestAnimationFrame(tick);
+  });
+  // A transition the browser skips, as for a newer one, still made the update.
+  await motion.finished.catch(() => {});
+  running = false;
+  keep();
+}
+
 /**
  * The chat thread a Concierge chat is focused on, and the motion that takes it
  * there and back. `scroller` is the message scroller and `content` the
@@ -171,11 +148,11 @@ const reducedMotion = () =>
  * scroller around the transcript. `resetKey` ends a focus without motion when
  * it changes, as when another chat opens.
  *
- * `focus` is the reader's: it is null as soon as a close starts. `shown`
- * is what the transcript still filters to, and outlasts `focus` by the motion.
- * `open` does nothing while a motion runs or a thread is already in focus.
- * `close` waits for a motion that runs, then closes; with `instant` it skips
- * its own motion, as for a jump to a message the focus hides.
+ * `focus` is the reader's, and `shown` is what the transcript filters to; both
+ * change in the same render. `open` does nothing while a motion runs or a
+ * thread is already in focus. `close` waits for a motion that runs, then
+ * closes; with `instant` it skips its own motion, as for a jump to a message
+ * the focus hides.
  */
 export function useThreadFocus({
   scroller,
@@ -213,22 +190,26 @@ export function useThreadFocus({
       try {
         const before = entryOf(env.scroller, next.thread);
         const y = before ? yOf(env, before) : 0;
-        // The rows go on showing until the motion folds them. The browser's own
-        // scroll anchoring would move the scroll too, against `pin`.
+        // The browser's own scroll anchoring would move the scroll too, against `pin`.
         env.scroller.style.overflowAnchor = "none";
-        env.content.setAttribute("data-thread-motion", "");
         hold(env);
-        setSpace(env.bottom, Math.max(spaceOf(env.bottom), env.scroller.clientHeight));
-        flushSync(() => {
-          setFocus(next);
-          setShown(next.root);
-        });
-        // The render regrouped the transcript: hold the message as it is now drawn.
-        const anchor = liveEntry(env.scroller, next.thread, next.root);
-        const rows = [...env.content.querySelectorAll<HTMLElement>("[data-thread-out]")];
-        await fold(env, rows, true, reducedMotion() ? 0 : MOTION_MS, anchor, y);
-        env.content.removeAttribute("data-thread-motion");
-        release(rows);
+        let anchor: HTMLElement | null = null;
+        await transition(
+          () => {
+            // A blank below, so holding the message never runs out of scroll.
+            setSpace(env.bottom, Math.max(spaceOf(env.bottom), env.scroller.clientHeight));
+            flushSync(() => {
+              setFocus(next);
+              setShown(next.root);
+            });
+            // The render regrouped the transcript: hold the message as it is now drawn.
+            anchor = liveEntry(env.scroller, next.thread, next.root);
+          },
+          () => {
+            if (anchor) pin(env, anchor, y);
+            hold(env);
+          },
+        );
         if (anchor) trimBottom(env, anchor);
       } finally {
         env.scroller.style.overflowAnchor = "";
@@ -254,23 +235,32 @@ export function useThreadFocus({
         const held = anchor?.dataset.threadEntry;
         const y = anchor ? yOf(env, anchor) : 0;
         env.scroller.style.overflowAnchor = "none";
-        env.content.setAttribute("data-thread-motion", "");
         hold(env);
-        setFocus(null);
-        setSpace(env.bottom, Math.max(spaceOf(env.bottom), env.scroller.clientHeight));
-        const rows = [...env.content.querySelectorAll<HTMLElement>("[data-thread-out]")];
-        await fold(env, rows, false, instant || reducedMotion() ? 0 : MOTION_MS, anchor, y);
-        flushSync(() => setShown(null));
-        env.content.removeAttribute("data-thread-motion");
-        release(rows);
+        let kept: HTMLElement | null = null;
+        const update = () => {
+          flushSync(() => {
+            setFocus(null);
+            setShown(null);
+          });
+          setSpace(env.top, 0);
+          // The blank below stays while the chat settles, so holding the
+          // message never runs out of scroll.
+          setSpace(env.bottom, Math.max(spaceOf(env.bottom), env.scroller.clientHeight));
+          // Closing regrouped the transcript, so the box held before may be
+          // gone. A reply folded into its root's stack is held by the root.
+          kept = liveEntry(env.scroller, held, focused.root);
+          kept?.querySelector<HTMLElement>("[data-thread-label]")?.focus({ preventScroll: true });
+        };
+        const keep = () => {
+          if (kept) pin(env, kept, y);
+          hold(env);
+        };
+        if (instant) update();
+        else await transition(update, keep);
         // The chat is whole again: no blank above or below.
-        setSpace(env.top, 0);
         setSpace(env.bottom, 0);
-        // Closing regrouped the transcript again, so the box held during the
-        // motion may be gone. A reply folded into its root's stack is held by the root.
-        const kept = liveEntry(env.scroller, held, focused.root);
-        if (kept) env.scroller.scrollTop += yOf(env, kept) - y;
-        kept?.querySelector<HTMLElement>("[data-thread-label]")?.focus({ preventScroll: true });
+        keep();
+        setSpace(env.top, 0);
       } finally {
         env.scroller.style.overflowAnchor = "";
         moving.current = false;

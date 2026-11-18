@@ -12,7 +12,7 @@ import { buildRows } from "../chat-view";
 import type { BlockActions, LivePreview } from "../MessageList";
 import { ChatThreadsProvider, useChatThreadsValue } from "./chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply-draft";
-import { type Env, liveEntry, pin, useThreadFocus } from "./use-thread-focus";
+import { type Env, liveEntry, pin, transition, useThreadFocus } from "./use-thread-focus";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -37,7 +37,27 @@ afterEach(() => {
   cleanup();
   reduced = false;
   rs.unstubAllGlobals();
+  delete (document as { startViewTransition?: unknown }).startViewTransition;
 });
+
+/**
+ * A browser with view transitions: each runs its update at once, as the
+ * browser does once it has the old picture, and ends when `end` says.
+ */
+function viewTransitions() {
+  const ends: Array<() => void> = [];
+  const start = rs.fn((update: () => void) => {
+    update();
+    return { finished: new Promise<void>((resolve) => ends.push(resolve)) };
+  });
+  Object.defineProperty(document, "startViewTransition", { value: start, configurable: true });
+  return {
+    start,
+    end: () => {
+      for (const end of ends.splice(0)) end();
+    },
+  };
+}
 
 const at = (minute: number) => new Date(2026, 10, 9, 9, minute).toISOString();
 /** `quoting` is the message it replies to: the reply carries its quote. */
@@ -162,7 +182,6 @@ const hidden = () =>
     .filter((element) => element.closest("[data-thread-out]"))
     .map((element) => element.dataset.threadEntry)
     .sort();
-const transcript = () => document.querySelector<HTMLElement>("[data-concierge-transcript]")!;
 /** The stack under root `id`: pressing it focuses its thread. */
 const stackOf = (id: string) => document.querySelector<HTMLElement>(`[data-thread-stack="${id}"]`)!;
 const openKyoto = () => fireEvent.click(stackOf("k1"));
@@ -177,7 +196,9 @@ describe("focusing a thread", () => {
     openKyoto();
     await settled();
 
-    expect(hidden()).toEqual(["f1", "f2", "free"]);
+    expect(hidden()).toEqual(["f1", "free"]);
+    // The reply of Flights stays in its stack: the focus hides that thread anyway.
+    expect(entry("f2")).toBeNull();
     expect(screen.getByTestId("focus").textContent).toBe("Kyoto trip");
   });
 
@@ -200,7 +221,6 @@ describe("focusing a thread", () => {
       // No blank is left above or below.
       expect(screen.getByTestId("top-space").style.height).toBe("");
       expect(screen.getByTestId("bottom-space").style.height).toBe("");
-      expect(transcript().hasAttribute("data-thread-motion")).toBe(false);
     }
   });
 
@@ -218,7 +238,7 @@ describe("focusing a thread", () => {
     await settled();
 
     expect(screen.getByTestId("focus").textContent).toBe("Kyoto trip");
-    expect(hidden()).toEqual(["f1", "f2", "free"]);
+    expect(hidden()).toEqual(["f1", "free"]);
   });
 
   it("with reduced motion switches at once, asking for no animation frame", async () => {
@@ -233,44 +253,46 @@ describe("focusing a thread", () => {
     expect(hidden()).toEqual([]);
   });
 
-  it("otherwise folds the rows over a moment: they stay, shrinking, until the motion ends", async () => {
+  it("otherwise changes in one view transition, with no motion styles on the rows", async () => {
+    const motion = viewTransitions();
     render(<Harness />);
     openKyoto();
 
-    // The motion has begun: the rows are shown, held by inline styles.
-    expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
-    expect(entry("f2").hasAttribute("data-thread-out")).toBe(true);
-    expect(entry("f2").style.overflow).toBe("hidden");
-
-    await waitFor(() => expect(transcript().hasAttribute("data-thread-motion")).toBe(false), {
-      timeout: 2000,
-    });
-    // Over: the styles are released, and the rows are left to the stylesheet.
-    expect(entry("f2").getAttribute("style") ?? "").toBe("");
-    expect(hidden()).toEqual(["f1", "f2", "free"]);
+    // The update ran inside the transition: the chat already shows the thread,
+    // and the stylesheet alone hides the rest.
+    expect(motion.start).toHaveBeenCalledTimes(1);
+    expect(hidden()).toEqual(["f1", "free"]);
+    expect(entry("f1").getAttribute("style") ?? "").toBe("");
+    await act(async () => motion.end());
+    await settled();
 
     fireEvent.click(screen.getByRole("button", { name: "back" }));
-    expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
-    expect(entry("f2").style.height).toBe("0px");
-    await waitFor(() => expect(hidden()).toEqual([]), { timeout: 2000 });
-    // Back on the main line, the replies of Flights stand in its stack again.
+    expect(motion.start).toHaveBeenCalledTimes(2);
+    expect(hidden()).toEqual([]);
+    await act(async () => motion.end());
+    await settled();
+    // Back on the main line, the replies of Kyoto and Flights stand in their stacks again.
+    expect(entry("k2")).toBeNull();
     expect(entry("f2")).toBeNull();
     expect(stackOf("f1")).toBeTruthy();
+    expect(screen.getByTestId("top-space").style.height).toBe("");
+    expect(screen.getByTestId("bottom-space").style.height).toBe("");
   });
 
-  it("closes at once even while the open motion still runs, leaving no blank or hidden row", async () => {
+  it("closes at once once the open transition ends, leaving no blank or hidden row", async () => {
+    const motion = viewTransitions();
     render(<Harness />);
     openKyoto();
-    // Mid motion: the rows are still being folded.
-    expect(transcript().hasAttribute("data-thread-motion")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "close now" }));
+    // The close waits for the transition that runs.
+    expect(screen.getByTestId("focus").textContent).toBe("Kyoto trip");
+    await act(async () => motion.end());
 
-    await waitFor(() => expect(screen.getByTestId("focus").textContent).toBe(""), {
-      timeout: 2000,
-    });
-    await waitFor(() => expect(hidden()).toEqual([]), { timeout: 2000 });
-    expect(transcript().hasAttribute("data-thread-motion")).toBe(false);
+    await waitFor(() => expect(screen.getByTestId("focus").textContent).toBe(""));
+    // Closing at once makes no transition of its own.
+    expect(motion.start).toHaveBeenCalledTimes(1);
+    expect(hidden()).toEqual([]);
     expect(screen.getByTestId("top-space").style.height).toBe("");
     expect(screen.getByTestId("bottom-space").style.height).toBe("");
     expect(entry("f2")).toBeNull();
@@ -288,7 +310,8 @@ describe("focusing a thread", () => {
       />,
     );
 
-    expect(hidden()).toEqual(["f1", "f2", "f3", "free"]);
+    expect(hidden()).toEqual(["f1", "free"]);
+    expect(entry("f3")).toBeNull();
     expect(entry("k4")).toBeTruthy();
   });
 
@@ -327,8 +350,10 @@ describe("focusing a thread", () => {
 
 describe("holding a message through a regrouped render", () => {
   // Two threads, each started by the owner and answered. On the main line the
-  // owner's two messages share one group; with a thread in focus, the second
-  // one stands in a group of its own and so is a new element.
+  // owner's two messages share one group. A focus shows only its own thread's
+  // replies, each after the message it answers, so the opened message keeps
+  // its group; closing a focus opened at a reply takes the reply back into its
+  // stack, and the root holds the place.
   const pairs = [
     say("k1", "user", "k1", 0, "One"),
     say("k2", "assistant", "k1", 1, undefined, "k1"),
@@ -373,15 +398,15 @@ describe("holding a message through a regrouped render", () => {
     scroller.remove();
   });
 
-  it("holds the message that opens a thread as it is drawn after the regroup, with no blank left above it", async () => {
+  it("holds the message that opens a thread in its own box, with no blank left above it", async () => {
     reduced = true;
     render(<Harness messages={pairs} />);
     const before = entry("u2");
     fireEvent.click(stackOf("u2"));
     await settled();
-    // The focus remounted u2 in a group of its own.
-    expect(entry("u2")).not.toBe(before);
-    expect(before.isConnected).toBe(false);
+    // Only u2's own reply joined the main line, after it: u2 was not drawn again.
+    expect(entry("u2")).toBe(before);
+    expect(entry("k2")).toBeNull();
     expect(screen.getByTestId("top-space").style.height).toBe("");
     expect(screen.getByTestId("focus").textContent).toBe("Two");
   });
@@ -455,5 +480,41 @@ describe("pin", () => {
     expect(anchor.getBoundingClientRect().top).toBe(y);
     expect(top.style.height).toBe("");
     expect(state.scrollTop).toBe(40);
+  });
+});
+
+describe("transition", () => {
+  it("holds the message every frame until the transition ends, and once after", async () => {
+    const motion = viewTransitions();
+    const update = rs.fn();
+    const keep = rs.fn();
+    const done = transition(update, keep);
+    expect(update).toHaveBeenCalledTimes(1);
+
+    // What shows again can still settle after the update, so the hold goes on.
+    await waitFor(() => expect(keep.mock.calls.length).toBeGreaterThan(2));
+    motion.end();
+    await done;
+    const held = keep.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(keep).toHaveBeenCalledTimes(held);
+  });
+
+  it("changes at once, asking for no frame, without view transitions or with reduced motion", async () => {
+    const frame = rs.spyOn(window, "requestAnimationFrame");
+    // An earlier test spied on it too: count only this test's frames.
+    frame.mockClear();
+    for (const browser of ["none", "reduced"]) {
+      if (browser === "reduced") {
+        reduced = true;
+        viewTransitions();
+      }
+      const update = rs.fn();
+      const keep = rs.fn();
+      await transition(update, keep);
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(keep).toHaveBeenCalledTimes(1);
+    }
+    expect(frame).not.toHaveBeenCalled();
   });
 });
