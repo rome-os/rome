@@ -160,6 +160,13 @@ describe("connector_proxy path/host assembly", () => {
     });
   });
 
+  it("suggests the toolkit's own host shape when a per-connection host is missing", () => {
+    const rejected = buildProxyEndpoint("freshdesk", "/api/v2/tickets");
+    if (rejected.ok) throw new Error("expected rejection");
+    expect(rejected.message).toContain("<domain>.freshdesk.com");
+    expect(rejected.message).not.toContain("supabase");
+  });
+
   it("rejects a full URL passed as the path", () => {
     const rejected = buildProxyEndpoint("linear", "https://evil.example.com/graphql");
     expect(rejected.ok).toBe(false);

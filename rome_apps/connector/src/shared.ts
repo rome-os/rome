@@ -69,6 +69,12 @@ export const TOOLKIT_DEFAULT_API_HOST: Record<string, string> = Object.fromEntri
   SUPPORTED_CONNECTORS.filter((c) => c.apiHost).map((c) => [c.toolkit, c.apiHost as string]),
 );
 
+/** The `host` to suggest when a per-connection toolkit is called without one. */
+const PER_CONNECTION_HOST_EXAMPLE: Record<string, string> = {
+  supabase: "<project-ref>.supabase.co",
+  freshdesk: "<domain>.freshdesk.com",
+};
+
 /**
  * The provider API domains each toolkit's credential may be sent to, keyed by
  * toolkit slug. `connector_proxy` injects the connection's live OAuth credential
@@ -202,9 +208,10 @@ export function buildProxyEndpoint(
     .replace(/\/+$/, "");
   const resolvedHost = suppliedHost || TOOLKIT_DEFAULT_API_HOST[toolkit.toLowerCase()];
   if (!resolvedHost) {
+    const example = PER_CONNECTION_HOST_EXAMPLE[toolkit.toLowerCase()];
     return {
       ok: false,
-      message: `"${toolkit}" has no default API host (its host is per-connection) — supply the "host" arg, e.g. "<project-ref>.supabase.co".`,
+      message: `"${toolkit}" has no default API host (its host is per-connection) — supply the "host" arg${example ? `, e.g. "${example}"` : ""}.`,
     };
   }
   return { ok: true, endpoint: `https://${resolvedHost}${trimmedPath}` };

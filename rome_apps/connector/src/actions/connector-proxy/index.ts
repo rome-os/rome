@@ -72,7 +72,7 @@ const inputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Omit it for Shopify too — Rome uses the connected store's '<store>.myshopify.com'. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
+      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Omit it for Shopify too — Rome uses the connected store's '<store>.myshopify.com'. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co', Freshdesk's '<domain>.freshdesk.com') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
     ),
   method: z
     .enum(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
