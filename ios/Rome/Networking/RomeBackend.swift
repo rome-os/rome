@@ -46,6 +46,20 @@ protocol RomeBackend: AnyObject, Sendable {
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
+    /// A page of a Concierge chat by its main-line messages (`type=concierge`):
+    /// the newest without `before`, else the one before the cursor the last page
+    /// gave. `through` is a message the page must reach, a reply too: it holds
+    /// every main-line message down to its thread's root and two older ones.
+    /// `concierge` of the answer is set when the instance answered in that mode.
+    /// An instance before it answers a turn page, and a chat that is not a Concierge
+    /// chat is read by turns, `limit` of them: both come back with it nil.
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage
+    /// One chat thread whole (`type=concierge&thread=`), named by any message of it:
+    /// its root and every reply, in a page whose `concierge` has the root. An
+    /// instance before the mode answers without it, and the caller reads the
+    /// thread the old way (`thread(sessionId:root:)`). A thread the chat does
+    /// not hold comes back with no messages.
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A send from a chat thread: it lands in that thread.
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
@@ -219,6 +233,32 @@ final class LiveBackend: RomeBackend {
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
         let query = [URLQueryItem(name: "limit", value: String(limit)), URLQueryItem(name: "through", value: through)]
         return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
+    }
+
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
+        var query = [URLQueryItem(name: "type", value: "concierge"), URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "before", value: before)) }
+        if let through { query.append(URLQueryItem(name: "through", value: through)) }
+        let data: Data
+        do {
+            data = try await client.getData("/chat/sessions/\(escape(sessionId))/messages", query: query)
+        } catch let error as APIError where error.isNotConcierge {
+            // Not a Concierge chat: it pages by turns.
+            if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
+            return try await messages(sessionId: sessionId, before: nil, limit: limit)
+        }
+        // An instance before the mode ignores `type` and answers a turn page.
+        if let wire = try? JSONDecoder().decode(ConciergeWirePage.self, from: data) { return wire.page() }
+        guard let page = try? JSONDecoder().decode(MessagePage.self, from: data) else { throw APIError.decoding }
+        return page
+    }
+
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
+        let query = [URLQueryItem(name: "type", value: "concierge"), URLQueryItem(name: "thread", value: key)]
+        let data = try await client.getData("/chat/sessions/\(escape(sessionId))/messages", query: query)
+        if let wire = try? JSONDecoder().decode(ConciergeWirePage.self, from: data) { return wire.page(thread: true) }
+        guard let page = try? JSONDecoder().decode(MessagePage.self, from: data) else { throw APIError.decoding }
+        return page
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
@@ -522,6 +562,14 @@ extension RomeBackend {
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}
+    /// Demo data and test doubles page by turns, as an instance before the mode does.
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
+        if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
+        return try await messages(sessionId: sessionId, before: before, limit: limit)
+    }
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
+        MessagePage(messages: try await thread(sessionId: sessionId, root: key), nextCursor: nil)
+    }
     /// Demo data and test doubles keep no read marks of messages.
     func markMessagesRead(sessionId: String, ids: [String]) async {}
     /// Demo data and test doubles have no read mark: no unread line.

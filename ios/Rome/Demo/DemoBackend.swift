@@ -242,6 +242,89 @@ final class DemoBackend: RomeBackend {
         return MessagePage(messages: Array(turned[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
     }
 
+    /// The Concierge chats of the demo: the main chat and the topic chats.
+    private func isConcierge(_ sessionId: String) -> Bool {
+        sessionId == conciergeChatID || topicChats.contains { $0.id == sessionId }
+    }
+
+    /// A page of a Concierge chat by its main-line messages, as an instance answers
+    /// `type=concierge`: each carries the summary of the thread it roots, the newest
+    /// page names the threads with unread replies whose root is older, and the trace
+    /// rows of the page's turns come with it. The cursor is `c:` and a key.
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
+        guard isConcierge(sessionId) else {
+            // Not a Concierge chat: it is read by turns.
+            if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
+            return try await messages(sessionId: sessionId, before: nil, limit: limit)
+        }
+        try await pause(0.3)
+        if unreadableChats.contains(sessionId) { throw APIError.server(status: 503, message: nil) }
+        let all = Self.withTurns(messages[sessionId] ?? []).map(Self.withThreads)
+        let main = all.filter { !$0.isTrace && ($0.chatThreadId == nil || $0.chatThreadId == $0.id) }
+        let end = before.flatMap { cursor in main.firstIndex { "c:\($0.id)" == cursor } } ?? main.count
+        var start = max(0, end - limit)
+        // `through` holds every main-line message down to the root of its thread, and two older ones.
+        if let through, let held = all.first(where: { $0.id == through }),
+           let rootAt = main.firstIndex(where: { $0.id == (held.chatThreadId ?? held.id) }), rootAt < start {
+            start = max(0, rootAt - 2)
+        }
+        let page = Array(main[start..<end])
+        var body: [ChatMessage] = []
+        var summaries: [String: ThreadSummary] = [:]
+        for message in page {
+            body.append(message)
+            let replies = all.filter { !$0.isTrace && $0.chatThreadId == message.id && $0.id != message.id }
+            if let summary = ThreadSummary.of(replies: replies) {
+                summaries[message.id] = summary
+                body.append(summary.latest)
+            }
+        }
+        var titles: [String: String] = [:]
+        var outside: [ChatMessage] = []
+        if before == nil {
+            let onPage = Set(page.map(\.id))
+            var waiting: [(root: String, summary: ThreadSummary)] = []
+            for root in Set(all.compactMap { $0.chatThreadId }) where !onPage.contains(root) {
+                let replies = all.filter { !$0.isTrace && $0.chatThreadId == root && $0.id != root }
+                guard let summary = ThreadSummary.of(replies: replies), summary.unreadCount > 0,
+                      let newest = replies.last(where: { ThreadStacks.counts($0) && $0.role != "user" && $0.read == false }) else { continue }
+                var entry = summary
+                entry.latest = newest
+                waiting.append((root, entry))
+            }
+            for (root, summary) in waiting.sorted(by: { $0.summary.unreadAt < $1.summary.unreadAt }) {
+                summaries[root] = summary
+                outside.append(summary.latest)
+                if let title = summary.latest.chatThreadTitle ?? threadTitles[root] { titles[root] = title }
+            }
+        }
+        let turns = Set((body + outside).compactMap(\.turnId))
+        let traces = all.filter { $0.isTrace && ($0.turnId.map(turns.contains) ?? false) }
+        var seen = Set<String>()
+        let flat = (body + outside + traces).filter { seen.insert($0.id).inserted }
+        let answer = ConciergeAnswer(body: body, oldestAt: page.map(\.date).min(), summaries: summaries, titles: titles, root: nil)
+        return MessagePage(messages: flat, nextCursor: start > 0 ? "c:\(main[start].id)" : nil, concierge: answer)
+    }
+
+    /// One thread whole, named by any message of it: its root with every reply, and the traces of their turns.
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
+        try await pause(0.25)
+        let all = Self.withTurns(messages[sessionId] ?? []).map(Self.withThreads)
+        guard let held = all.first(where: { $0.id == key }) else {
+            return MessagePage(messages: [], nextCursor: nil, concierge: ConciergeAnswer(body: [], oldestAt: nil, summaries: [:], titles: [:], root: nil))
+        }
+        let root = held.chatThreadId ?? held.id
+        let replies = all.filter { !$0.isTrace && $0.chatThreadId == root && $0.id != root }
+        let rootMessage = all.first { $0.id == root } ?? held
+        let body = [rootMessage] + replies
+        let turns = Set(body.compactMap(\.turnId))
+        let traces = all.filter { $0.isTrace && ($0.turnId.map(turns.contains) ?? false) }
+        var summaries: [String: ThreadSummary] = [:]
+        if let summary = ThreadSummary.of(replies: replies) { summaries[root] = summary }
+        let answer = ConciergeAnswer(body: body, oldestAt: rootMessage.date, summaries: summaries, titles: [:], root: root)
+        return MessagePage(messages: body + traces, nextCursor: nil, concierge: answer)
+    }
+
     /// Turns the way the server keeps them: each message the guardian writes
     /// starts one, and what follows answers it.
     private static func withTurns(_ messages: [ChatMessage]) -> [ChatMessage] {

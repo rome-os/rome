@@ -10,9 +10,9 @@ struct ThreadStack: Hashable, Sendable {
     var total: Int
     /// Replies not said by the owner that the owner has not seen.
     var unread: Int
-    /// Where the newest unread reply stands among the chat's messages, to
-    /// order the threads that wait: the oldest waiting first.
-    var unreadAt: Int
+    /// When the newest unread reply was said, in seconds, to order the
+    /// threads that wait: the oldest waiting first. 0 when none waits.
+    var unreadAt: Double
     /// The newest reply, by time, then by arrival.
     var lastId: String
     /// The newest reply's first line.
@@ -43,7 +43,7 @@ struct ThreadStacks: Equatable, Sendable {
 
     /// Whether the chat holds the thread whose root is `root`: its root is
     /// loaded and has a reply. A link to any other opens nothing.
-    func holds(_ root: String) -> Bool { roots[root] == root }
+    func holds(_ root: String) -> Bool { roots[root] == root || stacks[root] != nil }
 
     /// The roots of the threads that wait for the reader with a pill, oldest
     /// waiting first: those with unread replies whose stack the reader does
@@ -69,71 +69,58 @@ struct ThreadStacks: Equatable, Sendable {
     /// How long a stack's one line of preview runs before it is cut.
     static let previewMax = 160
 
-    /// The stacks of `messages`, in the order the store holds them. `arrival`
-    /// is the order each message first arrived in, which settles messages made in
-    /// the same second; a message with none goes by its place in the list.
-    static func build(_ messages: [ChatMessage], arrival: [String: Int] = [:]) -> ThreadStacks {
+    /// The stacks of `messages`, in the order the store holds them. `summaries`
+    /// are what the instance says of each thread (docs/domains/chats.md#chat-thread):
+    /// a stack reads its numbers from there, not from the replies that are loaded.
+    /// Without them (an instance before the Concierge pages) they are summed from
+    /// the loaded replies. `hints` name the threads whose root is not loaded.
+    /// `arrival` is the order each message first arrived in, which settles messages
+    /// made in the same second; a message with none goes by its place in the list.
+    /// With `hidesOrphans`, a loaded reply stands in its thread's stack whether
+    /// its root is loaded or not, as a Concierge chat paged by main-line messages
+    /// never draws a reply on its main line; otherwise a reply whose root has not
+    /// paged in yet stays a message of the transcript.
+    static func build(
+        _ messages: [ChatMessage], arrival: [String: Int] = [:], summaries: [String: ThreadSummary]? = nil,
+        hints: [String: String] = [:], hidesOrphans: Bool = false
+    ) -> ThreadStacks {
         let roots = TranscriptBuilder.threadRoots(messages)
-        guard !roots.isEmpty else { return .none }
-        let titles = TranscriptBuilder.threadTitles(messages, roots: roots)
-        // A thread's replies stand in its stack only when its root is loaded
-        // and draws something to hang the stack under: a reply whose root has
-        // not paged in yet stays a message of the transcript, so it is never
-        // out of sight with nothing to hold it.
+        guard !roots.isEmpty || !(summaries?.isEmpty ?? true) else { return .none }
+        var titles = TranscriptBuilder.threadTitles(messages, roots: roots)
+        // A thread whose root is not loaded is named by what the instance read of it.
+        for (root, hint) in hints where titles[root] == nil { titles[root] = hint }
+        // A reply stands in its thread's stack only when its root draws something
+        // to hang the stack under (or, with `hidesOrphans`, is not loaded).
         var holders = Set<String>()
-        for message in messages where roots[message.id] == message.id && holdsStack(message) {
-            holders.insert(message.id)
+        var loadedRoots = Set<String>()
+        for message in messages where roots[message.id] == message.id {
+            loadedRoots.insert(message.id)
+            if holdsStack(message) { holders.insert(message.id) }
         }
-        struct Tally {
-            var total = 0
-            var unread = 0
-            var unreadAt = -1
-            var last: (index: Int, date: Date, arrival: Int)?
-            var replies: [String] = []
-        }
-        var tallies: [String: Tally] = [:]
-        for (index, message) in messages.enumerated() {
-            guard !message.isTrace, let root = roots[message.id], root != message.id, holders.contains(root) else { continue }
-            var tally = tallies[root] ?? Tally()
-            tally.replies.append(message.id)
-            if reads(message) {
-                tally.total += 1
-                if message.role != "user", message.read == false {
-                    tally.unread += 1
-                    tally.unreadAt = index
-                }
-                let mine = (index: index, date: message.date, arrival: arrival[message.id] ?? index)
-                if let last = tally.last, (last.date, last.arrival) >= (mine.date, mine.arrival) {
-                    // Older, or the same moment and earlier in arrival.
-                } else {
-                    tally.last = mine
-                }
-            }
-            tallies[root] = tally
-        }
-        var stacks: [String: ThreadStack] = [:]
         var stacked = Set<String>()
-        for (root, tally) in tallies {
-            // A thread none of whose replies is read by the owner draws no
-            // stack, so it hides nothing.
-            guard tally.total > 0, let last = tally.last else { continue }
-            let newest = messages[last.index]
-            stacks[root] = ThreadStack(root: root, total: tally.total, unread: tally.unread, unreadAt: tally.unreadAt, lastId: newest.id, preview: preview(of: newest))
-            stacked.formUnion(tally.replies)
+        for message in messages {
+            guard !message.isTrace, let root = roots[message.id], root != message.id else { continue }
+            if holders.contains(root) || (hidesOrphans && !loadedRoots.contains(root)) { stacked.insert(message.id) }
         }
+        // Summed from loaded replies, a thread has a stack only where its root is loaded to hold it:
+        // a pill for any other would have nowhere to go.
+        let sums = summaries ?? ThreadSummary.summed(from: messages, arrival: arrival).filter { holders.contains($0.key) }
+        var stacks: [String: ThreadStack] = [:]
+        for (root, summary) in sums where summary.replyCount > 0 {
+            stacks[root] = ThreadStack(
+                root: root, total: summary.replyCount, unread: summary.unreadCount, unreadAt: summary.unreadAt,
+                lastId: summary.latest.id, preview: preview(of: summary.latest)
+            )
+        }
+        // A thread whose root is not loaded has a stack nothing draws: only its pill shows.
         return ThreadStacks(roots: roots, titles: titles, stacks: stacks, stacked: stacked)
     }
 
-    /// A message the transcript draws something for that a thread's stack
-    /// counts: a bubble or a card of the owner or of the agent, and no
-    /// automation's, which a Concierge chat does not draw.
-    static func reads(_ message: ChatMessage) -> Bool {
+    /// A message a stack counts as a reply: said by the owner or the agent, and no
+    /// automation (which a Concierge chat does not draw).
+    static func counts(_ message: ChatMessage) -> Bool {
         guard !message.isTrace, !TranscriptBuilder.isAutomated(message) else { return false }
-        if message.isUser {
-            return message.parts.contains { $0.textContent.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false }
-        }
-        guard message.role == "assistant" else { return false }
-        return TranscriptBuilder.isReply(message, parts: message.parts)
+        return message.role == "user" || message.role == "assistant"
     }
 
     /// A root that has a bubble or a task card to hang its stack under.
@@ -270,5 +257,70 @@ final class ThreadLinkContext {
     func open(_ root: String) {
         guard opens else { return }
         store?.openChatThread(root)
+    }
+}
+
+extension ThreadSummary {
+    /// The summary of a thread from all its replies, which only a thread read
+    /// whole has. Nil when none counts. The newest is by time, then by arrival
+    /// (`arrival` by message id, else the place in `replies`).
+    static func of(replies: [ChatMessage], arrival: [String: Int] = [:]) -> ThreadSummary? {
+        var count = 0
+        var unread = 0
+        var unreadAt = 0.0
+        var newest: (message: ChatMessage, date: Date, arrival: Int)?
+        for (index, message) in replies.enumerated() where ThreadStacks.counts(message) {
+            count += 1
+            let mine = (message: message, date: message.date, arrival: arrival[message.id] ?? index)
+            if message.role != "user", message.read == false {
+                unread += 1
+                unreadAt = max(unreadAt, mine.date.timeIntervalSince1970)
+            }
+            if let last = newest, (last.date, last.arrival) >= (mine.date, mine.arrival) { continue }
+            newest = mine
+        }
+        guard let latest = newest?.message else { return nil }
+        return ThreadSummary(replyCount: count, unreadCount: unread, latest: latest, unreadAt: unreadAt)
+    }
+
+    /// The summary of every thread of `messages` that has replies among them, by root:
+    /// right where each thread's replies are all loaded, as on an instance before the
+    /// Concierge pages, which brings whole turns.
+    static func summed(from messages: [ChatMessage], arrival: [String: Int] = [:]) -> [String: ThreadSummary] {
+        var replies: [String: [ChatMessage]] = [:]
+        for message in messages where !message.isTrace {
+            if let root = message.chatThreadId, root != message.id { replies[root, default: []].append(message) }
+        }
+        var summaries: [String: ThreadSummary] = [:]
+        for (root, own) in replies {
+            if let summary = of(replies: own, arrival: arrival) { summaries[root] = summary }
+        }
+        return summaries
+    }
+
+    /// The summary after a reply came live: it counts, and is the newest.
+    func withLive(reply message: ChatMessage) -> ThreadSummary {
+        var next = self
+        next.replyCount += 1
+        if message.role != "user", message.read == false {
+            next.unreadCount += 1
+            next.unreadAt = message.date.timeIntervalSince1970
+        }
+        next.latest = message
+        return next
+    }
+
+    /// The summary of a thread's first reply.
+    static func first(reply message: ChatMessage) -> ThreadSummary {
+        let unread = message.role != "user" && message.read == false
+        return ThreadSummary(replyCount: 1, unreadCount: unread ? 1 : 0, latest: message, unreadAt: unread ? message.date.timeIntervalSince1970 : 0)
+    }
+
+    /// The summary after the owner has seen every reply.
+    var seen: ThreadSummary {
+        var next = self
+        next.unreadCount = 0
+        next.unreadAt = 0
+        return next
     }
 }

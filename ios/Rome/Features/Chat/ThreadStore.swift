@@ -84,6 +84,12 @@ final class ThreadStore {
     /// Reads the whole thread when the instance has chat threads, for the
     /// messages older than the chat's pages. A failed read keeps what is shown.
     func load() async {
+        // A chat paged by main-line messages read the thread whole before it opened,
+        // and keeps it whole by live replies.
+        if chat?.conciergePaged == true {
+            loaded = true
+            return
+        }
         guard knowsThreads else {
             loaded = true
             return

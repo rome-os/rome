@@ -264,6 +264,106 @@ struct BuildInfo: Codable, Hashable, Sendable {
 struct MessagePage: Codable, Sendable {
     var messages: [ChatMessage]
     var nextCursor: String?
+    /// Set when the instance answered by main-line messages (`type=concierge`):
+    /// what the page says of the threads. Nil for a turn page, which an
+    /// instance before it answers whatever is asked.
+    var concierge: ConciergeAnswer? = nil
+
+    private enum CodingKeys: String, CodingKey { case messages, nextCursor }
+}
+
+/// What the newest reply of a thread and its counts say, as the instance
+/// sums them (docs/domains/chats.md#chat-thread): the stack under a root reads
+/// them, and the pills do. The replies themselves are not held.
+struct ThreadSummary: Hashable, Sendable {
+    /// Replies the stack counts: a user or assistant message no automation said.
+    var replyCount: Int
+    /// Counted replies the owner did not say and has not seen.
+    var unreadCount: Int
+    /// The newest reply that counts; for a thread that waits outside the page, its newest unread one.
+    var latest: ChatMessage
+    /// When the newest unread reply was said, in seconds; 0 when none waits. Orders the pills.
+    var unreadAt: Double
+}
+
+/// A page by main-line messages (`GET /chat/sessions/:id/messages?type=concierge`).
+struct ConciergeAnswer: Hashable, Sendable {
+    /// The main line and the newest reply of each thread (every reply, for one
+    /// thread read by itself), in the order the page lists them.
+    var body: [ChatMessage]
+    /// When the oldest main-line message of the page was said.
+    var oldestAt: Date?
+    /// What the page says of each thread with replies, by root: the main
+    /// line's, and the ones that wait outside it.
+    var summaries: [String: ThreadSummary]
+    /// The name of each thread that waits with a root not on the page, by root.
+    var titles: [String: String]
+    /// For one thread read by itself: its root.
+    var root: String?
+}
+
+/// The wire shape of a Concierge page. Every field the instance may leave
+/// out is optional, so a newer instance that adds fields never breaks it.
+struct ConciergeWirePage: Decodable, Sendable {
+    struct Entry: Decodable, Sendable {
+        struct Thread: Decodable, Sendable {
+            var replyCount: Int?
+            var unreadCount: Int?
+            var latestReply: ChatMessage?
+            /// Only in an answer for one thread.
+            var replies: [ChatMessage]?
+        }
+        var message: ChatMessage
+        var thread: Thread?
+    }
+
+    struct Outside: Decodable, Sendable {
+        var root: String
+        var title: String?
+        var replyCount: Int?
+        var unreadCount: Int?
+        var latestUnread: ChatMessage
+    }
+
+    var mainLine: [Entry]
+    var outside: [Outside]?
+    var traces: [ChatMessage]?
+    var nextCursor: String?
+
+    /// The messages the store keeps and what the page says of its threads.
+    func page(thread: Bool = false) -> MessagePage {
+        var body: [ChatMessage] = []
+        var summaries: [String: ThreadSummary] = [:]
+        for entry in mainLine {
+            body.append(entry.message)
+            guard let thread = entry.thread, let latest = thread.latestReply ?? thread.replies?.last else { continue }
+            body.append(contentsOf: thread.replies ?? [latest])
+            let unread = thread.unreadCount ?? 0
+            summaries[entry.message.id] = ThreadSummary(
+                replyCount: thread.replyCount ?? 0, unreadCount: unread, latest: latest,
+                unreadAt: unread > 0 ? latest.date.timeIntervalSince1970 : 0
+            )
+        }
+        var titles: [String: String] = [:]
+        var rest: [ChatMessage] = []
+        for entry in outside ?? [] {
+            let unread = entry.unreadCount ?? 0
+            summaries[entry.root] = ThreadSummary(
+                replyCount: entry.replyCount ?? 0, unreadCount: unread, latest: entry.latestUnread,
+                unreadAt: entry.latestUnread.date.timeIntervalSince1970
+            )
+            if let title = entry.title, !title.isEmpty { titles[entry.root] = title }
+            rest.append(entry.latestUnread)
+        }
+        // A message stands once, whichever list holds it.
+        var seen = Set<String>()
+        let messages = (body + rest + (traces ?? [])).filter { seen.insert($0.id).inserted }
+        let answer = ConciergeAnswer(
+            body: body, oldestAt: mainLine.map(\.message.date).min(), summaries: summaries, titles: titles,
+            root: thread ? mainLine.first?.message.id : nil
+        )
+        return MessagePage(messages: messages, nextCursor: nextCursor, concierge: answer)
+    }
 }
 
 /// `GET /concierge/session`.
