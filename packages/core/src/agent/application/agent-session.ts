@@ -1110,6 +1110,7 @@ function sessionSetupOf(
       log: deps.log,
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,
+      repliesTo: policy.delegatesWork,
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {

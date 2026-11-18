@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { and, eq } from "drizzle-orm";
 import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
+import { assertWidgetAlone } from "../webchat/widget-message.js";
 import { withAskingDevice } from "../connections/device/live-route.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
@@ -324,6 +325,8 @@ function setup(
           parts: unknown[],
           options: { replyTo?: string } = {},
         ) => {
+          // The stores refuse a widget beside other parts.
+          assertWidgetAlone(parts);
           const list = messages.get(chatId) ?? [];
           const id = `said-${++saidCount}`;
           // A reply joins the thread of the row it replies to, as Chats records it.
@@ -856,6 +859,47 @@ describe("Concierge tools", () => {
       const result = await s.tool("say", { text: "x", replyTo: "elsewhere" });
       expect(result.isError).toBe(true);
       expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+    });
+
+    describe("a card it shows", () => {
+      const question = {
+        type: "pending_interaction",
+        toolUseId: "tu-ask",
+        appId: "core",
+        render: { kind: "inline", componentId: "question-card", builtin: true },
+      } as const;
+
+      it("replies like its messages do: into the thread the guardian wrote in", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
+        guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
+        const card = await s.service.addCard(CONCIERGE_CHAT, "concierge-turn-1", question);
+        expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+        // A card is a message of its own: no quote beside it.
+        expect(partsOf(s, card)).toEqual([question]);
+      });
+
+      it("replies to the message it names, a task's start message in a turn with no guardian message", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, { id: "g0", turnId: "older" }, "Book flights");
+        const task = await taskStartedAt(s, "g0");
+        const named = await s.service.addCard(
+          CONCIERGE_CHAT,
+          "concierge-turn-1",
+          question,
+          await startKeyOf(s, task.id),
+        );
+        expect([replyOf(s, named), threadOf(s, named)]).toEqual(["g0", "g0"]);
+        // A name that is no message of the chat is dropped: the card still shows, replying to nothing.
+        const dropped = await s.service.addCard(
+          CONCIERGE_CHAT,
+          "concierge-turn-1",
+          question,
+          "elsewhere",
+        );
+        expect(replyOf(s, dropped)).toBeUndefined();
+        expect(partsOf(s, dropped)).toEqual([question]);
+      });
     });
 
     it("quotes an automation's message as the automation's", async () => {
@@ -5264,6 +5308,33 @@ describe("Concierge connect_card", () => {
       ],
     ]);
     expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: "said-1" });
+  });
+
+  it("lands in the thread the guardian wrote in, as its messages do", async () => {
+    const s = setup({ said: false });
+    withServices(s, [
+      { service: "mail", label: "Mail", icon: "glyph:gmail", state: null, connect: MAIL_CONNECT },
+    ]);
+    s.messages.set(CONCIERGE_CHAT, [
+      { id: "g0", role: "user", content: textContent("Plan Kyoto"), turnId: "older" },
+      {
+        id: "g1",
+        role: "user",
+        content: textContent("Connect my mail"),
+        turnId: "concierge-turn-1",
+        replyTo: "g0",
+        chatThread: "g0",
+      },
+    ]);
+
+    await s.tool("connect_card", { service: "mail" });
+
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledWith(
+      CONCIERGE_CHAT,
+      "concierge-turn-1",
+      [expect.objectContaining({ type: "connect_card", service: "mail" })],
+      { replyTo: "g1" },
+    );
   });
 
   it.each([
