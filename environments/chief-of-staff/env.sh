@@ -974,6 +974,74 @@ for (const r of rows) {
 JS
 }
 
+# One JSON line per model call, read from the transcripts Claude Code keeps in
+# Rome, with the Rome turn it ran in: the latest turn of the same agent session
+# that started by the call's start. Rome itself stores usage only per turn.
+cos_usage_per_call() {
+  docker exec -i "$ROME" node - "${1:-}" <<'JS'
+const { readdirSync, readFileSync } = require("node:fs");
+const Database = require("/app/node_modules/better-sqlite3");
+const sinceArg = process.argv[2];
+const since = sinceArg ? Date.parse(sinceArg) : 0;
+if (Number.isNaN(since)) throw new Error(`not a time: ${sinceArg}`);
+const db = new Database("/home/rome/.rome/default/rome.db", { readonly: true });
+const sessionOf = db.prepare(
+  "select channel_thread_key as name from sessions where provider_thread_id = ?",
+);
+// rome_agent_messages times are whole seconds, so a turn that started in the
+// same second as the call counts.
+const turnOf = db.prepare(
+  `select m.turn_id, s.name, min(m.created_at) as start
+   from rome_agent_messages m left join rome_sessions s on s.id = m.session_id
+   where m.turn_id is not null and (? is null or s.name = ?)
+   group by m.turn_id having start <= ? order by start desc limit 1`,
+);
+const root = "/home/rome/.claude/projects";
+const calls = new Map();
+for (const project of readdirSync(root)) {
+  for (const file of readdirSync(`${root}/${project}`)) {
+    if (!file.endsWith(".jsonl")) continue;
+    for (const line of readFileSync(`${root}/${project}/${file}`, "utf8").split("\n")) {
+      if (!line.includes('"assistant"')) continue;
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      // Claude Code writes one entry per content block of a reply, each with
+      // the reply's usage; entries without a request id are its own.
+      if (e.type !== "assistant" || !e.requestId || !e.message?.usage) continue;
+      const first = calls.get(e.requestId);
+      if (!first || e.timestamp < first.timestamp) calls.set(e.requestId, e);
+    }
+  }
+}
+const ordered = [...calls.values()]
+  .filter((e) => Date.parse(e.timestamp) >= since)
+  .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+for (const e of ordered) {
+  const name = sessionOf.get(e.sessionId)?.name ?? null;
+  const turn = turnOf.get(name, name, Math.floor(Date.parse(e.timestamp) / 1000));
+  const u = e.message.usage;
+  process.stdout.write(
+    `${JSON.stringify({
+      time: e.timestamp,
+      turnId: turn?.turn_id ?? null,
+      session: turn?.name ?? name,
+      claudeSession: e.sessionId,
+      requestId: e.requestId,
+      model: e.message.model ?? null,
+      inputTokens: u.input_tokens ?? 0,
+      cacheReadTokens: u.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+      outputTokens: u.output_tokens ?? 0,
+    })}\n`,
+  );
+}
+JS
+}
+
 # Stops Rome, posts the script's messages spread over the given minutes while
 # it is down, then starts it again.
 cos_offline() {

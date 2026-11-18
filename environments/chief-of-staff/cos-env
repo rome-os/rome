@@ -20,7 +20,7 @@ usage() {
   cos-env replay <script> [--gap <seconds>]
   cos-env offline <script> [--for <minutes>]
   cos-env clock [forward <hours> | reset]
-  cos-env usage [--since <time>]
+  cos-env usage [--per-call] [--since <time>]
   cos-env doc roster|goals
   cos-env memory [--since <time>]
   cos-env chat <name> default|mentions-only|ignore-others|off|every
@@ -29,7 +29,7 @@ usage() {
   cos-env version"
 }
 
-as="" chat="" dm="" thread="" since="" mention=0 gap=1 minutes=60
+as="" chat="" dm="" thread="" since="" mention=0 gap=1 minutes=60 per_call=0
 args=()
 command="${1:-}"
 [ -n "$command" ] || usage
@@ -44,6 +44,7 @@ while [ $# -gt 0 ]; do
     --mention-agent) mention=agent && shift ;;
     --mention-second) mention=second && shift ;;
     --gap) gap="${2:?--gap needs seconds}" && shift 2 ;;
+    --per-call) per_call=1 && shift ;;
     --for) minutes="${2:?--for needs minutes}" && shift 2 ;;
     --) shift && args+=("$@") && break ;;
     *) args+=("$1") && shift ;;
@@ -107,7 +108,9 @@ case "$command" in
     cos_offline "${args[0]}" "$minutes"
     ;;
   clock) cos_clock "${args[@]}" ;;
-  usage) cos_usage "$since" ;;
+  usage)
+    if [ "$per_call" = 1 ]; then cos_usage_per_call "$since"; else cos_usage "$since"; fi
+    ;;
   doc) cos_doc "${args[0]:-}" ;;
   memory) cos_memory "$since" ;;
   chat)
