@@ -73,7 +73,7 @@ const definitions = [
   {
     id: "dream",
     displayName: "Dream",
-    version: "0.3.0",
+    version: "0.4.0",
     description:
       "Periodic self-review agent that summarizes recent conversations and updates memory",
     hasFrontend: true,
