@@ -39,7 +39,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
+/**
+ * `onMobileBack` is absent where there is no file list to go back to.
+ * `singleFile` is a host that already names the file and offers its download,
+ * so the header keeps only what acts on the file, and says how it saved at any
+ * width.
+ */
+export function FileViewHeader({
+  onMobileBack,
+  singleFile = false,
+}: {
+  onMobileBack?: () => void;
+  singleFile?: boolean;
+}) {
   const { t } = useTranslation("files");
   const store = useFileBrowserStoreApi();
   const selectedPath = useFileBrowserStore((s) => s.selection.selectedPath);
@@ -79,37 +91,43 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
 
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 md:gap-3 md:px-6">
-      <IconButton
-        onClick={onMobileBack}
-        label={t("header.backToFiles")}
-        icon={<ArrowLeft aria-hidden />}
-        className="text-muted-foreground hover:bg-surface-muted hover:text-foreground @min-[1024px]/fb:hidden"
-      />
+      {onMobileBack && (
+        <IconButton
+          onClick={onMobileBack}
+          label={t("header.backToFiles")}
+          icon={<ArrowLeft aria-hidden />}
+          className="text-muted-foreground hover:bg-surface-muted hover:text-foreground @min-[1024px]/fb:hidden"
+        />
+      )}
       <div className="min-w-0 flex-1">
-        {(() => {
-          const path = selectedPath ?? "";
-          const lastSlash = path.lastIndexOf("/");
-          const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
-          const dirPath = lastSlash >= 0 ? path.slice(0, lastSlash) : "";
-          return (
-            <>
-              <div className="truncate font-mono text-ui text-foreground">{fileName || path}</div>
-              {selectedFile && (
-                <div className="mt-1 truncate font-mono text-aux text-muted-foreground">
-                  {dirPath && (
-                    <>
-                      <span>{dirPath}</span>
+        {singleFile
+          ? null
+          : (() => {
+              const path = selectedPath ?? "";
+              const lastSlash = path.lastIndexOf("/");
+              const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+              const dirPath = lastSlash >= 0 ? path.slice(0, lastSlash) : "";
+              return (
+                <>
+                  <div className="truncate font-mono text-ui text-foreground">
+                    {fileName || path}
+                  </div>
+                  {selectedFile && (
+                    <div className="mt-1 truncate font-mono text-aux text-muted-foreground">
+                      {dirPath && (
+                        <>
+                          <span>{dirPath}</span>
+                          <span className="mx-2 text-subtle-foreground">·</span>
+                        </>
+                      )}
+                      <span>{selectedFile.mimeType}</span>
                       <span className="mx-2 text-subtle-foreground">·</span>
-                    </>
+                      <span>{formatBytes(selectedFile.size)}</span>
+                    </div>
                   )}
-                  <span>{selectedFile.mimeType}</span>
-                  <span className="mx-2 text-subtle-foreground">·</span>
-                  <span>{formatBytes(selectedFile.size)}</span>
-                </div>
-              )}
-            </>
-          );
-        })()}
+                </>
+              );
+            })()}
       </div>
       <div className="flex shrink-0 items-center gap-2 md:gap-2">
         {textPreviewKind && selectedFile?.editable && (
@@ -222,7 +240,7 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
           <>
             {autoSaveStatusLabel ? (
               <span
-                className={`hidden text-aux @min-[1024px]/fb:inline ${
+                className={`text-aux ${singleFile ? "" : "hidden @min-[1024px]/fb:inline"} ${
                   autoSaveState === "error" ? "text-destructive" : "text-subtle-foreground"
                 }`}
               >
@@ -238,16 +256,18 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
             </Button>
           </>
         ) : null}
-        <button
-          type="button"
-          onClick={() => selectedPath && store.getState().ui.downloadPaths([selectedPath])}
-          disabled={!selectedPath}
-          title={t("contextMenu.download")}
-          aria-label={t("contextMenu.download")}
-          className="rounded-8 p-2 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
-        >
-          <Download className="h-5 w-5" aria-hidden="true" />
-        </button>
+        {singleFile ? null : (
+          <button
+            type="button"
+            onClick={() => selectedPath && store.getState().ui.downloadPaths([selectedPath])}
+            disabled={!selectedPath}
+            title={t("contextMenu.download")}
+            aria-label={t("contextMenu.download")}
+            className="rounded-8 p-2 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+          >
+            <Download className="h-5 w-5" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );

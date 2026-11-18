@@ -40,6 +40,7 @@ import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
+import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
 import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
@@ -320,6 +321,12 @@ export function ToolWorkspace({
     setOutputsTarget(null);
     setSelected((current) => (current === "outputs" ? null : current));
   }, []);
+  // The tab's own close settles a file being edited in it first.
+  const outputsLeaveGuard: LeaveGuard = useRef(null);
+  const closeOutputsTab = useCallback(
+    () => leaveEditor(outputsLeaveGuard, hideOutputs),
+    [hideOutputs],
+  );
   const outputsHost = useMemo<ToolOutputsHost>(
     () => ({ active: outputsActive && open, compact, show: showOutputs, hide: hideOutputs }),
     [outputsActive, open, compact, showOutputs, hideOutputs],
@@ -412,7 +419,7 @@ export function ToolWorkspace({
               label={tChat("outputs.title")}
               icon={<FileOutput className="size-3.5" />}
               active={outputsActive}
-              onClose={hideOutputs}
+              onClose={closeOutputsTab}
             />
           )}
           {sorted
@@ -695,6 +702,7 @@ export function ToolWorkspace({
                   chatId={outputsTarget.chatId}
                   selectedId={outputsTarget.outputId}
                   selectionSeq={outputsTarget.seq}
+                  leaveGuard={outputsLeaveGuard}
                   taskChats={outputsTarget.taskChats}
                 />
               </TabsContent>

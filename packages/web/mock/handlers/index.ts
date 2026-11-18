@@ -102,7 +102,7 @@ import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
-import { chatOutputHandlers } from "./chat-outputs";
+import { chatOutputHandlers, outputProjectFolder } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
@@ -1451,6 +1451,7 @@ const mockBody = (path: string) =>
   `# ${path.split("/").pop()}\n\nMock file content for the dashboard mock mode.\n`;
 
 const projectsTree: MockFsNode[] = [
+  outputProjectFolder,
   dir("projects/demo-app", [
     dir("projects/demo-app/src", [
       file("projects/demo-app/src/index.ts", mockBody("projects/demo-app/src/index.ts")),

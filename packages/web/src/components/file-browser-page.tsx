@@ -48,6 +48,12 @@ interface FileBrowserPageProps {
   leaveGuard?: { current: (() => Promise<boolean>) | null };
   rootLabel: string;
   rootPanelTrigger?: boolean;
+  /**
+   * Shows only the selected file: no tree, no file list and no way back to
+   * them, and a Markdown file opens straight in the editor. For a host that
+   * already chose the file, as a chat's Outputs tab does.
+   */
+  singleFile?: boolean;
   sidebarHeading?: string;
   searchPlaceholder: string;
 }
@@ -69,6 +75,7 @@ export function FileBrowserPage({
   leaveGuard,
   rootLabel,
   rootPanelTrigger = false,
+  singleFile = false,
   sidebarHeading,
   searchPlaceholder,
 }: FileBrowserPageProps) {
@@ -117,6 +124,7 @@ export function FileBrowserPage({
       getRouteSnapshot,
       t,
       embedded,
+      singleFile,
       getDeleteDescription,
       onPathsDeleted,
       onFolderCreated,
@@ -133,6 +141,7 @@ export function FileBrowserPage({
       getRouteSnapshot,
       t,
       embedded,
+      singleFile,
       getDeleteDescription,
       onPathsDeleted,
       onFolderCreated,
@@ -147,6 +156,7 @@ export function FileBrowserPage({
         embedded={embedded}
         rootLabel={rootLabel}
         rootPanelTrigger={rootPanelTrigger}
+        singleFile={singleFile}
         sidebarHeading={sidebarHeading}
         searchPlaceholder={searchPlaceholder}
         externalSelection={externalSelection}

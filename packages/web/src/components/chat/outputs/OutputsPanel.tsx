@@ -8,9 +8,10 @@ import {
   FileImage,
   FileOutput,
   FileText,
+  Pencil,
   Sheet,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
@@ -26,6 +27,13 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { type ChatOutput, useChatOutputs, useTaskChatOutputs } from "./chat-outputs";
+import {
+  type LeaveGuard,
+  OutputEditor,
+  leaveEditor,
+  outputTextKey,
+  useEditablePath,
+} from "./OutputEditor";
 
 /** The most text a preview shows, so a large log cannot stall the tab. */
 export const PREVIEW_CHARS = 200_000;
@@ -128,6 +136,12 @@ interface OutputsPanelProps {
   heading?: boolean;
   /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
   taskChats?: boolean;
+  /**
+   * Filled with a check a host runs before it unmounts the panel, as a sheet
+   * does on close: it settles a file being edited the way leaving it does and
+   * answers whether the host may go on.
+   */
+  leaveGuard?: LeaveGuard;
 }
 
 /**
@@ -141,14 +155,21 @@ export function OutputsPanel({
   onNavigate,
   heading = true,
   taskChats = false,
+  leaveGuard,
 }: OutputsPanelProps) {
   const { t, i18n } = useTranslation("chat");
   const outputs = useChatOutputs(chatId);
   useTaskChatOutputs(chatId, taskChats);
   const [chosen, setChosen] = useState<string | null>(selectedId);
   const [filter, setFilter] = useState<Filter>("all");
-  // A link opened on an output opens that one.
-  useEffect(() => setChosen(selectedId), [selectedId, selectionSeq]);
+  const ownGuard: LeaveGuard = useRef(null);
+  const guard = leaveGuard ?? ownGuard;
+  // A link opened on an output opens that one, once a file being edited has
+  // settled; if it stays open, so does the file.
+  useEffect(
+    () => leaveEditor(guard, () => setChosen(selectedId)),
+    [guard, selectedId, selectionSeq],
+  );
   const list = outputs.data?.outputs ?? [];
   const indexing = outputs.data?.indexing === true;
   // Earlier outputs still being read back, said quietly where the list is.
@@ -177,7 +198,8 @@ export function OutputsPanel({
         <OutputPreview
           key={current.id}
           output={current}
-          onBack={() => setChosen(null)}
+          leaveGuard={guard}
+          onBack={() => leaveEditor(guard, () => setChosen(null))}
           onNavigate={onNavigate}
         />
       </div>
@@ -345,10 +367,12 @@ export async function readPrefix(
 
 function OutputPreview({
   output,
+  leaveGuard,
   onBack,
   onNavigate,
 }: {
   output: ChatOutput;
+  leaveGuard: LeaveGuard;
   onBack: () => void;
   onNavigate?: () => void;
 }) {
@@ -356,8 +380,11 @@ function OutputPreview({
   const kind = previewOf(output);
   const url = output.contentUrl;
   const textual = kind === "markdown" || kind === "text";
+  const [editing, setEditing] = useState(false);
+  // A text file the agent wrote into the projects folder can be edited in place.
+  const editablePath = useEditablePath(output, textual && output.kind === "written");
   const text = useQuery({
-    queryKey: ["chat-output-text", url],
+    queryKey: outputTextKey(url),
     queryFn: () => readPrefix(url ?? "", PREVIEW_CHARS),
     enabled: textual && Boolean(url),
   });
@@ -370,6 +397,23 @@ function OutputPreview({
       </a>
     </Button>
   ) : null;
+  const editToggle =
+    editablePath !== null && editing ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => leaveEditor(leaveGuard, () => setEditing(false))}
+      >
+        {t("outputs.doneEditing")}
+      </Button>
+    ) : editablePath !== null ? (
+      <IconButton
+        size="sm"
+        label={t("outputs.edit")}
+        icon={<Pencil />}
+        onClick={() => setEditing(true)}
+      />
+    ) : null;
   const header = (
     <div className="flex items-center gap-2 pt-2 pr-4 pl-2">
       <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
@@ -383,9 +427,21 @@ function OutputPreview({
           <SourceText output={output} onNavigate={onNavigate} />
         </div>
       </div>
+      {editToggle}
       {download}
     </div>
   );
+
+  if (editing && editablePath !== null) {
+    return (
+      <div className="flex h-full flex-col gap-3">
+        {header}
+        <div className="min-h-0 flex-1">
+          <OutputEditor path={editablePath} textUrl={url} leaveGuard={leaveGuard} />
+        </div>
+      </div>
+    );
+  }
 
   if (!url) {
     return (

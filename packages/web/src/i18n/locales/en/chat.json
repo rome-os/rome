@@ -777,6 +777,8 @@
     "previewFailed": "Failed to load the file",
     "truncated": "Showing the first {{count}} characters.",
     "back": "Back to outputs",
+    "edit": "Edit",
+    "doneEditing": "Done",
     "filterLabel": "Show",
     "noneOfType": "No outputs of this kind yet.",
     "today": "Today",

@@ -584,7 +584,9 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 committedContent: nextContent,
                 lastDiskContent: nextContent,
                 textViewMode:
-                  data.kind === "text" && getTextPreviewKind(data.path, data.mimeType)
+                  data.kind === "text" &&
+                  !config.singleFile &&
+                  getTextPreviewKind(data.path, data.mimeType)
                     ? "preview"
                     : "edit",
               },
