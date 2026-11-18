@@ -1,3 +1,10 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "tier": "background",
+      "reason": "Archiving a topic chat with \"Stop them\" sends followsAndTasks: \"stop\", which an older server ignores and moves them instead.",
+      "pr": 2347,
+      "server": "#2347"
+    }
+  ]
 }
