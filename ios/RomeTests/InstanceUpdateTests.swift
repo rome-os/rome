@@ -253,16 +253,16 @@ final class Counter: @unchecked Sendable {
 
     @Test func theMinimumVersionReadsReleases() {
         let floor = UpdateGate.minimumInstanceVersion
-        #expect(UpdateGate.isSupported(floor))
-        #expect(UpdateGate.isSupported("v\(floor)"))
+        #expect(UpdateGate.isSupported(floor, minimum: UpdateGate.minimumInstanceVersion))
+        #expect(UpdateGate.isSupported("v\(floor)", minimum: UpdateGate.minimumInstanceVersion))
         #expect(UpdateGate.isSupported("1.1.185", minimum: "1.1.185"))
         #expect(!UpdateGate.isSupported("1.1.184", minimum: "1.1.185"))
         #expect(!UpdateGate.isSupported("1.0.999", minimum: "1.1.185"))
         #expect(UpdateGate.isSupported("1.2.0", minimum: "1.1.185"))
         #expect(UpdateGate.isSupported("1.1.185-rc.1", minimum: "1.1.185"))
         // Unknown or unreadable versions are never held against the instance.
-        #expect(UpdateGate.isSupported(nil))
-        #expect(UpdateGate.isSupported("dev"))
+        #expect(UpdateGate.isSupported(nil, minimum: "1.1.185"))
+        #expect(UpdateGate.isSupported("dev", minimum: "1.1.185"))
     }
 
     /// The prompts name the Rome, never this app, on one line.
