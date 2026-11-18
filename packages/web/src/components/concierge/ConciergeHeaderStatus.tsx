@@ -104,20 +104,11 @@ export function ConciergeHeaderStatus({
     props ? { type: "button" as const, "aria-label": menuLabel, ...props } : {};
   const badgeRef = useRef<HTMLElement>(null);
   const nameRef = useRef<HTMLElement>(null);
-  // The menu stands to the right of the badge and its name tag together, so a
-  // long name never runs under it.
+  // The menu stands beside the badge alone, drawn over a long name tag rather
+  // than pushed out by it. Without the badge, the name tag that opens it.
   const anchor = useRef({
-    getBoundingClientRect: () => {
-      const rects = [badgeRef.current, nameRef.current]
-        .filter((element): element is HTMLElement => element !== null)
-        .map((element) => element.getBoundingClientRect());
-      if (rects.length === 0) return new DOMRect();
-      const left = Math.min(...rects.map((rect) => rect.left));
-      const top = Math.min(...rects.map((rect) => rect.top));
-      const right = Math.max(...rects.map((rect) => rect.right));
-      const bottom = Math.max(...rects.map((rect) => rect.bottom));
-      return new DOMRect(left, top, right - left, bottom - top);
-    },
+    getBoundingClientRect: () =>
+      (badgeRef.current ?? nameRef.current)?.getBoundingClientRect() ?? new DOMRect(),
   });
   const badgeEl = (props: BadgeMenuProps | null) => {
     const Badge = props ? "button" : "div";
