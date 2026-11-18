@@ -304,6 +304,23 @@ enum CalendarFixtures {
         #expect(try await run(source).upserts.isEmpty, "confirmed: nothing to resend")
     }
 
+    @Test func anEventMovedLaterInAnUnconfirmedRunIsDeletedPastTheOldCutoff() async throws {
+        let fake = FakeCalendar()
+        fake.events = [CalendarFixtures.event("a", 9, 10)]
+        let source = source(fake, MemoryProgressStore())
+        await source.confirm(try await run(source), unsupported: [], rejected: [])
+        // Moved 8 days later; the move reaches the Rome, its answer is lost.
+        fake.events[0] = CalendarFixtures.event("a", 9 + 8 * 24, 10 + 8 * 24)
+        #expect(try await run(source).upserts.map(\.key) == ["events:a"])
+        // Then deleted, read once the confirmed day has aged out but the moved one has not.
+        fake.events.removeAll()
+        let later = CalendarFixtures.now.addingTimeInterval(10 * 86_400)
+        let next = try await run(source, at: later)
+        #expect(next.deletes == ["events:a"], "the Rome may hold the moved event")
+        await source.confirm(next, unsupported: [], rejected: [])
+        #expect(try await run(source, at: later).deletes.isEmpty, "confirmed: nothing left to retry")
+    }
+
     @Test func anEventThatAgedOutIsForgottenNotDeleted() async throws {
         let fake = FakeCalendar()
         fake.events = [CalendarFixtures.event("a", 9, 10)]

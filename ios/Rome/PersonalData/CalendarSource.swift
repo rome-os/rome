@@ -142,9 +142,12 @@ struct CalendarSource: PersonalDataSource {
     }
 
     /// What the Rome may hold: what it confirmed, and what an interrupted
-    /// run began sending or deleting.
+    /// run began sending or deleting. A key in both ends at the later of the
+    /// two, so it ages out only once every version the Rome may hold has.
     static func held(_ progress: SyncProgress) -> [String: SyncProgress.SentEntry] {
-        (progress.attempted ?? [:]).merging(progress.entries ?? [:]) { _, confirmed in confirmed }
+        (progress.attempted ?? [:]).merging(progress.entries ?? [:]) { tried, confirmed in
+            .init(hash: confirmed.hash, end: max(tried.end, confirmed.end))
+        }
     }
 
     static func hash(_ point: PersonalDataPoint) -> String {
