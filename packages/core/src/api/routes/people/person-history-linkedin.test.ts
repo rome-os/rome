@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { PersonResource, TimelinePage } from "@rome/api-types/people";
-import { createLinkedInDescriptor } from "../../../connections/integrations/linkedin.js";
+import { createLinkedInDescriptor } from "../../../connections/kinds/linkedin/descriptor.js";
 import type { Credential, RuntimeKit } from "../../../connections/types.js";
 import type { OpencliResult } from "../../../connections/kinds/linkedin/linkedin-cli.js";
 import {

@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { ChatId } from "@rome-os/app-runtime";
-import type { TalkFeatures } from "../types.js";
+import type { TalkFeatures } from "../../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -29,12 +29,12 @@ import {
   runOpencli,
   type LinkedInWhoami,
   type RunOpencli,
-} from "../kinds/linkedin/linkedin-cli.js";
-import { LinkedInInboxPoller } from "../kinds/linkedin/linkedin.js";
-import { linkedInMemberIdFromProfileUrl } from "../kinds/linkedin/linkedin-sync.js";
-import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
-import { CredentialRejected } from "../errors.js";
-import type { SetupFn } from "../setup/types.js";
+} from "./linkedin-cli.js";
+import { LinkedInInboxPoller } from "./linkedin.js";
+import { linkedInMemberIdFromProfileUrl } from "./linkedin-sync.js";
+import type { LinkedInSyncSink } from "./linkedin-sync.js";
+import { CredentialRejected } from "../../errors.js";
+import type { SetupFn } from "../../setup/types.js";
 import type {
   AuthScheme,
   CapabilityDegradation,
@@ -43,9 +43,9 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   Talker,
-} from "../types.js";
-import { createLogger } from "../../logger.js";
-import { refuseAttachments, refuseReplies, textToSend } from "../outbound/send-refusals.js";
+} from "../../types.js";
+import { createLogger } from "../../../logger.js";
+import { refuseAttachments, refuseReplies, textToSend } from "../../outbound/send-refusals.js";
 
 const log = createLogger("linkedin-reply");
 

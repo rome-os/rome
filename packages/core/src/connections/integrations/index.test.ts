@@ -23,7 +23,6 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
     } as unknown as BuiltinConnectionDeps);
 
@@ -55,7 +54,6 @@ describe("registerBuiltinConnections", () => {
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
       wechatUserRuntime: runtime,
     } as unknown as BuiltinConnectionDeps);
@@ -81,7 +79,6 @@ describe("registerBuiltinConnections", () => {
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
     } as unknown as BuiltinConnectionDeps);
 
@@ -99,7 +96,6 @@ describe("registerBuiltinConnections", () => {
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
       wechatUserRuntime: {} as WechatUserRuntime,
     } as unknown as BuiltinConnectionDeps);
@@ -143,7 +139,6 @@ describe("registerBuiltinConnections", () => {
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
       wechatUserRuntime: {} as WechatUserRuntime,
     } as unknown as BuiltinConnectionDeps);

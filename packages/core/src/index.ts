@@ -361,6 +361,8 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
+import type { KindMount } from "./connections/kind-mount.js";
+import { linkedin } from "./connections/kinds/linkedin/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1856,19 +1858,6 @@ async function main() {
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),
-    linkedInSyncSink: refreshingAfter(
-      linkedInStoreRepo,
-      [
-        "replaceThreadParticipantMembership",
-        "upsertParticipantProfile",
-        "backfillParticipantsFromMessages",
-      ],
-      refreshLinkedInProfiles,
-    ),
-    linkedinPoll: {
-      minIntervalMs: config.linkedinPollMinMinutes * 60_000,
-      maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
-    },
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
@@ -1895,6 +1884,24 @@ async function main() {
     // connection. Its key recovery runs a local debugger in this container.
     ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
+  // The kinds of connection laid out under connections/kinds/. Leaving a kind
+  // out is deleting its line.
+  const connectionKinds: KindMount[] = [
+    linkedin({
+      syncSink: refreshingAfter(
+        linkedInStoreRepo,
+        [
+          "replaceThreadParticipantMembership",
+          "upsertParticipantProfile",
+          "backfillParticipantsFromMessages",
+        ],
+        refreshLinkedInProfiles,
+      ),
+      minIntervalMs: config.linkedinPollMinMinutes * 60_000,
+      maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
+    }),
+  ];
+  for (const kind of connectionKinds) connectionRegistry.register(kind.descriptor);
   // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
   const channels = channelList({
