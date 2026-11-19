@@ -20,12 +20,15 @@ interface LanNodeState {
 
 class PairingRequired extends Error {}
 
+type LanNodeEvent = HostEvent | { type: "pairing_retry"; code: string };
+
 async function redeem(
   origin: string,
   installationId: string,
   installToken: string,
   verifier: string,
   signal: AbortSignal,
+  onEvent?: (event: LanNodeEvent) => void,
 ) {
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted();
@@ -36,7 +39,20 @@ async function redeem(
       redirect: "error",
       cache: "no-store",
       signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-    }).catch(() => null);
+    }).catch((error: unknown) => {
+      if (!signal.aborted) {
+        const cause = error instanceof Error ? error.cause : undefined;
+        const code = isRecord(cause) ? cause.code : undefined;
+        onEvent?.({
+          type: "pairing_retry",
+          code:
+            typeof code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(code)
+              ? code
+              : "REQUEST_FAILED",
+        });
+      }
+      return null;
+    });
     if (response?.ok) {
       const data: unknown = await response.json().catch(() => null);
       const session = deviceSessionFromToken(data, origin);
@@ -66,7 +82,7 @@ export async function runLanNode(options: {
   installToken?: string;
   stateDir: string;
   signal: AbortSignal;
-  onEvent?(event: HostEvent): void;
+  onEvent?(event: LanNodeEvent): void;
 }): Promise<"stopped" | "needs_pairing" | "superseded"> {
   const { installationId, installToken, signal } = options;
   const origin = cloudOrigin(options.cloudUrl);
@@ -123,6 +139,7 @@ export async function runLanNode(options: {
               grant.token,
               state.verifier,
               signal,
+              options.onEvent,
             );
             state.origin = origin;
             state.usedGrant = grant.hash;

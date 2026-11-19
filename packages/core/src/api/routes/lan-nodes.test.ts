@@ -130,6 +130,25 @@ describe("LAN Node device settings", () => {
     expect(await replaced.json()).toEqual(grant);
   });
 
+  it("removes an installation only after proving the Cloud account binding", async () => {
+    const remove = () =>
+      app.request(`${path}/${id}`, {
+        method: "DELETE",
+        headers: { ...guard(), Origin: "http://localhost" },
+      });
+    upstream = (url, init) => {
+      expect(url).toBe(`${cloudPath}/${id}`);
+      expect(init?.method).toBe("DELETE");
+      return new Response(null, { status: 204 });
+    };
+    cloudAccount = "other-account";
+    expect((await remove()).status).toBe(403);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    cloudAccount = owner;
+    expect((await remove()).status).toBe(204);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("combines grant and Gateway status without treating unavailable probes as offline", async () => {
     upstream = () =>
       Response.json({

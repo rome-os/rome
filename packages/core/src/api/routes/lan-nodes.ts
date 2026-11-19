@@ -56,6 +56,12 @@ export function lanNodesRoutes({
     if (!id.success) return c.json({ error: "node_not_found" }, 404);
     return c.json(await lanNodes.pair(c.get("accountId"), { id: id.data }, c.req.raw.signal), 201);
   });
+  app.delete("/:id", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return c.json({ error: "node_not_found" }, 404);
+    await lanNodes.removeInstallation(c.get("accountId"), id.data, c.req.raw.signal);
+    return c.body(null, 204);
+  });
   app.post("/:id/switch-status", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return c.json({ error: "node_not_found" }, 404);

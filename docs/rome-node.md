@@ -109,6 +109,10 @@ the device credential and preserves the device ID. Remove the device from
 Pairing again gives the Node a new device ID. If the first Compose file expires
 or is lost before deployment, use **Get a new Compose file** to replace it.
 
+Choose **Remove node** on an unpaired entry to remove its installation record
+and invalidate any outstanding Compose file. For a paired node, remove its
+device before removing the installation.
+
 On an online Node, choose **Check Shelly switch** and enter the known private
 IPv4 address of a [Shelly Gen2 or newer switch](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Switch/#switchgetstatus).
 The Node reads relay 0 via `GET /rpc/Switch.GetStatus?id=0` and reports on or off.
@@ -124,11 +128,12 @@ multi-platform archive without pushing it.
 ```sh
 docker buildx build --platform linux/amd64,linux/arm64 \
   --file infra/rome-node/Dockerfile \
+  --tag yunfanye/rome-node:1.0.0 \
   --output type=oci,dest=rome-node.oci.tar .
 ```
 
-Compose references `yunfanye/rome-node:latest`. For a local build, load the image
-under that tag on the Docker host.
+Compose references `yunfanye/rome-node:1.0.0`. Publish each version as a new
+tag. For a local build, load the archive on the Docker host.
 
 ### Connect directly to a self-hosted instance
 
@@ -147,8 +152,8 @@ Core stores the installation records in the instance database. Keep that
 database and the Node's named volume across updates. Removing a device
 invalidates its credential and closes its active connection. Core serves
 only the devices paired to this instance and sends only the supported LAN
-actions. Cloud-provisioned instances use their linked Rome Cloud and the
-installer API below.
+actions. Cloud-provisioned instances show setup once their linked Rome Cloud
+serves the installer API below.
 
 ### Rome Cloud installer contract
 
@@ -161,9 +166,10 @@ following API in the private [Rome Cloud repository](https://github.com/amantru/
 | `GET /api/instance/lan-nodes` | Returns `{ instanceId, nodes }` for the authenticated instance. Each node has `id`, `name`, and `state`. A `pending` node includes `expiresAt` as a UTC ISO timestamp. A `paired` node includes `deviceId`. A removed or revoked device leaves a `needs_pairing` node. |
 | `POST /api/instance/lan-nodes` | `{ name }` creates a pending node and returns `{ instanceId, id, installToken, expiresAt }`. |
 | `POST /api/instance/lan-nodes/{id}/pairing` | An empty JSON object replaces the grant for an existing pending or unpaired node. The response has the same fields as creation. Return 404 with `node_not_found` for nodes outside the instance and 409 with `already_paired` while a device is still authorized. |
+| `DELETE /api/instance/lan-nodes/{id}` | Removes an unpaired installation and invalidates its grant. Return 204 on removal, 404 with `node_not_found` for nodes outside the instance, or 409 with `already_paired` while a device is still authorized. |
 | `POST /api/devices/lan-nodes/redeem` | Accepts the install token as a Bearer and `{ installation_id, verifier }` as JSON. Returns `{ installation_id, access_token, token_type: "Bearer", device_id, caller_id }`. |
 
-For the first three routes, accept the existing instance bearer or signer JWT.
+For the instance routes, accept the existing instance bearer or signer JWT.
 Resolve its live account and instance in Cloud and scope every read and write
 to both. Core verifies the guardian's signed session subject against
 `GET /api/instance/whoami` with the same credential before calling these

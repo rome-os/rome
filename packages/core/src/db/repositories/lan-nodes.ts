@@ -99,6 +99,20 @@ export class LanNodesRepository {
     );
   }
 
+  removeInstallation(guardianId: string, id: string) {
+    const target = and(eq(nodes.id, id), eq(nodes.guardianId, guardianId));
+    return this.db.transaction(
+      (tx) => {
+        const row = tx.select({ deviceId: nodes.deviceId }).from(nodes).where(target).get();
+        if (!row) return "node_not_found";
+        if (row.deviceId) return "already_paired";
+        tx.delete(nodes).where(target).run();
+        return "removed";
+      },
+      { behavior: "immediate" },
+    );
+  }
+
   revoke(deviceId: string) {
     return (
       this.db

@@ -27,6 +27,33 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
+it("reports the network error code when pairing retries without exposing the error text", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "lan-node-retry-"));
+  const stop = new AbortController();
+  const report = rs.fn();
+  rs.spyOn(globalThis, "fetch").mockRejectedValue(
+    new TypeError(first.grant, { cause: { code: "ENOTFOUND", message: first.token } }),
+  );
+  try {
+    const result = await runLanNode({
+      cloudUrl: "https://rome.example",
+      installationId,
+      installToken: first.grant,
+      stateDir,
+      signal: AbortSignal.any([stop.signal, AbortSignal.timeout(2000)]),
+      onEvent(event) {
+        if (event.type !== "pairing_retry") return;
+        report(event);
+        stop.abort();
+      },
+    });
+    expect(result).toBe("stopped");
+    expect(report).toHaveBeenCalledExactlyOnceWith({ type: "pairing_retry", code: "ENOTFOUND" });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 it("performs one bounded Shelly read and checks the Gateway sender on text and binary requests", async () => {
   const send = rs.fn<(message: OutboundEnvelope) => boolean>(() => true);
   const sendFrame = rs.fn(() => true);

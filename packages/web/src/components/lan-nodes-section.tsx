@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -53,7 +54,7 @@ function lanNodeCompose({ id, expiresAt, installToken }: LanNodeGrant, origin: s
     expiresAt,
     compose: `services:
   rome-node:
-    image: "yunfanye/rome-node:latest"
+    image: "yunfanye/rome-node:1.0.0"
     container_name: "${projectName}"
     restart: unless-stopped
     read_only: true
@@ -83,18 +84,24 @@ function LanError({ error }: { error: Error }) {
   );
 }
 
+function installerUnavailable(error: Error | null) {
+  return error?.message === "cloud_unsupported" || error?.message === "not_configured";
+}
+
 export function LanNodesSection({ deviceHref }: { deviceHref: (id: string) => string }) {
   const { t } = useLanText();
   const title = useId();
-  const query = useQuery({
+  const query = useQuery<ReturnType<typeof lanNodeListSchema.parse>>({
     queryKey: ["lan-nodes"],
     retry: false,
-    refetchInterval: 15_000,
+    refetchInterval: ({ state }) => (installerUnavailable(state.error) ? false : 15_000),
     queryFn: async ({ signal }) =>
       lanNodeListSchema.parse(await fetchJson<unknown>(path, { signal, fallback: "unavailable" })),
   });
   const [pairing, setPairing] = useState<{ node?: LanNode } | null>(null);
   const [checking, setChecking] = useState<LanNode | null>(null);
+  const [removing, setRemoving] = useState<LanNode | null>(null);
+  if (query.isPending || installerUnavailable(query.error)) return null;
   return (
     <Section aria-labelledby={title}>
       <SectionHeader>
@@ -144,6 +151,11 @@ export function LanNodesSection({ deviceHref }: { deviceHref: (id: string) => st
                     {t(node.status === "waiting" ? "newCompose" : "repair")}
                   </Button>
                 )}
+                {!node.deviceId && (
+                  <Button variant="ghost" size="sm" onClick={() => setRemoving(node)}>
+                    {t("remove")}
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -157,7 +169,36 @@ export function LanNodesSection({ deviceHref }: { deviceHref: (id: string) => st
         />
       )}
       {checking && <CheckLanSwitch node={checking} onClose={() => setChecking(null)} />}
+      {removing && <RemoveLanNode node={removing} onClose={() => setRemoving(null)} />}
     </Section>
+  );
+}
+
+function RemoveLanNode({ node, onClose }: { node: LanNode; onClose: () => void }) {
+  const { t } = useLanText();
+  const client = useQueryClient();
+  const remove = useMutation({
+    mutationFn: () =>
+      fetchJson<void>(`${path}/${node.id}`, { method: "DELETE", fallback: "unavailable" }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["lan-nodes"] });
+    },
+    onSuccess: onClose,
+  });
+
+  return (
+    <RomeConfirmDialog
+      open
+      destructive
+      title={t("removeTitle", { name: node.name })}
+      description={t("removeDescription")}
+      confirmLabel={t("remove")}
+      confirmDisabled={remove.isPending}
+      onCancel={onClose}
+      onConfirm={() => remove.mutate()}
+    >
+      {remove.error && <LanError error={remove.error} />}
+    </RomeConfirmDialog>
   );
 }
 

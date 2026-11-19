@@ -91,7 +91,7 @@ it("copies a new LAN Node configuration, then reads its status and starts a repa
   expect(setup.getByRole("button", { name: "Download Compose" })).toBeTruthy();
   await user.click(setup.getByRole("button", { name: "Copy Compose" }));
   const compose = await navigator.clipboard.readText();
-  expect(compose).toContain('image: "yunfanye/rome-node:latest"');
+  expect(compose).toContain('image: "yunfanye/rome-node:1.0.0"');
   expect(compose).toContain('ROME_NODE_CLOUD_URL: "https://rome.example:9443"');
   expect(compose).toContain(`ROME_NODE_INSTALLATION_ID: "${id}"`);
   expect(compose).toContain(`ROME_NODE_INSTALL_TOKEN: "${installToken}"`);
@@ -129,6 +129,56 @@ it("copies a new LAN Node configuration, then reads its status and starts a repa
     expect.objectContaining({ method: "POST" }),
   );
 }, 15_000);
+
+it("hides LAN node setup until the Cloud installer is available", async () => {
+  const { client } = renderDevices(
+    () => ({
+      connection: "online",
+      checkedAt: new Date().toISOString(),
+      devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+    }),
+    undefined,
+    () => Response.json({ error: "cloud_unsupported" }, { status: 501 }),
+  );
+
+  await screen.findByRole("link", { name: /MacBook/ });
+  await waitFor(() => expect(client.getQueryState(["lan-nodes"])?.status).toBe("error"));
+  expect(screen.queryByRole("button", { name: "Add LAN node" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("removes an unpaired installation after confirmation and keeps paired devices listed", async () => {
+  const path = "/api/devices/lan-nodes";
+  const id = "73426989-9646-4579-9869-af5a321ff48d";
+  const paired = {
+    id: "3dc4a001-183f-4170-b150-1e2c0c792d72",
+    deviceId: "06954fc4-5a06-4dc8-898d-cffac7ac97a1",
+    name: "Paired node",
+    status: "offline",
+  };
+  let nodes = [{ id, deviceId: null, name: "Abandoned node", status: "waiting" }, paired];
+  const lan = rs.fn((url: string, init?: RequestInit) => {
+    if (url === `${path}/${id}` && init?.method === "DELETE") {
+      nodes = [paired];
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ nodes, transport: "direct" });
+  });
+  renderDevices(
+    () => ({ connection: "online", checkedAt: new Date().toISOString(), devices: [] }),
+    undefined,
+    lan,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Remove node" }));
+  const confirmation = within(
+    await screen.findByRole("dialog", { name: "Remove Abandoned node?" }),
+  );
+  await user.click(confirmation.getByRole("button", { name: "Remove node" }));
+  await waitFor(() => expect(screen.queryByText("Abandoned node")).toBeNull());
+  expect(screen.getByText("Paired node")).toBeTruthy();
+  expect(lan).toHaveBeenCalledWith(`${path}/${id}`, expect.objectContaining({ method: "DELETE" }));
+});
 
 it("lists devices independently of the settings request", async () => {
   renderDevices(() => ({

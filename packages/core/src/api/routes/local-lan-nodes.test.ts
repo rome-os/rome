@@ -12,6 +12,7 @@ import { LanNodesRepository } from "../../db/repositories/lan-nodes.js";
 import { guardianAuth } from "../../db/schema.js";
 import { createLocalLanNodes, withLocalLanNodes } from "../../desktops/local-lan-nodes.js";
 import { createNodeDevicesService } from "../../desktops/node-devices.js";
+import { applyInstanceSlug } from "../../instance/instance-env.js";
 import { createTestDb } from "../../test/db.js";
 import { buildTestDeps } from "../../test/helpers.js";
 import { startApi } from "../index.js";
@@ -53,7 +54,8 @@ async function database() {
 }
 
 async function server(db: Awaited<ReturnType<typeof database>>) {
-  const local = createLocalLanNodes(new LanNodesRepository(db));
+  const local = createLocalLanNodes(new LanNodesRepository(db), { PANTHEON_DOMAIN: "localhost" });
+  if (!local) throw new Error("Expected the direct transport");
   const cloud = createNodeDevicesService(() => ({
     getDevicesStatus: async () => null,
     listDevices: async () => ({ items: [] }),
@@ -93,6 +95,17 @@ function deviceSocket(origin: string, token: string) {
   return socket;
 }
 
+it("keeps the Cloud transport when a warm instance gains a slug", async () => {
+  const repo = new LanNodesRepository(await database());
+  const pool = { PANTHEON_DOMAIN: "romeos.cc" };
+  expect(createLocalLanNodes(repo, pool)).toBeUndefined();
+
+  const adopted = { ...pool };
+  expect(applyInstanceSlug("tenant", adopted)).toBe("https://tenant.romeos.cc");
+  expect(createLocalLanNodes(repo, adopted)).toBeUndefined();
+  expect(createLocalLanNodes(repo, { ...pool, PANTHEON_SLUG: "tenant" })).toBeUndefined();
+});
+
 it("pairs a local guardian's Node through the normal API and revokes it through device management", async () => {
   const db = await database();
   const { api, owner, origin } = await server(db);
@@ -103,7 +116,7 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
     });
   expect((await verify(path)).status).toBe(401);
   expect((await verify(path + "/redeem")).status).toBe(204);
-  expect((await verify("/api/account/devices")).status).toBe(204);
+  expect((await verify("/api/account/devices")).status).toBe(401);
   for (const headers of [
     { Origin: origin },
     { ...headersFor("other-owner"), Origin: origin },
@@ -146,6 +159,9 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
   expect(await claim(verifier).then((r) => r.json())).toEqual(session);
   expect((await claim("w".repeat(43))).status).toBe(409);
   expect((await fetch(`${url}/${grant.id}/pairing`, json({}, owner))).status).toBe(409);
+  expect((await fetch(`${url}/${grant.id}`, { method: "DELETE", headers: owner })).status).toBe(
+    409,
+  );
   expect((await fetch(url, { headers: owner }).then((r) => r.json())).nodes[0].status).toBe(
     "offline",
   );
@@ -155,15 +171,7 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
       headers: { ...credential, "X-Forwarded-Host": "unrelated.example" },
     }).then((r) => r.json()),
   ).toEqual({ gatewayPath: "/ws/lan-node" });
-  expect(
-    (await fetch(origin + "/api/account/devices", { headers: credential }).then((r) => r.json()))
-      .items[0],
-  ).toEqual({
-    id: session.device_id,
-    device_name: "NAS",
-    platform: "linux",
-    device_kind: "lan_node",
-  });
+  expect((await fetch(origin + "/api/account/devices", { headers: credential })).status).toBe(404);
   expect((await fetch(url, { headers: credential })).status).toBe(403);
 
   const bad = deviceSocket(origin, installToken);
@@ -249,6 +257,23 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
   ).then((r) => r.json());
   expect(replacement.id).toBe(grant.id);
   expect(replacement.installToken).not.toBe(installToken);
+  const installation = `${restarted.origin}${path}/${grant.id}`;
+  expect((await fetch(installation, { method: "DELETE", headers: credential })).status).toBe(403);
+  expect((await fetch(installation, { method: "DELETE", headers: restarted.owner })).status).toBe(
+    204,
+  );
+  const afterRemoval = await fetch(restarted.origin + path, { headers: restarted.owner }).then(
+    (r) => r.json(),
+  );
+  expect(afterRemoval.nodes).toEqual([]);
+  expect(
+    (
+      await fetch(
+        `${restarted.origin}${path}/redeem`,
+        json({ installation_id: grant.id, verifier }, authorization(replacement.installToken)),
+      )
+    ).status,
+  ).toBe(401);
 }, 15_000);
 
 it("bounds first redemption and recovery separately, and stores only hashes", async () => {

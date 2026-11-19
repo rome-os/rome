@@ -1,20 +1,28 @@
 name: Rome Node package
 
-# The unit suites of both packages run in ci.yml. This workflow checks only what they cannot:
-# that the packed archives install from npm and run on their own.
+# The unit suites of both packages run in ci.yml. This workflow checks the
+# standalone npm archives and the Docker image.
 on:
   pull_request:
     paths:
+      - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - package.json
+      - pnpm-workspace.yaml
       - pnpm-lock.yaml
+      - tsconfig.json
       - .github/workflows/rome-node.yml
   push:
     branches: [main]
     paths:
+      - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - package.json
+      - pnpm-workspace.yaml
       - pnpm-lock.yaml
+      - tsconfig.json
       - .github/workflows/rome-node.yml
   workflow_dispatch:
 
@@ -43,3 +51,28 @@ jobs:
           node packages/rome-node-cli/scripts/package-smoke.mjs "$RUNNER_TEMP/rome-node-core-install"
           npm install --prefix "$RUNNER_TEMP/rome-node-install" "$RUNNER_TEMP"/rome-node-package/*.tgz
           node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" --help
+
+  image:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5d5447ce83dd
+      - name: Build the standalone image
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: docker buildx build --platform "$PLATFORM" --file infra/rome-node/Dockerfile --tag rome-node:ci --load .
+      - name: Load the Node runtime
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges:true --entrypoint node rome-node:ci
+          --input-type=module -e
+          'import { runLanNode } from "./dist/lan-node.js";
+          if (typeof runLanNode !== "function" || process.getuid() === 0) process.exit(1)'

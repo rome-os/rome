@@ -14,6 +14,7 @@ try {
     signal: shutdown.signal,
     onEvent(event) {
       if (event.type === "connection") console.info(`LAN Node connection: ${event.status}`);
+      if (event.type === "pairing_retry") console.warn(`LAN Node pairing retry: ${event.code}`);
     },
   });
   if (result !== "stopped") {

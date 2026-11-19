@@ -19,22 +19,6 @@ export function lanNodeTransportRoutes(local?: LocalLanNodes) {
       return c.json({ error: "invalid_device_session" }, 401);
     return c.json({ gatewayPath: LAN_NODE_SOCKET_PATH });
   });
-  app.get("/api/account/devices", (c) => {
-    c.header("Cache-Control", "no-store");
-    if (!local) return c.json({ error: "not_configured" }, 404);
-    const device = local.findByBearer(c.req.header("Authorization"));
-    if (!device) return c.json({ error: "invalid_device_session" }, 401);
-    return c.json({
-      items: [
-        {
-          id: device.deviceId,
-          device_name: device.name,
-          platform: "linux",
-          device_kind: "lan_node",
-        },
-      ],
-    });
-  });
   app.post("/api/devices/lan-nodes/redeem", bodyLimit({ maxSize: 1024 }), async (c) => {
     c.header("Cache-Control", "no-store");
     if (!local) return c.json({ error: "not_configured" }, 404);

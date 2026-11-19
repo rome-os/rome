@@ -86,7 +86,9 @@ export function createLanNodesService(
     accountId: string,
     path: string,
     signal: AbortSignal,
-    body?: { name: string } | Record<string, never>,
+    options?:
+      | { method: "POST"; body: { name: string } | Record<string, never> }
+      | { method: "DELETE" },
   ) {
     const url = URL.parse(cloud.origin() ?? "");
     if (url?.protocol !== "https:") throw new LanNodeError("not_configured");
@@ -99,9 +101,10 @@ export function createLanNodesService(
     if (proof.status !== "ok") throw new LanNodeError("unavailable");
     if (proof.identity.accountId !== accountId) throw new LanNodeError("sign_in_required");
 
+    const body = options?.method === "POST" ? options.body : undefined;
     const response = await withTracingSuppressed(() =>
       fetch(new URL(path, origin), {
-        method: body ? "POST" : "GET",
+        method: options?.method ?? "GET",
         headers: {
           Authorization: `Bearer ${token}`,
           ...(body ? { "Content-Type": "application/json" } : {}),
@@ -162,7 +165,7 @@ export function createLanNodesService(
         accountId,
         replacing ? `${root}/${input.id}/pairing` : root,
         signal,
-        replacing ? {} : input,
+        { method: "POST", body: replacing ? {} : input },
       );
       const grant = grantSchema.safeParse(result.data).data;
       if (!grant || grant.instanceId !== result.instanceId || (replacing && grant.id !== input.id))
@@ -171,6 +174,9 @@ export function createLanNodesService(
       if (lifetime <= 0 || lifetime > 15 * 60_000) throw new LanNodeError("unavailable");
       const { id, installToken, expiresAt } = grant;
       return { id, installToken, expiresAt, origin: result.origin };
+    },
+    async removeInstallation(accountId: string, id: string, signal: AbortSignal) {
+      await request(accountId, `${root}/${id}`, signal, { method: "DELETE" });
     },
     async switchStatus(accountId: string, id: string, address: string, signal: AbortSignal) {
       const node = (await list(accountId, signal)).find((item) => item.id === id);

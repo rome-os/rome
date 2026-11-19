@@ -876,6 +876,9 @@ export async function buildTestDeps(
       pair: async () => {
         throw new LanNodeError("not_configured");
       },
+      removeInstallation: async () => {
+        throw new LanNodeError("not_configured");
+      },
       switchStatus: async () => {
         throw new LanNodeError("not_configured");
       },

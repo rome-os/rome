@@ -3,9 +3,11 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { lanNodeNameSchema, type DevicesStatus, type LanNode } from "@rome/api-types/devices";
 import { isRecord, parseResponse } from "@rome-os/node-core";
+import { isLoopbackHostname } from "@rome-os/libs/net";
 import { v5 as uuidv5 } from "uuid";
 import { WebSocket, WebSocketServer } from "ws";
 import type { LanNodesRepository } from "../db/repositories/lan-nodes.js";
+import { deriveInstanceOrigin } from "../instance/instance-env.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { LanNodeError, lanSwitchStatus, type LanNodesService } from "./lan-nodes.js";
 import type {
@@ -29,7 +31,11 @@ interface Connection {
   pending: Map<string, (result: DeviceRunResult) => void>;
 }
 
-export function createLocalLanNodes(repo: LanNodesRepository) {
+export function createLocalLanNodes(repo: LanNodesRepository, env = process.env) {
+  // Adoption can assign a slug at runtime. The hosting domain stays fixed.
+  const hostedOrigin = URL.parse(deriveInstanceOrigin("probe", env) ?? "");
+  if (hostedOrigin && !isLoopbackHostname(hostedOrigin.hostname)) return;
+
   const connections = new Map<string, Connection>();
   const findByBearer = (header?: string) => {
     const token = /^Bearer (romedev_[A-Za-z0-9_-]{43})$/.exec(header ?? "")?.[1];
@@ -186,6 +192,10 @@ export function createLocalLanNodes(repo: LanNodesRepository) {
       const { id, installToken, expiresAt } = result;
       return { id, installToken, expiresAt, origin: null };
     },
+    async removeInstallation(guardianId, id) {
+      const outcome = repo.removeInstallation(guardianId, id);
+      if (outcome !== "removed") throw new LanNodeError(outcome);
+    },
     async switchStatus(guardianId, id, address) {
       const node = repo.list(guardianId).find((row) => row.id === id);
       if (!node) throw new LanNodeError("node_not_found");
@@ -243,7 +253,7 @@ export function createLocalLanNodes(repo: LanNodesRepository) {
   };
 }
 
-export type LocalLanNodes = ReturnType<typeof createLocalLanNodes>;
+export type LocalLanNodes = NonNullable<ReturnType<typeof createLocalLanNodes>>;
 
 export function withLocalLanNodes(
   devices: ReturnType<typeof createNodeDevicesService>,

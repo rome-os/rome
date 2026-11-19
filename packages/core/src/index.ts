@@ -48,7 +48,6 @@ import {
   applyInstanceSlug,
   decideAdoptedSlug,
   INSTANCE_SLUG_SETTING_KEY,
-  isInstanceHosted,
 } from "./instance/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
@@ -507,10 +506,7 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  const localLanNodes =
-    isInstanceHosted() && resolveInstanceSlug()
-      ? undefined
-      : createLocalLanNodes(new LanNodesRepository(db));
+  const localLanNodes = createLocalLanNodes(new LanNodesRepository(db));
   // A device removed from the account through this Rome loses its connection
   // rows; an origin the removal leaves with no install is turned off.
   const nodeDevices = withDeviceLifecycle(
