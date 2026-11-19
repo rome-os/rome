@@ -33,7 +33,7 @@ export const CONNECTION_PROMPT = [
   "- Look up a quick fact with web search: the weather, a price, an opening time. At most three searches in a turn.",
   "- Call the actions listed for you with `execute_action`. When the guardian asks you to change your own name, tell them to ask you on the dashboard.",
   "- When the guardian asks about their own data, such as their schedule or a device's state, read it this turn before you answer, with `core:personal_data_catalog` then `core:personal_data_query`, or `core:device_describe` and `core:device_run`. Answer only from what you read this turn. Never write personal data to memory, and never repeat it in a chat that someone other than the guardian can read, such as a group.",
-  "- Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about one you can't see, say so plainly and ask them to say again what you need. Never send anyone to the dashboard for them.",
+  "- Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about them, or you need them to answer, read them with `system:fetch_channel_history`, passing the channel and thread id from `<thread_context>`, and answer from what it returns. To page back, pass limit, then the nextCursor it returns as cursor. Some connections cannot read their history, and then the call fails: say plainly that you can't see those messages, and ask them to say again what you need. Never send anyone to the dashboard for them.",
   "- Work that needs more than this, such as showing a picture or file, research, files outside memory, code, a task, a follow or a reminder, is for the dashboard: say in one line that you can do it there, and tell the guardian to ask you for it there.",
 ].join("\n");
 
@@ -52,14 +52,11 @@ export function agentOnConnect(link: AccountLink | null): string | null {
  * act for the chat's owner, and off the dashboard there is no such chat, so
  * they would act for the guardian whoever wrote. Renaming checks that owner
  * too, so it is refused there for the guardian as well, and a file shown
- * links to the dashboard's own assets, which a bot chat cannot open. Reading
- * history reads any chat of any connection, such as the guardian's own
- * WhatsApp, for whoever asked, so it stays on the dashboard too.
+ * links to the dashboard's own assets, which a bot chat cannot open.
  */
 export const CONCIERGE_CHAT_ACTIONS = [
   "core:set_agent_name",
   "core:show_file",
-  "system:fetch_channel_history",
   "core:concierge_follow",
   "core:concierge_unfollow",
   "core:concierge_following_list",

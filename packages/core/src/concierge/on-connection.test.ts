@@ -44,11 +44,9 @@ describe("the Concierge on a connection", () => {
     }
   });
 
-  it("never reads another chat's history, and asks again for what it can't see", () => {
-    // The read takes any chat of any connection, for whoever asked.
-    expect(CONCIERGE_CHAT_ACTIONS).toContain("system:fetch_channel_history");
-    expect(CONNECTION_PROMPT).not.toContain("fetch_channel_history");
-    expect(CONNECTION_PROMPT).toContain("ask them to say again what you need");
+  it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {
+    expect(CONNECTION_PROMPT).toContain("`system:fetch_channel_history`");
+    expect(CONNECTION_PROMPT).toContain("Some connections cannot read their history");
     expect(CONNECTION_PROMPT).toContain("Never send anyone to the dashboard for them.");
   });
 });
