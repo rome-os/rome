@@ -218,14 +218,27 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     placements: savedPlacements,
     addWidget,
     removeWidget,
-    toolView,
+    toolView: savedToolView,
     toolActivations,
     selectTool,
     setToolsCollapsed,
   } = useFreeCells();
   // A saved widget of a hidden feature's app is left out, so its frame never
-  // mounts. The saved layout keeps it.
+  // mounts, and the open and unread tools only name widgets that show. The
+  // saved layout and view keep it.
   const placements = useMemo(() => savedPlacements.filter(isPlacementShown), [savedPlacements]);
+  const toolView = useMemo(() => {
+    const shown = new Set(placements.map((p) => p.id));
+    const firstShown = [...placements].sort((a, b) => a.order - b.order)[0]?.id ?? null;
+    return {
+      ...savedToolView,
+      activeId:
+        savedToolView.activeId === null || shown.has(savedToolView.activeId)
+          ? savedToolView.activeId
+          : firstShown,
+      unreadIds: savedToolView.unreadIds.filter((id) => shown.has(id)),
+    };
+  }, [placements, savedToolView]);
   const { apps } = useAppsList();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>

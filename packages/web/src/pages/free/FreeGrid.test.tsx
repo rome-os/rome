@@ -539,6 +539,21 @@ describe("FreeGrid layout from the first messages page", () => {
     expect(JSON.parse(localStorage.getItem("rome:free-layout:inbox-chat")!)).toEqual(saved);
   });
 
+  it("opens the first shown widget when the saved open one is a hidden feature's app", () => {
+    hiddenFeatures.add("inbox");
+    const saved = [
+      { id: "inbox", type: "app", targetId: "inbox", order: 0 },
+      { id: "notes", type: "app", targetId: "notes", order: 1 },
+    ];
+    const view = { activeId: "inbox", collapsed: false, unreadIds: ["inbox"] };
+    localStorage.setItem("rome:free-layout:inbox-open", JSON.stringify(saved));
+    localStorage.setItem("rome:tool-view:inbox-open", JSON.stringify(view));
+    renderSession("inbox-open");
+    expect(screen.getByRole("tab", { name: "notes" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tab", { name: "inbox" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem("rome:tool-view:inbox-open")!)).toEqual(view);
+  });
+
   it("applies the layout the first page carries", () => {
     renderSession("server-chat");
     expect(screen.queryByRole("tab")).toBeNull();
