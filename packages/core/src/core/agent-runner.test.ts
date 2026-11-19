@@ -1903,6 +1903,38 @@ describe("AgentRunner", () => {
       ).rejects.toThrow("Unknown tool: execute_action");
     });
 
+    it("takes away the actions the session's place withholds, and only there", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { withoutActions: ["demo_action"] } : null,
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["demo_action"];
+      const run = (channel: string, threadId: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      try {
+        await run("telegram", "place-1");
+        await run("webchat", "place-2");
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).toEqual([]);
+      expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
+    });
+
     it("preserves App Store attribution on isolated forks", async () => {
       const find = agentLoader.find.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
@@ -2360,6 +2392,7 @@ describe("AgentRunner", () => {
       resetPolicy?: ProviderSessionResetPolicy;
       turnLinks?: PromptFacts;
       runLineDeps?: RunLineDeps;
+      placeSetup?: Parameters<typeof createSessions>[0]["placeSetup"];
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2370,6 +2403,7 @@ describe("AgentRunner", () => {
       {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
+        ...(options.placeSetup ? { placeSetup: options.placeSetup } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );

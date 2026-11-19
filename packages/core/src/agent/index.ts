@@ -225,6 +225,7 @@ export {
   type AgentTurnHandle,
   type AgentTurnInput,
   type SendTurnOptions,
+  type PlaceSetup,
 } from "./application/agent-session.js";
 export {
   AgentInputQueue,

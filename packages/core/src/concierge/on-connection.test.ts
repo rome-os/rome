@@ -1,16 +1,22 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  CONCIERGE_CHAT_ACTIONS,
   CONNECTION_INSTRUCTION,
   chatInstructionsOf,
   conciergeOnConnection,
-  onConnection,
+  conciergePlaceSetup,
 } from "./on-connection.js";
 
 describe("the Concierge on a connection", () => {
-  it("tells a chat on a connection from a dashboard chat, and an unknown place from both", () => {
-    expect(onConnection({ channel: "telegram" })).toBe(true);
-    expect(onConnection({ channel: "webchat" })).toBe(false);
-    expect(onConnection(undefined)).toBe(false);
+  it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {
+    expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
+      finalText: "deliver",
+      withoutActions: CONCIERGE_CHAT_ACTIONS,
+    });
+    expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
+    expect(conciergePlaceSetup("core:concierge", { channel: "webchat" })).toBeNull();
+    expect(conciergePlaceSetup("core:concierge", undefined)).toBeNull();
+    expect(conciergePlaceSetup("core:main", { channel: "telegram" })).toBeNull();
   });
 
   it("adds its instruction only to the Concierge, and only on a connection", async () => {

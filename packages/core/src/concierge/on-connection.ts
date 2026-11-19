@@ -1,4 +1,5 @@
 import type { ThreadContext } from "@rome-os/app-runtime";
+import type { PlaceSetup } from "../agent/index.js";
 import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { isConciergeAgent } from "../webchat/privacy.js";
 
@@ -15,9 +16,36 @@ export const CONNECTION_INSTRUCTION = [
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
 ].join("\n");
 
-/** Whether a session serving `thread` runs in a chat on a connection, not on the dashboard. */
-export function onConnection(thread: Pick<ThreadContext, "channel"> | undefined): boolean {
-  return thread !== undefined && thread.channel !== WEBCHAT_CHANNEL;
+/**
+ * The Concierge's actions that act for the owner of the Concierge chat a turn
+ * runs in. Off the dashboard there is no such chat, so they would act for the
+ * guardian whoever wrote.
+ */
+export const CONCIERGE_CHAT_ACTIONS = [
+  "core:concierge_follow",
+  "core:concierge_unfollow",
+  "core:concierge_following_list",
+  "core:concierge_following_configure",
+  "system:search_routine",
+  "system:delete_routine",
+] as const;
+
+/** The Concierge's setup on a connection: its text is the reply, and no action needs a Concierge chat. */
+const ON_CONNECTION: PlaceSetup = { finalText: "deliver", withoutActions: CONCIERGE_CHAT_ACTIONS };
+
+/**
+ * How the place a session serves changes the Concierge there, the one answer
+ * every part reads: its policy and actions, its own tools, its instruction and
+ * whether a backend turn delivers its text. Null for any other agent, and for
+ * the Concierge on the dashboard or in a place nothing names.
+ */
+export function conciergePlaceSetup(
+  agentName: string,
+  thread: Pick<ThreadContext, "channel"> | undefined,
+): PlaceSetup | null {
+  return isConciergeAgent(agentName) && thread !== undefined && thread.channel !== WEBCHAT_CHANNEL
+    ? ON_CONNECTION
+    : null;
 }
 
 /** The agent context's `chatInstructions` for the Concierge on a connection, and nothing elsewhere. */
@@ -25,7 +53,7 @@ export async function conciergeOnConnection(
   thread: Pick<ThreadContext, "channel"> | undefined,
   agentName: string,
 ): Promise<string | null> {
-  return isConciergeAgent(agentName) && onConnection(thread) ? CONNECTION_INSTRUCTION : null;
+  return conciergePlaceSetup(agentName, thread) ? CONNECTION_INSTRUCTION : null;
 }
 
 type ChatInstructions = (
