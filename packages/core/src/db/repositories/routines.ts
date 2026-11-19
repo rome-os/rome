@@ -221,19 +221,26 @@ export class RoutinesRepository {
   }
 
   /**
-   * Hands the routines these apps manage back to the guardian. Nobody can
-   * maintain a routine once its app is gone, so it becomes an ordinary routine
-   * a user can delete. Its enabled flag and run history stay as they are.
-   * Returns how many routines were released.
+   * Deletes the routines these apps manage, with their run history. Nobody can
+   * maintain a routine once its app is gone. A routine with an active run is
+   * kept, and a later call deletes it once the run ends. Returns the ids of the
+   * deleted routines.
    */
-  async releaseManagedRoutines(appIds: readonly string[]): Promise<number> {
-    if (appIds.length === 0) return 0;
-    const released = await this.db
-      .update(routines)
-      .set({ managedBy: null })
-      .where(inArray(routines.managedBy, [...appIds]))
-      .returning({ id: routines.id });
-    return released.length;
+  async deleteManagedRoutines(
+    appIds: readonly string[],
+  ): Promise<{ deleted: string[]; kept: number }> {
+    const result = { deleted: [] as string[], kept: 0 };
+    if (appIds.length === 0) return result;
+    const rows = await this.db
+      .select({ id: routines.id, managedBy: routines.managedBy })
+      .from(routines)
+      .where(inArray(routines.managedBy, [...appIds]));
+    for (const row of rows) {
+      const outcome = await this.deleteIfNoActiveRuns(row.id, row.managedBy ?? undefined);
+      if (outcome.status === "deleted") result.deleted.push(row.id);
+      else if (outcome.status === "active-runs") result.kept += 1;
+    }
+    return result;
   }
 
   /** Delete a routine only if it has no in-flight runs. The active-run count

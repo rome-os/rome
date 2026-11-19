@@ -1,7 +1,7 @@
 // Which routines stop when an app goes away. A routine that fires one of an
 // app's actions cannot run once the app is disabled, uninstalled or removed at
 // boot, so Routines pauses it. Once the app is uninstalled, the routines it
-// managed are handed back to the guardian.
+// managed are deleted.
 
 import { resolveArtifactId, type LegacyArtifactBindings } from "../apps/artifact-id.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -43,23 +43,23 @@ export function appRoutinePauser(deps: AppRoutinePauserDeps): (appId: string) =>
 }
 
 export interface RemovedAppRoutinesDeps {
-  repository: Pick<RoutinesRepository, "managingAppIds" | "releaseManagedRoutines">;
+  repository: Pick<RoutinesRepository, "managingAppIds" | "deleteManagedRoutines">;
   /** The app's lockfile entry, the authoritative record that it is installed. */
   readLockfileEntry: (appId: string) => Promise<unknown>;
 }
 
 /**
- * Hands back the routines of every managing app with no lockfile entry, and
+ * Deletes the routines of every managing app with no lockfile entry, and
  * returns those apps. The lockfile is read rather than the catalog, which is
- * incomplete when app boot fails, because a released routine can't be
- * reclaimed by its app.
+ * incomplete when app boot fails, because a deleted routine can't be restored.
  */
-export async function releaseRoutinesOfRemovedApps(
+export async function deleteRoutinesOfRemovedApps(
   deps: RemovedAppRoutinesDeps,
-): Promise<{ apps: string[]; routines: number }> {
+): Promise<{ apps: string[]; deleted: number; kept: number }> {
   const apps: string[] = [];
   for (const appId of await deps.repository.managingAppIds()) {
     if ((await deps.readLockfileEntry(appId)) == null) apps.push(appId);
   }
-  return { apps, routines: await deps.repository.releaseManagedRoutines(apps) };
+  const { deleted, kept } = await deps.repository.deleteManagedRoutines(apps);
+  return { apps, deleted: deleted.length, kept };
 }

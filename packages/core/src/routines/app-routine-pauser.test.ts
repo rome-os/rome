@@ -16,7 +16,7 @@ import type { ActionEngine } from "../apps/actions/engine.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutineEngine } from "./engine.js";
-import { appRoutinePauser, releaseRoutinesOfRemovedApps } from "./app-routine-pauser.js";
+import { appRoutinePauser, deleteRoutinesOfRemovedApps } from "./app-routine-pauser.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 
@@ -57,8 +57,9 @@ describe("AppManager routine lifecycle", () => {
       lockfilePath: join(root, "apps.lock.json"),
       installedRoot: join(root, "installed"),
       pauseRoutines: appRoutinePauser({ legacyBindings, repository, engine }),
-      releaseRoutines: async (appId) => {
-        await repository.releaseManagedRoutines([appId]);
+      deleteRoutines: async (appId) => {
+        const { deleted } = await repository.deleteManagedRoutines([appId]);
+        for (const id of deleted) await engine.deactivate(id);
       },
     });
     legacyBindings.action.legacy = formatArtifactId("app-a", "run");
@@ -109,6 +110,8 @@ describe("AppManager routine lifecycle", () => {
     "disable",
     "uninstall",
   ] as const)("%s pauses only enabled routines targeting the app, keeping history", async (operation) => {
+    // `shared` is managed by app-a but fires another app's action: disable
+    // leaves it running, uninstall deletes it.
     const seed = (actionName: string, enabled = true, managedBy?: string) =>
       repository.create({
         name: actionName,
@@ -136,7 +139,8 @@ describe("AppManager routine lifecycle", () => {
     const update = rs.spyOn(repository, "update");
     const originalDeactivate = engine.deactivate.bind(engine);
     const deactivate = rs.spyOn(engine, "deactivate").mockImplementation(async (id) => {
-      expect((await repository.findById(id))?.enabled).toBe(false);
+      const row = await repository.findById(id);
+      if (row) expect(row.enabled).toBe(false);
       await originalDeactivate(id);
     });
     expect(active.has(qualified)).toBe(true);
@@ -150,19 +154,29 @@ describe("AppManager routine lifecycle", () => {
       [qualified, { enabled: false }],
       [legacy, { enabled: false }],
     ]);
-    expect(deactivate.mock.calls).toEqual([[qualified], [legacy]]);
+    expect(deactivate.mock.calls).toEqual(
+      operation === "disable" ? [[qualified], [legacy]] : [[qualified], [legacy], [shared]],
+    );
     for (const id of [qualified, legacy]) {
       expect((await repository.findById(id))?.enabled).toBe(false);
       expect(active.has(id)).toBe(false);
     }
-    for (const id of [unrelated, shared, missing, lookalike]) {
+    if (operation === "uninstall") {
+      expect(await repository.findById(shared)).toBeNull();
+      expect(active.has(shared)).toBe(false);
+    }
+    const untouched =
+      operation === "disable"
+        ? [unrelated, shared, missing, lookalike]
+        : [unrelated, missing, lookalike];
+    for (const id of untouched) {
       expect((await repository.findById(id))?.enabled).toBe(true);
       expect(active.has(id)).toBe(true);
     }
     expect(await repository.findById(paused)).toEqual(pausedBefore);
     expect(active.has(paused)).toBe(false);
     expect(await runs.findById(historyId)).toEqual(history);
-    expect(await repository.findAll()).toHaveLength(7);
+    expect(await repository.findAll()).toHaveLength(operation === "disable" ? 7 : 6);
 
     if (operation === "disable") {
       await domain.manager.setEnabled("app-a", true);
@@ -173,7 +187,7 @@ describe("AppManager routine lifecycle", () => {
     }
   });
 
-  it("uninstall hands the app's managed routines to the guardian, and disable does not", async () => {
+  it("uninstall deletes the app's managed routines with their history, and disable does not", async () => {
     const seed = (name: string, actionName: string, managedBy: string) =>
       repository.create({
         name,
@@ -186,26 +200,20 @@ describe("AppManager routine lifecycle", () => {
     const other = await seed("other", "app-b:run", "app-b");
     const historyId = await runs.create({
       routineId: own,
-      executionId: "test-release-run",
+      executionId: "test-delete-run",
       status: "success",
     });
 
     await domain.manager.setEnabled("app-a", false);
-    expect(await repository.deleteIfNoActiveRuns(own)).toEqual({
-      status: "managed",
-      managedBy: "app-a",
-    });
+    expect((await repository.findById(own))?.managedBy).toBe("app-a");
 
     await domain.manager.uninstall("app-a");
-    const released = await repository.findById(own);
-    expect(released?.managedBy).toBeNull();
-    expect(released?.enabled).toBe(false);
-    expect(await runs.findById(historyId)).toBeTruthy();
+    expect(await repository.findById(own)).toBeNull();
+    expect(await runs.findById(historyId)).toBeNull();
     expect((await repository.findById(other))?.managedBy).toBe("app-b");
-    expect(await repository.deleteIfNoActiveRuns(own)).toEqual({ status: "deleted", name: "own" });
   });
 
-  it("releases routines only of the apps it is given", async () => {
+  it("deletes routines only of the apps it is given, keeping one with an active run", async () => {
     const seed = (name: string, managedBy?: string) =>
       repository.create({
         name,
@@ -215,17 +223,24 @@ describe("AppManager routine lifecycle", () => {
         args: {},
       });
     const gone = await seed("gone", "removed-app");
+    const running = await seed("running", "removed-app");
     const kept = await seed("kept", "app-b");
-    await seed("plain");
+    const plain = await seed("plain");
+    await runs.create({ routineId: running, executionId: "test-active-run", status: "running" });
 
     expect((await repository.managingAppIds()).sort()).toEqual(["app-b", "removed-app"]);
-    expect(await repository.releaseManagedRoutines([])).toBe(0);
-    expect(await repository.releaseManagedRoutines(["removed-app"])).toBe(1);
-    expect((await repository.findById(gone))?.managedBy).toBeNull();
+    expect(await repository.deleteManagedRoutines([])).toEqual({ deleted: [], kept: 0 });
+    expect(await repository.deleteManagedRoutines(["removed-app"])).toEqual({
+      deleted: [gone],
+      kept: 1,
+    });
+    expect(await repository.findById(gone)).toBeNull();
+    expect((await repository.findById(running))?.managedBy).toBe("removed-app");
     expect((await repository.findById(kept))?.managedBy).toBe("app-b");
+    expect(await repository.findById(plain)).toBeTruthy();
   });
 
-  it("boot releases only routines of apps missing from the lockfile, not ones the catalog missed", async () => {
+  it("boot deletes only routines of apps missing from the lockfile, not ones the catalog missed", async () => {
     const seed = (name: string, managedBy: string) =>
       repository.create({
         name,
@@ -244,13 +259,13 @@ describe("AppManager routine lifecycle", () => {
     });
     expect(unbooted.catalog.list()).toEqual([]);
 
-    const released = await releaseRoutinesOfRemovedApps({
+    const result = await deleteRoutinesOfRemovedApps({
       repository,
       readLockfileEntry: (appId) => unbooted.manager.readLockfileEntry(appId),
     });
 
-    expect(released).toEqual({ apps: ["removed-app"], routines: 1 });
-    expect((await repository.findById(removed))?.managedBy).toBeNull();
+    expect(result).toEqual({ apps: ["removed-app"], deleted: 1, kept: 0 });
+    expect(await repository.findById(removed)).toBeNull();
     expect((await repository.findById(installed))?.managedBy).toBe("app-a");
   });
 

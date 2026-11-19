@@ -1262,7 +1262,7 @@ export const routines = sqliteTable(
     // the app's to maintain: users can't delete it (the dashboard/DELETE path and
     // agent's delete_routine both refuse), only the managing app can — so an app
     // can freely recreate its routines on sync without a user pruning them.
-    // Uninstalling the app clears this, so its routines become the guardian's.
+    // Uninstalling the app deletes its routines.
     managedBy: text("managed_by"),
     enabled: integer("enabled", { mode: "boolean" }).default(true),
 
