@@ -108,13 +108,14 @@ case "$action" in
     fake="http://127.0.0.1:$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
     port_var="ROME_$(echo "${svc#rome-}" | tr a-z A-Z)_PORT"
     instance="http://127.0.0.1:$(sed -n "s/^$port_var=//p" "$STATE_DIR/compose.env")"
-    # The rows carry the tokens, so they go over stdin and are never saved.
-    spec="$(node "$ENV_DIR/tools/old-connections.mjs" prepare "$fake" "$team" "$guardian")"
+    # The rows carry the tokens, so the instance's image installs the apps in
+    # the fake Slack (slack.com inside the network) and writes them itself.
     compose stop -t 30 "$svc" >/dev/null
     set +e
     written="$(compose run --rm --no-deps -T --entrypoint node \
       -v "$ENV_DIR/tools/old-connections.mjs:/slackenv/old-connections.mjs:ro" \
-      "$svc" /slackenv/old-connections.mjs write <<<"$spec" 2>/dev/null | tail -n 1)"
+      "$svc" /slackenv/old-connections.mjs write --fake https://slack.com --team "$team" --guardian "$guardian" \
+      2>/dev/null | tail -n 1)"
     code=$?
     set -e
     compose start "$svc" >/dev/null

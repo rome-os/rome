@@ -1,9 +1,9 @@
-// Runs old-connections.mjs prepare against the fake Slack and write against a
-// database built from Rome's own migrations. ROME_SRC names the rome checkout
+// Runs old-connections.mjs write against the fake Slack and a database built
+// from Rome's own migrations. ROME_SRC names the rome checkout
 // whose migrations and connection kinds to use; without it, this checkout's.
 // Run: node --test environments/slack-app/tools/old-connections.test.mjs
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,28 +64,72 @@ function schemaKeys(file, name) {
   return new Set([...body.matchAll(/^\s+(\w+): /gm)].map((m) => m[1]));
 }
 
-const node = (args, input) =>
-  execFileSync(process.execPath, [tool, ...args], { input, encoding: "utf8" }).trim();
+const write = (dbPath) =>
+  runAsync(["write", "--fake", base, "--team", B, "--guardian", GUARDIAN, "--db", dbPath]);
 
-test("prepare reads each old app the way rome did, and write leaves the rows an upgrade finds", async () => {
-  const spec = JSON.parse(await runAsync(["prepare", base, B, GUARDIAN]));
-  const bot = spec.slack_bot;
-  const oauth = spec.slack;
+/** The app's tokens, as the fake hands them to setup: the same name answers the same app. */
+async function tokensOf(kind, name) {
+  const r = await fetch(`${base}/_control/other-app`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ team: B, kind, name }),
+  });
+  const a = await r.json();
+  return {
+    app_id: a.app_id,
+    bot_user_id: a.bot_user_id,
+    bot: a.bot_token,
+    app: a.app_token,
+    user: a.user_token,
+  };
+}
+
+test("write reads each old app the way rome did, and leaves the rows an upgrade finds", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "old-conn-")), "rome.db");
+  migrate(dbPath).close();
+  const first = JSON.parse(await write(dbPath));
+  assert.equal(first.ok, true);
+  assert.equal(first.slack_bot.written, true);
+  assert.equal(first.slack.written, true);
+
+  const botApp = await tokensOf("socket_bot", "Rome Bot");
+  const oauthApp = await tokensOf("oauth", "Rome");
+  assert.ok(!JSON.stringify(first).includes(botApp.bot));
+  assert.ok(!JSON.stringify(first).includes(oauthApp.user));
+  const profileOf = (kind) =>
+    JSON.parse(
+      new DatabaseSync(dbPath)
+        .prepare(
+          "SELECT g.profile FROM connection_grants g JOIN connections c ON c.id = g.custody WHERE c.connection_kind = ?",
+        )
+        .get(kind).profile,
+    );
+  const bot = {
+    ...first.slack_bot,
+    material: { botToken: botApp.bot, appToken: botApp.app },
+    profile: profileOf("slack_bot"),
+  };
+  const oauth = {
+    ...first.slack,
+    material: { botToken: oauthApp.bot, userToken: oauthApp.user },
+    profile: profileOf("slack"),
+  };
 
   // The bot's profile is what setup kept: auth.test's workspace and bot, and
   // the app bots.info names.
   assert.deepEqual(bot.profile, {
     teamId: B,
-    botUserId: bot.bot_user_id,
+    botUserId: botApp.bot_user_id,
     workspaceName: "Bayside",
     botUsername: "rome-bot",
-    appId: bot.app_id,
+    appId: botApp.app_id,
   });
-  assert.equal(bot.account_id, `${B}/${bot.bot_user_id}`);
+  assert.equal(bot.account_id, `${B}/${botApp.bot_user_id}`);
   assert.match(bot.material.botToken, /^xoxb-/);
   assert.match(bot.material.appToken, /^xapp-/);
   // Rome Cloud's OAuth profile names the installer by workspace and member.
   assert.equal(oauth.profile.subject, `${B}:${GUARDIAN}`);
+  assert.equal(oauth.account_id, `${B}:${GUARDIAN}`);
   assert.equal(oauth.profile.teamId, B);
   assert.equal(oauth.profile.email, "dana@bayside.test");
   assert.ok(oauth.profile.scopes.includes("users:read.email"));
@@ -98,14 +142,6 @@ test("prepare reads each old app the way rome did, and write leaves the rows an 
     const keys = schemaKeys(file, name);
     for (const k of Object.keys(profile)) assert.ok(keys.has(k), `${name} takes ${k}`);
   }
-
-  const dbPath = join(mkdtempSync(join(tmpdir(), "old-conn-")), "rome.db");
-  migrate(dbPath).close();
-  const first = JSON.parse(node(["write", "--db", dbPath], JSON.stringify(spec)));
-  assert.equal(first.ok, true);
-  assert.equal(first.slack_bot.written, true);
-  assert.equal(first.slack.written, true);
-  assert.ok(!JSON.stringify(first).includes(bot.material.botToken));
 
   const db = new DatabaseSync(dbPath);
   const conns = db.prepare("SELECT * FROM connections ORDER BY connection_kind").all();
@@ -162,17 +198,15 @@ test("prepare reads each old app the way rome did, and write leaves the rows an 
   db.close();
 
   // Again: each kind keeps the connection it has.
-  const again = JSON.parse(node(["write", "--db", dbPath], JSON.stringify(spec)));
+  const again = JSON.parse(await write(dbPath));
   assert.equal(again.slack_bot.written, false);
   assert.equal(again.slack_bot.connection_id, first.slack_bot.connection_id);
   assert.equal(new DatabaseSync(dbPath).prepare("SELECT count(*) n FROM connections").get().n, 2);
 });
 
-// prepare talks to the fake, which runs in this process, so it cannot block it.
+// write talks to the fake, which runs in this process, so it cannot block it.
 function runAsync(args) {
-  return new Promise((resolve, reject) => {
-    import("node:child_process").then(({ execFile }) =>
-      execFile(process.execPath, [tool, ...args], (err, out) => (err ? reject(err) : resolve(out))),
-    );
-  });
+  return new Promise((resolve, reject) =>
+    execFile(process.execPath, [tool, ...args], (err, out) => (err ? reject(err) : resolve(out))),
+  );
 }

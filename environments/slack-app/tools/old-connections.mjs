@@ -3,14 +3,12 @@
 // app (`slack`). Setup only: the rows are written into the instance's
 // database while it is stopped, never through a product route.
 //
-//   node old-connections.mjs prepare <fake-slack url> <team> <guardian member>
+//   node old-connections.mjs write --fake <fake-slack url> --team <team> --guardian <member> [--db path]
 //     Installs both apps in the fake Slack, reads each identity the way the
-//     product did when it connected one, and prints the rows to write, tokens
-//     included. Runs on the host.
-//   node old-connections.mjs write [--db path]
-//     Reads what prepare printed on stdin and writes the rows into rome.db. A
-//     kind that already has a connection keeps it. Prints the result without
-//     tokens. Runs in the instance's image, with the instance stopped.
+//     product did when it connected one, and writes the rows into rome.db. A
+//     kind that already has a connection keeps it. Runs in the instance's
+//     image with the instance stopped, so the tokens never leave the process;
+//     it prints the result without them.
 //   node old-connections.mjs link <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>
 //     Links the bot's account to the Concierge through the dashboard's own
 //     route, then checks that each connection came back: listed, the bot's
@@ -46,13 +44,13 @@ const OLD_OAUTH_BOT_SCOPES = [
 const OLD_OAUTH_USER_SCOPES = ["search:read"];
 const CONCIERGE = "core:concierge";
 
-if (mode === "prepare") await prepare(...rest);
-else if (mode === "write") await write(rest);
+if (mode === "write") await write(rest);
 else if (mode === "link") await link(...rest);
-else fail(2, "usage: old-connections.mjs prepare|write|link …");
+else fail(2, "usage: old-connections.mjs write|link …");
 
 async function prepare(fake, team, guardian) {
-  if (!fake || !team || !guardian) fail(2, "usage: prepare <fake-slack url> <team> <guardian>");
+  if (!fake || !team || !guardian)
+    fail(2, "usage: write --fake <url> --team <team> --guardian <member>");
   const control = (path, body) => post(`${fake}/_control${path}`, body);
   const slack = async (method, token, query) => {
     const r = await fetch(`${fake}/api/${method}?${new URLSearchParams(query ?? {})}`, {
@@ -108,27 +106,25 @@ async function prepare(fake, team, guardian) {
     teamId: ws.team_id,
   });
 
-  console.log(
-    JSON.stringify({
-      team,
-      guardian,
-      now,
-      slack_bot: {
-        app_id: bot.app_id,
-        bot_user_id: bot.bot_user_id,
-        material: { botToken: bot.bot_token, appToken: bot.app_token },
-        profile: botProfile,
-        account_id: `${botProfile.teamId}/${botProfile.botUserId}`,
-      },
-      slack: {
-        app_id: oauth.app_id,
-        bot_user_id: oauth.bot_user_id,
-        material: { botToken: oauth.bot_token, userToken: oauth.user_token },
-        profile: oauthProfile,
-        account_id: oauthProfile.subject,
-      },
-    }),
-  );
+  return {
+    team,
+    guardian,
+    now,
+    slack_bot: {
+      app_id: bot.app_id,
+      bot_user_id: bot.bot_user_id,
+      material: { botToken: bot.bot_token, appToken: bot.app_token },
+      profile: botProfile,
+      account_id: `${botProfile.teamId}/${botProfile.botUserId}`,
+    },
+    slack: {
+      app_id: oauth.app_id,
+      bot_user_id: oauth.bot_user_id,
+      material: { botToken: oauth.bot_token, userToken: oauth.user_token },
+      profile: oauthProfile,
+      account_id: oauthProfile.subject,
+    },
+  };
 }
 
 async function write(argv) {
@@ -136,7 +132,11 @@ async function write(argv) {
   const at = argv.indexOf("--db");
   const dbPath = at >= 0 ? argv[at + 1] : findDatabase(["/home/rome", "/home/user"]);
   if (!dbPath) fail(2, "no rome.db found under ~/.rome in the instance's homes");
-  const spec = JSON.parse(readFileSync(0, "utf8"));
+  const flag = (name) => {
+    const k = argv.indexOf(`--${name}`);
+    return k >= 0 ? argv[k + 1] : undefined;
+  };
+  const spec = await prepare(flag("fake"), flag("team"), flag("guardian"));
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
@@ -157,7 +157,6 @@ async function write(argv) {
         app_id: s.app_id,
         bot_user_id: s.bot_user_id,
         account_id: s.account_id,
-        bot_token_tail: s.material.botToken.slice(-6),
       };
       if (held) {
         out[kind] = {
@@ -269,14 +268,16 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
     hello = sockets.some((s) => s.appId === bot.app_id && s.event === "hello");
     if (!hello) await new Promise((r) => setTimeout(r, 1000));
   }
+  // The fake shows each app's token tails, never the tokens.
+  const { other_apps } = await fetch(`${fake}/_control/state`).then((r) => r.json());
+  const oauthTail = other_apps.find((a) => a.app_id === written.slack.app_id)?.bot_token_tail;
   const checks = {
     bot_agent_linked: linked.ok,
     bot_agent: linkBody?.account?.agent ?? null,
     bot_listed: view(bot.connection_id) !== null,
     bot_socket_hello: hello,
     oauth_listed: view(written.slack.connection_id) !== null,
-    oauth_token_file:
-      tokens.exists === true && tokens.bot_token_tail === written.slack.bot_token_tail,
+    oauth_token_file: tokens.exists === true && tokens.bot_token_tail === oauthTail,
   };
   console.log(JSON.stringify({ ...written, checks }));
   if (!Object.values(checks).every(Boolean)) process.exit(1);
