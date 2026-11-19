@@ -238,24 +238,23 @@ function previousTagOf(tag, published) {
   return `v${previous}`;
 }
 
-/** The title and description of each pull request the notes cite. One that cannot be read is left out. */
-function pullsOf(notes, repository) {
-  const pulls = new Map();
-  for (const { pr } of [...notes.breaking, ...notes.new, ...notes.fixes]) {
-    if (pr === null || pulls.has(pr)) continue;
-    try {
-      const out = execFileSync(
-        "gh",
-        ["pr", "view", String(pr), "--repo", repository, "--json", "title,body"],
-        { encoding: "utf8" },
-      );
-      const { title, body } = JSON.parse(out);
-      pulls.set(pr, { title, body: body ?? "" });
-    } catch {
-      console.error(`Could not read pull request #${pr}; its subject stands alone.`);
-    }
+/** A commit trailer such as `Co-Authored-By: Name <email>`. */
+const TRAILER = /^[A-Za-z-]+: .*<[^>\n]*@[^>\n]*>$/gm;
+
+/**
+ * Each squash commit's body, keyed by its pull request: the description the
+ * pull request was merged with. Unlike the live description, it cannot be
+ * edited after merge, and reading it needs no GitHub API.
+ */
+export function descriptionsOf(commits) {
+  const descriptions = new Map();
+  for (const commit of commits) {
+    const { pr } = entryOf(commit.subject, commit.body);
+    if (pr === null || descriptions.has(pr)) continue;
+    const body = (commit.body ?? "").replace(TRAILER, "").trim();
+    if (body) descriptions.set(pr, body);
   }
-  return pulls;
+  return descriptions;
 }
 
 /** release-notes.json for a release, with the model's highlights. */
@@ -264,7 +263,7 @@ async function notesWithHighlights(release) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   const highlights = await writeHighlights({
     notes: plain,
-    pulls: apiKey ? pullsOf(plain, release.repository) : new Map(),
+    descriptions: descriptionsOf(release.commits),
     apiKey,
   });
   return { ...plain, highlights };

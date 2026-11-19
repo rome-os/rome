@@ -17,9 +17,7 @@ const notes = {
   ],
   fixes: [{ scope: "ios", text: "keep drafts", pr: 12 }],
 };
-const pulls = new Map([
-  [11, { title: "feat(web): dictate messages (#11)", body: "x".repeat(5000) }],
-]);
+const descriptions = new Map([[11, "x".repeat(5000)]]);
 
 /** A stub DeepSeek that answers `content` as the model's message, recording each request. */
 function model(content, { status = 200 } = {}) {
@@ -38,8 +36,8 @@ function model(content, { status = 200 } = {}) {
   return { fetch, requests };
 }
 
-test("the prompt gives the model each cited entry with its pull request", () => {
-  const [system, user] = highlightsPrompt(notes, pulls);
+test("the prompt gives the model each cited entry with its merged description", () => {
+  const [system, user] = highlightsPrompt(notes, descriptions);
   assert.equal(system.role, "system");
   assert.match(system.content, /feature gate/);
   assert.match(system.content, /Improved security/);
@@ -48,9 +46,8 @@ test("the prompt gives the model each cited entry with its pull request", () => 
     changes.new.map((c) => c.pr),
     [11],
   );
-  assert.equal(changes.new[0].title, "feat(web): dictate messages (#11)");
   assert.equal(changes.new[0].description.length, 3000);
-  assert.equal(changes.fixes[0].title, null);
+  assert.equal(changes.fixes[0].description, null);
 });
 
 test("validation keeps cited, short, single highlights and moves breaking ones first", () => {
@@ -118,7 +115,12 @@ test("the model is asked once with the key, and its invented pull requests are d
     ],
     zh: [{ text: "语音输入消息。", pr: 11 }],
   });
-  const highlights = await writeHighlights({ notes, pulls, apiKey: "sk-test", fetch: stub.fetch });
+  const highlights = await writeHighlights({
+    notes,
+    descriptions,
+    apiKey: "sk-test",
+    fetch: stub.fetch,
+  });
   assert.deepEqual(highlights, {
     en: [{ text: "Dictate messages by voice.", pr: 11 }],
     zh: [{ text: "语音输入消息。", pr: 11 }],
@@ -134,21 +136,27 @@ test("any failure, a missing key or nothing to cite leaves the release without h
   t.mock.method(console, "error", () => {});
   const none = { en: [], zh: [] };
   for (const stub of [model("not json"), model({}, { status: 500 }), model(null)]) {
-    assert.deepEqual(await writeHighlights({ notes, pulls, apiKey: "k", fetch: stub.fetch }), none);
+    assert.deepEqual(
+      await writeHighlights({ notes, descriptions, apiKey: "k", fetch: stub.fetch }),
+      none,
+    );
   }
   const thrown = async () => {
     throw new TypeError("fetch failed");
   };
-  assert.deepEqual(await writeHighlights({ notes, pulls, apiKey: "k", fetch: thrown }), none);
+  assert.deepEqual(
+    await writeHighlights({ notes, descriptions, apiKey: "k", fetch: thrown }),
+    none,
+  );
 
   const unused = model({ en: [{ text: "x", pr: 11 }] });
   assert.deepEqual(
-    await writeHighlights({ notes, pulls, apiKey: undefined, fetch: unused.fetch }),
+    await writeHighlights({ notes, descriptions, apiKey: undefined, fetch: unused.fetch }),
     none,
   );
   const uncited = { breaking: [], new: [{ scope: null, text: "t", pr: null }], fixes: [] };
   assert.deepEqual(
-    await writeHighlights({ notes: uncited, pulls, apiKey: "k", fetch: unused.fetch }),
+    await writeHighlights({ notes: uncited, descriptions, apiKey: "k", fetch: unused.fetch }),
     none,
   );
   assert.equal(unused.requests.length, 0);

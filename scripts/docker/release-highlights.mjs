@@ -1,20 +1,20 @@
 // The highlights of a runtime release: a few user-facing lines, in English
 // and Chinese, that the web upgrade dialog shows in place of the raw commit
 // entries (docs/releases.md#github-release). A model writes them once, at
-// release time, from the release's entries and their pull requests.
+// release time, from the release's entries and the descriptions their pull
+// requests were merged with.
 
 /** Highlights per language at most. */
 export const HIGHLIGHT_LIMIT = 5;
 /** Longest highlight kept, in characters. The prompt asks for less. */
 const MAX_TEXT = { en: 200, zh: 100 };
-/** How much of a pull request's description the model reads. */
+/** How much of a merged description the model reads. */
 const MAX_BODY = 3000;
 /** Well inside the release job's limit, so a slow model never holds up the release. */
 const MODEL_TIMEOUT_MS = 60_000;
 /**
  * A link, domain or email address. Highlights never need one, and a pull
- * request description, which its author can edit after merge, could steer
- * the model into writing one.
+ * request description could steer the model into writing one.
  */
 const LINK = /https?:|www\.|\b[\w-]+\.(com|io|cc|net|org|ai|dev|app|co|me|xyz)\b|\S+@\S+\.\S+/i;
 
@@ -24,7 +24,7 @@ export const DEEPSEEK_MODEL = "deepseek-chat";
 /** No highlights: the dialog then links the full changes instead. */
 export const NO_HIGHLIGHTS = Object.freeze({ en: [], zh: [] });
 
-const SYSTEM_PROMPT = `You write the "What's new" highlights that Rome, a personal AI agent, shows its owner before they upgrade it. You get one release's changes as JSON: breaking changes, new features and fixes, each with its pull request number, title and description.
+const SYSTEM_PROMPT = `You write the "What's new" highlights that Rome, a personal AI agent, shows its owner before they upgrade it. You get one release's changes as JSON: breaking changes, new features and fixes, each with its pull request number and the description it was merged with.
 
 Rules:
 - Pick only changes the owner would notice while using Rome: new things they can do, and fixes to problems they could have run into. At most ${HIGHLIGHT_LIMIT}.
@@ -46,20 +46,19 @@ Every "pr" must be one of the pull request numbers you were given.`;
  * The chat messages that ask for a release's highlights.
  *
  * @param {{ breaking: Entry[], new: Entry[], fixes: Entry[] }} notes The release's entries.
- * @param {Map<number, { title: string, body: string }>} pulls Each entry's pull request.
+ * @param {Map<number, string>} descriptions Each pull request's description as merged.
  */
-export function highlightsPrompt(notes, pulls) {
+export function highlightsPrompt(notes, descriptions) {
   const describe = (entries) =>
     entries
       .filter((entry) => entry.pr !== null)
       .map((entry) => {
-        const pull = pulls.get(entry.pr);
+        const description = descriptions.get(entry.pr);
         return {
           pr: entry.pr,
           scope: entry.scope,
           subject: entry.text,
-          title: pull?.title ?? null,
-          description: pull?.body ? pull.body.slice(0, MAX_BODY) : null,
+          description: description ? description.slice(0, MAX_BODY) : null,
         };
       });
   const changes = {
@@ -118,11 +117,11 @@ export function validateHighlights(raw, notes) {
  *
  * @param {object} options
  * @param {{ breaking: Entry[], new: Entry[], fixes: Entry[] }} options.notes
- * @param {Map<number, { title: string, body: string }>} options.pulls
+ * @param {Map<number, string>} options.descriptions
  * @param {string | undefined} options.apiKey
  * @param {typeof fetch} [options.fetch]
  */
-export async function writeHighlights({ notes, pulls, apiKey, fetch = globalThis.fetch }) {
+export async function writeHighlights({ notes, descriptions, apiKey, fetch = globalThis.fetch }) {
   const cited = [...notes.breaking, ...notes.new, ...notes.fixes].some((e) => e.pr !== null);
   if (!cited) return NO_HIGHLIGHTS;
   if (!apiKey) {
@@ -135,7 +134,7 @@ export async function writeHighlights({ notes, pulls, apiKey, fetch = globalThis
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: DEEPSEEK_MODEL,
-        messages: highlightsPrompt(notes, pulls),
+        messages: highlightsPrompt(notes, descriptions),
         response_format: { type: "json_object" },
         temperature: 0.2,
       }),

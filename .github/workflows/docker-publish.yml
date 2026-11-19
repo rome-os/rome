@@ -279,8 +279,6 @@ jobs:
       GH_REPO: ${{ github.repository }}
     permissions:
       contents: write
-      # The highlights read each cited pull request's title and description.
-      pull-requests: read
 
     steps:
       - uses: actions/checkout@v6
