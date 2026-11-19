@@ -24,7 +24,7 @@ export function registerGmailActions(
       name: GMAIL_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Returns connectionId for core:gmail_send; profile returns the From emailAddress. If gmail_not_connected, Gmail can still be used through Composio. Connect Google in Settings → Connections (SHOW_GOOGLE_OAUTH is opt-in until verification).",
+        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Attachment downloads are not supported through this connection. Returns connectionId for core:gmail_send; profile returns the From emailAddress. If gmail_not_connected, Gmail can still be used through Composio. Connect Google in Settings → Connections (SHOW_GOOGLE_OAUTH is opt-in until verification).",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",

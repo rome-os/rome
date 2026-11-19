@@ -5,7 +5,7 @@ const message = {
   connectionId: "google-1",
   from: "guardian@example.com",
   to: ["recipient@example.com"],
-  subject: "Re: Hello 世界",
+  subject: "Re: Hello 世界\u2028\u2029",
   body: "Exact body\nBcc: not-a-header@example.com",
   inReplyTo: "<original@example.com>",
 };

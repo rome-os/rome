@@ -64,7 +64,7 @@ export function gmailRawMessage(input: GmailSendInput): string {
       ?.join("\r\n") ?? "";
   const subject =
     input.subject
-      .match(/.{1,10}/gu)
+      .match(/.{1,10}/gsu)
       ?.map((part) => `=?UTF-8?B?${Buffer.from(part, "utf8").toString("base64")}?=`)
       .join("\r\n ") ?? "";
   return Buffer.from(
