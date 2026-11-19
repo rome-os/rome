@@ -18,6 +18,7 @@ export interface AcceptanceTicket {
 
 interface Ticket extends AcceptanceTicket {
   taken: boolean;
+  done: boolean;
 }
 
 const tickets = new WeakMap<object, Ticket>();
@@ -33,19 +34,17 @@ export function openAcceptance(event: object): Promise<void> {
   });
   // A refusal no one awaits is still a settled outcome, not a crash.
   settled.catch(() => {});
-  let done = false;
   const ticket: Ticket = {
     taken: false,
+    done: false,
     accept() {
-      if (done) return;
-      done = true;
-      tickets.delete(event);
+      if (ticket.done) return;
+      ticket.done = true;
       resolve();
     },
     refuse(reason) {
-      if (done) return;
-      done = true;
-      tickets.delete(event);
+      if (ticket.done) return;
+      ticket.done = true;
       reject(reason);
     },
   };
@@ -57,9 +56,17 @@ export function openAcceptance(event: object): Promise<void> {
  *  handler that takes it owns settling it; returning no longer accepts. */
 export function takeAcceptance(event: object): AcceptanceTicket | null {
   const ticket = tickets.get(event);
-  if (!ticket || ticket.taken) return null;
+  if (!ticket || ticket.taken || ticket.done) return null;
   ticket.taken = true;
   return ticket;
+}
+
+/** Let `copy` stand for `event`: a wrapper that hands its subscriber a copy
+ *  of each event calls this, so the subscriber can take the event's ticket
+ *  through the copy. Whoever takes it through either one owns it. */
+export function shareAcceptance(event: object, copy: object): void {
+  const ticket = tickets.get(event);
+  if (ticket) tickets.set(copy, ticket);
 }
 
 /** Accept `event` unless a handler took its ticket. */

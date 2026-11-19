@@ -8,7 +8,13 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../participation/conversation-buffer.js";
-import { InboundNotAccepted, openAcceptance } from "../participation/inbound-acceptance.js";
+import { legacyChatIdChannels } from "../apps/legacy-chat-id.js";
+import {
+  acceptUntaken,
+  InboundNotAccepted,
+  openAcceptance,
+  shareAcceptance,
+} from "../participation/inbound-acceptance.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { chats } from "../db/schema.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -78,7 +84,8 @@ function fakeChannel() {
     if (!handler) throw new Error("nothing is listening");
     return handler(eventOf(message));
   };
-  /** Hear a message as the inbound port hands it over, with a ticket: the
+  /** Hear a message as the inbound port hands it over, with a ticket the
+   *  port accepts once the handler returns unless the handler took it: the
    *  promise answers whether the adapter took it in. */
   const hearWithTicket = async (
     message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
@@ -87,6 +94,7 @@ function fakeChannel() {
     const event = eventOf(message);
     const accepted = openAcceptance(event);
     await handler(event);
+    acceptUntaken(event);
     return { accepted };
   };
   return { channel, sent, hear, hearWithTicket, listening: () => handler !== null };
@@ -328,6 +336,52 @@ describe("channelAdapter", () => {
     );
 
     for (let id = 1; id <= 250; id += 1) {
+      const { accepted } = await hearWithTicket({
+        chatId: "-1001234567890123",
+        messageId: String(id),
+      });
+      await accepted;
+    }
+
+    expect(delivered).toHaveLength(250);
+    expect(delivered.at(-1)).toBe("250");
+  });
+
+  it("take a message in only once it is handed over, through the copy apps are given", async () => {
+    const { channel: raw, hearWithTicket } = fakeChannel();
+    // Production hears every channel through this wrapper, which hands the
+    // adapter a copy of each event.
+    const [channel] = legacyChatIdChannels([raw], shareAcceptance);
+    const adapter = channelAdapter(channel, deps());
+    const delivered: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        if (message.key === "1") await held;
+        delivered.push(message.key);
+        await new Promise((resolve) => setImmediate(resolve));
+        return 1;
+      },
+      () => {},
+    );
+
+    const { accepted: first } = await hearWithTicket({
+      chatId: "-1001234567890123",
+      messageId: "1",
+    });
+    let outcome = "pending";
+    void first.then(() => {
+      outcome = "accepted";
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(outcome).toBe("pending");
+    release();
+    await first;
+
+    for (let id = 2; id <= 250; id += 1) {
       const { accepted } = await hearWithTicket({
         chatId: "-1001234567890123",
         messageId: String(id),
@@ -592,7 +646,7 @@ describe("channelAdapter", () => {
   });
 
   it("drop what reaches a channel that knows no account, and refuse its sends", async () => {
-    const { channel, hear, sent } = fakeChannel();
+    const { channel, hear, hearWithTicket, sent } = fakeChannel();
     const adapter = channelAdapter(channel, { ...deps(), accountOf: () => null });
     const delivered: Inbound[] = [];
     adapter.start(
@@ -606,8 +660,11 @@ describe("channelAdapter", () => {
     await hear({ chatId: "-42", messageId: "7" });
     // An event that names its account is dropped too: the record decides.
     await hear({ chatId: "-42", messageId: "8", account: ROME });
+    // Upstream keeps what was not taken in, to deliver again.
+    const { accepted } = await hearWithTicket({ chatId: "-42", messageId: "9" });
     await adapter.settled();
 
+    await expect(accepted).rejects.toThrow(InboundNotAccepted);
     expect(delivered).toEqual([]);
     await expect(adapter.send("-42", null, { text: "hi" })).rejects.toThrow(ChannelWithoutAccount);
     expect(sent).toEqual([]);

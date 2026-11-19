@@ -469,6 +469,9 @@ export function channelAdapter(
             channel: channel.name,
             messageId: event.message.messageId,
           });
+          takeAcceptance(event)?.refuse(
+            new InboundNotAccepted("inbound message not taken in: its channel knows no account"),
+          );
           return;
         }
         const chat = keyed(heardBy, event.message).key.externalId;

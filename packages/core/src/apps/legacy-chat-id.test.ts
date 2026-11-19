@@ -105,7 +105,7 @@ describe("chat ids for apps written for SDK 0.7", () => {
         media: null,
       },
     };
-    const [wrapped] = legacyChatIdChannels([channel]);
+    const [wrapped] = legacyChatIdChannels([channel], () => {});
     const heard: InboundEvent[] = [];
     wrapped?.inbound?.subscribe(async (event) => {
       heard.push(event);
@@ -140,7 +140,7 @@ describe("chat ids for apps written for SDK 0.7", () => {
       send: null,
       inbound: { subscribe: () => () => {}, media: { materialize } },
     };
-    const [wrapped] = legacyChatIdChannels([channel]);
+    const [wrapped] = legacyChatIdChannels([channel], () => {});
     const { chatId: _chatId, parentChatId: _parentChatId, ...rest } = message;
 
     await wrapped?.inbound?.media?.materialize({
