@@ -238,6 +238,8 @@ const noted = (texts, thing) =>
  * R13-forget never reads Slack.
  */
 async function recall(conn, channel, thing) {
+  // Variant R12-decline would not keep the guardian's favourite restaurant.
+  if (breaks.has("R12-decline") && /restaurant/i.test(thing)) return undefined;
   // Variant R13-memory answers from its memory alone.
   if (breaks.has("R13-memory")) return noted(db.memory ?? [], thing);
   const fromCopy = noted(

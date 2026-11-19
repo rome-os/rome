@@ -85,6 +85,13 @@ const CASES = [
     what: "the visitor is told the guardian's private facts",
   },
   {
+    name: "R12-decline",
+    breaks: "R12-decline",
+    rule: "R12",
+    result: "not checked",
+    what: "the Concierge declines to keep one of the 5 facts, so none is scored",
+  },
+  {
     name: "R12-default-mode",
     breaks: "R12-default-mode",
     rule: "R12",
