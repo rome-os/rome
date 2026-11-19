@@ -377,7 +377,8 @@ describe("taking a message in", () => {
   async function setup() {
     const { db } = createTestDb();
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
-    const fx = makePasteTalk();
+    // A talker that confirms receipt upstream, which deliver answers.
+    const fx = makePasteTalk({ confirmsReceipt: true });
     registry.register(fx.descriptor);
     const connection = await registry.connect("fake-telegram");
     const ports = connectionPorts(

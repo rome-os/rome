@@ -269,12 +269,21 @@ export interface RuntimeKit {
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
   /**
-   * Start hearing. The runtime's `deliver` returns a promise that resolves
-   * once the message is taken in for good, recorded where Rome keeps it, and
-   * rejects when it was dropped; a test may pass a plain function. A transport
-   * that can be asked again, such as a mailbox that redelivers what is not
-   * confirmed, confirms receipt upstream only after it resolves. One that
-   * cannot may ignore it, as a fire-and-forget delivery loses nothing more.
+   * Whether this talker confirms receipt upstream only once Rome took a
+   * message in, such as a mailbox that redelivers what is not confirmed.
+   * Only then does `deliver` wait for it; see {@link start}.
+   */
+  readonly confirmsReceipt?: boolean;
+  /**
+   * Start hearing. For a talker that {@link confirmsReceipt}, the runtime's
+   * `deliver` returns a promise that resolves once the message is taken in
+   * for good, recorded where Rome keeps it, and rejects when it was dropped,
+   * and the talker confirms receipt upstream only after it resolves. That
+   * promise waits on the message's chat, so such a talker hears its next
+   * message without awaiting it when chats must not wait on each other. For
+   * any other talker `deliver` returns nothing: many hear one message at a
+   * time and await whatever their handler returns, and one slow chat must not
+   * hold up another. A test may pass a plain function.
    */
   start(
     deliver: (msg: ChannelMessage) => void | Promise<void>,

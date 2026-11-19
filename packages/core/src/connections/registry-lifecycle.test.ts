@@ -9,6 +9,7 @@
 //          receives resolver-produced material; also after rehydration.
 
 import { describe, it, expect } from "@rstest/core";
+import type { ChatId } from "@rome-os/app-runtime";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { createTestDb } from "../test/db.js";
@@ -18,6 +19,7 @@ import {
   makePasteTalk,
   makeRenewableAct,
   makeExternalCustody,
+  makeInboundMessage,
   makeRecordingSleep,
 } from "./test-fixtures.js";
 import type { ConnectionsRepository } from "./repository.js";
@@ -881,6 +883,65 @@ describe("custody follows grant state", () => {
         expiresAt: "never",
       });
       expect(custody.syncs).toEqual([{ material: { accessToken: "rotated" }, profile: {} }]);
+    } finally {
+      close();
+    }
+  });
+});
+
+describe("what a talker's deliver answers", () => {
+  /** A connected fake talker whose handler holds chat "a" until released,
+   *  and the chats it heard. */
+  async function heldOnChatA(confirmsReceipt: boolean) {
+    const { ledger, close } = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const { descriptor, talkerFactory, validCredential } = makePasteTalk({ confirmsReceipt });
+    registry.register(descriptor);
+    const conn = await registry.connect("fake-telegram");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const heard: string[] = [];
+    registry.onUnlocked("chat", (c) => {
+      c.hearTalker(async (msg) => {
+        heard.push(msg.chatId);
+        if (msg.chatId === "a") await held;
+      });
+    });
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
+    const deliver = talkerFactory.instances[0].state.deliver;
+    if (!deliver) throw new Error("the talker was not started");
+    return { deliver, heard, release, close };
+  }
+
+  it("lets a talker that awaits each delivery hear another chat while one is held", async () => {
+    const { deliver, heard, release, close } = await heldOnChatA(false);
+    try {
+      // A transport that hears one update at a time, as grammY's polling
+      // does, awaits what deliver answers before the next.
+      await deliver(makeInboundMessage({ chatId: "a" as ChatId }));
+      await deliver(makeInboundMessage({ chatId: "b" as ChatId }));
+      expect(heard).toEqual(["a", "b"]);
+    } finally {
+      release();
+      close();
+    }
+  });
+
+  it("answers a talker that confirms receipt once the message was taken in", async () => {
+    const { deliver, release, close } = await heldOnChatA(true);
+    try {
+      let taken = false;
+      const answered = deliver(makeInboundMessage({ chatId: "a" as ChatId }));
+      void Promise.resolve(answered).then(() => {
+        taken = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(taken).toBe(false);
+      release();
+      await answered;
+      expect(taken).toBe(true);
     } finally {
       close();
     }

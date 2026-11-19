@@ -56,7 +56,7 @@ export function makeRecordingSleep(): RecordingSleep {
 
 export interface FakeTalkerState {
   /** The `deliver` callback passed to start(). Null until start() is called. */
-  deliver: ((msg: ChannelMessage) => void) | null;
+  deliver: ((msg: ChannelMessage) => void | Promise<void>) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
   fault: ((err: CredentialRejected | Disconnected) => void) | null;
   /** Every start() call is recorded here with the credential at the time. */
@@ -86,6 +86,8 @@ export interface FakeTalkerOptions {
    *  bumps state.stopResolved when it resolves — models grammy's async drain so
    *  awaitable-shutdown tests can prove stopAll() waits for it. */
   asyncStop?: boolean;
+  /** The talker's {@link Talker.confirmsReceipt}. */
+  confirmsReceipt?: boolean;
 }
 
 export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): FakeTalker {
@@ -102,6 +104,7 @@ export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): Fake
 
   const talker: FakeTalker = {
     state,
+    ...(opts?.confirmsReceipt ? { confirmsReceipt: true } : {}),
     start(deliver, fault) {
       state.deliver = deliver;
       state.fault = fault;
