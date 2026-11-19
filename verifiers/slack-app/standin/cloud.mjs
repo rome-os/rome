@@ -122,6 +122,9 @@ export async function startCloud({
     // Slack's events address for the one app.
     if (p === "/slack/events" && req.method === "POST") {
       const body = await readBody(req);
+      // Broken R7-transport: an event with a bad signature never gets an
+      // answer, as if the network dropped it.
+      if (breaks.has("R7-transport") && !slackSigned(req, body)) return req.socket.destroy();
       if (!breaks.has("R7-signature") && !slackSigned(req, body))
         return send(res, 401, { error: "bad signature" });
       const payload = JSON.parse(body);

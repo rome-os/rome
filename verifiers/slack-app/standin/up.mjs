@@ -90,6 +90,9 @@ const control = await serve(async (req, res, url) => {
   if (!m || req.method !== "POST") return send(res, 404, { error: "not found" });
   if (m[2] === "stop") await stopInstance(m[1]);
   else startInstance(m[1]);
+  // Broken R6-stop-error: stop stops the instance, then reports a failure.
+  if (m[2] === "stop" && breaks.has("R6-stop-error"))
+    return send(res, 500, { error: "stopped, then failed" });
   return send(res, 200, { ok: true });
 });
 

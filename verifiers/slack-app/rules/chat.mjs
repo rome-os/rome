@@ -82,9 +82,19 @@ export async function r7(ctx) {
   const forged = [];
   for (let i = 1; i <= 10; i++) {
     const c = code("R7F", i);
-    const sent = await ctx.slack.forged(ws.id, ws.guardian, ask(c));
-    forged.push({ code: c, eventId: sent.eventId, status: sent.delivery?.status ?? null });
+    // A forged event Rome Cloud never answered tests nothing: the fake Slack
+    // does not retry forgeries, so send it again, up to three times.
+    const tries = [];
+    for (let t = 0; t < 3; t++) {
+      const sent = await ctx.slack.forged(ws.id, ws.guardian, ask(c));
+      tries.push({ eventId: sent.eventId, status: sent.delivery?.status ?? null });
+      if (tries.at(-1).status) break;
+    }
+    forged.push({ code: c, eventId: tries.at(-1).eventId, tries, status: tries.at(-1).status });
   }
+  const undelivered = forged.filter((f) => !f.status);
+  if (undelivered.length)
+    partial ??= `${undelivered.length} of 10 forged events never got an answer from Rome Cloud after 3 tries, so the signature check was not exercised`;
   const control = await oneReply(ctx, ws, "R7C");
   // Every post in the workspace since before the forged events, wherever it
   // went: a reply to a forged event in another conversation still answers it.
@@ -103,8 +113,8 @@ export async function r7(ctx) {
       "the read of what Rome recorded does not show the good message, so it cannot show the forged ones are absent";
   const recordedForged = recorded && forged.filter((f) => recorded.some((b) => b.includes(f.code)));
   evidence.forged = {
-    sent: forged.map((f) => f.eventId),
-    deliveryStatuses: forged.map((f) => f.status),
+    sent: forged.flatMap((f) => f.tries.map((t) => t.eventId)),
+    deliveryStatuses: forged.map((f) => f.tries.map((t) => t.status)),
     replied: replied.map((f) => f.eventId),
     otherPosts: others.map((p) => ({ channel: p.channel, ts: p.ts, text: p.text?.slice(0, 120) })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
@@ -188,9 +198,16 @@ export async function r6(ctx) {
   let whileStopped;
   // Whatever fails while the instance is down, start it again, so a crash
   // here leaves the environment as it found it.
-  await ctx.a.stop();
+  let stopError;
   try {
+    // A stop control can stop the instance and still report an error, so it
+    // runs inside the block that starts the instance again.
+    await ctx.a.stop().catch((err) => {
+      stopError = err.message;
+    });
     const down = await waitFor(async () => !(await ctx.a.up()), { timeoutMs: 60_000 });
+    if (!down && stopError)
+      return { result: "not checked", reason: `The stop control failed: ${stopError}.` };
     if (!down)
       return { result: "fail", reason: "The instance still answered a minute after stop." };
     const stoppedAt = Date.now();
@@ -211,6 +228,7 @@ export async function r6(ctx) {
     workspace: ws.id,
     channel,
     stopSeconds: env.stopSeconds,
+    stopError,
     eventIds,
     repliesWhileStopped: whileStopped,
   };

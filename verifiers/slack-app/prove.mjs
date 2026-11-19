@@ -1,6 +1,7 @@
 // Proves the verifier before the product exists: runs it against the good
 // stand-in, where every phase 1 rule must pass, and against each broken
-// stand-in, where the rule it breaks must fail.
+// stand-in, where the rule it breaks must fail (or, where the case says,
+// report "not checked" or still pass).
 //
 // Usage: node prove.mjs [git ref of the environment, default
 // origin/slack-official-app/environment]. Writes out/proof/summary.md.
@@ -87,6 +88,20 @@ const CASES = [
     what: "forged events get through, go unrecorded and are answered in another direct message",
   },
   {
+    name: "R7-transport",
+    breaks: "R7-transport",
+    rule: "R7",
+    result: "not checked",
+    what: "every forged event is dropped on the way to Rome Cloud",
+  },
+  {
+    name: "R6-stop-error",
+    breaks: "R6-stop-error",
+    rule: "R6",
+    result: "pass",
+    what: "the stop control stops the instance, then reports a failure",
+  },
+  {
     name: "R7-lookup",
     breaks: "R7-route,R7-lookup",
     rule: "R7",
@@ -135,10 +150,12 @@ for (const c of CASES) {
 
   const report = JSON.parse(readFileSync(join(work, "report/report.json"), "utf8"));
   const result = Object.fromEntries(report.rules.map((r) => [r.id, r.result]));
-  const proved = c.rule ? result[c.rule] === "fail" : PHASE1.every((id) => result[id] === "pass");
+  const proved = c.rule
+    ? result[c.rule] === (c.result ?? "fail")
+    : PHASE1.every((id) => result[id] === "pass");
   ok &&= proved;
   rows.push(
-    `| ${c.name} | ${c.rule ? `${c.rule} fails: ${c.what}` : c.expect} | ${PHASE1.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
+    `| ${c.name} | ${c.rule ? `${c.rule} ${c.result ?? "fail"}: ${c.what}` : c.expect} | ${PHASE1.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
   );
   if (c.rule)
     rows.push(
