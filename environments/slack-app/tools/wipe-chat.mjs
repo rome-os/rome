@@ -145,6 +145,16 @@ if (chatIds.size && has("chat_messages", "text")) {
   collect(`SELECT text AS t FROM chat_messages WHERE chat_id IN (${placeholders(ids)})`, ...ids);
 }
 
+// What a copy holds: the conversation id, or a wiped text as stored or
+// JSON-escaped. Kept in a table, so a query holds one predicate per column
+// however many texts there are.
+db.exec("CREATE TEMP TABLE wipe_needles (v TEXT NOT NULL)");
+const addNeedle = db.prepare("INSERT INTO temp.wipe_needles (v) VALUES (?)");
+for (const needle of new Set([conversation, ...escapedToo(words)])) addNeedle.run(needle);
+/** A condition true when any of `table`'s `columns` holds a needle. */
+const holdsNeedle = (table, columns) =>
+  `EXISTS (SELECT 1 FROM temp.wipe_needles n WHERE ${columns.map((c) => `instr("${table}"."${c}", n.v) > 0`).join(" OR ")})`;
+
 // ---- Delete
 const deleted = {};
 function remove(table, column, values) {
@@ -205,25 +215,21 @@ try {
  * still points at is retried once that one is gone.
  */
 function sweep() {
-  const needles = [conversation, ...escapedToo(words)];
   for (let pass = 0; pass < 5; pass++) {
     let progress = false;
     for (const [table, columns] of schema) {
       if (PLACES.has(table)) continue;
       const text = [...columns].filter((c) => isTextColumn(table, c));
       if (!text.length) continue;
-      const where = text.flatMap((c) => needles.map(() => `instr("${c}", ?) > 0`)).join(" OR ");
-      const params = text.flatMap(() => needles);
-      const found = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`, ...params)[0].n;
+      const where = holdsNeedle(table, text);
+      const found = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`)[0].n;
       if (!found) continue;
       if (dryRun) {
         if (pass === 0) deleted[table] = (deleted[table] ?? 0) + found;
         continue;
       }
       try {
-        const changes = Number(
-          db.prepare(`DELETE FROM "${table}" WHERE ${where}`).run(...params).changes,
-        );
+        const changes = Number(db.prepare(`DELETE FROM "${table}" WHERE ${where}`).run().changes);
         if (changes) {
           deleted[table] = (deleted[table] ?? 0) + changes;
           progress = true;
@@ -271,9 +277,8 @@ const kept = {};
 for (const [table, columns] of dryRun ? [] : schema) {
   for (const column of columns) {
     if (!isTextColumn(table, column)) continue;
-    const needles = [conversation, ...escapedToo(words)];
-    const where = needles.map(() => `instr("${column}", ?) > 0`).join(" OR ");
-    const n = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`, ...needles)[0].n;
+    const n = all(`SELECT count(*) AS n FROM "${table}" WHERE ${holdsNeedle(table, [column])}`)[0]
+      .n;
     if (n) ((PLACES.has(table) ? kept : remaining)[table] ??= {})[column] = n;
   }
 }

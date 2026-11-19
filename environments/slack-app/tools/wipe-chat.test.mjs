@@ -290,3 +290,52 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
     after.close();
   });
 }
+
+test("a long history is wiped in one pass, with a copy of each message elsewhere", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wipe-chat-"));
+  const home = join(dir, "home");
+  mkdirSync(join(home, ".rome/default"), { recursive: true });
+  const dbPath = join(home, ".rome/default/rome.db");
+  const db = migrate(dbPath);
+  const { chat } = seedChat(db, {
+    conversation: DM,
+    member: "UA0000BOB01",
+    words: "Bob's locker code is 4417",
+    session: `channel:slack_app:${DM}`,
+    thread: "55555555-eeee",
+  });
+  const said = Array.from({ length: 1500 }, (_, i) => `Bob said message number ${i}`);
+  const addMessage = db.prepare(
+    "INSERT INTO chat_messages (chat_id, key, text, parts, said_at) VALUES (?, ?, ?, '[]', 1)",
+  );
+  said.forEach((text, i) => {
+    addMessage.run(chat, `2.${String(i).padStart(6, "0")}`, text);
+    insert(db, "rome_agent_messages", {
+      id: `copy-${i}`,
+      session_id: "dashboard-chat",
+      role: "user",
+      content: [{ type: "text", text }],
+      created_at: 1,
+    });
+  });
+  db.close();
+
+  const out = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        join(here, "wipe-chat.mjs"),
+        "--conversation",
+        DM,
+        "--member",
+        "UA0000BOB01",
+        "--homes",
+        home,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ),
+  );
+  assert.equal(out.ok, true, JSON.stringify(out.remaining));
+  assert.equal(out.deleted.chat_messages, said.length + 1);
+  assert.equal(out.deleted.rome_agent_messages, said.length + 2);
+});
