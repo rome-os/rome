@@ -756,6 +756,8 @@ class ConnectionImpl implements Connection {
   private readonly renewedSinceGranted = new Set<GrantName>();
   /** In-flight renewal promise per grant (single-flight coalescing). */
   private readonly renewalsInFlight = new Map<GrantName, Promise<void>>();
+  /** The stop() drains of transports torn down without waiting. */
+  private readonly retiring = new Set<Promise<void>>();
   /** Per-grant serialization: the tail of a promise-chain mutex, keyed by grant
    *  name. Every guardian-facing lifecycle mutation (grant, revoke, profile
    *  backfill) runs inside its grant's chain, so two overlapping mutations on the
@@ -1174,7 +1176,13 @@ class ConnectionImpl implements Connection {
         slot.kind === "actor"
           ? (epoch.instance as Actor).stop?.()
           : (epoch.instance as Talker | Watcher).stop();
-      if (ret instanceof Promise) ret.catch((err) => this.warnStopThrew(slot, err));
+      if (ret instanceof Promise) {
+        // A disconnect that takes back access waits for this drain too.
+        const draining: Promise<void> = ret
+          .catch((err) => this.warnStopThrew(slot, err))
+          .finally(() => this.retiring.delete(draining));
+        this.retiring.add(draining);
+      }
     } catch (err) {
       this.warnStopThrew(slot, err);
     }
@@ -1224,10 +1232,11 @@ class ConnectionImpl implements Connection {
   }
 
   /** Tear down every capability at once, then wait, at most `ms`, for every
-   *  stop() to drain. No capability is live once it returns. Answers false
+   *  stop() to drain, including those of transports retired earlier. No capability is live once it returns. Answers false
    *  when a drain ran out of time; it goes on alone. */
   private async teardownAllWithin(ms: number): Promise<boolean> {
-    const stopping: Promise<void>[] = [];
+    // A transport an earlier rebuild retired may still be draining.
+    const stopping: Promise<void>[] = [...this.retiring];
     for (const slot of this.slots.values()) {
       const epoch = slot.epoch;
       if (!epoch) continue;

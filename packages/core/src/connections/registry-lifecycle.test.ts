@@ -1295,6 +1295,32 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
+  it("waits for a transport an earlier rebuild retired before the kind takes back its access", async () => {
+    const events: string[] = [];
+    let stops = 0;
+    const { registry, conn, close } = await withTransport(async () => {
+      stops++;
+      if (stops === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        events.push("retired drained");
+      }
+    }, events);
+    try {
+      // A new credential rebuilds the transport; the old one drains alone.
+      const { userCredential } = makeCustodyGrant();
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", {
+        ...userCredential(),
+        material: { accessToken: "renewed-user-token" },
+      });
+      expect(stops).toBe(1);
+
+      await registry.disconnect(conn.id);
+      expect(events).toEqual(["retired drained", "taken back"]);
+    } finally {
+      close();
+    }
+  });
+
   it("stops every capability before waiting on any one of them", async () => {
     const events: string[] = [];
     const { registry, conn, close } = await withTransport(
