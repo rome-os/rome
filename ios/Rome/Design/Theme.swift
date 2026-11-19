@@ -11,6 +11,10 @@ enum Palette {
     static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
+    /// Behind a task link's name: the text colour, faint, so it reads on any
+    /// bubble, as the web's chip does (foreground at 7%). `fill` is nearly
+    /// the Agent's bubble in light, and the chip vanished on it.
+    static let taskChip = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.12))
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)

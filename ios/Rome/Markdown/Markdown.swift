@@ -411,8 +411,8 @@ enum MarkdownParser {
     }
 
     /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
-    /// is a chip: the task chat's status mark and its current name in the tint
-    /// of inline code, the link's text only while the name is unknown. A task
+    /// is a chip: the task chat's status mark and its current name on a faint
+    /// fill (`Palette.taskChip`), the link's text only while the name is unknown. A task
     /// chat the chat does not know reads as plain text
     /// (docs/domains/chats.md#task-link). SwiftUI's text cannot tint an image,
     /// so the mark sits just before the tinted name, drawn in `marks`.
@@ -449,7 +449,7 @@ enum MarkdownParser {
         }
         var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
         name.foregroundColor = Palette.fg
-        name.backgroundColor = Palette.fill
+        name.backgroundColor = Palette.taskChip
         name.link = TaskLink.url(chatId: id)
         return Text(verbatim: " ") + marks.mark(info) + Text(name)
     }

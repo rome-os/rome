@@ -29,10 +29,10 @@ struct ChatHeaderBlur: View {
             HeaderBlur()
             // A faint wash of the page under the clock only, so it reads over
             // any row. Dark has none: the black page would sink the blurred rows.
-            LinearGradient(stops: [
-                .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3), location: 0),
-                .init(color: page.opacity(0), location: 0.4),
-            ], startPoint: .top, endPoint: .bottom)
+            // Eased, as the bands are, so its end shows no line.
+            LinearGradient(stops: HeaderBlurView.easedFade(from: 0, to: 0.4).map {
+                .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3 * $0.alpha), location: $0.at)
+            }, startPoint: .top, endPoint: .bottom)
         }
         .padding(.bottom, -reach)
         .ignoresSafeArea(edges: .top)
@@ -78,9 +78,11 @@ final class HeaderBlurView: UIView {
         for band in Self.bands {
             let view = UIVisualEffectView(effect: nil)
             let mask = CAGradientLayer()
-            // Whole down to two thirds of its reach, then fading out.
-            mask.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
-            mask.locations = [0, NSNumber(value: Double(band.reach * 0.66)), NSNumber(value: Double(band.reach))]
+            // Whole down to 60% of its reach, then fading out on an eased
+            // curve: a straight ramp leaves a visible seam where it ends.
+            let fade = Self.easedFade(from: band.reach * 0.6, to: band.reach)
+            mask.colors = [UIColor.black.cgColor] + fade.map { UIColor.black.withAlphaComponent($0.alpha).cgColor }
+            mask.locations = [0] + fade.map { NSNumber(value: Double($0.at)) }
             view.layer.mask = mask
             addSubview(view)
             views.append(view)
@@ -94,6 +96,16 @@ final class HeaderBlurView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Stops of a fade from whole at `start` to clear at `end` on a
+    /// smoothstep curve, which meets both ends flat, so neither shows as an
+    /// edge.
+    static func easedFade(from start: CGFloat, to end: CGFloat, steps: Int = 8) -> [(at: CGFloat, alpha: CGFloat)] {
+        (0...steps).map { step in
+            let t = CGFloat(step) / CGFloat(steps)
+            return (start + (end - start) * t, 1 - t * t * (3 - 2 * t))
+        }
+    }
 
     /// The size the animators were last set up at; nil when they need setting
     /// up again. Set up before a layout in a window, they show the full blur
