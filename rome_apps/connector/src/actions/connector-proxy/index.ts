@@ -200,12 +200,15 @@ export function createAction(
               error: both ? `${SLACK_APP_NOT_READY} ${SLACK_BOTH_ON_APP}` : SLACK_APP_NOT_READY,
             };
           }
+          // A parameter can come in the path's query string as well as in
+          // `query`, as the sign-in path takes it; `query` wins a clash.
+          const url = new URL(endpoint);
           const result = await slackAppProxyCall({
             channels,
             account,
-            path: new URL(endpoint).pathname,
+            path: url.pathname,
             body,
-            query,
+            query: { ...Object.fromEntries(url.searchParams), ...query },
           });
           if (result.status === "error") {
             return both && via === undefined

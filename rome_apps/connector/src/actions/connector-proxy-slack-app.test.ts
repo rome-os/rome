@@ -61,6 +61,35 @@ describe("connector_proxy for Slack through Rome's Slack app", () => {
     });
   });
 
+  it("reads parameters from the path's query string, letting query win a clash", async () => {
+    const send = rs.fn(async () => ({ chatId: "C1:1700000000.000100", messageId: "1.2" }));
+    const queried = rs.fn(async () => []);
+    const service = {
+      list: async () => [
+        { name: "slack_app", account: APP, platform: "slack", sendable: true, searchable: true },
+      ],
+      send,
+      query: queried,
+      search: rs.fn(),
+    } as unknown as ChannelsService;
+
+    await run(service, {
+      toolkit: "slack",
+      path: "/api/chat.postMessage?thread_ts=1700000000.000100",
+      method: "POST",
+      body: { channel: "C1", text: "re" },
+    });
+    await run(service, {
+      toolkit: "slack",
+      path: "/api/conversations.history?channel=D_PATH&limit=5",
+      method: "GET",
+      query: { channel: "D1" },
+    });
+
+    expect(send).toHaveBeenCalledWith(APP, "C1:1700000000.000100", { text: "re" });
+    expect(queried).toHaveBeenCalledWith(APP, expect.objectContaining({ chatId: "D1", limit: 5 }));
+  });
+
   it("points at Settings when no Slack connection answers", async () => {
     const service = {
       list: async () => [],
