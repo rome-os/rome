@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { changesImage, entryOf, previousRelease, releaseNotes } from "./release-notes.mjs";
+import {
+  changesImage,
+  entryOf,
+  lineOf,
+  previousRelease,
+  releaseNotes,
+  releaseNotesJson,
+} from "./release-notes.mjs";
 import { sourceDirs } from "./runtime-inputs.mjs";
 
 const script = fileURLToPath(new URL("./release-notes.mjs", import.meta.url));
@@ -66,13 +73,28 @@ test("the notes count from the highest published stable version below the releas
 test("a subject's type picks its section, and its scope leads the line", () => {
   assert.deepEqual(entryOf("feat(web): a thing (#1)"), {
     section: "new",
-    line: "**web:** a thing (#1)",
+    scope: "web",
+    text: "a thing",
+    pr: 1,
+  });
+  assert.equal(lineOf(entryOf("feat(web): a thing (#1)")), "**web:** a thing (#1)");
+  assert.deepEqual(entryOf("fix: a bug (#12) in (#3) parsing"), {
+    section: "fixes",
+    scope: null,
+    text: "a bug (#12) in (#3) parsing",
+    pr: null,
   });
   assert.equal(entryOf("fix: a bug").section, "fixes");
   assert.equal(entryOf("perf(core): faster").section, "fixes");
   assert.equal(entryOf("feat(core)!: drop a route").section, "breaking");
   assert.equal(entryOf("refactor(core): move code").section, "internal");
-  assert.deepEqual(entryOf("Update things"), { section: "other", line: "Update things" });
+  assert.deepEqual(entryOf("Update things (#7)"), {
+    section: "other",
+    scope: null,
+    text: "Update things",
+    pr: 7,
+  });
+  assert.equal(lineOf(entryOf("Update things (#7)")), "Update things (#7)");
   assert.equal(
     entryOf("refactor(core): drop a route", "Why.\n\nBREAKING CHANGE: gone").section,
     "breaking",
@@ -117,6 +139,71 @@ test("the notes group the image's changes and leave out what ships elsewhere", (
   );
 });
 
+test("the JSON lists the same changes by section, with internal ones as a count", () => {
+  const notes = releaseNotesJson({
+    tag: "v1.1.191",
+    previousTag: "v1.1.190",
+    date: "2026-11-19T00:10:13.000Z",
+    repository: "rome-os/rome",
+    commits: [
+      { subject: "feat(ui): typography (#1983)", files: ["packages/ui/src/a.css"] },
+      { subject: "refactor(core): split (#1992)", files: ["packages/core/src/a.ts"] },
+      { subject: "feat(ios): iPad support (#1971)", files: ["ios/Rome/A.swift"] },
+      { subject: "chore: release main", files: ["packages/ui/package.json"] },
+      { subject: "fix(concierge): fresh waits (#1964)", files: ["packages/core/src/b.ts"] },
+      { subject: "fix: a direct push", files: ["packages/core/src/c.ts"] },
+      { subject: "Update things", files: ["packages/core/src/d.ts"] },
+      {
+        subject: "refactor(core)!: drop a route (#1950)",
+        body: "",
+        files: ["packages/core/src/e.ts"],
+      },
+    ],
+  });
+  assert.deepEqual(notes, {
+    schema: 1,
+    version: "1.1.191",
+    previousVersion: "1.1.190",
+    date: "2026-11-19T00:10:13.000Z",
+    url: "https://github.com/rome-os/rome/releases/tag/v1.1.191",
+    breaking: [{ scope: "core", text: "drop a route", pr: 1950 }],
+    new: [{ scope: "ui", text: "typography", pr: 1983 }],
+    fixes: [
+      { scope: "concierge", text: "fresh waits", pr: 1964 },
+      { scope: null, text: "a direct push", pr: null },
+    ],
+    internal: 2,
+  });
+});
+
+test("the JSON for a first release or one with nothing for the image lists nothing", () => {
+  const empty = { breaking: [], new: [], fixes: [], internal: 0 };
+  const first = releaseNotesJson({
+    tag: "v1.0.0",
+    previousTag: null,
+    date: "2026-01-01T00:00:00.000Z",
+    repository: "rome-os/rome",
+    commits: [{ subject: "feat: ignored", files: ["Dockerfile"] }],
+  });
+  assert.deepEqual(first, {
+    schema: 1,
+    version: "1.0.0",
+    previousVersion: null,
+    date: "2026-01-01T00:00:00.000Z",
+    url: "https://github.com/rome-os/rome/releases/tag/v1.0.0",
+    ...empty,
+  });
+  const quiet = releaseNotesJson({
+    tag: "v1.0.1",
+    previousTag: "v1.0.0",
+    date: "2026-01-02T00:00:00.000Z",
+    repository: "rome-os/rome",
+    commits: [{ subject: "docs: a page", files: ["docs/a.md"] }],
+  });
+  assert.equal(quiet.previousVersion, "1.0.0");
+  assert.deepEqual([quiet.breaking, quiet.new, quiet.fixes, quiet.internal], [[], [], [], 0]);
+});
+
 test("a release with nothing for the image says so", () => {
   const notes = release([{ subject: "docs: a page", files: ["docs/a.md"] }]);
   assert.match(notes, /No changes to what the image runs\./);
@@ -157,12 +244,17 @@ test("the script reads the range from git, footers included", (t) => {
   git("tag", "v1.0.3");
   writeFileSync(join(root, "published.txt"), "latest\n1.0.0\n1.0.1\n");
 
-  const notes = execFileSync("node", [script, "v1.0.3", "published.txt"], {
-    cwd: root,
-    env,
-    encoding: "utf8",
-  });
+  const notes = execFileSync(
+    "node",
+    [script, "v1.0.3", "published.txt", "--json", "release-notes.json"],
+    { cwd: root, env, encoding: "utf8" },
+  );
   assert.match(notes, /## Changes since v1\.0\.1/);
+  const json = JSON.parse(readFileSync(join(root, "release-notes.json"), "utf8"));
+  assert.equal(json.version, "1.0.3");
+  assert.equal(json.previousVersion, "1.0.1");
+  assert.ok(!Number.isNaN(Date.parse(json.date)));
+  assert.deepEqual(json.fixes, [{ scope: "core", text: "never shipped", pr: null }]);
   assert.match(notes, /### Fixes\n\n- \*\*core:\*\* never shipped/);
   assert.doesNotMatch(notes, /readme/);
 
