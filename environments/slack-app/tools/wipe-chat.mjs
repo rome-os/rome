@@ -14,12 +14,15 @@
 //   webchat/repository.ts lists them)
 // - the agent provider sessions of those conversations and their transcripts on
 //   disk, so a new message starts a model thread that knows nothing of the old
-// What stays: the chat itself (its place and address), the connection, and
-// anything not kept per chat, such as memory.
+// - then, by what they hold rather than by name, every other row that names the
+//   conversation or holds the text of a wiped message: the connection's other
+//   tables (such as slack_app_timeline), and the approvals and action runs whose
+//   payloads quote what was said. Texts under 8 characters are not looked for.
+// What stays: the chat's place and address (chats, chat_addresses), which hold
+// no message, and the connection itself.
 //
-// Afterwards every text column of every table is searched for the conversation
-// id and for the text of each wiped message. It exits 3 when a copy is still
-// found, 0 when none is.
+// Afterwards every text column of every table is searched again. It exits 3
+// when a copy is still found, 0 when none is.
 //
 // Usage: node wipe-chat.mjs --conversation D… [--member U…] [--db path]
 //          [--homes /home/rome,/home/user] [--dry-run]
@@ -46,6 +49,8 @@ db.exec("PRAGMA busy_timeout = 5000");
 const schema = readSchema(db);
 const has = (table, column) => schema.get(table)?.has(column) ?? false;
 const placeholders = (list) => list.map(() => "?").join(",");
+// The chat's place and address: they name the conversation and hold no message.
+const PLACES = new Set(["chats", "chat_addresses"]);
 const all = (sql, ...params) => db.prepare(sql).all(...params);
 
 // ---- What is the chat's
@@ -187,10 +192,48 @@ try {
   }
   remove("session_turn_checkpoints", "session_id", providerSessions.keys());
   remove("sessions", "id", providerSessions.keys());
+  sweep();
   db.exec(dryRun ? "ROLLBACK" : "COMMIT");
 } catch (error) {
   db.exec("ROLLBACK");
   fail(1, `wipe failed: ${error.message}`);
+}
+
+/**
+ * Deletes, from every table but the chat's place and address, each row whose
+ * text names the conversation or holds a wiped message. A row another row
+ * still points at is retried once that one is gone.
+ */
+function sweep() {
+  const needles = [conversation, ...escapedToo(words)];
+  for (let pass = 0; pass < 5; pass++) {
+    let progress = false;
+    for (const [table, columns] of schema) {
+      if (PLACES.has(table)) continue;
+      const text = [...columns].filter((c) => isTextColumn(table, c));
+      if (!text.length) continue;
+      const where = text.flatMap((c) => needles.map(() => `instr("${c}", ?) > 0`)).join(" OR ");
+      const params = text.flatMap(() => needles);
+      const found = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`, ...params)[0].n;
+      if (!found) continue;
+      if (dryRun) {
+        if (pass === 0) deleted[table] = (deleted[table] ?? 0) + found;
+        continue;
+      }
+      try {
+        const changes = Number(
+          db.prepare(`DELETE FROM "${table}" WHERE ${where}`).run(...params).changes,
+        );
+        if (changes) {
+          deleted[table] = (deleted[table] ?? 0) + changes;
+          progress = true;
+        }
+      } catch (error) {
+        if (!/FOREIGN KEY/i.test(error.message)) throw error;
+      }
+    }
+    if (!progress) break;
+  }
 }
 
 // ---- Provider transcripts
@@ -219,8 +262,10 @@ function walk(dir, depth) {
 }
 
 // ---- Look for anything left
-// A dry run changed nothing, so it has nothing to check.
+// A dry run changed nothing, so it has nothing to check. The chat's place and
+// address name the conversation and hold no message: they are reported as kept.
 const remaining = {};
+const kept = {};
 for (const [table, columns] of dryRun ? [] : schema) {
   for (const column of columns) {
     if (!isTextColumn(table, column)) continue;
@@ -229,18 +274,15 @@ for (const [table, columns] of dryRun ? [] : schema) {
     for (const needle of needles) {
       n += all(`SELECT count(*) AS n FROM ${table} WHERE instr("${column}", ?) > 0`, needle)[0].n;
     }
-    if (n) (remaining[table] ??= {})[column] = n;
+    if (n) ((PLACES.has(table) ? kept : remaining)[table] ??= {})[column] = n;
   }
 }
-// The chat's own place and address name the conversation and hold no message.
-const PLACES = new Set(["chats", "chat_addresses"]);
-const copies = Object.fromEntries(Object.entries(remaining).filter(([t]) => !PLACES.has(t)));
 
 db.close();
 if (!dryRun) keepOwner(dbPath);
 
 const result = {
-  ok: Object.keys(copies).length === 0,
+  ok: Object.keys(remaining).length === 0,
   dry_run: dryRun,
   db: dbPath,
   conversation,
@@ -251,6 +293,7 @@ const result = {
   deleted,
   transcripts,
   remaining,
+  kept,
 };
 console.log(JSON.stringify(result));
 process.exit(result.ok ? 0 : 3);

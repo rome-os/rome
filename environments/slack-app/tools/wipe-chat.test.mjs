@@ -202,17 +202,25 @@ test("wipes one chat's messages, its sessions and transcripts, and nothing else"
 });
 
 for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\nsee \\ above']) {
-  test(`a copy left anywhere else fails the wipe: ${JSON.stringify(words)}`, () => {
+  test(`copies left anywhere else are swept, and the wipe exits 0: ${JSON.stringify(words)}`, () => {
     const dir = mkdtempSync(join(tmpdir(), "wipe-chat-"));
     const home = join(dir, "home");
     mkdirSync(join(home, ".rome/default"), { recursive: true });
-    const db = migrate(join(home, ".rome/default/rome.db"));
+    const dbPath = join(home, ".rome/default/rome.db");
+    const db = migrate(dbPath);
     seedChat(db, {
       conversation: DM,
       member: "UA0000BOB01",
       words,
       session: `channel:slack_app:${DM}`,
       thread: "33333333-cccc",
+    });
+    seedChat(db, {
+      conversation: OTHER,
+      member: "UA0000CARA1",
+      words: "Cara likes green tea",
+      session: `channel:slack_app:${OTHER}`,
+      thread: "44444444-dddd",
     });
     // The same words quoted in the guardian's dashboard chat.
     insert(db, "rome_agent_messages", {
@@ -222,9 +230,36 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
       content: [{ type: "text", text: words }],
       created_at: 1,
     });
+    insert(db, "rome_agent_messages", {
+      id: "unrelated",
+      session_id: "dashboard-chat",
+      role: "user",
+      content: [{ type: "text", text: "Cara likes green tea" }],
+      created_at: 1,
+    });
+    // An action the agent ran with the words, and its approval.
+    const args = { channel: DM, text: words };
+    const seeded = {
+      approvals: insert(db, "approvals", {
+        id: "ap1",
+        payload: args,
+        status: "pending",
+        created_at: 1,
+      }),
+      action_executions: insert(db, "action_executions", { id: "ax1", args, created_at: 1 }),
+      execution_journal: insert(db, "execution_journal", { id: "ej1", args, created_at: 1 }),
+      // A later table of the Slack app connection, found by what it holds.
+      slack_app_timeline: insert(db, "slack_app_timeline", {
+        team_id: "TA0000AAAA",
+        channel_id: DM,
+        ts: "1.000002",
+        said_at: 1,
+        message: { text: words },
+      }),
+    };
     db.close();
-    let out;
-    try {
+
+    const out = JSON.parse(
       execFileSync(
         process.execPath,
         [
@@ -237,13 +272,21 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
           home,
         ],
         { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-      );
-      assert.fail("expected exit 3");
-    } catch (error) {
-      assert.equal(error.status, 3);
-      out = JSON.parse(error.stdout);
+      ),
+    );
+    assert.equal(out.ok, true, JSON.stringify(out.remaining));
+    assert.deepEqual(out.remaining, {});
+    assert.ok(out.kept.chat_addresses, JSON.stringify(out.kept));
+    assert.equal(out.deleted.rome_agent_messages, 3);
+    for (const [table, present] of Object.entries(seeded)) {
+      if (present) assert.ok(out.deleted[table] >= 1, `${table}: ${JSON.stringify(out.deleted)}`);
     }
-    assert.equal(out.ok, false);
-    assert.equal(out.remaining.rome_agent_messages.content, 1);
+
+    const after = new DatabaseSync(dbPath);
+    const count = (sql, ...p) => after.prepare(sql).get(...p).n;
+    assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'unrelated'"), 1);
+    assert.equal(count("SELECT count(*) AS n FROM chat_messages WHERE text LIKE '%green tea%'"), 1);
+    assert.equal(count("SELECT count(*) AS n FROM chat_addresses WHERE address = ?", DM), 1);
+    after.close();
   });
 }
