@@ -259,12 +259,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
-import {
-  agentOnConnect,
-  chatInstructionsOf,
-  conciergeOnConnection,
-  conciergePlaceSetup,
-} from "./concierge/on-connection.js";
+import { agentOnConnect, conciergePlaceSetup } from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -398,6 +393,10 @@ import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
+import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
+import { SlackMessageCopyRepository } from "./connections/kinds/slack-app/message-copy.js";
+import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -1364,10 +1363,7 @@ async function main() {
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       placeSetup: conciergePlaceSetup,
-      chatInstructions: chatInstructionsOf([
-        taskChatInstructions({ webchatRepo }),
-        conciergeOnConnection,
-      ]),
+      chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
@@ -1903,6 +1899,29 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
+    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
+    // Cloud for sign-in and the workspace binding, and a relay drain per
+    // workspace for its events.
+    slackApp: {
+      api: createSlackAppWebApi(config.slackApiBaseUrl),
+      cloud: romeCloudSlackApp(),
+      copy: new SlackMessageCopyRepository(db),
+      openMailbox: (mailbox, onFrame) => {
+        const drainer = new RelayDrainer(
+          [
+            {
+              connectUrl: mailbox.connectUrl,
+              drainKey: mailbox.drainKey,
+              targetAppId: SLACK_APP_KIND,
+              targetPath: [],
+            },
+          ],
+          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
+        );
+        drainer.start();
+        return { stop: () => drainer.stop() };
+      },
+    },
     settingsRepo,
     chatSettings,
     chatStop,

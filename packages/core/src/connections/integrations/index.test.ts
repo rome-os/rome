@@ -20,6 +20,7 @@ import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.
 function registerEveryKind(registry: ConnectionRegistry): void {
   registerBuiltinConnections(registry, {
     listAgents: () => [],
+    slackApp: { api: {}, cloud: {}, openMailbox: () => ({ stop() {} }), copy: {} },
   } as unknown as BuiltinConnectionDeps);
   const mounted = [
     feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
@@ -76,6 +77,7 @@ describe("registerBuiltinConnections", () => {
       telegram: "own_account",
       discord: "own_account",
       slack_bot: "own_account",
+      slack_app: "own_account",
       telegram_user: "delegate",
     });
     // Only a kind with a Talk can be a connected account.
