@@ -50,17 +50,19 @@ const freePort = () =>
 
 // The environment's fake Slack, loaded from its own folder.
 const fake = await import(join(fakeDir, "server.mjs"));
-const slackPort = await freePort();
 const secrets = { clientSecret: rand(), signingSecret: rand() };
-const { slack } = fake.start(
+// Port 0: fake Slack binds every interface, so only it can know a port that
+// is free on all of them.
+const { slack, servers } = fake.start(
   fake.loadConfig({
-    port: slackPort,
+    port: 0,
     workspacesFile: join(fakeDir, "workspaces.json"),
     retryDelaysMs: "200,500,1000",
     ...secrets,
   }),
 );
-const slackUrl = `http://127.0.0.1:${slackPort}`;
+if (!servers[0].listening) await new Promise((r) => servers[0].once("listening", r));
+const slackUrl = `http://127.0.0.1:${servers[0].address().port}`;
 await listening(`${slackUrl}/_control/state`);
 
 const instanceSecrets = { a: rand(), b: rand() };
