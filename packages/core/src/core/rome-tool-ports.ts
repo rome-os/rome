@@ -85,25 +85,32 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // model-facing catalog and the execution gate derive from it, so they can't
   // disagree. It's consulted per request, so an action installed
   // mid-conversation by `app_management` is callable in the same session.
+  // What the session's place withholds comes off after "*" resolves, so a
+  // wildcard grant cannot bring a withheld action back.
+  const permittedActions = (turn: TurnFacts): Action[] => {
+    const granted = actionRegistry.getForAgent([...turn.actions]);
+    const withheld = turn.withheldActions ?? [];
+    if (withheld.length === 0) return granted;
+    const names = new Set(withheld.map((name) => actionRegistry.get(name)?.config.name ?? name));
+    return granted.filter((action) => !names.has(action.config.name));
+  };
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
     if (!requestedAction) throw new Error(`Unknown action: ${name}`);
-    return actionRegistry
-      .getForAgent([...turn.actions])
-      .find((action) => action.config.name === requestedAction.config.name);
+    return permittedActions(turn).find(
+      (action) => action.config.name === requestedAction.config.name,
+    );
   };
 
   const actions: AgentActions = {
-    list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
+    list: (turn) => permittedActions(turn).map(toAgentAction),
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
     permits: (turn, name) => {
       const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return actionRegistry
-        .getForAgent([...turn.actions])
-        .some((action) => action.config.name === canonical);
+      return permittedActions(turn).some((action) => action.config.name === canonical);
     },
     run: (turn, name, input) =>
       turn.inTurn(() =>
