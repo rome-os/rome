@@ -265,7 +265,7 @@ import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./app-host/routine-calls.js";
-import { appRoutinePauser } from "./routines/app-routine-pauser.js";
+import { appRoutinePauser, releaseRoutinesOfRemovedApps } from "./routines/app-routine-pauser.js";
 import { instanceWorkerCalls } from "./app-host/instance-calls.js";
 import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
@@ -907,20 +907,12 @@ async function main() {
   });
   // Uninstall releases an app's managed routines. Apps removed before that
   // rule existed left routines nobody can maintain, so release those here.
-  // Read the lockfile, not the catalog: the catalog is incomplete when
-  // appManager.boot() failed, and a release can't be undone by the app.
   try {
-    const orphanedManagers: string[] = [];
-    for (const appId of await routinesRepo.managingAppIds()) {
-      if ((await appManager.readLockfileEntry(appId)) == null) orphanedManagers.push(appId);
-    }
-    const releasedRoutines = await routinesRepo.releaseManagedRoutines(orphanedManagers);
-    if (releasedRoutines > 0) {
-      appsLog.info("released routines of removed apps", {
-        apps: orphanedManagers,
-        routines: releasedRoutines,
-      });
-    }
+    const released = await releaseRoutinesOfRemovedApps({
+      repository: routinesRepo,
+      readLockfileEntry: (appId) => appManager.readLockfileEntry(appId),
+    });
+    if (released.routines > 0) appsLog.info("released routines of removed apps", released);
   } catch (err) {
     appsLog.warn("could not release routines of removed apps", {
       error: err instanceof Error ? err.message : String(err),

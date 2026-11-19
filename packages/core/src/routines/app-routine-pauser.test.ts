@@ -16,7 +16,7 @@ import type { ActionEngine } from "../apps/actions/engine.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutineEngine } from "./engine.js";
-import { appRoutinePauser } from "./app-routine-pauser.js";
+import { appRoutinePauser, releaseRoutinesOfRemovedApps } from "./app-routine-pauser.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 
@@ -223,6 +223,35 @@ describe("AppManager routine lifecycle", () => {
     expect(await repository.releaseManagedRoutines(["removed-app"])).toBe(1);
     expect((await repository.findById(gone))?.managedBy).toBeNull();
     expect((await repository.findById(kept))?.managedBy).toBe("app-b");
+  });
+
+  it("boot releases only routines of apps missing from the lockfile, not ones the catalog missed", async () => {
+    const seed = (name: string, managedBy: string) =>
+      repository.create({
+        name,
+        actionName: "app-b:run",
+        managedBy,
+        trigger: { type: "manual" },
+        args: {},
+      });
+    const removed = await seed("removed", "removed-app");
+    const installed = await seed("installed", "app-a");
+    // A fresh domain whose boot never ran has an empty catalog, as after a
+    // failed app boot. app-a is still in the lockfile.
+    const unbooted = createAppDomain({
+      lockfilePath: join(root, "apps.lock.json"),
+      installedRoot: join(root, "installed"),
+    });
+    expect(unbooted.catalog.list()).toEqual([]);
+
+    const released = await releaseRoutinesOfRemovedApps({
+      repository,
+      readLockfileEntry: (appId) => unbooted.manager.readLockfileEntry(appId),
+    });
+
+    expect(released).toEqual({ apps: ["removed-app"], routines: 1 });
+    expect((await repository.findById(removed))?.managedBy).toBeNull();
+    expect((await repository.findById(installed))?.managedBy).toBe("app-a");
   });
 
   it.each([
