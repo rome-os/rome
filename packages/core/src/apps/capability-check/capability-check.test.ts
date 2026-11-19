@@ -574,6 +574,23 @@ declare class NoSchemaAction { constructor(config: unknown); }
     expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I3"]);
   });
 
+  it("D2: needs every return of the factory to carry the schema", async () => {
+    const branching = SCHEMA_ACTION.replace(
+      "  return {\n    config,",
+      "  if (process.env.NO_SCHEMA) return { config, execute: async () => ({}) };\n  return {\n    config,",
+    );
+    const verdict = checkApp(
+      await readApp(
+        writeApp({
+          ...COMPLIANT,
+          ...ACTION("add_note", `declare const process: any;\n${branching}`),
+        }),
+      ),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["D2", "I1"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

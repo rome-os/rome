@@ -503,13 +503,12 @@ class SourceReader {
       ts.forEachChild(body, visit);
     }
     if (returned.length === 0) return "unknown";
-    let unknown = false;
-    for (const expression of returned) {
-      const found = this.schemaOfValue(expression, depth);
-      if (found === "unknown") unknown = true;
-      else if (found !== "none") return found;
-    }
-    return unknown ? "unknown" : "none";
+    // Every return must agree: one with a schema and one without is not proof.
+    const found = returned.map((expression) => this.schemaOfValue(expression, depth));
+    const schemas = found.filter((f): f is TS.Expression => typeof f !== "string");
+    if (schemas.length === found.length) return schemas[0] as TS.Expression;
+    if (found.every((f) => f === "none")) return "none";
+    return "unknown";
   }
 
   /** The schema an action value carries; see `returnedSchema`. */
