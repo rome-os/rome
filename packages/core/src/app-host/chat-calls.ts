@@ -87,16 +87,18 @@ export interface ChatWorkerCallsDeps {
 }
 
 /**
- * Whether the calling action may read any chat: it runs outside a chat, or in
- * a turn whose audience is private, so nobody but the guardian reads what it
- * says. A turn others read, such as one for a visitor, in a group or in an
- * email thread, could pass on what another chat holds, so it reads only the
- * chat it is in. An action with no audience reads as a shared turn. A routine
- * fire runs outside a chat, so it reads any chat whatever its audience, a
- * known gap. Domain: docs/domains/participation.md#audience.
+ * Whether the calling action may read any chat: it runs in a turn whose
+ * audience is private, so nobody but the guardian reads what it says, or
+ * outside any turn. A turn others read, such as one for a visitor, in a group
+ * or in an email thread, could pass on what another chat holds, so it reads
+ * only the chat it is in. That holds where the turn has no chat of its own,
+ * such as an agent it summoned or a routine's fire, which then reads no chat.
+ * A turn in a chat with no audience reads as shared, and so does one acting
+ * for anyone but the guardian. Domain: docs/domains/participation.md#audience.
  */
 function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
   if (context?.actor && context.actor.kind !== "guardian") return false;
+  if (context?.audience === "shared") return false;
   if (!context?.channelContext) return true;
   return context.audience === "private";
 }
