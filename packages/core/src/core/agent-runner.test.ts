@@ -6854,6 +6854,131 @@ describe("AgentRunner", () => {
       expect(seen).toEqual([]);
     });
 
+    it("reads the chat's latest messages from the platform on a new session's first turn only", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "D_GUARDIAN",
+        agentName: "main",
+      });
+      const said = (minute: number, text: string, from: "guardian" | "member" | "rome") => ({
+        channel: "slack_app",
+        chatId: "D_GUARDIAN",
+        messageId: `m${minute}`,
+        direction: from === "rome" ? "outbound" : "inbound",
+        senderId: from === "rome" ? "U_ROME" : `T_A/U_${from.toUpperCase()}`,
+        senderDisplayName: from === "rome" ? "Rome" : from === "guardian" ? "Ouou" : "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+        account: { platform: "slack", id: "T_A/U_ROME" },
+      });
+      // What the platform holds, newest first. Rome's own record holds none
+      // of it, as after its copy was wiped.
+      const platform = [
+        said(3, "and the code is 4417", "member"),
+        said(2, "Noted.", "rome"),
+        said(1, "my sister's birthday is 12 May", "guardian"),
+      ];
+      const people = new SenderLabels({
+        byAccount: async (account) =>
+          account.id === "T_A/U_GUARDIAN"
+            ? ({ id: "p1", displayName: "Ouou", bondLevel: "guardian", links: [] } as never)
+            : null,
+      });
+      const latest = rs.fn(async () => {
+        return platform as never;
+      });
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: people,
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const prompt of ["what is my sister's birthday?", "thanks"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:D_GUARDIAN",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "D_GUARDIAN" },
+          }),
+        );
+      }
+
+      expect(latest).toHaveBeenCalledTimes(1);
+      const [first, second] = providerPrompts;
+      expect(first).toContain("<conversation_context>");
+      // Oldest first, each named as People names its sender, and none of
+      // them the guardian but the guardian's own.
+      const order = ["12 May", "Noted.", "4417"].map((text) => first.indexOf(text));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      expect(first).toMatch(/Ouou \[[^\]]*guardian[^\]]*\][^\n]*12 May/);
+      expect(first).not.toMatch(/Sam \[[^\]]*guardian/);
+      expect(second).not.toContain("12 May");
+    });
+
+    it("opens a session as before when the platform's read fails or takes too long", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      for (const [threadId, latest] of [
+        ["D_FAILS", async () => Promise.reject(new Error("no read here"))],
+        ["D_SLOW", () => new Promise<never>(() => {})],
+      ] as const) {
+        const conversation = await webchatRepo.ensureChannelChat({
+          channel: "slack_app",
+          threadId,
+          agentName: "main",
+        });
+        const promptFacts = chatPromptFacts({
+          facts: { unseen: () => [], seen: () => undefined },
+          messages: { byIds: () => [] },
+          labels: new SenderLabels({ byAccount: async () => null }),
+          channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+          channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+          latest,
+          latestWaitMs: 20,
+        });
+        const providerPrompts: string[] = [];
+        const provider: ModelProvider = {
+          id: "mock",
+          builtinTools: new Set<string>(),
+          openSession: makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          }),
+        };
+        await collectMessages(
+          createRunner(provider, undefined, { turnLinks: promptFacts }).run({
+            agentName: "test-main",
+            prompt: "hello",
+            channelThreadKey: `slack_app:${threadId}`,
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId },
+          }),
+        );
+        expect(providerPrompts).toHaveLength(1);
+        expect(providerPrompts[0]).toContain("hello");
+        expect(providerPrompts[0]).not.toContain("<conversation_context>");
+      }
+    });
+
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
