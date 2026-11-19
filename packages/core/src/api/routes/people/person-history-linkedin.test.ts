@@ -16,7 +16,7 @@ import {
 } from "../../../test/helpers.js";
 import { seedBaseline } from "../../../test/seeds.js";
 import { phoneBookRoutes } from "../../../people/phone-book/index.js";
-import { personHistoryRoutes } from "./person-history.js";
+import { personHistoryRoutes } from "../../../people/person-history/index.js";
 
 const MEMBER = "ACoAARecipient";
 const SELF = "ACoAAOwner";
