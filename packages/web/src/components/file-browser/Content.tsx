@@ -7,9 +7,11 @@ import { HistoryPanel, HistoryMobileSheet } from "./HistoryPanel";
 
 interface ContentProps {
   folderPanel?: (props: { path: string }) => ReactNode;
+  /** Always shown, with no way back to a file list that is not there. */
+  singleFile?: boolean;
 }
 
-export function Content({ folderPanel }: ContentProps) {
+export function Content({ folderPanel, singleFile = false }: ContentProps) {
   const { t } = useTranslation("files");
   const store = useFileBrowserStoreApi();
   const selectedPath = useFileBrowserStore((s) => s.selection.selectedPath);
@@ -39,14 +41,17 @@ export function Content({ folderPanel }: ContentProps) {
   return (
     <section
       className={`${
-        hasContentPanel ? "flex" : "hidden @min-[1024px]/fb:flex"
+        hasContentPanel || singleFile ? "flex" : "hidden @min-[1024px]/fb:flex"
       } flex-1 flex-col overflow-hidden`}
     >
       {showSearch ? (
         <SearchResults onMobileBack={handleMobileBack} />
       ) : selectedPath ? (
         <>
-          <FileViewHeader onMobileBack={handleMobileBack} />
+          <FileViewHeader
+            onMobileBack={singleFile ? undefined : handleMobileBack}
+            singleFile={singleFile}
+          />
           <div className="flex flex-1 overflow-hidden">
             <div className="flex-1 overflow-hidden">
               <FileViewBody />

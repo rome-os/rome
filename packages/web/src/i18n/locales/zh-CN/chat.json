@@ -777,6 +777,8 @@
     "previewFailed": "无法加载文件",
     "truncated": "只显示前 {{count}} 个字符。",
     "back": "返回产出",
+    "edit": "编辑",
+    "doneEditing": "完成",
     "filterLabel": "显示",
     "noneOfType": "还没有这类产出。",
     "today": "今天",
