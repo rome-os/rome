@@ -14,6 +14,7 @@ import { validateActionArgs } from "../../apps/actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 import { listRoutineRuns, readRoutineRun } from "../../routines/runs.js";
+import { datedOneOffState, updateRoutine } from "../../routines/update.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
 // it in user-supplied args so we never silently overwrite caller data.
@@ -111,24 +112,6 @@ function datedOneOffError(trigger: {
   if (state === "unparseable") return "schedule.date / localTime is unparseable";
   if (state === "past") return "schedule.date is in the past";
   return null;
-}
-
-/** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
- * parse throw rather than return NaN, so that counts as unparseable too. */
-export function datedOneOffState(trigger: {
-  date?: string;
-  localTime: string;
-  tzid: string;
-}): "unparseable" | "past" | null {
-  if (!trigger.date) return null;
-  let fireAt: Date;
-  try {
-    fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-  } catch {
-    return "unparseable";
-  }
-  if (Number.isNaN(fireAt.getTime())) return "unparseable";
-  return fireAt.getTime() < Date.now() ? "past" : null;
 }
 
 interface CreateRoutineBody {
@@ -311,57 +294,21 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       );
     }
 
-    // Turning a one-off back on after its date has passed would leave it
-    // enabled with nothing left to fire.
-    if (body.enabled === true) {
-      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
-      const trigger = current ? toRoutine(current).trigger : undefined;
-      // Writers and migration 0076 date every one-off, so only a malformed row
-      // reaches here with neither date nor rrule, and the scheduler refuses it.
-      if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
-        return c.json(
-          {
-            error: `This one-off at ${trigger.localTime} has no date and can no longer run. Create a new routine to run it.`,
-          },
-          400,
-        );
-      }
-      const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
-      if (state === "past" && trigger?.type === "schedule") {
-        return c.json(
-          {
-            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
-          },
-          400,
-        );
-      }
-      if (state === "unparseable") {
-        return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
-      }
-    }
-
-    const updates: Record<string, unknown> = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.enabled !== undefined) updates.enabled = body.enabled;
-
-    if (Object.keys(updates).length === 0) {
+    if (body.name === undefined && body.enabled === undefined) {
       return c.json({ error: "No fields to update" }, 400);
     }
 
-    const result = await deps.db.update(routines).set(updates).where(eq(routines.id, id));
-    if (Number(result.changes ?? 0) === 0) {
-      return c.json({ error: "Routine not found" }, 404);
-    }
-
+    const result = await updateRoutine(
+      { routines: deps.routinesRepo, engine: deps.routineEngine },
+      id,
+      {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+      },
+    );
+    if (result.status === "not-found") return c.json({ error: "Routine not found" }, 404);
+    if (result.status === "refused") return c.json({ error: result.error }, 400);
     const [updated] = await deps.db.select().from(routines).where(eq(routines.id, id));
-
-    if (updated) {
-      await deps.routineEngine.deactivate(id);
-      if (updated.enabled) {
-        await deps.routineEngine.activate(toRoutine(updated));
-      }
-    }
-
     return c.json(updated ? publicRoutineRow(updated) : updated);
   });
 

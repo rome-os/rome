@@ -149,9 +149,12 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // Reads a person and their notes (people/read-person.ts), which only main
   // registers.
   "core:read_person",
-  // Reads of a routine's runs (routines/run-actions.ts).
+  // Reads of a routine's runs (routines/run-actions.ts), and pausing and
+  // resuming one (routines/enabled-actions.ts), against the main-owned engine.
   "core:routine_runs_list",
   "core:routine_run_read",
+  "core:routine_pause",
+  "core:routine_resume",
   "core:show_file",
   // Reads of the personal-data store (personal-data/actions.ts).
   "core:personal_data_catalog",

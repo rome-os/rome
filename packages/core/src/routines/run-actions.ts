@@ -1,12 +1,12 @@
 // The agent's way to check what a routine did: `core:routine_runs_list` and
 // `core:routine_run_read`, over the same reads as the Routines page (runs.ts).
 
-import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import { listRoutineRuns, readRoutineRun } from "./runs.js";
+import { type OwnerOfChat, turnWorksForGuardian } from "./turn-access.js";
 
 export const ROUTINE_RUNS_LIST_ACTION = "core:routine_runs_list";
 export const ROUTINE_RUN_READ_ACTION = "core:routine_run_read";
@@ -18,9 +18,7 @@ export interface RoutineRunActionDeps {
   routines: Pick<RoutinesRepository, "findById">;
   routineRuns: Pick<RoutineRunsRepository, "findByRoutineId" | "findById">;
   actionExecutions: Pick<ActionExecutionsRepository, "findByRootExecutionIds">;
-  /** Whose chat it is ("guardian" or "visitor:<account>"), or null for a chat
-   * that no longer exists. */
-  ownerOfChat(chatId: string): Promise<string | null>;
+  ownerOfChat: OwnerOfChat;
 }
 
 const iso = (d: Date | undefined | null): string | null => (d ? d.toISOString() : null);
@@ -61,7 +59,7 @@ export function registerRoutineRunActions(
       additionalProperties: false,
     },
     execute: async (args) => {
-      if (!(await askedForGuardian(deps))) return refusal;
+      if (!(await turnWorksForGuardian(deps.ownerOfChat))) return refusal;
       const routineId = typeof args.routineId === "string" ? args.routineId.trim() : "";
       const row = routineId ? await deps.routines.findById(routineId) : null;
       if (!row) return notFound(routineId);
@@ -114,7 +112,7 @@ export function registerRoutineRunActions(
       additionalProperties: false,
     },
     execute: async (args) => {
-      if (!(await askedForGuardian(deps))) return refusal;
+      if (!(await turnWorksForGuardian(deps.ownerOfChat))) return refusal;
       const routineId = typeof args.routineId === "string" ? args.routineId.trim() : "";
       const runId = typeof args.runId === "string" ? args.runId.trim() : "";
       const detail = routineId && runId ? await readRoutineRun(deps, routineId, runId) : null;
@@ -134,21 +132,4 @@ function notFound(routineId: string) {
     status: "error" as const,
     error: `No routine found with id "${routineId}". Use system:search_routine to find the right id.`,
   };
-}
-
-/** Whether the running turn works for the guardian, who alone reads routines
- * on the dashboard. A visitor's turn, or a turn no one started in a visitor's
- * chat, is refused. A turn with neither an actor nor a chat cannot show it is
- * the guardian's and is refused too. A chat on a connection has no owner and
- * is the guardian's agent's. The same rule as `core:read_person`. */
-async function askedForGuardian(deps: Pick<RoutineRunActionDeps, "ownerOfChat">): Promise<boolean> {
-  const context = actionExecutionContext.getStore();
-  if (context?.actor && context.actor.kind !== "guardian") return false;
-  const thread = context?.channelContext;
-  if (!context?.actor && !thread) return false;
-  if (thread?.channel === "webchat") {
-    const owner = thread.threadId ? await deps.ownerOfChat(thread.threadId) : null;
-    if (owner !== "guardian") return false;
-  }
-  return true;
 }
