@@ -262,7 +262,8 @@ describe("DiscordAdapter REST broker capability", () => {
     await adapter.stop();
 
     await expect(read).rejects.toThrow("Discord connection stopped during the read");
-    expect(sent).toBe(2);
+    // The chat, then the guild and the bot's member side by side.
+    expect(sent).toBe(3);
     expect(routes).toHaveLength(sent);
   });
 
