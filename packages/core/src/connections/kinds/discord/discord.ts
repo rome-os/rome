@@ -1444,6 +1444,8 @@ Use \`/channel agent clear\` to undo.`,
           ),
         directChannelFor: (userId) => this.directConversationFor(userId),
         readsHistoryIn: (channelId) => this.readsHistoryIn(channelId),
+        nicknameOf: (guildId, userId) =>
+          this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
       chatId,
       read,

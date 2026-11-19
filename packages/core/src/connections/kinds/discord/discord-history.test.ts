@@ -176,6 +176,23 @@ describe("readDiscordHistory", () => {
     ).resolves.toEqual([]);
   });
 
+  it("names a sender by their nickname in the guild, as a message heard live does", async () => {
+    const { get } = discord({
+      [CHAT]: { channel: { ...textChannel, guild_id: "300" }, messages: [said(1)] },
+    });
+
+    const page = await readDiscordHistory(
+      {
+        ...deps(get),
+        nicknameOf: (guild, user) => (guild === "300" ? `nick of ${user}` : undefined),
+      },
+      CHAT,
+      { limit: 5 },
+    );
+
+    expect(page[0]?.senderDisplayName).toBe("nick of 200000000000000001");
+  });
+
   it("reads the DM with a user a chat id names, as a send takes it", async () => {
     const dm = "100000000000000004";
     const { get } = discord({

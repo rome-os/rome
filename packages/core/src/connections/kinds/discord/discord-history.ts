@@ -82,6 +82,9 @@ export interface DiscordHistoryDeps {
    *  where that cannot be told. Discord answers a bot without it an empty
    *  history, not a refusal, so a read asks first. */
   readsHistoryIn?: (chatId: string) => Promise<boolean | null>;
+  /** A guild member's nickname there, where known. Discord's REST history
+   *  carries no member, which a message heard live does. */
+  nicknameOf?: (guildId: string, userId: string) => string | undefined;
 }
 
 /** The lowest Discord id of a message said at `ms` or later. */
@@ -200,7 +203,7 @@ export async function readDiscordHistory(
 }
 
 function toChannelMessage(
-  deps: Pick<DiscordHistoryDeps, "botId" | "textOf">,
+  deps: Pick<DiscordHistoryDeps, "botId" | "textOf" | "nicknameOf">,
   channel: WireChannel,
   message: WireMessage,
 ): ChannelMessage {
@@ -219,7 +222,10 @@ function toChannelMessage(
     ...(parent ? { parentChatId: parent as ChatId } : {}),
     senderId: message.author.id,
     senderDisplayName:
-      message.member?.nick ?? message.author.global_name ?? message.author.username,
+      message.member?.nick ??
+      (channel.guild_id ? deps.nicknameOf?.(channel.guild_id, message.author.id) : undefined) ??
+      message.author.global_name ??
+      message.author.username,
     senderUsername: message.author.username,
     text: deps.textOf(message.content, channel.guild_id),
     attachments: (message.attachments ?? []).map((attachment) =>
