@@ -884,29 +884,6 @@ export class WebChatRepository {
   }
 
   /**
-   * The messages of the chat thread of the message keyed `key` in chat
-   * `sessionId`, which may be any message of it, in the order they were said. Empty when the chat holds no
-   * such message or keeps no chat threads. Chat threads live in Chats, so
-   * this repository keeps none.
-   */
-  async getChatThreadMessages(
-    _sessionId: string,
-    _key: string,
-  ): Promise<
-    Array<
-      StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
-    >
-  > {
-    return [];
-  }
-
-  /** The key of the last message of the chat thread of the message keyed
-   *  `key` in chat `sessionId`, or null when the chat holds none. */
-  async lastInChatThread(_sessionId: string, _key: string): Promise<string | null> {
-    return null;
-  }
-
-  /**
    * Mark the messages of chat `sessionId` keyed `keys` read, and answer how
    * many were unread. A chat outside Chats keeps no read marks, so it
    * marks none.

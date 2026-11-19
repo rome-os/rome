@@ -908,29 +908,6 @@ describe("ChatsWebChatRepository", () => {
       expect(inserted).toEqual(["m1", expect.any(String)]);
     });
 
-    it("reads one thread in the order its messages were said, and finds its last", async () => {
-      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-      await said("Unrelated");
-      const answer = await said("Sunny", "m1");
-      await repo.recordUserInput("m2", "chat-1", text("And Friday?"), undefined, undefined, answer);
-      expect((await repo.getChatThreadMessages("chat-1", "m1")).map((line) => line.id)).toEqual([
-        "m1",
-        answer,
-        "m2",
-      ]);
-      expect(await repo.lastInChatThread("chat-1", "m1")).toBe("m2");
-      expect(await repo.lastInChatThread("chat-1", "missing")).toBeNull();
-      // Any message of a thread names it, as a client that sends the message it tapped does.
-      for (const key of [answer, "m2"]) {
-        expect((await repo.getChatThreadMessages("chat-1", key)).map((line) => line.id)).toEqual([
-          "m1",
-          answer,
-          "m2",
-        ]);
-        expect(await repo.lastInChatThread("chat-1", key)).toBe("m2");
-      }
-    });
-
     describe("read marks", () => {
       const readOf = async () =>
         new Map((await repo.getMessages("chat-1")).map((message) => [message.id, message.read]));

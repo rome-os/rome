@@ -372,52 +372,6 @@ describe("ConciergeTasksRepository", () => {
         )
       ).id;
 
-    it("answers the newest task started in each thread, by the key of the thread's root", async () => {
-      await chats.createSession("concierge", "Concierge");
-      const root = await say("concierge", "Plan a trip");
-      const ack = await say("concierge", "On it", root);
-      const alone = await say("concierge", "Unrelated");
-      const [flights] = await repo.upsertMany(
-        [{ title: "Flights", sourceMessageId: root }],
-        new Date(1000),
-      );
-      const [hotels] = await repo.upsertMany(
-        [{ title: "Hotels", sourceMessageId: ack }],
-        new Date(2000),
-      );
-      const [elsewhere] = await repo.upsertMany([{ title: "Elsewhere", sourceMessageId: alone }]);
-
-      const found = await repo.threadTasks("concierge", [root, alone, "missing"]);
-
-      expect(flights!.id).not.toBe(hotels!.id);
-      expect(found).toEqual(
-        new Map([
-          [root, { id: hotels!.id, title: "Hotels" }],
-          [alone, { id: elsewhere!.id, title: "Elsewhere" }],
-        ]),
-      );
-    });
-
-    it("leaves out a thread no task started in, and the tasks of another chat's threads", async () => {
-      await chats.createSession("concierge", "Concierge");
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const quiet = await say("concierge", "Hello");
-      const inTopic = await say("topic-1", "Agenda");
-      await repo.upsertMany([{ title: "Agenda", chatId: "topic-1", sourceMessageId: inTopic }]);
-
-      expect(await repo.threadTasks("concierge", [quiet, inTopic])).toEqual(new Map());
-      expect(await repo.threadTasks("concierge", [])).toEqual(new Map());
-      expect([...(await repo.threadTasks("topic-1", [inTopic])).keys()]).toEqual([inTopic]);
-    });
-
     it("finds the tasks a message started, in its chat, and no others", async () => {
       await chats.createSession("concierge", "Concierge");
       const start = await say("concierge", "Book flights");

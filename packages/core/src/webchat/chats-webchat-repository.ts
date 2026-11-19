@@ -407,22 +407,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return true;
   }
 
-  /**
-   * The messages of the chat thread of the message keyed `key`, which may be
-   * any message of it, in the order they were said. Empty when the chat
-   * holds no such message.
-   */
-  override async getChatThreadMessages(sessionId: string, key: string): Promise<TranscriptLine[]> {
-    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, key);
-  }
-
-  /** The key of the last message of the chat thread of the message keyed
-   *  `key` in chat `sessionId`, or null when the chat holds none. */
-  override async lastInChatThread(sessionId: string, key: string): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.lastInChatThread(standing.place.chat, key) : null;
-  }
-
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
   canContinueAfterRestart(turn: InterruptedTurn): boolean {
     return (
@@ -1099,25 +1083,17 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
-  private selectLines(
-    sessionIds: readonly string[],
-    where: SQL = sql``,
-    chatThread?: string,
-  ): TranscriptLine[] {
+  private selectLines(sessionIds: readonly string[], where: SQL = sql``): TranscriptLine[] {
     // Partitioning by turn keeps a turn's user, assistant and trace lines
     // contiguous even when a later turn's prompt was said before an earlier
-    // turn's reply. A chat thread reads in the order its lines were said.
-    const order =
-      chatThread === undefined
-        ? sql`ORDER BY session_id,
-          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, created_at, line_order, seq`
-        : sql`ORDER BY created_at, seq`;
+    // turn's reply.
     return this.db
       .all<LineRow>(sql`
-        SELECT * FROM ${sessionLines(sessionIds, chatThread)}
+        SELECT * FROM ${sessionLines(sessionIds)}
         ${where}
-        ${order}
+        ORDER BY session_id,
+          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
+          turn_id, created_at, line_order, seq
       `)
       .map(storedLine);
   }
@@ -1236,7 +1212,7 @@ function storedLine(row: LineRow): TranscriptLine {
  * puts a turn's first prompt before its trace, and the trace before the
  * turn's other lines.
  */
-export function sessionLines(sessionIds: readonly string[], chatThread?: string) {
+export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
     SELECT m.key AS id, s.id AS session_id,
@@ -1267,16 +1243,6 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
     JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
-      ${
-        // The thread of the message keyed `chatThread`, any message of it: its
-        // root and every message that replies down to it.
-        chatThread === undefined
-          ? sql``
-          : sql`AND COALESCE(m.root_message_id, m.id) = (
-              SELECT COALESCE(t.root_message_id, t.id) FROM chat_messages t
-              WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
-            )`
-      }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
@@ -1297,7 +1263,6 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role = 'trace')
-      ${chatThread === undefined ? sql`` : sql`AND 0`}
   )`;
 }
 

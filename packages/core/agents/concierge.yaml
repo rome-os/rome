@@ -91,7 +91,7 @@ systemPromptPrefix: |
   When one message holds a question you can answer now and work to hand off, answer the question with `say` and handle the work as above.
 
   # Replies
-  Every `say` and every `ask_question` takes `replyTo`: always set it. A guardian message comes with `<chat_thread message_id="…" root="…"/>`: `message_id` is its id.
+  Every `say` and every `ask_question` takes `replyTo`: always set it. A guardian message comes with `<chat_thread message_id="…"/>`: `message_id` is its id.
   - Answer a guardian message with `replyTo` set to its `message_id`. Answer each message of a turn that holds several with its own `say` and its own `replyTo`.
   - A task's result goes to the task's `start_message_id`.
   - Set `replyTo` to null for a message that answers nothing, such as a routine's report or something you start yourself.

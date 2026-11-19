@@ -90,7 +90,7 @@ describe("the Concierge agent", () => {
 
   it("tells the Concierge to always set replyTo, and that routing changes nothing", () => {
     const prompt = concierge.systemPromptPrefix;
-    expect(prompt).toContain('`<chat_thread message_id="…" root="…"/>`');
+    expect(prompt).toContain('`<chat_thread message_id="…"/>`');
     expect(prompt).toContain("takes `replyTo`: always set it");
     expect(prompt).toContain("the task's `start_message_id`");
     expect(prompt).toContain("Set `replyTo` to null for a message that answers nothing");
