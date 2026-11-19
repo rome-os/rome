@@ -58,16 +58,16 @@ The role exists for these: any two at the same size, dropped into one row, are t
 
 - **`lg` (44px) and `xs` (24px) are the Button family's, and are not part of the shared vocabulary.** `Button` and its square twin `IconButton` carry them. A field, a select, or a switcher does not. `[mech]`
 
-  They are not alignment steps, which is why the role does not bind them. `xs` is a chip beside body text, and a member sizing one sizes it square, off `--rome-size-24`. Neither shares a row with a field, so neither exercises the agreement the shared steps exist for.
+  Use these steps outside mixed field rows. An `xs` action sits beside body text. A square action at that step uses a 24px box.
 
-  A standalone labeled action uses `Button size="lg"`. A square action uses `IconButton size="lg"` or `Button size="icon-lg"`. `[mech]`
+  The labeled Button exposes four sizes. Use `Button size="lg"` for a standalone action. A large square action uses `IconButton size="lg"` or `Button size="icon-lg"`. `[mech]`
 
 - Height is one step of `--control-h-*`, and the radius step matches it. No member takes a height from another source. `[mech]`
-- A step reaches a member's public API when a call site needs it, not to complete a set. A name no caller can use is a promise the role has to keep for nothing. `[mech]`
+- A call site or an explicit component size requirement drives each step in a member's public API. `[mech]`
 - A member centers its own content on the cross axis, so a row of same-size members needs `items-center` on the row and no per-member nudging. `[mech]`
 - An adornment inside the control — a leading icon in a field, a trailing chevron — consumes the horizontal padding, never the height. `[mech]`
 - In the large platform scale, standard controls paint a 44px box through the variable set in `styles.css`. `UiScaleProvider` chooses that set automatically for a coarse primary pointer, or explicitly through `scale="large"`. Layout breakpoints remain width-based. `[mech]`
-- A labeled `Button` can opt into `compact` for a 24px, 28px, or 32px face at `xs`, `sm`, or `md`. On touch the layout reserves space for each 44px target, including its extension above and below the visible face. `[mech]`
+- A labeled `Button` can opt into `compact` for a 24px, 28px, or 32px face at `xs`, `sm`, or `md`. In the large platform scale, the kit protects the block margins that reserve the extended touch target. Use the parent to add spacing between compact buttons. `[mech]`
 
 ### Block members
 

@@ -41,7 +41,7 @@ Stating air per step is the error this section exists to prevent. Within one lad
 
 ### The ratio bound
 
-Air divided by the line box it surrounds is the **air ratio**. A pairing holds a ratio at or under 1.0. `[mech]`
+Air divided by the line box it surrounds is the **air ratio**. A pairing in a mixed row holds a ratio at or under 1.0. `[mech]`
 
 Past 1.0 the empty space outweighs the text it frames, and the component reads as inflated rather than prominent. The bound is falsifiable from the two scales alone, so a step that breaks it is a defect and not a preference.
 
@@ -57,16 +57,9 @@ A pairing under a 4px floor fails from the other side. The text then touches the
 
 A control that renders no text has no pairing, so the bound does not reach it. An icon-only member still declares a role, because an em-sized glyph and a tooltip resolve against it, and it declares the role its step carries. `[mech]`
 
-### A label caps how tall its control gets
+### Standalone actions
 
-The bound decides which steps may carry a label at all. A member holds one typography role, so a taller box spends the whole gain on air, and past a ratio of 1.0 the control reads as inflated rather than loud. Height is not one of the four sources of hierarchy [typography.md](semantic-token/typography.md) names. `[llm]`
-
-> Prefer: a call to action at 32px leading through full width, primary ink, and its position in a dialog footer.
-> Over: the same button at 44px, which holds the same 14px text in the same 20px line box and spends the extra 12px on air, at a ratio of 1.20.
-
-The roster is what caps it. Escaping the bound at 44px needs a 24px line box, and the line-height formula puts every font size under 17px in a 20px box — so no role below Title moves the ratio at all. Title on a button is a heading on a control, which its usage statement rules out.
-
-That is why 44px belongs to the square members alone. An icon control has no label, so no pairing, so no bound — and 44px is the touch floor it exists to clear.
+The labeled Button's `lg` step serves standalone actions. At the medium platform scale it pairs a 44px face with a 20px line box, for an air ratio of 1.20. Use `sm` or `md` for mixed rows and express emphasis through the [typography roles](semantic-token/typography.md), ink, and placement. `[llm]`
 
 ## A component beside a text run
 

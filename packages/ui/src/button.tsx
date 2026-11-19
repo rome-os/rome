@@ -184,7 +184,7 @@ function Button({
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
-    /** Keep smaller labeled buttons visually compact within the platform's touch target. */
+    /** Compact touch faces at `xs`, `sm`, and `md`. Set row spacing on the parent. */
     compact?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";

@@ -119,7 +119,7 @@ export function ControlsSection() {
         >
           <div data-compact-button-preview data-ui-typography="inline-card">
             <Row className="items-end">
-              {BUTTON_SIZES.map((size) => (
+              {(["xs", "sm", "md"] as const).map((size) => (
                 <Item key={size} label={size}>
                   <Button size={size} compact>
                     Continue

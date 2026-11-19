@@ -336,6 +336,8 @@
   --control-h-xs: var(--rome-size-24);
   --control-px-center-xs: var(--rome-space-2);
   --control-min-h: 0px;
+  --button-compact-px-sm: var(--control-px-center-sm);
+  --button-compact-px-md: var(--control-px-center-md);
   --control-filter-px: var(--rome-space-3);
   --calendar-cell: var(--rome-size-28);
   --control-calendar-px: var(--rome-space-2);
@@ -384,6 +386,8 @@
   --control-h-xs: var(--rome-size-44);
   --control-px-center-xs: var(--rome-space-4);
   --control-min-h: var(--rome-size-44);
+  --button-compact-px-sm: var(--rome-space-2);
+  --button-compact-px-md: var(--rome-space-3);
   --control-filter-px: var(--rome-space-4);
   --calendar-cell: var(--rome-size-44);
   --control-calendar-px: 0px;
@@ -423,8 +427,8 @@
 
   [data-slot="button"][data-compact][data-size="sm"] {
     --control-h-sm: var(--rome-size-28);
-    --control-px-start-sm: var(--rome-space-2);
-    --control-px-center-sm: var(--control-px-start-sm);
+    --control-px-start-sm: var(--button-compact-px-sm);
+    --control-px-center-sm: var(--button-compact-px-sm);
     --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
     --button-compact-h: var(--control-h-sm);
   }
@@ -432,17 +436,17 @@
   [data-slot="button"][data-compact][data-size="md"] {
     --control-h-md: var(--rome-size-32);
     --control-px-start-md: var(--rome-space-3);
-    --control-px-center-md: var(--control-px-start-md);
+    --control-px-center-md: var(--button-compact-px-md);
     --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
     --button-compact-h: var(--control-h-md);
   }
 
-  /* Reserve each target's extension in the layout so wrapped controls cannot overlap. */
+  /* Keep margin utilities from reclaiming the space each extended target needs. */
   [data-slot="button"][data-compact]:is([data-size="xs"], [data-size="sm"], [data-size="md"]) {
     --button-hit-inset: max(0px, calc((var(--control-min-h) - var(--button-compact-h)) / 2));
     position: relative;
     min-inline-size: calc(var(--control-min-h) + 2px);
-    margin-block: var(--button-hit-inset);
+    margin-block: var(--button-hit-inset) !important;
   }
 
   [data-slot="button"][data-compact]:is([data-size="xs"], [data-size="sm"], [data-size="md"])::after {

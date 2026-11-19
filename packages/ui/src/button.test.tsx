@@ -45,7 +45,7 @@ describe("Button press feedback", () => {
 });
 
 describe("Button sizes", () => {
-  it.each(["xs", "sm", "md", "lg"] as const)("renders compact labeled size %s", (size) => {
+  it.each(["xs", "sm", "md"] as const)("renders compact labeled size %s", (size) => {
     render(
       <Button size={size} compact>
         Save

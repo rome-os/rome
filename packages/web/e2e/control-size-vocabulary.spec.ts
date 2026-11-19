@@ -147,10 +147,25 @@ test("the square members agree with the ladder they name", async ({ page }) => {
   }
 });
 
+test("compact Button keeps the medium scale's padding", async ({ page }) => {
+  await page.goto("/dev/gallery");
+  await expect(page.locator("html")).toHaveAttribute("data-ui-scale", "medium");
+  const preview = page.locator("[data-compact-button-preview]");
+  for (const [size, padding] of [
+    ["xs", 8],
+    ["sm", 10],
+    ["md", 14],
+  ] as const) {
+    const button = preview.locator(`button[data-size="${size}"]`);
+    await expect(button).toHaveCSS("padding-inline-start", `${padding}px`);
+    await expect(button).toHaveCSS("padding-inline-end", `${padding}px`);
+  }
+});
+
 test.describe("compact Button on touch", () => {
   test.use({ viewport: { width: 320, height: 800 }, hasTouch: true });
 
-  test("draws each size while reserving a 44px hit target", async ({ page }) => {
+  test("reserves 44px for each compact target even with a margin override", async ({ page }) => {
     await page.goto("/dev/gallery");
     await expect(page.locator("html")).toHaveAttribute("data-ui-scale", "large");
     const preview = page.locator("[data-compact-button-preview]");
@@ -159,11 +174,15 @@ test.describe("compact Button on touch", () => {
       ["xs", 24],
       ["sm", 28],
       ["md", 32],
-      ["lg", 44],
     ] as const) {
       const button = preview.locator(`button[data-size="${size}"]`);
       await expect(button).toHaveCSS("height", `${height}px`);
-      await button.evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await button.evaluate((element) => {
+        element.style.marginBlock = "0";
+        element.scrollIntoView({ block: "center" });
+      });
+      await expect(button).toHaveCSS("margin-block-start", `${(44 - height) / 2}px`);
+      await expect(button).toHaveCSS("margin-block-end", `${(44 - height) / 2}px`);
       expect(
         await button.evaluate((element) => {
           const rect = element.getBoundingClientRect();
