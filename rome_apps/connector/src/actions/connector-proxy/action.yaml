@@ -27,12 +27,15 @@ description: |
   connected (connector_connect) first. On a 2xx response, returns { status, data,
   headers } as `data`.
 
-  Slack through Rome's own Slack app takes three methods: `/api/chat.postMessage`
+  Slack through Rome's own Slack app takes five methods: `/api/chat.postMessage`
   ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
-  ({ channel, limit?, latest?, oldest? }) reads, and `/api/search.messages`
-  ({ query, count?, channel? }) searches. Search covers what Rome has kept of
-  the app's direct messages and mentions, reading a named `channel`'s newest
-  messages first, and its `coverage` field says what it covered.
+  ({ channel, limit?, latest?, oldest? }) and `/api/conversations.replies`
+  ({ channel, ts }) read, `/api/conversations.list` ({ query?, limit? }) lists
+  the channels the app is a member of, and `/api/search.messages`
+  ({ query, count?, channel? }) searches. A channel is named by its id or as
+  `#name`. Search covers what Rome has kept of the app's direct messages and
+  mentions, reading a named `channel`'s newest messages first, and its
+  `coverage` field says what it covered.
   Any other Slack method is refused. With both the Slack app and the older Slack
   sign-in connected, a call takes the app unless `via: "sign_in"` names the
   sign-in, and the result's `via` names the connection taken.

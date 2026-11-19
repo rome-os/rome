@@ -128,16 +128,12 @@ describe("Slack's Web API through Rome's Slack app", () => {
   it("refuses any other method, naming what it offers, and reaches nothing", async () => {
     const service = channels();
 
-    for (const path of [
-      "/api/auth.test",
-      "/api/conversations.list",
-      "/api/conversations.replies",
-    ]) {
+    for (const path of ["/api/auth.test", "/api/users.info", "/api/reactions.add"]) {
       const result = await call(service, path, {});
       expect(result).toEqual({
         status: "error",
         error: expect.stringContaining(
-          `isn't offered on Rome's Slack app connection. It offers chat.postMessage (send), conversations.history (read) and search.messages`,
+          `isn't offered on Rome's Slack app connection. It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list`,
         ),
       });
     }
@@ -160,5 +156,57 @@ describe("Slack's Web API through Rome's Slack app", () => {
     });
     expect((await call(service, "/api/chat.postMessage", { channel: "D1" })).status).toBe("error");
     expect((await call(service, "/api/search.messages", {})).status).toBe("error");
+  });
+
+  it("reads a thread with conversations.replies, oldest first as Slack answers it", async () => {
+    const service = channels();
+
+    const result = await call(service, "/api/conversations.replies", undefined, {
+      channel: "C1",
+      ts: "1700000000.000100",
+    });
+
+    expect(service.query).toHaveBeenCalledWith(APP, { chatId: "C1:1700000000.000100", limit: 100 });
+    if (result.status !== "ok") throw new Error(result.error);
+    expect(result.data.data).toMatchObject({
+      messages: [{ ts: "1700000000.000100" }, { ts: "1700000000.000300" }],
+    });
+  });
+
+  it("lists the channels the app is a member of, from the chats Rome knows", async () => {
+    const descriptor = (
+      connectionKind: string,
+      kind: string,
+      chatId: string,
+      displayName: string,
+    ) => ({
+      snapshot: {
+        conversation: { ref: { connectionId: "c1", chatId }, connectionKind, kind, displayName },
+      },
+    });
+    const list = rs.fn(async () => ({
+      items: [
+        descriptor("slack_app", "channel", "C_NEWS", "#news"),
+        descriptor("slack_app", "dm", "D1", "Ouou"),
+        descriptor("discord", "channel", "123", "general"),
+      ],
+      nextCursor: "next",
+    }));
+
+    const result = await slackAppProxyCall({
+      channels: channels(),
+      chatSettings: { list } as never,
+      account: APP,
+      path: "/api/conversations.list",
+      query: { limit: "20", query: "ne" },
+    });
+
+    expect(list).toHaveBeenCalledWith({ limit: 20, query: "ne" });
+    if (result.status !== "ok") throw new Error(result.error);
+    expect(result.data.data).toEqual({
+      ok: true,
+      channels: [{ id: "C_NEWS", name: "news", is_member: true }],
+      response_metadata: { next_cursor: "next" },
+    });
   });
 });
