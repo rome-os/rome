@@ -1097,9 +1097,8 @@ function sessionSetupOf(
   // The answer feeds the cached system prompt, so the opener states it for
   // the session's life.
   const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
-  const allowList = (config.actions ?? []).filter(
-    (action) => !place?.withoutActions?.includes(action),
-  );
+  const allowList = config.actions ?? [];
+  const withheldActions = place?.withoutActions ?? [];
   const subagents = subagentsOf(deps.agentLoader, config);
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
@@ -1173,6 +1172,7 @@ function sessionSetupOf(
         sessionId: "",
         isSubagent,
         actions: allowList,
+        withheldActions,
         widgets,
         turnId: () => undefined,
         threadContext: () => opening.threadContext,
@@ -1643,9 +1643,10 @@ async function openSession(
     // had when the session opened.
     // The session's place may withhold some of them, as its setup does.
     get actions() {
-      const granted = deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
-      const withheld = deps.placeSetup?.(key.agentName, refs.getThreadContext())?.withoutActions;
-      return withheld ? granted.filter((action) => !withheld.includes(action)) : granted;
+      return deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+    },
+    get withheldActions() {
+      return deps.placeSetup?.(key.agentName, refs.getThreadContext())?.withoutActions ?? [];
     },
     widgets,
     turnId: refs.getTurnId,
