@@ -4,6 +4,7 @@ import {
   GUARDIAN_OWN_KINDS,
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
+import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
@@ -12,6 +13,20 @@ import {
   registerBuiltinConnections,
   WECHAT_USER_KIND,
 } from "./index.js";
+
+/**
+ * Registers what boot registers: the built-in kinds, then each kind the wiring
+ * mounts on its own. A kind that moves to connections/kinds/ joins the list
+ * here too, so the checks over every kind keep covering it.
+ */
+function registerEveryKind(registry: ConnectionRegistry): void {
+  registerBuiltinConnections(registry, {
+    listAgents: () => [],
+    wechatUserRuntime: {} as WechatUserRuntime,
+  } as unknown as BuiltinConnectionDeps);
+  const mounted = [linkedin({} as unknown as LinkedInDescriptorDeps)];
+  for (const kind of mounted) registry.register(kind.descriptor);
+}
 
 describe("registerBuiltinConnections", () => {
   it("renews through Rome Cloud only for providers Rome Cloud can refresh", async () => {
@@ -95,10 +110,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      listAgents: () => [],
-      wechatUserRuntime: {} as WechatUserRuntime,
-    } as unknown as BuiltinConnectionDeps);
+    registerEveryKind(registry);
 
     const links = Object.fromEntries(
       [...registered.values()]
@@ -138,10 +150,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      listAgents: () => [],
-      wechatUserRuntime: {} as WechatUserRuntime,
-    } as unknown as BuiltinConnectionDeps);
+    registerEveryKind(registry);
 
     const unnamed = [...registered.values()]
       .filter((descriptor) => !descriptor.accountIdOf)
