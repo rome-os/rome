@@ -2,7 +2,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  ChannelType,
   Client,
+  PermissionFlagsBits,
   REST,
   RESTEvents,
   type APIRequest,
@@ -270,5 +272,38 @@ describe("DiscordAdapter REST broker capability", () => {
     await expect(adapter.listArchivedThreads()).rejects.toThrow("Discord chat 1");
     expect(signals.length).toBeGreaterThan(0);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("sees a private thread only as a member of it, or as one who manages threads", () => {
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const granted = (manages: boolean) => ({
+      has: (permission: bigint | bigint[]) =>
+        permission === PermissionFlagsBits.ManageThreads ? manages : true,
+    });
+    let manages = false;
+    const threads = new Map([
+      ["1", { type: ChannelType.PrivateThread, joined: true }],
+      ["2", { type: ChannelType.PrivateThread, joined: false }],
+      ["3", { type: ChannelType.PublicThread, joined: false }],
+    ]);
+    const guild = {
+      channels: { cache: threads },
+      members: { me: { permissionsIn: () => granted(manages) } },
+    };
+    (adapter as unknown as { client: { guilds: { cache: Map<string, unknown> } } }).client = {
+      guilds: { cache: new Map([["9", guild]]) },
+    };
+    const thread = (id: string) => ({
+      id,
+      name: `thread ${id}`,
+      guildId: "9",
+      guildName: "Rome",
+      type: "thread" as const,
+      parentId: "4",
+    });
+
+    expect(["1", "2", "3"].map((id) => adapter.sees(thread(id)))).toEqual([true, false, true]);
+    manages = true;
+    expect(adapter.sees(thread("2"))).toBe(true);
   });
 });

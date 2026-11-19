@@ -548,7 +548,16 @@ export class DiscordAdapter {
     const channel = guild?.channels.cache.get(chat.id);
     const me = guild?.members.me;
     if (!channel || !me) return true;
-    return me.permissionsIn(channel).has(permissions);
+    const granted = me.permissionsIn(channel);
+    // A private thread's permissions are its parent's, yet only its members
+    // and those who manage threads see it.
+    if (
+      channel.type === discordJs().ChannelType.PrivateThread &&
+      !channel.joined &&
+      !granted.has(discordJs().PermissionFlagsBits.ManageThreads)
+    )
+      return false;
+    return granted.has(permissions);
   }
 
   /** Execute a provider-relative request through the epoch-owned discord.js
