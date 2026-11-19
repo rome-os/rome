@@ -2,7 +2,7 @@
 // release carries (docs/releases.md#github-release). The upgrade dialog asks
 // for a range, from the running version to the offered one.
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   RELEASE_VERSION,
@@ -27,6 +27,11 @@ const MISSING_TTL_MS = 10 * 60_000;
  * downloaded again: a backfill replaces those assets with ones that have them.
  */
 export const REFRESH_WITHOUT_HIGHLIGHTS_MS = 60 * 60_000;
+/**
+ * How long a file with highlights is used before it is downloaded again, so
+ * a backfill that corrects a published file reaches instances within a day.
+ */
+export const REVALIDATE_MS = 24 * 60 * 60_000;
 
 /**
  * Orders two RELEASE_VERSION strings: negative when `a` is older. A
@@ -66,9 +71,10 @@ export interface ReleaseNotesOptions {
 
 /**
  * Downloads, checks and caches each release's notes, and merges a range of
- * them. A file with highlights is final, so it is kept for good, in memory
- * and in `cacheDir`. A file without them is kept too, but downloaded again
- * after REFRESH_WITHOUT_HIGHLIGHTS_MS, and used still when that fails.
+ * them. A read file is kept in memory and in `cacheDir`, and downloaded
+ * again once it is older than REVALIDATE_MS, or REFRESH_WITHOUT_HIGHLIGHTS_MS
+ * when it has no highlights. The kept copy still answers when that download
+ * fails or finds nothing.
  */
 export class ReleaseNotes {
   private readonly baseUrl: string;
@@ -201,11 +207,11 @@ export class ReleaseNotes {
     return merged;
   }
 
-  private remember(version: string, notes: ReleaseNotesFile): void {
-    const freshUntil = notes.highlights
-      ? Number.POSITIVE_INFINITY
-      : this.now() + REFRESH_WITHOUT_HIGHLIGHTS_MS;
+  /** Keeps `notes`, read at `readAt`, until its refresh interval ends. */
+  private remember(version: string, notes: ReleaseNotesFile, readAt = this.now()): number {
+    const freshUntil = readAt + (notes.highlights ? REVALIDATE_MS : REFRESH_WITHOUT_HIGHLIGHTS_MS);
     this.cached.set(version, { notes, freshUntil });
+    return freshUntil;
   }
 
   private async lookup(version: string, deadline: number): Promise<Lookup> {
@@ -220,11 +226,14 @@ export class ReleaseNotes {
   }
 
   private async load(version: string, deadline: number): Promise<Lookup> {
-    // A file kept without highlights still answers when the new download fails.
-    const kept = this.cached.get(version)?.notes ?? (await this.readDisk(version));
-    if (kept?.highlights) {
-      this.remember(version, kept);
-      return { kind: "found", notes: kept };
+    let kept = this.cached.get(version)?.notes ?? null;
+    if (!kept) {
+      // After a restart the file's age on disk decides whether it is fresh.
+      const onDisk = await this.readDisk(version);
+      if (onDisk && this.remember(version, onDisk.notes, onDisk.writtenAt) > this.now()) {
+        return { kind: "found", notes: onDisk.notes };
+      }
+      kept = onDisk?.notes ?? null;
     }
     const downloaded = await this.download(version, deadline);
     if (downloaded.kind === "found") {
@@ -267,13 +276,20 @@ export class ReleaseNotes {
     return { kind: "found", notes: parsed.data };
   }
 
-  /** The file kept from an earlier read, or null when there is none or it no longer parses. */
-  private async readDisk(version: string): Promise<ReleaseNotesFile | null> {
+  /**
+   * The file kept from an earlier read and when it was written, or null when
+   * there is none or it no longer parses.
+   */
+  private async readDisk(
+    version: string,
+  ): Promise<{ notes: ReleaseNotesFile; writtenAt: number } | null> {
     if (!this.cacheDir) return null;
     try {
-      const raw = JSON.parse(await readFile(join(this.cacheDir, `${version}.json`), "utf8"));
+      const file = join(this.cacheDir, `${version}.json`);
+      const raw = JSON.parse(await readFile(file, "utf8"));
       const parsed = releaseNotesFileSchema.safeParse(raw);
-      return parsed.success && parsed.data.version === version ? parsed.data : null;
+      if (!parsed.success || parsed.data.version !== version) return null;
+      return { notes: parsed.data, writtenAt: (await stat(file)).mtimeMs };
     } catch {
       return null;
     }

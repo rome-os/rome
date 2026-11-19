@@ -1,9 +1,20 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ReleaseNotesFile } from "@rome/api-types/release-notes";
-import { compareVersions, REFRESH_WITHOUT_HIGHLIGHTS_MS, ReleaseNotes } from "./release-notes.js";
+import {
+  compareVersions,
+  REFRESH_WITHOUT_HIGHLIGHTS_MS,
+  ReleaseNotes,
+  REVALIDATE_MS,
+} from "./release-notes.js";
+
+/** Ages a kept file on disk by `ms`. */
+function age(dir: string, version: string, ms: number) {
+  const at = new Date(Date.now() - ms);
+  utimesSync(join(dir, `${version}.json`), at, at);
+}
 
 const BASE = "https://notes.test/download";
 
@@ -342,13 +353,20 @@ describe("ReleaseNotes.range", () => {
     expect(requested).toHaveLength(3);
   });
 
-  it("downloads again after a restart when the file kept on disk has no highlights", async () => {
+  it("downloads again after a restart once the file kept on disk without highlights is an hour old", async () => {
     const dir = cacheDir();
     const first = github({ "1.0.1": schemaOne("1.0.1", "1.0.0") });
     await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: first.fetch }).range(
       null,
       "1.0.1",
     );
+    const early = github({});
+    await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: early.fetch }).range(
+      null,
+      "1.0.1",
+    );
+    expect(early.requested).toHaveLength(0);
+    age(dir, "1.0.1", REFRESH_WITHOUT_HIGHLIGHTS_MS + 60_000);
 
     const backfilled = github({
       "1.0.1": notes("1.0.1", "1.0.0", {
@@ -364,5 +382,63 @@ describe("ReleaseNotes.range", () => {
     const again = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: offline.fetch });
     expect((await again.range(null, "1.0.1")).highlights.en).toHaveLength(1);
     expect(offline.requested).toHaveLength(0);
+  });
+
+  it("downloads a file with highlights again after a day, so a corrected backfill arrives", async () => {
+    let now = 0;
+    const assets: Record<string, unknown> = {
+      "1.0.1": notes("1.0.1", "1.0.0", {
+        new: [{ scope: null, text: "x", pr: 9 }],
+        highlights: { en: [{ text: "First wording.", pr: 9 }], zh: [] },
+      }),
+    };
+    const { fetch, requested } = github(assets);
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch, now: () => now });
+    await store.range(null, "1.0.1");
+    now += REVALIDATE_MS - 1;
+    await store.range(null, "1.0.1");
+    expect(requested).toHaveLength(1);
+
+    assets["1.0.1"] = notes("1.0.1", "1.0.0", {
+      new: [{ scope: null, text: "x", pr: 9 }],
+      highlights: { en: [{ text: "Corrected wording.", pr: 9 }], zh: [] },
+    });
+    now += 2;
+    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
+
+    // A failed or missing download keeps the copy in hand.
+    now += REVALIDATE_MS + 1;
+    assets["1.0.1"] = 500;
+    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
+    now += REVALIDATE_MS + 1;
+    delete assets["1.0.1"];
+    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
+  });
+
+  it("downloads again after a restart once the file kept on disk is a day old", async () => {
+    const dir = cacheDir();
+    const first = github({
+      "1.0.1": notes("1.0.1", "1.0.0", {
+        new: [{ scope: null, text: "x", pr: 9 }],
+        highlights: { en: [{ text: "First wording.", pr: 9 }], zh: [] },
+      }),
+    });
+    await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: first.fetch }).range(
+      null,
+      "1.0.1",
+    );
+    age(dir, "1.0.1", REVALIDATE_MS + 60_000);
+
+    const corrected = github({
+      "1.0.1": notes("1.0.1", "1.0.0", {
+        new: [{ scope: null, text: "x", pr: 9 }],
+        highlights: { en: [{ text: "Corrected wording.", pr: 9 }], zh: [] },
+      }),
+    });
+    const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: corrected.fetch });
+    expect((await restarted.range(null, "1.0.1")).highlights.en[0]?.text).toBe(
+      "Corrected wording.",
+    );
+    expect(corrected.requested).toHaveLength(1);
   });
 });
