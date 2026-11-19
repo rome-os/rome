@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { AgentAction } from "../domain/agent-action.js";
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
@@ -467,18 +468,18 @@ describe("execute_action", () => {
   });
 
   it("reads an action by any of its names, as running it does", async () => {
-    const send = {
+    const send: AgentAction = {
       name: "system:send_message",
       description: "Send a message",
       type: "system",
       complexity: "simple",
       speed: "fast",
       reliability: "high",
-      sideEffects: "external",
+      sideEffects: "write",
       requiresApproval: false,
       cancellable: false,
       inputSchema: { properties: {} },
-    } as const;
+    };
     const read = (name: string) =>
       tools({
         actions: {

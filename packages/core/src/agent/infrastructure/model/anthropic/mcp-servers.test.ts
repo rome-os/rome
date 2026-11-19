@@ -94,8 +94,8 @@ function build(args: BuildArgs = {}) {
         list: args.getActionCatalog ?? (() => actionSnapshot),
         permits: () => true,
         appOf: () => undefined,
-        find: (turn, name) =>
-          (args.getActionCatalog ?? (() => actionSnapshot))(turn).find(
+        find: (_turn, name) =>
+          (args.getActionCatalog ?? (() => actionSnapshot))().find(
             (action) => action.name === name,
           ),
         run: async (_turn, name, input) => ({
