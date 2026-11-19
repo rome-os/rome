@@ -216,6 +216,7 @@ describe("channels.send into a Concierge chat", () => {
 describe("channels.query from a turn that is not the guardian's", () => {
   const visitorOn = (threadId: string) => ({
     callerActionContext: {
+      audience: "shared" as const,
       channelContext: {
         channel: "telegram",
         threadId,
@@ -252,5 +253,65 @@ describe("channels.query from a turn that is not the guardian's", () => {
       calls["channels.query"]({ channel: "telegram" }, visitorOn("chat-a")),
     ).rejects.toThrow("reads only the chat it is in");
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it("reads its own chat when it names the chat by its account", async () => {
+    const query = rs.fn(async () => []);
+    const account = { platform: "telegram", id: "rome-bot" };
+    const calls = makeCalls({
+      channelsService: {
+        list: rs.fn(async () => [
+          { name: "whatsapp", account: { platform: "whatsapp", id: "rome-wa" } },
+          { name: "telegram", account },
+        ]),
+        send: rs.fn(),
+        query,
+      } as never,
+    });
+
+    await calls["channels.query"]({ channel: account, chatId: "chat-a" }, visitorOn("chat-a"));
+    expect(query).toHaveBeenCalledWith(account, { chatId: "chat-a" });
+    await expect(
+      calls["channels.query"](
+        { channel: { platform: "whatsapp", id: "rome-wa" }, chatId: "chat-a" },
+        visitorOn("chat-a"),
+      ),
+    ).rejects.toThrow("reads only the chat it is in");
+  });
+
+  it("reads any chat only from a turn whose audience is private", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(async () => []), send: rs.fn(), query } as never,
+    });
+    const guardianIn = (channel: string, audience?: "private" | "shared") => ({
+      callerActionContext: {
+        ...(audience ? { audience } : {}),
+        channelContext: {
+          channel,
+          threadId: "here",
+          threadType: "private" as const,
+          senderBondLevel: "guardian",
+        },
+      },
+    });
+
+    await calls["channels.query"](
+      { channel: "whatsapp", chatId: "else" },
+      guardianIn("telegram", "private"),
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    // The guardian's own email thread, or a dashboard chat visitors can open,
+    // is read by others: the host reads its audience as shared.
+    for (const turn of [guardianIn("email", "shared"), guardianIn("webchat", "shared")]) {
+      await expect(
+        calls["channels.query"]({ channel: "whatsapp", chatId: "else" }, turn),
+      ).rejects.toThrow("reads only the chat it is in");
+    }
+    // An action with no audience is not the host's own, and reads as shared.
+    await expect(
+      calls["channels.query"]({ channel: "whatsapp", chatId: "else" }, guardianIn("telegram")),
+    ).rejects.toThrow("reads only the chat it is in");
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });
