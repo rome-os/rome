@@ -5,7 +5,7 @@ This is the concepts index — the single source of truth for entity definitions
 Browse by domain:
 
 - [`people.md`](people.md) — Guardian, Visitor, Persons, Accounts, Addresses, Links, Bond levels. *Who Rome serves and who it interacts with.*
-- [`deployment.md`](deployment.md) — Profiles, Instances. *How a deployment names itself for data isolation and for telemetry.*
+- [`deployment.md`](deployment.md) — Profiles, Instances, Container nodes. *Data isolation, deployment identity, and Rome Node installs in Docker.*
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*
 - [`sessions.md`](sessions.md) — Sessions, Model pin, Turns, Events, Blocks, Deltas, Owning app, Forked turns. *The durable boundary around agent work.*

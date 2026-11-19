@@ -1,0 +1,363 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { afterEach, expect, it } from "@rstest/core";
+import { WebSocket } from "ws";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../../access/auth.js";
+import { ContainerNodesRepository } from "../../db/repositories/container-nodes.js";
+import { guardianAuth } from "../../db/schema.js";
+import {
+  createLocalContainerNodes,
+  withLocalContainerNodes,
+} from "../../desktops/local-container-nodes.js";
+import { createNodeDevicesService } from "../../desktops/node-devices.js";
+import { applyInstanceSlug } from "../../instance/instance-env.js";
+import { createTestDb } from "../../test/db.js";
+import { buildTestDeps } from "../../test/helpers.js";
+import { startApi } from "../index.js";
+import type { ApiHandle } from "../deps.js";
+
+const path = "/api/devices/container-nodes";
+const guardianId = randomUUID();
+const userId = "local-guardian";
+const verifier = "v".repeat(43);
+const composeKey = randomBytes(32);
+
+const headersFor = (user: string) => ({ Cookie: `${COOKIE_NAME}=${createSession(user)}` });
+const authorization = (token: string) => ({ Authorization: `Bearer ${token}` });
+const json = (value: unknown, headers: Record<string, string> = {}): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json", ...headers },
+  body: JSON.stringify(value),
+});
+const databases: Array<ReturnType<typeof createTestDb>> = [];
+const apis: ApiHandle[] = [];
+const sockets: WebSocket[] = [];
+
+afterEach(async () => {
+  for (const socket of sockets.splice(0))
+    if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+  for (const api of apis.splice(0)) await api.close();
+  for (const db of databases.splice(0)) db.close();
+});
+
+async function database() {
+  const db = createTestDb();
+  databases.push(db);
+  await db.db.insert(guardianAuth).values({
+    id: guardianId,
+    userId,
+    passwordHash: "local-password-hash",
+    createdAt: new Date(),
+  });
+  return db.db;
+}
+
+async function server(db: Awaited<ReturnType<typeof database>>) {
+  const local = createLocalContainerNodes(
+    new ContainerNodesRepository(db),
+    { PANTHEON_DOMAIN: "localhost" },
+    async () => composeKey,
+  );
+  if (!local) throw new Error("Expected the direct transport");
+  const cloud = createNodeDevicesService(() => ({
+    getDevicesStatus: async () => null,
+    listDevices: async () => ({ items: [] }),
+    run: async () => {
+      throw new Error("Unexpected Cloud action");
+    },
+    renameDevice: async () => {
+      throw new Error("Unexpected Cloud rename");
+    },
+    removeDevice: async () => {
+      throw new Error("Unexpected Cloud remove");
+    },
+    disconnect() {},
+  }));
+  const devices = withLocalContainerNodes(cloud, local);
+  const deps = await buildTestDeps(db);
+  const api = await startApi(
+    { host: "127.0.0.1", port: 0 },
+    {
+      ...deps,
+      nodeDevices: devices,
+      localContainerNodes: local,
+      containerNodes: local.service,
+    },
+  );
+  apis.push(api);
+  const origin = `http://127.0.0.1:${api.port}`;
+  const owner = { ...headersFor(userId), Origin: origin };
+  return { api, devices, owner, origin, local };
+}
+
+function deviceSocket(origin: string, token: string) {
+  const socket = new WebSocket(origin.replace("http:", "ws:") + "/ws/container-node", {
+    headers: authorization(token),
+  });
+  sockets.push(socket);
+  return socket;
+}
+
+it("keeps the Cloud transport when a warm instance gains a slug", async () => {
+  const repo = new ContainerNodesRepository(await database());
+  const pool = { PANTHEON_DOMAIN: "romeos.cc" };
+  expect(createLocalContainerNodes(repo, pool)).toBeUndefined();
+
+  const adopted = { ...pool };
+  expect(applyInstanceSlug("tenant", adopted)).toBe("https://tenant.romeos.cc");
+  expect(createLocalContainerNodes(repo, adopted)).toBeUndefined();
+  expect(createLocalContainerNodes(repo, { ...pool, PANTHEON_SLUG: "tenant" })).toBeUndefined();
+});
+
+it("reads the original pending Compose after a restart and revokes it on removal", async () => {
+  const db = await database();
+  const first = await server(db);
+  const deploymentOrigin = "http://rome.home.arpa:9443";
+  const response = await fetch(
+    first.origin + path,
+    json({ name: "NAS", origin: deploymentOrigin }, first.owner),
+  );
+  expect(response.status).toBe(201);
+  const grant = await response.json();
+  expect(grant).toMatchObject({
+    origin: deploymentOrigin,
+    installToken: expect.stringMatching(/^romeinstall_/),
+  });
+
+  apis.splice(apis.indexOf(first.api), 1);
+  await first.api.close();
+  const restarted = await server(db);
+  const url = restarted.origin + path;
+  const installation = `${url}/${grant.id}`;
+  const compose = `${installation}/compose`;
+  expect((await fetch(compose, { headers: headersFor("other-owner") })).status).toBe(403);
+  expect((await fetch(compose, { headers: authorization(grant.installToken) })).status).toBe(403);
+  const saved = await fetch(compose, { headers: restarted.owner });
+  expect(saved.headers.get("cache-control")).toBe("no-store");
+  expect(await saved.json()).toEqual(grant);
+
+  expect(
+    (
+      await fetch(installation, {
+        ...json({ name: "Renamed NAS" }, restarted.owner),
+        method: "PATCH",
+      })
+    ).status,
+  ).toBe(204);
+  expect(await fetch(url, { headers: restarted.owner }).then((r) => r.json())).toMatchObject({
+    nodes: [{ id: grant.id, name: "Renamed NAS", status: "waiting" }],
+  });
+  expect(await fetch(compose, { headers: restarted.owner }).then((r) => r.json())).toEqual(grant);
+  expect((await fetch(installation, { method: "DELETE", headers: restarted.owner })).status).toBe(
+    204,
+  );
+  expect((await fetch(compose, { headers: restarted.owner })).status).toBe(404);
+  expect(
+    (
+      await fetch(
+        `${url}/redeem`,
+        json({ installation_id: grant.id, verifier }, authorization(grant.installToken)),
+      )
+    ).status,
+  ).toBe(401);
+});
+
+it("pairs a local guardian's Node through the normal API and revokes it through device management", async () => {
+  const db = await database();
+  const { api, owner, origin } = await server(db);
+  const url = origin + path;
+  const verify = (uri: string) =>
+    fetch(origin + "/api/auth/verify", {
+      headers: { "X-Forwarded-Uri": uri },
+    });
+  expect((await verify(path)).status).toBe(401);
+  expect((await verify(path + "/redeem")).status).toBe(204);
+  expect((await verify("/api/account/devices")).status).toBe(401);
+  for (const headers of [
+    { Origin: origin },
+    { ...headersFor("other-owner"), Origin: origin },
+    { ...headersFor(userId), Origin: "https://other.example" },
+    {
+      Cookie: `${VISITOR_COOKIE_NAME}=${createVisitorSession(userId, "guard@example.com")}`,
+      Origin: origin,
+    },
+  ]) {
+    expect((await fetch(url, json({ name: "NAS" }, headers))).status).toBe(403);
+  }
+  const start = await fetch(url, json({ name: "NAS" }, owner));
+  expect(start.status).toBe(201);
+  expect(start.headers.get("cache-control")).toBe("no-store");
+  const grant = await start.json();
+  expect(grant).toMatchObject({
+    origin: null,
+    installToken: expect.stringMatching(/^romeinstall_/),
+  });
+  expect(
+    await fetch(`${url}/${grant.id}/compose`, { headers: owner }).then((r) => r.json()),
+  ).toEqual({
+    error: "compose_unavailable",
+  });
+  const { installToken } = grant;
+  const claim = (proof: string) =>
+    fetch(
+      `${url}/redeem`,
+      json(
+        {
+          installation_id: grant.id,
+          verifier: proof,
+        },
+        authorization(installToken),
+      ),
+    );
+  expect(await fetch(url, { headers: owner }).then((r) => r.json())).toMatchObject({
+    transport: "direct",
+    nodes: [{ id: grant.id, status: "waiting" }],
+  });
+  expect((await fetch(origin + "/v1/gateway/config", { headers: owner })).status).toBe(401);
+  const response = await claim(verifier);
+  expect(response.status).toBe(200);
+  const session = await response.json();
+  expect(await claim(verifier).then((r) => r.json())).toEqual(session);
+  expect((await claim("w".repeat(43))).status).toBe(409);
+  expect((await fetch(`${url}/${grant.id}/pairing`, json({}, owner))).status).toBe(409);
+  expect((await fetch(`${url}/${grant.id}`, { method: "DELETE", headers: owner })).status).toBe(
+    409,
+  );
+  expect((await fetch(url, { headers: owner }).then((r) => r.json())).nodes[0].status).toBe(
+    "offline",
+  );
+  const credential = authorization(session.access_token);
+  expect(
+    await fetch(origin + "/v1/gateway/config", {
+      headers: { ...credential, "X-Forwarded-Host": "unrelated.example" },
+    }).then((r) => r.json()),
+  ).toEqual({ gatewayPath: "/ws/container-node" });
+  expect((await fetch(origin + "/api/account/devices", { headers: credential })).status).toBe(404);
+  expect((await fetch(url, { headers: credential })).status).toBe(403);
+
+  const bad = deviceSocket(origin, installToken);
+  const [error] = await once(bad, "error");
+  expect(error.message).toContain("401");
+  const node = deviceSocket(origin, session.access_token);
+  await once(node, "open");
+  expect((await fetch(url, { headers: owner }).then((r) => r.json())).nodes[0].status).toBe(
+    "online",
+  );
+  const pending = fetch(
+    `${url}/${grant.id}/switch-status`,
+    json({ address: "192.168.1.42" }, owner),
+  );
+  const [raw] = await once(node, "message");
+  const sent = JSON.parse(raw.toString());
+  expect(sent).toMatchObject({
+    from: session.caller_id,
+    payload: {
+      type: "request",
+      action: "shelly.switch.status",
+      args: { address: "192.168.1.42" },
+    },
+  });
+  node.send(
+    JSON.stringify({
+      id: sent.id,
+      to: "other-instance",
+      payload: { type: "response", ok: true, result: { on: false } },
+    }),
+  );
+  node.send(
+    JSON.stringify({
+      id: sent.id,
+      to: session.caller_id,
+      payload: { type: "response", ok: true, result: { on: true } },
+    }),
+  );
+  expect(await (await pending).json()).toEqual({ on: true });
+  const removePath = `${origin}/api/devices/${session.device_id}`;
+  expect((await fetch(removePath, { method: "DELETE", headers: credential })).status).toBe(403);
+  expect(
+    (
+      await fetch(removePath, {
+        method: "DELETE",
+        headers: { ...owner, Origin: "https://other.example" },
+      })
+    ).status,
+  ).toBe(403);
+
+  apis.splice(apis.indexOf(api), 1);
+  await api.close();
+  const restarted = await server(db);
+  const resumed = deviceSocket(restarted.origin, session.access_token);
+  await once(resumed, "open");
+  const afterRestart = await fetch(restarted.origin + "/api/devices", {
+    headers: restarted.owner,
+  }).then((r) => r.json());
+  expect(afterRestart.devices).toMatchObject([
+    { id: session.device_id, installationId: grant.id, name: "NAS", status: "connected" },
+  ]);
+  expect((await restarted.devices.runAction(session.device_id, "exec", {})).ok).toBe(false);
+  const onClose = once(resumed, "close");
+  expect(
+    (
+      await fetch(`${restarted.origin}/api/devices/${session.device_id}`, {
+        method: "DELETE",
+        headers: restarted.owner,
+      })
+    ).status,
+  ).toBe(204);
+  expect((await onClose)[0]).toBe(4001);
+  expect(
+    (await fetch(restarted.origin + "/v1/gateway/config", { headers: credential })).status,
+  ).toBe(401);
+  const list = await fetch(restarted.origin + path, { headers: restarted.owner }).then((r) =>
+    r.json(),
+  );
+  expect(list.nodes[0]).toMatchObject({ status: "needs_pairing", deviceId: null });
+  const replacement = await fetch(
+    `${restarted.origin}${path}/${grant.id}/pairing`,
+    json({}, restarted.owner),
+  ).then((r) => r.json());
+  expect(replacement.id).toBe(grant.id);
+  expect(replacement.installToken).not.toBe(installToken);
+  const installation = `${restarted.origin}${path}/${grant.id}`;
+  expect((await fetch(installation, { method: "DELETE", headers: credential })).status).toBe(403);
+  expect((await fetch(installation, { method: "DELETE", headers: restarted.owner })).status).toBe(
+    204,
+  );
+  const afterRemoval = await fetch(restarted.origin + path, { headers: restarted.owner }).then(
+    (r) => r.json(),
+  );
+  expect(afterRemoval.nodes).toEqual([]);
+  expect(
+    (
+      await fetch(
+        `${restarted.origin}${path}/redeem`,
+        json({ installation_id: grant.id, verifier }, authorization(replacement.installToken)),
+      )
+    ).status,
+  ).toBe(401);
+}, 15_000);
+
+it("bounds first redemption and recovery separately, and stores only hashes", async () => {
+  const repo = new ContainerNodesRepository(await database());
+  const grant = repo.issue(guardianId, { name: "NAS" }, 0);
+  if (grant.outcome !== "issued") throw new Error("No grant issued");
+  const { id, installToken } = grant;
+  const deadline = 2 * 60 * 60_000;
+  expect(Date.parse(grant.expiresAt)).toBe(deadline);
+  expect(repo.redeem(id, installToken, verifier, deadline).outcome).toBe("expired");
+  const first = repo.redeem(id, installToken, verifier, deadline - 1);
+  expect(first.outcome).toBe("redeemed");
+  expect(repo.redeem(id, installToken, verifier, deadline + 1)).toEqual(first);
+  expect(repo.redeem(id, installToken, verifier, deadline + 10 * 60_000 - 1).outcome).toBe(
+    "expired",
+  );
+  const saved = JSON.stringify(repo.list(guardianId));
+  expect(saved).not.toContain(installToken);
+  expect(saved).not.toContain(verifier);
+  if (first.outcome === "redeemed") expect(saved).not.toContain(first.token);
+});

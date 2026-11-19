@@ -311,6 +311,8 @@ export function getIdentityIssue(): { state: IdentityIssue; message: string } | 
 export interface ProveIdentityOptions {
   /** Override fetch (tests). Defaults to global `fetch`. */
   fetch?: typeof fetch;
+  /** Use the same credential to prove identity and make a subsequent Cloud call. */
+  credential?: { origin: string; token: string };
   /** Present only for the one-time version announcement: at boot, or when the
    *  instance links at runtime. Recurring identity heartbeats omit it, so Rome
    *  Cloud can distinguish announcements from liveness. */
@@ -327,13 +329,14 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
   const socket = signerSocketPath();
   let token: string | null;
   try {
-    token = socket ? await requestSignerToken(socket) : getInstanceToken();
+    token =
+      opts.credential?.token ?? (socket ? await requestSignerToken(socket) : getInstanceToken());
   } catch {
     return { status: "signer_unavailable" };
   }
   if (!token) return { status: "no_token" };
 
-  const origin = getRomeCloudOrigin();
+  const origin = opts.credential?.origin ?? getRomeCloudOrigin();
   if (!origin) return { status: "unconfigured" };
 
   let response: Response;
@@ -348,6 +351,8 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
       },
       ...(isBootAnnouncement ? { body: JSON.stringify({ version: opts.bootVersion }) } : {}),
       cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     // Network failure — non-terminal. The caller retries later; we never treat
