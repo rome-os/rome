@@ -222,7 +222,7 @@ A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[na
 
 ## Task list
 
-The Tasks and Routines views in a [Concierge chat](#concierge-chat)'s side panel that answer "what is my agent doing for me in this chat?". The dashboard labels them Tasks and Routines. Its owner opens each from the menu on the agent's logo in the chat's header, which lists Tasks, Routines and Outputs in that order. The Tasks entry has a dot while a task chat needs its owner; the logo itself carries none. On a phone each opens in a sheet. The iOS app shows them as three tabs of the Agent page. Each view keeps the panel's title and has no tabs of its own.
+The Tasks and Routines views in a [Concierge chat](#concierge-chat)'s side panel that answer "what is my agent doing for me in this chat?". The dashboard labels them Tasks and Routines. Its owner opens each from the menu on the agent's logo in the chat's header, which lists Tasks, Routines and Outputs in that order. The Tasks entry has a dot while a task chat needs its owner. The logo itself carries none. On a phone each opens in a sheet. The iOS app shows them as three tabs of the Agent page. Each view keeps the panel's title and has no tabs of its own.
 
 - It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and a Stop on another person's chat is refused as if the chat did not exist. A common chat has none for now.
 - It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a follow and a routine show as their own record says.
