@@ -205,9 +205,31 @@ describe("ChatsWebChatRepository", () => {
       "answer-b",
     ]);
     const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
-    expect(newest.rows.map((line) => line.id)).toEqual(["trace-a", "answer-a", "answer-b"]);
+    // A's trace is older than both answers, so it stands right after the oldest message.
+    expect(newest.rows.map((line) => line.id)).toEqual(["answer-a", "trace-a", "answer-b"]);
     const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
     expect(older.rows.map((line) => line.id)).toEqual(["owner-a", "owner-b", "trace-a"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("keeps messages said in the same second in the order they were recorded, on every page", async () => {
+    await repo.createSession("chat-1", "Plans");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date(1_800_000_000_000));
+      // Ids that sort against the order recorded in, all in one second.
+      for (const id of ["m-z", "m-a", "m-m", "m-b"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+    } finally {
+      rs.useRealTimers();
+    }
+    const ids = (rows: { id: string }[]) => rows.map((line) => line.id);
+    expect(ids(await repo.getMessages("chat-1"))).toEqual(["m-z", "m-a", "m-m", "m-b"]);
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    expect(ids(newest.rows)).toEqual(["m-m", "m-b"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
+    expect(ids(older.rows)).toEqual(["m-z", "m-a"]);
     expect(older.nextCursor).toBeNull();
   });
 

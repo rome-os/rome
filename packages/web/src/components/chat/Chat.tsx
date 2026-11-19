@@ -182,9 +182,8 @@ import {
 import {
   mergeChatMessage,
   mergeLatestMessagePage,
-  orderChatMessages,
   startsNewHistory,
-} from "@/lib/chat-message-ordering";
+} from "@/lib/chat-message-merge";
 import {
   ChatApiError,
   createSession,
@@ -1248,11 +1247,17 @@ export function Chat({
           messages: newestMessages,
           hasOlder: page.nextCursor !== null,
         });
-        const fetchedMessages = orderChatMessages(page.messages);
+        const fetchedMessages = page.messages;
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = localBeforeFetch;
+        // A row sent while the page was on the way stays when the history starts over.
+        const keepMessageIds = new Set(
+          [...(localOptimisticMessageIdsRef.current.get(id) ?? [])].filter(
+            (messageId) => !localBeforeFetch?.has(messageId),
+          ),
+        );
         const commitMessages = () =>
           setMessages((prev) => {
             const next = new Map(prev);
@@ -1261,6 +1266,7 @@ export function Chat({
               mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
                 restart,
                 dropMessageIds,
+                keepMessageIds,
               }),
             );
             return next;
@@ -1807,8 +1813,10 @@ export function Chat({
         localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
         setMessages((prev) => {
           const next = new Map(prev);
-          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
-          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          next.set(
+            sendingSessionId,
+            mergeChatMessage(next.get(sendingSessionId) ?? [], message, replacesId),
+          );
           return next;
         });
       };

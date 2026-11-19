@@ -7,7 +7,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
-import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
+import { prependChatMessages } from "@/lib/chat-message-merge";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildChatView, buildRows } from "./chat-view";
 import { buildConciergeItems } from "./concierge-groups";
@@ -359,7 +359,11 @@ describe("turns whose messages interleave, as the server pages them", () => {
       new Map([
         [
           "concierge",
-          pages.reduce<ChatMessage[]>((all, page) => mergeFetchedChatMessages(all, page), []),
+          // The newest page first, then each older one above it.
+          pages.reduce<ChatMessage[]>(
+            (all, page) => (all.length === 0 ? page : prependChatMessages(all, page)),
+            [],
+          ),
         ],
       ]),
       "concierge",
@@ -389,13 +393,14 @@ describe("turns whose messages interleave, as the server pages them", () => {
       say("answer-b", "assistant", "Second answer", 4, quoteOf("owner-b", "Second question")),
       "turn-b",
     );
-    // The newest page holds the two answers, and the trace of A's turn comes along.
-    const newest = [traceA, answerA, answerB];
+    // The newest page holds the two answers, and the trace of A's turn comes along,
+    // after the page's oldest message as the server places it.
+    const newest = [answerA, traceA, answerB];
     // The next page holds the two questions, and A's trace again.
     const older = [ownerA, ownerB, traceA];
 
     // The newest page alone leaves out the two questions.
-    expect(shownOf(newest).map((m) => m.id)).toEqual(["trace-a", "answer-a", "answer-b"]);
+    expect(shownOf(newest).map((m) => m.id)).toEqual(["answer-a", "trace-a", "answer-b"]);
 
     const shown = shownOf(newest, older);
     expect(shown.map((m) => m.id)).toEqual([
@@ -429,12 +434,13 @@ describe("turns whose messages interleave, as the server pages them", () => {
       },
     } as ChatMessage;
     // A routine's turn starts while the guardian's turn is open, and answers after it.
+    // Its trace is older than the page's messages, so the server puts it after the first.
     const shown = shownOf([
-      routineTrace,
       inTurn(
         say("answer-g", "assistant", "Guardian answer", 2, quoteOf("owner-g", "Question")),
         "turn-g",
       ),
+      routineTrace,
       inTurn(say("answer-r", "assistant", "Routine report", 3), "turn-r"),
     ]);
     renderTranscript(shown);

@@ -170,8 +170,9 @@ describe("GET /chat/sessions/:id/messages paging", () => {
 
     const page = await getPage("?limit=2");
 
-    // Both replies, and the traces of both turns, in the order they were said.
-    expect(page.messages.map((m) => m.id)).toEqual(["t-0", "t-1", "a-1", "a-0"]);
+    // Both replies, and the traces of both turns, which are older than both: they
+    // stand right after the oldest message, so the page starts with a message.
+    expect(page.messages.map((m) => m.id)).toEqual(["a-1", "t-0", "t-1", "a-0"]);
     const older = await getPage(`?limit=2&before=${encodeURIComponent(page.nextCursor ?? "")}`);
     expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0", "u-1", "t-1"]);
     expect(older.nextCursor).toBeNull();
@@ -181,7 +182,7 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     await seedTurn(0, BASE_SECONDS);
 
     const newest = await getPage("?limit=1");
-    expect(newest.messages.map((m) => m.id)).toEqual(["t-0", "a-0"]);
+    expect(newest.messages.map((m) => m.id)).toEqual(["a-0", "t-0"]);
     const older = await getPage(`?limit=1&before=${encodeURIComponent(newest.nextCursor ?? "")}`);
     expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0"]);
     expect(older.nextCursor).toBeNull();

@@ -86,8 +86,6 @@ final class TranscriptStore {
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
     private var cursor: String?
-    /// The order each message id was first received in.
-    private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
     /// What the rows do when acted on; the same object for the store's life.
@@ -267,7 +265,7 @@ final class TranscriptStore {
     /// first fetch merges into them by id, so nothing moves that is still there.
     func showCached() {
         guard !loaded, messages.isEmpty, let kept = cache?.messages(chat: sessionId) else { return }
-        merge(kept, persist: false)
+        commit(kept, persist: false)
         loaded = true
         hasOlder = false
         fromCache = true
@@ -317,14 +315,11 @@ final class TranscriptStore {
             // loaded, so a reload never puts the older-page spinner back on top.
             let known = Set(messages.map(\.id))
             let wasLoaded = loaded
-            let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { known.contains($0.id) }
-            if gap {
-                messages = []
-                seen = [:]
-            } else if fromCache {
-                pruneCached(against: page)
-            }
-            merge(page.messages)
+            let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { !$0.isTrace && known.contains($0.id) }
+            if gap { messages = [] }
+            // The server wins over the copy kept on disk: a kept row the page
+            // does not hold was deleted.
+            mergeLatest(page.messages, dropsUnlisted: fromCache && !gap)
             // Replies a refetch brings count like live ones: the list marks
             // the back-to-bottom button for a guardian reading further up.
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
@@ -351,24 +346,11 @@ final class TranscriptStore {
         } catch {}
     }
 
-    /// The server wins: a kept row the page should hold but does not was
-    /// deleted. Kept rows older than the page stay until the older page,
-    /// fetched from the page's cursor, brings them again.
-    private func pruneCached(against page: MessagePage) {
-        let fresh = Set(page.messages.map(\.id))
-        let oldest = page.messages.map(\.date).min()
-        messages.removeAll { message in
-            guard !fresh.contains(message.id) else { return false }
-            guard page.nextCursor != nil, let oldest else { return true }
-            return message.date >= oldest
-        }
-    }
-
     /// Fetches the newest page without touching paging state.
     @discardableResult
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
-        merge(page.messages)
+        mergeLatest(page.messages)
         loadError = nil
         readOnce = true
         return true
@@ -385,7 +367,7 @@ final class TranscriptStore {
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
         PerfProbe.count("olderPlaced")
-        merge(page.messages)
+        prepend(page.messages)
         self.cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
         summarizeUnread()
@@ -512,62 +494,61 @@ final class TranscriptStore {
         if onScreen { markRead() }
     }
 
-    /// Keeps the server's order: messages by when they were said, whichever
-    /// turn they belong to. Times are whole seconds, so messages that tie
-    /// within a second keep the order they first arrived in; the order never
-    /// changes when the same messages arrive again.
-    private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
+    // The server sends every message list in its final order, and the store never
+    // sorts: a page is held as it came, an older page goes above the held
+    // messages, a live message goes last in the order it arrived, and a message
+    // already held is replaced where it stands. The order is right after a reload.
+
+    /// Holds `next` as the messages, and keeps a copy on disk.
+    private func commit(_ next: [ChatMessage], persist: Bool = true) {
         rowsHeld = true
         defer {
             rowsHeld = false
             rebuildRows()
         }
-        // A copy of a message already held, with the same time, keeps its
-        // place: every key the order goes by is unchanged, so it replaces the
-        // held one where it stands, with no sort. Streaming and
-        // live edits of a message take this path.
-        if !incoming.isEmpty, let placed = placedInPlace(incoming) {
-            if placed != messages { messages = placed }
-            if persist { cache?.save(chat: sessionId, messages: messages) }
-            return
-        }
-        var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for message in incoming {
-            byID[message.id] = message
-            if seen[message.id] == nil {
-                seen[message.id] = seen.count
-            }
-        }
-        messages = Self.ordered(Array(byID.values), seen: seen)
+        if next != messages { messages = next }
         let stored = Set(messages.map(\.id))
         if pending.contains(where: { stored.contains($0.id) }) { pending.removeAll { stored.contains($0.id) } }
         if persist { cache?.save(chat: sessionId, messages: messages) }
     }
 
-    /// `incoming` put in place of the messages it updates, or nil when one
-    /// of them is new or moved to another time and the order must be worked
-    /// out again.
-    private func placedInPlace(_ incoming: [ChatMessage]) -> [ChatMessage]? {
-        var placed = messages
-        for message in incoming {
-            guard let index = placed.firstIndex(where: { $0.id == message.id }),
-                  placed[index].createdAt == message.createdAt
-            else { return nil }
-            placed[index] = message
+    /// A live message: replaces the held message with its id where it stands,
+    /// else goes last.
+    private func mergeLive(_ message: ChatMessage) {
+        var next = messages
+        if let index = next.firstIndex(where: { $0.id == message.id }) {
+            next[index] = message
+        } else {
+            next.append(message)
         }
-        return placed
+        commit(next)
     }
 
-    /// The server's order: by when each message was said, then by when it
-    /// first arrived. Each message's keys are worked out once, not on every
-    /// comparison.
-    static func ordered(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
-        all.map { (message: $0, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
-            .sorted { a, b in
-                if a.date != b.date { return a.date < b.date }
-                return a.arrival < b.arrival
-            }
-            .map(\.message)
+    /// An older page goes above the held messages. A held message it carries
+    /// again, such as the trace of a turn on both pages, takes the page's place.
+    private func prepend(_ older: [ChatMessage]) {
+        let ids = Set(older.map(\.id))
+        commit(older + messages.filter { !ids.contains($0.id) })
+    }
+
+    /// The newest page, or one that reaches down from it: it replaces the held
+    /// messages from its first held message (not a trace) onward, and what
+    /// stands above stays. A held message after it that it does not carry, such
+    /// as a live one the server read too early, stays after it, unless
+    /// `dropsUnlisted`. A page that reaches none of the held messages goes
+    /// first.
+    private func mergeLatest(_ page: [ChatMessage], dropsUnlisted: Bool = false) {
+        let ids = Set(page.map(\.id))
+        let heldIDs = Set(messages.map(\.id))
+        guard let anchor = page.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
+              let at = messages.firstIndex(where: { $0.id == anchor.id })
+        else {
+            commit(page + (dropsUnlisted ? [] : messages.filter { !ids.contains($0.id) }))
+            return
+        }
+        let above = messages[..<at].filter { !ids.contains($0.id) }
+        let below = dropsUnlisted ? [] : messages[at...].filter { !ids.contains($0.id) }
+        commit(above + page + below)
     }
 
     // MARK: Live events
@@ -584,7 +565,7 @@ final class TranscriptStore {
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
             if isNew { hold(message, after: newest) }
-            merge([message])
+            mergeLive(message)
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
             writing = (turnId, mode, isWriting)
@@ -722,7 +703,7 @@ final class TranscriptStore {
         if message(messageId) == nil,
            let page = try? await backend.messages(sessionId: sessionId, through: messageId, limit: Self.pageSize) {
             // From the newest down past the card, so no gap opens above what is held.
-            merge(page.messages)
+            mergeLatest(page.messages)
             if message(messageId) != nil {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil

@@ -36,6 +36,7 @@ import {
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
+  pageStartingWithAMessage,
   THROUGH_CONTEXT_MESSAGES,
   type TraceBatch,
   WebChatRepository,
@@ -742,12 +743,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
       ...new Set(page.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
     ]);
     // The page's messages are every one from the oldest up to the cursor, and
-    // its turns' traces come along, however old.
-    const rows = this.selectLines(
-      [sessionId],
-      sql`WHERE (role != 'trace'
+    // its turns' traces come along, however old, in the order they were said.
+    const rows = pageStartingWithAMessage(
+      this.selectLines(
+        [sessionId],
+        sql`WHERE (role != 'trace'
           AND (created_at, seq) >= (${oldest.at}, ${oldest.seq}) ${upTo})
         OR (role = 'trace' AND turn_id IN (SELECT value FROM json_each(${turnIds})))`,
+      ),
     );
     return {
       rows,

@@ -6385,7 +6385,7 @@ describe("Webchat API", () => {
       const ids = (page: Page) => page.messages.map((message) => message.id);
 
       const newest = await read("limit=2");
-      expect(ids(newest)).toEqual(["trace-a", "answer-a", "answer-b"]);
+      expect(ids(newest)).toEqual(["answer-a", "trace-a", "answer-b"]);
       expect(newest.nextCursor).toEqual(expect.any(String));
       const older = await read(`limit=2&before=${newest.nextCursor}`);
       expect(ids(older)).toEqual(["owner-a", "owner-b", "trace-a"]);

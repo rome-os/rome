@@ -1,7 +1,6 @@
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
-import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: per-session message lists → one renderable view. No React,
@@ -103,10 +102,10 @@ export function buildChatView(
   mainSessionId: string,
   mainIdentity: AgentIdentity,
 ): ChatView {
-  // Messages stand in the order they were said. A turn's trace is looked up by
-  // its turn id and shown as its subtitle, so its position in the list doesn't
-  // matter.
-  const displayMessages = orderChatMessages(messages.get(mainSessionId) ?? []);
+  // Messages stand in the order the server sent them, which is the order they
+  // were said. A turn's trace is looked up by its turn id and shown as its
+  // subtitle, so its position in the list doesn't matter.
+  const displayMessages = messages.get(mainSessionId) ?? [];
   return {
     displayMessages,
     identityBySession: new Map([[mainSessionId, mainIdentity]]),

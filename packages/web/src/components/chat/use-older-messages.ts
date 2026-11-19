@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { listSessionMessagePage } from "@/lib/chat-api";
-import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
+import { prependChatMessages } from "@/lib/chat-message-merge";
 import type { ChatMessage } from "@/lib/chat-types";
 
 /**
@@ -128,7 +128,7 @@ export function useOlderMessages(
         }
         setMessages((prev) => {
           const next = new Map(prev);
-          next.set(id, mergeFetchedChatMessages(next.get(id) ?? [], page.messages));
+          next.set(id, prependChatMessages(next.get(id) ?? [], page.messages));
           return next;
         });
         setCursor(id, page.nextCursor);

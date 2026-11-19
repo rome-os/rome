@@ -329,6 +329,18 @@ export interface MessagePageOptions {
   through?: string;
 }
 
+/**
+ * `rows` of a page, which stand in the order they were said, with a trace that
+ * is older than every message on the page moved to stand right after the
+ * oldest message. A page then starts with a message, so a client can place it
+ * by that message alone.
+ */
+export function pageStartingWithAMessage<T extends { role: string }>(rows: T[]): T[] {
+  const first = rows.findIndex((row) => row.role !== "trace");
+  if (first <= 0) return rows;
+  return [rows[first] as T, ...rows.slice(0, first), ...rows.slice(first + 1)];
+}
+
 /** How many messages older than a `through` message a page holds, so it opens with some context. */
 export const THROUGH_CONTEXT_MESSAGES = 5;
 
@@ -2455,8 +2467,10 @@ export class WebChatRepository {
    * The newest `limit` messages of a session, before `options.before`, in the
    * order `getMessages` returns them, plus the cursor for the older ones (null
    * when none remain). The trace rows of the turns those messages belong to
-   * come with them and do not count toward the limit, so a turn's trace shows
-   * on every page that holds one of its messages. Pages are disjoint while
+   * come with them, in the order they were said, and do not count toward the
+   * limit, so a turn's trace shows on every page that holds one of its
+   * messages. A trace older than the page's oldest message stands right after
+   * it ({@link pageStartingWithAMessage}). Pages are disjoint while
    * messages arrive, because the cursor is a position in the order they are
    * said in.
    */
@@ -2480,18 +2494,20 @@ export class WebChatRepository {
     const turnIds = [
       ...new Set(page.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
     ];
-    const rows = await this.selectMessages(
-      and(
-        eq(romeAgentMessages.sessionId, sessionId),
-        or(
-          and(
-            ne(romeAgentMessages.role, "trace"),
-            sql`${position} >= (${oldest.at}, ${oldest.seq})`,
-            before ? sql`${position} < (${before.at}, ${before.seq})` : undefined,
+    const rows = pageStartingWithAMessage(
+      await this.selectMessages(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          or(
+            and(
+              ne(romeAgentMessages.role, "trace"),
+              sql`${position} >= (${oldest.at}, ${oldest.seq})`,
+              before ? sql`${position} < (${before.at}, ${before.seq})` : undefined,
+            ),
+            turnIds.length > 0
+              ? and(eq(romeAgentMessages.role, "trace"), inArray(romeAgentMessages.turnId, turnIds))
+              : undefined,
           ),
-          turnIds.length > 0
-            ? and(eq(romeAgentMessages.role, "trace"), inArray(romeAgentMessages.turnId, turnIds))
-            : undefined,
         ),
       ),
     );

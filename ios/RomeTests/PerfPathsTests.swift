@@ -18,28 +18,26 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         for _ in 0..<60 where !until() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
-    /// The order as the store worked it out before its keys were computed
-    /// once: the reference the faster sort must match.
-    private func reference(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
-        all.sorted { a, b in
-            if a.date != b.date { return a.date < b.date }
-            return seen[a.id]! < seen[b.id]!
-        }
+    /// The server sends every list in its final order and the store never
+    /// sorts: whatever times the messages carry, they stay as they came.
+    @Test func aPageStaysInTheOrderTheServerSentIt() async {
+        let backend = FakeBackend()
+        backend.stored = [
+            message("z", turn: "t2", at: 50),
+            message("a", turn: "t1", at: 10),
+            message("m", at: 10),
+            message("b", turn: "t1", at: 5)
+        ]
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        await settle { store.loaded }
+        #expect(store.messages.map(\.id) == ["z", "a", "m", "b"])
+        await store.reload()
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["z", "a", "m", "b"])
     }
 
-    @Test func theOrderIsWhenTheyWereSaidWhateverTheTies() {
-        var generator = SystemRandomNumberGenerator()
-        for _ in 0..<50 {
-            // Few distinct seconds and turns, so messages tie often.
-            let all = (0..<40).map { index in
-                message("m\(index)", turn: Bool.random(using: &generator) ? "t\(Int.random(in: 0..<6, using: &generator))" : nil, at: Double(Int.random(in: 0..<8, using: &generator)))
-            }.shuffled(using: &generator)
-            let seen = Dictionary(uniqueKeysWithValues: all.map(\.id).shuffled(using: &generator).enumerated().map { ($1, $0) })
-            #expect(TranscriptStore.ordered(all, seen: seen).map(\.id) == reference(all, seen: seen).map(\.id))
-        }
-    }
-
-    @Test func aLiveEditOfAHeldMessageKeepsItsPlace() async {
+    @Test func aLiveMessageGoesLastAndASameIdIsReplacedInPlace() async {
         let backend = FakeBackend()
         backend.stored = [
             message("u1", role: "user", "hi", turn: "t1", at: 0),
@@ -51,16 +49,16 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         store.start()
         await settle { store.loaded }
         let before = store.messages.map(\.id)
-        // The same turn and time, new text: replaced where it stands.
+        // The same id, new text: replaced where it stands.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a1", "first, edited", turn: "t1", at: 5)))
         #expect(store.messages.map(\.id) == before)
         #expect(store.message("a1")?.parts.first?.textContent == "first, edited")
-        // A new time moves it, as a full sort would.
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a1", "first, later", turn: "t1", at: 7)))
-        #expect(store.messages.map(\.id) == ["u1", "a2", "a1", "u2"])
-        // A new message lands in order.
+        // A new time does not move it.
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a1", "first, later", turn: "t1", at: 70)))
+        #expect(store.messages.map(\.id) == before)
+        // A new message goes last, whatever time it carries.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("a3", "third", turn: "t1", at: 6)))
-        #expect(store.messages.map(\.id) == ["u1", "a2", "a3", "a1", "u2"])
+        #expect(store.messages.map(\.id) == before + ["a3"])
     }
 
     @Test func aChatListThatChangesNothingWritesNothing() async {

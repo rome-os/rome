@@ -582,6 +582,51 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
     }
 
+    @Test func pagesMergeByPositionNotByTime() async {
+        // Times that run against the server's order decide nothing.
+        func row(_ id: String, second: Double, role: String = "assistant") -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 50), row("m2", second: 10)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.map(\.id) == ["m3", "m4"])
+
+        // An older page goes above.
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+
+        // A live message goes last, and the same id is replaced where it stands.
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("live", second: 1)))
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("m2", second: 99)))
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "live"])
+
+        // A refetched newest page replaces from its first message onward; the
+        // older pages stay, and so does a live message the page does not carry.
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20), row("m5", second: 5)], nextCursor: "older")
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "m5", "live"])
+    }
+
+    @Test func aTraceOfATurnOnBothPagesTakesTheOlderPagesPlace() async {
+        func row(_ id: String, role: String = "assistant", second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("answer-a", second: 3), row("trace-a", role: "trace", second: 2), row("answer-b", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("owner-a", role: "user", second: 0), row("owner-b", role: "user", second: 1), row("trace-a", role: "trace", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "trace-a", "answer-a", "answer-b"])
+        // The newest page again: placed by its first message, the trace no longer ahead of it.
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "answer-a", "trace-a", "answer-b"])
+    }
+
     @Test func olderPageFromBeforeAGapIsDropped() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)

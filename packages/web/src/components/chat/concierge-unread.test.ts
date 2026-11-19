@@ -1,11 +1,7 @@
 // @rstest-environment jsdom
 import { describe, expect, it } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
-import {
-  mergeChatMessage,
-  mergeFetchedChatMessages,
-  orderChatMessages,
-} from "@/lib/chat-message-ordering";
+import { mergeChatMessage, prependChatMessages } from "@/lib/chat-message-merge";
 import type { ChatMessage } from "@/lib/chat-types";
 import { summarizeUnread, type UnreadAtOpen, useUnreadAtOpen } from "./concierge-unread";
 
@@ -35,7 +31,8 @@ const guardian = (id: string, createdAt: string, turnId?: string) =>
 
 /** The state a chat holds when it opens on `page`, with the read mark at `mark`. */
 function opened(page: ChatMessage[], mark = MARK): { messages: ChatMessage[]; open: UnreadAtOpen } {
-  const messages = orderChatMessages(page);
+  // The server sends a page in the order it was said, which the fixtures are written in.
+  const messages = page;
   const said = messages.filter((m) => m.role !== "trace");
   return {
     messages,
@@ -162,7 +159,7 @@ describe("summarizeUnread", () => {
         count: 2,
         more: true,
       });
-      const loaded = mergeFetchedChatMessages(messages, [
+      const loaded = prependChatMessages(messages, [
         agent("a1", "2026-10-27T12:00:00.000Z"),
         agent("a2", "2026-10-27T12:10:30.000Z"),
       ]);
