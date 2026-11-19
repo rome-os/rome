@@ -81,7 +81,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
@@ -1349,6 +1349,14 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
+        // A new session reads the chat's latest messages through its
+        // channel, from where the chat lives, as an action reading the
+        // chat's history would: a read of the chat the turn is in.
+        latest: (place, limit) =>
+          channelsService.query(place.channel, {
+            chatId: place.threadId as ChatId,
+            limit,
+          }),
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>
