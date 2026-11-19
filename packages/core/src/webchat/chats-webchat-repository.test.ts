@@ -931,73 +931,6 @@ describe("ChatsWebChatRepository", () => {
       }
     });
 
-    describe("Concierge page", () => {
-      type Statement = { all(...values: unknown[]): unknown[] };
-      type Client = { prepare(sql: string): Statement };
-
-      /** The query plan of each statement `read` runs whose SQL holds `marker`. */
-      async function plansOf(marker: string, read: () => Promise<unknown>): Promise<string[]> {
-        const client = (testDb.db as unknown as { $client: Client }).$client;
-        const prepare = client.prepare.bind(client);
-        const ran: { sql: string; values: unknown[] }[] = [];
-        client.prepare = (query: string) => {
-          const statement = prepare(query);
-          const all = statement.all.bind(statement);
-          statement.all = (...values: unknown[]) => {
-            if (query.includes(marker)) ran.push({ sql: query, values });
-            return all(...values);
-          };
-          return statement;
-        };
-        try {
-          await read();
-        } finally {
-          client.prepare = prepare;
-        }
-        return ran.map(({ sql: query, values }) =>
-          (prepare(`EXPLAIN QUERY PLAN ${query}`).all(...values) as { detail: string }[])
-            .map((row) => row.detail)
-            .join("\n"),
-        );
-      }
-
-      it("finds the main line by the page index and the replies by the root index", async () => {
-        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-        await said("Sunny", "m1");
-        await repo.recordUserInput("m2", "chat-1", text("Hello"));
-
-        const page = () => repo.getConciergePage("chat-1", { limit: 1 });
-        const [mainLine] = await plansOf("m.said_at DESC, m.id DESC", page);
-        const [replies] = await plansOf("m.root_message_id = j.value", page);
-
-        const [waiting] = await plansOf("m.read_at IS NULL", page);
-
-        expect(mainLine).toContain("idx_chat_messages_page");
-        expect(replies).toContain("idx_chat_messages_root");
-        expect(waiting).toContain("idx_chat_messages_root");
-      });
-
-      it("finds the traces of the page's turns by turn", async () => {
-        await repo.addMessage("u1", "chat-1", "user", text("Hello"), "turn-1");
-
-        const [traces] = await plansOf("r.turn_id = j.value", () =>
-          repo.getConciergePage("chat-1", { limit: 5 }),
-        );
-
-        expect(traces).toContain("idx_rome_agent_messages_turn_id");
-        expect(traces).not.toMatch(/SCAN r/);
-      });
-
-      it("reads no thread for a message the chat does not hold", async () => {
-        expect(await repo.getConciergeThread("chat-1", "missing")).toEqual({
-          mainLine: [],
-          outside: [],
-          traces: [],
-          nextCursor: null,
-        });
-      });
-    });
-
     describe("read marks", () => {
       const readOf = async () =>
         new Map((await repo.getMessages("chat-1")).map((message) => [message.id, message.read]));
@@ -1035,16 +968,27 @@ describe("ChatsWebChatRepository", () => {
         expect(await repo.markMessagesRead("no-chat", [b])).toBe(0);
       });
 
-      it("reads the main line when the chat is opened, and leaves a thread's replies", async () => {
+      it("reads no message when the chat is opened, and every earlier one when a later one is marked", async () => {
         await repo.recordUserInput("m1", "chat-1", text("Weather?"));
         const reply = await said("Sunny", "m1");
         const alone = await said("Good morning");
+        const last = await said("Anything else?");
         await repo.markSessionRead("chat-1");
         expect(await readOf()).toEqual(
           new Map([
             ["m1", true],
             [reply, false],
+            [alone, false],
+            [last, false],
+          ]),
+        );
+        expect(await repo.markMessagesRead("chat-1", [alone])).toBe(2);
+        expect(await readOf()).toEqual(
+          new Map([
+            ["m1", true],
+            [reply, true],
             [alone, true],
+            [last, false],
           ]),
         );
       });

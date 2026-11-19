@@ -13,11 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { listSessionMessagePage } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
-import {
-  CONCIERGE_PAGE_MESSAGES,
-  scrollTopAfterPrepend,
-  useOlderMessages,
-} from "./use-older-messages";
+import { scrollTopAfterPrepend, useOlderMessages } from "./use-older-messages";
 
 rs.mock("@/lib/chat-api", () => ({ listSessionMessagePage: rs.fn() }));
 
@@ -74,17 +70,12 @@ function Harness({
   initial,
   initialStuck,
   seen,
-  focused,
-  concierge,
 }: {
   initial: ChatMessage[];
   initialStuck: boolean;
   seen: Seen;
-  focused: boolean;
-  concierge: boolean;
 }) {
   const [messages, setMessages] = useState(new Map([["s1", initial]]));
-  const [paused, setPaused] = useState(focused);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const stick = useStickToBottom({ initialStuck });
   const older = useOlderMessages("s1", {
@@ -92,10 +83,9 @@ function Harness({
     scroller,
     pinned: stick.isAtBottom,
     setMessages,
-    paused,
   });
   const { setCursor } = older;
-  useEffect(() => setCursor("s1", "cursor-1", concierge), [setCursor, concierge]);
+  useEffect(() => setCursor("s1", "cursor-1"), [setCursor]);
   const rows = messages.get("s1") ?? [];
   seen.isAtBottom = () => stick.isAtBottom;
   seen.loadOlder = older.loadOlder;
@@ -125,7 +115,6 @@ function Harness({
         stick.scrollRef(node);
       }}
     >
-      <button type="button" data-testid="end-focus" onClick={() => setPaused(false)} />
       {older.hasOlder("s1") ? <div ref={older.sentinelRef} data-testid="sentinel" /> : null}
       <div ref={stick.contentRef}>
         {rows.map((row) => (
@@ -136,22 +125,9 @@ function Harness({
   );
 }
 
-function renderHarness(
-  initial: ChatMessage[],
-  initialStuck = false,
-  focused = false,
-  concierge = false,
-) {
+function renderHarness(initial: ChatMessage[], initialStuck = false) {
   const seen: Seen = { scrollTop: () => 0, isAtBottom: () => initialStuck };
-  render(
-    <Harness
-      initial={initial}
-      initialStuck={initialStuck}
-      seen={seen}
-      focused={focused}
-      concierge={concierge}
-    />,
-  );
+  render(<Harness initial={initial} initialStuck={initialStuck} seen={seen} />);
   return seen;
 }
 
@@ -330,9 +306,9 @@ describe("useOlderMessages", () => {
 });
 
 describe("useOlderMessages onOlderPage", () => {
-  it("reports each older page that loads, and no other", async () => {
-    const page = { messages: [message("m1", 1), message("m2", 2)], nextCursor: null };
-    rs.mocked(listSessionMessagePage).mockResolvedValueOnce(page);
+  it("reports the messages of each older page that loads, and no other", async () => {
+    const page = [message("m1", 1), message("m2", 2)];
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({ messages: page, nextCursor: null });
     const onOlderPage = rs.fn();
     const { result } = renderHook(() =>
       useOlderMessages("s1", {
@@ -347,63 +323,5 @@ describe("useOlderMessages onOlderPage", () => {
     expect(onOlderPage).not.toHaveBeenCalled();
     await act(() => result.current.loadOlder("s1"));
     expect(onOlderPage).toHaveBeenCalledExactlyOnceWith("s1", page);
-  });
-});
-
-describe("useOlderMessages with a thread in focus", () => {
-  const scroller = () => screen.getByTestId("scroller");
-  const pages = () => rs.mocked(listSessionMessagePage).mock.calls.length;
-
-  it("loads nothing, however near the view the sentinel is, or what the reader pushes", async () => {
-    renderHarness([message("m3", 3)], false, true);
-    await act(async () => {});
-    expect(FakeIntersectionObserver.live()).toHaveLength(0);
-
-    await act(async () => fireEvent.wheel(scroller(), { deltaY: -40 }));
-    await act(async () => fireEvent.keyDown(document.body, { key: "Home" }));
-    await act(async () => {
-      fireEvent.touchStart(scroller(), { touches: [{ clientY: 100 }] });
-      fireEvent.touchMove(scroller(), { touches: [{ clientY: 200 }] });
-    });
-
-    expect(pages()).toBe(0);
-  });
-
-  it("hands the paging back to the sentinel when the focus ends", async () => {
-    renderHarness([message("m3", 3)], false, true);
-    expect(FakeIntersectionObserver.live()).toHaveLength(0);
-
-    await act(async () => screen.getByTestId("end-focus").click());
-
-    expect(FakeIntersectionObserver.live()).toHaveLength(1);
-  });
-});
-
-describe("useOlderMessages in a Concierge chat", () => {
-  it("asks for older pages by main-line messages, and a read through a message goes the same way", async () => {
-    rs.mocked(listSessionMessagePage).mockResolvedValue({
-      messages: [message("m2", 2)],
-      nextCursor: null,
-      concierge: { body: [], oldestAt: null, titles: new Map(), threads: new Map() },
-    });
-    const seen = renderHarness([message("m3", 3)], false, false, true);
-
-    await act(async () => seen.loadOlder?.("s1", { through: "m1" }));
-
-    expect(listSessionMessagePage).toHaveBeenCalledWith("s1", {
-      limit: CONCIERGE_PAGE_MESSAGES,
-      before: "cursor-1",
-      through: "m1",
-      concierge: { fallbackLimit: 7 },
-    });
-  });
-
-  it("asks by turns for a session whose cursor came by turns", async () => {
-    rs.mocked(listSessionMessagePage).mockResolvedValue({ messages: [], nextCursor: null });
-    const seen = renderHarness([message("m3", 3)], false, false, false);
-
-    await act(async () => seen.loadOlder?.("s1"));
-
-    expect(listSessionMessagePage).toHaveBeenCalledWith("s1", { limit: 7, before: "cursor-1" });
   });
 });

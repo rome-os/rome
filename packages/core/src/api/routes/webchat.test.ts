@@ -6401,16 +6401,15 @@ describe("Webchat API", () => {
       const cardOf = (toolUseId: string) => rows().find((row) => row.parts.includes(toolUseId))!;
       const startRow = rows().find((row) => row.key === start.id)!;
 
-      // The owner wrote inside the thread: the card replies there, with no name.
+      // The owner wrote inside a thread: the card that names no message replies to nothing.
       await send("topic-1", { replyToMessageId: start.id });
       const inThread = cardOf("tu-1");
-      expect(inThread.replyTo).not.toBeNull();
-      expect(inThread.root).toBe(startRow.id);
+      expect([inThread.replyTo, inThread.root]).toEqual([null, null]);
       expect(JSON.parse(inThread.parts)).toEqual([
         expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-1" }),
       ]);
 
-      // The owner wrote on the main line: the card replies to the message it names.
+      // The card replies to the message it names.
       ask = { toolUseId: "tu-2", replyTo: start.id };
       await send("topic-1", {});
       const named = cardOf("tu-2");
@@ -6423,6 +6422,17 @@ describe("Webchat API", () => {
       await send(plain, {});
       expect(await findCard(plain, "tu-3")).toBeDefined();
       expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
+    });
+
+    it("answers a request to page a chat as a Concierge chat with not_concierge, which clients read as: page by turns", async () => {
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      const res = await app.request(`/chat/sessions/${sessionId}/messages?type=concierge&limit=40`);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "not_concierge" });
+      // The same chat pages by turns.
+      const turns = await app.request(`/chat/sessions/${sessionId}/messages?limit=20`);
+      expect(turns.status).toBe(200);
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {

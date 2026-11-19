@@ -21,21 +21,6 @@ export interface ReplyTarget {
 }
 
 /**
- * A chat thread, as a focus on it opens: the message the focus holds in
- * place, which is a message of the thread, and the thread's name, which the
- * composer and the back control show.
- */
-export interface ReplyThread {
-  thread: string;
-  title: string;
-}
-
-/** A thread in focus: what opened it, and the root of the thread. */
-export interface FocusedThread extends ReplyThread {
-  root: string;
-}
-
-/**
  * The reply a chat's composer holds, and the transcript's hooks for it. A
  * surface without a provider (a shared chat, a read-only viewer) offers no
  * Reply.
@@ -45,8 +30,7 @@ export interface ReplyDraft {
   sessionId: string | null;
   /** The message the reply quotes. */
   target: ReplyTarget | null;
-  /** Picks the reply and opens the reply bar with its quote. A reply sent
-   *  from the chat's timeline is in the replied message's chat thread. */
+  /** Picks the reply and opens the reply bar with its quote. */
   set: (target: ReplyTarget) => void;
   /** Drops the reply. Answers the draft's change count after it, for `restore`. */
   clear: () => number;
@@ -58,17 +42,8 @@ export interface ReplyDraft {
    * picked.
    */
   restore: (target: ReplyTarget, since?: number) => void;
-  /** Whether the loaded transcript holds the message, so a quote can link to it. */
-  has: (messageId: string) => boolean;
+  /** Goes to a quoted message: scrolls to it, loading older pages when it is not loaded yet. */
   jump: (messageId: string) => void;
-  /** Whether the chat keeps chat threads: only then can a thread be opened. */
-  threads: boolean;
-  /** The root of the chat thread in focus, which this draft sends into, or null when it sends to the chat itself. */
-  thread: string | null;
-  /** The name of the thread in focus, for the composer's placeholder. */
-  threadTitle: string | null;
-  /** Focuses the chat on the thread of `thread`, a message of it. Only a quote in a reply focuses. */
-  openThread: (thread: ReplyThread) => void;
 }
 
 /** The form fields that carry a reply to the server. */
@@ -90,32 +65,21 @@ export function useReplyDraft(): ReplyDraft | null {
 /**
  * The draft state for one composer. The reply is dropped when `chatId`
  * changes. Picking a reply focuses the composer through `focusComposer`.
- * With `thread`, the chat is focused on that chat thread, named by its root,
- * and the draft sends into it. A chat that keeps chat threads passes `onOpenThread`.
  */
 export function useReplyDraftState({
   chatId,
   sessionId,
-  messageIds,
   jump,
   focusComposer,
-  onOpenThread,
-  thread = null,
 }: {
   chatId: string | undefined;
   sessionId: string | null;
-  messageIds: ReadonlySet<string>;
   jump: (messageId: string) => void;
   focusComposer: () => void;
-  onOpenThread?: (thread: ReplyThread) => void;
-  thread?: FocusedThread | null;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
-  const openRef = useRef(onOpenThread);
-  openRef.current = onOpenThread;
-  const threads = onOpenThread !== undefined;
   // Counts every change to the draft, so a late restore can tell whether the
   // guardian changed it after the send.
   const changes = useRef(0);
@@ -134,9 +98,6 @@ export function useReplyDraftState({
     },
     [focus],
   );
-  const openThread = useCallback((next: ReplyThread) => openRef.current?.(next), []);
-  const threadId = thread?.root ?? null;
-  const threadTitle = thread?.title ?? null;
   const clear = useCallback(() => {
     changes.current += 1;
     setTarget(null);
@@ -147,7 +108,6 @@ export function useReplyDraftState({
     changes.current += 1;
     setTarget((current) => current ?? next);
   }, []);
-  const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
 
   return useMemo(
     () => ({
@@ -156,13 +116,8 @@ export function useReplyDraftState({
       set,
       clear,
       restore,
-      has,
       jump,
-      threads,
-      thread: threadId,
-      threadTitle,
-      openThread,
     }),
-    [sessionId, target, set, clear, restore, has, jump, threads, threadId, threadTitle, openThread],
+    [sessionId, target, set, clear, restore, jump],
   );
 }

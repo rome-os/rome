@@ -6,7 +6,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     let json = (try? JSONSerialization.data(withJSONObject: [["type": "text", "content": text]])) ?? Data()
     return ChatMessage(
         id: id, sessionId: "concierge", turnId: turn, role: role, content: String(bytes: json, encoding: .utf8) ?? "[]",
-        createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), chatThreadId: nil, knowsThreads: true
+        createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
     )
 }
 

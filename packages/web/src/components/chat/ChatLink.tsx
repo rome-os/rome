@@ -12,8 +12,6 @@ import { ChatMedia, InsideLinkContext } from "./ChatImage";
 import { FileChip } from "./FileChip";
 import { MemoryFileSheet } from "./MemoryFileSheet";
 import { type OutputLinks, useOutputLinks } from "./outputs/chat-outputs";
-import { ThreadLink } from "./reply/ThreadLink";
-import { threadOfLink } from "./reply/thread-link";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -272,8 +270,6 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   const outputs = useOutputLinks();
   const href = props.href;
 
-  const thread = threadOfLink(href);
-  if (thread !== null) return <ThreadLink root={thread} fallback={linkText(props.children)} />;
   if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {

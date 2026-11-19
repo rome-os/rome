@@ -526,8 +526,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
         return;
       }
       onNavigate?.();
-      // The card is in a chat thread, which the chat then focuses.
-      void requestConciergeJump(target, { focusThread: true }).finally(release);
+      void requestConciergeJump(target).finally(release);
       return;
     }
     void fetchJson<unknown>(`${listUrl(chatId)}/${encodeURIComponent(id)}/stop`, {

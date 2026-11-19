@@ -61,7 +61,6 @@ import {
   toWebchatProjectOption,
 } from "../../webchat/projects.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import { storedQuoteLine } from "../../webchat/reply-quote.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
 import { AssetTooLargeError, MAX_ASSET_BYTES } from "../../assets/store.js";
 import { appendUploadPathsToPrompt, saveWebchatUploads } from "../../webchat/uploads.js";
@@ -71,11 +70,7 @@ import {
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { SessionTurnFeedbackResponse, TurnFeedback } from "@rome/api-types/trace-segments";
-import type {
-  ConciergePageCursor,
-  MessagePageCursor,
-  StoredTurnFeedback,
-} from "../../webchat/repository.js";
+import type { MessagePageCursor, StoredTurnFeedback } from "../../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
@@ -218,9 +213,6 @@ const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
 /** Turns per message page when a request pages without naming `limit`. */
 const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
 const MESSAGE_PAGE_MAX_LIMIT = 100;
-// A Concierge page counts main-line messages, which are short, not turns.
-const CONCIERGE_PAGE_DEFAULT_LIMIT = 40;
-const CONCIERGE_CURSOR_MARKER = "concierge";
 
 /** Flatten the ambient session actor into audit-log attributes so the
  * session-lifecycle events answer "who did this" the same way
@@ -1895,122 +1887,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
   };
-  // A Concierge cursor names the oldest main-line message of its page, and
-  // carries a marker, so it never reads as a turn cursor, nor a turn cursor as
-  // it.
-  const encodeConciergeCursor = (cursor: ConciergePageCursor): string =>
-    Buffer.from(JSON.stringify([CONCIERGE_CURSOR_MARKER, cursor.saidAt, cursor.key])).toString(
-      "base64url",
-    );
-  const decodeConciergeCursor = (raw: string): ConciergePageCursor | null => {
-    try {
-      const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-      if (!Array.isArray(parsed) || parsed.length !== 3 || parsed[0] !== CONCIERGE_CURSOR_MARKER) {
-        return null;
-      }
-      const [, saidAt, key] = parsed;
-      if (!Number.isFinite(saidAt) || typeof key !== "string" || key === "") return null;
-      return { saidAt: Number(saidAt), key };
-    } catch {
-      return null;
-    }
-  };
-  // `type=concierge` pages a Concierge chat by its main-line messages
-  // (docs/domains/chats.md#chat-thread): the messages that reply to none.
-  // Each comes with a summary of the thread it roots (its counts and newest
-  // reply), so a reply never comes without its root, and the newest page names
-  // the threads with unread replies whose root is older. `thread` reads one
-  // thread whole. Every message is read once and enriched once, whichever of
-  // the three lists it stands in.
-  const respondWithConciergePage = async (
-    c: Context,
-    sessionId: string,
-    { withLayout }: { withLayout: boolean },
-  ) => {
-    const threadParam = c.req.query("thread");
-    const limitParam = c.req.query("limit");
-    const beforeParam = c.req.query("before");
-    const throughParam = c.req.query("through");
-    if (threadParam !== undefined) {
-      if (!threadParam) return c.json({ error: "thread must name a message" }, 400);
-      if (limitParam !== undefined || beforeParam !== undefined || throughParam !== undefined) {
-        return c.json({ error: "thread cannot come with limit, before or through" }, 400);
-      }
-    }
-    const limit =
-      limitParam === undefined ? CONCIERGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
-    if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
-      return c.json({ error: `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}` }, 400);
-    }
-    const before = beforeParam === undefined ? null : decodeConciergeCursor(beforeParam);
-    if (beforeParam !== undefined && !before) {
-      return c.json({ error: "Invalid before cursor" }, 400);
-    }
-    if (throughParam !== undefined && !throughParam) {
-      return c.json({ error: "through must name a message" }, 400);
-    }
-    const chat = await deps.webchatRepo.getSession(sessionId);
-    if (!isConciergeChat(chat)) {
-      return c.json({ error: "Not a Concierge chat", code: "not_concierge" }, 400);
-    }
-    const page =
-      threadParam !== undefined
-        ? await deps.webchatRepo.getConciergeThread(sessionId, threadParam)
-        : await deps.webchatRepo.getConciergePage(sessionId, {
-            limit,
-            before,
-            ...(throughParam ? { through: throughParam } : {}),
-          });
-    const stored = [
-      ...page.mainLine.flatMap(({ message, thread }) => [
-        message,
-        ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
-      ]),
-      ...page.outside.map((entry) => entry.latestUnread),
-      ...page.traces,
-    ];
-    const enriched = new Map(
-      (await enrichStoredMessages(sessionId, stored)).map((message) => [message.id, message]),
-    );
-    const shown = <T extends { id: string }>(message: T) => enriched.get(message.id) ?? message;
-    // A thread whose root is not on the page is named by its task, which its
-    // reply carries once enriched, else by the start of what that reply quotes.
-    const titleOf = (entry: (typeof page.outside)[number]) => {
-      const reply = shown(entry.latestUnread);
-      const title = "chatThreadTitle" in reply ? reply.chatThreadTitle : undefined;
-      return title ?? storedQuoteLine(entry.latestUnread.content);
-    };
-    return c.json({
-      type: "concierge",
-      mainLine: page.mainLine.map(({ message, thread }) => ({
-        message: shown(message),
-        thread: thread
-          ? {
-              replyCount: thread.replyCount,
-              unreadCount: thread.unreadCount,
-              latestReply: shown(thread.latestReply),
-              // Only a thread read by itself brings all its replies.
-              ...(thread.replies ? { replies: thread.replies.map(shown) } : {}),
-            }
-          : null,
-      })),
-      outside: page.outside.map((entry) => ({
-        root: entry.root,
-        title: titleOf(entry),
-        replyCount: entry.replyCount,
-        unreadCount: entry.unreadCount,
-        latestUnread: shown(entry.latestUnread),
-      })),
-      // The trace rows of the turns on the page, which a client reads their
-      // source, model switch and failure from.
-      traces: page.traces.map(shown),
-      nextCursor: page.nextCursor ? encodeConciergeCursor(page.nextCursor) : null,
-      hasMore: page.nextCursor !== null,
-      ...(withLayout && !before && threadParam === undefined
-        ? { layout: (await deps.webchatRepo.getLayout(sessionId)) ?? null }
-        : {}),
-    });
-  };
   // `withLayout` (the /chat route for a top-level session) attaches the saved
   // workspace layout to the first page, so the client paints the messages and
   // the tool panel together instead of fetching the layout separately.
@@ -2019,12 +1895,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
-    // `type` picks a mode that pages one kind of chat its own way; without it
-    // the paging below holds for every chat.
-    const typeParam = c.req.query("type");
-    if (typeParam !== undefined) {
-      if (typeParam !== "concierge") return c.json({ error: 'type must be "concierge"' }, 400);
-      return respondWithConciergePage(c, sessionId, { withLayout });
+    // Builds that page a Concierge chat with `type=concierge` take this answer
+    // as "page by turns", as they do for a chat that is not a Concierge chat.
+    if (c.req.query("type") === "concierge") {
+      return c.json({ error: "Not a Concierge chat", code: "not_concierge" }, 400);
     }
     // One chat thread, named by any of its messages, in one page: threads are short.
     const threadParam = c.req.query("thread");

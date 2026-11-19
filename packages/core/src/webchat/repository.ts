@@ -330,75 +330,6 @@ export interface MessagePageOptions {
 /** How many groups older than a `through` message a page holds, so it opens with some context. */
 export const THROUGH_CONTEXT_GROUPS = 2;
 
-/** How many main-line messages older than a `through` message's root a Concierge page holds. */
-export const THROUGH_CONTEXT_MESSAGES = 2;
-
-/** Where a Concierge page ends: the oldest main-line message it holds. */
-export interface ConciergePageCursor {
-  /** `said_at` (epoch seconds) of the message. */
-  saidAt: number;
-  /** The message's key. */
-  key: string;
-}
-
-export interface ConciergePageOptions {
-  /** Main-line messages per page. A reply never counts. */
-  limit: number;
-  /** Return only main-line messages strictly older than this cursor. */
-  before?: ConciergePageCursor | null;
-  /**
-   * A message the page must reach, a reply or a main-line message: the page
-   * holds every main-line message down to its thread's root, and
-   * {@link THROUGH_CONTEXT_MESSAGES} older ones. A message the chat does not
-   * hold changes nothing.
-   */
-  through?: string;
-}
-
-/** A message of a chat's transcript, as a client reads it. */
-type StoredChatLine = StoredWebchatMessage & {
-  inputState: import("@rome-os/app-runtime").AgentInputState | null;
-};
-
-/** A main-line message with a summary of the thread it roots. */
-export interface ConciergeMainLine {
-  message: StoredChatLine;
-  /** Null when no reply counts. */
-  thread: {
-    /** Replies the reader's stack counts: a user or assistant message no automation said. */
-    replyCount: number;
-    /** Counted replies the chat's owner did not say and has not seen. */
-    unreadCount: number;
-    /** The newest counted reply. */
-    latestReply: StoredChatLine;
-    /**
-     * Every message whose root is the message, deeper replies too, in the
-     * order they were said. Only a thread read by itself has it.
-     */
-    replies?: StoredChatLine[];
-  } | null;
-}
-
-/** A thread with unread replies whose root is not on the page. */
-export interface ConciergeOutside {
-  /** The key of the thread's root. */
-  root: string;
-  replyCount: number;
-  unreadCount: number;
-  /** The newest of the unread replies. */
-  latestUnread: StoredChatLine;
-}
-
-export interface ConciergePage {
-  /** Oldest first. */
-  mainLine: ConciergeMainLine[];
-  /** Only on the newest page, oldest waiting first. */
-  outside: ConciergeOutside[];
-  /** The trace rows of the turns of every message above, in the order they were said. */
-  traces: StoredChatLine[];
-  nextCursor: ConciergePageCursor | null;
-}
-
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
     ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${inArray(romeAgentMessages.sessionId, archivedSessionIds)}`.mapWith(
@@ -967,23 +898,6 @@ export class WebChatRepository {
     >
   > {
     return [];
-  }
-
-  /**
-   * A page of a Concierge chat by its main-line messages, with the threads
-   * they root whole. Chat threads live in Chats, so this repository holds
-   * none: an empty page.
-   */
-  async getConciergePage(
-    _sessionId: string,
-    _options: ConciergePageOptions,
-  ): Promise<ConciergePage> {
-    return { mainLine: [], outside: [], traces: [], nextCursor: null };
-  }
-
-  /** The chat thread of the message keyed `key`, as a page of its root alone. Empty here, as {@link getConciergePage}. */
-  async getConciergeThread(_sessionId: string, _key: string): Promise<ConciergePage> {
-    return { mainLine: [], outside: [], traces: [], nextCursor: null };
   }
 
   /** The key of the last message of the chat thread of the message keyed

@@ -18,6 +18,9 @@ private func message(
 
 private func text(_ value: String) -> [String: Any] { ["type": "text", "content": value] }
 
+/// What a reply to the guardian's message `original` starts with.
+private func replying(to original: String) -> [String: Any] { ["type": "reply_to", "messageId": original, "author": "guardian", "text": "hi"] }
+
 @Suite struct MessagePartTests {
     @Test func parsesTextFormatsAndForwardedOrigin() {
         let parts = MessagePart.parse(json([
@@ -67,22 +70,39 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 }
 
 @Suite struct TranscriptBuilderTests {
-    @Test func agentRunGetsFirstAndLastCornersAcrossCards() {
-        let rows = TranscriptBuilder.rows(
-            messages: [
-                message("u", role: "user", [text("hi")], at: 0),
-                message("a1", [text("one")], at: 10),
-                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
-                message("a2", [text("two")], at: 12),
-            ],
-            pending: [], answers: [:], options: .init()
-        )
-        let positions = rows.compactMap { row -> BubblePosition? in
+    private func positions(_ rows: [TranscriptRow]) -> [BubblePosition] {
+        rows.compactMap { row -> BubblePosition? in
             if case .agentText(_, _, _, _, let position) = row { return position }
             return nil
         }
-        #expect(positions == [.first, .last])
-        if case .separator = rows.first {} else { Issue.record("expected a leading separator") }
+    }
+
+    /// Replies to one message are a run, which gets first and last corners; a
+    /// card between them, which replies to nothing the app can see, ends it.
+    @Test func repliesToOneMessageGetFirstAndLastCorners() {
+        let user = message("u", role: "user", [text("hi")], at: 0)
+        let run = TranscriptBuilder.rows(
+            messages: [user, message("a1", [replying(to: "u"), text("one")], at: 10), message("a2", [replying(to: "u"), text("two")], at: 12)],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(run) == [.first, .last])
+        if case .separator = run.first {} else { Issue.record("expected a leading separator") }
+        let split = TranscriptBuilder.rows(
+            messages: [
+                user,
+                message("a1", [replying(to: "u"), text("one")], at: 10),
+                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
+                message("a2", [replying(to: "u"), text("two")], at: 12),
+            ],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(split) == [.single, .single])
+    }
+
+    /// Bubbles that reply to nothing stand apart, whoever said them.
+    @Test func bubblesThatReplyToNothingStandApart() {
+        let rows = TranscriptBuilder.rows(messages: [message("a1", [text("one")], at: 10), message("a2", [text("two")], at: 12)], pending: [], answers: [:], options: .init())
+        #expect(positions(rows) == [.single, .single])
     }
 
     @Test func aSeparatorComesAtAnHourAndNotBefore() {
@@ -319,12 +339,12 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {
         let messages = [
-            message("a1", [text("one")], at: 60 * 90),
-            message("a2", [text("two")], at: 60 * 90 + 10),
-            message("a3", [text("three")], at: 60 * 90 + 20),
+            message("a1", [replying(to: "u"), text("one")], at: 60 * 90),
+            message("a2", [replying(to: "u"), text("two")], at: 60 * 90 + 10),
+            message("a3", [replying(to: "u"), text("three")], at: 60 * 90 + 20),
         ]
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(unreadFrom: "a2"))
-        #expect(rows.map(\.id) == ["sep-a1", "a1:0", "unread-divider", "a2:0", "a3:0"])
+        #expect(rows.map(\.id) == ["sep-a1", "a1:1", "unread-divider", "a2:1", "a3:1"])
         let positions = rows.compactMap { row -> BubblePosition? in
             if case .agentText(_, _, _, _, let position) = row { return position }
             return nil
@@ -332,7 +352,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(positions == [.single, .first, .last])
 
         let after = TranscriptBuilder.rows(messages: [message("old", [text("x")], at: 0)] + messages, pending: [], answers: [:], options: .init(unreadFrom: "a1"))
-        #expect(after.map(\.id).prefix(5) == ["sep-old", "old:0", "sep-a1", "unread-divider", "a1:0"])
+        #expect(after.map(\.id).prefix(5) == ["sep-old", "old:0", "sep-a1", "unread-divider", "a1:1"])
     }
 
     @Test func noLineForAMessageTheChatDoesNotDraw() {

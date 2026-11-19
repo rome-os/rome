@@ -114,7 +114,7 @@ enum Palette {
 enum Metrics {
     static let pagePadding: CGFloat = 16
     static let bubbleRadius: CGFloat = 20
-    static let bubbleTight: CGFloat = 6
+    static let bubbleTight: CGFloat = 4
     static let cardRadius: CGFloat = 18
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18
@@ -143,10 +143,8 @@ extension View {
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
     /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
     /// tinted message's tint goes on before the width, so it hugs the bubble.
-    func bubbleWidth(
-        full: Bool = false, stack: ThreadStack? = nil, onOpenStack: @escaping () -> Void = {}
-    ) -> some View {
-        modifier(BubbleWidth(full: full, stack: stack, onOpenStack: onOpenStack))
+    func bubbleWidth(full: Bool = false) -> some View {
+        modifier(BubbleWidth(full: full))
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -165,15 +163,11 @@ extension View {
 private struct BubbleWidth: ViewModifier {
     /// The chat's whole width, as an agent card takes it, rather than a bubble's.
     let full: Bool
-    let stack: ThreadStack?
-    let onOpenStack: () -> Void
     @Environment(\.rowTinted) private var tinted
 
     func body(content: Content) -> some View {
         content
             .tinted(tinted)
-            // The thread's stack hangs under the bubble itself, whatever the row's width.
-            .threadStack(stack, onOpen: onOpenStack)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, full ? 0 : Metrics.bubbleInset)
     }

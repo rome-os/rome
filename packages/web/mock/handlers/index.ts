@@ -359,19 +359,11 @@ const turn = (
   return rows;
 };
 
-// The Concierge's afternoon, as the server sends it: a reply chain per topic.
-// Every message in a thread of more than one carries the root's key, and a
-// reply, the guardian's or the Concierge's, carries the quote of the message it
-// replies to. The three task threads interleave with each other and with the
-// Concierge's own messages, so there is a lot to fold away. The plumber thread
-// is a plain back-and-forth with nothing between its messages. The turns above
-// are one message and its answer in no thread.
-const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
-const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
-const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
-// No task started in the plumber thread, so it has no title: a client names it
-// from its root's text.
-const PLUMBER_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-17` };
+// The Concierge's afternoon, as the server sends it: replies that answer
+// several topics in turn, interleaved. A reply, the guardian's or the
+// Concierge's, carries the quote of the message it replies to, and the chat
+// draws it by what sits above it: plain, in a run of replies to one message, or
+// with the quote in its bubble. The plumber exchange is a plain back-and-forth.
 const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
 
 \`\`\`bash
@@ -413,7 +405,6 @@ const afternoon = (
   at: string,
   from: "guardian" | "agent",
   content: string,
-  thread?: { id: string; title?: string },
 ): ChatMessage => {
   afternoonSaid.set(n, { from, content });
   const quoted = AFTERNOON_REPLIES[n];
@@ -437,97 +428,8 @@ const afternoon = (
     content: JSON.stringify([...quote, text(content)]),
     createdAt: `2026-08-07T${at}:00.000Z`,
     ...(from === "guardian" ? { sender: guardianSender } : {}),
-    ...(thread ? { chatThreadId: thread.id } : {}),
-    ...(thread?.title ? { chatThreadTitle: thread.title } : {}),
   };
 };
-
-/**
- * A Concierge chat's transcript as the server pages it by main-line messages
- * (docs/domains/chats.md#chat-thread): newest first by `limit`, each main-line
- * message with a summary of its thread, or with every reply when one thread is
- * asked for. The cursor is the index of the page's first main-line message.
- */
-function conciergePage(transcript: ChatMessage[], query: URLSearchParams) {
-  const said = transcript.filter((m) => m.role === "user" || m.role === "assistant");
-  const isRoot = (m: ChatMessage) => !m.chatThreadId || m.chatThreadId === m.id;
-  const mainLine = said.filter(isRoot);
-  const repliesOf = (root: string) => said.filter((m) => m.chatThreadId === root && m.id !== root);
-  const counted = (m: ChatMessage) => m.sender?.kind !== "automated";
-  const summary = (root: string, whole: boolean) => {
-    const replies = repliesOf(root);
-    const own = replies.filter(counted);
-    const latestReply = own.at(-1) ?? (whole ? replies.at(-1) : undefined);
-    if (!latestReply) return null;
-    return {
-      replyCount: own.length,
-      unreadCount: own.filter((m) => m.role === "assistant" && m.read === false).length,
-      latestReply,
-      ...(whole ? { replies } : {}),
-    };
-  };
-  const traces = (shown: ChatMessage[]) => {
-    const turns = new Set(shown.flatMap((m) => m.turnId ?? []));
-    return transcript.filter((m) => m.role === "trace" && m.turnId && turns.has(m.turnId));
-  };
-  const thread = query.get("thread");
-  if (thread) {
-    const key = transcript.find((m) => m.id === thread);
-    const root = mainLine.find((m) => m.id === (key?.chatThreadId ?? thread));
-    const entry = root ? { message: root, thread: summary(root.id, true) } : null;
-    const shown = entry ? [root!, ...(entry.thread?.replies ?? [])] : [];
-    return {
-      type: "concierge",
-      mainLine: entry ? [entry] : [],
-      outside: [],
-      traces: traces(shown),
-      nextCursor: null,
-      hasMore: false,
-    };
-  }
-  const limit = Number(query.get("limit")) || 40;
-  const end = query.has("before") ? Number(query.get("before")) : mainLine.length;
-  const through = query.get("through");
-  const target = through ? transcript.find((m) => m.id === through) : undefined;
-  const at = target ? mainLine.findIndex((m) => m.id === (target.chatThreadId ?? target.id)) : -1;
-  const start = Math.max(0, Math.min(end - limit, at >= 0 && at < end ? at - 2 : end));
-  const page = mainLine.slice(start, end);
-  const entries = page.map((message) => ({ message, thread: summary(message.id, false) }));
-  const onPage = new Set(page.map((m) => m.id));
-  const outside = query.has("before")
-    ? []
-    : mainLine.flatMap((root) => {
-        if (onPage.has(root.id)) return [];
-        const waiting = repliesOf(root.id).filter(
-          (m) => counted(m) && m.role === "assistant" && m.read === false,
-        );
-        const latestUnread = waiting.at(-1);
-        return latestUnread
-          ? [
-              {
-                root: root.id,
-                title: null,
-                replyCount: repliesOf(root.id).filter(counted).length,
-                unreadCount: waiting.length,
-                latestUnread,
-              },
-            ]
-          : [];
-      });
-  const shown = [
-    ...page,
-    ...entries.flatMap((entry) => (entry.thread ? [entry.thread.latestReply] : [])),
-    ...outside.map((entry) => entry.latestUnread),
-  ];
-  return {
-    type: "concierge",
-    mainLine: entries,
-    outside,
-    traces: traces(shown),
-    nextCursor: start > 0 ? String(start) : null,
-    hasMore: start > 0,
-  };
-}
 
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
@@ -540,18 +442,6 @@ function conciergePage(transcript: ChatMessage[], query: URLSearchParams) {
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
-/**
- * The thread a message that replies to `target` is in: the target's, or, when
- * the target is alone, the one it now starts, as the server records it.
- */
-const joinThread = (target: ChatMessage) => {
-  target.chatThreadId ??= target.id;
-  return {
-    chatThreadId: target.chatThreadId,
-    ...(target.chatThreadTitle ? { chatThreadTitle: target.chatThreadTitle } : {}),
-  };
-};
-
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
@@ -625,37 +515,27 @@ const transcripts: Record<string, ChatMessage[]> = {
       "13:10",
       "guardian",
       "Can you book a table for 4 on Friday evening, somewhere close to the office?",
-      TABLE_THREAD,
     ),
-    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7.", TABLE_THREAD),
+    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7."),
     afternoon(
       3,
       "13:12",
       "guardian",
       "Also check flights to Berlin next Tuesday, back on Thursday.",
-      FLIGHT_THREAD,
     ),
-    afternoon(
-      4,
-      "13:12",
-      "agent",
-      "On it. I'll compare fares and tell you what I find.",
-      FLIGHT_THREAD,
-    ),
+    afternoon(4, "13:12", "agent", "On it. I'll compare fares and tell you what I find."),
     afternoon(
       5,
       "13:20",
       "agent",
       "All three take a booking for 4. Osteria 23 has a quiet back room, and it is the closest at 9 minutes on foot. Shall I take that one?",
-      TABLE_THREAD,
     ),
-    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?", TABLE_THREAD),
+    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?"),
     afternoon(
       7,
       "13:30",
       "agent",
       "Round trip, Tuesday 11/17 to Thursday 11/19, economy:\n\n1. **Lufthansa LH1135** · 08:40 out, 18:30 back · €210\n2. **Eurowings EW9021** · 07:15 out, 20:50 back · €148, no bag\n3. **Ryanair FR1832** · 06:10 out, 21:40 back · €96, no bag",
-      FLIGHT_THREAD,
     ),
     // A routine made the Concierge speak: its reply carries the routine's name.
     {
@@ -680,55 +560,39 @@ const transcripts: Record<string, ChatMessage[]> = {
       content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
       createdAt: "2026-08-07T13:32:01.000Z",
     },
-    afternoon(
-      8,
-      "13:40",
-      "agent",
-      "Last night's NAS backup failed. I'm looking into why.",
-      NAS_THREAD,
-    ),
+    afternoon(8, "13:40", "agent", "Last night's NAS backup failed. I'm looking into why."),
     afternoon(
       9,
       "13:41",
       "agent",
       "Yes, there is a €200 minimum for the back room, which fits a table of 4.",
-      TABLE_THREAD,
     ),
-    afternoon(
-      10,
-      "13:50",
-      "guardian",
-      "Anything that gets me back on Thursday afternoon?",
-      FLIGHT_THREAD,
-    ),
+    afternoon(10, "13:50", "guardian", "Anything that gets me back on Thursday afternoon?"),
     afternoon(
       11,
       "13:51",
       "agent",
       "Lufthansa has a 14:30 back on Thursday. With the Tuesday morning flight it is €190 round trip.",
-      FLIGHT_THREAD,
     ),
     afternoon(
       12,
       "14:00",
       "agent",
       "The backup disk is full: Time Machine kept 14 months of snapshots and never cleared the old ones. I deleted the ones before 2025, which freed 820 GB, and last night's backup has run again.",
-      NAS_THREAD,
     ),
-    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?", NAS_THREAD),
-    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT, NAS_THREAD),
-    afternoon(15, "14:15", "guardian", "Book the back room.", TABLE_THREAD),
+    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?"),
+    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT),
+    afternoon(15, "14:15", "guardian", "Book the back room."),
     afternoon(
       16,
       "14:16",
       "agent",
       "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
-      TABLE_THREAD,
     ),
-    afternoon(17, "14:20", "guardian", "What time is the plumber coming?", PLUMBER_THREAD),
-    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
-    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
-    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?"),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park."),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?"),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon."),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
@@ -1680,18 +1544,6 @@ export const handlers = [
     const messages = transcripts[String(params.sessionId)];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const query = new URL(request.url).searchParams;
-    if (query.get("type") === "concierge") {
-      const id = String(params.sessionId);
-      const chat = chatSessions.find((candidate) => candidate.id === id);
-      // Only a Concierge chat takes the paging mode, as the server answers.
-      if (id !== "concierge" && !chat?.agentName?.includes("concierge")) {
-        return HttpResponse.json(
-          { error: "Not a Concierge chat", code: "not_concierge" },
-          { status: 400 },
-        );
-      }
-      return HttpResponse.json(conciergePage(messages, query));
-    }
     const limit = Number(query.get("limit"));
     if (!limit) return HttpResponse.json(messages);
     // Pages by turn like the server; the cursor is the index of the page's first turn.
@@ -1712,18 +1564,14 @@ export const handlers = [
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
   // A sent message is only recorded: no turn starts, so nothing answers it. It
-  // replies to the message the owner picked, else, with a thread in focus, to
-  // that thread's last message, else to nothing, and joins the thread of the
-  // message it replies to, as the server records it.
+  // replies to the message the owner picked, else to nothing.
   http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
     const sessionId = String(params.sessionId);
     const messages = transcripts[sessionId];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const form = await request.formData();
     const picked = form.get("replyToMessageId");
-    const thread = form.get("chatThread");
-    const focused = thread ? messages.filter((message) => message.chatThreadId === thread) : [];
-    const repliesTo = picked ? messages.find((message) => message.id === picked) : focused.at(-1);
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : undefined;
     const sentAt = new Date().toISOString();
     // A reply shows the quote of what it replies to.
     const original = repliesTo ? JSON.parse(repliesTo.content) : [];
@@ -1749,7 +1597,6 @@ export const handlers = [
       content,
       createdAt: sentAt,
       sender: guardianSender,
-      ...(repliesTo ? joinThread(repliesTo) : {}),
     });
     return HttpResponse.json({
       turnId: null,

@@ -22,37 +22,36 @@ import UIKit
         #expect(SendProblem(nil, onRetry: {}, onDelete: nil) == nil)
     }
 
-    private func stored(_ id: String, inputState: String?, text: String = "hello", extra: String = "", thread: String? = nil, seconds: Double = 0) -> ChatMessage {
+    private func stored(_ id: String, inputState: String?, text: String = "hello", extra: String = "", seconds: Double = 0) -> ChatMessage {
         let body = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
-        var message = ChatMessage(id: id, sessionId: conciergeChatID, role: "user", content: "[\(extra){\"type\":\"text\",\"content\":\(body)}]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), chatThreadId: thread, knowsThreads: true)
+        var message = ChatMessage(id: id, sessionId: conciergeChatID, role: "user", content: "[\(extra){\"type\":\"text\",\"content\":\(body)}]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)))
         message.inputState = inputState
         return message
     }
 
     /// A resend goes where the message went: replying to the message it
-    /// quoted, in that message's thread.
-    @Test func aResendKeepsItsThreadAndReply() async {
+    /// quoted.
+    @Test func aResendKeepsItsReply() async {
         let backend = FakeBackend()
         backend.sendSucceeds = true
         let quote = #"{"type":"reply_to","messageId":"m-9","text":"Which day?"},"#
-        backend.stored = [stored("in-3", inputState: "failed", extra: quote, thread: "root-1")]
+        backend.stored = [stored("in-3", inputState: "failed", extra: quote)]
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         await store.reload()
         store.retry("in-3:1")
-        for _ in 0..<100 where backend.sentThreads.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        let target = backend.sentThreads.first ?? nil
-        #expect(target?.body == ["replyToMessageId": .string("m-9"), "chatThread": .string("root-1")])
-        #expect(store.pending.first?.thread == target)
+        for _ in 0..<100 where backend.sentReplies.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        let target = backend.sentReplies.first ?? nil
+        #expect(target?.body == ["replyToMessageId": .string("m-9")])
+        #expect(store.pending.first?.reply == target)
     }
 
     /// A message replied to nothing, which no quote says, goes back as one
-    /// that replies to nothing, whatever thread it has since been put in.
+    /// that replies to nothing.
     @Test func aResendTargetFollowsTheQuote() {
-        #expect(TranscriptStore.resendTarget(of: stored("a", inputState: "failed", thread: "root-1")) == nil)
+        #expect(TranscriptStore.resendTarget(of: stored("a", inputState: "failed")) == nil)
         #expect(TranscriptStore.resendTarget(of: stored("b", inputState: "failed")) == nil)
         let quote = #"{"type":"reply_to","messageId":"m-9","text":"Which day?"},"#
-        let replied = TranscriptStore.resendTarget(of: stored("c", inputState: "failed", extra: quote, thread: "c"))
-        // Its own root names no thread to send into.
+        let replied = TranscriptStore.resendTarget(of: stored("c", inputState: "failed", extra: quote))
         #expect(replied?.body == ["replyToMessageId": .string("m-9")])
     }
 
@@ -128,39 +127,6 @@ import UIKit
         store.drafts = ChatDrafts(store: drafts, chat: conciergeChatID)
         await store.reload()
         #expect(store.rows.contains { $0.id == "in-9:0" })
-    }
-
-    /// The thread view pairs a resend as the timeline does: its copy shows
-    /// in the original's place, on its way or stored only in the thread's
-    /// own read, never both and never neither.
-    @Test func theThreadViewShowsTheCopyNotTheOriginal() async throws {
-        let backend = FakeBackend()
-        backend.sendError = .network
-        var root = stored("root", inputState: nil, text: "plan the trip", thread: "root")
-        root.chatThreadTitle = "Trip"
-        backend.stored = [root, stored("in-11", inputState: "failed", text: "and hotels", thread: "root", seconds: 5)]
-        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        await store.reload()
-        store.openThread(at: "root")
-        let thread = try #require(store.thread)
-        store.retry("in-11:0")
-        for _ in 0..<100 where store.pending.first?.state == .sending || store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        let copy = try #require(store.pending.first?.id)
-        func ids() -> [String] { thread.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } } }
-        // On its way: the copy in the original's place.
-        #expect(ids() == ["root:0", copy])
-        // Sent and stored, but held only by the thread's own read: the copy
-        // shows once, and the original stays hidden.
-        backend.sendError = .network
-        backend.sendSucceeds = true
-        store.retry(copy)
-        for _ in 0..<100 where store.pending.first?.state != .sent { try? await Task.sleep(for: .milliseconds(10)) }
-        var stored = stored(copy, inputState: nil, text: "and hotels", thread: "root", seconds: 9)
-        stored.chatThreadTitle = "Trip"
-        backend.threads["root"] = [root, backend.stored[1], stored]
-        await thread.load()
-        #expect(ids() == ["root:0", "\(copy):0"])
-        store.closeThread()
     }
 
     /// A resend of a document keeps it: sent as a file, and drawn as a tile

@@ -324,40 +324,27 @@ export class MessageRepository {
   }
 
   /**
-   * Mark the messages of `chat` keyed `keys` read at `at`. A message already
-   * read keeps its time, and a key Rome does not hold is skipped. Answers how
-   * many messages it marked.
+   * Mark the messages of `chat` keyed `keys` read at `at`, and every message
+   * said before the latest of them: seeing a message means seeing what is
+   * above it. A message already read keeps its time, and a key Rome does not
+   * hold is skipped. Answers how many messages it marked.
    */
   markRead(chat: ChatRef, keys: readonly string[], at: Date = new Date()): number {
     if (keys.length === 0) return 0;
+    const chatId = chatIdOf(chat);
     return this.db
       .update(chatMessages)
       .set({ readAt: at })
       .where(
         and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          sql`${chatMessages.chatId} = ${chatId}`,
           isNull(chatMessages.readAt),
-          sql`${chatMessages.key} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))`,
-        ),
-      )
-      .returning({ id: chatMessages.id })
-      .all().length;
-  }
-
-  /**
-   * Mark the main line of `chat` read at `at`: every message that is not a
-   * reply inside a thread rooted at another message. Answers how many it
-   * marked.
-   */
-  markMainLineRead(chat: ChatRef, at: Date = new Date()): number {
-    return this.db
-      .update(chatMessages)
-      .set({ readAt: at })
-      .where(
-        and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
-          isNull(chatMessages.readAt),
-          sql`(${chatMessages.rootMessageId} IS NULL OR ${chatMessages.rootMessageId} = ${chatMessages.id})`,
+          sql`(${chatMessages.saidAt}, ${chatMessages.id}) <= (
+            SELECT m.said_at, m.id FROM chat_messages m
+            WHERE m.chat_id = ${chatId}
+              AND m.key IN (SELECT value FROM json_each(${JSON.stringify(keys)}))
+            ORDER BY m.said_at DESC, m.id DESC LIMIT 1
+          )`,
         ),
       )
       .returning({ id: chatMessages.id })

@@ -92,6 +92,19 @@ describe("ask_question", () => {
     expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
   });
 
+  it("requires the reply of a card that names one, and lets it be null", () => {
+    const schema = (overrides: Partial<RomeToolsOptions>) =>
+      tools(overrides)
+        .listTools("ask_user")
+        .find((tool) => tool.name === "ask_question")?.inputSchema as {
+        required: string[];
+        properties: { replyTo?: { type: unknown } };
+      };
+    expect(schema({}).required).toEqual(["questions"]);
+    expect(schema({ repliesTo: true }).required).toEqual(["questions", "replyTo"]);
+    expect(schema({ repliesTo: true }).properties.replyTo?.type).toEqual(["string", "null"]);
+  });
+
   it("relays defaults and option descriptions as readable prose", async () => {
     const input = {
       questions: [

@@ -7,22 +7,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { type ChatMessagePage, listSessionMessagePage } from "@/lib/chat-api";
+import { listSessionMessagePage } from "@/lib/chat-api";
 import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
 import type { ChatMessage } from "@/lib/chat-types";
 
 /**
- * Turns per page of a regular chat. A page is what the transcript renders at
- * once, so it is sized to fill a few screens and no more: a regular chat's
- * turns carry long answers and cost the most to render.
+ * Turns per page. A page is what the transcript renders at once, so it is
+ * sized to fill a few screens and no more: a regular chat's turns carry long
+ * answers and cost the most to render, a Concierge turn is a few short
+ * bubbles.
  */
 export const CHAT_PAGE_TURNS = 10;
-/**
- * Main-line messages per page of a Concierge chat, which are a few short
- * bubbles each. Replies do not count: each page brings a summary of the thread
- * of every message on it.
- */
-export const CONCIERGE_PAGE_MESSAGES = 40;
+export const CONCIERGE_PAGE_TURNS = 30;
 
 /** How far above the viewport the sentinel counts as reached, so older turns arrive before the top does. */
 const LOAD_AHEAD_PX = 800;
@@ -47,37 +43,26 @@ export function scrollTopAfterPrepend(
 }
 
 interface UseOlderMessagesOptions {
-  /** Turns per page of a chat paged by turns; see {@link CHAT_PAGE_TURNS}. */
+  /** Turns per page; see {@link CHAT_PAGE_TURNS}. */
   pageTurns: number;
   /** The element that scrolls the transcript. */
   scroller: HTMLElement | null;
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
-  /** Called with each older page that loads, once its messages are merged in. */
-  onOlderPage?: (sessionId: string, page: ChatMessagePage) => void;
-  /**
-   * No page loads while this holds, as when a chat thread is in focus: the rows
-   * outside it are hidden, so a page adds no height and the sentinel would
-   * report again until the history ran out. A thread is read whole for the
-   * focus, so it needs no older page.
-   */
-  paused?: boolean;
+  /** Called with the messages of each older page that loads, once it is merged in. */
+  onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
 }
 
 export interface OlderMessages {
-  /**
-   * Remembers where a session's older history starts, from a page response.
-   * `concierge` says the page was by main-line messages, whose cursor reads
-   * only that way.
-   */
-  setCursor: (sessionId: string, cursor: string | null, concierge?: boolean) => void;
+  /** Remembers where a session's older history starts, from a newest-page response. */
+  setCursor: (sessionId: string, cursor: string | null) => void;
   /** Whether the session has older turns that are not loaded yet. */
   hasOlder: (sessionId: string) => boolean;
   /** Attach to an element placed at the top of the transcript. */
   sentinelRef: (node: HTMLElement | null) => void;
   /**
-   * Loads the page before the oldest loaded one, keeping the viewport
+   * Loads the page of turns before the oldest loaded one, keeping the viewport
    * on what it shows. With `through`, the page reaches that message however
    * far back it is, in one read.
    */
@@ -90,19 +75,10 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  {
-    pageTurns,
-    scroller,
-    pinned,
-    setMessages,
-    onOlderPage,
-    paused = false,
-  }: UseOlderMessagesOptions,
+  { pageTurns, scroller, pinned, setMessages, onOlderPage }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
-  // The sessions whose cursor reads by main-line messages.
-  const conciergeRef = useRef(new Set<string>());
   // Each session's page read in flight.
   const loadingRef = useRef(new Map<string, Promise<void>>());
   const [loading, setLoading] = useState(false);
@@ -126,9 +102,7 @@ export function useOlderMessages(
     if (target !== el.scrollTop) el.scrollTop = target;
   }, [anchorTick]);
 
-  const setCursor = useCallback((id: string, cursor: string | null, concierge = false) => {
-    if (concierge) conciergeRef.current.add(id);
-    else conciergeRef.current.delete(id);
+  const setCursor = useCallback((id: string, cursor: string | null) => {
     if (cursorsRef.current.get(id) === cursor && cursorsRef.current.has(id)) return;
     const next = new Map(cursorsRef.current);
     next.set(id, cursor);
@@ -142,12 +116,10 @@ export function useOlderMessages(
     async (id: string, cursor: string, options: { through?: string }) => {
       setLoading(true);
       try {
-        const concierge = conciergeRef.current.has(id);
         const page = await listSessionMessagePage(id, {
-          limit: concierge ? CONCIERGE_PAGE_MESSAGES : pageTurns,
+          limit: pageTurns,
           before: cursor,
           ...(options.through ? { through: options.through } : {}),
-          ...(concierge ? { concierge: { fallbackLimit: pageTurns } } : {}),
         });
         // A newer response may have restarted the history while this one flew.
         if (!page || cursorsRef.current.get(id) !== cursor) return;
@@ -161,8 +133,8 @@ export function useOlderMessages(
           next.set(id, mergeFetchedChatMessages(next.get(id) ?? [], page.messages));
           return next;
         });
-        setCursor(id, page.nextCursor, !!page.concierge);
-        onOlderPage?.(id, page);
+        setCursor(id, page.nextCursor);
+        onOlderPage?.(id, page.messages);
       } catch {
         setRetryBlocked(true);
       } finally {
@@ -204,8 +176,7 @@ export function useOlderMessages(
   // Observing again after each page re-reports a sentinel that is still in
   // range, so a short transcript keeps loading until it fills the viewport.
   useEffect(() => {
-    if (paused || !sessionId || !sentinel || !scroller || !waiting || loading || retryBlocked)
-      return;
+    if (!sessionId || !sentinel || !scroller || !waiting || loading || retryBlocked) return;
     if (typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -215,7 +186,7 @@ export function useOlderMessages(
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [paused, sessionId, sentinel, scroller, waiting, loading, retryBlocked, loadOlder]);
+  }, [sessionId, sentinel, scroller, waiting, loading, retryBlocked, loadOlder]);
 
   return { setCursor, hasOlder, sentinelRef, loadOlder };
 }

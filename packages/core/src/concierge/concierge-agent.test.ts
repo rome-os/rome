@@ -88,15 +88,16 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("The brief says what to do, never where to send it");
   });
 
-  it("tells the Concierge a message can reply to one earlier message, and that routing changes no thread", () => {
+  it("tells the Concierge to always set replyTo, and that routing changes nothing", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain('`<chat_thread message_id="…" root="…"/>`');
-    expect(prompt).toContain("set `replyTo` on `say`");
+    expect(prompt).toContain("takes `replyTo`: always set it");
     expect(prompt).toContain("the task's `start_message_id`");
-    expect(prompt).toContain("a `say` without `replyTo` replies to nothing");
-    expect(prompt).toContain("a `say` without `replyTo` replies there");
-    expect(prompt).toContain("`[thread name](#rome-thread=ID)`");
-    expect(prompt).toContain("Sending a message to a task changes no thread");
+    expect(prompt).toContain("Set `replyTo` to null for a message that answers nothing");
+    expect(prompt).toContain("Sending a message to a task changes nothing here");
+    // Replies read in order: no stack to point at, and no link to a thread.
+    expect(prompt).not.toContain("#rome-thread");
+    expect(prompt).not.toContain("a stack under");
     // Rome sets threads from replies, so no rule asks the Concierge to place a message.
     for (const removed of [
       "never place a message",

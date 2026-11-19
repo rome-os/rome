@@ -49,8 +49,6 @@ struct TopicChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Under an open thread, VoiceOver reads the thread, not what it covers.
-        .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
             // The title and the status are read by the header itself, so a
             // change in them never redraws the transcript.
@@ -72,18 +70,11 @@ struct TopicChatScreen: View {
                 onArchive: { title in askToArchive(title) },
                 onDelete: { title in askToDelete(title) }
             )
-            .accessibilityHidden(store?.thread != nil)
         }
         .overlay(alignment: .top) {
             if let store { TranscriptBanners(store: store).padding(.top, 70) }
         }
-        // Over the header and the transcript; the composer below stays in place.
-        .overlay {
-            if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.taskChats, name: workspace.agentDisplayName, activity: { workspace.topics.activity(for: chatId) }, onClose: { store.closeThread() })
-            }
-        }
-        // Reply brings the keyboard up; a label opens the thread for reading.
+        // Reply brings the keyboard up.
         .onChange(of: store?.replies) { composerFocused = true }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
@@ -101,7 +92,7 @@ struct TopicChatScreen: View {
             archive(id, stoppingWork: stoppingWork)
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
         )) { composerFocused = true }
@@ -110,10 +101,8 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
-                // One pill for each thread with replies the guardian has not seen.
-                if let store { ThreadPills(store: store) }
                 if let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
@@ -125,7 +114,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
+                TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -144,24 +133,11 @@ struct TopicChatScreen: View {
         }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
-        // The chat is seen only while it is the one on screen: a thread kept open under another
-        // page reads nothing, and is read when this one comes back.
-        .onChange(of: "\(store?.sessionId ?? "")|\(visibleChat ?? "")", initial: true) { updateOnScreen() }
         .onDisappear {
-            store?.viewed = false
-            store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
         }
-    }
-
-    /// Tells the store whether the guardian sees the chat.
-    private func updateOnScreen() {
-        guard let store else { return }
-        // Only what is seen: this screen opens and reads the chat itself (`markRead`), so the
-        // store's own opening, which the main Chat relies on, is not asked twice.
-        store.viewed = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
     }
 
     /// Read only while it is the chat on screen: never under an instance
@@ -178,7 +154,7 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
@@ -251,11 +227,10 @@ struct TopicChatScreen: View {
         guard !attachments.isPreparing else { return }
         let images = attachments.images
         if let store {
-            // While a chat thread is open, the composer sends into it.
-            if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
+            if store.send(draft, images: images, fromComposer: true, reply: store.composerReply) {
                 draft = ""
                 _ = attachments.take()
-                store.composerSent()
+                store.cancelQuote()
             }
             return
         }
@@ -296,7 +271,6 @@ struct TopicChatScreen: View {
 private struct TopicComposer: View {
     let workspace: Workspace
     let chatId: String?
-    let replying: Bool
     @Binding var draft: String
     @Binding var focused: Bool
     let attachments: ComposerAttachments
@@ -312,9 +286,9 @@ private struct TopicComposer: View {
 
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
-        // Only "Message in <name>" is fitted; a reply keeps "Reply".
-        let name = replying ? nil : TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: replying ? .thread : .topicChat, onScreen: onScreen, onSend: onSend)
+        // Only "Message in <name>" is fitted.
+        let name = TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, onSend: onSend)
     }
 }
 

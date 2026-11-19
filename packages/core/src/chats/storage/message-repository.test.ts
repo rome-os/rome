@@ -493,16 +493,22 @@ describe("MessageRepository", () => {
       expect(readAt("a")).toBeNull();
     });
 
-    it("marks the main line read and leaves the replies inside a thread", () => {
-      messages.record(heard("root", at));
-      messages.record({ ...heard("reply", at), replyTo: "root" });
-      messages.record({ ...heard("deeper", at), replyTo: "reply" });
-      messages.record(heard("plain", at));
-      expect(messages.markMainLineRead(chat)).toBe(2);
-      expect(readAt("root")).not.toBeNull();
-      expect(readAt("plain")).not.toBeNull();
-      expect(readAt("reply")).toBeNull();
-      expect(readAt("deeper")).toBeNull();
+    it("marks every message said before the latest one named, replies and all", () => {
+      const said = (second: number) => new Date(`2026-10-29T01:00:0${second}Z`);
+      messages.record(heard("root", said(1)));
+      messages.record({ ...heard("reply", said(2)), replyTo: "root" });
+      // Recorded last, said between: order is by when it was said.
+      messages.record(heard("newest", said(4)));
+      messages.record(heard("between", said(3)));
+      messages.record({ ...heard("owned", said(0)), read: true });
+      const marked = new Date("2026-10-29T02:00:00Z");
+      expect(messages.markRead(chat, ["reply", "root"], marked)).toBe(2);
+      expect(readAt("root")).toBe(marked.getTime() / 1000);
+      expect(readAt("reply")).toBe(marked.getTime() / 1000);
+      expect(readAt("between")).toBeNull();
+      expect(readAt("newest")).toBeNull();
+      expect(messages.markRead(chat, ["between"], marked)).toBe(1);
+      expect(readAt("newest")).toBeNull();
     });
   });
 });

@@ -10,13 +10,9 @@ struct RowInfo: Hashable {
     var date: Date?
     /// The message is in a turn, so share mode can start on it.
     var canShare = false
-    /// The quote a reply carries, on its first bubble.
+    /// The quote a reply draws, on its first bubble: not for a reply that sits
+    /// right under what it answers, or in a run of replies to one message.
     var quote: MessagePart.ReplyQuote?
-    /// The quote leads somewhere: the reply's thread view, or the original.
-    var quoteLeads = false
-    /// The thread this message roots, when it has replies: its stack, drawn
-    /// under the message's last bubble.
-    var stack: ThreadStack?
     /// The badge on a guardian message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
@@ -26,36 +22,19 @@ struct RowInfo: Hashable {
     var senderName: String?
 
     /// The info of every text and task card row, by row id. `messages` are the ones the
-    /// rows were built from, and everything the quote may lead to. `threads`
-    /// are the stacks the main line draws: each goes on the last bubble or
-    /// card of its root.
+    /// rows were built from, and everything the quote may lead to.
     @MainActor
     static func build(
         rows: [TranscriptRow],
         messages: [ChatMessage],
         pending: [PendingSend],
-        kind: TranscriptStore.Kind,
-        threads: ThreadStacks = .none
+        kind: TranscriptStore.Kind
     ) -> [String: RowInfo] {
         var byID: [String: ChatMessage] = [:]
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
         var infos: [String: RowInfo] = [:]
-        // A reply the main line leaves out for a stack is not the message above another.
-        let adjacent = TranscriptBuilder.adjacentReplies(messages, hidden: threads.stacked)
-        // The last bubble or card of each message, which carries its stack.
-        var lastBubble: [String: String] = [:]
-        if !threads.stacks.isEmpty {
-            for row in rows {
-                switch row {
-                case .userText, .agentText, .taskCard:
-                    if let message = row.ownMessageId { lastBubble[message] = row.id }
-                default:
-                    break
-                }
-            }
-        }
-        for row in rows {
+        for (index, row) in rows.enumerated() {
             var info = RowInfo()
             switch row {
             case .userText(_, _, _, let state):
@@ -73,20 +52,36 @@ struct RowInfo: Hashable {
                 info.canShare = message.turnId != nil
                 info.saidByAgent = message.saidByAgent
                 info.senderName = message.sender?.name
-                // The quote leads where `TranscriptStore.quoteAction` would take it:
-                // a reply is in a thread of more than one, since its root is
-                // another message.
-                // A reply that sits right under what it answers shows nothing.
-                if !adjacent.contains(message.id), let quote = Self.quote(of: message, row: row) {
+                if let quote = Self.quote(of: message, row: row), Self.drawsQuote(message, row: row, previous: Self.messageAbove(index, rows: rows, byID: byID)) {
                     info.quote = quote
-                    let inThread = message.chatThreadId.map { $0 != message.id } ?? false
-                    info.quoteLeads = kind == .concierge && (inThread || byID[quote.messageId] != nil)
                 }
             }
-            if let own = row.ownMessageId, lastBubble[own] == row.id { info.stack = threads.stacks[own] }
             infos[row.id] = info
         }
         return infos
+    }
+
+    /// The message drawn above the row at `index`, which is not its own: the
+    /// rows between, such as time lines and notices, are not messages.
+    private static func messageAbove(_ index: Int, rows: [TranscriptRow], byID: [String: ChatMessage]) -> ChatMessage? {
+        let own = rows[index].ownMessageId
+        for above in rows[..<index].reversed() {
+            if let id = above.ownMessageId, id != own { return byID[id] }
+        }
+        return nil
+    }
+
+    /// Whether a reply draws its quote (docs/domains/chats.md#chat-thread).
+    /// The guardian's reply always does. The Concierge's does not when it sits
+    /// in a run of replies to one message, or right under the guardian's
+    /// message it answers. A card draws none.
+    private static func drawsQuote(_ message: ChatMessage, row: TranscriptRow, previous: ChatMessage?) -> Bool {
+        if message.isUser { return true }
+        guard case .agentText(_, _, _, _, let position) = row else { return false }
+        if position.joinsAbove { return false }
+        let target = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
+        if let previous, previous.isUser, previous.id == target { return false }
+        return true
     }
 
     /// The quote a reply carries, drawn on the first bubble or card of its message only.
