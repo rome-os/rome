@@ -496,6 +496,38 @@ declare class NoSchemaAction { constructor(config: unknown); }
     expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["D2", "I1"]);
   });
 
+  it("I2: does not take a route with a method `switch` inside as proof", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'if (request.method === "POST" && route === "notes") return this.add();',
+      `if (route === "notes") {
+      switch (request.method) {
+        case "POST": return this.add();
+        case "GET": return [];
+      }
+    }`,
+    );
+    const page =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => fetchAppApi("notes");\n';
+    const verdict = checkApp(
+      await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api, "src/web/App.tsx": page })),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
+  });
+
+  it("I2: leaves an action a table dispatch may run to a person", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'if (request.method === "POST" && route === "notes") return this.add();',
+      `if (route === "notes") {
+      const handlers: Record<string, () => unknown> = { POST: () => this.add(), GET: () => [] };
+      return handlers[request.method]?.();
+    }`,
+    );
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

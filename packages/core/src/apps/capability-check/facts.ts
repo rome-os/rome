@@ -45,6 +45,8 @@ export interface RouteFacts {
   alternatives?: string[];
   /** Why the reader could not tell which path the route matches, when it could not. */
   unreadable?: string;
+  /** The route hands requests to a dispatcher, which may run actions the reader does not see. */
+  dispatches?: boolean;
   /** The route is declared `api.noAuth`: a machine endpoint, such as a webhook. */
   noAuth: boolean;
   /** The route is unreadable and the app declares `api.noAuth` paths, so it may be one. */

@@ -741,6 +741,11 @@ class SourceReader {
       // code that runs outside them, such as a write after a method check.
       const { handsOff, ...effects } = this.effects(branch.then, innerThens);
       let unreadable = handsOff && `it hands off to ${handsOff}, which the reader cannot split`;
+      // A dispatch `switch` inside the route splits it into routes the reader cannot place.
+      const dispatch = innerSwitch(branch.then, innerThens);
+      if (!unreadable && dispatch) {
+        unreadable = `a \`switch (${dispatch.expression.getText()})\` dispatch inside it`;
+      }
       if (inner.length > 0 && !unreadable && effects.runs.length + effects.writes.length === 0) {
         // Code that answers after the narrower tests may be a route that runs
         // nothing, or only a "not allowed" reply; the reader cannot tell which.
@@ -752,6 +757,7 @@ class SourceReader {
       routes.push({
         ...described,
         ...(unreadable ? { unreadable } : {}),
+        ...(handsOff || dispatch ? { dispatches: true } : {}),
         at: this.at(entryFile, branch.node),
         ...effects,
       });
@@ -772,6 +778,7 @@ class SourceReader {
           path: "?",
           at: this.at(entryFile, node),
           ...effects,
+          dispatches: true,
           unreadable: `a \`switch (${node.expression.getText()})\` dispatch`,
         });
       }
@@ -808,6 +815,7 @@ class SourceReader {
         path: "?",
         at: this.at(entryFile, holder),
         ...rest,
+        ...(handsOff ? { dispatches: true } : {}),
         unreadable: handsOff
           ? `code outside its route tests hands off to ${handsOff}`
           : "code outside any route test the reader recognizes",
@@ -1199,6 +1207,19 @@ function testsRoutes(body: TS.Node, literal: LiteralOf): boolean {
     else ts.forEachChild(node, visit);
   };
   visit(body);
+  return found;
+}
+
+/** A dispatch `switch` in `node`, outside `skip`, in its own function. */
+function innerSwitch(node: TS.Node, skip: ReadonlySet<TS.Node>): TS.SwitchStatement | undefined {
+  let found: TS.SwitchStatement | undefined;
+  const visit = (current: TS.Node) => {
+    if (found || skip.has(current) || ts.isFunctionLike(current)) return;
+    if (ts.isSwitchStatement(current) && isDispatchSubject(current.expression.getText())) {
+      found = current;
+    } else ts.forEachChild(current, visit);
+  };
+  ts.forEachChild(node, visit);
   return found;
 }
 

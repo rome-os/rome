@@ -217,6 +217,15 @@ function judgeHumanInterface(
       );
       return;
     }
+    // A dispatcher the reader cannot split may run it where the reader does not look.
+    if (app.routes?.some((route) => !route.noAuth && route.dispatches)) {
+      cannotJudge(
+        "I2",
+        action.at,
+        `No route the reader can follow runs \`${action.name}\`, but a route hands requests to a dispatcher it cannot split.`,
+      );
+      return;
+    }
     gap(
       "I2",
       action.at,
