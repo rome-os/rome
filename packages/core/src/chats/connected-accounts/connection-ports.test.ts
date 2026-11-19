@@ -372,3 +372,71 @@ describe("send port", () => {
     await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(AccountNotConnected);
   });
 });
+
+describe("taking a message in", () => {
+  async function setup() {
+    const { db } = createTestDb();
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    const ports = connectionPorts(
+      { registry, channelOf: (each) => each.connectionKind },
+      "fake-telegram",
+    );
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    const talker = fx.talkerFactory.instances.at(-1)!;
+    // The runtime's deliver answers whether the message was taken in.
+    const deliver = (message: ChannelMessage) =>
+      talker.state.deliver?.(message) as unknown as Promise<void>;
+    return { ports, deliver };
+  }
+
+  it("settles a delivery once every subscriber has handled the message, not before", async () => {
+    const { ports, deliver } = await setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const handled: string[] = [];
+    ports?.inbound?.subscribe(async (event) => {
+      await held;
+      handled.push(event.message.messageId);
+    });
+    ports?.inbound?.subscribe(async () => {});
+
+    let settled = false;
+    const delivered = deliver(said("m1", "dm-1", 0)).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    release();
+    await delivered;
+    expect(handled).toEqual(["m1"]);
+  });
+
+  it("rejects a delivery a subscriber failed to handle, so the transport can ask again", async () => {
+    const { ports, deliver } = await setup();
+    ports?.inbound?.subscribe(async () => {
+      throw new Error("could not record");
+    });
+    await expect(deliver(said("m1", "dm-1", 0))).rejects.toThrow("could not record");
+  });
+
+  it("rejects a delivery whose subscription ended before handling it", async () => {
+    const { ports, deliver } = await setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const unsubscribe = ports?.inbound?.subscribe(async () => held);
+    const first = deliver(said("m1", "dm-1", 0));
+    const second = deliver(said("m2", "dm-1", 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    unsubscribe?.();
+    release();
+    await first;
+    await expect(second).rejects.toThrow("subscription ended");
+  });
+});

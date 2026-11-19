@@ -8,6 +8,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../participation/conversation-buffer.js";
+import { InboundNotAccepted, openAcceptance } from "../participation/inbound-acceptance.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { chats } from "../db/schema.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -54,27 +55,41 @@ function fakeChannel() {
       media: null,
     },
   } as unknown as Channel;
+  const eventOf = (
+    message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
+  ): InboundEvent => ({
+    kind: "message",
+    ref: { connectionId: "conn-1", chatId: message.chatId as ChatId },
+    message: {
+      channel: "telegram",
+      direction: "inbound",
+      senderId: "alice",
+      senderDisplayName: "Alice",
+      text: "hi",
+      attachments: [],
+      timestamp: new Date("2026-10-29T01:00:00Z"),
+      ...message,
+      chatId: message.chatId as ChatId,
+    },
+  });
   const hear = (
     message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
   ) => {
     if (!handler) throw new Error("nothing is listening");
-    return handler({
-      kind: "message",
-      ref: { connectionId: "conn-1", chatId: message.chatId as ChatId },
-      message: {
-        channel: "telegram",
-        direction: "inbound",
-        senderId: "alice",
-        senderDisplayName: "Alice",
-        text: "hi",
-        attachments: [],
-        timestamp: new Date("2026-10-29T01:00:00Z"),
-        ...message,
-        chatId: message.chatId as ChatId,
-      },
-    });
+    return handler(eventOf(message));
   };
-  return { channel, sent, hear, listening: () => handler !== null };
+  /** Hear a message as the inbound port hands it over, with a ticket: the
+   *  promise answers whether the adapter took it in. */
+  const hearWithTicket = async (
+    message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
+  ) => {
+    if (!handler) throw new Error("nothing is listening");
+    const event = eventOf(message);
+    const accepted = openAcceptance(event);
+    await handler(event);
+    return { accepted };
+  };
+  return { channel, sent, hear, hearWithTicket, listening: () => handler !== null };
 }
 
 describe("chat adapter keys", () => {
@@ -257,6 +272,71 @@ describe("channelAdapter", () => {
     expect(delivered).toHaveLength(101);
     expect(delivered.slice(0, 3)).toEqual(["1", "52", "53"]);
     expect(delivered.at(-1)).toBe("151");
+  });
+
+  it("take a message in once it is handed over, and let go of one dropped from a full queue", async () => {
+    const { channel, hearWithTicket } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        delivered.push(message.key);
+        if (message.key === "1") await held;
+        return 1;
+      },
+      () => {},
+    );
+
+    const tickets: Array<{ accepted: Promise<void> }> = [];
+    for (let id = 1; id <= 102; id += 1) {
+      tickets.push(await hearWithTicket({ chatId: "-1001234567890123", messageId: String(id) }));
+    }
+    const outcome = (index: number) =>
+      tickets[index].accepted.then(
+        () => "accepted",
+        (error: unknown) => (error instanceof InboundNotAccepted ? "let go" : "failed"),
+      );
+    // Message 2 was the oldest waiting when 102 arrived to a full queue.
+    expect(await outcome(1)).toBe("let go");
+    let first = "pending";
+    void outcome(0).then((result) => {
+      first = result;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(first).toBe("pending");
+    release();
+    await adapter.settled();
+    expect(await outcome(0)).toBe("accepted");
+    expect(await outcome(101)).toBe("accepted");
+  });
+
+  it("lose none of a backlog its transport replays one taken-in message at a time", async () => {
+    const { channel, hearWithTicket } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: string[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message.key);
+        await new Promise((resolve) => setImmediate(resolve));
+        return 1;
+      },
+      () => {},
+    );
+
+    for (let id = 1; id <= 250; id += 1) {
+      const { accepted } = await hearWithTicket({
+        chatId: "-1001234567890123",
+        messageId: String(id),
+      });
+      await accepted;
+    }
+
+    expect(delivered).toHaveLength(250);
+    expect(delivered.at(-1)).toBe("250");
   });
 
   it("hold no event for a message whose address could not be kept", async () => {

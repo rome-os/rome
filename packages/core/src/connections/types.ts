@@ -268,7 +268,18 @@ export interface RuntimeKit {
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
-  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
+  /**
+   * Start hearing. The runtime's `deliver` returns a promise that resolves
+   * once the message is taken in for good, recorded where Rome keeps it, and
+   * rejects when it was dropped; a test may pass a plain function. A transport
+   * that can be asked again, such as a mailbox that redelivers what is not
+   * confirmed, confirms receipt upstream only after it resolves. One that
+   * cannot may ignore it, as a fire-and-forget delivery loses nothing more.
+   */
+  start(
+    deliver: (msg: ChannelMessage) => void | Promise<void>,
+    fault: (err: StreamFault) => void,
+  ): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
