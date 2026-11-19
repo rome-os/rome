@@ -224,7 +224,7 @@ const remaining = {};
 for (const [table, columns] of dryRun ? [] : schema) {
   for (const column of columns) {
     if (!isTextColumn(table, column)) continue;
-    const needles = [conversation, ...words];
+    const needles = [conversation, ...escapedToo(words)];
     let n = 0;
     for (const needle of needles) {
       n += all(`SELECT count(*) AS n FROM ${table} WHERE instr("${column}", ?) > 0`, needle)[0].n;
@@ -276,6 +276,18 @@ function readSchema(database) {
       return [table, set];
     }),
   );
+}
+
+/** Each word as it is, and as it reads inside a JSON string (quotes, newlines
+ *  and backslashes escaped), since copies such as rome_agent_messages.content
+ *  are kept as JSON. */
+function escapedToo(list) {
+  const out = new Set();
+  for (const word of list) {
+    out.add(word);
+    out.add(JSON.stringify(word).slice(1, -1));
+  }
+  return [...out];
 }
 
 function isTextColumn(table, column) {

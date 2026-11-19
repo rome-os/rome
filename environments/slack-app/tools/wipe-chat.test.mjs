@@ -201,47 +201,49 @@ test("wipes one chat's messages, its sessions and transcripts, and nothing else"
   after.close();
 });
 
-test("a copy left anywhere else fails the wipe", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wipe-chat-"));
-  const home = join(dir, "home");
-  mkdirSync(join(home, ".rome/default"), { recursive: true });
-  const db = migrate(join(home, ".rome/default/rome.db"));
-  seedChat(db, {
-    conversation: DM,
-    member: "UA0000BOB01",
-    words: "Bob's locker code is 4417",
-    session: `channel:slack_app:${DM}`,
-    thread: "33333333-cccc",
+for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\nsee \\ above']) {
+  test(`a copy left anywhere else fails the wipe: ${JSON.stringify(words)}`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "wipe-chat-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".rome/default"), { recursive: true });
+    const db = migrate(join(home, ".rome/default/rome.db"));
+    seedChat(db, {
+      conversation: DM,
+      member: "UA0000BOB01",
+      words,
+      session: `channel:slack_app:${DM}`,
+      thread: "33333333-cccc",
+    });
+    // The same words quoted in the guardian's dashboard chat.
+    insert(db, "rome_agent_messages", {
+      id: "elsewhere",
+      session_id: "dashboard-chat",
+      role: "user",
+      content: [{ type: "text", text: words }],
+      created_at: 1,
+    });
+    db.close();
+    let out;
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          join(here, "wipe-chat.mjs"),
+          "--conversation",
+          DM,
+          "--member",
+          "UA0000BOB01",
+          "--homes",
+          home,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      );
+      assert.fail("expected exit 3");
+    } catch (error) {
+      assert.equal(error.status, 3);
+      out = JSON.parse(error.stdout);
+    }
+    assert.equal(out.ok, false);
+    assert.equal(out.remaining.rome_agent_messages.content, 1);
   });
-  // The same words quoted in the guardian's dashboard chat.
-  insert(db, "rome_agent_messages", {
-    id: "elsewhere",
-    session_id: "dashboard-chat",
-    role: "user",
-    content: [{ type: "text", text: "Bob's locker code is 4417" }],
-    created_at: 1,
-  });
-  db.close();
-  let out;
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        join(here, "wipe-chat.mjs"),
-        "--conversation",
-        DM,
-        "--member",
-        "UA0000BOB01",
-        "--homes",
-        home,
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-    assert.fail("expected exit 3");
-  } catch (error) {
-    assert.equal(error.status, 3);
-    out = JSON.parse(error.stdout);
-  }
-  assert.equal(out.ok, false);
-  assert.equal(out.remaining.rome_agent_messages.content, 1);
-});
+}
