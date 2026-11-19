@@ -742,3 +742,64 @@ test("a private group is listed and described only to a token whose member is in
     "channel_not_found",
   );
 });
+
+test("the channels option: users.conversations, and channel history and replies, by scope and membership", async () => {
+  const CHANNEL_SCOPES = `${APP_SCOPES},channels:read,groups:read,channels:history,groups:history`;
+  const token = (await install(A, GUARDIAN, CHANNEL_SCOPES)).access_token;
+  const old = (await install("TB0000BBBB", "UB0000GUARD", APP_SCOPES)).access_token;
+  const get = async (method, query, t) =>
+    (
+      await fetch(`${base}/api/${method}?${new URLSearchParams(query)}`, {
+        headers: { authorization: `Bearer ${t}` },
+      })
+    ).json();
+  await ctl("/config", { history_limit: false });
+  try {
+    const listed = await get(
+      "users.conversations",
+      { types: "public_channel,private_channel", exclude_archived: "true", limit: "200" },
+      token,
+    );
+    assert.equal(listed.ok, true);
+    // The bot is in general and news, not in quiet.
+    assert.deepEqual(
+      listed.channels.map((c) => [c.id, c.name, c.is_private]),
+      [
+        ["CA0000GENRL", "general", false],
+        ["CA0000NEWS1", "news", false],
+      ],
+    );
+    assert.equal(listed.response_metadata.next_cursor, "");
+    const history = await get(
+      "conversations.history",
+      { channel: "CA0000NEWS1", limit: "15" },
+      token,
+    );
+    assert.ok(history.messages.some((m) => m.text === "The tangerine kiosk opens on Fridays."));
+    const replies = await get(
+      "conversations.replies",
+      { channel: "CA0000NEWS1", ts: "1700000000.000100", limit: "15" },
+      token,
+    );
+    assert.equal(replies.messages[0].ts, "1700000000.000100");
+    assert.equal(
+      (await get("conversations.history", { channel: "CA0000QUIET" }, token)).error,
+      "not_in_channel",
+    );
+    // A workspace installed with only the old scopes.
+    assert.equal(
+      (await get("users.conversations", { types: "public_channel,private_channel" }, old)).error,
+      "missing_scope",
+    );
+    assert.equal(
+      (await get("conversations.history", { channel: "CB0000GENRL" }, old)).error,
+      "missing_scope",
+    );
+    assert.equal(
+      (await get("conversations.replies", { channel: "CB0000GENRL", ts: "1" }, old)).error,
+      "missing_scope",
+    );
+  } finally {
+    await ctl("/config", { history_limit: true });
+  }
+});

@@ -1200,6 +1200,24 @@ const API_METHODS = {
     );
   },
 
+  // The conversations the token's bot or member is in, of the asked types.
+  "users.conversations"(args, _token, info) {
+    const types = splitScopes(args.types || "public_channel");
+    for (const type of types) {
+      if (!LIST_SCOPES[type]) return { ok: false, error: "invalid_types" };
+      const denied = missingScope(this, info, LIST_SCOPES[type]);
+      if (denied) return denied;
+    }
+    const mine = this.conversationsOf(info).filter(
+      (c) => types.includes(c.type) && (c.type === "im" || c.channel.is_member),
+    );
+    return listPage(
+      mine.map((c) => c.channel),
+      args,
+      "channels",
+    );
+  },
+
   "conversations.info"(args, _token, info) {
     const channel = this.resolveConversation(info.teamId, args.channel);
     if (!channel) return { ok: false, error: "channel_not_found" };
