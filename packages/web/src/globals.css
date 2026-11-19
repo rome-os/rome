@@ -511,7 +511,7 @@ button.rome-upgrade-row:hover {
   text-decoration: none;
   white-space: nowrap;
   background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
-  padding-inline: 4px 5px;
+  @apply px-1;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   @apply rounded-4;
