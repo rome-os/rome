@@ -138,7 +138,9 @@ write(
   "packages/pantheon/drizzle/0001_slack_bindings.sql",
   "CREATE TABLE slack_bindings_sql (team_id TEXT, instance_id TEXT, PRIMARY KEY (team_id), UNIQUE (instance_id, team_id));\n" +
     'ALTER TABLE "slack_bindings" ADD CONSTRAINT "slack_bindings_instance_fk" FOREIGN KEY ("instance_id") REFERENCES "instances"("id");\n' +
-    'ALTER TABLE "slack_bindings" ADD UNIQUE ("team_id");\n',
+    'ALTER TABLE "slack_bindings" ADD UNIQUE ("team_id");\n' +
+    // Rome Cloud's own name for the instance a row belongs to.
+    'ALTER TABLE "slack_bindings" ADD COLUMN "account_instance_id" text;\n',
 );
 if (breaks.has("R11-sql"))
   write(

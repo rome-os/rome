@@ -13,7 +13,7 @@ const git = async (dir, ...args) =>
 
 /** Columns a workspace to instance binding may hold. Anything else is a finding. */
 const BINDING_COLUMN =
-  /^(id|team_?id|workspace_?id|enterprise_?id|instance_?id|app_?id|created_?at|updated_?at|bound_?at)$/i;
+  /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|created_?at|updated_?at|bound_?at)$/i;
 
 export async function r11(ctx) {
   const { rome, romeCloud, romeCloudBase } = ctx.env.repos;
