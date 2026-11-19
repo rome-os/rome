@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
 import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   cardKey,
   chatCardSettledSchema,
@@ -2482,19 +2483,40 @@ export function Chat({
   };
   // The badge's menu: the project, and the model that answered last at its
   // foot. No counts or marks. A Concierge chat's Tasks, Routines and Outputs
-  // are buttons beside the badge instead; any other chat keeps Outputs here.
+  // are buttons beside the badge, except on a phone, where they do not fit
+  // beside the header's own buttons and stay in this menu. Any other chat
+  // keeps Outputs here.
+  const phoneHeader = useMediaQuery("(max-width: 767px)");
+  const toolsInMenu = !concierge || phoneHeader;
   const menuItems: HeaderMenuItem[] = mainSessionId
     ? [
-        ...(concierge
-          ? []
-          : [
+        ...(concierge && phoneHeader
+          ? [
+              {
+                key: "tasks",
+                icon: <ListChecks />,
+                label: t("concierge.menu.tasks"),
+                dot: tasksNeedYou,
+                run: () => taskList.open("tasks"),
+              },
+              {
+                key: "routines",
+                icon: <CalendarClock />,
+                label: t("concierge.menu.routines"),
+                run: () => taskList.open("routines"),
+              },
+            ]
+          : []),
+        ...(toolsInMenu
+          ? [
               {
                 key: "outputs",
                 icon: <FileOutput />,
                 label: t("concierge.menu.outputs"),
                 run: () => outputsPane.open(),
               },
-            ]),
+            ]
+          : []),
         ...(chosenProject
           ? [
               {
@@ -2537,7 +2559,7 @@ export function Chat({
     />
   );
   const headerTools =
-    concierge && mainSessionId
+    concierge && mainSessionId && !phoneHeader
       ? [
           toolButton(
             "tasks",
