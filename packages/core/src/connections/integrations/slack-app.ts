@@ -216,7 +216,7 @@ export interface SlackAppDescriptorDeps {
   api: SlackAppWebApi;
   cloud: SlackAppCloud;
   openMailbox: OpenMailbox;
-  /** The connection's own copy of the direct messages it hears. */
+  /** The connection's own copy of the messages it hears and reads. */
   copy: SlackMessageCopy;
   instanceOrigin?: () => string;
 }
@@ -236,6 +236,9 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     auth: scheme,
     capabilities: {
       talker: {
+        // The connection reads a chat from its own copy where that holds the
+        // whole chat, and from Slack where it does not (slack-app/timeline.ts).
+        reads: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -283,6 +286,18 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
                 }
                 throw error;
               }
+            },
+            history: {
+              async read(chatId, read) {
+                try {
+                  return await adapter.readHistory(chatId, read);
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
+              },
             },
             directMessaging: {
               async chatFor(senderId) {

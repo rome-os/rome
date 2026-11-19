@@ -4,6 +4,7 @@
 // reads them the same way.
 
 import { SlackApiError, type SlackBotIdentity, type SlackUserName } from "../slack/slack.js";
+import type { SlackWireMessage } from "./message.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
@@ -17,6 +18,13 @@ export interface SlackAppWebApi {
   ): Promise<{ ts: string }>;
   openDirectMessage(botToken: string, userId: string, signal?: AbortSignal): Promise<string>;
   userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
+  /** One page of a conversation's history, newest first: at most `limit`
+   *  messages before `latest` (exclusive), or the newest. */
+  conversationHistory(
+    botToken: string,
+    input: { channel: string; latest?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<{ messages: SlackWireMessage[]; hasMore: boolean }>;
 }
 
 interface SlackApiResponse {
@@ -163,6 +171,28 @@ export function createSlackAppWebApi(
       return {
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
+      };
+    },
+    async conversationHistory(botToken, input, signal) {
+      const body = await get(
+        botToken,
+        "conversations.history",
+        {
+          channel: input.channel,
+          limit: String(input.limit),
+          ...(input.latest ? { latest: input.latest } : {}),
+        },
+        signal,
+      );
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      return {
+        messages: messages.filter(
+          (message): message is SlackWireMessage =>
+            typeof message === "object" &&
+            message !== null &&
+            typeof (message as { ts?: unknown }).ts === "string",
+        ),
+        hasMore: body.has_more === true,
       };
     },
   };

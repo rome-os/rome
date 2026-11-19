@@ -140,6 +140,7 @@ describe("the Slack app talker", () => {
         postMessage: async () => ({ ts: "3.0" }),
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
       },
       cloud: cloud({
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: "fresh" }),
@@ -148,7 +149,15 @@ describe("the Slack app talker", () => {
         opened.push(mailbox.drainKey);
         return { stop: () => {} };
       },
-      copy: { keep: () => true, handedOver: () => {}, mayNotHold: () => [] },
+      copy: {
+        keep: () => true,
+        handedOver: () => {},
+        mayNotHold: () => [],
+        keepRun: () => {},
+        timelineRow: () => null,
+        timelineBefore: () => [],
+        timelineAfter: () => null,
+      },
     });
     const talker = descriptor.capabilities.talker?.build(
       {

@@ -10,6 +10,10 @@ import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-ap
 import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
 import { createTestDb } from "../../../test/db.js";
 import { SlackMessageCopyRepository } from "./message-copy.js";
+import type { SlackWireMessage } from "./message.js";
+import { SlackApiError } from "../slack/slack.js";
+import { SlackReadGate } from "./read-gate.js";
+import { slackAppTimeline } from "../../../db/schema.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -26,6 +30,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     postMessage: rs.fn(async () => ({ ts: "2.0" })),
     openDirectMessage: rs.fn(async () => "D_NEW"),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
+    conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     ...overrides,
   };
 }
@@ -116,6 +121,7 @@ function adapter(
   api = fakeApi(),
   copy: SlackMessageCopyRepository = testCopy(),
   now?: () => Date,
+  readGate?: SlackReadGate,
 ) {
   const delivered: ChannelMessage[] = [];
   const faults: string[] = [];
@@ -131,6 +137,7 @@ function adapter(
     onFault: ({ kind }) => faults.push(kind),
     copy,
     ...(now ? { now } : {}),
+    ...(readGate ? { readGate } : {}),
   });
   a.onInbound((message) => delivered.push(message));
   return { adapter: a, delivered, faults, api, copy };
@@ -662,4 +669,244 @@ describe("Slack app mailbox key", () => {
       expect(t.faults).toEqual(["transport"]);
       await t.adapter.stop();
     }));
+});
+
+/**
+ * Slack's side of one direct message: every message said there, whether or
+ * not the instance heard it, answered as conversations.history pages are,
+ * newest first, at most `limit` before `latest`.
+ */
+function fakeSlackHistory() {
+  const said: SlackWireMessage[] = [];
+  const calls: Array<{ channel: string; latest?: string }> = [];
+  const conversationHistory = rs.fn(
+    async (_token: string, input: { channel: string; latest?: string; limit: number }) => {
+      calls.push({ channel: input.channel, ...(input.latest ? { latest: input.latest } : {}) });
+      const older = said
+        .filter((m) => input.latest === undefined || Number(m.ts) < Number(input.latest))
+        .sort((a, b) => Number(b.ts) - Number(a.ts));
+      return { messages: older.slice(0, input.limit), hasMore: older.length > input.limit };
+    },
+  );
+  return {
+    calls,
+    conversationHistory,
+    /** A message said in Slack, by the member or by Rome's bot. */
+    say(i: number, by: "member" | "bot" = "member"): SlackWireMessage {
+      const message = {
+        ts: `1700000000.${String(i).padStart(6, "0")}`,
+        user: by === "bot" ? BOT : "U_GUARDIAN",
+        ...(by === "bot" ? { bot_id: "B_ROME" } : {}),
+        text: `message ${i}`,
+      };
+      said.push(message);
+      return message;
+    },
+  };
+}
+
+/** A gate that never waits, so a test reads as often as it likes. */
+function openGate(): SlackReadGate {
+  return new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 });
+}
+
+function historyAdapter(
+  mailbox: ReturnType<typeof fakeMailbox>,
+  slack: ReturnType<typeof fakeSlackHistory>,
+  options: { db?: ReturnType<typeof createTestDb>["db"]; gate?: SlackReadGate } = {},
+) {
+  const db = options.db ?? createTestDb().db;
+  const api = fakeApi({ conversationHistory: slack.conversationHistory });
+  return {
+    ...adapter(
+      mailbox,
+      api,
+      new SlackMessageCopyRepository(db),
+      undefined,
+      options.gate ?? openGate(),
+    ),
+    db,
+  };
+}
+
+const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
+
+describe("Slack app reads a direct message (R13)", () => {
+  it("reads from Slack what its copy lacks, then the same from its copy", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 10; i++) slack.say(i, i % 2 === 0 ? "bot" : "member");
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+
+    const first = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect(texts(first)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((i) => `message ${i}`));
+    expect(first[0]).toMatchObject({ direction: "outbound", senderId: "T_A/U_BOT" });
+    expect(first[1]).toMatchObject({
+      direction: "inbound",
+      senderId: "T_A/U_GUARDIAN",
+      senderDisplayName: "Ouou",
+      thread: { kind: "dm" },
+    });
+    expect(slack.calls).toHaveLength(1);
+
+    const again = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect(again).toEqual(first);
+    expect(slack.calls).toHaveLength(1);
+  });
+
+  it("answers the same with its copy wiped as with it whole", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 12; i++) slack.say(i, i % 3 === 0 ? "bot" : "member");
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    const whole = await a.readHistory("D_GUARDIAN" as never, { limit: 12 });
+
+    db.delete(slackAppTimeline).run();
+    const wiped = await a.readHistory("D_GUARDIAN" as never, { limit: 12 });
+    expect(wiped).toEqual(whole);
+    // Paging back from the oldest gives the same messages as well.
+    const older = await a.readHistory("D_GUARDIAN" as never, {
+      olderThan: "1700000000.000007",
+      limit: 3,
+    });
+    expect(texts(older)).toEqual(["message 6", "message 5", "message 4"]);
+  });
+
+  it("reads a message that reached Slack but never the instance", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const db = createTestDb().db;
+    const first = historyAdapter(mailbox, slack, { db });
+    await first.adapter.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    await first.adapter.stop();
+
+    // Said while the instance was away, and lost on the way: never deposited.
+    slack.say(2);
+    const second = historyAdapter(mailbox, slack, { db });
+    await second.adapter.start();
+    slack.say(3);
+    await mailbox.deposit(frame(dmEvent(3)));
+
+    const read = await second.adapter.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("reads from its copy what it heard and sent in one drain, without asking Slack", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+    expect(slack.calls).toHaveLength(1);
+
+    slack.say(2);
+    await mailbox.deposit(frame(dmEvent(2)));
+    // Rome's reply, and Slack's event for it.
+    const reply = slack.say(3, "bot");
+    const api = a as unknown as { config: { api: SlackAppWebApi } };
+    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockResolvedValueOnce({
+      ts: reply.ts,
+    });
+    await a.send("D_GUARDIAN" as never, { text: "message 3" } as never);
+    await mailbox.deposit(
+      frame({ ...dmEvent(3), event: { ...dmEvent(3).event, user: BOT, bot_id: "B_ROME" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+    expect(slack.calls).toHaveLength(1);
+  });
+
+  it("asks Slack again after a message heard out of order", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    for (const i of [1, 2, 3]) slack.say(i);
+    await mailbox.deposit(frame(dmEvent(1)));
+    // Slack retried message 2 later than it sent message 3.
+    await mailbox.deposit(frame(dmEvent(3)));
+    await mailbox.deposit(frame(dmEvent(2)));
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("refuses a read of a chat the app may not read, naming it", async () => {
+    const mailbox = fakeMailbox();
+    const api = fakeApi({
+      conversationHistory: rs.fn(async () => {
+        throw new SlackApiError("missing_scope");
+      }),
+    });
+    const { adapter: a } = adapter(mailbox, api, testCopy(), undefined, openGate());
+    await a.start();
+    await expect(a.readHistory("C_TEAM" as never, { limit: 5 })).rejects.toThrow(
+      /may not read chat C_TEAM/,
+    );
+  });
+});
+
+describe("Slack app reads take turns with Slack's allowance (R13)", () => {
+  it("shares one Slack request between two reads of the same chat", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    const gate = new SlackReadGate({ intervalMs: 60_000, maxWaitMs: 60_000 });
+    const { adapter: a } = historyAdapter(mailbox, slack, { gate });
+    await a.start();
+
+    const [one, two] = await Promise.all([
+      a.readHistory("D_GUARDIAN" as never, { limit: 5 }),
+      a.readHistory("D_GUARDIAN" as never, { limit: 5 }),
+    ]);
+    expect(one).toEqual(two);
+    expect(slack.calls).toHaveLength(1);
+  });
+
+  it("holds a read up to a minute for Slack's next turn, hearing messages meanwhile, and refuses one that would wait longer", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    let release: () => void = () => {};
+    const waits: number[] = [];
+    const gate = new SlackReadGate({
+      intervalMs: 60_000,
+      maxWaitMs: 60_000,
+      now: () => 0,
+      sleep: (ms) => {
+        waits.push(ms);
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { gate });
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+
+    const waiting = a.readHistory("D_GUARDIAN" as never, {
+      olderThan: "1700000000.000050",
+      limit: 5,
+    });
+    await mailbox.settle();
+    expect(waits).toEqual([60_000]);
+    await expect(a.readHistory("D_OTHER" as never, { limit: 5 })).rejects.toThrow(
+      /Try again in 120 seconds/,
+    );
+
+    // A message arrives while the read waits, and is handed over once.
+    slack.say(2);
+    await mailbox.deposit(frame(dmEvent(2)));
+    expect(texts(delivered)).toEqual(["message 2"]);
+
+    release();
+    expect(texts(await waiting)).toEqual(["message 2", "message 1"]);
+    expect(texts(delivered)).toEqual(["message 2"]);
+  });
 });
