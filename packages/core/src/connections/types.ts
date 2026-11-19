@@ -345,8 +345,14 @@ export interface ConnectionDescriptor {
    * connection still ends, and the reason comes back to the guardian, since
    * the access may still be live at the platform. Run again after a failure,
    * it must finish what is left. Omitted by kinds with nothing to take back.
+   * `signal` aborts when the disconnect stops waiting, after which the
+   * connection is gone and may be connected again, so the kind must change
+   * nothing more at the platform.
    */
-  onDisconnect?(grant: { material: SecretRecord; profile: ProfileRecord }): Promise<void>;
+  onDisconnect?(
+    grant: { material: SecretRecord; profile: ProfileRecord },
+    opts: { signal: AbortSignal },
+  ): Promise<void>;
   /** True when the guardian can add another account of this connection kind, each
    *  with its own Connection and channel. A connection kind that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature

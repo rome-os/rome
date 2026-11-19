@@ -891,7 +891,9 @@ describe("custody follows grant state", () => {
 });
 
 describe("disconnect takes back access at the platform", () => {
-  async function connected(onDisconnect?: (grant: unknown) => Promise<void>) {
+  async function connected(
+    onDisconnect?: (grant: unknown, opts: { signal: AbortSignal }) => Promise<void>,
+  ) {
     const { ledger, close } = makeLedger();
     const { descriptor, userCredential } = makeCustodyGrant();
     const taken: unknown[] = [];
@@ -901,10 +903,10 @@ describe("disconnect takes back access at the platform", () => {
     });
     registry.register({
       ...descriptor,
-      onDisconnect: async (grant) => {
+      onDisconnect: async (grant, opts) => {
         // The connection still exists while the kind takes its access back.
         taken.push({ grant, existed: registry.find("fake-oauth-provider").length });
-        await onDisconnect?.(grant);
+        await onDisconnect?.(grant, opts);
       },
     });
     const conn = await registry.connect("fake-oauth-provider");
@@ -942,13 +944,20 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
-  it("ends the connection when the kind does not answer within 10s, and says so", async () => {
-    const { registry, conn, close } = await connected(() => new Promise<never>(() => {}));
+  it("ends the connection when the kind does not answer within 10s, says so, and stops the kind", async () => {
+    let signal: AbortSignal | undefined;
+    const { registry, conn, close } = await connected((_grant, opts) => {
+      signal = opts.signal;
+      return new Promise<never>(() => {});
+    });
     rs.useFakeTimers();
     try {
       const ended = registry.disconnect(conn.id);
-      await rs.advanceTimersByTimeAsync(10_000);
+      await rs.advanceTimersByTimeAsync(9_999);
+      expect(signal?.aborted).toBe(false);
+      await rs.advanceTimersByTimeAsync(1);
       expect(await ended).toEqual({ notTakenBack: "no answer within 10s" });
+      expect(signal?.aborted).toBe(true);
       expect(registry.find("fake-oauth-provider")).toHaveLength(0);
     } finally {
       rs.useRealTimers();
