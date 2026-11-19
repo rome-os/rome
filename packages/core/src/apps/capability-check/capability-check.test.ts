@@ -432,6 +432,41 @@ export class Handler {
     expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
   });
 
+  it("I2: takes a helper parameter's default when a call leaves it out", async () => {
+    const page = `import { fetchAppApi } from "@rome-os/app-web-sdk";
+function api(path: string, init: RequestInit = { method: "POST" }) { return fetchAppApi(path, init); }
+export const save = () => api("notes");
+`;
+    expect(await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page })).toEqual([]);
+  });
+
+  it("I1: does not let the status exemption cover a path test it cannot place", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return "not found";',
+      'if (request.method === "GET" && (route === "status" || route.endsWith("/notes"))) return "x";\n    return "not found";',
+    );
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+  });
+
+  it("D3: leaves a zod schema with an `.or` alternative to a person", async () => {
+    const zod = `import { z } from "zod";
+const schema = z.object({ text: z.string().describe("The note.") }).or(z.object({ tag: z.string() }));
+export function createAction(config: unknown) { return defineAction({ config, schema, execute: async () => ({}) }); }
+declare function defineAction(spec: unknown): unknown;
+`;
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, ...ACTION("add_note", zod) })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["D3"]);
+  });
+
+  it("I5: reports every axios request method", async () => {
+    const page = `${COMPLIANT["src/web/App.tsx"]}import axios from "axios";\nexport const drop = () => axios.delete("https://example.com/notes");\n`;
+    const gaps = await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page });
+    expect(gaps.map((g) => g.rule)).toEqual(["I5"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

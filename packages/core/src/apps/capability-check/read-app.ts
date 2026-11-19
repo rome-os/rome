@@ -42,12 +42,14 @@ const DIRECT_REQUESTS = new Set([
   "EventSource",
   "WebSocket",
   "axios",
-  "axios.get",
-  "axios.post",
+  ...["request", "get", "post", "put", "patch", "delete", "head", "options"].map(
+    (method) => `axios.${method}`,
+  ),
 ]);
 /** SDK calls through which a page reaches its own app API. */
 const APP_API_CALLS = new Set(["fetchAppApi", "appApiUrl"]);
-const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
+/** Zod calls that add fields, or alternatives, the shape before them does not show. */
+const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "or", "safeExtend"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
 /** How deep the reader follows calls from a route to find the actions it runs. */
@@ -361,10 +363,13 @@ class SourceReader {
         },
       ];
     }
+    // An argument the call leaves out takes the parameter's default.
+    const passed = (site: TS.CallExpression, parameter: TS.ParameterDeclaration) =>
+      site.arguments[owner.parameters.indexOf(parameter)] ?? parameter.initializer;
     return sites.flatMap((site) =>
       this.calledRequests(
-        pathParameter ? site.arguments[owner.parameters.indexOf(pathParameter)] : pathArgument,
-        initParameter ? site.arguments[owner.parameters.indexOf(initParameter)] : init,
+        pathParameter ? passed(site, pathParameter) : pathArgument,
+        initParameter ? passed(site, initParameter) : init,
         pageSources,
         hops + 1,
       ),
@@ -1240,6 +1245,27 @@ interface Segment {
   value: string;
 }
 
+/** Whether an expression reads the request path anywhere in it. */
+function readsPath(node: TS.Node): boolean {
+  let found = false;
+  const visit = (child: TS.Node) => {
+    if (found) return;
+    const text = child.getText();
+    if (
+      (ts.isIdentifier(child) ||
+        ts.isPropertyAccessExpression(child) ||
+        ts.isElementAccessExpression(child)) &&
+      (ROUTE_SUBJECT.test(text) || /path(\[\d+\])?$/i.test(text))
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return found;
+}
+
 function isDispatchSubject(text: string): boolean {
   return /method$/i.test(text) || ROUTE_SUBJECT.test(text) || /path\[\d+\]$/.test(text);
 }
@@ -1361,6 +1387,18 @@ function readCondition(
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
       const operands = [node.left, node.right].map((operand) => readCondition(operand, literal));
       const pathOperands = operands.filter((o) => o.segments.length > 0 || o.root);
+      // `route === "status" || route.endsWith("/notes")`: a side that reads
+      // the path in a way the reader cannot place leaves the route unplaced.
+      if (
+        pathOperands.length > 0 &&
+        pathOperands.length < operands.length &&
+        [node.left, node.right].some(
+          (operand, i) =>
+            !pathOperands.includes(operands[i] as (typeof operands)[number]) && readsPath(operand),
+        )
+      ) {
+        patternOnPath = true;
+      }
       if (pathOperands.length === operands.length) {
         const [first] = operands as [ReturnType<typeof readCondition>];
         segments.push(...first.segments);
