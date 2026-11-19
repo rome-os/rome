@@ -310,22 +310,20 @@ final class TranscriptStore {
         await readResends()
         do {
             let page = try await backend.messages(sessionId: sessionId, before: nil, limit: Self.pageSize)
-            // A newest page that shares nothing with what is held leaves a gap
-            // behind it: start over from it. Otherwise keep the pages already
-            // loaded, so a reload never puts the older-page spinner back on top.
+            // Keeps the pages already loaded, so a reload never puts the
+            // older-page spinner back on top; a page that shares nothing with
+            // them starts the history over (`mergeLatest`).
             let known = Set(messages.map(\.id))
             let wasLoaded = loaded
-            let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { !$0.isTrace && known.contains($0.id) }
-            if gap { messages = [] }
             // The server wins over the copy kept on disk: a kept row the page
             // does not hold was deleted.
-            mergeLatest(page.messages, dropsUnlisted: fromCache && !gap)
+            mergeLatest(page, dropsUnlisted: fromCache)
             // Replies a refetch brings count like live ones: the list marks
             // the back-to-bottom button for a guardian reading further up.
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
                 arrivals += 1
             }
-            if !loaded || gap || fromCache {
+            if !loaded || fromCache {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
                 fromCache = false
@@ -350,7 +348,7 @@ final class TranscriptStore {
     @discardableResult
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
-        mergeLatest(page.messages)
+        mergeLatest(page)
         loadError = nil
         readOnce = true
         return true
@@ -535,20 +533,28 @@ final class TranscriptStore {
     /// messages from its first held message (not a trace) onward, and what
     /// stands above stays. A held message after it that it does not carry, such
     /// as a live one the server read too early, stays after it, unless
-    /// `dropsUnlisted`. A page that reaches none of the held messages goes
-    /// first.
-    private func mergeLatest(_ page: [ChatMessage], dropsUnlisted: Bool = false) {
-        let ids = Set(page.map(\.id))
+    /// `dropsUnlisted`. A page that shares no message with the held ones while
+    /// older messages remain leaves a gap behind it: the history starts over
+    /// from the page, and the paging follows its cursor. Every refresh of the
+    /// newest page goes through here, so they all follow the one rule.
+    private func mergeLatest(_ page: MessagePage, dropsUnlisted: Bool = false) {
+        let ids = Set(page.messages.map(\.id))
         let heldIDs = Set(messages.map(\.id))
-        guard let anchor = page.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
+        guard let anchor = page.messages.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
               let at = messages.firstIndex(where: { $0.id == anchor.id })
         else {
-            commit(page + (dropsUnlisted ? [] : messages.filter { !ids.contains($0.id) }))
+            if !messages.isEmpty, page.nextCursor != nil {
+                commit(page.messages)
+                cursor = page.nextCursor
+                hasOlder = true
+            } else {
+                commit(page.messages + (dropsUnlisted ? [] : messages.filter { !ids.contains($0.id) }))
+            }
             return
         }
         let above = messages[..<at].filter { !ids.contains($0.id) }
         let below = dropsUnlisted ? [] : messages[at...].filter { !ids.contains($0.id) }
-        commit(above + page + below)
+        commit(above + page.messages + below)
     }
 
     // MARK: Live events
@@ -703,7 +709,7 @@ final class TranscriptStore {
         if message(messageId) == nil,
            let page = try? await backend.messages(sessionId: sessionId, through: messageId, limit: Self.pageSize) {
             // From the newest down past the card, so no gap opens above what is held.
-            mergeLatest(page.messages)
+            mergeLatest(page)
             if message(messageId) != nil {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil

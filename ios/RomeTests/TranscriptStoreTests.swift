@@ -611,6 +611,40 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "m5", "live"])
     }
 
+    /// The refresh after a send reads the newest page: when it shares no message
+    /// with the history held and older messages remain, the history starts over
+    /// from it, as a reload's does, and the paging follows its cursor.
+    @Test func theRefreshAfterASendThatSharesNothingStartsTheHistoryOver() async {
+        func row(_ id: String, second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: "assistant", content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 3), row("m4", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 1), row("m2", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+        #expect(!store.hasOlder)
+
+        // The chat moved on far enough that the newest page shares nothing.
+        backend.servedPages[nil] = MessagePage(messages: [row("m10", second: 10), row("m11", second: 11)], nextCursor: "c2")
+        backend.servedPages["c2"] = MessagePage(messages: [row("m8", second: 8), row("m9", second: 9)], nextCursor: nil)
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m10", "m11"])
+        #expect(store.hasOlder)
+
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11"])
+        #expect(!store.hasOlder)
+
+        // A page that shares a message does not start over.
+        backend.servedPages[nil] = MessagePage(messages: [row("m9", second: 9), row("m10", second: 10), row("m11", second: 11), row("m12", second: 12)], nextCursor: "c2")
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11", "m12"])
+        #expect(!store.hasOlder)
+    }
+
     @Test func aTraceOfATurnOnBothPagesTakesTheOlderPagesPlace() async {
         func row(_ id: String, role: String = "assistant", second: Double) -> ChatMessage {
             ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
