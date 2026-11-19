@@ -4,7 +4,6 @@ import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
@@ -22,7 +21,6 @@ import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "./feishu.js";
-import { createLinkedInDescriptor } from "./linkedin.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
@@ -40,7 +38,6 @@ export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
-export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
 export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
 
@@ -55,10 +52,6 @@ export interface BuiltinConnectionDeps {
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
-  /** The LinkedIn inbox mirror (linkedin_threads/linkedin_messages). */
-  linkedInSyncSink: LinkedInSyncSink;
-  /** Jitter bounds for the LinkedIn poll cadence (config `linkedinPoll*Minutes`). */
-  linkedinPoll: { minIntervalMs: number; maxIntervalMs: number };
   /** Loaded-agent lister (Discord/Feishu agent-binding validation + autocomplete). */
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord/Feishu in-chat settings). */
@@ -146,13 +139,6 @@ export function registerBuiltinConnections(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
       onGuardianConnected: deps.onWhatsAppGuardianConnected,
-    }),
-  );
-  registry.register(
-    createLinkedInDescriptor({
-      syncSink: deps.linkedInSyncSink,
-      minIntervalMs: deps.linkedinPoll.minIntervalMs,
-      maxIntervalMs: deps.linkedinPoll.maxIntervalMs,
     }),
   );
   // Rome Cloud-OAuth provider connection state (github/slack/
