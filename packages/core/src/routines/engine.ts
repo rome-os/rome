@@ -63,13 +63,16 @@ export class RoutineEngine {
   /**
    * The person a fire acts for: who created the routine, read from its stored
    * row at each fire, so however a routine was activated its fires act for
-   * that person. Never anyone ambient.
+   * that person. Never anyone ambient. The guardian acts through loopback, not
+   * their session cookie: no message of theirs started the fire, so what only
+   * their own message may do, such as changing a routine, stays refused.
    */
   private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
     const creator = await this.routinesRepo.creatorOf(routine.id);
     if (creator === undefined) return undefined;
-    if (creator === null) return this.legacyActorOf(routine);
-    return creator.kind === "anonymous" ? undefined : creator;
+    const actor = creator === null ? await this.legacyActorOf(routine) : creator;
+    if (!actor || actor.kind === "anonymous") return undefined;
+    return actor.kind === "guardian" ? { ...actor, via: "loopback" } : actor;
   }
 
   registerProvider(type: string, provider: TriggerProvider): void {
