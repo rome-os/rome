@@ -7,4 +7,4 @@ export {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "./guardian-profile.js";
+} from "./application/guardian-profile.js";

@@ -123,6 +123,7 @@ write(
 );
 write("src/chats/people-probe.test.ts", 'import "../people/phone-book/index.js";\n');
 write("src/api/routes/people/phone-book.ts", 'import "../../../people/phone-book/index.js";\n');
+write("src/index.ts", 'import "./people/phone-book/index.js";\n');
 write("src/connections/kinds/discord/discord.ts", 'import "../../../people/link-code/index.js";\n');
 
 write("src/connections/registry.ts", 'import "./kinds/slack/index.js";\n');
@@ -216,7 +217,7 @@ describe("checkImports with the library rule", () => {
 });
 
 describe("checkImports with the feature rules", () => {
-  it("keeps features apart and off the root, and lets only routes, wiring, tests and listed files use them", () => {
+  it("keeps features apart and off the root, and lets only the wiring, tests and listed files use them", () => {
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), [
       ...featureRules,
       ...layerRules,
@@ -228,9 +229,11 @@ describe("checkImports with the feature rules", () => {
           line.startsWith("people/") ||
           line.startsWith("chats/") ||
           line.startsWith("api/") ||
-          line.startsWith("connections/"),
+          line.startsWith("connections/") ||
+          line.startsWith("index.ts"),
       );
     expect(lines).toEqual([
+      "api/routes/people/phone-book.ts:1 → ../../../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
       "chats/people-probe.ts:2 → ../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
       "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [features-used-from-wiring]",
       "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [enter-through-index]",

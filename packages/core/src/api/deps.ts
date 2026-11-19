@@ -112,7 +112,7 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (people/link-code/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/link-code/application/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route

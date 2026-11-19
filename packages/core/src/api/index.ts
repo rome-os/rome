@@ -53,7 +53,6 @@ import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { linkCodeRoutes } from "./routes/people/link-code.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -209,7 +208,6 @@ export function buildApp(
   api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", linkCodeRoutes(deps));
   for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
