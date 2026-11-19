@@ -397,9 +397,13 @@ interface ManagerDeps {
    * What the conversation a session serves adds to its context: text for the
    * end of its system prompt, or null. Every open and resume of a
    * conversation session asks, so a cold continuation holds it too. Absent,
-   * nothing is added.
+   * nothing is added. `agentName` is the canonical id of the agent the
+   * session runs.
    */
-  chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
+  chatInstructions?: (
+    thread: ThreadContext | undefined,
+    agentName: string,
+  ) => Promise<string | null>;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -1213,7 +1217,7 @@ async function prepareSetup(
   // no session.
   const added =
     init.kind === "conversation" && !isSubagent
-      ? await deps.chatInstructions?.(init.threadContext)
+      ? await deps.chatInstructions?.(init.threadContext, agent.name)
       : null;
   const source = sessionSetupOf(
     deps,

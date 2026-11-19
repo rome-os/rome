@@ -369,10 +369,10 @@ A participant's identity on a platform. A colleague's Feishu identity is an acco
 - A person's identity and an agent's identity on a platform are the same kind of thing.
 - Most accounts in a chat are other people's. Rome has no connection to them and no agent speaks through them.
 - An account Rome holds a connection to has at most one agent speaking through it, held by its [connected account](#connected-account), in every chat and DM that account is in: an own-account link if the account is the agent's own, a delegate if it is the guardian's. There is no per-chat choice of agent.
-- A connected account may have no agent: the guardian gave Rome access to it but is not using envoy on it. Rome then does not listen to that account's messages at all. No chat forms through it and nothing is recorded, until an agent is linked.
+- A connected account may have no agent: the guardian unlinked it. Rome then does not listen to that account's messages at all. No chat forms through it and nothing is recorded, until an agent is linked.
 - Those link rules cover accounts that take an agent. An account that takes none, such as email or WhatsApp, is always listened to.
 - The guardian **links** an agent to the account, **switches** it in one step, or **unlinks** it. The noun is the account's agent.
-- Connecting an account and linking an agent are two separate operations, never one. So every connected account passes through the state of being connected with no agent, however briefly, and Rome never picks an agent for it on its own. Where the product asks the guardian to pick one, before or after connecting, is a matter of design, not of the model.
+- Connecting an account and linking an agent are two separate operations. Connecting a new account links the Concierge to it in the same step, so it answers from its first message (Ouou, 2026-11-19). An account Rome already has a connected account for keeps its agent when it connects again.
 - An account named "Sales agent" is the sales agent, wherever it appears. That is the intuition the rules protect.
 
 ## Connected account
