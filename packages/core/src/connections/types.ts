@@ -31,6 +31,9 @@ export interface TalkDirectory {
     cursor?: string;
     limit: number;
     includeTopics?: boolean;
+    /** Also the threads the platform has archived, read from the platform.
+     *  Implies `includeTopics`. A read that fails rejects. */
+    includeArchived?: boolean;
   }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 

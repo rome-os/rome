@@ -64,6 +64,8 @@ import type {
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
+  ChatDescriptor,
+  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
   ListChatSettingsInput,
@@ -329,6 +331,10 @@ export class ChannelsServiceProxy implements ChannelsService {
         ...(query.since ? { since: query.since.toISOString() } : {}),
       }),
     );
+  }
+
+  chats(channel: Account | string, query: ChatListQuery = {}): Promise<ChatDescriptor[]> {
+    return callMain<ChatDescriptor[]>("channels.chats", { channel, ...query });
   }
 }
 

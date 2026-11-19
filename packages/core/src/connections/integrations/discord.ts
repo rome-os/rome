@@ -306,10 +306,18 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           const directory: TalkDirectory = {
             async listConversations(input) {
               const query = input.query?.toLocaleLowerCase();
+              const active = adapter.listGuildChannels();
+              // Archived threads are read from Discord; the gateway names only
+              // active ones. A thread both name is listed once, as active.
+              const archived = input.includeArchived
+                ? (await adapter.listArchivedThreads()).filter(
+                    (thread) => !active.some((channel) => channel.id === thread.id),
+                  )
+                : [];
+              const threads = input.includeTopics || input.includeArchived;
               const page = directoryPage(
-                adapter
-                  .listGuildChannels()
-                  .filter((channel) => input.includeTopics || channel.type !== "thread")
+                [...active, ...archived]
+                  .filter((channel) => threads || channel.type !== "thread")
                   .filter(
                     (channel) =>
                       !query ||
@@ -333,6 +341,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                   kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
                   displayName: channel.name,
                   containerName: channel.guildName,
+                  ...(channel.archived ? { archived: true } : {}),
                   // Discord also uses parentId for a channel's category.
                   // Only native threads inherit conversation settings.
                   ...(channel.type === "thread" && channel.parentId

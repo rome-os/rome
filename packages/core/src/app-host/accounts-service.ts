@@ -16,7 +16,9 @@ import type {
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
+  ChatDescriptor,
   ChatId,
+  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
@@ -102,6 +104,9 @@ export class AccountNotHeld extends Error {
   }
 }
 
+/** How many chats one page of a listing asks a Connection for. */
+const CHAT_PAGE = 1_000;
+
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
   const accountOf = (connection: Connection) => deps.accounts?.accountOf(connection.id) ?? null;
@@ -144,6 +149,40 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       ...(account ? { account } : {}),
       cursor: channelMessageCursor(message),
     }));
+  }
+
+  /** The chats the Connection behind `target` can see, read from it whole.
+   *  Rejects when it lists none, or while its talk is locked. */
+  async function chats(
+    target: Account | string,
+    read: ChatListQuery = {},
+  ): Promise<ChatDescriptor[]> {
+    const connection = isAccount(target)
+      ? holding(target)
+      : backingConnection(deps.registry, target, deps.channelOf);
+    const name = isAccount(target) ? accountLabel(target) : target;
+    if (!connection) throw new Error(`No connection reaches "${name}"`);
+    const listed: ChatDescriptor[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = connection.withTalker((talker) =>
+        talker.directory
+          ? talker.directory.listConversations({
+              limit: CHAT_PAGE,
+              ...(cursor ? { cursor } : {}),
+              includeTopics: read.includeThreads === true || read.includeArchivedThreads === true,
+              ...(read.includeArchivedThreads ? { includeArchived: true } : {}),
+            })
+          : null,
+      );
+      if (page === undefined)
+        throw new Error(`"${name}" lists no chats while its connection is locked`);
+      if (page === null) throw new Error(`"${name}" lists no chats`);
+      const { conversations, nextCursor } = await page;
+      listed.push(...conversations);
+      cursor = nextCursor;
+    } while (cursor);
+    return listed;
   }
 
   return withRemovedMembers<ChannelsService>(
@@ -193,6 +232,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
+      chats,
     },
     REMOVED_SERVICE_MEMBERS,
   );

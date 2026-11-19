@@ -192,6 +192,48 @@ describe("createChannelsService", () => {
     );
   });
 
+  it("lists the chats a Connection sees, every page, and says when it lists none", async () => {
+    const listConversations = rs.fn(
+      async (input: { cursor?: string; includeArchived?: boolean }) =>
+        input.cursor
+          ? { conversations: [{ displayName: "b" }] }
+          : { conversations: [{ displayName: "a" }], nextCursor: "next" },
+    );
+    const directory = { listConversations };
+    const all = [
+      {
+        id: "discord-1",
+        connectionKind: "discord",
+        withTalker: (call: (live: object) => unknown) => call({ directory }),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+      {
+        id: "tg-a",
+        connectionKind: "telegram_user",
+        withTalker: (call: (live: object) => unknown) => call({}),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+    ] as unknown as Connection[];
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+    });
+
+    const chats = await channelsService.chats!("discord", { includeArchivedThreads: true });
+
+    expect(chats.map((chat) => chat.displayName)).toEqual(["a", "b"]);
+    expect(listConversations).toHaveBeenLastCalledWith({
+      limit: 1000,
+      cursor: "next",
+      includeTopics: true,
+      includeArchived: true,
+    });
+    await expect(channelsService.chats!("telegram_user")).rejects.toThrow(
+      '"telegram_user" lists no chats',
+    );
+  });
+
   it("puts a cursor on each message and resumes after one", async () => {
     const query = rs.fn(async () => [line("m2", 2_000), line("m1", 1_000)]);
     const { channelsService } = service([

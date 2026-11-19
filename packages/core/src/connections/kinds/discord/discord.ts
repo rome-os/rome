@@ -63,6 +63,7 @@ import {
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import { archivedDiscordThreads } from "./discord-threads.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
@@ -270,6 +271,8 @@ export interface GuildChannelInfo {
   guildName: string;
   type: "text" | "news" | "thread" | "forum";
   parentId?: string;
+  /** True for a thread Discord has archived. */
+  archived?: boolean;
 }
 
 /**
@@ -280,6 +283,7 @@ export interface GuildChannelInfo {
  */
 export interface DiscordAdapterLike {
   listGuildChannels(): GuildChannelInfo[];
+  listArchivedThreads(): Promise<GuildChannelInfo[]>;
   executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
 }
 
@@ -449,6 +453,36 @@ export class DiscordAdapter {
       }
     }
     return out;
+  }
+
+  /**
+   * The threads Discord has archived in every chat the bot sees, read from
+   * Discord: public ones, and private ones the bot has joined. The gateway
+   * names only active threads. A chat whose archive the bot may not see
+   * contributes none; any other failure rejects, naming the chat.
+   */
+  async listArchivedThreads(): Promise<GuildChannelInfo[]> {
+    const chats = this.listGuildChannels().filter((channel) => channel.type !== "thread");
+    const byId = new Map(chats.map((chat) => [chat.id, chat]));
+    const threads = await archivedDiscordThreads(
+      (route, query) => this.rest.get(route, query ? { query } : {}),
+      chats.map((chat) => chat.id),
+    );
+    return threads.flatMap((thread) => {
+      const chat = byId.get(thread.parentId);
+      if (!chat) return [];
+      return [
+        {
+          id: thread.id,
+          name: thread.name,
+          guildId: chat.guildId,
+          guildName: chat.guildName,
+          type: "thread" as const,
+          parentId: chat.id,
+          archived: true,
+        },
+      ];
+    });
   }
 
   /** Execute a provider-relative request through the epoch-owned discord.js
