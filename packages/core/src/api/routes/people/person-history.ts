@@ -1,13 +1,8 @@
-import { Hono, type Context } from "hono";
-import {
-  parseSendMessageRequest,
-  sendRefusalMessage,
-  timelinePageLimit,
-  type SendRefusal,
-} from "@rome/api-types/people";
+import { Hono } from "hono";
+import { parseSendMessageRequest, timelinePageLimit } from "@rome/api-types/people";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { platformOf } from "@rome/api-types/platform";
-import { send, type SendResult } from "../../../chats/send.js";
+import { send } from "../../../chats/send.js";
 import {
   asGuardian,
   directPlace,
@@ -18,6 +13,7 @@ import {
 } from "../../../people/person-history/index.js";
 import { accountOfWire } from "../../../people/model/wire.js";
 import type { ApiDeps } from "../../deps.js";
+import { respondToSend } from "../send-response.js";
 
 // A person's history: one of their accounts' messages, paged, and sending to
 // that account. Which stores an account's history is read from, and where a
@@ -113,15 +109,4 @@ export function personHistoryRoutes(deps: ApiDeps): Hono {
   });
 
   return app;
-}
-
-/** The one answer every send route gives, so the dashboard reads one shape. */
-export function respondToSend(c: Context, result: SendResult) {
-  if (result.ok) return c.json(result.sent, 200);
-  if ("invalid" in result) return c.json({ error: result.invalid }, 400);
-  if ("error" in result) return c.json({ error: result.error }, 502);
-  return c.json(
-    { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
-    409,
-  );
 }
