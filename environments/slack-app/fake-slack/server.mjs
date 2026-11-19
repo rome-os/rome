@@ -346,8 +346,25 @@ export class FakeSlack {
     return this.group(teamId, channel)?.bot_member !== false;
   }
 
-  /** Slack's refusal when a bot token acts in a group the bot is not in. */
+  /** Whether a member is in a conversation: a direct message is its own
+   *  member's, a public group open to every member of the workspace. */
+  userInConversation(teamId, userId, channel) {
+    if (channel.startsWith("D")) return this.imOwner(teamId, channel)?.id === userId;
+    const group = this.group(teamId, channel);
+    if (!group) return false;
+    if (!group.is_private && !group.id.startsWith("G")) return true;
+    return (group.members ?? this.workspace(teamId).members.map((m) => m.id)).includes(userId);
+  }
+
+  /** Slack's refusal when a token acts where it cannot: a bot token in a
+   *  group the bot is not in, a user token in a private conversation its
+   *  member is not in, which Slack answers as if it did not exist. */
   notInChannel(info, channel) {
+    if (info.kind === "user") {
+      return this.userInConversation(info.teamId, info.userId, channel)
+        ? null
+        : { ok: false, error: "channel_not_found" };
+    }
     if (info.kind !== "bot" || this.botInConversation(info.teamId, channel)) return null;
     return { ok: false, error: "not_in_channel" };
   }

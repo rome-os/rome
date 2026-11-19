@@ -118,6 +118,12 @@
           "id": "CC0000GENRL",
           "name": "general",
           "members": ["UC0000OWNR1", "UC0000HANK1"]
+        },
+        {
+          "id": "GC0000BORD1",
+          "name": "board",
+          "is_private": true,
+          "members": ["UC0000OWNR1"]
         }
       ]
     }

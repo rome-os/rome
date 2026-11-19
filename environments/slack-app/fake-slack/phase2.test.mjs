@@ -685,3 +685,30 @@ test("removing the app revokes every token it issued, a repeated sign-in's older
   // Another app's tokens are not Rome's app's to lose.
   assert.equal((await api("auth.test", {}, other.bot_token)).ok, true);
 });
+
+test("a user token reads only the private conversations its member is in", async () => {
+  const C = "TC0000CCCC";
+  const OWNER = "UC0000OWNR1";
+  const HANK = "UC0000HANK1";
+  const reads = "channels:history,groups:history,im:history";
+  const owner = (await install(C, OWNER, "chat:write", reads)).authed_user.access_token;
+  const hank = (await install(C, HANK, "chat:write", reads)).authed_user.access_token;
+  const dms = (await ctl("/state")).workspaces.find((w) => w.id === C).members;
+  const dmOf = (id) => dms.find((m) => m.id === id).im_channel;
+  await ctl("/config", { history_limit: false });
+  try {
+    const read = async (method, channel, token) =>
+      (await api(method, { channel, ts: "1700000000.000100" }, token)).error ?? "ok";
+    // A member's own direct message with the bot, and nobody else's.
+    assert.equal(await read("conversations.history", dmOf(OWNER), owner), "ok");
+    assert.equal(await read("conversations.history", dmOf(HANK), owner), "channel_not_found");
+    assert.equal(await read("conversations.replies", dmOf(HANK), owner), "channel_not_found");
+    // A private group only for its members; a public one for everybody.
+    assert.equal(await read("conversations.history", "GC0000BORD1", owner), "ok");
+    assert.equal(await read("conversations.history", "GC0000BORD1", hank), "channel_not_found");
+    assert.equal(await read("conversations.replies", "GC0000BORD1", hank), "channel_not_found");
+    assert.equal(await read("conversations.history", "CC0000GENRL", hank), "ok");
+  } finally {
+    await ctl("/config", { history_limit: true });
+  }
+});
