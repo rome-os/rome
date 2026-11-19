@@ -25,6 +25,9 @@ const MAX_WORKERS = 16;
 const CHATS = 24;
 const CONNECTION_ID = "connection:slack-app";
 
+/** How many turns are running at once, and the most there ever were. */
+const inFlight = { now: 0, peak: 0 };
+
 /** An action worker that answers only when told to, as a slow turn does. */
 class SlowWorker extends EventEmitter {
   pid = 1;
@@ -44,6 +47,8 @@ class SlowWorker extends EventEmitter {
     } else if (sent.actionName === "message_handler" && sent.args) {
       this.runs.push({ messageId: sent.args.messageId });
       this.pending += 1;
+      inFlight.now += 1;
+      inFlight.peak = Math.max(inFlight.peak, inFlight.now);
     }
     return true;
   }
@@ -51,6 +56,7 @@ class SlowWorker extends EventEmitter {
   finish(): boolean {
     if (this.pending === 0) return false;
     this.pending -= 1;
+    inFlight.now -= 1;
     this.emit("message", { type: "result", result: { status: "ok", data: "answered" } });
     return true;
   }
@@ -167,6 +173,8 @@ describe("Inbox when every action worker is busy", () => {
     expect(settled.filter((outcome) => outcome instanceof Error)).toEqual([]);
     const ran = workers.flatMap((worker) => worker.runs.map((run) => run.messageId));
     expect(ran.sort()).toEqual(Array.from({ length: CHATS }, (_, i) => `m${i}`).sort());
-    expect(workers.length).toBeLessThanOrEqual(CHATS);
+    // The cap held, so some messages waited for a worker rather than running.
+    expect(inFlight.peak).toBeLessThanOrEqual(MAX_WORKERS);
+    expect(inFlight.peak).toBeLessThan(CHATS);
   });
 });
