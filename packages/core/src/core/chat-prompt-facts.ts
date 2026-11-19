@@ -60,7 +60,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     },
     read: async (messageIds) => deps.labels.read(deps.messages.byIds(messageIds).map(contextOf)),
     seen: (messageIds, chatId, turnId) => deps.facts.seen(messageIds, chatId, turnId),
-    async earlier(place, before) {
+    async earlier(place, before, first) {
       // Only a direct message: in a group, the platform also holds what was
       // said before Rome joined, which no turn's catch-up shows.
       if (
@@ -70,12 +70,17 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
         handsEveryMessage(place.channel)
       )
         return null;
-      // One more than kept: the bound takes in a message said at `before`.
-      const read = deps.latest(place, { limit: EARLIER_MESSAGES + 1, until: before });
+      // Rome's record keeps whole seconds, so what was said just before the
+      // session's first message may share its second. Knowing that message's
+      // platform id, the read takes in the whole second and cuts there.
+      const key = first === undefined ? undefined : deps.messages.byIds([first])[0]?.key;
+      const until = key === undefined ? before : new Date(before.getTime() + 999);
+      // One more than kept: the bound takes in a message said at `until`.
+      const read = deps.latest(place, { limit: EARLIER_MESSAGES + 1, until });
       read.catch(() => {});
       const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
       if (!page) return null;
-      const said = earlierMessages(page, before);
+      const said = earlierMessages(page, cutOf(page, before, key));
       const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
       return labelled.map(
         (message, i): UnseenMessage => ({
@@ -87,6 +92,13 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       );
     },
   };
+}
+
+/** Where the earlier messages end: before the page's message keyed `key`,
+ *  the session's first, when the page holds it, and before `before` when not. */
+function cutOf(page: readonly ChannelMessage[], before: Date, key: string | undefined): Date {
+  const opening = key === undefined ? undefined : page.find((m) => m.messageId === key);
+  return opening ? opening.timestamp : before;
 }
 
 /** The messages of `page` said before `before`, oldest first, within the

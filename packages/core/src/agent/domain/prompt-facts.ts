@@ -48,6 +48,9 @@ export interface PromptFacts {
    * said it as {@link PromptMessage} does. Null where none can be read: a
    * place whose channel hands the agent every message, a platform with no
    * read, or a read that failed or ran out of time. Absent, nothing is read.
+   * `first`, when given, is the id of the message the session opens on: it,
+   * and what was said after it within `before`'s second, are left out by the
+   * platform's own order, since Rome's record keeps whole seconds.
    */
-  earlier?(place: ThreadContext, before: Date): Promise<UnseenMessage[] | null>;
+  earlier?(place: ThreadContext, before: Date, first?: number): Promise<UnseenMessage[] | null>;
 }
