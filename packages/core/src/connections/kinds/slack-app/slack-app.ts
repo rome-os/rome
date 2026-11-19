@@ -36,6 +36,19 @@ const log = createLogger("slack-app");
 
 const SLACK_MESSAGE_ID = /^\d+\.\d+(?::\d+\.\d+)?$/;
 const USER_NAME_CACHE_SIZE = 500;
+const HOUR_MS = 60 * 60 * 1000;
+/** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
+const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
+const RENEW_RETRY_MS = HOUR_MS;
+/** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
+const MAX_TIMER_MS = 24 * HOUR_MS;
+
+/** When a drain key `<exp>.<sig>` stops working, in epoch ms, or null when the
+ *  key does not say. */
+export function drainKeyExpiry(drainKey: string): number | null {
+  const match = /^(\d+)\./.exec(drainKey);
+  return match ? Number(match[1]) * 1_000 : null;
+}
 
 /** One frame drained from the workspace's mailbox. */
 export interface MailboxFrame {
@@ -92,6 +105,7 @@ export class SlackAppAdapter {
   private abort = new AbortController();
   private appId: string | undefined;
   private mailbox: SlackAppMailbox;
+  private renewTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
@@ -114,14 +128,7 @@ export class SlackAppAdapter {
     this.appId = identity.appId;
     if (this.config.refreshMailbox) {
       try {
-        const fresh = await this.config.refreshMailbox();
-        if (
-          fresh.connectUrl !== this.mailbox.connectUrl ||
-          fresh.drainKey !== this.mailbox.drainKey
-        ) {
-          this.mailbox = fresh;
-          this.config.onMailboxRefreshed?.(fresh);
-        }
+        await this.refreshMailbox();
       } catch (error) {
         log.warn("slack app mailbox refresh failed; draining with the stored key", {
           error: describe(error),
@@ -129,12 +136,88 @@ export class SlackAppAdapter {
       }
     }
     if (signal.aborted) return;
+    // The relay refuses an expired key on every reconnect, so draining with
+    // one would look connected and hear nothing. Failing the start hands the
+    // retry to the runtime, which starts again after a backoff.
+    if (this.keyExpired()) {
+      throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
+    }
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+    this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
+  }
+
+  /** Ask Rome Cloud for drain credentials; true when they changed. */
+  private async refreshMailbox(): Promise<boolean> {
+    const fresh = await this.config.refreshMailbox?.();
+    if (
+      !fresh ||
+      (fresh.connectUrl === this.mailbox.connectUrl && fresh.drainKey === this.mailbox.drainKey)
+    ) {
+      return false;
+    }
+    this.mailbox = fresh;
+    this.config.onMailboxRefreshed?.(fresh);
+    return true;
+  }
+
+  private keyExpired(): boolean {
+    const expiry = drainKeyExpiry(this.mailbox.drainKey);
+    return expiry !== null && expiry <= Date.now();
+  }
+
+  /** Renew the drain key a week before it expires, while the drain runs. */
+  private scheduleRenewal(delayMs?: number): void {
+    this.clearRenewal();
+    if (!this.config.refreshMailbox || this.abort.signal.aborted) return;
+    let wait = delayMs;
+    if (wait === undefined) {
+      const expiry = drainKeyExpiry(this.mailbox.drainKey);
+      if (expiry === null) return;
+      wait = Math.max(0, expiry - RENEW_BEFORE_EXPIRY_MS - Date.now());
+    }
+    const due = Date.now() + wait;
+    this.renewTimer = setTimeout(
+      () => {
+        this.renewTimer = null;
+        if (Date.now() < due) this.scheduleRenewal(due - Date.now());
+        else void this.renew();
+      },
+      Math.min(wait, MAX_TIMER_MS),
+    );
+  }
+
+  private async renew(): Promise<void> {
+    const signal = this.abort.signal;
+    try {
+      const changed = await this.refreshMailbox();
+      if (signal.aborted) return;
+      if (changed) {
+        const old = this.drain;
+        this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+        await old?.stop();
+        log.info("slack app mailbox key renewed", { teamId: this.config.teamId });
+      }
+      this.scheduleRenewal();
+    } catch (error) {
+      if (signal.aborted) return;
+      log.warn("slack app mailbox renewal failed; will retry", { error: describe(error) });
+      if (this.keyExpired()) {
+        this.config.onFault?.({ kind: "transport", cause: error });
+        return;
+      }
+      this.scheduleRenewal(RENEW_RETRY_MS);
+    }
+  }
+
+  private clearRenewal(): void {
+    if (this.renewTimer) clearTimeout(this.renewTimer);
+    this.renewTimer = null;
   }
 
   async stop(): Promise<void> {
     this.abort.abort(new Error("Slack app adapter stopped."));
+    this.clearRenewal();
     const drain = this.drain;
     this.drain = null;
     await drain?.stop();

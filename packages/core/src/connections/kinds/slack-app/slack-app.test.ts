@@ -262,3 +262,108 @@ describe("Slack app Web API", () => {
     ]);
   });
 });
+
+describe("Slack app mailbox key", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = Date.UTC(2026, 10, 19);
+  const keyExpiringAt = (ms: number, tag = "sig") => `${Math.floor(ms / 1000)}.${tag}`;
+
+  function renewing(
+    stored: string,
+    refresh: () => Promise<{ connectUrl: string; drainKey: string }>,
+  ) {
+    const opened: string[] = [];
+    const stopped: string[] = [];
+    const faults: string[] = [];
+    const refreshed: string[] = [];
+    const open: OpenMailbox = (mailbox) => {
+      opened.push(mailbox.drainKey);
+      return { stop: () => void stopped.push(mailbox.drainKey) };
+    };
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: stored },
+      api: fakeApi(),
+      openMailbox: open,
+      refreshMailbox: rs.fn(refresh),
+      onMailboxRefreshed: (mailbox) => refreshed.push(mailbox.drainKey),
+      onFault: ({ kind }) => faults.push(kind),
+    });
+    return { adapter: a, opened, stopped, faults, refreshed };
+  }
+
+  async function withClock(run: () => Promise<void>) {
+    rs.useFakeTimers();
+    rs.setSystemTime(NOW);
+    try {
+      await run();
+    } finally {
+      rs.useRealTimers();
+    }
+  }
+
+  it("refuses to drain with an expired key it could not renew, and drains once Rome Cloud recovers", () =>
+    withClock(async () => {
+      const expired = keyExpiringAt(NOW - DAY);
+      const fresh = keyExpiringAt(NOW + 90 * DAY, "fresh");
+      let cloudUp = false;
+      const t = renewing(expired, async () => {
+        if (!cloudUp) throw new Error("Rome Cloud unreachable");
+        return { connectUrl: "wss://relay.test/c/mbx", drainKey: fresh };
+      });
+      await expect(t.adapter.start()).rejects.toThrow("expired");
+      expect(t.opened).toEqual([]);
+      // The runtime restarts the connection after a Disconnected fault.
+      cloudUp = true;
+      await t.adapter.start();
+      expect(t.opened).toEqual([fresh]);
+      expect(t.refreshed).toEqual([fresh]);
+      await t.adapter.stop();
+    }));
+
+  it("renews the key a week before it expires and reopens the drain with it", () =>
+    withClock(async () => {
+      const first = keyExpiringAt(NOW + 30 * DAY, "first");
+      const second = keyExpiringAt(NOW + 120 * DAY, "second");
+      let answer = first;
+      const t = renewing(first, async () => ({
+        connectUrl: "wss://relay.test/c/mbx",
+        drainKey: answer,
+      }));
+      await t.adapter.start();
+      expect(t.opened).toEqual([first]);
+      answer = second;
+      await rs.advanceTimersByTimeAsync(22 * DAY);
+      expect(t.opened).toEqual([first]);
+      await rs.advanceTimersByTimeAsync(1 * DAY + 1000);
+      expect(t.opened).toEqual([first, second]);
+      expect(t.stopped).toEqual([first]);
+      expect(t.refreshed).toEqual([second]);
+      expect(t.faults).toEqual([]);
+      await t.adapter.stop();
+    }));
+
+  it("retries a failed renewal hourly, and reports the connection down once the key expires", () =>
+    withClock(async () => {
+      const key = keyExpiringAt(NOW + 7 * DAY + 2 * 60 * 60 * 1000);
+      let calls = 0;
+      const t = renewing(key, async () => {
+        calls++;
+        if (calls === 1) return { connectUrl: "wss://relay.test/c/mbx", drainKey: key };
+        throw new Error("Rome Cloud unreachable");
+      });
+      await t.adapter.start();
+      await rs.advanceTimersByTimeAsync(2 * 60 * 60 * 1000 + 1000);
+      expect(calls).toBe(2);
+      await rs.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
+      expect(calls).toBe(5);
+      expect(t.faults).toEqual([]);
+      await rs.advanceTimersByTimeAsync(7 * DAY);
+      expect(t.faults).toEqual(["transport"]);
+      await t.adapter.stop();
+    }));
+});
