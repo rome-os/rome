@@ -125,6 +125,18 @@ const server = await serve(async (req, res, url) => {
     return send(res, 200, { matched: true, state: setup.state });
   }
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
+  // Like Rome, it replies only to the guardian unless a guardian adds "other"
+  // to replyToBondLevels. Broken R12-ignore-setting takes the setting and
+  // keeps replying to the guardian alone.
+  if (p === "/api/settings" && req.method === "GET")
+    return send(res, 200, { replyToBondLevels: db.replyTo ?? ["guardian"] });
+  if (p === "/api/settings" && req.method === "PUT") {
+    if (!sameOrigin) return send(res, 403, { error: "Cross-site requests are not allowed." });
+    const body = JSON.parse((await readBody(req)) || "{}");
+    if (Array.isArray(body.replyToBondLevels)) db.replyTo = body.replyToBondLevels;
+    save();
+    return send(res, 200, { replyToBondLevels: db.replyTo ?? ["guardian"] });
+  }
   // Like Rome, a Slack direct message with the bot is one session, and its
   // inbound messages are recorded with role "user" once they start a turn.
   // Its session is named after the connection's channel, which the
@@ -206,7 +218,7 @@ const REMEMBER = /Please remember (?:this|these) for later:/i;
 const noted = (texts, thing) =>
   texts
     .filter((t) => REMEMBER.test(t ?? ""))
-    .flatMap((t) => [...t.matchAll(/my ([^;]+?) is ([A-Z]+-\d+)/g)])
+    .flatMap((t) => [...t.matchAll(/my ([^;]+?) is (.+?)(?=;|\.\s|\.$|$)/g)])
     .filter((m) => m[1].toLowerCase() === thing.toLowerCase())
     .at(-1)?.[2];
 
@@ -308,6 +320,10 @@ async function answer(event, team, { now = false } = {}) {
     await answer(held, team, { now: true });
     held = null;
   }
+  // A member who is not the guardian gets a reply only once "other" is on.
+  const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
+  const others = (db.replyTo ?? ["guardian"]).includes("other") && !breaks.has("R12-ignore-setting");
+  if (event.user !== guardian && !others) return;
   // Broken silent never answers. Variant refuse declines what it was asked,
   // once, as the plain-text Concierge does on a connected account.
   if (breaks.has("silent")) return;

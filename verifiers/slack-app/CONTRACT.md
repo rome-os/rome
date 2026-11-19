@@ -10,6 +10,7 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
   "model": "claude-haiku-5-5",
   "differences": { },                  // copied into the report as is
   "stopSeconds": 120,                  // R6's stop; production's is 3600
+  "r12": { "allowMembers": false },    // R12 turns replies to members on first
   "timeouts": { "replySeconds": 90, "settleSeconds": 10, "restartSeconds": 300 },
   "repos": {                           // checkouts R11 reads
     "rome": "/abs/path/rome",
@@ -52,6 +53,7 @@ The routes the dashboard uses today, relative to `api`. Every call sends the ins
 | `GET /connections/{connection id}` | The connection's view. The verifier reads `connection.channel`, the channel the connection backs, to name the chat Rome recorded. The connection id is the one the setup's done state gave. |
 | `GET /sessions/channel:{channel}:{direct message id}/messages` | The bot chat's session for one Slack direct message, as an array oldest first of `{id, role, content, ...}`. `{channel}` comes from the connection's view, never from the direct message id alone. The verifier keeps inbound entries, role `notification` or `user` (an inbound message that started a turn), and searches their `content`. The People timeline is not used: it leaves agent chats out. Rome has no public listing that gives a connection's chats with their session ids, so the name is built from the view. |
 | `GET /connections/{connection id}` (R8, R13) | R8 polls its `state` for `broken` after the removal. R13 compares the whole view, less `setups`, before and after the wipe. A 404 is read as the connection being gone. |
+| `GET /settings`, `PUT /settings {replyToBondLevels}` | R12 with allowMembers: reads the setting, sets `["guardian", "other"]` so members who are not the guardian get replies, and puts the old value back after. |
 | `DELETE /connections/{connection id}` | R8's disconnect, as the dashboard's Disconnect does. |
 | `GET /accounts` | Every account the instance has observed, as `{accounts: [{channel, channelUserId}], nextCursor}`. The verifier reads every page and keeps channel `slack` (or `slack_app`), since the filter matches the platform name exactly. A dropped event adds none. |
 

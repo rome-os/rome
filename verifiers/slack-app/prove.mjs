@@ -85,6 +85,18 @@ const CASES = [
     what: "the visitor is told the guardian's private facts",
   },
   {
+    name: "R12-default-mode",
+    breaks: "R12-default-mode",
+    rule: "R12",
+    what: "scored with the guardian-only default, so the visitor gets no reply",
+  },
+  {
+    name: "R12-ignore-setting",
+    breaks: "R12-ignore-setting",
+    rule: "R12",
+    what: "turning replies to members on changes nothing",
+  },
+  {
     name: "R13-forget",
     breaks: "R13-forget",
     rule: "R13",
