@@ -30,6 +30,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | Break | What the stand-in does wrong |
 |---|---|
 | `R1-fields` | Setup asks for a bot token and a signing secret. |
+| `continue` | Not a break: Connect shows a Continue screen of Rome's own, a form with no method and nothing to fill. R1 must still pass. |
 | `R1-twice` | Connect sends the guardian through the Slack sign-in twice. |
 | `R1-agent` | The connected account gets no agent. |
 | `R3` | Rome Cloud lets a second instance take a bound workspace. |
@@ -48,6 +49,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `R7-elsewhere` (with `R7-signature`) | Forged events get through, are not recorded, and are answered in another member's direct message. |
 | `R11` | The relay gains a Slack file. |
 | `R11-migration` | A migration adds a bot token column with `ALTER TABLE`. |
+| `R11-namespace` | A Drizzle schema written with a namespace import (`pg.text(...)`) stores the bot token. |
 | `R11-eof` | A `CREATE TABLE` with no semicolon, ending the file, stores the bot token. |
 | `R11-sql` | A one-line `CREATE TABLE` stores the bot token. |
 | `R11-store` | Rome Cloud stores the bot token. |

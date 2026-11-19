@@ -43,6 +43,13 @@ const CASES = [
     what: "setup asks for a bot token and a signing secret",
   },
   {
+    name: "continue",
+    breaks: "continue",
+    rule: "R1",
+    result: "pass",
+    what: "Connect shows a Continue screen of Rome's own, a GET form with nothing to fill",
+  },
+  {
     name: "R1-twice",
     breaks: "R1-twice",
     rule: "R1",
@@ -131,6 +138,12 @@ const CASES = [
     breaks: "R7-route,R7-lookup",
     rule: "R7",
     what: "the wrong instance looks up workspace A's sender, then drops the event",
+  },
+  {
+    name: "R11-namespace",
+    breaks: "R11-namespace",
+    rule: "R11",
+    what: "a Drizzle schema from a namespace import (`pg.text`) stores the bot token",
   },
   {
     name: "R11-eof",

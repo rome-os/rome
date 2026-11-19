@@ -101,9 +101,10 @@ async function storedColumns(dir, base) {
       .map((l) => l.slice(1))
       .join("\n");
     const names = new Set();
-    // Drizzle: `teamId: text("team_id")`, anywhere on a line.
+    // Drizzle: `teamId: text("team_id")`, or `pg.text(...)` from a namespace
+    // import, anywhere on a line.
     for (const m of added.matchAll(
-      new RegExp(`(\\w+)\\s*:\\s*(?:${TYPE})\\(\\s*(?:["'](\\w+)["'])?`, "g"),
+      new RegExp(`(\\w+)\\s*:\\s*(?:\\w+\\.)?(?:${TYPE})\\(\\s*(?:["'](\\w+)["'])?`, "g"),
     ))
       names.add(m[2] ?? m[1]);
     // SQL: every column of a CREATE TABLE, one line or many, ended by `;`

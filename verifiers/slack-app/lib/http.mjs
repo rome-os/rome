@@ -31,8 +31,16 @@ export async function json(url, { method = "GET", body, headers = {} } = {}) {
 export async function follow(url, { method = "GET", form, stopAt = () => false, max = 15 } = {}) {
   const visited = [];
   let next = url;
-  let nextMethod = method;
-  let nextBody = form ? new URLSearchParams(form).toString() : undefined;
+  let nextMethod = method.toUpperCase();
+  let nextBody;
+  if (form && (nextMethod === "GET" || nextMethod === "HEAD")) {
+    // A GET form sends its fields as the query, replacing the action's own.
+    const to = new URL(url);
+    to.search = new URLSearchParams(form).toString();
+    next = to.toString();
+  } else if (form) {
+    nextBody = new URLSearchParams(form).toString();
+  }
   for (let i = 0; i < max; i++) {
     visited.push(next);
     if (stopAt(new URL(next))) return { stoppedAt: new URL(next), visited };

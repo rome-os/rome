@@ -176,6 +176,12 @@ if (breaks.has("R11-sql"))
     "packages/pantheon/drizzle/0003_slack_secrets.sql",
     "CREATE TABLE slack_secrets (team_id TEXT, bot_token TEXT);\n",
   );
+if (breaks.has("R11-namespace"))
+  write(
+    romeCloud,
+    "packages/pantheon/src/db/schema-ns.ts",
+    "import * as pg from 'drizzle-orm/pg-core';\nexport const slackTokens = pg.pgTable('slack_tokens', {\n  botToken: pg.text('bot_token'),\n});\n",
+  );
 if (breaks.has("R11-eof"))
   write(
     romeCloud,

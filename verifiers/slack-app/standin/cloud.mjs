@@ -60,6 +60,20 @@ export async function startCloud({
       to.searchParams.set("scope", "im:history,chat:write,app_mentions:read");
       to.searchParams.set("redirect_uri", `${self.url}/slack/callback`);
       to.searchParams.set("state", cloudState);
+      // Variant continue: a Continue screen of Rome's own first, a form with
+      // no method (so GET) and nothing to fill. A valid Connect still.
+      if (breaks.has("continue")) {
+        const hidden = [...to.searchParams]
+          .map(([k, v]) => `<input type="hidden" name="${k}" value="${v}">`)
+          .join("");
+        const action = `${to.origin}${to.pathname}`;
+        return send(
+          res,
+          200,
+          `<form action="${action}">${hidden}<button type="submit">Continue</button></form>`,
+          "text/html",
+        );
+      }
       res.writeHead(302, { location: to.toString() });
       return res.end();
     }
