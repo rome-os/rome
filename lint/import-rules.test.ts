@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
 import { contextRules } from "./rules/contexts.js";
-import { featureRules, partOf } from "./rules/features.js";
+import { featureRules } from "./rules/features.js";
+import { kindRulesFor } from "./rules/kinds.js";
 import { layerRules } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 
@@ -124,6 +125,27 @@ write("src/chats/people-probe.test.ts", 'import "../people/phone-book/index.js";
 write("src/api/routes/people/phone-book.ts", 'import "../../../people/phone-book/index.js";\n');
 write("src/connections/kinds/discord/discord.ts", 'import "../../../people/link-code/index.js";\n');
 
+write("src/connections/registry.ts", 'import "./kinds/slack/index.js";\n');
+write("src/connections/registry.test.ts", 'import "./kinds/slack/slack.js";\n');
+write("src/connections/kinds/slack/index.ts", 'export * from "./slack.js";\n');
+write(
+  "src/connections/kinds/slack/slack.ts",
+  ['import "../../registry.js";', 'import "../discord/discord.js";', 'import "hono";'].join("\n"),
+);
+write(
+  "src/connections/kinds/slack/http/routes.ts",
+  'import "hono";\nimport "../actions/post.js";\n',
+);
+write("src/connections/kinds/slack/actions/post.ts", "export const post = 1;\n");
+write("src/connections/kinds/slack/application/send.ts", 'import "../http/routes.js";\n');
+write("src/connections/kinds/slack/infrastructure/store.ts", 'import "drizzle-orm";\n');
+write("src/connections/kinds/slack/store.ts", 'import "drizzle-orm";\n');
+write(
+  "src/chats/slack-probe.ts",
+  'import "../connections/kinds/slack/index.js";\nimport "../connections/kinds/slack/slack.js";\n',
+);
+write("src/chats/slack-probe.test.ts", 'import "../connections/kinds/slack/slack.js";\n');
+
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("checkImports with the layer rules", () => {
@@ -222,29 +244,25 @@ describe("checkImports with the feature rules", () => {
   });
 });
 
-describe("partOf", () => {
-  const mounted = { people: ["phone-book"], connections: ["kinds/discord"] };
-
-  it("places a file of a kind of connection one folder down, and the rest of Connections at its root", () => {
-    expect(partOf("connections/kinds/discord/http/routes.ts", mounted)).toEqual({
-      domain: "connections",
-      part: "kinds/discord",
-      rest: ["http", "routes.ts"],
-    });
-    expect(partOf("connections/kinds/slack/slack.ts", mounted)).toEqual({
-      domain: "connections",
-      part: null,
-      rest: ["kinds", "slack", "slack.ts"],
-    });
-    expect(partOf("connections/registry.ts", mounted)?.part).toBeNull();
-  });
-
-  it("places a feature directly under its domain, and nothing outside a listed domain", () => {
-    expect(partOf("people/phone-book/index.ts", mounted)).toEqual({
-      domain: "people",
-      part: "phone-book",
-      rest: ["index.ts"],
-    });
-    expect(partOf("chats/send.ts", mounted)).toBeNull();
+describe("checkImports with the kind rules", () => {
+  it("keeps kinds apart and off the Connections root, and lets outside code in only through index.ts", () => {
+    const lines = checkImports(
+      join(root, "src"),
+      join(root, "tsconfig.json"),
+      kindRulesFor(["discord", "slack"]),
+    )
+      .map(formatImportViolation)
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => !line.endsWith("[unresolved]"));
+    expect(lines).toEqual([
+      "chats/slack-probe.ts:2 → ../connections/kinds/slack/slack.js (connections/kinds/slack/slack.ts) [kinds-enter-through-index]",
+      "connections/kinds/slack/application/send.ts:1 → ../http/routes.js (connections/kinds/slack/http/routes.ts) [kind-adapters-import-inward]",
+      "connections/kinds/slack/http/routes.ts:2 → ../actions/post.js (connections/kinds/slack/actions/post.ts) [kind-adapters-import-inward]",
+      "connections/kinds/slack/slack.ts:2 → ../discord/discord.js (connections/kinds/discord/discord.ts) [kinds-import-no-sibling]",
+      "connections/kinds/slack/slack.ts:2 → ../discord/discord.js (connections/kinds/discord/discord.ts) [kinds-enter-through-index]",
+      "connections/kinds/slack/slack.ts:3 → hono [kind-hono-stays-in-http]",
+      "connections/kinds/slack/store.ts:1 → drizzle-orm [kind-drizzle-stays-in-infrastructure]",
+      "connections/registry.ts:1 → ./kinds/slack/index.js (connections/kinds/slack/index.ts) [connections-root-names-no-kind]",
+    ]);
   });
 });
