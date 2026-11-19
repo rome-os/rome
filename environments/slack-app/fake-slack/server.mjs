@@ -839,8 +839,11 @@ export class FakeSlack {
     // tokens are revoked". So an app that checks its token on either event
     // finds it dead.
     install.active = false;
-    this.state.tokens[install.botToken].revoked = true;
-    for (const token of Object.values(install.userTokens)) this.state.tokens[token].revoked = true;
+    // Every token Rome's app was ever issued in the workspace, older user
+    // tokens of a repeated sign-in too. Other apps' tokens stay.
+    for (const info of Object.values(this.state.tokens)) {
+      if (info.teamId === teamId && !info.appId) info.revoked = true;
+    }
     this.save();
     const tokensRevoked = await this.sendEvent(
       teamId,

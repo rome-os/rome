@@ -659,3 +659,21 @@ test("older Slack apps an upgrade finds: a Socket Mode bot and Rome Cloud's OAut
   assert.ok(!JSON.stringify(state).includes(oauth.bot_token));
   assert.equal(state.workspaces[1].bot_token_tail.length, 6);
 });
+
+test("removing the app revokes every token it issued, a repeated sign-in's older user token too", async () => {
+  const C = "TC0000CCCC";
+  const first = await install(C, "UC0000OWNR1", "chat:write", "search:read");
+  const second = await install(C, "UC0000OWNR1", "chat:write", "search:read");
+  assert.notEqual(first.authed_user.access_token, second.authed_user.access_token);
+  const other = await ctl("/other-app", { team: C, kind: "oauth", name: "Rome Old" });
+  await ctl("/uninstall", { team: C });
+  for (const token of [
+    first.access_token,
+    first.authed_user.access_token,
+    second.authed_user.access_token,
+  ]) {
+    assert.equal((await api("auth.test", {}, token)).error, "token_revoked");
+  }
+  // Another app's tokens are not Rome's app's to lose.
+  assert.equal((await api("auth.test", {}, other.bot_token)).ok, true);
+});
