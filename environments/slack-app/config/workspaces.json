@@ -1,0 +1,55 @@
+{
+  "workspaces": [
+    {
+      "id": "TA0000AAAA",
+      "name": "Acme",
+      "domain": "acme",
+      "members": [
+        {
+          "id": "UA0000GUARD",
+          "name": "alice",
+          "real_name": "Alice Guardian",
+          "email": "alice@acme.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        { "id": "UA0000BOB01", "name": "bob", "real_name": "Bob Member", "email": "bob@acme.test" },
+        {
+          "id": "UA0000CARA1",
+          "name": "cara",
+          "real_name": "Cara Member",
+          "email": "cara@acme.test"
+        }
+      ],
+      "channels": [{ "id": "CA0000GENRL", "name": "general" }]
+    },
+    {
+      "id": "TB0000BBBB",
+      "name": "Bayside",
+      "domain": "bayside",
+      "members": [
+        {
+          "id": "UB0000GUARD",
+          "name": "dana",
+          "real_name": "Dana Guardian",
+          "email": "dana@bayside.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "UB0000ERIN1",
+          "name": "erin",
+          "real_name": "Erin Member",
+          "email": "erin@bayside.test"
+        },
+        {
+          "id": "UB0000FINN1",
+          "name": "finn",
+          "real_name": "Finn Member",
+          "email": "finn@bayside.test"
+        }
+      ],
+      "channels": [{ "id": "CB0000GENRL", "name": "general" }]
+    }
+  ]
+}

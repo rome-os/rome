@@ -1,0 +1,903 @@
+// A stand-in for Slack, so the official Slack app can be tested with no
+// person and no real workspace. It plays Slack's approve screen, the Web API
+// methods the app calls, and Slack's event delivery, and it records every API
+// call it receives. A control API under /_control lets a test act as a
+// workspace member and read back what the bot posted.
+//
+// Dependency-free on purpose: it runs on a stock Node 22+ image.
+// Usage and the control API are in ../README.md.
+
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+
+const env = process.env;
+
+export function loadConfig(overrides = {}) {
+  const workspacesFile = overrides.workspacesFile ?? env.FAKE_SLACK_WORKSPACES;
+  const workspaces = workspacesFile
+    ? JSON.parse(readFileSync(workspacesFile, "utf8")).workspaces
+    : (overrides.workspaces ?? []);
+  return {
+    port: Number(overrides.port ?? env.FAKE_SLACK_PORT ?? 8080),
+    tlsPort: Number(overrides.tlsPort ?? env.FAKE_SLACK_TLS_PORT ?? 0),
+    tlsCert: overrides.tlsCert ?? env.FAKE_SLACK_TLS_CERT,
+    tlsKey: overrides.tlsKey ?? env.FAKE_SLACK_TLS_KEY,
+    appId: overrides.appId ?? env.SLACK_APP_ID ?? "A0FAKEAPP01",
+    clientId: overrides.clientId ?? env.SLACK_CLIENT_ID ?? "1111111111.2222222222",
+    clientSecret: overrides.clientSecret ?? env.SLACK_CLIENT_SECRET,
+    signingSecret: overrides.signingSecret ?? env.SLACK_SIGNING_SECRET,
+    eventsUrl: overrides.eventsUrl ?? env.FAKE_SLACK_EVENTS_URL ?? "",
+    // Slack retries a failed delivery after about 0 s, 1 min and 5 min. The
+    // environment shortens these (DIFFERENCES.md).
+    retryDelaysMs: (overrides.retryDelaysMs ?? env.FAKE_SLACK_RETRY_DELAYS_MS ?? "1000,5000,15000")
+      .toString()
+      .split(",")
+      .filter(Boolean)
+      .map(Number),
+    deliveryTimeoutMs: Number(
+      overrides.deliveryTimeoutMs ?? env.FAKE_SLACK_DELIVERY_TIMEOUT_MS ?? 3000,
+    ),
+    stateFile: overrides.stateFile ?? env.FAKE_SLACK_STATE_FILE,
+    workspaces,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Signing, as Slack does it: v0= HMAC SHA256 over "v0:{timestamp}:{body}".
+// ---------------------------------------------------------------------------
+
+export function slackSignature(secret, timestamp, body) {
+  return `v0=${createHmac("sha256", secret).update(`v0:${timestamp}:${body}`).digest("hex")}`;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+function emptyState() {
+  return {
+    seq: 0,
+    tsCounter: 0,
+    installs: {}, // teamId -> { teamId, botUserId, botId, botToken, userTokens: {userId: token}, installedBy, installedAt, active }
+    tokens: {}, // token -> { teamId, kind: "bot"|"user", userId, revoked }
+    codes: {}, // code -> { teamId, userId, scopes, userScopes, redirectUri, expiresAt, used }
+    calls: [], // { seq, at, method, teamId, tokenKind, args, ok, error }
+    posts: [], // { seq, at, teamId, channel, ts, threadTs, text, blocks, user }
+    events: [], // { seq, at, teamId, eventId, type, signature, body }
+    deliveries: [], // { seq, at, eventId, attempt, status, error, ms }
+    defaultSignIn: null, // { teamId, userId } preselected on the approve screen
+  };
+}
+
+export class FakeSlack {
+  constructor(config) {
+    this.config = config;
+    if (!config.signingSecret) throw new Error("SLACK_SIGNING_SECRET is required");
+    if (!config.clientSecret) throw new Error("SLACK_CLIENT_SECRET is required");
+    this.workspaces = new Map(config.workspaces.map((w) => [w.id, w]));
+    this.state = emptyState();
+    if (config.stateFile && existsSync(config.stateFile)) {
+      this.state = { ...emptyState(), ...JSON.parse(readFileSync(config.stateFile, "utf8")) };
+    }
+    this.saveTimer = null;
+  }
+
+  save() {
+    if (!this.config.stateFile || this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      const tmp = `${this.config.stateFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.state));
+      renameSync(tmp, this.config.stateFile);
+    }, 50);
+  }
+
+  nextSeq() {
+    this.state.seq += 1;
+    this.save();
+    return this.state.seq;
+  }
+
+  nextTs() {
+    this.state.tsCounter = (this.state.tsCounter + 1) % 1_000_000;
+    const seconds = Math.floor(Date.now() / 1000);
+    return `${seconds}.${String(this.state.tsCounter).padStart(6, "0")}`;
+  }
+
+  workspace(teamId) {
+    const w = this.workspaces.get(teamId);
+    if (!w) throw httpError(404, `unknown workspace ${teamId}`);
+    return w;
+  }
+
+  member(teamId, userId) {
+    const m = this.workspace(teamId).members.find((x) => x.id === userId);
+    if (!m) throw httpError(404, `unknown member ${userId} in ${teamId}`);
+    return m;
+  }
+
+  /** The bot user and bot ids are fixed per workspace, as Slack keeps them across reinstalls. */
+  botIds(teamId) {
+    const suffix = teamId.replace(/^T/, "");
+    return { botUserId: `UBOT${suffix}`, botId: `BBOT${suffix}` };
+  }
+
+  /** A direct message's conversation id is stable per (workspace, member). */
+  imChannel(teamId, userId) {
+    return `D${teamId.replace(/^T/, "").slice(0, 4)}${userId.replace(/^U/, "")}`;
+  }
+
+  imOwner(teamId, channel) {
+    return this.workspace(teamId).members.find((m) => this.imChannel(teamId, m.id) === channel);
+  }
+
+  group(teamId, channel) {
+    return (this.workspace(teamId).channels ?? []).find(
+      (c) => c.id === channel || c.name === channel,
+    );
+  }
+
+  activeInstall(teamId) {
+    const install = this.state.installs[teamId];
+    return install?.active ? install : null;
+  }
+
+  // ---------------------------------------------------------------- OAuth
+
+  issueCode({ teamId, userId, scopes, userScopes, redirectUri }) {
+    const code = `${teamId}.${randomBytes(16).toString("hex")}`;
+    this.state.codes[code] = {
+      teamId,
+      userId,
+      scopes,
+      userScopes,
+      redirectUri,
+      expiresAt: Date.now() + 10 * 60_000,
+      used: false,
+    };
+    this.save();
+    return code;
+  }
+
+  exchangeCode({ clientId, clientSecret, code, redirectUri }) {
+    if (clientId !== this.config.clientId) return { ok: false, error: "invalid_client_id" };
+    if (clientSecret !== this.config.clientSecret) return { ok: false, error: "bad_client_secret" };
+    const grant = this.state.codes[code];
+    if (!grant || grant.used || grant.expiresAt < Date.now())
+      return { ok: false, error: "invalid_code" };
+    if (redirectUri && grant.redirectUri && redirectUri !== grant.redirectUri) {
+      return { ok: false, error: "bad_redirect_uri" };
+    }
+    grant.used = true;
+    const { teamId, userId } = grant;
+    const w = this.workspace(teamId);
+    const { botUserId, botId } = this.botIds(teamId);
+    let install = this.state.installs[teamId];
+    if (!install || !install.active) {
+      const botToken = `xoxb-${teamId}-${randomBytes(12).toString("hex")}`;
+      install = {
+        teamId,
+        botUserId,
+        botId,
+        botToken,
+        userTokens: {},
+        installedBy: userId,
+        installedAt: new Date().toISOString(),
+        active: true,
+      };
+      this.state.installs[teamId] = install;
+      this.state.tokens[botToken] = { teamId, kind: "bot", userId: botUserId, revoked: false };
+    }
+    const response = {
+      ok: true,
+      app_id: this.config.appId,
+      authed_user: { id: userId },
+      scope: grant.scopes,
+      token_type: "bot",
+      access_token: install.botToken,
+      bot_user_id: botUserId,
+      team: { id: teamId, name: w.name },
+      enterprise: null,
+      is_enterprise_install: false,
+    };
+    if (grant.userScopes) {
+      const userToken = `xoxp-${teamId}-${randomBytes(12).toString("hex")}`;
+      install.userTokens[userId] = userToken;
+      this.state.tokens[userToken] = { teamId, kind: "user", userId, revoked: false };
+      response.authed_user = {
+        id: userId,
+        scope: grant.userScopes,
+        access_token: userToken,
+        token_type: "user",
+      };
+    }
+    this.save();
+    return response;
+  }
+
+  // ---------------------------------------------------------------- Web API
+
+  callApi(method, args, token) {
+    const tokenInfo = token ? this.state.tokens[token] : undefined;
+    const record = {
+      seq: this.nextSeq(),
+      at: new Date().toISOString(),
+      method,
+      teamId: tokenInfo?.teamId ?? null,
+      tokenKind: tokenInfo?.kind ?? (token ? "unknown" : "none"),
+      args: redact(args),
+    };
+    const result = this.dispatch(method, args, token, tokenInfo);
+    record.ok = result.ok;
+    if (!result.ok) record.error = result.error;
+    this.state.calls.push(record);
+    this.save();
+    return result;
+  }
+
+  dispatch(method, args, token, tokenInfo) {
+    if (method === "oauth.v2.access") {
+      return this.exchangeCode({
+        clientId: args.client_id,
+        clientSecret: args.client_secret,
+        code: args.code,
+        redirectUri: args.redirect_uri,
+      });
+    }
+    if (method === "api.test") return { ok: true, args };
+    if (!(method in API_METHODS)) return { ok: false, error: "unknown_method" };
+    if (!token) return { ok: false, error: "not_authed" };
+    if (!tokenInfo) return { ok: false, error: "invalid_auth" };
+    if (tokenInfo.revoked) return { ok: false, error: "token_revoked" };
+    return API_METHODS[method].call(this, args, token, tokenInfo);
+  }
+
+  // ---------------------------------------------------------------- Events
+
+  envelope(teamId, event) {
+    const install = this.activeInstall(teamId) ?? this.state.installs[teamId];
+    const { botUserId } = this.botIds(teamId);
+    return {
+      token: "fake-verification-token",
+      team_id: teamId,
+      context_team_id: teamId,
+      context_enterprise_id: null,
+      api_app_id: this.config.appId,
+      event: { ...event, event_ts: event.event_ts ?? event.ts ?? this.nextTs() },
+      type: "event_callback",
+      event_id: `Ev${randomBytes(6).toString("hex").toUpperCase()}`,
+      event_time: Math.floor(Date.now() / 1000),
+      authorizations: [
+        {
+          enterprise_id: null,
+          team_id: teamId,
+          user_id: install?.botUserId ?? botUserId,
+          is_bot: true,
+          is_enterprise_install: false,
+        },
+      ],
+      is_ext_shared_channel: false,
+      event_context: `4-${randomBytes(8).toString("hex")}`,
+    };
+  }
+
+  /**
+   * Signs and posts one event to the configured events address. `signature`
+   * is "valid", or one of the forgeries a test uses for R7. Waits for the
+   * first attempt; a valid event that fails is retried in the background.
+   */
+  async sendEvent(teamId, event, { signature = "valid", requireInstall = true } = {}) {
+    if (!this.config.eventsUrl) throw httpError(409, "no events address configured");
+    if (requireInstall && signature === "valid" && !this.activeInstall(teamId)) {
+      throw httpError(409, `the app is not installed in ${teamId}`);
+    }
+    const envelope = this.envelope(teamId, event);
+    const body = JSON.stringify(envelope);
+    this.state.events.push({
+      seq: this.nextSeq(),
+      at: new Date().toISOString(),
+      teamId,
+      eventId: envelope.event_id,
+      type: event.type,
+      channelType: event.channel_type ?? null,
+      signature,
+      body: envelope,
+    });
+    const first = await this.deliver(envelope.event_id, body, signature, 0);
+    if (signature === "valid" && !isSuccess(first.status))
+      this.scheduleRetry(envelope.event_id, body, 1);
+    this.save();
+    return { event_id: envelope.event_id, event: envelope.event, delivery: first };
+  }
+
+  scheduleRetry(eventId, body, attempt) {
+    const delay = this.config.retryDelaysMs[attempt - 1];
+    if (delay === undefined) return;
+    setTimeout(async () => {
+      const result = await this.deliver(eventId, body, "valid", attempt);
+      if (!isSuccess(result.status)) this.scheduleRetry(eventId, body, attempt + 1);
+    }, delay).unref();
+  }
+
+  async deliver(eventId, body, signature, attempt) {
+    const realTs = Math.floor(Date.now() / 1000);
+    const headers = {
+      "content-type": "application/json",
+      "user-agent": "Slackbot 1.0 (+https://api.slack.com/robots)",
+    };
+    const ts = signature === "stale_timestamp" ? realTs - 10 * 60 : realTs;
+    if (signature !== "missing_signature") {
+      headers["x-slack-request-timestamp"] = String(ts);
+      const secret =
+        signature === "bad_signature"
+          ? `${this.config.signingSecret}-forged`
+          : this.config.signingSecret;
+      headers["x-slack-signature"] = slackSignature(secret, ts, body);
+    }
+    if (attempt > 0) {
+      headers["x-slack-retry-num"] = String(attempt);
+      headers["x-slack-retry-reason"] = "http_error";
+    }
+    const started = Date.now();
+    const record = { seq: 0, at: new Date().toISOString(), eventId, attempt, signature };
+    try {
+      const response = await fetch(this.config.eventsUrl, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(this.config.deliveryTimeoutMs),
+      });
+      record.status = response.status;
+      record.responseBody = (await response.text()).slice(0, 500);
+    } catch (error) {
+      record.status = 0;
+      record.error =
+        error?.name === "TimeoutError"
+          ? "http_timeout"
+          : String(error?.cause?.code ?? error?.message ?? error);
+    }
+    record.ms = Date.now() - started;
+    record.seq = this.nextSeq();
+    this.state.deliveries.push(record);
+    this.save();
+    return record;
+  }
+
+  /** A member's direct message to the bot, as Slack's message.im event. */
+  directMessage(teamId, userId, text) {
+    this.member(teamId, userId);
+    const ts = this.nextTs();
+    return {
+      type: "message",
+      channel: this.imChannel(teamId, userId),
+      user: userId,
+      text,
+      ts,
+      team: teamId,
+      client_msg_id: randomUUID(),
+      channel_type: "im",
+      blocks: richText(text),
+    };
+  }
+
+  /** A member's mention of the bot in a group, as Slack's app_mention event. */
+  mention(teamId, userId, channel, text) {
+    this.member(teamId, userId);
+    const group = this.group(teamId, channel ?? "general");
+    if (!group) throw httpError(404, `unknown group ${channel} in ${teamId}`);
+    const { botUserId } = this.botIds(teamId);
+    const ts = this.nextTs();
+    const full = `<@${botUserId}> ${text}`;
+    return {
+      type: "app_mention",
+      channel: group.id,
+      user: userId,
+      text: full,
+      ts,
+      team: teamId,
+      client_msg_id: randomUUID(),
+      blocks: richText(full),
+    };
+  }
+
+  async uninstall(teamId) {
+    const install = this.activeInstall(teamId);
+    if (!install) throw httpError(409, `the app is not installed in ${teamId}`);
+    const revokedUsers = Object.keys(install.userTokens);
+    // Slack sends both events, then the tokens stop working.
+    const tokensRevoked = await this.sendEvent(teamId, {
+      type: "tokens_revoked",
+      tokens: { oauth: revokedUsers, bot: [install.botUserId] },
+    });
+    const uninstalled = await this.sendEvent(teamId, { type: "app_uninstalled" });
+    install.active = false;
+    this.state.tokens[install.botToken].revoked = true;
+    for (const token of Object.values(install.userTokens)) this.state.tokens[token].revoked = true;
+    this.save();
+    return { tokens_revoked: tokensRevoked, app_uninstalled: uninstalled };
+  }
+
+  // ---------------------------------------------------------------- Reads
+
+  since(list, query) {
+    const after = Number(query.get("since") ?? 0);
+    return list.filter((x) => x.seq > after);
+  }
+
+  posts(query) {
+    return this.since(this.state.posts, query).filter(
+      (p) =>
+        (!query.get("team") || p.teamId === query.get("team")) &&
+        (!query.get("channel") || p.channel === query.get("channel")) &&
+        (!query.get("thread_ts") || p.threadTs === query.get("thread_ts")),
+    );
+  }
+
+  calls(query) {
+    return this.since(this.state.calls, query).filter(
+      (c) =>
+        (!query.get("team") || c.teamId === query.get("team")) &&
+        (!query.get("method") || c.method === query.get("method")),
+    );
+  }
+
+  publicState() {
+    return {
+      app: {
+        app_id: this.config.appId,
+        client_id: this.config.clientId,
+        events_url: this.config.eventsUrl,
+      },
+      seq: this.state.seq,
+      workspaces: [...this.workspaces.values()].map((w) => {
+        const install = this.state.installs[w.id];
+        return {
+          id: w.id,
+          name: w.name,
+          domain: w.domain,
+          bot: this.botIds(w.id),
+          installed: Boolean(install?.active),
+          installed_by: install?.installedBy ?? null,
+          members: w.members.map((m) => ({ ...m, im_channel: this.imChannel(w.id, m.id) })),
+          groups: w.channels ?? [],
+        };
+      }),
+      default_sign_in: this.state.defaultSignIn,
+    };
+  }
+}
+
+const API_METHODS = {
+  "auth.test"(_args, _token, info) {
+    const w = this.workspace(info.teamId);
+    const install = this.state.installs[info.teamId];
+    const isBot = info.kind === "bot";
+    return {
+      ok: true,
+      url: `https://${w.domain}.slack.com/`,
+      team: w.name,
+      user: isBot ? "rome" : this.member(info.teamId, info.userId).name,
+      team_id: info.teamId,
+      user_id: info.userId,
+      ...(isBot ? { bot_id: install.botId } : {}),
+      is_enterprise_install: false,
+    };
+  },
+
+  "auth.revoke"(args, token) {
+    if (args.test === "true" || args.test === true) return { ok: true, revoked: false };
+    this.state.tokens[token].revoked = true;
+    return { ok: true, revoked: true };
+  },
+
+  "chat.postMessage"(args, _token, info) {
+    if (!args.channel) return { ok: false, error: "channel_not_found" };
+    if (!args.text && !args.blocks && !args.attachments) return { ok: false, error: "no_text" };
+    let channel = args.channel;
+    if (channel.startsWith("U") || channel.startsWith("W")) {
+      if (!this.workspace(info.teamId).members.some((m) => m.id === channel)) {
+        return { ok: false, error: "channel_not_found" };
+      }
+      channel = this.imChannel(info.teamId, channel);
+    } else if (channel.startsWith("D")) {
+      if (!this.imOwner(info.teamId, channel)) return { ok: false, error: "channel_not_found" };
+    } else if (!this.group(info.teamId, channel)) {
+      return { ok: false, error: "channel_not_found" };
+    } else {
+      channel = this.group(info.teamId, channel).id;
+    }
+    const install = this.state.installs[info.teamId];
+    const ts = this.nextTs();
+    const blocks = typeof args.blocks === "string" ? safeJson(args.blocks) : args.blocks;
+    const post = {
+      seq: this.nextSeq(),
+      at: new Date().toISOString(),
+      teamId: info.teamId,
+      channel,
+      ts,
+      threadTs: args.thread_ts ?? null,
+      text: args.text ?? "",
+      blocks: blocks ?? null,
+      user: info.userId,
+      tokenKind: info.kind,
+    };
+    this.state.posts.push(post);
+    return {
+      ok: true,
+      channel,
+      ts,
+      message: {
+        type: "message",
+        user: info.userId,
+        ...(info.kind === "bot" ? { bot_id: install.botId, app_id: this.config.appId } : {}),
+        text: post.text,
+        ts,
+        ...(post.threadTs ? { thread_ts: post.threadTs } : {}),
+        team: info.teamId,
+      },
+    };
+  },
+
+  "conversations.open"(args, _token, info) {
+    if (args.channel) {
+      if (!this.imOwner(info.teamId, args.channel))
+        return { ok: false, error: "channel_not_found" };
+      return { ok: true, channel: { id: args.channel } };
+    }
+    const users = String(args.users ?? "")
+      .split(",")
+      .filter(Boolean);
+    if (users.length !== 1)
+      return { ok: false, error: users.length ? "not_supported" : "users_list_not_supplied" };
+    if (!this.workspace(info.teamId).members.some((m) => m.id === users[0])) {
+      return { ok: false, error: "user_not_found" };
+    }
+    return {
+      ok: true,
+      no_op: true,
+      already_open: true,
+      channel: { id: this.imChannel(info.teamId, users[0]) },
+    };
+  },
+
+  "users.info"(args, _token, info) {
+    const w = this.workspace(info.teamId);
+    const { botUserId, botId } = this.botIds(info.teamId);
+    if (args.user === botUserId) {
+      return {
+        ok: true,
+        user: {
+          id: botUserId,
+          team_id: info.teamId,
+          name: "rome",
+          real_name: "Rome",
+          is_bot: true,
+          deleted: false,
+          profile: { real_name: "Rome", display_name: "Rome", bot_id: botId },
+        },
+      };
+    }
+    const m = w.members.find((x) => x.id === args.user);
+    if (!m) return { ok: false, error: "user_not_found" };
+    return {
+      ok: true,
+      user: {
+        id: m.id,
+        team_id: info.teamId,
+        name: m.name,
+        real_name: m.real_name,
+        is_admin: Boolean(m.is_admin),
+        is_owner: Boolean(m.is_owner),
+        is_bot: false,
+        deleted: false,
+        tz: m.tz ?? "UTC",
+        profile: {
+          real_name: m.real_name,
+          display_name: m.display_name ?? m.name,
+          email: m.email,
+          image_72: `https://fake-slack.invalid/avatars/${m.id}.png`,
+        },
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// HTTP
+// ---------------------------------------------------------------------------
+
+function httpError(status, message) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
+
+function isSuccess(status) {
+  return status >= 200 && status < 300;
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function redact(args) {
+  const out = { ...args };
+  for (const k of ["client_secret", "token", "code"]) if (k in out) out[k] = "[redacted]";
+  return out;
+}
+
+function richText(text) {
+  return [
+    {
+      type: "rich_text",
+      block_id: randomBytes(3).toString("hex"),
+      elements: [{ type: "rich_text_section", elements: [{ type: "text", text }] }],
+    },
+  ];
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function parseArgs(req, url, raw) {
+  const args = Object.fromEntries(url.searchParams);
+  const type = req.headers["content-type"] ?? "";
+  if (raw) {
+    if (type.includes("application/json")) Object.assign(args, JSON.parse(raw));
+    else Object.assign(args, Object.fromEntries(new URLSearchParams(raw)));
+  }
+  // oauth.v2.access also takes the client credentials as HTTP Basic auth.
+  const auth = req.headers.authorization ?? "";
+  if (auth.startsWith("Basic ")) {
+    const [id, secret] = Buffer.from(auth.slice(6), "base64").toString("utf8").split(":");
+    args.client_id ??= id;
+    args.client_secret ??= secret;
+  }
+  return args;
+}
+
+function bearer(req, args) {
+  const auth = req.headers.authorization ?? "";
+  if (auth.startsWith("Bearer ")) return auth.slice(7);
+  return args.token;
+}
+
+function send(res, status, body, headers = {}) {
+  const isString = typeof body === "string";
+  res.writeHead(status, {
+    "content-type": isString ? "text/html; charset=utf-8" : "application/json; charset=utf-8",
+    ...headers,
+  });
+  res.end(isString ? body : JSON.stringify(body));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+function approvePage(slack, params) {
+  const def = slack.state.defaultSignIn;
+  const teamId = params.get("team") || def?.teamId || slack.config.workspaces[0]?.id;
+  const w = slack.workspaces.get(teamId) ?? slack.config.workspaces[0];
+  const userId =
+    params.get("user") || (def?.teamId === w.id ? def.userId : null) || w.members[0].id;
+  const scopes = (params.get("scope") ?? "").split(",").filter(Boolean);
+  const hidden = ["client_id", "scope", "user_scope", "redirect_uri", "state"]
+    .map((k) => `<input type="hidden" name="${k}" value="${escapeHtml(params.get(k) ?? "")}">`)
+    .join("");
+  const workspaceOptions = slack.config.workspaces
+    .map(
+      (x) =>
+        `<option value="${x.id}"${x.id === w.id ? " selected" : ""}>${escapeHtml(x.name)}</option>`,
+    )
+    .join("");
+  const memberOptions = w.members
+    .map(
+      (m) =>
+        `<option value="${m.id}"${m.id === userId ? " selected" : ""}>${escapeHtml(m.real_name)}</option>`,
+    )
+    .join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Rome is requesting permission to access the ${escapeHtml(w.name)} Slack workspace</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;background:#f8f8f8;margin:0;padding:40px 16px}main{max-width:520px;margin:auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:28px}
+h1{font-size:22px}li{margin:4px 0}.row{display:flex;gap:8px;margin:12px 0}.row label{width:110px;color:#555}button{font-size:15px;padding:10px 18px;border-radius:4px;border:1px solid #bbb;background:#fff;cursor:pointer}
+button[name=decision][value=allow]{background:#007a5a;color:#fff;border-color:#007a5a}.note{color:#777;font-size:12px}</style></head>
+<body><main><p class="note">Fake Slack: a stand-in for slack.com used in tests.</p>
+<h1>Rome is requesting permission to access the <span id="workspace-name">${escapeHtml(w.name)}</span> Slack workspace</h1>
+<form method="post" action="/oauth/v2/authorize/approve">${hidden}
+<div class="row"><label for="team">Workspace</label><select id="team" name="team" onchange="location.search=new URLSearchParams({...Object.fromEntries(new URLSearchParams(location.search)),team:this.value,user:''})">${workspaceOptions}</select></div>
+<div class="row"><label for="user">Signed in as</label><select id="user" name="user">${memberOptions}</select></div>
+<p>What will Rome be able to view and do?</p><ul>${scopes.map((s) => `<li><code>${escapeHtml(s)}</code></li>`).join("")}</ul>
+<div class="row"><button type="submit" name="decision" value="cancel">Cancel</button><button type="submit" name="decision" value="allow" id="allow">Allow</button></div>
+</form></main></body></html>`;
+}
+
+export function createHandler(slack) {
+  return async function handle(req, res) {
+    const url = new URL(req.url, "http://fake-slack");
+    try {
+      const raw = req.method === "GET" ? "" : await readBody(req);
+
+      // ----- Approve screen
+      if (url.pathname === "/oauth/v2/authorize" && req.method === "GET") {
+        if (url.searchParams.get("client_id") !== slack.config.clientId) {
+          return send(res, 400, "<h1>Invalid client_id parameter</h1>");
+        }
+        if (!url.searchParams.get("redirect_uri"))
+          return send(res, 400, "<h1>Missing redirect_uri</h1>");
+        return send(res, 200, approvePage(slack, url.searchParams));
+      }
+      if (url.pathname === "/oauth/v2/authorize/approve" && req.method === "POST") {
+        const form = new URLSearchParams(raw);
+        const redirect = new URL(form.get("redirect_uri"));
+        if (form.get("state")) redirect.searchParams.set("state", form.get("state"));
+        if (form.get("decision") !== "allow") {
+          redirect.searchParams.set("error", "access_denied");
+          return send(res, 302, "", { location: redirect.toString() });
+        }
+        const teamId = form.get("team");
+        slack.member(teamId, form.get("user"));
+        const code = slack.issueCode({
+          teamId,
+          userId: form.get("user"),
+          scopes: form.get("scope") ?? "",
+          userScopes: form.get("user_scope") ?? "",
+          redirectUri: form.get("redirect_uri"),
+        });
+        redirect.searchParams.set("code", code);
+        return send(res, 302, "", { location: redirect.toString() });
+      }
+
+      // ----- Web API
+      if (url.pathname.startsWith("/api/")) {
+        const method = url.pathname.slice(5);
+        const args = parseArgs(req, url, raw);
+        return send(res, 200, slack.callApi(method, args, bearer(req, args)));
+      }
+
+      // ----- Control API
+      if (url.pathname.startsWith("/_control/")) {
+        const body = raw ? JSON.parse(raw) : {};
+        return send(res, 200, await control(slack, req.method, url, body));
+      }
+
+      return send(res, 404, { ok: false, error: "not_found" });
+    } catch (error) {
+      return send(res, error.status ?? 500, { ok: false, error: error.message });
+    }
+  };
+}
+
+async function control(slack, method, url, body) {
+  const route = `${method} ${url.pathname.slice("/_control".length)}`;
+  const q = url.searchParams;
+  switch (route) {
+    case "GET /health":
+      return { ok: true };
+    case "GET /state":
+      return { ok: true, ...slack.publicState() };
+    case "POST /sign-in":
+      // Which workspace and member the approve screen preselects.
+      slack.member(body.team, body.user);
+      slack.state.defaultSignIn = { teamId: body.team, userId: body.user };
+      slack.save();
+      return { ok: true };
+    case "POST /dm": {
+      const event = slack.directMessage(body.team, body.user, body.text);
+      return { ok: true, ...(await slack.sendEvent(body.team, event)) };
+    }
+    case "POST /mention": {
+      const event = slack.mention(body.team, body.user, body.channel, body.text);
+      return { ok: true, ...(await slack.sendEvent(body.team, event)) };
+    }
+    case "POST /forged": {
+      // An event Slack did not sign: bad_signature (default), stale_timestamp or missing_signature.
+      const event =
+        body.kind === "mention"
+          ? slack.mention(body.team, body.user, body.channel, body.text)
+          : slack.directMessage(body.team, body.user, body.text);
+      return {
+        ok: true,
+        ...(await slack.sendEvent(body.team, event, {
+          signature: body.mode ?? "bad_signature",
+          requireInstall: false,
+        })),
+      };
+    }
+    case "POST /event":
+      return {
+        ok: true,
+        ...(await slack.sendEvent(body.team, body.event, {
+          signature: body.signature ?? "valid",
+          requireInstall: body.require_install !== false,
+        })),
+      };
+    case "POST /url-verification": {
+      const challenge = randomBytes(16).toString("hex");
+      const payload = JSON.stringify({
+        token: "fake-verification-token",
+        challenge,
+        type: "url_verification",
+      });
+      const delivery = await slack.deliver("url_verification", payload, "valid", 0);
+      return { ok: true, challenge, delivery };
+    }
+    case "POST /uninstall":
+      return { ok: true, ...(await slack.uninstall(body.team)) };
+    case "GET /posts":
+      return { ok: true, seq: slack.state.seq, posts: slack.posts(q) };
+    case "GET /calls":
+      return { ok: true, seq: slack.state.seq, calls: slack.calls(q) };
+    case "GET /events":
+      return { ok: true, seq: slack.state.seq, events: slack.since(slack.state.events, q) };
+    case "GET /deliveries":
+      return {
+        ok: true,
+        seq: slack.state.seq,
+        deliveries: slack
+          .since(slack.state.deliveries, q)
+          .filter((d) => !q.get("event_id") || d.eventId === q.get("event_id")),
+      };
+    case "POST /config":
+      // Lets a test point events elsewhere or change retry timing at run time.
+      if (body.events_url !== undefined) slack.config.eventsUrl = body.events_url;
+      if (body.retry_delays_ms !== undefined) slack.config.retryDelaysMs = body.retry_delays_ms;
+      return {
+        ok: true,
+        events_url: slack.config.eventsUrl,
+        retry_delays_ms: slack.config.retryDelaysMs,
+      };
+    case "POST /reset": {
+      // Clears the records; keeps installs and tokens unless {"installs": true}.
+      const keep = body.installs ? emptyState() : { ...slack.state };
+      slack.state = {
+        ...emptyState(),
+        installs: keep.installs,
+        tokens: keep.tokens,
+        seq: slack.state.seq,
+      };
+      slack.save();
+      return { ok: true, seq: slack.state.seq };
+    }
+    default:
+      throw httpError(404, `no control route ${route}`);
+  }
+}
+
+export function start(config = loadConfig()) {
+  const slack = new FakeSlack(config);
+  const handler = createHandler(slack);
+  const servers = [createHttpServer(handler).listen(config.port)];
+  if (config.tlsPort && config.tlsCert && config.tlsKey) {
+    servers.push(
+      createHttpsServer(
+        { cert: readFileSync(config.tlsCert), key: readFileSync(config.tlsKey) },
+        handler,
+      ).listen(config.tlsPort),
+    );
+  }
+  return { slack, servers };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const config = loadConfig();
+  start(config);
+  console.log(
+    JSON.stringify({
+      msg: "fake slack listening",
+      port: config.port,
+      tlsPort: config.tlsPort || null,
+      eventsUrl: config.eventsUrl,
+      workspaces: config.workspaces.map((w) => w.id),
+    }),
+  );
+}
