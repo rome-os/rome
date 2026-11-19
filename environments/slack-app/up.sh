@@ -233,6 +233,19 @@ for name in $([ "$CLOUD_ONLY" = 1 ] || echo a b); do
     "$STATE_DIR/$svc-cookies.json" >"$STATE_DIR/$svc-enroll.json"
 done
 
+# The verifier runs rome's import rules on the rome commit under test, so the
+# scratch checkout gets its dependencies. Install scripts are skipped: the
+# import rules need no native module.
+export ROME_DEPENDENCIES=installed
+if [ ! -x "$STATE_DIR/rome-src/node_modules/.bin/tsx" ]; then
+  log "installing rome's dependencies in the scratch checkout for the verifier"
+  if ! (cd "$STATE_DIR/rome-src" && pnpm install --frozen-lockfile --ignore-scripts --reporter=silent); then
+    log "pnpm install failed in $STATE_DIR/rome-src; env.json says so and the import rules cannot run"
+    ROME_DEPENDENCIES=failed
+  fi
+fi
+export ROME_CLOUD_BASE_REF="${ROME_CLOUD_BASE_REF:-origin/main}"
+
 # ------------------------------------------------------------ env.json
 node "$ENV_DIR/tools/write-env-json.mjs" \
   "$ENV_SHA" "$ROME_SHA" "$ROME_REF" "$ROME_CLOUD_SHA" "$ROME_CLOUD_REF" "$AGENT_MODEL" "$STATE_DIR" >"$STATE_DIR/env.json"

@@ -31,6 +31,8 @@ const instance = (name, port, guardian) => ({
   stop: [ctl, "stop", name],
   start: [ctl, "start", name],
   status: [ctl, "status", name],
+  // The instance route that lists recorded messages, once the product names it.
+  messages_path: null,
 });
 
 const fakeSlack = `http://127.0.0.1:${e.FAKE_SLACK_PORT}`;
@@ -45,6 +47,14 @@ console.log(
         rome_ref: romeRef,
         rome_cloud: cloudSha,
         rome_cloud_ref: cloudRef,
+      },
+      // The checkouts this run uses, at the commits above. rome has its
+      // dependencies installed, so its import rules run there.
+      repos: {
+        rome: join(stateDir, "rome-src"),
+        rome_cloud: join(stateDir, "rome-cloud-src"),
+        rome_cloud_base_ref: e.ROME_CLOUD_BASE_REF ?? "origin/main",
+        rome_dependencies: e.ROME_DEPENDENCIES ?? "not_installed",
       },
       agent: { model, pinned_by: "model-proxy", concierge: "on" },
       fake_slack: {
