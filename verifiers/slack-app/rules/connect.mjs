@@ -6,6 +6,10 @@ import { awaitReplies, tally } from "../lib/replies.mjs";
 
 export const CONCIERGE = "core:concierge";
 
+// The refusal must say why, in any words: the workspace is already connected
+// to another Rome.
+const TOLD_WHY = /already (connected|bound)|another Rome|workspace_bound/i;
+
 const SEEDED = /\bR\d+[A-Z]?-\d\d-[0-9a-f]{4}\b/;
 
 /**
@@ -109,8 +113,10 @@ export async function r3(ctx) {
   const problems = [];
   if (walk.outcome === "connected")
     problems.push("the second instance connected the same workspace");
-  else if (walk.outcome !== "refused" || !walk.reason)
-    problems.push(`the second connect ended ${walk.outcome} without saying why`);
+  else if (walk.outcome !== "refused" || !TOLD_WHY.test(walk.reason ?? ""))
+    problems.push(
+      `the second connect ended ${walk.outcome} without saying the workspace is already connected (${walk.reason ?? "no reason"})`,
+    );
   if (after !== before) problems.push("the second instance gained a connected account");
   if (!first.ok) problems.push(`a direct message to the first got ${first.replies} replies, not 1`);
   return problems.length

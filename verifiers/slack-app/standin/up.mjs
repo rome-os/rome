@@ -168,8 +168,7 @@ const env = {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
     },
-    connect: { kind: "slack_app", grant: "default" },
-    messagesPath: "/messages",
+    connect: { kind: "slack_app", grant: "bot" },
   })),
 };
 writeFileSync(join(workDir, "env.json"), `${JSON.stringify(env, null, 2)}\n`);

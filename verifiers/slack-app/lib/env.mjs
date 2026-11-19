@@ -29,8 +29,7 @@ export function loadEnv(path) {
     inst.headers ??= {};
     inst.connect ??= {};
     inst.connect.kind ??= "slack_app";
-    inst.connect.grant ??= "default";
-    inst.messagesPath ??= null;
+    inst.connect.grant ??= "bot";
   }
   env.stopSeconds ??= 3600;
   env.timeouts ??= {};
@@ -65,7 +64,11 @@ function fromEnvironment(raw) {
     model: raw.agent?.model,
     differences: raw.differences,
     stopSeconds: raw.shortened?.r6_stop_minutes ? raw.shortened.r6_stop_minutes * 60 : undefined,
-    repos: raw.repos,
+    repos: raw.repos && {
+      rome: raw.repos.rome,
+      romeCloud: raw.repos.romeCloud ?? raw.repos.rome_cloud,
+      romeCloudBase: raw.repos.romeCloudBase ?? raw.repos.rome_cloud_base,
+    },
     slack: { control: raw.fake_slack?.control },
     instances: (raw.instances ?? []).map((i) => ({
       name: i.name,
@@ -73,7 +76,6 @@ function fromEnvironment(raw) {
       headers: cookie(i.guardian_cookies_file),
       control: { stop: i.stop, start: i.start },
       connect: i.connect,
-      messagesPath: i.messages_path,
     })),
   };
 }

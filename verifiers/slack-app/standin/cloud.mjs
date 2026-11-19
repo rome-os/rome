@@ -86,23 +86,19 @@ export async function startCloud({
       } else {
         const team = exchange.team.id;
         const bound = bindings.get(team);
-        if (bound && bound !== from.instance && !breaks.has("R3")) {
-          back.searchParams.set("error", "workspace_taken");
-          back.searchParams.set(
-            "message",
-            "This Slack workspace is already connected to another Rome. Disconnect it there first.",
-          );
-        } else {
-          bindings.set(team, from.instance);
-          const handoff = rand();
-          handoffs.set(handoff, {
-            instance: from.instance,
-            team,
-            botToken: exchange.access_token,
-            botUserId: exchange.bot_user_id,
-          });
-          back.searchParams.set("handoff", handoff);
-        }
+        // Like the product, a bound workspace still returns a handoff, and
+        // the redeem refuses it.
+        const refused = Boolean(bound && bound !== from.instance && !breaks.has("R3"));
+        if (!refused) bindings.set(team, from.instance);
+        const handoff = rand();
+        handoffs.set(handoff, {
+          instance: from.instance,
+          team,
+          botToken: exchange.access_token,
+          botUserId: exchange.bot_user_id,
+          refused,
+        });
+        back.searchParams.set("handoff", handoff);
       }
       res.writeHead(302, { location: back.toString() });
       return res.end();
@@ -114,6 +110,12 @@ export async function startCloud({
       handoffs.delete(handoff);
       if (!h || h.instance !== instance || !authorized(req, instance))
         return send(res, 403, { error: "bad handoff" });
+      if (h.refused)
+        return send(res, 409, {
+          error: "workspace_bound",
+          message:
+            "This Slack workspace is already connected to another Rome. Disconnect Slack in the other Rome first, then connect it here.",
+        });
       return send(res, 200, { team: h.team, botToken: h.botToken, botUserId: h.botUserId });
     }
 

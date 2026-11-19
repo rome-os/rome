@@ -42,6 +42,9 @@ export function fakeSlack(base) {
     /** What the bot posted, oldest first, after `since`. */
     posts: async ({ team, channel, since }) =>
       (await call(`/posts?${query({ team, channel, since })}`)).posts,
+    /** Every delivery attempt of one event, with its status. */
+    deliveries: async (eventId) =>
+      (await call(`/deliveries?${query({ event_id: eventId })}`)).deliveries,
     /** Every Web API call after `since`, oldest first. */
     calls: async ({ team, method, since } = {}) =>
       (await call(`/calls?${query({ team, method, since })}`)).calls,

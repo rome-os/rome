@@ -63,6 +63,14 @@ export async function r7(ctx) {
   const evidence = {};
   const problems = [];
   let partial = null;
+  const readable = async (read) => {
+    try {
+      return await read();
+    } catch (err) {
+      partial ??= `a read of what Rome recorded failed: ${err.message}`;
+      return null;
+    }
+  };
 
   // Forged: 10 events with a bad signature, then one good message. Its reply
   // shows the path was open while the forged ones went by.
@@ -73,17 +81,16 @@ export async function r7(ctx) {
     const c = code("R7F", i);
     const sent = await ctx.slack.forged(ws.id, ws.guardian, ask(c));
     channel = sent.channel;
-    forged.push({ code: c, eventId: sent.eventId });
+    forged.push({ code: c, eventId: sent.eventId, status: sent.delivery?.status ?? null });
   }
   const control = await oneReply(ctx, ws, "R7C");
   const posts = await ctx.slack.posts({ team: ws.id, channel, since });
   const replied = forged.filter((f) => posts.some((p) => p.text?.includes(f.code)));
-  const recorded = await ctx.a.recordedMessages();
-  const recordedForged = recorded
-    ? forged.filter((f) => recorded.some((m) => m.text?.includes(f.code)))
-    : null;
+  const recorded = await readable(() => ctx.a.recordedFrom(ws.id, ws.guardian));
+  const recordedForged = recorded && forged.filter((f) => recorded.some((b) => b.includes(f.code)));
   evidence.forged = {
     sent: forged.map((f) => f.eventId),
+    deliveryStatuses: forged.map((f) => f.status),
     replied: replied.map((f) => f.eventId),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
     goodMessageAfter: { eventId: control.eventId, replies: control.replies },
@@ -93,10 +100,10 @@ export async function r7(ctx) {
   if (replied.length) problems.push(`${replied.length} of 10 forged events got a reply`);
   if (recordedForged?.length)
     problems.push(`${recordedForged.length} of 10 forged events were recorded`);
-  if (!recordedForged) partial = "the instance offers no route to read recorded messages";
 
   // Misrouted: R4's 20 messages came from workspace A. None may reach the
-  // instance bound to workspace B.
+  // instance bound to workspace B: no Slack call from it about them, no
+  // account of workspace A observed there, and nothing recorded from A's guardian.
   if (!ctx.bound.b || !ctx.fromA) {
     evidence.misrouted = "not checked: the second instance has no connection, or R4 did not run";
     partial ??= "the misrouting half had nothing to check";
@@ -105,25 +112,30 @@ export async function r7(ctx) {
     const aboutA = callsByB.filter((c) =>
       ctx.fromA.codes.some((k) => JSON.stringify(c.args ?? {}).includes(k)),
     );
-    const recordedB = await ctx.b.recordedMessages();
-    const reachedB = recordedB
-      ? ctx.fromA.codes.filter((k) => recordedB.some((m) => m.text?.includes(k)))
-      : null;
+    const accountsB = await readable(() => ctx.b.slackAccounts());
+    const fromAOnB = accountsB?.filter((id) => id.startsWith(`${ws.id}/`));
+    const recordedB = await readable(() => ctx.b.recordedFrom(ws.id, ws.guardian));
+    const reachedB =
+      recordedB && ctx.fromA.codes.filter((k) => recordedB.some((b) => b.includes(k)));
     evidence.misrouted = {
       fromWorkspace: ws.id,
       events: ctx.fromA.eventIds,
       slackCallsBySecondInstanceAboutThem: aboutA.length,
+      accountsOfWorkspaceAOnSecond: fromAOnB ?? "not readable",
       recordedBySecondInstance: reachedB?.length ?? "not readable",
     };
     if (aboutA.length)
       problems.push(
         `the instance bound to ${ctx.wsB.id} made ${aboutA.length} Slack calls about ${ws.id}'s messages`,
       );
+    if (fromAOnB?.length)
+      problems.push(
+        `the instance bound to ${ctx.wsB.id} observed ${fromAOnB.length} account(s) of ${ws.id}`,
+      );
     if (reachedB?.length)
       problems.push(
         `${reachedB.length} of 20 events from ${ws.id} reached the instance bound to ${ctx.wsB.id}`,
       );
-    if (!reachedB) partial ??= "the instance offers no route to read recorded messages";
   }
 
   if (problems.length) return { result: "fail", reason: problems.join("; "), evidence };

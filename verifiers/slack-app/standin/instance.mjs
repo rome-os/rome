@@ -24,7 +24,7 @@ const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
 const server = await serve(async (req, res, url) => {
   const p = url.pathname;
-  const setupStart = p.match(/^\/api\/connections\/slack_app\/grants\/default\/setup$/);
+  const setupStart = p.match(/^\/api\/connections\/slack_app\/grants\/bot\/setup$/);
   if (setupStart && req.method === "POST") {
     const cid = rand();
     const state = rand();
@@ -43,7 +43,7 @@ const server = await serve(async (req, res, url) => {
       const to = new URL("/slack/connect", CLOUD);
       to.searchParams.set("instance", NAME);
       to.searchParams.set("state", state);
-      to.searchParams.set("return", `http://127.0.0.1:${PORT}/connections/return`);
+      to.searchParams.set("return", `http://127.0.0.1:${PORT}/callback`);
       setup.state = { status: "awaiting-redirect", url: to.toString() };
     }
     setups.set(cid, setup);
@@ -68,7 +68,8 @@ const server = await serve(async (req, res, url) => {
       body: JSON.stringify({ instance: NAME, handoff: body.handoff }),
     });
     if (!got.ok) {
-      setup.state = { status: "failed", reason: `redeem: ${got.status}` };
+      const why = await got.json().catch(() => ({}));
+      setup.state = { status: "failed", reason: why.message ?? `redeem: ${got.status}` };
       return send(res, 200, { matched: true, state: setup.state });
     }
     const grant = await got.json();
@@ -85,7 +86,31 @@ const server = await serve(async (req, res, url) => {
     return send(res, 200, { matched: true, state: setup.state });
   }
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
-  if (p === "/api/messages") return send(res, 200, { messages: db.messages });
+  // The People routes the verifier reads what Rome recorded through: one
+  // person per Slack member, each with one account.
+  if (p === "/api/people") {
+    const ids = [...new Set(db.messages.map((m) => `${m.team}/${m.user}`))];
+    return send(res, 200, { people: ids.map((id) => ({ id: `p_${id.replace("/", "_")}` })) });
+  }
+  const timeline = p.match(/^\/api\/people\/([\w-]+)\/messages$/);
+  if (timeline) {
+    const who = url.searchParams.get("channelUserId");
+    if (
+      url.searchParams.get("channel") !== "slack_app" ||
+      timeline[1] !== `p_${who.replace("/", "_")}`
+    )
+      return send(res, 400, { error: "That account is not linked to this person" });
+    const entries = db.messages
+      .filter((m) => `${m.team}/${m.user}` === who)
+      .map((m) => ({ body: m.text, direction: "inbound" }))
+      .reverse();
+    return send(res, 200, { entries, nextCursor: null });
+  }
+  if (p === "/api/accounts") {
+    const ids = [...new Set(db.messages.map((m) => `${m.team}/${m.user}`))];
+    const accounts = ids.map((channelUserId) => ({ channel: "slack_app", channelUserId }));
+    return send(res, 200, { accounts, nextCursor: null });
+  }
   return send(res, 404, { error: "not found" });
 }, Number(PORT));
 
@@ -121,6 +146,7 @@ async function drainOnce() {
     db.messages.push({
       eventId: payload.event_id,
       team: payload.team_id,
+      user: ev.user,
       channel: ev.channel,
       text: ev.text,
     });

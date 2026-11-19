@@ -7,6 +7,9 @@ import { follow, forms, json, sleep } from "./http.mjs";
 
 const run = promisify(execFile);
 
+/** The kind of connection, and the channel Rome records its accounts under. */
+const SLACK_KIND = "slack_app";
+
 /** Wraps instance `inst` from env.json. */
 export function instance(inst, slackOrigin) {
   const api = inst.api.replace(/\/$/, "");
@@ -132,14 +135,45 @@ export function instance(inst, slackOrigin) {
     },
 
     /**
-     * Messages Rome recorded from Slack, or null when the instance offers no
-     * route to read them (`messagesPath` unset in env.json).
+     * The bodies of the messages Rome recorded from one Slack member, read
+     * from the timeline of the person linked to them. Empty when no person
+     * holds that account, since Rome then recorded nothing from it.
      */
-    async recordedMessages() {
-      if (!inst.messagesPath) return null;
-      const res = await call(inst.messagesPath);
-      if (!res.ok) throw new Error(`messages on ${inst.name}: ${res.status}`);
-      return res.data.messages;
+    async recordedFrom(team, user) {
+      const people = await call("/people");
+      if (!people.ok) throw new Error(`people on ${inst.name}: ${people.status}`);
+      const channelUserId = `${team}/${user}`;
+      for (const person of people.data.people ?? []) {
+        const bodies = [];
+        let cursor = "";
+        for (let page = 0; page < 50; page++) {
+          const q = new URLSearchParams({ channel: SLACK_KIND, channelUserId, limit: "300" });
+          if (cursor) q.set("cursor", cursor);
+          const res = await call(`/people/${encodeURIComponent(person.id)}/messages?${q}`);
+          if (!res.ok) break;
+          bodies.push(...res.data.entries.map((m) => m.body ?? ""));
+          cursor = res.data.nextCursor;
+          if (!cursor) return bodies;
+        }
+        if (bodies.length) return bodies;
+      }
+      return [];
+    },
+
+    /** The `channelUserId` of every Slack account this instance has observed. */
+    async slackAccounts() {
+      const ids = [];
+      let cursor = "";
+      for (let page = 0; page < 50; page++) {
+        const q = new URLSearchParams({ channel: SLACK_KIND });
+        if (cursor) q.set("cursor", cursor);
+        const res = await call(`/accounts?${q}`);
+        if (!res.ok) throw new Error(`accounts on ${inst.name}: ${res.status}`);
+        ids.push(...res.data.accounts.map((a) => a.channelUserId));
+        cursor = res.data.nextCursor;
+        if (!cursor) break;
+      }
+      return ids;
     },
 
     stop: () => control("stop"),

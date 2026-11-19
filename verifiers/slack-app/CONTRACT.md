@@ -23,8 +23,7 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
       "api": "http://host:port/api",
       "headers": { "cookie": "..." },  // assumed: how the verifier signs in as the guardian
       "control": { "stop": "<URL to POST, or a shell command>", "start": "..." },
-      "connect": { "kind": "slack_app", "grant": "default" },   // grant name assumed
-      "messagesPath": "/..."           // assumed: see "Recorded messages"
+      "connect": { "kind": "slack_app", "grant": "bot" }
     }
   ]
 }
@@ -46,12 +45,12 @@ The routes the dashboard uses today, relative to `api`:
 | `GET /setups/{cid}` | Polls the setup's state: `awaiting-input` (a form, which R1 counts and does not fill), `awaiting-redirect` (a URL the verifier walks as a browser), `presenting`, `done`, `failed`. |
 | `POST /setups/return {state, handoff?, error?, message?}` | Hands back the query of the URL the sign-in returned the browser to, the way the dashboard's callback page does. The verifier stops the browser at the first URL on the instance's origin that carries `state`. |
 | `GET /connected-accounts` | Each connected account with its `agent` and `connection`. R1 wants `agent` to be `core:concierge`. |
+| `GET /people`, then `GET /people/{id}/messages?channel=slack_app&channelUserId={team}/{user}` | The messages Rome recorded from one Slack member, as `{entries: [{body}], nextCursor}`. The verifier tries each person until one holds that account. |
+| `GET /accounts?channel=slack_app` | Every Slack account the instance has observed, as `{accounts: [{channelUserId}], nextCursor}`. A dropped event adds none. |
 
-R3 expects a refused second connect to end the setup `failed` with a `reason` the guardian can read.
+R3 expects a refused second connect to end the setup `failed` with a reason that says the workspace is already connected, in any words. The product refuses on redeem, after the browser returns with a handoff.
 
-### Recorded messages
-
-*Assumed*, and the one route the product must add or name: `GET {messagesPath}` answers `{messages: [{text, ...}]}` with every message Rome recorded from Slack. R7 needs it to prove a forged or misrouted event was not recorded. Without it, R7 reports "not checked" when it sees no failure.
+R7 reads what Rome recorded through the People routes above: a forged event must leave nothing in the guardian's timeline, and the instance bound to workspace B must hold no account of workspace A and nothing from A's guardian. If a read fails, R7 reports "not checked" unless it already saw a failure.
 
 ## Stop and start
 
