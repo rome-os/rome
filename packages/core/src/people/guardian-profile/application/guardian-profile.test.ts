@@ -20,25 +20,25 @@ const state = rs.hoisted(() => ({ memoryDir: "" }));
 
 // The profile memory root is a temp dir per test, so the path helpers resolve
 // against it rather than against the real profile dir.
-rs.mock("../../profile-memory.js", () => ({
+rs.mock("../../../profile-memory.js", () => ({
   ensureProfileMemoryInitialized: rs.fn(() => state.memoryDir),
   getRelationshipDir: rs.fn(() => `${state.memoryDir}/relationship`),
   getGuardianProfileFile: rs.fn(() => `${state.memoryDir}/relationship/GUARDIAN.md`),
   GUARDIAN_PROFILE_PATH: "memory/relationship/GUARDIAN.md",
 }));
 
-import { persons, settings } from "../../db/schema.js";
-import { SettingsRepository } from "../../db/repositories/settings.js";
-import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../instance/timezone.js";
-import { createTestDb } from "../../test/db.js";
-import { guardianAuth } from "../../db/schema.js";
+import { persons, settings } from "../../../db/schema.js";
+import { SettingsRepository } from "../../../db/repositories/settings.js";
+import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../../instance/timezone.js";
+import { createTestDb } from "../../../test/db.js";
+import { guardianAuth } from "../../../db/schema.js";
 import {
   applyGuardianProfile,
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
 } from "./guardian-profile.js";
-import { AGENT_PRESETS } from "../../lib/agent-presets.js";
+import { AGENT_PRESETS } from "../../../lib/agent-presets.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());

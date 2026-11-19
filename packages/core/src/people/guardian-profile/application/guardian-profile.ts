@@ -2,19 +2,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import type { DrizzleDb } from "../../db/index.js";
-import { guardianAuth, persons } from "../../db/schema.js";
-import { pickRandomAgentPreset } from "../../lib/agent-presets.js";
+import type { DrizzleDb } from "../../../db/index.js";
+import { guardianAuth, persons } from "../../../db/schema.js";
+import { pickRandomAgentPreset } from "../../../lib/agent-presets.js";
 import { generatePersonSlug } from "@rome/api-types/persons";
-import type { SettingsRepository } from "../../db/repositories/settings.js";
-import { createLogger } from "../../logger.js";
+import type { SettingsRepository } from "../../../db/repositories/settings.js";
+import { createLogger } from "../../../logger.js";
 import {
   ensureProfileMemoryInitialized,
   getGuardianProfileFile,
   getRelationshipDir,
   GUARDIAN_PROFILE_PATH,
-} from "../../profile-memory.js";
-import { applyGuardianTimezoneWrite } from "../../instance/timezone.js";
+} from "../../../profile-memory.js";
+import { applyGuardianTimezoneWrite } from "../../../instance/timezone.js";
 
 const log = createLogger("guardian-profile");
 
