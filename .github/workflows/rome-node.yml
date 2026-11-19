@@ -85,7 +85,9 @@ jobs:
           if (typeof runLanNode !== "function" || process.getuid() === 0) process.exit(1)'
 
   publish-image:
-    if: github.repository == 'rome-os/rome' && github.event_name == 'workflow_dispatch' && inputs.publish_image
+    if: >-
+      github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.publish_image
     needs: image
     runs-on: ubuntu-latest
     timeout-minutes: 15

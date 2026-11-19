@@ -137,13 +137,15 @@ archive on the Docker host and start it with `docker compose up --pull never`.
 
 ### Release the image
 
-Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) at the
-reviewed branch or tag with **Publish the Docker image to GitHub Container
+Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
+`main` with **Publish the Docker image to GitHub Container
 Registry** selected. The workflow checks both architectures before publishing
 `latest` with the source commit recorded in the image.
 
 The first publish creates a private package. A package admin sets it to
 public so Docker hosts can pull the image without credentials.
+Keep the installer and Gateway protocol compatible with deployed instances
+that use `latest`.
 
 ### Connect directly to a self-hosted instance
 
