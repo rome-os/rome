@@ -433,14 +433,18 @@ export class FakeSlack {
     };
   }
 
-  /** The conversations `info`'s token can see: every group (the fake keeps no
-   *  bot membership), and the direct messages with the bot, or for a user
-   *  token the user's own. Each as {type, channel} in Slack's shape. */
+  /** The conversations `info`'s token can see: every public group, the
+   *  private groups its bot or member is in, and the direct messages with the
+   *  bot, or for a user token the user's own. Each as {type, channel} in
+   *  Slack's shape. */
   conversationsOf(info) {
     const w = this.workspace(info.teamId);
-    const groups = (w.channels ?? []).map((c) => {
+    const groups = (w.channels ?? []).flatMap((c) => {
       const isPrivate = Boolean(c.is_private) || c.id.startsWith("G");
       const members = c.members ?? w.members.map((m) => m.id);
+      const isMember = info.kind === "bot" ? c.bot_member !== false : members.includes(info.userId);
+      // A private group is invisible to a token whose bot or member is not in it.
+      if (isPrivate && !isMember) return [];
       return {
         type: isPrivate ? "private_channel" : "public_channel",
         channel: {
@@ -451,7 +455,7 @@ export class FakeSlack {
           is_im: false,
           is_private: isPrivate,
           is_archived: false,
-          is_member: info.kind === "bot" ? c.bot_member !== false : members.includes(info.userId),
+          is_member: isMember,
           num_members: members.length,
         },
       };

@@ -724,3 +724,21 @@ test("the history limit holds per app: another app's read leaves Rome's quota al
   assert.equal(await read(other.bot_token), "ratelimited");
   assert.equal(await read(token), "ratelimited");
 });
+
+test("a private group is listed and described only to a token whose member is in it", async () => {
+  const C = "TC0000CCCC";
+  const scopes = "channels:read,groups:read";
+  const owner = (await install(C, "UC0000OWNR1", "chat:write", scopes)).authed_user.access_token;
+  const hank = (await install(C, "UC0000HANK1", "chat:write", scopes)).authed_user.access_token;
+  const listed = async (t) =>
+    (await api("conversations.list", { types: "public_channel,private_channel" }, t)).channels.map(
+      (c) => c.id,
+    );
+  assert.deepEqual(await listed(owner), ["CC0000GENRL", "GC0000BORD1"]);
+  assert.deepEqual(await listed(hank), ["CC0000GENRL"]);
+  assert.equal((await api("conversations.info", { channel: "GC0000BORD1" }, owner)).ok, true);
+  assert.equal(
+    (await api("conversations.info", { channel: "GC0000BORD1" }, hank)).error,
+    "channel_not_found",
+  );
+});
