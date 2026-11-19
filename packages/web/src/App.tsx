@@ -14,6 +14,7 @@ import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
 import FreePage, { HomeRedirect, MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
+import { FeatureRoute } from "./components/feature-gate";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
 // the shell stay eager. Every other route is split into its own chunk so the
@@ -174,11 +175,11 @@ export default function App() {
                 roster's: a person id is a slug of the display name the guardian
                 gave them, so `directory` is an id they can mint, and a static
                 route beside it would leave such a person unreachable. */}
-            <Route path="/people" element={<PeopleIndexRedirect />} />
-            <Route path="/people/latest" element={<PeopleIndexRedirect />} />
-            <Route path="/people/directory" element={<PeoplePage />} />
-            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/envoys/*" element={<EnvoysPage />} />
+            <Route path="/people" element={<FeatureRoute feature="people"><PeopleIndexRedirect /></FeatureRoute>} />
+            <Route path="/people/latest" element={<FeatureRoute feature="people"><PeopleIndexRedirect /></FeatureRoute>} />
+            <Route path="/people/directory" element={<FeatureRoute feature="people"><PeoplePage /></FeatureRoute>} />
+            <Route path="/people/person/:personId" element={<FeatureRoute feature="people"><PersonDetailPage /></FeatureRoute>} />
+            <Route path="/envoys/*" element={<FeatureRoute feature="envoys"><EnvoysPage /></FeatureRoute>} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
@@ -193,7 +194,7 @@ export default function App() {
                 react-router's ranking, so inbox links open this host page
                 instead of the (non-existent) embedded app frontend. Deep links
                 under /apps/inbox/* collapse onto the dashboard. */}
-            <Route path="/apps/inbox" element={<InboxPage />} />
+            <Route path="/apps/inbox" element={<FeatureRoute feature="inbox"><InboxPage /></FeatureRoute>} />
             <Route path="/apps/inbox/*" element={<Navigate to="/apps/inbox" replace />} />
             {/* Deliberately OUTSIDE /apps/:appId/* — AuthGate classifies
                 /apps/<segment> via getRoutedAppId, so a details route in that

@@ -58,7 +58,7 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 import { randomUUID } from "@/lib/random-uuid";
-import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
+import { type BuiltinNavEntry, useBuiltinNav } from "./builtin-nav";
 
 function SearchPageIcon({ Icon }: { Icon: BuiltinNavEntry["Icon"] }) {
   return (
@@ -338,6 +338,7 @@ export interface ChatSearchDialogProps {
 export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) {
   const { t } = useTranslation("common");
   const { t: tChat } = useTranslation("chat");
+  const builtinNav = useBuiltinNav();
   const navigate = useNavigate();
   const location = useLocation();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -482,8 +483,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
   const normalizedQuery = normalizeSearchText(searchQuery);
   const matchingPageEntries = useMemo(
-    () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
-    [normalizedQuery, t],
+    () => matchingPages(builtinNav, (page) => t(page.labelKey), normalizedQuery),
+    [builtinNav, normalizedQuery, t],
   );
   // New chat is offered when the query names it, as a command beside the
   // pages. It is the palette's way to a common chat, besides Cmd+Shift+O.

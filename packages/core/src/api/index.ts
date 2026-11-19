@@ -50,6 +50,7 @@ import { appKeysRoutes } from "./routes/app-keys.js";
 import { vaultRoutes } from "./routes/vault.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
+import { featuresRoutes } from "./routes/features.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
@@ -165,6 +166,7 @@ export function buildApp(
   api.route("/", healthRoutes(deps));
   api.route("/", uptimeRoutes());
   api.route("/", buildInfoRoutes(deps));
+  api.route("/", featuresRoutes());
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
   api.route("/", wechatAppRoutes(deps));

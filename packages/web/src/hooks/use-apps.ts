@@ -1,6 +1,9 @@
+import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { AppListResponse, InstalledAppCard, SpecSource } from "@rome/api-types/apps";
+import { APP_FEATURES } from "@rome/api-types/features";
+import { useFeatureStates } from "@/hooks/use-features";
 import { fetchJson } from "@/lib/fetch-json";
 import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
 
@@ -44,12 +47,21 @@ export function useAppsList(options: { enabled?: boolean } = {}): AppsListResult
       }),
   });
 
+  // An app that is a hidden feature is left out here, so no list of apps offers
+  // it. One whose feature is not answered for yet waits with it.
+  const featureState = useFeatureStates();
+  const allApps = list.data?.apps;
+  const apps = useMemo(
+    () => allApps?.filter((app) => featureState(APP_FEATURES[app.id]) === "shown") ?? null,
+    [allApps, featureState],
+  );
+
   // Keep the last successful list on a background refetch error (the React Query
   // default) rather than blanking the page: a transient failure on a focus
   // refetch shouldn't wipe usable cards. Staleness is signaled by surfacing
   // `error` (consumers show a load-error banner above the still-rendered cards).
   return {
-    apps: list.data?.apps ?? null,
+    apps,
     error: list.error,
     // A background refresh must not replace usable app cards with a loading
     // state. This flag is only for consumers that have no catalog yet (for

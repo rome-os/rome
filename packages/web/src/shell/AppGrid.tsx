@@ -35,7 +35,7 @@ import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isChatPath } from "@/lib/chat-session";
-import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
+import { type BuiltinNavEntry, useBuiltinNav } from "./builtin-nav";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
   ACTIVE_CLASS,
@@ -174,6 +174,7 @@ interface AppGridProps {
 export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
+  const builtinNav = useBuiltinNav();
   const location = useLocation();
   const navigate = useNavigate();
   const [pins, setPins] = useState<PinnedEntry[]>(() =>
@@ -394,7 +395,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     );
   };
 
-  const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
+  const builtinMap = new Map(builtinNav.map((b) => [b.id, b]));
 
   const renderPin = (pin: PinnedEntry): React.ReactNode => {
     if (pin.type === "builtin") {

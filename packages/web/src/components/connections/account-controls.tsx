@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { FeatureGate } from "@/components/feature-gate";
 import {
   List,
   ListRow,
@@ -154,37 +155,45 @@ function AddAccount({
 }
 
 /** The account's agent, read-only. Envoys is where it changes, since that is
- *  where the confirmation and the one-account-per-platform warning live. */
+ *  where the confirmation and the one-account-per-platform warning live. While
+ *  Envoys is hidden the row only shows the agent. */
 function AccountAgentRow({ card }: { card: ConnectionCard }) {
   const { t } = useTranslation("settings");
   const agent = card.agent === null ? null : canonicalAgent(card.agent);
+  const summary = (
+    <>
+      <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <ListRowContent>
+        <ListRowTitle className="truncate">
+          {agent ? (
+            <span className="font-mono">{agentLabel(agent)}</span>
+          ) : (
+            t("connections.accounts.noAgentTitle")
+          )}
+        </ListRowTitle>
+        <ListRowDescription>
+          {agent
+            ? t(
+                card.link === "delegate"
+                  ? "connections.accounts.agentAnswersForYou"
+                  : "connections.accounts.agentSpeaksAs",
+              )
+            : t("connections.accounts.agentNone")}
+        </ListRowDescription>
+      </ListRowContent>
+    </>
+  );
   return (
-    <ListRow asChild interactive>
-      <Link to={agent ? `/envoys/${encodeURIComponent(agent)}/settings` : "/envoys"}>
-        <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <ListRowContent>
-          <ListRowTitle className="truncate">
-            {agent ? (
-              <span className="font-mono">{agentLabel(agent)}</span>
-            ) : (
-              t("connections.accounts.noAgentTitle")
-            )}
-          </ListRowTitle>
-          <ListRowDescription>
-            {agent
-              ? t(
-                  card.link === "delegate"
-                    ? "connections.accounts.agentAnswersForYou"
-                    : "connections.accounts.agentSpeaksAs",
-                )
-              : t("connections.accounts.agentNone")}
-          </ListRowDescription>
-        </ListRowContent>
-        <span className="sr-only shrink-0 text-aux text-muted-foreground sm:not-sr-only">
-          {t("connections.accounts.changeInEnvoys")}
-        </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      </Link>
-    </ListRow>
+    <FeatureGate feature="envoys" fallback={<ListRow>{summary}</ListRow>}>
+      <ListRow asChild interactive>
+        <Link to={agent ? `/envoys/${encodeURIComponent(agent)}/settings` : "/envoys"}>
+          {summary}
+          <span className="sr-only shrink-0 text-aux text-muted-foreground sm:not-sr-only">
+            {t("connections.accounts.changeInEnvoys")}
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </Link>
+      </ListRow>
+    </FeatureGate>
   );
 }

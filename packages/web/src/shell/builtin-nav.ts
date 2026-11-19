@@ -8,7 +8,9 @@ import {
   Pencil2Icon,
 } from "@radix-ui/react-icons";
 import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
-import type { ComponentType } from "react";
+import { type ComponentType, useMemo } from "react";
+import type { GatedFeature } from "@rome/api-types/features";
+import { useFeatureStates } from "@/hooks/use-features";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
  * titles and the Cmd+K switcher all read this list, so a new page shows up in
@@ -21,6 +23,9 @@ export interface BuiltinNavEntry {
   sidebarIconMotion?: "tilt";
   /** Extra search terms, matched alongside the translated label and the id. */
   aliases?: readonly string[];
+  /** The gated feature this page belongs to. It is left out of navigation
+   *  while the feature is hidden. */
+  feature?: GatedFeature;
 }
 
 export const APP_NAV: readonly BuiltinNavEntry[] = [
@@ -39,11 +44,11 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     sidebarIconMotion: "tilt",
   },
   { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
-  { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
+  { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon, feature: "people" },
   // Off the sidebar until the guardian pins it: main answers assistants, so
   // their chats are read now and then rather than watched.
   { id: "assistants", href: "/assistants", labelKey: "nav.assistants", Icon: Bot },
-  { id: "envoys", href: "/envoys", labelKey: "nav.envoys", Icon: Megaphone },
+  { id: "envoys", href: "/envoys", labelKey: "nav.envoys", Icon: Megaphone, feature: "envoys" },
   { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
   {
     // One page for sessions and the event log. It keeps the Sessions address,
@@ -74,3 +79,13 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
   },
   { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },
 ] as const;
+
+/** The destinations navigation offers: APP_NAV without the pages of hidden
+ *  features. A page whose feature has not been answered for yet waits. */
+export function useBuiltinNav(): readonly BuiltinNavEntry[] {
+  const featureState = useFeatureStates();
+  return useMemo(
+    () => APP_NAV.filter((entry) => featureState(entry.feature) === "shown"),
+    [featureState],
+  );
+}
