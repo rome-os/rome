@@ -1122,6 +1122,37 @@ const API_METHODS = {
     return user ? { ok: true, user } : { ok: false, error: "user_not_found" };
   },
 
+  // auth.test names a bot by its bot id, and bots.info names the app.
+  "bots.info"(args, _token, info) {
+    const own = this.botIds(info.teamId);
+    if (args.bot === own.botId) {
+      return {
+        ok: true,
+        bot: {
+          id: own.botId,
+          deleted: false,
+          name: "rome",
+          app_id: this.config.appId,
+          user_id: own.botUserId,
+        },
+      };
+    }
+    const other = Object.values(this.state.otherApps).find(
+      (a) => a.teamId === info.teamId && a.botId === args.bot,
+    );
+    if (!other) return { ok: false, error: "bot_not_found" };
+    return {
+      ok: true,
+      bot: {
+        id: other.botId,
+        deleted: false,
+        name: other.botName,
+        app_id: other.appId,
+        user_id: other.botUserId,
+      },
+    };
+  },
+
   "users.list"(args, _token, info) {
     const w = this.workspace(info.teamId);
     const ids = [this.botIds(info.teamId).botUserId, ...w.members.map((m) => m.id)];
@@ -1263,6 +1294,7 @@ function splitScopes(scopes) {
 const METHOD_SCOPES = {
   "chat.postMessage": "chat:write",
   "conversations.open": "im:write",
+  "bots.info": "users:read",
   "users.info": "users:read",
   "users.list": "users:read",
   "reactions.add": "reactions:write",

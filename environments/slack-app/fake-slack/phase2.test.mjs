@@ -568,6 +568,14 @@ test("older Slack apps an upgrade finds: a Socket Mode bot and Rome Cloud's OAut
   // Its own identity, distinct from Rome's app.
   const who = await api("auth.test", {}, bot.bot_token);
   assert.deepEqual([who.user_id, who.bot_id, who.user], [bot.bot_user_id, bot.bot_id, "rome-bot"]);
+  // auth.test names no app, so a bot reads its app from bots.info, by GET.
+  const named = await (
+    await fetch(`${base}/api/bots.info?bot=${who.bot_id}`, {
+      headers: { authorization: `Bearer ${bot.bot_token}` },
+    })
+  ).json();
+  assert.deepEqual([named.bot.app_id, named.bot.user_id], [bot.app_id, bot.bot_user_id]);
+  assert.equal((await api("bots.info", { bot: "BNOPE" }, bot.bot_token)).error, "bot_not_found");
   // An app-level token opens Socket Mode and nothing else; a bot token cannot open it.
   assert.equal(
     (await api("apps.connections.open", {}, bot.bot_token)).error,

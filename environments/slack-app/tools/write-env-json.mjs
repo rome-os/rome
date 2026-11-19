@@ -22,6 +22,13 @@ const enroll = (name) => {
     return null;
   }
 };
+const readState = (file) => {
+  try {
+    return JSON.parse(readFileSync(join(stateDir, file), "utf8"));
+  } catch {
+    return null;
+  }
+};
 const instance = (name, port, guardian) => ({
   name,
   url: `http://127.0.0.1:${port}`,
@@ -42,7 +49,16 @@ const instance = (name, port, guardian) => ({
     // Whether /run/rome/slack-oauth-token exists in the instance, and the last
     // 6 characters of the bot and user tokens it holds.
     token_file: [ctl, "token-file", name],
+    // R10: writes the older slack_bot and slack connections into the stopped
+    // instance, starts it again, links the bot to the Concierge and checks
+    // both came back. Prints old_connections below; exit 0 when every check
+    // holds. up.sh --old-connections <name> runs it before this file.
+    old_connections: [ctl, "old-connections", name],
   },
+  old_connections_file: join(stateDir, `${name}-old-connections.json`),
+  // What old_connections printed last, or null before it ran: per kind its
+  // connection_id, account_id, app_id, bot_user_id and checks.
+  old_connections: readState(`${name}-old-connections.json`),
   // The instance's own listing of recent action executions (name, status),
   // newest first; the guardian's cookies sign it. ?actionName=&limit=
   action_executions: `http://127.0.0.1:${port}/api/action-executions`,
@@ -125,6 +141,32 @@ console.log(
         query: [ctl, "cloud-query"],
       },
       relay: { url_inside_network: "http://relay:8787" },
+      // R10. The older connections, as an upgrade leaves them, and how each
+      // sends. Routes are the instance's, signed with the guardian's cookies.
+      old_connections: {
+        slack_bot: {
+          // Rome hears the bot over Socket Mode. POST this with
+          // {app_id, event: {type: "message", channel_type: "im", channel:
+          // <the member's im_channels entry>, user, text, ts}} and the
+          // Concierge answers through chat.postMessage with the bot's token;
+          // control/posts?team= shows it with the bot's appId.
+          hear: `${fakeSlack}/_control/socket-event`,
+          sockets: `${fakeSlack}/_control/sockets`,
+          // A new one: setup of the placeholder's bot grant.
+          connect_route: "POST /api/connections/slack_bot/grants/bot/setup",
+        },
+        slack: {
+          // Rome Cloud's earlier OAuth app. Nothing in core sends through
+          // it; the connector's connector_proxy action (toolkit slack) reads
+          // its tokens from the token file, so a Concierge turn that posts
+          // through the connector sends with them.
+          token_file: "control.token_file of the instance",
+          connect_route: "GET or POST /api/oauth/slack/start",
+        },
+        // The Connect picker: placeholders are the entries with id null.
+        picker_route: "GET /api/connections",
+        restart: "control.stop then control.start of the instance; its data stays",
+      },
       instances: [
         instance("rome-a", e.ROME_A_PORT, "guardian-a@slackenv.test"),
         instance("rome-b", e.ROME_B_PORT, "guardian-b@slackenv.test"),

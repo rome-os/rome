@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Starts the Slack app test environment and writes .state/env.json.
 #
-#   environments/slack-app/up.sh [--rome <ref>] [--rome-cloud <ref>]
+#   environments/slack-app/up.sh [--rome <ref>] [--rome-cloud <ref>] [--old-connections rome-a|rome-b]
 #
 # --rome        the rome commit the instances run (default origin/main)
 # --rome-cloud  the rome-cloud commit Rome Cloud and the relay run (default origin/main)
 # --cloud-only  start Rome Cloud, the relay and the fake Slack, without instances
+# --old-connections  give that instance the older slack_bot and slack
+#               connections an upgrade leaves (ctl.sh old-connections), for R10
 #
 # Rome Cloud's checkout is found at $ROME_CLOUD_DIR, else next to this rome
 # checkout. The model credential comes from $SLACKENV_ANTHROPIC_API_KEY or
@@ -21,6 +23,7 @@ STATE_DIR="$ENV_DIR/.state"
 ROME_REF=origin/main
 ROME_CLOUD_REF=origin/main
 CLOUD_ONLY=0
+OLD_CONNECTIONS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,8 +39,17 @@ while [ $# -gt 0 ]; do
       CLOUD_ONLY=1
       shift
       ;;
+    --old-connections)
+      case "${2:-}" in rome-a | rome-b) ;; *)
+        echo "--old-connections takes rome-a or rome-b" >&2
+        exit 2
+        ;;
+      esac
+      OLD_CONNECTIONS="$2"
+      shift 2
+      ;;
     -h | --help)
-      sed -n '2,15p' "$0"
+      sed -n '2,18p' "$0"
       exit 0
       ;;
     *)
@@ -251,6 +263,14 @@ for name in $([ "$CLOUD_ONLY" = 1 ] || echo a b); do
   node "$ENV_DIR/tools/enroll.mjs" "$CLOUD" "http://127.0.0.1:${!port_var}" "guardian-$name@slackenv.test" \
     "$STATE_DIR/$svc-cookies.json" >"$STATE_DIR/$svc-enroll.json"
 done
+
+if [ -n "$OLD_CONNECTIONS" ] && [ "$CLOUD_ONLY" = 0 ]; then
+  log "writing the older Slack connections into $OLD_CONNECTIONS"
+  "$ENV_DIR/ctl.sh" old-connections "$OLD_CONNECTIONS" >/dev/null || {
+    log "the older Slack connections did not come back in $OLD_CONNECTIONS; see $STATE_DIR/$OLD_CONNECTIONS-old-connections.json"
+    exit 1
+  }
+fi
 
 # The verifier runs rome's import rules on the rome commit under test, so the
 # scratch checkout gets its dependencies. Install scripts are skipped: the

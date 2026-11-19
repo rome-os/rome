@@ -6,6 +6,7 @@
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
+#   environments/slack-app/ctl.sh old-connections rome-a|rome-b  (R10's slack_bot and slack)
 #   environments/slack-app/ctl.sh logs <service>
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
@@ -13,6 +14,8 @@
 # wipe-chat stops the instance, wipes Rome's copy of the conversation
 # (tools/wipe-chat.mjs) and starts it again if it was running. cloud-query runs
 # one query on Rome Cloud's database as a role that can only read.
+# old-connections writes the two older Slack connections an upgrade leaves
+# (tools/old-connections.mjs) into the stopped instance and starts it again.
 set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$ENV_DIR/.state"
@@ -25,7 +28,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | token-file) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -41,7 +44,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,15p' "$0"
+    sed -n '2,18p' "$0"
     exit 2
     ;;
 esac
@@ -55,6 +58,23 @@ wait_healthy() {
 }
 
 healthy() { compose exec -T "$svc" node -e 'fetch("http://127.0.0.1:9368/health").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))' >/dev/null 2>&1; }
+
+token_file() {
+  # Whether the instance holds the Slack token file the connector reads, and
+  # the last 6 characters of each token in it. The tokens stay inside.
+  compose exec -T "$svc" node -e '
+    const fs = require("fs");
+    const path = process.env.ROME_SLACK_TOKEN_FILE?.trim() || "/run/rome/slack-oauth-token";
+    const tail = (t) => (typeof t === "string" && t ? t.slice(-6) : null);
+    let out = { instance: process.argv[1], path, exists: false };
+    try {
+      const j = JSON.parse(fs.readFileSync(path, "utf8"));
+      out = { ...out, exists: true, bot_token_tail: tail(j.botToken), user_token_tail: tail(j.userToken), team_id: j.teamId ?? null };
+    } catch (e) {
+      if (e.code !== "ENOENT") out = { ...out, exists: true, error: String(e.message) };
+    }
+    console.log(JSON.stringify(out));' "$svc"
+}
 
 case "$action" in
   stop)
@@ -77,20 +97,49 @@ case "$action" in
     compose logs --no-color --tail 500 "$svc"
     ;;
   token-file)
-    # Whether the instance holds the Slack token file the connector reads, and
-    # the last 6 characters of each token in it. The tokens stay inside.
-    compose exec -T "$svc" node -e '
-      const fs = require("fs");
-      const path = process.env.ROME_SLACK_TOKEN_FILE?.trim() || "/run/rome/slack-oauth-token";
-      const tail = (t) => (typeof t === "string" && t ? t.slice(-6) : null);
-      let out = { instance: process.argv[1], path, exists: false };
-      try {
-        const j = JSON.parse(fs.readFileSync(path, "utf8"));
-        out = { ...out, exists: true, bot_token_tail: tail(j.botToken), user_token_tail: tail(j.userToken), team_id: j.teamId ?? null };
-      } catch (e) {
-        if (e.code !== "ENOENT") out = { ...out, exists: true, error: String(e.message) };
-      }
-      console.log(JSON.stringify(out));' "$svc"
+    token_file
+    ;;
+  old-connections)
+    # The guardian's own workspace and member: the first workspace is
+    # rome-a's, the second rome-b's.
+    read -r team guardian < <(INDEX="$([ "$svc" = rome-a ] && echo 0 || echo 1)" node -e '
+      const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).workspaces[+process.env.INDEX];
+      console.log(w.id, w.members.find((m) => m.is_owner).id);' "$ENV_DIR/config/workspaces.json")
+    fake="http://127.0.0.1:$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+    port_var="ROME_$(echo "${svc#rome-}" | tr a-z A-Z)_PORT"
+    instance="http://127.0.0.1:$(sed -n "s/^$port_var=//p" "$STATE_DIR/compose.env")"
+    # The rows carry the tokens, so they go over stdin and are never saved.
+    spec="$(node "$ENV_DIR/tools/old-connections.mjs" prepare "$fake" "$team" "$guardian")"
+    compose stop -t 30 "$svc" >/dev/null
+    set +e
+    written="$(compose run --rm --no-deps -T --entrypoint node \
+      -v "$ENV_DIR/tools/old-connections.mjs:/slackenv/old-connections.mjs:ro" \
+      "$svc" /slackenv/old-connections.mjs write <<<"$spec" 2>/dev/null | tail -n 1)"
+    code=$?
+    set -e
+    compose start "$svc" >/dev/null
+    wait_healthy || {
+      echo "{\"instance\":\"$svc\",\"state\":\"unhealthy\"}"
+      exit 1
+    }
+    [ "$code" -eq 0 ] || {
+      echo "$written"
+      exit "$code"
+    }
+    printf '%s\n' "$written" >"$STATE_DIR/$svc-old-connections.json"
+    # Boot rewrites the token file from the OAuth grant; give it a moment.
+    for _ in $(seq 1 30); do
+      token_file >"$STATE_DIR/$svc-token-file.json"
+      grep -q '"exists":true' "$STATE_DIR/$svc-token-file.json" && break
+      sleep 1
+    done
+    set +e
+    result="$(node "$ENV_DIR/tools/old-connections.mjs" link "$instance" "$STATE_DIR/$svc-cookies.json" "$fake" \
+      "$STATE_DIR/$svc-old-connections.json" "$STATE_DIR/$svc-token-file.json")"
+    code=$?
+    set -e
+    printf '%s\n' "$result" | tee "$STATE_DIR/$svc-old-connections.json"
+    exit "$code"
     ;;
   wipe-chat)
     conversation="${3:-}"
