@@ -236,6 +236,8 @@ export function ChannelConnectCard({
       // fresh Connect instead of the previous "done" view (no page reload).
       setup.reset();
       await onRefresh();
+      // Ended in Rome, but the service may still hold the access.
+      if (result.warning) setError(result.warning);
     }
     setDisconnecting(false);
   }
