@@ -548,16 +548,24 @@ export class FakeSlack {
     const install = this.activeInstall(teamId);
     if (!install) throw httpError(409, `the app is not installed in ${teamId}`);
     const revokedUsers = Object.keys(install.userTokens);
-    // Slack sends both events, then the tokens stop working.
-    const tokensRevoked = await this.sendEvent(teamId, {
-      type: "tokens_revoked",
-      tokens: { oauth: revokedUsers, bot: [install.botUserId] },
-    });
-    const uninstalled = await this.sendEvent(teamId, { type: "app_uninstalled" });
+    // The tokens stop working first: Slack sends tokens_revoked once tokens
+    // "are revoked", and an app "is not uninstalled until its final user and bot
+    // tokens are revoked". So an app that checks its token on either event
+    // finds it dead.
     install.active = false;
     this.state.tokens[install.botToken].revoked = true;
     for (const token of Object.values(install.userTokens)) this.state.tokens[token].revoked = true;
     this.save();
+    const tokensRevoked = await this.sendEvent(
+      teamId,
+      { type: "tokens_revoked", tokens: { oauth: revokedUsers, bot: [install.botUserId] } },
+      { requireInstall: false },
+    );
+    const uninstalled = await this.sendEvent(
+      teamId,
+      { type: "app_uninstalled" },
+      { requireInstall: false },
+    );
     return { tokens_revoked: tokensRevoked, app_uninstalled: uninstalled };
   }
 

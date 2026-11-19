@@ -363,3 +363,97 @@ test("a long history is wiped in one pass, with a copy of each message elsewhere
   assert.equal(out.deleted.chat_messages, said.length + 1);
   assert.equal(out.deleted.rome_agent_messages, said.length + 2);
 });
+
+test("--text removes what Rome distilled: rows and memory lines that hold the text", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wipe-chat-"));
+  const home = join(dir, "home");
+  mkdirSync(join(home, ".rome/default"), { recursive: true });
+  const dbPath = join(home, ".rome/default/rome.db");
+  const db = migrate(dbPath);
+  seedChat(db, {
+    conversation: DM,
+    member: "UA0000BOB01",
+    words: "Bob's locker code is 4417",
+    session: `channel:slack_app:${DM}`,
+    thread: "77777777-aaaa",
+  });
+  const fact = "locker 4417 by the east door";
+  // Rome's restatement of the fact in another conversation, and in its memory.
+  insert(db, "rome_agent_messages", {
+    id: "distilled",
+    session_id: "dashboard-chat",
+    role: "assistant",
+    content: [{ type: "text", text: `Noted: Bob's ${fact}.` }],
+    created_at: 1,
+  });
+  insert(db, "rome_agent_messages", {
+    id: "unrelated",
+    session_id: "dashboard-chat",
+    role: "user",
+    content: [{ type: "text", text: "Cara likes green tea" }],
+    created_at: 1,
+  });
+  insert(db, "sessions", {
+    id: "p-memory",
+    agent_name: "concierge",
+    chat_id: "memory-chat",
+    provider: "claude",
+    provider_thread_id: "88888888-bbbb",
+    created_at: 1,
+    last_active_at: 1,
+    status: "active",
+  });
+  db.close();
+  const memory = join(home, ".rome/default/profile/memory");
+  mkdirSync(memory, { recursive: true });
+  writeFileSync(join(memory, "people.md"), `# People\n- Bob: ${fact}\n- Cara likes green tea\n`);
+  writeFileSync(join(memory, "bob.md"), `- ${fact}\n`);
+  const projects = join(home, ".claude/projects/-home-rome");
+  mkdirSync(projects, { recursive: true });
+  writeFileSync(join(projects, "88888888-bbbb.jsonl"), `${JSON.stringify({ text: fact })}\n`);
+  writeFileSync(join(projects, "99999999-cccc.jsonl"), "{}\n");
+
+  const run = (...extra) =>
+    execFileSync(
+      process.execPath,
+      [
+        join(here, "wipe-chat.mjs"),
+        "--conversation",
+        DM,
+        "--member",
+        "UA0000BOB01",
+        "--homes",
+        home,
+        ...extra,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+
+  assert.throws(
+    () => run("--text", "4417"),
+    (e) => e.status === 2,
+  );
+  const dry = JSON.parse(run("--text", fact, "--text", "east door, by the lockers", "--dry-run"));
+  assert.equal(dry.deleted["(files)"], 3);
+  assert.ok(readFileSync(join(memory, "people.md"), "utf8").includes(fact));
+
+  const out = JSON.parse(run("--text", fact, "--text", "east door, by the lockers"));
+  assert.equal(out.ok, true, JSON.stringify(out.remaining));
+  assert.deepEqual(out.remaining, {});
+  assert.equal(out.deleted["(files)"], 3);
+  assert.ok(out.provider_sessions.includes("p-memory"));
+  assert.equal(
+    readFileSync(join(memory, "people.md"), "utf8"),
+    "# People\n- Cara likes green tea\n",
+  );
+  assert.ok(!existsSync(join(memory, "bob.md")));
+  assert.ok(!existsSync(join(projects, "88888888-bbbb.jsonl")));
+  assert.ok(existsSync(join(projects, "99999999-cccc.jsonl")));
+
+  const after = new DatabaseSync(dbPath);
+  const count = (sql) => after.prepare(sql).get().n;
+  assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'distilled'"), 0);
+  assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'unrelated'"), 1);
+  assert.equal(count("SELECT count(*) AS n FROM sessions WHERE id = 'p-memory'"), 0);
+  after.close();
+});

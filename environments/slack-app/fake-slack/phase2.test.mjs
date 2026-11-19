@@ -196,10 +196,19 @@ test("history and thread reads, the limit, scopes, group messages, removal and r
   assert.equal(groupRead.ok, true);
   assert.equal(groupRead.messages[0].reply_count, 1);
 
-  // Removing the app: both events, then the token fails, and auth-test says so.
+  // Removing the app: the token is dead before either event arrives, so an app
+  // that checks it on hearing of the removal finds it revoked.
   assert.equal((await ctl("/auth-test", { team: A })).auth_test.ok, true);
+  const heard = {};
+  onEvent = async (envelope) => {
+    const type = envelope.event?.type;
+    if (type === "tokens_revoked" || type === "app_uninstalled")
+      heard[type] = (await api("auth.test", {}, token)).error;
+  };
   const removed = await ctl("/uninstall", { team: A });
+  onEvent = null;
   assert.equal(removed.ok, true);
+  assert.deepEqual(heard, { tokens_revoked: "token_revoked", app_uninstalled: "token_revoked" });
   assert.equal((await api("auth.test", {}, token)).error, "token_revoked");
   const check = await ctl("/auth-test", { team: A });
   assert.equal(check.token_state, "revoked");

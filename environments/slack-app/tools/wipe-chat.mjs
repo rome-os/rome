@@ -18,6 +18,9 @@
 //   conversation or holds the text of a wiped message: the connection's other
 //   tables (such as slack_app_timeline), and the approvals and action runs whose
 //   payloads quote what was said. Texts under 8 characters are not looked for.
+// - with --text (repeatable), any row and any file under the homes (memory
+//   included) that holds one of the given texts: what Rome distilled from the
+//   chat. A file loses the lines that hold one; a transcript goes whole.
 // What stays: the chat's place and address (chats, chat_addresses), which hold
 // no message, and the connection itself.
 //
@@ -25,10 +28,18 @@
 // when a copy is still found, 0 when none is.
 //
 // Usage: node wipe-chat.mjs --conversation D… [--member U…] [--db path]
-//          [--homes /home/rome,/home/user] [--dry-run]
+//          [--homes /home/rome,/home/user] [--text "…"]... [--dry-run]
 // Prints one JSON object.
 
-import { chownSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  chownSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -40,6 +51,11 @@ if (!conversation || !/^[A-Z0-9]+$/.test(conversation)) {
 const member = args.member && /^[A-Z0-9]+$/.test(args.member) ? args.member : null;
 const homes = (args.homes ?? "/home/rome,/home/user").split(",").filter(Boolean);
 const dryRun = Boolean(args["dry-run"]);
+// Texts Rome may have distilled from the chat (a fact's value, say), to remove
+// wherever they are, memory files included. Short ones would match ids and
+// hashes, so each must be 8 characters or more.
+const extraTexts = Array.isArray(args.text) ? args.text : [];
+if (extraTexts.some((t) => t.length < 8)) fail(2, "each --text must be 8 characters or more");
 const dbPath = args.db ?? findDatabase(homes);
 if (!dbPath) fail(2, "no rome.db found under ~/.rome in the instance's homes");
 
@@ -51,6 +67,8 @@ const has = (table, column) => schema.get(table)?.has(column) ?? false;
 const placeholders = (list) => list.map(() => "?").join(",");
 // The chat's place and address: they name the conversation and hold no message.
 const PLACES = new Set(["chats", "chat_addresses"]);
+// Tables no message is ever copied into, which a text could match by accident.
+const NEVER = new Set(["__drizzle_migrations"]);
 const all = (sql, ...params) => db.prepare(sql).all(...params);
 
 // ---- What is the chat's
@@ -150,7 +168,8 @@ if (chatIds.size && has("chat_messages", "text")) {
 // however many texts there are.
 db.exec("CREATE TEMP TABLE wipe_needles (v TEXT NOT NULL)");
 const addNeedle = db.prepare("INSERT INTO temp.wipe_needles (v) VALUES (?)");
-for (const needle of new Set([conversation, ...escapedToo(words)])) addNeedle.run(needle);
+for (const needle of new Set([conversation, ...escapedToo(words), ...escapedToo(extraTexts)]))
+  addNeedle.run(needle);
 /** A condition true when any of `table`'s `columns` holds a needle. */
 const holdsNeedle = (table, columns) =>
   `EXISTS (SELECT 1 FROM temp.wipe_needles n WHERE ${columns.map((c) => `instr("${table}"."${c}", n.v) > 0`).join(" OR ")})`;
@@ -221,7 +240,7 @@ function sweep() {
   for (let pass = 0; pass < 5; pass++) {
     let progress = false;
     for (const [table, columns] of schema) {
-      if (PLACES.has(table)) continue;
+      if (PLACES.has(table) || NEVER.has(table)) continue;
       const text = [...columns].filter((c) => isTextColumn(table, c));
       if (!text.length) continue;
       const where = holdsNeedle(table, text);
@@ -295,6 +314,39 @@ function walk(dir, depth) {
   }
 }
 
+// ---- Files holding a given text
+// Only with --text: memory and other files under the homes lose each line that
+// holds one of the texts. A transcript (.jsonl) that holds one goes whole, with
+// its provider session, since a transcript missing lines cannot be resumed.
+const FILES = "(files)";
+const textNeedles = escapedToo(extraTexts);
+const fileHits = (body) => textNeedles.filter((t) => body.includes(t)).length;
+if (textNeedles.length) for (const home of homes) eachTextFile(home, sweepFile);
+function sweepFile(path, body) {
+  if (!fileHits(body)) return;
+  if (path.endsWith(".jsonl")) {
+    transcripts.push(path);
+    const thread = path.replace(/^.*\//, "").replace(/\.jsonl$/, "");
+    if (has("sessions", "provider_thread_id")) {
+      const ids = all("SELECT id FROM sessions WHERE provider_thread_id = ?", thread).map(
+        (r) => r.id,
+      );
+      for (const id of ids) providerSessions.set(id, thread);
+      remove("session_turn_checkpoints", "session_id", ids);
+      remove("sessions", "id", ids);
+    }
+    deleted[FILES] = (deleted[FILES] ?? 0) + 1;
+    if (!dryRun) rmSync(path, { force: true });
+    return;
+  }
+  const lines = body.split("\n");
+  const keep = lines.filter((l) => !fileHits(l));
+  deleted[FILES] = (deleted[FILES] ?? 0) + (lines.length - keep.length);
+  if (dryRun) return;
+  if (keep.join("").trim()) writeFileSync(path, keep.join("\n"));
+  else rmSync(path, { force: true });
+}
+
 // ---- Look for anything left
 // A dry run changed nothing, so it has nothing to check. The chat's place and
 // address name the conversation and hold no message: they are reported as kept.
@@ -309,6 +361,14 @@ for (const [table, columns] of dryRun ? [] : schema) {
       .n;
     if (n) ((PLACES.has(table) ? kept : remaining)[table] ??= {})[column] = n;
   }
+}
+
+if (textNeedles.length && !dryRun) {
+  for (const home of homes)
+    eachTextFile(home, (path, body) => {
+      const n = fileHits(body);
+      if (n) (remaining[FILES] ??= {})[path] = n;
+    });
 }
 
 db.close();
@@ -397,6 +457,31 @@ function keepOwner(path) {
   }
 }
 
+/** Calls `fn(path, body)` for each text file under `dir` but the database's own. */
+function eachTextFile(dir, fn, depth = 0) {
+  if (depth > 9 || !existsSync(dir)) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.name === "node_modules" || e.name === ".git") continue;
+    const path = join(dir, e.name);
+    if (e.isDirectory()) eachTextFile(path, fn, depth + 1);
+    if (!e.isFile() || path.startsWith(dbPath)) continue;
+    let body;
+    try {
+      if (statSync(path).size > 8 * 1024 * 1024) continue;
+      body = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    if (!body.includes("\0")) fn(path, body);
+  }
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -406,7 +491,8 @@ function parseArgs(argv) {
     const next = argv[i + 1];
     if (next === undefined || next.startsWith("--")) out[key] = true;
     else {
-      out[key] = next;
+      if (key === "text") (out.text ??= []).push(next);
+      else out[key] = next;
       i++;
     }
   }

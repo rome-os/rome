@@ -2,7 +2,7 @@
 # Controls a running environment.
 #
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
-#   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id>
+#   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh logs <service>
 #
@@ -72,9 +72,20 @@ case "$action" in
   wipe-chat)
     conversation="${3:-}"
     [[ "$conversation" =~ ^[A-Z0-9]+$ ]] || {
-      echo "usage: ctl.sh wipe-chat rome-a|rome-b <Slack conversation id>" >&2
+      echo "usage: ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]..." >&2
       exit 2
     }
+    # Texts Rome may have distilled from the chat, removed wherever they are.
+    texts=()
+    shift 3
+    while [ $# -gt 0 ]; do
+      [ "$1" = --text ] && [ $# -ge 2 ] || {
+        echo "wipe-chat takes only --text <text> after the conversation id" >&2
+        exit 2
+      }
+      texts+=(--text "$2")
+      shift 2
+    done
     # The member whose direct message it is, from the fake Slack, so the chat
     # is found by its key as well as by its address.
     port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
@@ -90,7 +101,7 @@ case "$action" in
     set +e
     result="$(compose run --rm --no-deps -T --entrypoint node \
       -v "$ENV_DIR/tools/wipe-chat.mjs:/slackenv/wipe-chat.mjs:ro" \
-      "$svc" /slackenv/wipe-chat.mjs --conversation "$conversation" ${member:+--member "$member"} 2>/dev/null)"
+      "$svc" /slackenv/wipe-chat.mjs --conversation "$conversation" ${member:+--member "$member"} "${texts[@]}" 2>/dev/null)"
     code=$?
     set -e
     state=stopped
