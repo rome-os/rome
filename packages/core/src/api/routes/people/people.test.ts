@@ -9,7 +9,7 @@ import {
   type TimelinePage,
 } from "@rome/api-types/people";
 import { phoneBookRoutes } from "../../../people/phone-book/index.js";
-import { personHistoryRoutes } from "./person-history.js";
+import { personHistoryRoutes } from "../../../people/person-history/index.js";
 import {
   createTestDb,
   buildTestDeps,

@@ -89,7 +89,7 @@
     "publishHint": "Publishes v{{version}} to the Rome App Store.",
     "publishHintListed": "Publishes v{{version}} to the Rome App Store. Latest published: v{{storeVersion}}.",
     "publishHintUnlisted": "Publishes v{{version}} to the Rome App Store. Not published yet.",
-    "uninstallHint": "Remove the app. Its data is preserved for a later reinstall.",
+    "uninstallHint": "Remove the app. Its data is preserved for a later reinstall, but the routines it manages are deleted.",
     "uninstallPurgeHint": "The app's data is deleted permanently and cannot be recovered."
   },
   "installed": {
@@ -139,7 +139,7 @@
     },
     "uninstallDialog": {
       "title": "Uninstall {{name}}?",
-      "descriptionKeep": "Its data is kept for a later reinstall.",
+      "descriptionKeep": "Its data is kept for a later reinstall. The routines it manages are deleted.",
       "descriptionPurge": "Its data is deleted permanently and cannot be recovered.",
       "confirmKeep": "Uninstall",
       "confirmPurge": "Uninstall and erase data"

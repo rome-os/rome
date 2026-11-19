@@ -1,4 +1,3 @@
-import type { PhoneBook } from "../people/phone-book/index.js";
 import type { AgentNameEvents } from "../people/guardian-profile/index.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
@@ -55,6 +54,7 @@ import type { ActionExecutionsRepository } from "../apps/repositories/action-exe
 import type { SessionRepository } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
+import type { Action } from "@rome-os/app-runtime";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
 import type { Permissions } from "../access/permissions.js";
@@ -177,8 +177,9 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
-  /** The phone book's routes and actions. Absent, the phone book is left out. */
-  phoneBook?: PhoneBook;
+  /** Each feature's routes and actions, built once by the wiring. A feature
+   *  left out of the list is left out of Rome. */
+  features?: readonly Feature[];
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
@@ -293,4 +294,10 @@ export interface ApiDeps {
 export interface ApiHandle {
   port: number;
   close(): Promise<void>;
+}
+
+/** A feature's two interfaces: routes for the dashboard and apps, actions for agents. */
+export interface Feature {
+  routes: Hono;
+  actions: readonly Action[];
 }
