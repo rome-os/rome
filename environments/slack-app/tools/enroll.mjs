@@ -112,11 +112,15 @@ const statusBody = status.ok ? await status.json() : { status: status.status };
 writeFileSync(cookieFile, JSON.stringify(Object.fromEntries(jarFor(instance))), { mode: 0o600 });
 console.log(JSON.stringify({ guardian: email, landed: landed.pathname, enroll: statusBody }));
 
+// One pass, so "&amp;lt;" decodes to "&lt;" and not to "<".
 function decodeEntities(s) {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+  const named = {
+    "&amp;": "&",
+    "&quot;": '"',
+    "&#x27;": "'",
+    "&#39;": "'",
+    "&lt;": "<",
+    "&gt;": ">",
+  };
+  return s.replace(/&amp;|&quot;|&#x27;|&#39;|&lt;|&gt;/g, (m) => named[m]);
 }

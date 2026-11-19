@@ -95,9 +95,13 @@ createServer(async (req, res) => {
     res.end();
   } catch (error) {
     stats.statuses.error = (stats.statuses.error ?? 0) + 1;
+    console.error(JSON.stringify({ msg: "upstream request failed", error: String(error) }));
     res.writeHead(502, { "content-type": "application/json" });
     res.end(
-      JSON.stringify({ type: "error", error: { type: "proxy_error", message: String(error) } }),
+      JSON.stringify({
+        type: "error",
+        error: { type: "proxy_error", message: "upstream request failed" },
+      }),
     );
   }
 }).listen(port, () =>
