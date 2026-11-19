@@ -198,6 +198,52 @@ declare function defineAction(spec: unknown): unknown;
     expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I2", "src/actions/add_note"]]);
   });
 
+  it("I2: does not count a route the page never calls", async () => {
+    const page = "export const App = () => null;\n";
+    const gaps = await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page });
+    expect(gaps.map((g) => [g.rule, g.message])).toEqual([
+      [
+        "I2",
+        "The page never calls `/notes`, the route that runs `add_note`, so a person cannot do it from the page.",
+      ],
+    ]);
+  });
+
+  it("I2: follows a path the page passes through its own helper", async () => {
+    const page = `import { fetchAppApi } from "@rome-os/app-web-sdk";
+const call = (path: string) => fetchAppApi(path, { method: "POST" });
+export const save = () => call("notes");
+`;
+    expect(await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page })).toEqual([]);
+  });
+
+  it("I4: reports shared code the page is built from importing data", async () => {
+    const gaps = await gapsOf({
+      ...COMPLIANT,
+      "src/lib/data.ts": 'export { createNotesRepository } from "../db/notes.js";\n',
+      "src/web/Data.tsx":
+        'import { createNotesRepository } from "../lib/data.js";\nexport const r = createNotesRepository;\n',
+    });
+    expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I4", "src/lib/data.ts:1"]]);
+    // A type-only import is erased from the page.
+    const types = await gapsOf({
+      ...COMPLIANT,
+      "src/lib/data.ts":
+        'import type { createNotesRepository } from "../db/notes.js";\nexport type R = typeof createNotesRepository;\n',
+      "src/web/Data.tsx":
+        'import type { R } from "../lib/data.js";\nexport const r: R | null = null;\n',
+    });
+    expect(types).toEqual([]);
+  });
+
+  it("reads an API entry declared with its extension", async () => {
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "entry: api/index",
+      "entry: api/index.ts",
+    );
+    expect(await gapsOf({ ...COMPLIANT, "app.yaml": manifest })).toEqual([]);
+  });
+
   it("I4: reports an action that imports the API, and an API that imports an action", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,
@@ -214,9 +260,9 @@ declare function defineAction(spec: unknown): unknown;
   it("I5: reports a page that fetches past its app API", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,
-      "src/web/App.tsx": 'export const load = () => fetch("/api/skills");\n',
+      "src/web/Skills.tsx": 'export const load = () => fetch("/api/skills");\n',
     });
-    expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/web/App.tsx:1"]]);
+    expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/web/Skills.tsx:1"]]);
   });
 
   it("reports an API whose routes it cannot read instead of passing it", async () => {
@@ -446,11 +492,43 @@ declare const extra: unknown;
       expect(opaque.unverified.map((u) => u.rule)).toEqual(["D3"]);
     });
 
+    it("does not let one machine path exempt the other paths of an alternation", async () => {
+      const files = withRoute(
+        'if (request.method === "POST" && (route === "webhook" || route === "erase")) return "done";',
+      );
+      const verdict = await verdictOf({
+        ...files,
+        "app.yaml": (files["app.yaml"] as string).replace(
+          "  entry: api/index\n",
+          "  entry: api/index\n  noAuth:\n    - /webhook\n",
+        ),
+      });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["I1", expect.stringContaining("not all machine routes")],
+      ]);
+    });
+
+    it("does not let the root exemption cover the other paths it serves", async () => {
+      const verdict = await verdictOf({
+        ...COMPLIANT,
+        "src/api/index.ts": (COMPLIANT["src/api/index.ts"] as string).replace(
+          'request.method === "GET" && request.path.length === 0',
+          'request.method === "GET" && (route === "" || route === "everything")',
+        ),
+      });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["I1", expect.stringContaining("also serves `/everything`")],
+      ]);
+    });
+
     it("finds a request the page makes through a shared helper", async () => {
       const gaps = await gapsOf({
         ...COMPLIANT,
         "src/lib/network.ts": 'export const load = () => fetch("/api/skills");\n',
-        "src/web/App.tsx": 'import { load } from "../lib/network.js";\nexport const go = load;\n',
+        "src/web/Skills.tsx":
+          'import { load } from "../lib/network.js";\nexport const go = load;\n',
       });
       expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/lib/network.ts:1"]]);
     });

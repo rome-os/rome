@@ -46,7 +46,7 @@ export const RULES = [
     id: "I2",
     goal: "interfaces",
     statement:
-      "Every agent-callable action is run by an app API route, so a person can do from the app's page what an agent can. Webhook actions are exempt.",
+      "Every agent-callable action is run by an app API route that the app's page calls, so a person can do from the page what an agent can. Webhook actions are exempt.",
   },
   {
     id: "I3",
@@ -149,23 +149,10 @@ export function checkApp(app: AppFacts): AppVerdict {
       "The app declares an API, but its routes could not be read, so neither interface can be checked.",
     );
   } else {
-    const ranByRoutes = new Set<string>();
-    for (const route of app.routes) {
-      // A machine route gives no person a way to run what it runs.
-      if (!route.noAuth) for (const name of route.runs) ranByRoutes.add(localName(app.id, name));
-      judgeRoute(app, route, gap, cannotJudge);
-    }
+    for (const route of app.routes) judgeRoute(app, route, gap, cannotJudge);
     for (const action of app.actions) {
       if (!isAgentCallable(action) || action.webhook) continue;
-      // A route reaches a person only through a page that calls it.
-      if (app.hasPage && ranByRoutes.has(action.name)) continue;
-      gap(
-        "I2",
-        action.at,
-        app.hasPage
-          ? `No app API route runs \`${action.name}\`, so a person cannot do it from the app's page.`
-          : `\`${action.name}\` has no human interface: the app has no page.`,
-      );
+      judgeHumanInterface(app, action, gap, cannotJudge);
     }
   }
 
@@ -173,6 +160,15 @@ export function checkApp(app: AppFacts): AppVerdict {
   for (const imp of app.imports) {
     const reason = layerViolation(imp);
     if (reason) gap("I4", `${app.sourceRoot}/${imp.from}:${imp.line}`, reason);
+  }
+  // Shared code may import data, but not when the page is built from it.
+  for (const imp of app.pageCrossings) {
+    if (layerViolation(imp)) continue;
+    gap(
+      "I4",
+      `${app.sourceRoot}/${imp.from}:${imp.line}`,
+      `\`${imp.from}\` is part of the page and imports \`${imp.to}\`, so the page reaches past its app API.`,
+    );
   }
 
   // I5
@@ -185,6 +181,66 @@ export function checkApp(app: AppFacts): AppVerdict {
   }
 
   return { appId: app.id, gaps, unverified };
+}
+
+/**
+ * I2: a person can run `action` only from a page that calls a route that
+ * runs it. Machine routes reach no person.
+ */
+function judgeHumanInterface(
+  app: AppFacts,
+  action: ActionFacts,
+  gap: (rule: RuleId, at: string, message: string) => void,
+  cannotJudge: (rule: RuleId, at: string, message: string) => void,
+): void {
+  if (!app.hasPage) {
+    gap("I2", action.at, `\`${action.name}\` has no human interface: the app has no page.`);
+    return;
+  }
+  const running = (app.routes ?? []).filter(
+    (route) => !route.noAuth && route.runs.some((name) => localName(app.id, name) === action.name),
+  );
+  if (running.length === 0) {
+    gap(
+      "I2",
+      action.at,
+      `No app API route runs \`${action.name}\`, so a person cannot do it from the app's page.`,
+    );
+    return;
+  }
+  const called = running.some((route) =>
+    app.pageApiCalls.some((call) => call.path !== null && pathMatches(route, call.path)),
+  );
+  if (called) return;
+  if (running.some((route) => route.unreadable) || app.pageApiCalls.some((c) => c.path === null)) {
+    cannotJudge(
+      "I2",
+      action.at,
+      `Could not tell whether the page calls the route that runs \`${action.name}\`.`,
+    );
+    return;
+  }
+  gap(
+    "I2",
+    action.at,
+    `The page never calls \`/${running[0]?.path}\`, the route that runs \`${action.name}\`, so a person cannot do it from the page.`,
+  );
+}
+
+/** Whether a page's call to `called` reaches `route`; `:id` and `*` match any segment. */
+function pathMatches(route: RouteFacts, called: string): boolean {
+  const callSegments = called === "" ? [] : called.split("/");
+  return (route.alternatives ?? [route.path]).some((path) => {
+    const routeSegments = path === "" ? [] : path.split("/");
+    for (let i = 0; i < routeSegments.length; i++) {
+      const segment = routeSegments[i] as string;
+      if (segment === "*") return callSegments.length >= i;
+      const call = callSegments[i];
+      if (call === undefined) return false;
+      if (segment !== ":id" && call !== ":id" && segment !== call) return false;
+    }
+    return callSegments.length === routeSegments.length;
+  });
 }
 
 function judgeRoute(
@@ -217,7 +273,18 @@ function judgeRoute(
     );
   }
   if (route.unreadable) return;
-  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) return;
+  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) {
+    // The root status route is exempt, but not the other paths it may also serve.
+    const others = (route.alternatives ?? []).filter((path) => path !== "");
+    if (others.length > 0 && route.runs.length === 0) {
+      cannotJudge(
+        "I1",
+        route.at,
+        `${label} also serves ${others.map((p) => `\`/${p}\``).join(", ")}, which the root exemption does not cover.`,
+      );
+    }
+    return;
+  }
   if (route.runs.length === 0) {
     gap("I1", route.at, `${label} runs no action, so no agent can do what it does.`);
     return;

@@ -10,6 +10,7 @@ import { parse as parseYaml } from "yaml";
 import { isAppApiPathNoAuth } from "../no-auth.js";
 import { parseAppManifest, parseManifestObject } from "../packaging/manifest.js";
 import type {
+  PageApiCallFacts,
   ActionFacts,
   AppFacts,
   ArgumentDescriptions,
@@ -44,6 +45,8 @@ const DIRECT_REQUESTS = new Set([
   "axios.get",
   "axios.post",
 ]);
+/** SDK calls through which a page reaches its own app API. */
+const APP_API_CALLS = new Set(["fetchAppApi", "appApiUrl"]);
 const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
@@ -84,18 +87,31 @@ export async function readApp(dir: string): Promise<AppFacts> {
     routes =
       found.length === 0
         ? null
-        : found.map((route) => ({
-            ...route,
-            noAuth:
-              route.unreadable === undefined &&
-              isAppApiPathNoAuth(noAuth as boolean | string[], `/${route.path}`),
-            mayBeNoAuth:
-              route.unreadable !== undefined &&
-              (noAuth === true || (Array.isArray(noAuth) && noAuth.length > 0)),
-          }));
+        : found.map((route) => {
+            const machine = (path: string) =>
+              isAppApiPathNoAuth(noAuth as boolean | string[], `/${path}`);
+            const paths = route.alternatives ?? [route.path];
+            const machinePaths = paths.filter(machine).length;
+            // `route === "webhook" || route === "erase"` is a machine route for one path only.
+            const mixed = machinePaths > 0 && machinePaths < paths.length;
+            const unreadable =
+              route.unreadable ??
+              (mixed
+                ? `paths ${paths.map((p) => `\`/${p}\``).join(" and ")} that are not all machine routes`
+                : undefined);
+            return {
+              ...route,
+              ...(unreadable ? { unreadable } : {}),
+              noAuth: unreadable === undefined && machinePaths === paths.length,
+              mayBeNoAuth:
+                unreadable !== undefined &&
+                (mixed || noAuth === true || (Array.isArray(noAuth) && noAuth.length > 0)),
+            };
+          });
   }
 
   const imports = reader.imports();
+  const pageFiles = reader.pageFiles(imports);
   return {
     id: manifest.id,
     dir,
@@ -106,7 +122,16 @@ export async function readApp(dir: string): Promise<AppFacts> {
     routes,
     ...(apiEntryAt ? { apiEntry: apiEntryAt } : {}),
     imports,
-    pageRequests: reader.pageRequests(imports),
+    pageRequests: reader.pageRequests(pageFiles),
+    pageApiCalls: reader.pageApiCalls(pageFiles),
+    pageCrossings: imports.filter(
+      (imp) =>
+        // A type-only import is erased from the page bundle.
+        pageFiles.has(imp.from) &&
+        !imp.from.startsWith("web/") &&
+        !imp.typeOnly &&
+        /^(api|actions|db)\//.test(imp.to),
+    ),
   };
 }
 
@@ -180,6 +205,7 @@ class SourceReader {
             from: this.fromSource(source.fileName),
             to: this.fromSource(target),
             line: line + 1,
+            ...(isTypeOnly(node) ? { typeOnly: true } : {}),
           });
         }
         ts.forEachChild(node, visit);
@@ -194,7 +220,8 @@ class SourceReader {
    * own files and in the shared files it imports. Imports of the API, the
    * actions or the data are I4 gaps of their own, so their files are not read.
    */
-  pageRequests(imports: readonly ImportFacts[]): PageRequestFacts[] {
+  /** The files the page is built from: web/, and the app's own files it imports. */
+  pageFiles(imports: readonly ImportFacts[]): Set<string> {
     const pageFiles = new Set<string>();
     const queue = this.program
       .getSourceFiles()
@@ -210,6 +237,10 @@ class SourceReader {
         }
       }
     }
+    return pageFiles;
+  }
+
+  pageRequests(pageFiles: ReadonlySet<string>): PageRequestFacts[] {
     const found: PageRequestFacts[] = [];
     for (const source of this.program.getSourceFiles()) {
       if (!this.ownFile(source.fileName) || isTestFile(source.fileName)) continue;
@@ -234,6 +265,85 @@ class SourceReader {
       visit(source);
     }
     return found;
+  }
+
+  /**
+   * The page's calls to its app API, by the path each calls. A path passed
+   * in by a caller is read at each call site in the page.
+   */
+  pageApiCalls(pageFiles: ReadonlySet<string>): PageApiCallFacts[] {
+    const found: PageApiCallFacts[] = [];
+    const pageSources = this.program
+      .getSourceFiles()
+      .filter(
+        (source) =>
+          this.ownFile(source.fileName) &&
+          !isTestFile(source.fileName) &&
+          pageFiles.has(this.fromSource(source.fileName)),
+      );
+    for (const source of pageSources) {
+      const visit = (node: TS.Node) => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          APP_API_CALLS.has(node.expression.text)
+        ) {
+          for (const path of this.calledPaths(node.arguments[0], pageSources)) {
+            found.push({ at: this.at(source.fileName, node), path });
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    return found;
+  }
+
+  /** The app API paths an argument can stand for; `[null]` when the reader cannot tell. */
+  private calledPaths(
+    argument: TS.Expression | undefined,
+    pageSources: readonly TS.SourceFile[],
+    hops = 0,
+  ): (string | null)[] {
+    if (!argument) return [""];
+    const text = this.stringLiteral(argument);
+    if (text !== undefined) return [normalizeCallPath(text)];
+    if (ts.isTemplateExpression(argument)) {
+      let path = argument.head.text;
+      for (const span of argument.templateSpans) path += `\u0000${span.literal.text}`;
+      return [normalizeCallPath(path)];
+    }
+    // A path the enclosing function takes as a parameter: read each call site.
+    const declaration = ts.isIdentifier(argument) ? this.declarationOf(argument)[0] : undefined;
+    if (hops < 2 && declaration && ts.isParameter(declaration)) {
+      const owner = declaration.parent;
+      const index = owner.parameters.indexOf(declaration);
+      const name = owner.name && ts.isIdentifier(owner.name) ? owner.name : undefined;
+      const ownerName =
+        name ??
+        (ts.isVariableDeclaration(owner.parent) && ts.isIdentifier(owner.parent.name)
+          ? owner.parent.name
+          : undefined);
+      if (!ownerName) return [null];
+      const ownerSymbol = this.checker.getSymbolAtLocation(ownerName);
+      const paths: (string | null)[] = [];
+      for (const source of pageSources) {
+        const visit = (node: TS.Node) => {
+          if (ts.isCallExpression(node) && ownerSymbol) {
+            let symbol = this.checker.getSymbolAtLocation(node.expression);
+            if (symbol && symbol.flags & ts.SymbolFlags.Alias)
+              symbol = this.checker.getAliasedSymbol(symbol);
+            if (symbol === ownerSymbol) {
+              paths.push(...this.calledPaths(node.arguments[index], pageSources, hops + 1));
+            }
+          }
+          ts.forEachChild(node, visit);
+        };
+        visit(source);
+      }
+      return paths.length > 0 ? paths : [null];
+    }
+    return [null];
   }
 
   private fromSource(file: string): string {
@@ -748,15 +858,17 @@ function isDispatchSubject(text: string): boolean {
 function describeRoute(
   conditions: TS.Expression[],
   literal: LiteralOf,
-): Pick<RouteFacts, "method" | "path" | "unreadable"> {
+): Pick<RouteFacts, "method" | "path" | "unreadable" | "alternatives"> {
   const methods = new Set<string>();
   const slots: string[] = [];
   let next = 0;
   let depth = 0;
   let root = false;
   let opaque = false;
+  let alternatives: string[] | undefined;
   for (const condition of conditions) {
     const read = readCondition(condition, literal);
+    alternatives = read.alternatives ?? alternatives;
     for (const method of read.methods) methods.add(method);
     for (const segment of read.segments) {
       const index = segment.index ?? next;
@@ -775,7 +887,7 @@ function describeRoute(
     .replace(/^\/|\/$/g, "");
   const method = methods.size === 0 ? "ANY" : [...methods].join("|");
   // `path === "" || path === "status"` serves the root among its paths.
-  if (root) return { method, path: "" };
+  if (root) return { method, path: "", ...(alternatives ? { alternatives } : {}) };
   if (path === "") {
     return {
       method,
@@ -783,7 +895,7 @@ function describeRoute(
       unreadable: opaque ? "a path test the reader cannot follow" : "no path test",
     };
   }
-  return { method, path };
+  return { method, path, ...(alternatives ? { alternatives } : {}) };
 }
 
 /** What one route condition tests. */
@@ -794,6 +906,8 @@ function readCondition(
   methods: string[];
   segments: Segment[];
   depth?: number;
+  /** Each path an alternation (`a || b`) accepts, when the condition is one. */
+  alternatives?: string[];
   /** The condition matches the root path. */
   root: boolean;
   /** The condition tests something against a literal, or a pattern, the reader cannot place. */
@@ -866,9 +980,13 @@ function readCondition(
   };
   visit(condition);
   // `path === "" || path === "status"` matches either; the first names the route.
+  const alternation = isAlternation(condition) && segments.length + (root ? 1 : 0) > 1;
   return {
     methods,
-    segments: segments.length > 1 && isAlternation(condition) ? segments.slice(0, 1) : segments,
+    segments: alternation ? segments.slice(0, 1) : segments,
+    ...(alternation
+      ? { alternatives: [...(root ? [""] : []), ...segments.map((s) => s.value)] }
+      : {}),
     root,
     opaque,
     patternOnPath,
@@ -924,11 +1042,44 @@ function contains(outer: TS.Node, inner: TS.Node): boolean {
   );
 }
 
-function resolveSourceFile(base: string): string | undefined {
+/** The source file a module path names: as given, or with a source extension for a built one. */
+function resolveSourceFile(path: string): string | undefined {
+  if (SOURCE_EXTENSIONS.some((extension) => path.endsWith(extension)) && existsSync(path)) {
+    return path;
+  }
+  const base = path.replace(/\.(m?js|jsx|tsx?|mts)$/, "");
   for (const extension of SOURCE_EXTENSIONS) {
     if (existsSync(base + extension)) return base + extension;
   }
   return undefined;
+}
+
+/** Whether an import or export brings in types only, so it is erased from the build. */
+function isTypeOnly(node: TS.Node): boolean {
+  if (ts.isImportDeclaration(node)) {
+    const clause = node.importClause;
+    if (!clause) return false;
+    if (clause.isTypeOnly) return true;
+    const bindings = clause.namedBindings;
+    return (
+      !clause.name &&
+      bindings !== undefined &&
+      ts.isNamedImports(bindings) &&
+      bindings.elements.length > 0 &&
+      bindings.elements.every((element) => element.isTypeOnly)
+    );
+  }
+  return ts.isExportDeclaration(node) && node.isTypeOnly;
+}
+
+/** An app API path as a page calls it: no leading or trailing slash, no query. */
+function normalizeCallPath(path: string): string {
+  return path
+    .replace(/[?#].*$/, "")
+    .split("/")
+    .map((segment) => (segment.includes("\u0000") ? ":id" : segment))
+    .join("/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 function isTestFile(file: string): boolean {

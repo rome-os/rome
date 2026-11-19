@@ -37,6 +37,8 @@ export interface RouteFacts {
   runs: string[];
   /** Calls through which the route writes app data itself, not through an action. */
   writes: string[];
+  /** Every path the route's test accepts, when it accepts several (`a || b`). */
+  alternatives?: string[];
   /** Why the reader could not tell which path the route matches, when it could not. */
   unreadable?: string;
   /** The route is declared `api.noAuth`: a machine endpoint, such as a webhook. */
@@ -50,6 +52,8 @@ export interface ImportFacts {
   from: string;
   to: string;
   line: number;
+  /** The import brings in types only (`import type`), which the build erases. */
+  typeOnly?: boolean;
 }
 
 /** A request the app's page makes without going through its app API. */
@@ -60,6 +64,14 @@ export interface PageRequestFacts {
   call: string;
   /** The source text of what it requests. */
   target: string;
+}
+
+/** A call the page makes to its app API. */
+export interface PageApiCallFacts {
+  /** `file:line`, relative to the app directory. */
+  at: string;
+  /** The path it calls, with `:id` for computed segments. Null when the reader cannot tell. */
+  path: string | null;
 }
 
 export interface AppFacts {
@@ -81,4 +93,8 @@ export interface AppFacts {
   apiEntry?: string;
   imports: ImportFacts[];
   pageRequests: PageRequestFacts[];
+  /** The page's calls to its own app API. */
+  pageApiCalls: PageApiCallFacts[];
+  /** Imports into api/, actions/ or db/ from shared code the page reaches. */
+  pageCrossings: ImportFacts[];
 }
