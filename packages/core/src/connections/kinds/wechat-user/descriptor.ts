@@ -23,19 +23,18 @@
 
 import { z } from "zod";
 import type { ChatDescriptor, ChatId } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
   WechatUserRuntime,
   type WechatUserChat,
   type WechatUserStatus,
-} from "../kinds/wechat-user/wechat-user.js";
-import { WECHAT_USER_CHANNEL } from "../../chats/history/wechat-user-messages.js";
-import { createLogger } from "../../logger.js";
-import { CredentialRejected } from "../errors.js";
-import { abortableDelay, SetupAbortError } from "../setup/session.js";
-import type { SetupFn, SetupView } from "../setup/types.js";
+} from "./wechat-user.js";
+import { createLogger } from "../../../logger.js";
+import { CredentialRejected } from "../../errors.js";
+import { abortableDelay, SetupAbortError } from "../../setup/session.js";
+import type { SetupFn, SetupView } from "../../setup/types.js";
 import type {
   AuthScheme,
   CapabilityDegradation,
@@ -44,14 +43,15 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   Talker,
-} from "../types.js";
-import { directoryPage } from "./talk-features.js";
+} from "../../types.js";
+import { directoryPage } from "../../integrations/talk-features.js";
 
 const log = createLogger("wechat-user");
 
-// The channel's name is the connection kind's: one constant, so the channel its reads
-// back and the channel its Connection backs cannot drift into two.
-export const WECHAT_USER_KIND = WECHAT_USER_CHANNEL;
+/** The connection kind, which is also the channel name every stored WeChat
+ *  account row spells. Chats reads it from here, so the channel its reads
+ *  back and the channel its Connection backs cannot drift into two. */
+export const WECHAT_USER_KIND = "wechat_user";
 
 /** How long a setup step waits for the guardian's phone actions. Scanning and
  *  confirming on a phone that may be in another room: generous on purpose. */

@@ -19,11 +19,11 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("renewal-handoffs");
 
-/** How many of a chat's latest turns are read for its recent messages. */
-const RECENT_TURNS = 60;
+/** How many of a chat's latest messages are read for its recent messages. */
+const RECENT_MESSAGES = 200;
 
-/** How many turns each page holds when every message since a time is read. */
-const SINCE_PAGE_TURNS = 100;
+/** How many messages each page holds when every message since a time is read. */
+const SINCE_PAGE_MESSAGES = 300;
 
 /**
  * The rows of every turn said at or after `since`: a turn with any row then
@@ -92,10 +92,11 @@ export interface RenewalHandoffSources {
   hardContextLimitTokens?: number;
   modelResolver: ModelResolver;
   /**
-   * The rows of chat `chatId`'s `turns` latest turns older than page
-   * `before`, oldest first, and where the next older page starts, or null.
+   * The rows of chat `chatId`'s `limit` latest messages older than page
+   * `before`, with the traces of their turns, oldest first, and where the
+   * next older page starts, or null.
    */
-  page(chatId: string, turns: number, before?: unknown): Promise<ChatPage>;
+  page(chatId: string, limit: number, before?: unknown): Promise<ChatPage>;
   /** Who said chat `chatId`'s user lines, or null for the default "Guardian". */
   ownerLabel?: (chatId: string) => Promise<string | null>;
   /** Chat `chatId`'s open tasks, one per line, or null for none or a chat that keeps none. */
@@ -136,14 +137,17 @@ export function recentMessagesOf(
 }
 
 export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHandoffs {
-  /** Pages back from the newest turn until a page reaches before `since`. */
+  /** Pages back from the newest message until a page reaches before `since`. */
   const rowsFrom = async (chatId: string, since: Date): Promise<ChatRow[]> => {
     const pages: (readonly ChatRow[])[] = [];
     let before: unknown;
     for (;;) {
-      const page = await sources.page(chatId, SINCE_PAGE_TURNS, before);
+      const page = await sources.page(chatId, SINCE_PAGE_MESSAGES, before);
       pages.unshift(page.rows);
-      if (!page.next || page.rows.some((row) => row.createdAt < since)) break;
+      // A trace comes with its turn's messages and may be older than all of them.
+      if (!page.next || page.rows.some((row) => row.role !== "trace" && row.createdAt < since)) {
+        break;
+      }
       before = page.next;
     }
     return rowsSince(pages.flat(), since);
@@ -152,7 +156,7 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
     const [rows, owner] = await Promise.all([
       since
         ? rowsFrom(chatId, since)
-        : sources.page(chatId, RECENT_TURNS).then((page) => page.rows),
+        : sources.page(chatId, RECENT_MESSAGES).then((page) => page.rows),
       sources.ownerLabel ? sources.ownerLabel(chatId).catch(() => null) : null,
     ]);
     return recentMessagesOf(rows, exceptTurnId, owner);

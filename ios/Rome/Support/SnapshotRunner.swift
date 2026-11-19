@@ -159,28 +159,14 @@ enum SnapshotRunner {
                     workspace.topics.setActivity(.working, for: main)
                 }
                 workspace.debugSetAgentName("Milo")
-                // A task's thread view over a busy chat: its header names the task.
-                await capture("57e-header-thread-open", style: styleName, in: directory, wait: 1.5) {
-                    workspace.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: main)
-                    workspace.concierge.openThread(at: "c-price")
-                }
-                workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
-            // A pill brought the transcript to a thread's stack, tinted for a moment.
-            await capture("04f-chat-stack-landed", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.concierge.showStack("c-site")
+            // Replies in order: two replies to one message grouped, a reply
+            // to an earlier message with its quote, the guardian's own quote.
+            await capture("04c-chat-replies", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.concierge.jump(to: "c-site")
             }
-            // A task's thread view, opened from a label: the task's title,
-            // "Open task chat", and the message it opened from tinted.
-            await capture("04c-chat-thread-open", style: styleName, in: directory, wait: 1.5) {
-                guard let chat = model.workspace?.concierge,
-                      let said = chat.messages.last(where: { !$0.isUser && $0.chatThreadId == "c-site" && $0.parts.contains { $0.textContent != nil } })
-                else { return }
-                chat.openThread(at: said.id)
-            }
-            model.workspace?.concierge.closeThread()
-            // The settled login task: its question and approval folded, labelled.
+            // The settled login task: its question and approval folded, and the Concierge's answer quoting what the guardian asked.
             await capture("04d-chat-settled-cards", style: styleName, in: directory, wait: 2) {
                 model.workspace?.concierge.jump(to: "c-login")
             }
@@ -367,8 +353,8 @@ enum SnapshotRunner {
             // shell, and the sheet would stay over every later screen.
             try? await Task.sleep(for: .seconds(0.6))
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
-            // A task's chat thread: its labels, and a reply's quote.
-            await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // A reply's quote.
+            await capture("50-topic-quote", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
             // Share mode on the last two turns, then the chat's links.
             await capture("61-share-select", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .section(.topic("topic-trip"))
@@ -406,40 +392,10 @@ enum SnapshotRunner {
                 workspace.topicStore("topic-trip").share.showsLinks = false
                 workspace.concierge.share.showsLinks = false
             }
-            // A long chat thread: every answer carries its label.
-            await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
+            // A long chat, to scroll far from the bottom.
+            await capture("53-topic-long-chat", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
             await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
-            model.debugCommand = .section(.topic("topic-trip"))
-            try? await Task.sleep(for: .seconds(1.5))
-            await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topicStore("topic-trip").openThread(at: "k1")
-            }
-            // Reply inside the thread view: the bar names the task, quoting nothing.
-            await capture("51b-thread-reply", style: styleName, in: directory, wait: 1.5) {
-                let store = model.workspace?.topicStore("topic-trip")
-                if store?.thread == nil { store?.openThread(at: "k1") }
-                store?.reply(to: "k5")
-            }
-            model.workspace?.topicStore("topic-trip").closeThread()
-            try? await Task.sleep(for: .seconds(0.4))
-            // A thread taller than the screen, opened near its foot: the
-            // header above the rows, the last answer just above the composer.
-            model.debugCommand = .section(.topic("topic-books"))
-            try? await Task.sleep(for: .seconds(1.5))
-            await capture("54-long-thread-open", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topicStore("topic-books").openThread(at: "b23")
-            }
-            model.workspace?.topicStore("topic-books").closeThread()
-            try? await Task.sleep(for: .seconds(0.4))
-            // The same long thread while the chat runs a task: rows scroll under the status.
-            await capture("54b-long-thread-busy", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: "topic-books")
-                model.workspace?.topicStore("topic-books").openThread(at: "b23")
-            }
-            model.workspace?.topicStore("topic-books").closeThread()
-            model.workspace?.topics.setActivity(nil, for: "topic-books")
-            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.

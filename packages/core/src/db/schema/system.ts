@@ -705,10 +705,6 @@ export const chatMessages = sqliteTable(
     // (docs/domains/chats.md#reaction); null for none.
     reaction: text("reaction"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
-    // When the chat's owner saw the line (docs/domains/chats.md#chat-thread);
-    // null for a line not yet seen. A Concierge chat has the one reader, its
-    // owner, so one column is enough.
-    readAt: integer("read_at", { mode: "timestamp" }),
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),

@@ -6,7 +6,7 @@ import { ConnectionRegistry } from "./registry.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { AppConnectionBroker } from "./app-connections.js";
-import { createFeishuDescriptor } from "./integrations/feishu.js";
+import { createFeishuDescriptor } from "./kinds/feishu/descriptor.js";
 const operation = "feishu.document.read";
 function harness() {
   const { db, close } = createTestDb();

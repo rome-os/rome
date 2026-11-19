@@ -24,7 +24,6 @@ function renderComposer(
   reply?: ReplyTarget,
   selector = true,
   ref?: React.Ref<ChatComposerHandle>,
-  threads = false,
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation(
     (async (input: RequestInfo | URL) =>
@@ -75,10 +74,7 @@ function renderComposer(
   });
   const tree = (next: Partial<ConciergeComposerProps>) => (
     <QueryClientProvider client={client}>
-      <ReplyDraftHarness
-        initial={reply}
-        thread={threads ? { thread: "a1", title: "Kyoto trip", root: "m1" } : undefined}
-      >
+      <ReplyDraftHarness initial={reply}>
         <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
     </QueryClientProvider>
@@ -279,63 +275,15 @@ describe("ConciergeComposer reply", () => {
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
-  it("names the thread in its placeholder, which a topic chat's name does not replace", async () => {
-    renderComposer({ chatName: "Trip to Lisbon" }, undefined, true, undefined, true);
-    expect(await screen.findByPlaceholderText("Reply: Kyoto trip")).toBeTruthy();
-  });
-
-  it("names the thread the same way in Chinese, in the placeholder and the back control", () => {
-    const t = (key: string) => i18n.t(key, { ns: "chat", lng: "zh-CN", title: "京都行程" });
-    expect(t("thread.replyPlaceholder")).toBe("回复：京都行程");
-    expect(t("thread.back")).toBe("返回对话：京都行程");
-  });
-
-  it("sends every message into its thread, quoting a message only when one is picked", async () => {
-    const { onSend } = renderComposer({}, reply, true, undefined, true);
-
-    // With a thread in focus the composer reads as a reply into it.
-    await userEvent.type(
-      await screen.findByPlaceholderText("Reply: Kyoto trip"),
-      "why there?{Enter}",
-    );
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "and the hotel?{Enter}");
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-
-    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "m1", replyTo: reply });
-    // The send cleared the reply, not the thread.
-    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "m1" });
-    expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
-    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
-    expect(screen.getByPlaceholderText("Reply: Kyoto trip")).toBeTruthy();
-  });
-
-  it("keeps sending into its thread, with its reply back, when a send fails", async () => {
-    const { onSend } = renderComposer({}, reply, true, undefined, true);
-    onSend.mockRejectedValueOnce(new Error("offline"));
-
-    await userEvent.type(
-      await screen.findByPlaceholderText("Reply: Kyoto trip"),
-      "why there?{Enter}",
-    );
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("button", { name: "Cancel reply" })).toBeTruthy();
-    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "{Enter}");
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-
-    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "m1", replyTo: reply });
-  });
-
-  it("drops a picked reply on Esc and keeps sending into its thread", async () => {
-    const { onSend } = renderComposer({}, reply, true, undefined, true);
+  it("drops a picked reply on Esc", async () => {
+    const { onSend } = renderComposer({}, reply);
     await screen.findByRole("button", { name: "Cancel reply" });
 
-    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "{Escape}");
+    await userEvent.type(screen.getByPlaceholderText("Message"), "{Escape}");
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
-    await userEvent.type(screen.getByPlaceholderText("Reply: Kyoto trip"), "ok{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Message"), "ok{Enter}");
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][0]).toMatchObject({ chatThread: "m1" });
     expect(onSend.mock.calls[0][0].replyTo).toBeUndefined();
   });
 

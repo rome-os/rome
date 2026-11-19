@@ -26,9 +26,17 @@ final class FakeBackend: RomeBackend {
     /// Set, every message read fails with it.
     var messagesError: APIError?
 
+    /// Set, the page each read answers, by the cursor it passes (nil for the
+    /// newest), as the server hands them out; a page missing fails.
+    var servedPages: [String?: MessagePage] = [:]
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         pageLimits.append(limit)
         if let messagesError { throw messagesError }
+        if !servedPages.isEmpty {
+            guard let page = servedPages[before] else { throw APIError.notFound }
+            return page
+        }
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
@@ -43,42 +51,6 @@ final class FakeBackend: RomeBackend {
                 await hook()
             }
         }
-        return page
-    }
-
-    /// The messages each read by `through` asked to reach, in order.
-    var throughReads: [String] = []
-    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
-        throughReads.append(through)
-        return try await messages(sessionId: sessionId, before: nil, limit: limit)
-    }
-
-    /// Answers a read by main-line messages (`type=concierge`); nil answers by turns, as an
-    /// instance before the mode does.
-    var conciergePage: ((_ before: String?, _ limit: Int, _ through: String?) -> MessagePage)?
-    /// What each such read asked for, in order.
-    var conciergeReads: [(before: String?, limit: Int, through: String?)] = []
-    /// Set, every such read fails with it.
-    var conciergeError: APIError?
-    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
-        conciergeReads.append((before, limit, through))
-        if let conciergeError { throw conciergeError }
-        if let conciergePage { return conciergePage(before, limit, through) }
-        if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
-        return try await messages(sessionId: sessionId, before: before, limit: limit)
-    }
-
-    /// One thread read whole, by the key asked for; a missing one fails.
-    var conciergeThreads: [String: MessagePage] = [:]
-    var conciergeThreadReads: [String] = []
-    var conciergeThreadError: APIError?
-    /// Runs inside a thread read by main-line paging, before it answers.
-    var duringConciergeThreadRead: (() async -> Void)?
-    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
-        conciergeThreadReads.append(key)
-        await duringConciergeThreadRead?()
-        if let conciergeThreadError { throw conciergeThreadError }
-        guard let page = conciergeThreads[key] else { throw APIError.notFound }
         return page
     }
 
@@ -243,28 +215,10 @@ final class FakeBackend: RomeBackend {
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
 
-    /// What each send asked for its chat thread, in order.
-    var sentThreads: [ThreadTarget?] = []
-    /// A thread read's answer, by the root asked for; missing ones fail.
-    var threads: [String: [ChatMessage]] = [:]
-    var threadReads: [String] = []
-
-    /// Set, every thread read fails with it (a network error, say).
-    var threadError: APIError?
-    /// Runs inside a thread read, before it answers.
-    var duringThreadRead: (() async -> Void)?
-
-
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
-        threadReads.append(root)
-        await duringThreadRead?()
-        if let threadError { throw threadError }
-        guard let thread = threads[root] else { throw APIError.notFound }
-        return thread
-    }
-
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
-        sentThreads.append(thread)
+    /// The reply each send named, in order.
+    var sentReplies: [ReplyTarget?] = []
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
+        sentReplies.append(reply)
         return try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
 
@@ -299,17 +253,6 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    /// The messages told to the instance as seen, by chat, in order.
-    var markedRead: [(session: String, ids: [String])] = []
-    /// Off, the instance does not take a mark (a failed POST): every one is answered as not taken.
-    var markReadSucceeds = true
-    /// Runs inside a mark, before it answers.
-    var duringMarkRead: (() async -> Void)?
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
-        markedRead.append((sessionId, ids))
-        await duringMarkRead?()
-        return markReadSucceeds
-    }
     /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
     /// many reads had gone out each time it was asked for.
     var readMarkValue: String?
@@ -605,18 +548,19 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
             ChatMessage(id: id, sessionId: "task", turnId: turn, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
         }
         let backend = FakeBackend()
-        // Server order: a turn's rows together, the turn's late reply before
-        // the next turn, two rows in the same second in the order written.
+        // Server order: by when each was said, whichever turn it is in: the
+        // turn's late reply after the next turn's prompt, two rows in the same
+        // second in the order written.
         backend.stored = [
             row("u1", turn: "t1", second: 0, role: "user"),
             row("a1", turn: "t1", second: 20),
-            row("a2", turn: "t1", second: 50),
-            row("a3", turn: "t1", second: 50),
             row("u2", turn: "t2", second: 30, role: "user"),
+            row("a3", turn: "t1", second: 50),
+            row("a2", turn: "t1", second: 50),
         ]
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
-        let expected = ["u1", "a1", "a2", "a3", "u2"]
+        let expected = ["u1", "a1", "u2", "a3", "a2"]
         #expect(store.messages.map(\.id) == expected)
 
         await store.reload()
@@ -636,6 +580,85 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
         await store.reload()
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
+    }
+
+    @Test func pagesMergeByPositionNotByTime() async {
+        // Times that run against the server's order decide nothing.
+        func row(_ id: String, second: Double, role: String = "assistant") -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 50), row("m2", second: 10)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.map(\.id) == ["m3", "m4"])
+
+        // An older page goes above.
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+
+        // A live message goes last, and the same id is replaced where it stands.
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("live", second: 1)))
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("m2", second: 99)))
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "live"])
+
+        // A refetched newest page replaces from its first message onward; the
+        // older pages stay, and so does a live message the page does not carry.
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20), row("m5", second: 5)], nextCursor: "older")
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "m5", "live"])
+    }
+
+    /// The refresh after a send reads the newest page: when it shares no message
+    /// with the history held and older messages remain, the history starts over
+    /// from it, as a reload's does, and the paging follows its cursor.
+    @Test func theRefreshAfterASendThatSharesNothingStartsTheHistoryOver() async {
+        func row(_ id: String, second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: "assistant", content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 3), row("m4", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 1), row("m2", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+        #expect(!store.hasOlder)
+
+        // The chat moved on far enough that the newest page shares nothing.
+        backend.servedPages[nil] = MessagePage(messages: [row("m10", second: 10), row("m11", second: 11)], nextCursor: "c2")
+        backend.servedPages["c2"] = MessagePage(messages: [row("m8", second: 8), row("m9", second: 9)], nextCursor: nil)
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m10", "m11"])
+        #expect(store.hasOlder)
+
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11"])
+        #expect(!store.hasOlder)
+
+        // A page that shares a message does not start over.
+        backend.servedPages[nil] = MessagePage(messages: [row("m9", second: 9), row("m10", second: 10), row("m11", second: 11), row("m12", second: 12)], nextCursor: "c2")
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11", "m12"])
+        #expect(!store.hasOlder)
+    }
+
+    @Test func aTraceOfATurnOnBothPagesTakesTheOlderPagesPlace() async {
+        func row(_ id: String, role: String = "assistant", second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("answer-a", second: 3), row("trace-a", role: "trace", second: 2), row("answer-b", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("owner-a", role: "user", second: 0), row("owner-b", role: "user", second: 1), row("trace-a", role: "trace", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "trace-a", "answer-a", "answer-b"])
+        // The newest page again: placed by its first message, the trace no longer ahead of it.
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "answer-a", "trace-a", "answer-b"])
     }
 
     @Test func olderPageFromBeforeAGapIsDropped() async {

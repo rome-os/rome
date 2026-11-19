@@ -202,7 +202,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         replyTo?: ReplyTarget,
         pickedFolder: FolderSelection | null = null,
         skillName?: string,
-        chatThread?: string,
       ): ChatComposerSnapshot => ({
         text: appendFolderLine(text, pickedFolder),
         uploads,
@@ -212,7 +211,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         inputId,
         replyTo,
         skillName,
-        ...(chatThread ? { chatThread } : {}),
       }),
       [reasoningEffort],
     );
@@ -239,7 +237,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       voice.dismissNotice();
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
-      const chatThread = replyDraft?.thread ?? undefined;
       // The draft's change count once this send cleared it: a failed send
       // puts its reply back only if the guardian changed nothing since.
       let clearedAt: number | undefined;
@@ -251,9 +248,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         clearedAt = replyDraft?.clear();
       }
       try {
-        await invokeOnSend(
-          snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name, chatThread),
-        );
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
@@ -620,9 +615,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : replyDraft?.thread && replyDraft.threadTitle
-                          ? t("thread.replyPlaceholder", { title: replyDraft.threadTitle })
-                          : (namedPlaceholder ?? t("concierge.placeholder"))
+                        : (namedPlaceholder ?? t("concierge.placeholder"))
                     }
                     rows={1}
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:truncate placeholder:text-subtle-foreground focus:outline-none"

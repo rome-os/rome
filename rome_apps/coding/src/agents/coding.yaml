@@ -1,5 +1,5 @@
 name: coding
-description: Writes and modifies code.
+description: Builds and changes Rome apps.
 tier: medium
 permissionMode: bypassPermissions
 tools:

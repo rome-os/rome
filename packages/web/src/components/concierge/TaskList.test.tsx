@@ -343,15 +343,13 @@ describe("TaskList", () => {
     stop();
   });
 
-  it("jumps to the card's message and its thread on Respond, pending until it lands", async () => {
+  it("jumps to the card's message on Respond, pending until it lands", async () => {
     let land!: (landed: boolean) => void;
     const jumps: string[] = [];
-    const focuses: boolean[] = [];
     const stop = onConciergeJump(
-      (id, focusThread) =>
+      (id) =>
         new Promise((resolve) => {
           jumps.push(id);
-          focuses.push(focusThread);
           land = resolve;
         }),
     );
@@ -359,8 +357,6 @@ describe("TaskList", () => {
     await screen.findByRole("region", { name: "Needs you" });
     fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
     expect(jumps).toEqual(["card-message"]);
-    // The card is in a chat thread, which the chat focuses.
-    expect(focuses).toEqual([true]);
     expect(within(rowOf("Pick a hotel")).getByText("Opening…")).toBeTruthy();
     // Pending: both buttons stay shown and take no other press.
     const row = rowOf("Pick a hotel");

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "834b45fc-1377-4e62-b602-5ac0e78f1720",
+  "id": "57db660b-8330-4a96-908b-6c182a48a6fd",
   "prevId": "de6597b6-5c2e-42cb-b73b-72e11002ae45",
   "tables": {
     "account_profiles": {
@@ -1001,13 +1001,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -4899,119 +4892,6 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "slack_app_messages": {
-      "name": "slack_app_messages",
-      "columns": {
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_ts": {
-          "name": "thread_ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "said_at": {
-          "name": "said_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "handed_over_at": {
-          "name": "handed_over_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_slack_app_messages_chat_said": {
-          "name": "idx_slack_app_messages_chat_said",
-          "columns": [
-            "team_id",
-            "channel_id",
-            "said_at"
-          ],
-          "isUnique": false
-        },
-        "idx_slack_app_messages_unhanded": {
-          "name": "idx_slack_app_messages_unhanded",
-          "columns": [
-            "team_id",
-            "handed_over_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "slack_app_messages_team_id_event_id_pk": {
-          "columns": [
-            "team_id",
-            "event_id"
-          ],
-          "name": "slack_app_messages_team_id_event_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

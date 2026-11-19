@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { SetupSession } from "../setup/session.js";
-import type { SetupGrant } from "../setup/types.js";
-import { makeFeishuSetup, reviveFeishuProfile } from "./feishu.js";
+import { SetupSession } from "../../setup/session.js";
+import type { SetupGrant } from "../../setup/types.js";
+import { makeFeishuSetup, reviveFeishuProfile } from "./descriptor.js";
 
 describe("Feishu credential setup", () => {
   it("validates manual credentials and grants without granting guardian authority", async () => {

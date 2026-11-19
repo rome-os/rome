@@ -1034,8 +1034,15 @@
     {
       "idx": 148,
       "version": "6",
-      "when": 1795089989201,
-      "tag": "0148_slack_app_messages",
+      "when": 1795092902102,
+      "tag": "0148_drop_message_read_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "6",
+      "when": 1795103314177,
+      "tag": "0149_slack_app_messages",
       "breakpoints": true
     }
   ]

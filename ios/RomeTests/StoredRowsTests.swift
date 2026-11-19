@@ -4,13 +4,13 @@ import Testing
 
 private func message(
     _ id: String, role: String = "assistant", _ text: String = "hi", turn: String? = nil, at seconds: TimeInterval,
-    thread: String? = nil, title: String? = nil, parts: [[String: Any]]? = nil
+    parts: [[String: Any]]? = nil
 ) -> ChatMessage {
     let json = (try? JSONSerialization.data(withJSONObject: parts ?? [["type": "text", "content": text]])) ?? Data()
     let created = RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
     return ChatMessage(
         id: id, sessionId: "concierge", turnId: turn, role: role, content: String(bytes: json, encoding: .utf8) ?? "[]",
-        createdAt: created, chatThreadId: thread, knowsThreads: true, chatThreadTitle: title
+        createdAt: created
     )
 }
 
@@ -130,8 +130,6 @@ private func message(
         backend.stored = [
             message("u1", role: "user", "hi", turn: "t1", at: 0),
             message("a1", "sunny", turn: "t1", at: 5),
-            // Something between, so the reply below is not right under what it answers.
-            message("a2", "anything else?", turn: "t1", at: 7),
             message("u2", role: "user", at: 10, parts: [
                 ["type": "reply_to", "messageId": "a1", "author": "agent", "text": "sunny"],
                 ["type": "text", "content": "and tomorrow?"]
@@ -148,11 +146,9 @@ private func message(
         #expect(!info("u2:1").canShare)
         #expect(!info("u1:0").isPending)
         #expect(info("a1:0").canShare)
-        // A quote leads to its original when the chat holds it; right under it, a reply shows none.
+        // The guardian's reply always draws its quote, the original held or not.
         #expect(info("u2:1").quote?.messageId == "a1")
-        #expect(info("u2:1").quoteLeads)
         #expect(info("u3:1").quote?.messageId == "gone")
-        #expect(!info("u3:1").quoteLeads)
         // The reaction follows the event.
         #expect(info("u1:0").mark == nil)
         let mark = LiveEvent.reaction(sessionId: "concierge", messageId: "u1", reaction: "👍")
@@ -175,32 +171,12 @@ private func message(
         store.stop()
     }
 
-    @Test func aThreadsRowsFollowTheChat() async {
-        let backend = FakeBackend()
-        let root = message("r", role: "user", "plan", at: 0, thread: "r")
-        let reply = message("a1", "sure", at: 10, thread: "r")
-        backend.stored = [root, reply]
-        backend.threads["r"] = [root, reply]
-        let store = await chat(backend)
-        store.openThread(at: "r")
-        let thread = store.thread!
-        #expect(thread.rows.map(\.id).contains("a1:0"))
-        let more = message("a2", "more", at: 20, thread: "r")
-        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(more))
-        #expect(thread.rows.map(\.id).contains("a2:0"))
-        #expect(thread.info(for: thread.rows.first { $0.id == "a2:0" }!).date == more.date)
-        store.closeThread()
-        store.stop()
-    }
-
     @Test func actionsActOnTheirStore() async {
         let backend = FakeBackend()
-        backend.stored = [message("a1", "sure", at: 10, thread: "a1", title: "T")]
+        backend.stored = [message("a1", "sure", at: 10)]
         let store = await chat(backend)
         store.actions.reply(to: "a1")
         #expect(store.quote?.messageId == "a1")
-        store.openThread(at: "a1")
-        #expect(store.thread != nil)
         store.stop()
     }
 
