@@ -467,6 +467,35 @@ declare function defineAction(spec: unknown): unknown;
     expect(gaps.map((g) => g.rule)).toEqual(["I5"]);
   });
 
+  it("I1 and I2: do not pair a path with another alternative's method", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'if (request.method === "POST" && route === "notes") return this.add();',
+      'if ((request.method === "POST" && route === "notes") || (request.method === "GET" && route === "other")) return this.add();',
+    );
+    const page =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => fetchAppApi("notes");\n';
+    const verdict = checkApp(
+      await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api, "src/web/App.tsx": page })),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I2"]);
+  });
+
+  it("D2 and I1: leave a schema it cannot tie to the returned action to a person", async () => {
+    const untied = `export function createAction(config: unknown) {
+  const sample = { inputSchema: { type: "object", properties: {} } };
+  console.log(sample);
+  return new NoSchemaAction(config);
+}
+declare class NoSchemaAction { constructor(config: unknown); }
+`;
+    const verdict = checkApp(
+      await readApp(writeApp({ ...COMPLIANT, ...ACTION("add_note", untied) })),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["D2", "I1"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

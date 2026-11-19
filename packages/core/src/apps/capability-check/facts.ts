@@ -22,6 +22,8 @@ export interface ActionFacts {
   webhook: boolean;
   /** Whether the action hands Rome an input schema, which puts it in agent catalogs. */
   hasInputSchema: boolean;
+  /** The schema found could not be tied to the action the module returns. */
+  schemaUntied?: boolean;
   arguments: ArgumentDescriptions;
 }
 

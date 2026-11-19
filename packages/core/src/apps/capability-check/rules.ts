@@ -127,6 +127,13 @@ export function checkApp(app: AppFacts): AppVerdict {
         `\`${action.name}\` is public but has no input schema, so no agent can find it.`,
       );
     }
+    if (action.schemaUntied && action.visibility === "public" && !action.webhook) {
+      cannotJudge(
+        "D2",
+        action.at,
+        `Found an input schema near \`${action.name}\` but could not tie it to the action the module returns.`,
+      );
+    }
     // D3
     if (isAgentCallable(action)) {
       if (action.arguments.kind === "undescribed") {
@@ -343,6 +350,14 @@ function judgeRoute(
     const own = app.actions.find((action) => action.name === localName(app.id, name));
     if (!own) {
       cannotJudge("I1", route.at, `${label} runs \`${name}\`, which another app owns.`);
+      continue;
+    }
+    if (own.schemaUntied) {
+      cannotJudge(
+        "I1",
+        route.at,
+        `${label} runs \`${own.name}\`, whose input schema could not be tied to it.`,
+      );
       continue;
     }
     if (!isAgentCallable(own)) {

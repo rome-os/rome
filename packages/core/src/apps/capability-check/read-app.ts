@@ -146,7 +146,7 @@ function readAction(reader: SourceReader, appDir: string, actionDir: string): Ac
   const config = parseYaml(readFileSync(yamlPath, "utf8")) as Record<string, unknown>;
   const entry = typeof config.entry === "string" ? config.entry : "index";
   const entryFile = resolveSourceFile(join(actionDir, entry.replace(/\.(m?js|ts)$/, "")));
-  const schema = entryFile ? reader.inputSchema(entryFile) : undefined;
+  const { schema, tied } = entryFile ? reader.inputSchema(entryFile) : { tied: true };
   return {
     name: String(config.name),
     at: relative(appDir, actionDir).split(sep).join("/"),
@@ -155,6 +155,7 @@ function readAction(reader: SourceReader, appDir: string, actionDir: string): Ac
     sideEffects: config.sideEffects === "write" ? "write" : "read-only",
     webhook: config.webhook === true,
     hasInputSchema: schema !== undefined,
+    ...(schema && !tied ? { schemaUntied: true } : {}),
     arguments: schema ? reader.argumentDescriptions(schema) : { kind: "described" },
   };
 }
@@ -434,29 +435,32 @@ class SourceReader {
   /**
    * The expression an action module hands Rome as its input schema: the
    * `inputSchema` it returns, or the `schema` it passes `defineAction`.
-   * Undefined when it hands none. Looks in the entry file, then in the files
-   * it imports, since an entry may re-export an action built elsewhere.
+   * Undefined when it hands none. `tied` is false when the reader found a
+   * schema it could not tie to the action the module returns.
    */
-  inputSchema(entryFile: string): TS.Expression | undefined {
+  inputSchema(entryFile: string): { schema?: TS.Expression; tied: boolean } {
     const entry = this.program.getSourceFile(entryFile);
-    if (!entry) return undefined;
+    if (!entry) return { tied: true };
     // The schema is the one the exported factory builds, not any `inputSchema`
     // that happens to sit in the file.
     const factory = this.actionFactory(entry);
     if (factory) {
       const returned = this.returnedSchema(factory, 0);
-      if (returned === "none") return undefined;
+      if (returned === "none") return { tied: true };
+      if (returned !== "unknown") return { schema: returned, tied: true };
       // A factory whose result the reader cannot trace: any schema it reaches.
-      return returned === "unknown" ? this.schemaReachedFrom(factory) : returned;
+      const reached = this.schemaReachedFrom(factory);
+      return reached ? { schema: reached, tied: false } : { tied: true };
     }
+    // No factory to trace: a schema anywhere in the entry, or the files it imports.
     const inEntry = findInputSchema(entry);
-    if (inEntry) return inEntry;
+    if (inEntry) return { schema: inEntry, tied: false };
     for (const imp of this.importsOf(entry)) {
       const source = this.program.getSourceFile(imp);
       const found = source && findInputSchema(source);
-      if (found) return found;
+      if (found) return { schema: found, tied: false };
     }
-    return undefined;
+    return { tied: true };
   }
 
   /** The body of the `createAction` (or default) export an action entry hands Rome. */
@@ -1396,6 +1400,14 @@ function readCondition(
           (operand, i) =>
             !pathOperands.includes(operands[i] as (typeof operands)[number]) && readsPath(operand),
         )
+      ) {
+        patternOnPath = true;
+      }
+      // `(POST && route === "a") || (GET && route === "b")` pairs each path
+      // with its own method, which one route cannot hold.
+      if (
+        pathOperands.length === operands.length &&
+        new Set(operands.map((o) => [...o.methods].sort().join("|"))).size > 1
       ) {
         patternOnPath = true;
       }
