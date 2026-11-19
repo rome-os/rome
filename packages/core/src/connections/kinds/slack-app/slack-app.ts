@@ -128,7 +128,7 @@ export class SlackAppAdapter {
     this.appId = identity.appId;
     if (this.config.refreshMailbox) {
       try {
-        await this.refreshMailbox();
+        await this.refreshMailbox(signal);
       } catch (error) {
         log.warn("slack app mailbox refresh failed; draining with the stored key", {
           error: describe(error),
@@ -147,10 +147,13 @@ export class SlackAppAdapter {
     log.info("slack app started", { teamId: this.config.teamId });
   }
 
-  /** Ask Rome Cloud for drain credentials; true when they changed. */
-  private async refreshMailbox(): Promise<boolean> {
+  /** Ask Rome Cloud for drain credentials; true when they changed. An answer
+   *  that lands after `signal` aborted belongs to a stopped adapter, whose
+   *  grant may already be replaced, so it is dropped without persisting. */
+  private async refreshMailbox(signal: AbortSignal): Promise<boolean> {
     const fresh = await this.config.refreshMailbox?.();
     if (
+      signal.aborted ||
       !fresh ||
       (fresh.connectUrl === this.mailbox.connectUrl && fresh.drainKey === this.mailbox.drainKey)
     ) {
@@ -190,7 +193,7 @@ export class SlackAppAdapter {
   private async renew(): Promise<void> {
     const signal = this.abort.signal;
     try {
-      const changed = await this.refreshMailbox();
+      const changed = await this.refreshMailbox(signal);
       if (signal.aborted) return;
       if (changed) {
         // The old drain finishes the frame it is delivering before the new one

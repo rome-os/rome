@@ -396,6 +396,26 @@ describe("Slack app mailbox key", () => {
       await a.stop();
     }));
 
+  it("drops a refresh that answers after the adapter stopped, without persisting it", async () => {
+    const stored = "k-stored";
+    let answer!: (mailbox: { connectUrl: string; drainKey: string }) => void;
+    const t = renewing(
+      stored,
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const started = t.adapter.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A regrant replaces this adapter while Rome Cloud is still answering.
+    await t.adapter.stop();
+    answer({ connectUrl: "wss://relay.test/c/mbx", drainKey: "k-late" });
+    await started;
+    expect(t.refreshed).toEqual([]);
+    expect(t.opened).toEqual([]);
+  });
+
   it("retries a failed renewal hourly, and reports the connection down once the key expires", () =>
     withClock(async () => {
       const key = keyExpiringAt(NOW + 7 * DAY + 2 * 60 * 60 * 1000);
