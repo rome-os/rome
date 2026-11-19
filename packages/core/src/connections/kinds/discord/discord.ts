@@ -63,7 +63,7 @@ import {
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
-import { archivedDiscordThreads } from "./discord-threads.js";
+import { archivedDiscordThreads, type DiscordGet } from "./discord-threads.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
@@ -478,10 +478,37 @@ export class DiscordAdapter {
       (channel) => channel.type !== "thread" && this.readsArchiveOf(channel),
     );
     const byId = new Map(chats.map((chat) => [chat.id, chat]));
-    const threads = await archivedDiscordThreads(
-      (route, query) => this.rest.get(route, query ? { query } : {}),
-      chats.map((chat) => ({ id: chat.id, holdsPrivateThreads: chat.type === "text" })),
-    );
+    // The scan must not outlive this credential's epoch: `stop` aborts it,
+    // and no request is sent once it has.
+    const controller = new AbortController();
+    this.activeApiRequestControllers.add(controller);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("Discord connection stopped during the listing")),
+        { once: true },
+      );
+    });
+    void aborted.catch(() => undefined);
+    const get: DiscordGet = async (route, query) => {
+      if (controller.signal.aborted) return aborted;
+      const request = this.rest.get(route, {
+        ...(query ? { query } : {}),
+        signal: controller.signal,
+      });
+      // discord.js does not observe the signal while it waits on a bucket.
+      void request.catch(() => undefined);
+      return Promise.race([request, aborted]);
+    };
+    let threads: Awaited<ReturnType<typeof archivedDiscordThreads>>;
+    try {
+      threads = await archivedDiscordThreads(
+        get,
+        chats.map((chat) => ({ id: chat.id, holdsPrivateThreads: chat.type === "text" })),
+      );
+    } finally {
+      this.activeApiRequestControllers.delete(controller);
+    }
     return threads.flatMap((thread) => {
       const chat = byId.get(thread.parentId);
       if (!chat) return [];
