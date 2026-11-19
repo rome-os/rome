@@ -829,6 +829,48 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
+  it("links no message to an older one Slack delivers again after a restart", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const db = createTestDb().db;
+    const first = historyAdapter(mailbox, slack, { db });
+    await first.adapter.start();
+    for (const i of [1, 2, 3]) {
+      slack.say(i);
+      await mailbox.deposit(frame(dmEvent(i)));
+    }
+    await first.adapter.stop();
+
+    const second = historyAdapter(mailbox, slack, { db });
+    await second.adapter.start();
+    // Message 1 again, then a new message.
+    await mailbox.deposit(frame(dmEvent(1)));
+    slack.say(4);
+    await mailbox.deposit(frame(dmEvent(4)));
+
+    const read = await second.adapter.readHistory("D_GUARDIAN" as never, { limit: 4 });
+    expect(texts(read)).toEqual(["message 4", "message 3", "message 2", "message 1"]);
+  });
+
+  it("links no message across one it failed to note", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, copy } = historyAdapter(mailbox, slack);
+    await a.start();
+    for (const i of [1, 2, 3]) slack.say(i);
+    await mailbox.deposit(frame(dmEvent(1)));
+    const keepRun = copy.keepRun.bind(copy);
+    const failing = rs.spyOn(copy, "keepRun").mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+    await mailbox.deposit(frame(dmEvent(2)));
+    failing.mockImplementation(keepRun);
+    await mailbox.deposit(frame(dmEvent(3)));
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
   it("reads from its copy what it heard and sent in one drain, without asking Slack", async () => {
     const slack = fakeSlackHistory();
     slack.say(1);

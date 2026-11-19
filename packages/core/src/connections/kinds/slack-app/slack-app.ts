@@ -478,6 +478,9 @@ export class SlackAppAdapter {
       const { raw: _raw, addressing: _addressing, ...kept } = message;
       noteInDrain(this.timeline(), channelId, wire.ts, kept);
     } catch (error) {
+      // The message is missing from the timeline, so the next one heard must
+      // not link across it.
+      this.heads.delete(channelId);
       log.warn("slack app could not note a message in its timeline", { error: describe(error) });
     }
   }
