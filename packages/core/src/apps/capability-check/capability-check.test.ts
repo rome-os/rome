@@ -385,14 +385,32 @@ declare function defineAction(spec: unknown): unknown;
       ]);
     });
 
-    it("leaves a JSON Schema composed of others to a person", async () => {
-      const composed = SCHEMA_ACTION.replace(
-        'type: "object",',
-        'type: "object",\n      allOf: [{ properties: { tag: { type: "string" } } }],',
+    it("leaves a JSON Schema whose branches add arguments to a person", async () => {
+      const composed = (extra: string) =>
+        SCHEMA_ACTION.replace('type: "object",', `type: "object",\n      ${extra},`);
+      const adds = await verdictOf({
+        ...COMPLIANT,
+        ...ACTION("add_note", composed('allOf: [{ properties: { tag: { type: "string" } } }]')),
+      });
+      expect(adds.gaps).toEqual([]);
+      expect(adds.unverified.map((u) => u.rule)).toEqual(["D3"]);
+      // A branch that only adds rules hides no argument.
+      const rules = await verdictOf({
+        ...COMPLIANT,
+        ...ACTION(
+          "add_note",
+          composed('allOf: [{ if: { required: ["text"] }, then: { required: ["text"] } }]'),
+        ),
+      });
+      expect(rules.unverified).toEqual([]);
+    });
+
+    it("leaves a method-less test on an indexed segment of an unknown name to a person", async () => {
+      const verdict = await verdictOf(
+        withRoute('const parts = request.path;\n    if (parts[0] === "items") return "items";'),
       );
-      const verdict = await verdictOf({ ...COMPLIANT, ...ACTION("add_note", composed) });
       expect(verdict.gaps).toEqual([]);
-      expect(verdict.unverified.map((u) => u.rule)).toEqual(["D3"]);
+      expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
     });
 
     it("leaves a write from an unreadable route to a person when the app has machine routes", async () => {

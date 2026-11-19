@@ -44,16 +44,6 @@ const DIRECT_REQUESTS = new Set([
   "axios.get",
   "axios.post",
 ]);
-const JSON_SCHEMA_COMPOSES = [
-  "allOf",
-  "anyOf",
-  "oneOf",
-  "$ref",
-  "not",
-  "if",
-  "patternProperties",
-  "dependentSchemas",
-];
 const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
@@ -338,8 +328,7 @@ class SourceReader {
 
   private jsonSchemaArguments(schema: TS.ObjectLiteralExpression): ArgumentDescriptions {
     if (schema.properties.some((p) => ts.isSpreadAssignment(p))) return { kind: "unknown" };
-    // Arguments can also come from composed or referenced schemas.
-    if (JSON_SCHEMA_COMPOSES.some((key) => propertyValue(schema, key))) return { kind: "unknown" };
+    if (this.composesArguments(schema)) return { kind: "unknown" };
     const properties = propertyValue(schema, "properties");
     if (!properties) return { kind: "described" };
     const literal = this.followIdentifier(properties);
@@ -356,6 +345,33 @@ class SourceReader {
     return undescribed.length === 0
       ? { kind: "described" }
       : { kind: "undescribed", names: undescribed };
+  }
+
+  /**
+   * Whether arguments may also come from a referenced or composed schema. A
+   * composed branch that only adds rules, such as `if`/`then` required lists,
+   * adds no arguments.
+   */
+  private composesArguments(schema: TS.ObjectLiteralExpression): boolean {
+    if (propertyValue(schema, "$ref") || propertyValue(schema, "patternProperties")) return true;
+    const branches: TS.Expression[] = [];
+    for (const key of ["allOf", "anyOf", "oneOf"]) {
+      const value = propertyValue(schema, key);
+      if (!value) continue;
+      const list = this.followIdentifier(value);
+      if (!list || !ts.isArrayLiteralExpression(list)) return true;
+      branches.push(...list.elements);
+    }
+    for (const key of ["then", "else"]) {
+      const value = propertyValue(schema, key);
+      if (value) branches.push(value);
+    }
+    return branches.some((branch) => {
+      const literal = this.followIdentifier(branch);
+      if (!literal || !ts.isObjectLiteralExpression(literal)) return true;
+      if (literal.properties.some((p) => ts.isSpreadAssignment(p))) return true;
+      return propertyValue(literal, "properties") !== undefined || this.composesArguments(literal);
+    });
   }
 
   /** The initializer an identifier names, or the expression itself. */
@@ -782,7 +798,10 @@ function readCondition(
   root: boolean;
   /** The condition tests something against a literal, or a pattern, the reader cannot place. */
   opaque: boolean;
-  /** The condition matches the path against a pattern, so it is a route the reader cannot place. */
+  /**
+   * The condition matches the path against a pattern, or tests an indexed
+   * segment of a name it does not know, so it is a route the reader cannot place.
+   */
   patternOnPath: boolean;
 } {
   const methods: string[] = [];
@@ -820,6 +839,8 @@ function readCondition(
           else segments.push({ value });
         } else {
           opaque = true;
+          // `parts[0] === "items"` reads like a path segment on a name the reader does not know.
+          if (/\[\d+\]$/.test(subjectText)) patternOnPath = true;
         }
       }
     }
