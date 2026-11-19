@@ -298,4 +298,32 @@ describe("DiscordAdapter REST broker capability", () => {
       await expect(failing.readsHistoryIn("3")).resolves.toBeNull();
     });
   });
+
+  it("ends a history read when the epoch stops during its permission check", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    rs.spyOn(REST.prototype, "get").mockResolvedValue({ id: "3", type: 0, name: "general" });
+    rs.spyOn(ChannelManager.prototype, "fetch").mockImplementation(
+      (() => new Promise(() => undefined)) as never,
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const client = (adapter as unknown as { client: { user: unknown } }).client;
+    Object.defineProperty(client, "user", { value: { id: "1" }, configurable: true });
+
+    const read = adapter.readHistory("3" as never, { limit: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await adapter.stop();
+
+    await expect(read).rejects.toThrow("Discord connection stopped during the read");
+  });
+
+  it("reports a 401 on a history read as a rejected credential", async () => {
+    rs.spyOn(REST.prototype, "get").mockRejectedValue(
+      Object.assign(new Error("401: Unauthorized"), { status: 401 }),
+    );
+    const onGatewayFault = rs.fn();
+    const adapter = new DiscordAdapter({ botToken: "not-exposed", onGatewayFault });
+
+    await expect(adapter.readHistory("3" as never, { limit: 5 })).rejects.toThrow();
+    expect(onGatewayFault).toHaveBeenCalledWith(expect.objectContaining({ kind: "credential" }));
+  });
 });

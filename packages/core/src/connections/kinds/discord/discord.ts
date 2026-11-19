@@ -1439,16 +1439,18 @@ Use \`/channel agent clear\` to undo.`,
     void aborted.catch(() => undefined);
     const get: DiscordGet = async (route, query) => {
       if (controller.signal.aborted) return aborted;
-      const request = this.rest.get(route, {
-        ...(query ? { query } : {}),
-        signal: controller.signal,
-      });
+      const request = this.rest
+        .get(route, { ...(query ? { query } : {}), signal: controller.signal })
+        .catch((err: unknown) => {
+          this.reportRejectedCredential(err);
+          throw err;
+        });
       // discord.js does not observe the signal while it waits on a bucket.
       void request.catch(() => undefined);
       return Promise.race([request, aborted]);
     };
     try {
-      return await this.readHistoryWith(get, chatId, read, () => controller.signal.aborted);
+      return await this.readHistoryWith(get, chatId, read, aborted);
     } finally {
       // Whatever ended the read, nothing it started sends on.
       controller.abort();
@@ -1460,7 +1462,7 @@ Use \`/channel agent clear\` to undo.`,
     get: DiscordGet,
     chatId: ChatId,
     read: TalkHistoryRead,
-    stopped: () => boolean,
+    aborted: Promise<never>,
   ): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
     const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
@@ -1482,11 +1484,9 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        readsHistoryIn: async (channelId) => {
-          const reads = await this.readsHistoryIn(channelId);
-          if (stopped()) throw new Error("Discord connection stopped during the read");
-          return reads;
-        },
+        // The permission fetches go through discord.js managers, which take
+        // no signal: a stop ends the read without waiting on them.
+        readsHistoryIn: (channelId) => Promise.race([this.readsHistoryIn(channelId), aborted]),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
@@ -1518,11 +1518,23 @@ Use \`/channel agent clear\` to undo.`,
       const flags = discordJs().PermissionFlagsBits;
       return permissions.has([flags.ViewChannel, flags.ReadMessageHistory]);
     } catch (err) {
+      if (this.reportRejectedCredential(err)) throw err;
       // Discord refusing the chat itself is an answer.
       const status = (err as { status?: unknown } | null)?.status;
       if (status === 403 || status === 404) return false;
       return null;
     }
+  }
+
+  /** Reports a 401 from Discord as a rejected credential, as the broker does,
+   *  and says whether it was one. */
+  private reportRejectedCredential(err: unknown): boolean {
+    if ((err as { status?: unknown } | null)?.status !== 401) return false;
+    this.onGatewayFault?.({
+      kind: "credential",
+      cause: new Error("Discord REST API rejected the bot credential"),
+    });
+    return true;
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
