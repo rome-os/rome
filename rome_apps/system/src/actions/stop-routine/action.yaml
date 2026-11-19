@@ -1,0 +1,7 @@
+name: stop_routine
+type: system
+description: Stop a routine's running run, as the Routines page's Stop does — each running run ends as cancelled. A run waiting for the guardian's approval is not stopped. The routine itself stays on; pause it with pause_routine to stop future runs. Only in the guardian's private chat, in a turn their own message started
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

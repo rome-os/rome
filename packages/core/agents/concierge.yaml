@@ -30,14 +30,14 @@ actions:
   - system:search_routine
   - system:delete_routine
   # Checks whether a routine ran, failed or is due, and what a run did.
-  - core:routine_runs_list
-  - core:routine_run_read
+  - system:list_routine_runs
+  - system:read_routine_run
   # Pauses and resumes a routine when the guardian asks.
-  - core:routine_pause
-  - core:routine_resume
+  - system:pause_routine
+  - system:resume_routine
   # Runs a routine now, or stops its run, when the guardian asks.
-  - core:routine_run_now
-  - core:routine_stop
+  - system:run_routine
+  - system:stop_routine
   # Follows things for the guardian and tells them about events (see Following).
   - core:concierge_follow
   - core:concierge_unfollow

@@ -196,7 +196,7 @@ type ScheduleTriggerT = import("@rome-os/app-runtime").ScheduleTrigger;
 type ManualTriggerT = import("@rome-os/app-runtime").ManualTrigger;
 
 /** A manual routine carries no trigger config — it never fires on its own and
- * runs only when asked, from the dashboard's "Run now" or `core:routine_run_now`. The card still confirms the
+ * runs only when asked, from the dashboard's "Run now" or `system:run_routine`. The card still confirms the
  * draft (name, what it does) so the guardian deliberately saves it. */
 function buildManualTriggerFromInput(): { ok: true; trigger: ManualTriggerT } {
   return { ok: true, trigger: { type: "manual" } };
@@ -314,7 +314,7 @@ export function proposeRoutineTools(input: {
     {
       name: ROUTINE_PROPOSAL_TOOL,
       description:
-        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook that runs when the guardian asks, from the Routines page's 'Run now' or through core:routine_run_now (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook that runs when the guardian asks, from the Routines page's 'Run now' or through system:run_routine (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
       inputSchema: {
         type: "object",
         required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
