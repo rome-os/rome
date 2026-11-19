@@ -371,6 +371,7 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import type { KindMount } from "./connections/kind-mount.js";
+import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
@@ -1915,6 +1916,13 @@ async function main() {
   // The kinds of connection laid out under connections/kinds/. Leaving a kind
   // out is deleting its line.
   const connectionKinds: KindMount[] = [
+    feishu({
+      chatSettings,
+      peopleRepo,
+      listAgents: () => agentLoader.list().map((agent) => agent.name),
+      accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
+      hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
     linkedin({
       syncSink: refreshingAfter(
         linkedInStoreRepo,

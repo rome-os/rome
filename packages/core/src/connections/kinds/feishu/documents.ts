@@ -1,8 +1,8 @@
 // App access contract: docs/concepts/apps.md#connection-access.
 import { z } from "zod";
-import { CredentialRejected, ProviderOperationError } from "../errors.js";
-import type { Actor, OperationDescriptor, ProfileRecord } from "../types.js";
-import type { FeishuAppMaterial } from "./feishu.js";
+import { CredentialRejected, ProviderOperationError } from "../../errors.js";
+import type { Actor, OperationDescriptor, ProfileRecord } from "../../types.js";
+import type { FeishuAppMaterial } from "./descriptor.js";
 
 export const FEISHU_DOCUMENT_READ = "feishu.document.read";
 export const FEISHU_DOCUMENT_SCOPE = "docx:document:readonly";

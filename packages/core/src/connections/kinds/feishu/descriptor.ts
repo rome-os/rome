@@ -26,35 +26,35 @@ import type {
   LarkChannel,
   NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
+import type { ChatSettingsService } from "../../../chat-settings/service.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
   type FeishuConfig,
   isFeishuAuthError,
-} from "../kinds/feishu/feishu.js";
+} from "./feishu.js";
 import { z } from "zod";
 import {
   createFeishuDocumentActor,
   FEISHU_DOCUMENT_OPERATIONS,
   type FeishuDocumentRequest,
-} from "./feishu-documents.js";
-import { CredentialRejected, Disconnected } from "../errors.js";
-import { credentialsPaste } from "../schemes.js";
-import type { SetupFn, SetupView } from "../setup/types.js";
+} from "./documents.js";
+import { CredentialRejected, Disconnected } from "../../errors.js";
+import { credentialsPaste } from "../../schemes.js";
+import type { SetupFn, SetupView } from "../../setup/types.js";
 import type { ChannelActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
   ProfileRecord,
   SecretRecord,
   Talker,
-} from "../types.js";
-import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
-import { createLogger } from "../../logger.js";
-import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+} from "../../types.js";
+import { addressIsConversationFeature, directoryPage } from "../../integrations/talk-features.js";
+import { createLogger } from "../../../logger.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 
 // The Lark SDK loads when a Feishu connection first needs it, not with every boot.
 const larkSdk =
