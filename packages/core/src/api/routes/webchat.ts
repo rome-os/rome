@@ -11,6 +11,7 @@ import {
   type ConciergeService,
   isConciergeChat,
   isMainConciergeChat,
+  TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -3186,10 +3187,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(sessionId),
       session.agentName ?? MAIN_AGENT,
     );
+    // A task chat names the Concierge chat it reports to, so its header links back.
+    const task =
+      session.triggerKind === TASK_CHAT_TRIGGER_KIND
+        ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
+        : null;
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
+      ...(task
+        ? {
+            taskOf: {
+              conciergeChatId: task.conciergeChat.id,
+              conciergeChatName: task.conciergeChat.name,
+              main: task.conciergeChat.main,
+            },
+          }
+        : {}),
     });
   });
 
@@ -3220,15 +3235,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // A task chat's task stops with it: its row is stopped and archived in
-    // the delete's own transaction, and the Concierge hears of it quietly.
-    let taskId: string | null = null;
-    if (deps.concierge) taskId = await deps.concierge.endTaskChat(sessionId, "deleted");
+    // A task chat's task stops with it: its running work stops, and the task
+    // goes with the chat in the delete's own transaction.
+    if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
-    if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -4558,9 +4571,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
+    // A task chat is named by the task that started it, so its first message
+    // does not rename it.
     const autoTitle =
-      policy.autoTitle ||
-      (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === "");
+      session.triggerKind !== TASK_CHAT_TRIGGER_KIND &&
+      (policy.autoTitle ||
+        (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === ""));
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:

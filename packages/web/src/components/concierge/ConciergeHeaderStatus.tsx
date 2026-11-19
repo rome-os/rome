@@ -8,7 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
@@ -43,6 +45,8 @@ export interface HeaderMenuItem {
   key: string;
   icon: ReactNode;
   label: string;
+  /** A dot after the label: something in what it opens needs a look. */
+  dot?: boolean;
   run: () => void;
 }
 
@@ -349,6 +353,14 @@ function QuickMenu({
           >
             {item.icon}
             <span className="min-w-0 truncate">{item.label}</span>
+            {item.dot ? (
+              <span
+                role="img"
+                aria-label={t("concierge.menu.needsYouDot")}
+                data-concierge-menu-dot
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+              />
+            ) : null}
           </button>
         ))}
         {menu.caption ? (
@@ -361,5 +373,27 @@ function QuickMenu({
         ) : null}
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The link a task chat's header starts with: back to the Concierge chat it
+ * reports to, named by that chat. It floats like the header's round buttons.
+ */
+export function BackToConciergeChat({ to, name }: { to: string; name: string }) {
+  const { t } = useTranslation("chat");
+  return (
+    <Link
+      to={to}
+      data-back-to-concierge-chat
+      aria-label={t("taskLink.backTo", { name })}
+      className={cn(
+        "pointer-events-auto col-start-1 row-start-1 inline-flex h-[var(--control-h-md)] max-w-48 shrink-0 items-center gap-1 justify-self-start rounded-full pl-2 pr-3 text-ui text-foreground transition hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
+        FLOATING_SURFACE,
+      )}
+    >
+      <ChevronLeft className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate">{name}</span>
+    </Link>
   );
 }

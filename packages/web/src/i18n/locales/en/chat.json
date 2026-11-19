@@ -120,10 +120,10 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Running on its own",
+        "on_its_own": "Routines",
         "ended": "Ended"
       },
-      "empty": "Nothing runs here yet.",
+      "empty": "No tasks yet.",
       "loading": "Loading tasks",
       "loadFailed": "Failed to load tasks",
       "showMore": "Show {{count}} more",
@@ -132,16 +132,14 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "notStarted": "Not started",
         "stopping": "Stopping…",
-        "opening": "Opening…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
           "stopped": "Stopped",
           "no_response": "No response"
         },
-        "notStartedAge": "Not started · Created {{age}}"
+        "active": "Active"
       },
       "schedule": {
         "daily": "Daily at {{time}}",
@@ -165,21 +163,22 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
-        "respond": "Respond",
-        "respondTo": "Respond to {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}",
-        "openChat": "Open the chat for {{title}}"
+        "stopTask": "Stop {{title}}"
       },
       "failed": {
         "stop": "Failed to stop the task"
       },
-      "created": "Created {{when}}",
-      "endedAt": "Ended {{when}}"
+      "endedAt": "Ended {{when}}",
+      "routines": "Routines",
+      "needsYouDot": "A task needs you",
+      "emptyRoutines": "No routines yet."
     },
     "menu": {
       "tasks": "Tasks",
-      "outputs": "Outputs"
+      "routines": "Routines",
+      "outputs": "Outputs",
+      "needsYouDot": "A task needs you"
     }
   },
   "reply": {
@@ -795,5 +794,20 @@
     "menu": "Chat menu",
     "project": "Project · {{name}}",
     "lastModel": "Last answered by {{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "Needs you",
+      "active": "Active",
+      "later": "Later",
+      "done": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "no_response": "No response"
+    },
+    "label": "{{name}}, {{status}}",
+    "untitled": "Task",
+    "mainChat": "Main chat",
+    "backTo": "Back to {{name}}"
   }
 }
