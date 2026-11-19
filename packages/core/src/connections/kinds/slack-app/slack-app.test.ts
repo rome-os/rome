@@ -279,6 +279,17 @@ describe("Slack app mentions in a group (R5)", () => {
     );
   });
 
+  it("hears a message that is only its mention, in the group and in a thread", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    await mailbox.deposit(
+      frame(mentionEvent(1, { text: `<@${BOT}>` })),
+      frame(mentionEvent(2, { text: ` <@${BOT}> `, thread_ts: "1700000100.000001" })),
+    );
+    expect(delivered.map((m) => m.text)).toEqual(["@Rome", "@Rome"]);
+  });
+
   it("neither answers nor keeps a group message that does not mention it", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered, copy } = adapter(mailbox);
@@ -879,6 +890,48 @@ describe("Slack app reads a direct message (R13)", () => {
 
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("links no message across one from another workspace, which Slack's history still shows", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    for (const i of [1, 2, 3]) slack.say(i);
+    const external = dmEvent(2);
+    await mailbox.deposit(
+      frame(dmEvent(1)),
+      frame({ ...external, event: { ...external.event, user_team: "T_OTHER" } }),
+      frame(dmEvent(3)),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
+    expect(texts(read)).toEqual(["message 3", "message 2"]);
+  });
+
+  it("answers a read without the names Slack is slow to give, asking once per author", async () => {
+    rs.useFakeTimers();
+    try {
+      const slack = fakeSlackHistory();
+      for (let i = 1; i <= 7; i++) slack.say(i);
+      const userName = rs.fn(() => new Promise<never>(() => {}));
+      const { adapter: a } = adapter(
+        fakeMailbox(),
+        fakeApi({ conversationHistory: slack.conversationHistory, userName }),
+        testCopy(),
+        undefined,
+        openGate(),
+      );
+      await a.start();
+      const reading = a.readHistory("D_GUARDIAN" as never, { limit: 7 });
+      await rs.advanceTimersByTimeAsync(3_000);
+      const read = await reading;
+      expect(read).toHaveLength(7);
+      expect(read[0]?.senderDisplayName).toBeUndefined();
+      expect(userName).toHaveBeenCalledTimes(1);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("reads from its copy what it heard and sent in one drain, without asking Slack", async () => {

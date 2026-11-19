@@ -2,6 +2,7 @@
 // app heard it as an event or read it from Slack's history, so a reader can
 // tell the two are one.
 
+import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   decodeSlackText,
@@ -54,7 +55,10 @@ export function slackMessage(
   if (!isSaid(wire.subtype)) return null;
   const author = authorOf(wire);
   if (!author || typeof wire.text !== "string") return null;
-  const text = decodeSlackText(wire.text, context.botUserId);
+  // A message that was only the app's mention keeps that mention, so a bare
+  // @Rome is still heard.
+  const mentionsApp = wire.text.includes(`<@${context.botUserId}`);
+  const text = preserveMentionOnlyText(decodeSlackText(wire.text, context.botUserId), mentionsApp);
   if (!text) return null;
   const isDm = context.chatId.startsWith("D");
   return {

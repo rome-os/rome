@@ -48,6 +48,9 @@ const RENEW_RETRY_MS = HOUR_MS;
  *  again on start: handing over does not wait for Rome to record it, so a
  *  stop may have cut it off. Rome ignores a message it already holds. */
 const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
+/** How long a history read waits for its authors' names. */
+const NAME_WAIT_MS = 3_000;
+
 /** Slack's allowance for conversations.history: one request a minute in a
  *  workspace, of at most 15 messages. */
 const HISTORY_INTERVAL_MS = 60 * 1000;
@@ -359,7 +362,12 @@ export class SlackAppAdapter {
     }
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
-    if (isExternalAuthor(payload)) return { status: 200 };
+    // Slack's history still shows such a message, so the drain's timeline
+    // breaks there rather than linking across it.
+    if (isExternalAuthor(payload)) {
+      if (direct) this.heads.delete(event.channel);
+      return { status: 200 };
+    }
     // A bot or workflow that mentions the app posts as a bot_message, often
     // with no user: the bot is its author. Only a mention is taken from one,
     // since the app's own posts are told apart by their user.
@@ -495,11 +503,15 @@ export class SlackAppAdapter {
       { channel: channelId, ...(latest ? { latest } : {}), limit: HISTORY_PAGE },
       this.abort.signal,
     );
+    const wires = page.messages.filter(inTimeline);
+    const names = await this.namesOf(
+      wires.flatMap((wire) =>
+        wire.user && wire.user !== this.config.botUserId ? [wire.user] : [],
+      ),
+    );
     const messages: Array<{ ts: string; message: ChannelMessage }> = [];
-    for (const wire of page.messages) {
-      if (!inTimeline(wire)) continue;
-      const author = wire.user && wire.user !== this.config.botUserId ? wire.user : null;
-      const name = author ? await this.lookUpName(author) : {};
+    for (const wire of wires) {
+      const name = (wire.user && names.get(wire.user)) || {};
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push({ ts: wire.ts, message });
     }
@@ -549,6 +561,27 @@ export class SlackAppAdapter {
   }
 
   /** A member's name, best effort: a failed lookup leaves the message unnamed. */
+  /** The names of `authors`, each looked up once and all together. A page is
+   *  answered without the names Slack has not given within
+   *  {@link NAME_WAIT_MS}, so a slow lookup never holds up a read. */
+  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackUserName>> {
+    const unique = [...new Set(authors)];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), NAME_WAIT_MS);
+    });
+    try {
+      const named = await Promise.all(
+        unique.map(
+          async (id) => [id, (await Promise.race([this.lookUpName(id), late])) ?? {}] as const,
+        ),
+      );
+      return new Map(named);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async lookUpName(userId: string): Promise<SlackUserName> {
     const cached = this.userNames.get(userId);
     if (cached) return cached;
