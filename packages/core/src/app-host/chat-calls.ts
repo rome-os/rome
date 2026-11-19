@@ -83,6 +83,20 @@ export interface ChatWorkerCallsDeps {
   ) => Promise<MessageReceipt | null>;
 }
 
+/**
+ * Whether the calling action's turn is the guardian's alone: nobody else reads
+ * what it says, so it may read any chat. A turn others read, such as one for
+ * a visitor or in a group, could pass on what another chat holds, so it reads
+ * only the chat it is in. The dashboard chat reads by its own rule. Domain:
+ * docs/domains/participation.md#audience.
+ */
+function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
+  if (context?.actor && context.actor.kind !== "guardian") return false;
+  const place = context?.channelContext;
+  if (!place || place.channel === "webchat") return true;
+  return place.threadType === "private" && place.senderBondLevel === "guardian";
+}
+
 /** The chat calls an app's worker makes, keyed by method name. */
 export function chatWorkerCalls(
   deps: ChatWorkerCallsDeps,
@@ -115,6 +129,14 @@ export function chatWorkerCalls(
         QueryParams,
         params,
       );
+      const context = caller?.callerActionContext;
+      const place = context?.channelContext;
+      if (
+        !readsAnyChat(context) &&
+        (channel !== place?.channel || chatId === undefined || chatId !== place.threadId)
+      ) {
+        throw new Error("A turn others read reads only the chat it is in");
+      }
       // The dashboard chat reads as the person accountable for the calling
       // action's turn, in the chat it runs in.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>

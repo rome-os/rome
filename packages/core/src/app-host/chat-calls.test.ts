@@ -212,3 +212,45 @@ describe("channels.send into a Concierge chat", () => {
     }
   });
 });
+
+describe("channels.query from a turn that is not the guardian's", () => {
+  const visitorOn = (threadId: string) => ({
+    callerActionContext: {
+      channelContext: {
+        channel: "telegram",
+        threadId,
+        threadType: "private" as const,
+        senderBondLevel: "other",
+      },
+    },
+  });
+
+  it("reads the chat the turn is in", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-a" }, visitorOn("chat-a"));
+
+    expect(query).toHaveBeenCalledWith("telegram", { chatId: "chat-a" });
+  });
+
+  it("reads no other chat, nor every chat at once", async () => {
+    const query = rs.fn(async () => [{ text: "the guardian's own words" }]);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+
+    await expect(
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    await expect(
+      calls["channels.query"]({ channel: "whatsapp", chatId: "chat-a" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    await expect(
+      calls["channels.query"]({ channel: "telegram" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    expect(query).not.toHaveBeenCalled();
+  });
+});
