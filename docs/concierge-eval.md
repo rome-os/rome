@@ -108,7 +108,7 @@ Results go to `.concierge-eval/baseline/<config>/run-N.json`, with the machine's
 
 | Note | The rule |
 |---|---|
-| `rule:` | A thanks gets no 👀, neither the working status nor a reaction. A message carries at most one emoji. A task's result never sends the owner to the task chat. A simple answer ends on the answer, with no question back and no offer of more. |
+| `rule:` | A thanks gets no 👀, neither the working status nor a reaction. A message carries at most one emoji. A task's result never sends the owner to the task chat. A task's result told in the Concierge's own words keeps every URL, version, id, PR number and measured number of the task's conclusion verbatim: the check reads the conclusion of each ended task chat's final answer, and skips a run where the Concierge forwarded a card. A bare integer is no specific. A simple answer ends on the answer, with no question back and no offer of more. |
 | `zh:` | A Chinese chat gets Chinese answers with full-width punctuation. |
 | `drift:` | In a long chat, a late quick answer is at most twice as long as its early twin, or 150 characters longer. |
 | `card:` | A reply shows at most one card, and a greeting or a simple question gets none. |
