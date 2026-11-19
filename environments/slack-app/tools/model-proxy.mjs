@@ -105,6 +105,9 @@ createServer(async (req, res) => {
   } catch (error) {
     stats.statuses.error = (stats.statuses.error ?? 0) + 1;
     console.error(JSON.stringify({ msg: "upstream request failed", error: String(error) }));
+    // Cut off mid-stream: the status is sent already, so end this response
+    // broken rather than answer twice, which would throw and stop the proxy.
+    if (res.headersSent) return res.destroy();
     res.writeHead(502, { "content-type": "application/json" });
     res.end(
       JSON.stringify({

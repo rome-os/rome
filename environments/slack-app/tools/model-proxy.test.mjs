@@ -10,6 +10,13 @@ const upstream = createServer(async (req, res) => {
   const chunks = [];
   for await (const c of req) chunks.push(c);
   seen.push({ headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+  if (req.url === "/v1/cut-off") {
+    // A stream that breaks after its first event.
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("event: message_start\ndata: {}\n\n");
+    setTimeout(() => res.socket.destroy(), 20);
+    return;
+  }
   res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
 }).listen(0);
 await new Promise((r) => upstream.once("listening", r));
@@ -65,4 +72,24 @@ test("a subscription token gets the OAuth beta", async () => {
   assert.equal(got.headers["anthropic-beta"], "tools-x,oauth-2025-04-20");
   const bare = await send(p.port, {});
   assert.equal(bare.headers["anthropic-beta"], "oauth-2025-04-20");
+});
+
+test("a stream cut off upstream ends that response and leaves the proxy running", async () => {
+  const p = await startProxy({ MODEL_PROXY_API_KEY: "real-key" });
+  children.push(p.child);
+  let exited = false;
+  p.child.once("exit", () => {
+    exited = true;
+  });
+  const cut = await fetch(`http://127.0.0.1:${p.port}/v1/cut-off`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "claude-opus-5-5", messages: [] }),
+  });
+  assert.equal(cut.status, 200);
+  await assert.rejects(cut.text());
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(exited, false);
+  const next = await send(p.port, {});
+  assert.equal(next.body.model, "claude-haiku-5-5");
 });
