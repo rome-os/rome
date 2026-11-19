@@ -232,7 +232,13 @@ export class FakeSlack {
     if (grant.userScopes) {
       const userToken = `xoxp-${teamId}-${randomBytes(12).toString("hex")}`;
       install.userTokens[userId] = userToken;
-      this.state.tokens[userToken] = { teamId, kind: "user", userId, revoked: false };
+      this.state.tokens[userToken] = {
+        teamId,
+        kind: "user",
+        userId,
+        revoked: false,
+        scopes: splitScopes(grant.userScopes),
+      };
       response.authed_user = {
         id: userId,
         scope: grant.userScopes,
@@ -254,12 +260,15 @@ export class FakeSlack {
       method,
       teamId: tokenInfo?.teamId ?? null,
       tokenKind: tokenInfo?.kind ?? (token ? "unknown" : "none"),
+      // The scopes the token held when it made the call.
+      scopes: tokenInfo ? granted(this, tokenInfo) : [],
       args: redact(args),
     };
     const limited = this.rateLimit(method, tokenInfo);
     const result = limited ?? this.dispatch(method, args, token, tokenInfo);
     record.ok = result.ok;
     if (!result.ok) record.error = result.error;
+    if (result.needed) record.needed = result.needed;
     if (limited) record.retryAfter = limited.retryAfter;
     this.state.calls.push(record);
     this.save();
@@ -317,6 +326,81 @@ export class FakeSlack {
     return this.group(teamId, channel)?.id ?? null;
   }
 
+  /** A user as users.info shows it to `info`'s token, or null. */
+  userObject(info, userId) {
+    const teamId = info.teamId;
+    const { botUserId, botId } = this.botIds(teamId);
+    if (userId === botUserId) {
+      return {
+        id: botUserId,
+        team_id: teamId,
+        name: "rome",
+        real_name: "Rome",
+        is_bot: true,
+        deleted: false,
+        profile: { real_name: "Rome", display_name: "Rome", bot_id: botId },
+      };
+    }
+    const m = this.workspace(teamId).members.find((x) => x.id === userId);
+    if (!m) return null;
+    // Slack shows a member's email only to a token granted users:read.email.
+    const seesEmail = granted(this, info).includes("users:read.email");
+    return {
+      id: m.id,
+      team_id: teamId,
+      name: m.name,
+      real_name: m.real_name,
+      is_admin: Boolean(m.is_admin),
+      is_owner: Boolean(m.is_owner),
+      is_bot: false,
+      deleted: false,
+      tz: m.tz ?? "UTC",
+      profile: {
+        real_name: m.real_name,
+        display_name: m.display_name ?? m.name,
+        ...(seesEmail && m.email ? { email: m.email } : {}),
+        image_72: `https://fake-slack.invalid/avatars/${m.id}.png`,
+      },
+    };
+  }
+
+  /** The conversations `info`'s token can see: every group (the fake keeps no
+   *  bot membership), and the direct messages with the bot, or for a user
+   *  token the user's own. Each as {type, channel} in Slack's shape. */
+  conversationsOf(info) {
+    const w = this.workspace(info.teamId);
+    const groups = (w.channels ?? []).map((c) => {
+      const isPrivate = Boolean(c.is_private) || c.id.startsWith("G");
+      const members = c.members ?? w.members.map((m) => m.id);
+      return {
+        type: isPrivate ? "private_channel" : "public_channel",
+        channel: {
+          id: c.id,
+          name: c.name,
+          is_channel: !isPrivate,
+          is_group: isPrivate,
+          is_im: false,
+          is_private: isPrivate,
+          is_archived: false,
+          is_member: info.kind === "bot" || members.includes(info.userId),
+          num_members: members.length,
+        },
+      };
+    });
+    const ims = w.members
+      .filter((m) => info.kind === "bot" || m.id === info.userId)
+      .map((m) => ({
+        type: "im",
+        channel: {
+          id: this.imChannel(info.teamId, m.id),
+          is_im: true,
+          is_private: true,
+          user: info.kind === "bot" ? m.id : this.botIds(info.teamId).botUserId,
+        },
+      }));
+    return [...groups, ...ims];
+  }
+
   /** The scope a history read of `channel` needs: a direct message, a public
    *  group, or a private group (an id starting with G, or `is_private`). */
   historyScope(teamId, channel) {
@@ -339,6 +423,9 @@ export class FakeSlack {
     if (!token) return { ok: false, error: "not_authed" };
     if (!tokenInfo) return { ok: false, error: "invalid_auth" };
     if (tokenInfo.revoked) return { ok: false, error: "token_revoked" };
+    if (USER_TOKEN_ONLY.has(method) && tokenInfo.kind === "bot") {
+      return { ok: false, error: "not_allowed_token_type" };
+    }
     const needed = METHOD_SCOPES[method];
     const denied = needed ? missingScope(this, tokenInfo, needed) : null;
     if (denied) return denied;
@@ -813,48 +900,131 @@ const API_METHODS = {
   },
 
   "users.info"(args, _token, info) {
+    const user = this.userObject(info, args.user);
+    return user ? { ok: true, user } : { ok: false, error: "user_not_found" };
+  },
+
+  "users.list"(args, _token, info) {
     const w = this.workspace(info.teamId);
-    const { botUserId, botId } = this.botIds(info.teamId);
-    if (args.user === botUserId) {
-      return {
-        ok: true,
-        user: {
-          id: botUserId,
-          team_id: info.teamId,
-          name: "rome",
-          real_name: "Rome",
-          is_bot: true,
-          deleted: false,
-          profile: { real_name: "Rome", display_name: "Rome", bot_id: botId },
-        },
-      };
+    const ids = [this.botIds(info.teamId).botUserId, ...w.members.map((m) => m.id)];
+    return listPage(
+      ids.map((id) => this.userObject(info, id)),
+      args,
+      "members",
+    );
+  },
+
+  "conversations.list"(args, _token, info) {
+    const types = splitScopes(args.types || "public_channel");
+    for (const type of types) {
+      if (!LIST_SCOPES[type]) return { ok: false, error: "invalid_types" };
+      const denied = missingScope(this, info, LIST_SCOPES[type]);
+      if (denied) return denied;
     }
-    const m = w.members.find((x) => x.id === args.user);
-    if (!m) return { ok: false, error: "user_not_found" };
-    // Slack shows a member's email only to an app granted users:read.email.
-    const seesEmail = (this.state.installs[info.teamId]?.scopes ?? []).includes("users:read.email");
+    const all = this.conversationsOf(info).filter((c) => types.includes(c.type));
+    return listPage(
+      all.map((c) => c.channel),
+      args,
+      "channels",
+    );
+  },
+
+  "conversations.info"(args, _token, info) {
+    const channel = this.resolveConversation(info.teamId, args.channel);
+    if (!channel) return { ok: false, error: "channel_not_found" };
+    const found = this.conversationsOf(info).find((c) => c.channel.id === channel);
+    if (!found) return { ok: false, error: "channel_not_found" };
+    const denied = missingScope(this, info, LIST_SCOPES[found.type]);
+    if (denied) return denied;
+    return { ok: true, channel: found.channel };
+  },
+
+  "reactions.add"(args, _token, info) {
+    const channel = this.resolveConversation(info.teamId, args.channel);
+    if (!channel) return { ok: false, error: "channel_not_found" };
+    if (!args.name) return { ok: false, error: "invalid_name" };
+    const message = this.historyOf(info.teamId, channel).find((m) => m.ts === args.timestamp);
+    if (!message) return { ok: false, error: "message_not_found" };
+    const name = String(args.name).replace(/^:|:$/g, "");
+    message.reactions ??= [];
+    let reaction = message.reactions.find((r) => r.name === name);
+    if (!reaction) {
+      reaction = { name, users: [], count: 0 };
+      message.reactions.push(reaction);
+    }
+    if (reaction.users.includes(info.userId)) return { ok: false, error: "already_reacted" };
+    reaction.users.push(info.userId);
+    reaction.count = reaction.users.length;
+    this.save();
+    return { ok: true };
+  },
+
+  "search.messages"(args, _token, info) {
+    if (!args.query) return { ok: false, error: "no_query" };
+    const words = String(args.query).toLowerCase().split(/\s+/).filter(Boolean);
+    const w = this.workspace(info.teamId);
+    const matches = [];
+    for (const c of this.conversationsOf(info)) {
+      for (const m of this.historyOf(info.teamId, c.channel.id)) {
+        const text = String(m.text ?? "").toLowerCase();
+        if (!words.every((word) => text.includes(word))) continue;
+        matches.push({
+          type: "message",
+          channel: { id: c.channel.id, name: c.channel.name ?? c.channel.id },
+          user: m.user ?? null,
+          username: w.members.find((x) => x.id === m.user)?.name ?? null,
+          ts: m.ts,
+          text: m.text,
+          permalink: `https://${w.domain}.slack.com/archives/${c.channel.id}/p${m.ts.replace(".", "")}`,
+        });
+      }
+    }
+    matches.sort((a, b) => Number(b.ts) - Number(a.ts));
+    const count = Math.min(100, Math.max(1, Number(args.count) || 20));
+    const pageNo = Math.max(1, Number(args.page) || 1);
+    const pages = Math.max(1, Math.ceil(matches.length / count));
     return {
       ok: true,
-      user: {
-        id: m.id,
-        team_id: info.teamId,
-        name: m.name,
-        real_name: m.real_name,
-        is_admin: Boolean(m.is_admin),
-        is_owner: Boolean(m.is_owner),
-        is_bot: false,
-        deleted: false,
-        tz: m.tz ?? "UTC",
-        profile: {
-          real_name: m.real_name,
-          display_name: m.display_name ?? m.name,
-          ...(seesEmail && m.email ? { email: m.email } : {}),
-          image_72: `https://fake-slack.invalid/avatars/${m.id}.png`,
+      query: args.query,
+      messages: {
+        total: matches.length,
+        matches: matches.slice((pageNo - 1) * count, pageNo * count),
+        paging: { count, total: matches.length, page: pageNo, pages },
+        pagination: {
+          total_count: matches.length,
+          page: pageNo,
+          per_page: count,
+          page_count: pages,
+          first: (pageNo - 1) * count + 1,
+          last: Math.min(pageNo * count, matches.length),
         },
       },
     };
   },
 };
+
+/** One page of a list method, with Slack's cursor. */
+function listPage(items, args, key) {
+  const asked = Number(args.limit);
+  const limit = Math.min(1000, asked > 0 ? asked : 100);
+  let offset = 0;
+  if (args.cursor) {
+    offset = Number(
+      Buffer.from(String(args.cursor), "base64url")
+        .toString("utf8")
+        .replace(/^offset:/, ""),
+    );
+    if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: "invalid_cursor" };
+  }
+  const more = offset + limit < items.length;
+  return {
+    ok: true,
+    [key]: items.slice(offset, offset + limit),
+    response_metadata: {
+      next_cursor: more ? Buffer.from(`offset:${offset + limit}`).toString("base64url") : "",
+    },
+  };
+}
 
 const HISTORY_METHODS = new Set(["conversations.history", "conversations.replies"]);
 const HISTORY_LIMITED_MAX = 15;
@@ -872,7 +1042,29 @@ const METHOD_SCOPES = {
   "chat.postMessage": "chat:write",
   "conversations.open": "im:write",
   "users.info": "users:read",
+  "users.list": "users:read",
+  "reactions.add": "reactions:write",
+  "search.messages": "search:read",
 };
+
+/** Methods Slack answers only for a user token: a bot token gets
+ *  not_allowed_token_type. */
+const USER_TOKEN_ONLY = new Set(["search.messages", "search.all", "search.files"]);
+
+/** The read scope behind each conversation type of conversations.list. */
+const LIST_SCOPES = {
+  public_channel: "channels:read",
+  private_channel: "groups:read",
+  im: "im:read",
+  mpim: "mpim:read",
+};
+
+/** The scopes a token holds: a bot token the install's, a user token its own. */
+function granted(slack, info) {
+  return info.kind === "bot"
+    ? (slack.state.installs[info.teamId]?.scopes ?? [])
+    : (info.scopes ?? []);
+}
 
 /** The bot scope Slack needs before it sends the app an event of this kind. */
 const EVENT_SCOPES = {
@@ -882,11 +1074,9 @@ const EVENT_SCOPES = {
   "message:group": "groups:history",
 };
 
-/** Slack's refusal when a bot token lacks `needed`, or null. User tokens are
- *  not checked (DIFFERENCES.md). */
+/** Slack's refusal when a token lacks `needed`, or null. */
 function missingScope(slack, info, needed) {
-  if (info.kind !== "bot") return null;
-  const provided = slack.state.installs[info.teamId]?.scopes ?? [];
+  const provided = granted(slack, info);
   if (provided.includes(needed)) return null;
   return { ok: false, error: "missing_scope", needed, provided: provided.join(",") };
 }

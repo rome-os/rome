@@ -71,7 +71,7 @@ async function ctl(path, body) {
   return { status: res.status, ...(await res.json()) };
 }
 
-async function install(team, user, scopes) {
+async function install(team, user, scopes, userScopes = "") {
   const approve = await fetch(`${base}/oauth/v2/authorize/approve`, {
     method: "POST",
     redirect: "manual",
@@ -79,6 +79,7 @@ async function install(team, user, scopes) {
     body: new URLSearchParams({
       client_id: "111.222",
       scope: scopes,
+      user_scope: userScopes,
       redirect_uri: "http://cloud.test/cb",
       team,
       user,
@@ -414,4 +415,102 @@ test("without public distribution only the home workspace can approve the app", 
       [C, "UC0000OWNR1", "approved", null],
     ],
   );
+});
+
+test("the connector's Web API methods check scope and token type, and every call is recorded", async () => {
+  const C = "TC0000CCCC";
+  const OWNER = "UC0000OWNR1";
+  const HANK = "UC0000HANK1";
+  await ctl("/config", { history_limit: false });
+  const narrow = await install(C, OWNER, "chat:write", "");
+  const bot = narrow.access_token;
+  // A bot token without the scope: Slack's missing_scope, naming it.
+  for (const [method, args, needed] of [
+    ["conversations.list", {}, "channels:read"],
+    ["conversations.list", { types: "im" }, "im:read"],
+    ["conversations.info", { channel: "CC0000GENRL" }, "channels:read"],
+    ["users.list", {}, "users:read"],
+    [
+      "reactions.add",
+      { channel: "CC0000GENRL", timestamp: "1.1", name: "eyes" },
+      "reactions:write",
+    ],
+  ]) {
+    const r = await api(method, args, bot);
+    if (method === "reactions.add") {
+      assert.equal(r.error, "missing_scope", method);
+    } else {
+      assert.deepEqual([r.error, r.needed], ["missing_scope", needed], method);
+    }
+  }
+  // A method a bot token can never call.
+  assert.equal((await api("search.messages", { query: "x" }, bot)).error, "not_allowed_token_type");
+
+  const wide = await install(
+    C,
+    OWNER,
+    "chat:write,channels:read,groups:read,im:read,users:read,reactions:write,channels:history",
+    "search:read",
+  );
+  assert.equal(wide.access_token, bot);
+  const user = wide.authed_user.access_token;
+  const said = await ctl("/group-message", {
+    team: C,
+    user: HANK,
+    channel: "CC0000GENRL",
+    text: "the blue door code",
+  });
+  const listed = await api("conversations.list", { types: "public_channel,im" }, bot);
+  assert.equal(listed.ok, true);
+  assert.deepEqual(
+    listed.channels.map((c) => c.id),
+    ["CC0000GENRL", "DC000C0000OWNR1", "DC000C0000HANK1"],
+  );
+  assert.equal(
+    (await api("conversations.info", { channel: "CC0000GENRL" }, bot)).channel.name,
+    "general",
+  );
+  const people = await api("users.list", { limit: 2 }, bot);
+  assert.equal(people.members.length, 2);
+  assert.ok(people.response_metadata.next_cursor);
+  const rest = await api("users.list", { cursor: people.response_metadata.next_cursor }, bot);
+  assert.deepEqual(
+    rest.members.map((m) => m.id),
+    [HANK],
+  );
+  const ts = said.event.ts;
+  assert.equal(
+    (await api("reactions.add", { channel: "CC0000GENRL", timestamp: ts, name: "eyes" }, bot)).ok,
+    true,
+  );
+  assert.equal(
+    (await api("reactions.add", { channel: "CC0000GENRL", timestamp: ts, name: "eyes" }, bot))
+      .error,
+    "already_reacted",
+  );
+  const history = await api("conversations.history", { channel: "CC0000GENRL" }, bot);
+  assert.deepEqual(history.messages[0].reactions, [
+    { name: "eyes", users: [narrow.bot_user_id], count: 1 },
+  ]);
+  // A user token: its own scopes, so search works and a write it was not granted does not.
+  const found = await api("search.messages", { query: "blue door" }, user);
+  assert.equal(found.ok, true);
+  assert.equal(found.messages.total, 1);
+  assert.equal(found.messages.matches[0].channel.id, "CC0000GENRL");
+  assert.deepEqual(
+    [(await api("chat.postMessage", { channel: "CC0000GENRL", text: "hi" }, user)).error],
+    ["missing_scope"],
+  );
+
+  const { calls } = await ctl(`/calls?team=${C}&method=search.messages`);
+  assert.deepEqual(
+    calls.map((c) => [c.tokenKind, c.ok, c.error ?? null, c.scopes.join(",")]),
+    [
+      ["bot", false, "not_allowed_token_type", "chat:write"],
+      ["user", true, null, "search:read"],
+    ],
+  );
+  const refused = (await ctl(`/calls?team=${C}&method=users.list`)).calls[0];
+  assert.equal(refused.needed, "users:read");
+  await ctl("/config", { history_limit: true });
 });
