@@ -1,8 +1,8 @@
 // Import rules for domains laid out as `<domain>/<feature>` under
 // packages/core/src. The domain root, meaning the files directly in it plus
 // model/ and infrastructure/, is the service the domain provides. Each feature
-// is a subfolder with an index.ts, and leaving a feature out is skipping its
-// route mount. rules/layers.ts holds a feature to entering through index.ts. The layout: DEVELOPMENT.md, "Established patterns".
+// is a subfolder with an index.ts, and leaving a feature out is deleting its
+// entry in the wiring's features list. rules/layers.ts holds a feature to entering through index.ts. The layout: DEVELOPMENT.md, "Established patterns".
 
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
@@ -60,10 +60,8 @@ export function isTest(path: string): boolean {
   return /\.test\.tsx?$/.test(path);
 }
 
-/** Whether `from` is the feature's own routes, the wiring, a test, or a listed user of the feature. */
+/** Whether `from` is the wiring, a test, or a listed user of the feature. */
 function mayUse(from: string, domain: string, feature: string): boolean {
-  if (from.startsWith(`api/routes/${domain}/${feature}/`)) return true;
-  if (from === `api/routes/${domain}/${feature}.ts`) return true;
   if (WIRING_FILES.includes(from) || WIRING_FOLDERS.includes(from.split("/")[0])) return true;
   if (isTest(from)) return true;
   return FEATURE_USERS[`${domain}/${feature}`]?.files.includes(from) ?? false;
@@ -111,7 +109,7 @@ export const featureRules: ImportRule[] = [
   },
   {
     name: "features-used-from-wiring",
-    description: `Leaving a feature out is skipping its route mount, so outside its domain only the feature's own routes (api/routes/<domain>/<feature>), the wiring and tests use it. The listed exceptions: ${usersList()}.`,
+    description: `Leaving a feature out is deleting its entry in the wiring's features list, so outside its domain only the wiring and tests use it. The listed exceptions: ${usersList()}.`,
     rejects: (imp) => {
       const found = featureImport(imp);
       if (found === null || found.from?.domain === found.to.domain) return false;
