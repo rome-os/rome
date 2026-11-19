@@ -163,6 +163,8 @@ services:
       MODEL_PROXY_OAUTH_TOKEN: ${MODEL_PROXY_OAUTH_TOKEN:-}
     volumes:
       - ${ENV_DIR}:/env:ro
+      # NODE_EXTRA_CA_CERTS names this file, so a host CA reaches upstream calls.
+      - ${STATE_DIR}/trust.pem:/state/trust.pem:ro
 
   rome-a-net:
     <<: *node
