@@ -1112,7 +1112,7 @@ function sessionSetupOf(
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferTool: DeferTool | undefined =
-    init.guardianFacing === true && !isSubagent
+    init.guardianFacing === true && !isSubagent && place?.withoutDefer !== true
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,

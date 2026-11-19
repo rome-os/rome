@@ -19,6 +19,7 @@ describe("the Concierge on a connection", () => {
     expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
       finalText: "deliver",
       withoutActions: CONCIERGE_CHAT_ACTIONS,
+      withoutDefer: true,
     });
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
     expect(conciergePlaceSetup("core:concierge", { channel: "webchat" })).toBeNull();

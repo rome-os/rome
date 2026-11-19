@@ -12,7 +12,7 @@ import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
 export const CONNECTION_INSTRUCTION = [
   "## On a connected account",
   "",
-  "This chat is not on the dashboard. It is on one of Rome's connected accounts, such as a Telegram, Slack, Discord or Feishu bot, and whoever writes reaches you through that account. Here the text you write is your reply, sent to the chat as it is: write only what you would text them, and never narrate what you are doing. `say`, `react`, the task, chat and follow tools and your Concierge chats are not here, so what the instructions above say about them holds only on the dashboard. Do what you can yourself. When something needs a task chat or a follow, tell the guardian to ask you for it on the dashboard.",
+  "This chat is not on the dashboard. It is on one of Rome's connected accounts, such as a Telegram, Slack, Discord or Feishu bot, and whoever writes reaches you through that account. Here the text you write is your reply, sent to the chat as it is: write only what you would text them, and never narrate what you are doing. `say`, `react`, `defer`, the task, chat and follow tools and your Concierge chats are not here, so what the instructions above say about them holds only on the dashboard. Do what you can yourself. When something needs a task chat or a follow, tell the guardian to ask you for it on the dashboard.",
   "",
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
 ].join("\n");
@@ -41,8 +41,16 @@ export const CONCIERGE_CHAT_ACTIONS = [
   "system:delete_routine",
 ] as const;
 
-/** The Concierge's setup on a connection: its text is the reply, and no action needs a Concierge chat. */
-const ON_CONNECTION: PlaceSetup = { finalText: "deliver", withoutActions: CONCIERGE_CHAT_ACTIONS };
+/**
+ * The Concierge's setup on a connection: its text is the reply, no action
+ * needs a Concierge chat, and it schedules no later wake-up, since a reply a
+ * wake-up sends skips the checks the message that asked for it passed.
+ */
+const ON_CONNECTION: PlaceSetup = {
+  finalText: "deliver",
+  withoutActions: CONCIERGE_CHAT_ACTIONS,
+  withoutDefer: true,
+};
 
 /**
  * How the place a session serves changes the Concierge there, the one answer

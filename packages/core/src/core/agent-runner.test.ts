@@ -1935,6 +1935,29 @@ describe("AgentRunner", () => {
       expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
     });
 
+    it("withholds defer where the session's place says so, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.threadId === "no-wake" ? { withoutDefer: true } : null,
+      });
+      for (const threadId of ["no-wake", "wakes"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `webchat:${threadId}`,
+            threadContext: { channel: "webchat", threadId },
+          }),
+        );
+      }
+      expect(toolNames(provider.sessions[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(provider.sessions[1].tools, "ask_user")).toContain("defer");
+    });
+
     it("lets the session's tools read its place while the session first opens", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const places: Array<string | undefined> = [];
