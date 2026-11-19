@@ -17,8 +17,8 @@ export function taskStatusKey({ status, endReason }: ConciergeTaskStatusResult):
 
 /**
  * The chip for task chat `id`, with its live name, else `fallback`, the link's
- * own text. A task chat that is not this Concierge chat's own reads as plain
- * text, and so does a link outside a Concierge chat.
+ * own text. A task chat that is not this chat's owner's reads as plain text,
+ * and so does a link outside a Concierge chat.
  */
 export function TaskLink({ id, fallback }: { id: string; fallback?: string }) {
   const { t } = useTranslation("chat");

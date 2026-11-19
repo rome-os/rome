@@ -199,6 +199,7 @@ export const taskListHandlers = [
               name: item.task.chat.name,
               status: item.task.status ?? "active",
               endReason: item.task.endReason ?? null,
+              from: String(params.chatId),
             },
           ]
         : [],

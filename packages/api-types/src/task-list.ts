@@ -157,10 +157,10 @@ export interface TaskListChangedEvent {
 }
 
 /**
- * `GET /api/chats/:chatId/task-links?ids=a,b`: the task chats of that Concierge
- * chat among `ids`, as a task link draws them (docs/domains/chats.md#task-link).
- * An id of another owner's, of another Concierge chat's, or of no task chat is
- * left out, and its link reads as plain text.
+ * `GET /api/chats/:chatId/task-links?ids=a,b`: the task chats among `ids` of
+ * that Concierge chat's owner, from any of their Concierge chats, as a task link
+ * draws them (docs/domains/chats.md#task-link). An id of another owner's or of
+ * no task chat is left out, and its link reads as plain text.
  */
 export interface TaskLinkDto {
   /** The task chat's id. */
@@ -169,6 +169,12 @@ export interface TaskLinkDto {
   name: string;
   status: ConciergeTaskStatus;
   endReason: ConciergeTaskEndReason | null;
+  /**
+   * The Concierge chat it reports to. Its status changes arrive on that
+   * chat's `chat.tasks:<from>` topic, so a chip of another chat's task
+   * listens there too.
+   */
+  from: string;
 }
 export interface TaskLinksResponse {
   tasks: TaskLinkDto[];

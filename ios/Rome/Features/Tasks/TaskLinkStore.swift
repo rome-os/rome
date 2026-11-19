@@ -7,8 +7,9 @@ private let taskLinkLog = Logger(subsystem: "cc.romeos.mobile", category: "TaskL
 
 /// What the task links of one Concierge chat show: each task chat's live name
 /// and status (docs/domains/chats.md#task-link). The chat's messages register
-/// the task chats they name; one read answers for all of them, and the chat's
-/// `tasks_changed` events read it again, so a chip moves as its task chat runs.
+/// the task chats they name; one read answers for all of them. A task may come
+/// from any of the owner's Concierge chats: the `tasks_changed` events of the
+/// chat each one reports to read it again, so a chip moves as its task chat runs.
 @MainActor
 @Observable
 final class TaskLinkStore {
@@ -23,6 +24,8 @@ final class TaskLinkStore {
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var wanted: Set<String> = []
     @ObservationIgnored private var tokens: [UUID] = []
+    /// The Concierge chats whose task changes this store listens to.
+    @ObservationIgnored private var listening: Set<String> = []
     @ObservationIgnored private var reading = false
     @ObservationIgnored private var readAgain = false
 
@@ -40,17 +43,23 @@ final class TaskLinkStore {
         read()
     }
 
-    /// Listens for changes, once.
-    private func start() {
-        guard tokens.isEmpty else { return }
-        tokens.append(backend.events.subscribe(LiveTopic.chatTasks(chatId)) { [weak self] _ in
-            self?.read()
-        })
+    /// Listens for this chat's changes, once.
+    private func start() { listen(to: [chatId]) }
+
+    /// Listens for the changes of each of `chats` not yet listened to.
+    private func listen(to chats: Set<String>) {
+        for chat in chats.subtracting(listening) {
+            listening.insert(chat)
+            tokens.append(backend.events.subscribe(LiveTopic.chatTasks(chat)) { [weak self] _ in
+                self?.read()
+            })
+        }
     }
 
     func stop() {
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
+        listening = []
     }
 
     /// Reads every wanted id; a read asked for while one runs follows it.
@@ -69,6 +78,7 @@ final class TaskLinkStore {
                     for id in ids { info[id] = nil }
                     for found in response.tasks { info[found.id] = found }
                     asked.formUnion(ids)
+                    if !listening.isEmpty { listen(to: Set(response.tasks.compactMap(\.from))) }
                 } catch {
                     taskLinkLog.error("task links of \(self.chatId, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 }
