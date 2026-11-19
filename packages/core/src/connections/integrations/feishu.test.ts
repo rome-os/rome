@@ -17,7 +17,7 @@ import {
   type SendInput,
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { isFeishuAuthError } from "../kinds/feishu/feishu.js";
 import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";

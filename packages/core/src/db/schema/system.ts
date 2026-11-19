@@ -1290,14 +1290,15 @@ export const routines = sqliteTable(
     // Optional caller-assigned identity. Unique when set (SQLite treats multiple
     // NULLs as distinct, so most routines can leave it null). Lets a caller make
     // create_routine idempotent/dedup-able without overloading `name` (the human
-    // title): briefing keys its managed routines `briefing-*` and recreates them
-    // by key. A duplicate key is rejected at create time.
+    // title): an app can key its managed routines and recreate them by key. A
+    // duplicate key is rejected at create time.
     key: text("key").unique(),
-    // The app that owns and manages this routine (its appId), e.g. "briefing".
+    // The app that owns and manages this routine (its appId), e.g. "dream".
     // Null for routines a guardian or agent created directly. A managed routine is
     // the app's to maintain: users can't delete it (the dashboard/DELETE path and
     // agent's delete_routine both refuse), only the managing app can — so an app
     // can freely recreate its routines on sync without a user pruning them.
+    // Uninstalling the app deletes its routines.
     managedBy: text("managed_by"),
     enabled: integer("enabled", { mode: "boolean" }).default(true),
 

@@ -11,6 +11,8 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { contextCrossings, contextRules } from "./rules/contexts.js";
+import { featureCrossings, featureRules } from "./rules/features.js";
+import { kindCrossings, kindRules } from "./rules/kinds.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 import { wiringCrossings, wiringRules } from "./rules/wiring.js";
@@ -41,7 +43,8 @@ export interface ImportRule {
 /**
  * One import that breaks a rule, allowed for now and tracked by a ticket. A
  * listed crossing names the rule, the importing file and the file it
- * resolves to, all relative to the scanned src directory. A listed crossing
+ * resolves to, all relative to the scanned src directory, or for a package
+ * import the package specifier as written. A listed crossing
  * that no longer occurs is itself reported, so the list only shrinks.
  */
 export interface ListedCrossing {
@@ -153,8 +156,13 @@ export function checkImports(
     for (const rule of rules) {
       if (!rule.rejects(imp)) continue;
       const crossing =
-        imp.kind === "file" &&
-        listed.find((c) => c.rule === rule.name && c.from === imp.from && c.to === imp.to);
+        imp.kind !== "computed" &&
+        listed.find(
+          (c) =>
+            c.rule === rule.name &&
+            c.from === imp.from &&
+            c.to === (imp.kind === "file" ? imp.to : imp.specifier),
+        );
       if (crossing) {
         unseen.delete(crossing);
         continue;
@@ -243,12 +251,20 @@ export function runCli(): number {
   const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
   const rules = [
     ...layerRules,
+    ...featureRules,
+    ...kindRules,
     ...contextRules,
     ...libraryRules,
     ...wiringRules,
     ...slackAppCopyRules,
   ];
-  const crossings = [...listedCrossings, ...contextCrossings, ...wiringCrossings];
+  const crossings = [
+    ...listedCrossings,
+    ...featureCrossings,
+    ...kindCrossings,
+    ...contextCrossings,
+    ...wiringCrossings,
+  ];
   const violations = checkImports(join(core, "src"), join(core, "tsconfig.json"), rules, crossings);
   if (violations.length > 0) {
     for (const violation of violations) console.error(`  - ${formatImportViolation(violation)}`);

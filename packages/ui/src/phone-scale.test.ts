@@ -63,6 +63,19 @@ describe("the large platform scale", () => {
     expect(box).toBeCloseTo(line, 6);
   });
 
+  it("gives inline chat cards a typography scope that only sets UI type", () => {
+    const inlineCard = sheet.match(/\[data-ui-typography="inline-card"\]\s*\{([^}]+)\}/)?.[1];
+    expect(
+      inlineCard
+        ?.trim()
+        .split(/\s*;\s*/)
+        .filter(Boolean),
+    ).toEqual([
+      "--text-ui: var(--rome-font-size-14)",
+      "--text-ui--line-height: var(--rome-line-height-143)",
+    ]);
+  });
+
   it("keeps every phone line box on the 4px grid, above the 1.2 descender floor", () => {
     for (const role of ["ui", "composer", "section", "aux", "badge"]) {
       const size = step(`--text-${role}`);

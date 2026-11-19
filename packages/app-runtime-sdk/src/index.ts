@@ -2271,6 +2271,12 @@ export interface ActionRunContext {
   parentExecutionId?: string;
   parentActionName?: string;
   actionName?: string;
+  /** What a root run does when every action worker is busy. `"fail"` (the
+   *  default) fails at once. `"queue"` waits in turn for a worker, and fails
+   *  only if none frees up within the host's deadline. Queue only from a
+   *  caller that holds no action worker, such as a hook. Nested runs always
+   *  fail at once. */
+  whenWorkersBusy?: "fail" | "queue";
 }
 
 export interface CurrentActionContext {

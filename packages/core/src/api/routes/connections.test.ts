@@ -23,7 +23,8 @@ import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import {
   createTestDb,
   grantReaching,
@@ -825,7 +826,7 @@ describe("guardian links across a disconnect", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-    const peopleRepo = new PeopleRepository(db);
+    const peopleRepo = new DrizzlePeopleRepository(db);
     await peopleRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",

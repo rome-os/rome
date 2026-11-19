@@ -80,8 +80,9 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
+import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -526,7 +527,7 @@ export async function buildTestDeps(
   }
 
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);

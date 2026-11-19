@@ -17,9 +17,9 @@ describe("MessageWriting", () => {
     expect(writing.on(use("say"))).toBe(false);
     // A late delta of a call that landed opens nothing.
     expect(writing.on(delta("say"))).toBeNull();
-    expect(writing.on(delta("mcp__rome__chat_forward", "call-2"))).toBe(true);
+    expect(writing.on(delta("mcp__rome__say", "call-2"))).toBe(true);
     expect(writing.on(delta("core:say", "call-3"))).toBeNull();
-    expect(writing.on(use("chat_forward", "call-2"))).toBeNull();
+    expect(writing.on(use("say", "call-2"))).toBeNull();
     expect(writing.on(use("say", "call-3"))).toBe(false);
   });
 

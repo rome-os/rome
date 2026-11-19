@@ -2,7 +2,13 @@
 // long scenarios: the types, the checks a scenario picks from, and the
 // standing rules every scenario runs. docs/concierge-eval.md#baseline
 
-import { chineseStyle, noTaskChatPointer, noTrailingOffer, oneEmoji } from "./baseline-rules.js";
+import {
+  chineseStyle,
+  exactSpecifics,
+  noTaskChatPointer,
+  noTrailingOffer,
+  oneEmoji,
+} from "./baseline-rules.js";
 import type { Step } from "./scenarios.js";
 import type { TimedTurn } from "./timing.js";
 
@@ -37,6 +43,8 @@ export interface CheckInput {
   shown: string[];
   /** The chat's tasks, as the Tasks panel lists them. */
   tasks: { status: string; endReason: string | null }[];
+  /** The conclusion each ended task chat's final answer wrote, for the tasks that wrote one. */
+  conclusions: string[];
 }
 
 /** An owner message. A setup message only prepares the chat: its turn is not reported. */
@@ -120,9 +128,9 @@ export function delegated(input: CheckInput, step = 0): string[] {
   if (!input.tasks.some((t) => t.status === "ended" && t.endReason === "done")) {
     notes.push("no task ended done");
   }
-  // The result reaches the owner in a system turn that forwards or says it.
+  // The result reaches the owner in a system turn that says it, or forwards its card.
   const relays = input.turns.filter(
-    (t) => t.trigger === "system" && (tool(t, "chat_forward") > 0 || tool(t, "say") > 0),
+    (t) => t.trigger === "system" && (tool(t, "card_forward") > 0 || tool(t, "say") > 0),
   );
   if (relays.length === 0) notes.push("no system turn relayed the result");
   return notes;
@@ -162,9 +170,13 @@ export function cardRules(scenario: BaselineScenario, input: CheckInput): string
 
 /** The rules every scenario keeps, whatever it asks: emoji, task results, cards, and Chinese style. */
 export function standingRules(scenario: BaselineScenario, input: CheckInput): string[] {
+  const cardForwarded = input.turns.some(
+    (turn) => turn.trigger === "system" && tool(turn, "card_forward") > 0,
+  );
   return [
     ...oneEmoji(input.said),
     ...noTaskChatPointer(input.said),
+    ...exactSpecifics(input.conclusions, input.said, cardForwarded),
     ...cardRules(scenario, input),
     ...(scenario.lang === "zh" ? chineseStyle([...input.said, ...input.cardsAfter.flat()]) : []),
   ];
