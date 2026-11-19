@@ -422,8 +422,11 @@ enum MarkdownParser {
         guard !linksAsText, let tasks, source.contains(TaskLink.prefix) else { return Text(styled) }
         var out: Text?
         var plain = AttributedString()
+        // The last character drawn: a chip takes a space before it only after text.
+        var previous: Character?
         func flush() {
             guard !plain.characters.isEmpty else { return }
+            previous = plain.characters.last
             out = out.map { $0 + Text(plain) } ?? Text(plain)
             plain = AttributedString()
         }
@@ -434,7 +437,8 @@ enum MarkdownParser {
             }
             flush()
             let written = String(styled[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            let chip = chip(id: id, written: written, tasks: tasks, marks: marks)
+            let chip = chip(id: id, written: written, tasks: tasks, marks: marks, spaced: TaskLink.spacesChip(after: previous))
+            previous = "\u{00A0}"
             out = out.map { $0 + chip } ?? chip
         }
         flush()
@@ -442,7 +446,7 @@ enum MarkdownParser {
     }
 
     @MainActor
-    private static func chip(id: String, written: String, tasks: TaskLinkStore, marks: TaskMarkStyle) -> Text {
+    private static func chip(id: String, written: String, tasks: TaskLinkStore, marks: TaskMarkStyle, spaced: Bool) -> Text {
         guard let info = tasks.info[id] else {
             // Not read yet, or none of this chat's: the link's own text.
             return Text(AttributedString(written.isEmpty ? String(localized: "Task") : written))
@@ -451,7 +455,8 @@ enum MarkdownParser {
         name.foregroundColor = Palette.fg
         name.backgroundColor = Palette.taskChip
         name.link = TaskLink.url(chatId: id)
-        return Text(verbatim: " ") + marks.mark(info) + Text(name)
+        let chip = marks.mark(info) + Text(name)
+        return spaced ? Text(verbatim: " ") + chip : chip
     }
 
     /// The blocks with each image and picture set drawn as its description,

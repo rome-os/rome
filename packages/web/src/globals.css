@@ -510,11 +510,17 @@ button.rome-upgrade-row:hover {
    tint, so it reads as a word in the sentence. It is an inline box with
    horizontal padding only, so it never makes the line taller; only its 14px
    mark carries colour. A status change flashes the tint once. */
+/* The chip: the mark, then the name on a faint fill. Only the name carries
+   the fill, so a chip that starts a line starts flush with the text under
+   it, as the iOS chip does. */
 [data-task-link] {
   display: inline;
   color: inherit;
   text-decoration: none;
   white-space: nowrap;
+}
+
+[data-task-link-name] {
   background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
   @apply px-1;
   box-decoration-break: clone;
@@ -523,7 +529,7 @@ button.rome-upgrade-row:hover {
   transition: background-color 120ms ease;
 }
 
-[data-task-link]:hover {
+[data-task-link]:hover [data-task-link-name] {
   background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
 }
 
@@ -531,7 +537,7 @@ button.rome-upgrade-row:hover {
   display: inline-block;
   width: 14px;
   height: 14px;
-  margin-right: 4px;
+  margin-right: 2px;
   vertical-align: -2px;
 }
 
@@ -541,7 +547,7 @@ button.rome-upgrade-row:hover {
   height: 14px;
 }
 
-[data-task-link][data-flash] {
+[data-task-link][data-flash] [data-task-link-name] {
   animation: rome-task-link-flash 700ms ease-out;
 }
 
@@ -552,7 +558,7 @@ button.rome-upgrade-row:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-task-link][data-flash] {
+  [data-task-link][data-flash] [data-task-link-name] {
     animation: none;
   }
 }

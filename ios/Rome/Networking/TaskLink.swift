@@ -32,6 +32,14 @@ enum TaskLink {
         return found
     }
 
+    /// Whether a chip takes a space before its mark: only right after text.
+    /// At the start of a paragraph or a list item, after a line break or
+    /// after a space it starts flush, in line with the text around it.
+    static func spacesChip(after previous: Character?) -> Bool {
+        guard let previous else { return false }
+        return !previous.isWhitespace
+    }
+
     /// The URL a chip carries, which `chatId(of:)` reads back.
     static func url(chatId: String) -> URL? {
         let plain = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))

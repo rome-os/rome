@@ -313,6 +313,18 @@ private let listJSON = #"""
         #expect(symbol("sleeping") == "arrow.triangle.2.circlepath")
     }
 
+    @Test func aChipStartsFlushWhereNothingStandsBeforeIt() {
+        // The start of a paragraph or a list item, a line break, a space: no space of its own.
+        #expect(!TaskLink.spacesChip(after: nil))
+        #expect(!TaskLink.spacesChip(after: "\n"))
+        #expect(!TaskLink.spacesChip(after: " "))
+        // Another chip ends in a no-break space.
+        #expect(!TaskLink.spacesChip(after: "\u{00A0}"))
+        // Right after a word or punctuation it keeps one.
+        #expect(TaskLink.spacesChip(after: "a"))
+        #expect(TaskLink.spacesChip(after: "："))
+    }
+
     @Test func coloursEachStatusAsTheWebDoes() {
         func tone(_ status: String, _ reason: String? = nil) -> TaskMarkTone {
             TaskLinkInfo(id: "c", name: "N", status: status, endReason: reason).tone
