@@ -1351,7 +1351,9 @@ async function main() {
         // A new session reads the chat's latest messages through its
         // channel, from where the chat lives, as an action reading the
         // chat's history would: a read of the chat the turn is in.
-        latest: (place, limit) =>
+        // The query here has no upper bound yet, so earlier() drops what
+        // came after `until` itself.
+        latest: (place, { limit }) =>
           channelsService.query(place.channel, {
             chatId: place.threadId as ChatId,
             limit,

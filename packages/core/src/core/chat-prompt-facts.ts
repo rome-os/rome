@@ -29,11 +29,16 @@ export interface ChatPromptFactsDeps {
   channelOfChat: (chatId: string) => string | null;
   channelSurface: ChannelSurfaces;
   /**
-   * The latest messages of the chat `place` names, newest first, as the
-   * channel reads them from where the chat lives. Rejects where it reads
-   * none. Absent, a new session reads nothing earlier.
+   * The latest messages of the chat `place` names said at or before `until`,
+   * newest first, as the channel reads them from where the chat lives. The
+   * bound applies before the limit, so messages said since the session's
+   * first take no room. Rejects where it reads none. Absent, a new session
+   * reads nothing earlier.
    */
-  latest?: (place: ThreadContext, limit: number) => Promise<ChannelMessage[]>;
+  latest?: (
+    place: ThreadContext,
+    read: { limit: number; until: Date },
+  ) => Promise<ChannelMessage[]>;
   /** How long a read of the latest messages may take. Defaults to 5s. */
   latestWaitMs?: number;
 }
@@ -65,7 +70,8 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
         handsEveryMessage(place.channel)
       )
         return null;
-      const read = deps.latest(place, EARLIER_MESSAGES + 1);
+      // One more than kept: the bound takes in a message said at `before`.
+      const read = deps.latest(place, { limit: EARLIER_MESSAGES + 1, until: before });
       read.catch(() => {});
       const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
       if (!page) return null;
