@@ -255,6 +255,48 @@ describe("RoutineEngine run records", () => {
     expect((await runs.findById(runId))?.status).toBe("running");
     finish();
   });
+
+  it("starts no action when a stop comes after the run started but before its action did", async () => {
+    let lookedUp: () => void = () => {};
+    // The fire's audience lookup waits until the stop has gone through.
+    const routines = new RoutinesRepository(
+      testDb.db,
+      () => new Promise((resolve) => (lookedUp = () => resolve("private"))),
+    );
+    const runs = new RoutineRunsRepository(testDb.db);
+    const actionEngine = {
+      run: rs.fn(async () => ({ status: "success", result: null })),
+      cancel: async () => false,
+    };
+    const engine = new RoutineEngine(
+      routines,
+      runs,
+      actionEngine as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const id = await routines.create({
+      name: "slow to start",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+      chatId: "guardian-chat",
+    });
+
+    let outcome: Promise<{ runId: string; status: string }> = Promise.resolve({
+      runId: "",
+      status: "",
+    });
+    const runId = await new Promise<string>((resolve) => {
+      outcome = engine.runNow(id, {}, resolve);
+    });
+    expect(await engine.cancelRun(id)).toEqual({ stopped: true, killedLiveProcess: false });
+    lookedUp();
+
+    expect(await outcome).toMatchObject({ runId, status: "cancelled" });
+    expect(actionEngine.run).not.toHaveBeenCalled();
+    expect((await runs.findById(runId))?.status).toBe("cancelled");
+  });
 });
 
 describe("RoutineEngine worker admission", () => {

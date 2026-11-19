@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { systemClock } from "../lib/clock.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import {
   registerRoutineEnabledActions,
   ROUTINE_PAUSE_ACTION,
   ROUTINE_RESUME_ACTION,
 } from "./enabled-actions.js";
+import { RoutineEngine } from "./engine.js";
 import type { Trigger } from "./types.js";
 
 const guardianAsked: ActionRunContext = {
@@ -22,7 +26,8 @@ const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn(async
 
 beforeEach(() => {
   testDb = createTestDb();
-  routines = new RoutinesRepository(testDb.db);
+  // Every routine's chat is the guardian's private chat.
+  routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.activate.mockClear();
   routineEngine.deactivate.mockClear();
   const registry = new ActionRegistryImpl();
@@ -113,6 +118,38 @@ describe("who may pause or resume a routine", () => {
     const result = await pause(id, { audience: "private" });
     expect((result as { error: string }).error).toMatch(/^routine_needs_guardian:/);
     expect((await routines.findById(id))?.enabled).toBe(true);
+  });
+
+  it("refuses a routine's fire, though the guardian made the routine in their private chat", async () => {
+    const target = await createRoutine(true);
+    const firing = await actionExecutionContext.run(
+      {
+        executionId: "e",
+        rootExecutionId: "e",
+        initiator: "agent:core:main",
+        actor: { kind: "guardian", userId: "guardian", via: "cookie" },
+      },
+      () =>
+        routines.create({
+          name: "Pause the water reminder",
+          trigger: { type: "manual" },
+          actionName: ROUTINE_PAUSE_ACTION,
+          args: { routineId: target },
+          chatId: "guardian-chat",
+        }),
+    );
+    const fires = new RoutineEngine(
+      routines,
+      new RoutineRunsRepository(testDb.db),
+      engine,
+      0,
+      systemClock,
+    );
+
+    const run = await fires.runNow(firing);
+
+    expect(run.error).toMatch(/routine_needs_guardian:/);
+    expect((await routines.findById(target))?.enabled).toBe(true);
   });
 
   it("refuses a visitor", async () => {

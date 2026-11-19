@@ -5,7 +5,7 @@ import type { ActionRegistry } from "../apps/actions/types.js";
 import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
-import { listRoutineRuns, readRoutineRun } from "./runs.js";
+import { type ActionTraceNode, listRoutineRuns, readRoutineRun } from "./runs.js";
 import { type OwnerOfChat, turnWorksForGuardian } from "./turn-access.js";
 
 export const ROUTINE_RUNS_LIST_ACTION = "core:routine_runs_list";
@@ -76,7 +76,8 @@ export function registerRoutineRunActions(
             id: routine.id,
             name: routine.name,
             enabled: routine.enabled,
-            lastRunAt: iso(routine.lastFiredAt),
+            // Run now never sets lastFiredAt, so the newest run says when it last ran.
+            lastRunAt: iso(runs[0]?.firedAt ?? routine.lastFiredAt),
             nextRunAt: iso(routine.nextRunAt),
           },
           runs: runs.map((run) => ({
@@ -122,9 +123,35 @@ export function registerRoutineRunActions(
           error: `Routine "${routineId}" has no run "${runId}". List its runs with ${ROUTINE_RUNS_LIST_ACTION}.`,
         };
       }
-      return { status: "ok", data: detail };
+      return { status: "ok", data: { ...detail, roots: detail.roots.map(forAgent) } };
     },
   });
+}
+
+/** The longest an action's arguments run in a run's trace, as JSON. */
+const MAX_ARGS_CHARS = 500;
+
+/** What the agent needs of one action in a run: what ran, how it went and
+ * with what, its arguments cut short. The Routines page reads the rest. */
+interface AgentTraceNode {
+  actionName: string;
+  status: string;
+  durationMs: number | null;
+  error: string | null;
+  args: string | null;
+  children: AgentTraceNode[];
+}
+
+function forAgent(node: ActionTraceNode): AgentTraceNode {
+  const args = node.args === undefined || node.args === null ? null : JSON.stringify(node.args);
+  return {
+    actionName: node.actionName,
+    status: node.status,
+    durationMs: node.durationMs,
+    error: node.error,
+    args: args && args.length > MAX_ARGS_CHARS ? `${args.slice(0, MAX_ARGS_CHARS)}…` : args,
+    children: node.children.map(forAgent),
+  };
 }
 
 function notFound(routineId: string) {

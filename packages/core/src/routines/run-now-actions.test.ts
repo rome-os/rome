@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { systemClock } from "../lib/clock.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import {
   registerRoutineRunNowActions,
   ROUTINE_RUN_NOW_ACTION,
   ROUTINE_STOP_ACTION,
 } from "./run-now-actions.js";
+import { RoutineEngine } from "./engine.js";
 
 const guardianAsked: ActionRunContext = {
   actor: { kind: "guardian", userId: "guardian", via: "cookie" },
@@ -31,7 +35,8 @@ const routineEngine = {
 
 beforeEach(() => {
   testDb = createTestDb();
-  routines = new RoutinesRepository(testDb.db);
+  // Every routine's chat is the guardian's private chat.
+  routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
   const registry = new ActionRegistryImpl();
@@ -115,6 +120,40 @@ describe("core:routine_run_now", () => {
       { audience: "private" },
     );
     expect((result as { error: string }).error).toMatch(/^routine_needs_guardian:/);
+    expect(routineEngine.runNow).not.toHaveBeenCalled();
+  });
+});
+
+describe("a routine's fire", () => {
+  it("cannot run a routine, though the guardian made it in their private chat", async () => {
+    const id = await actionExecutionContext.run(
+      {
+        executionId: "e",
+        rootExecutionId: "e",
+        initiator: "agent:core:main",
+        actor: { kind: "guardian", userId: "guardian", via: "cookie" },
+      },
+      () =>
+        routines.create({
+          name: "Run myself again",
+          trigger: { type: "manual" },
+          actionName: ROUTINE_RUN_NOW_ACTION,
+          args: {},
+          chatId: "guardian-chat",
+        }),
+    );
+    await routines.update(id, { args: { routineId: id } });
+    const fires = new RoutineEngine(
+      routines,
+      new RoutineRunsRepository(testDb.db),
+      engine,
+      0,
+      systemClock,
+    );
+
+    const run = await fires.runNow(id);
+
+    expect(run.error).toMatch(/routine_needs_guardian:/);
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 });
