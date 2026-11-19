@@ -49,6 +49,8 @@ test("the prompt gives the model each cited entry with its merged description", 
   assert.match(system.content, /6 位 PIN 码/);
   assert.match(system.content, /full-width punctuation/);
   assert.match(system.content, /管理员/);
+  assert.match(system.content, /"你"/);
+  assert.match(system.content, /never "监护人"/);
   const changes = JSON.parse(user.content);
   assert.deepEqual(
     changes.new.map((c) => c.pr),
@@ -101,6 +103,30 @@ test("validation drops a highlight that carries a link, domain or email address"
   });
 });
 
+test("validation drops any domain-shaped text, and keeps versions and abbreviations", () => {
+  const ten = {
+    breaking: [],
+    new: [1, 2, 3, 4, 5, 6].map((pr) => ({ scope: null, text: "t", pr })),
+    fixes: [],
+  };
+  const raw = {
+    en: [
+      { text: "Sign in again at rome-upgrade.help.", pr: 1 },
+      { text: "Get help at status.rome.support today.", pr: 2 },
+      { text: "Backups move to rome.cloud.", pr: 3 },
+      { text: "Upgrading to 1.1.210 keeps your chats.", pr: 4 },
+      { text: "Agents, e.g. the Concierge, answer faster.", pr: 5 },
+      { text: "Connect Freshdesk, i.e. your help desk.", pr: 6 },
+    ],
+    zh: [{ text: "升级后请访问rome-upgrade.help登录。", pr: 1 }],
+  };
+  assert.deepEqual(
+    validateHighlights(raw, ten).en.map((h) => h.pr),
+    [4, 5, 6],
+  );
+  assert.deepEqual(validateHighlights(raw, ten).zh, []);
+});
+
 test("validation caps each language and reads a malformed answer as none", () => {
   const many = {
     breaking: [],
@@ -138,6 +164,38 @@ test("the model is asked once with the key, and its invented pull requests are d
   assert.equal(stub.requests[0].init.headers.Authorization, "Bearer sk-test");
   assert.equal(stub.requests[0].body.model, DEEPSEEK_MODEL);
   assert.deepEqual(stub.requests[0].body.response_format, { type: "json_object" });
+  assert.equal(stub.requests[0].body.model, "deepseek-flash");
+  assert.deepEqual(stub.requests[0].body.thinking, { type: "disabled" });
+  assert.equal("top_p" in stub.requests[0].body, false);
+});
+
+test("a failed call or dropped highlights show as a workflow warning", async (t) => {
+  const errors = [];
+  t.mock.method(console, "error", (line) => errors.push(line));
+  await writeHighlights({
+    notes,
+    descriptions,
+    apiKey: "k",
+    fetch: model({}, { status: 500 }).fetch,
+  });
+  assert.match(
+    errors.at(-1),
+    /^::warning title=Release highlights::no highlights for this release: DeepSeek answered 500$/,
+  );
+
+  const invented = model({ en: [{ text: "Made up.", pr: 4242 }], zh: [] });
+  assert.deepEqual(
+    await writeHighlights({ notes, descriptions, apiKey: "k", fetch: invented.fetch }),
+    { en: [], zh: [] },
+  );
+  assert.match(errors.at(-1), /^::warning title=Release highlights::dropped 1 of 1 en highlights/);
+
+  errors.length = 0;
+  await writeHighlights({ notes, descriptions, apiKey: undefined, fetch: invented.fetch });
+  assert.equal(
+    errors.some((line) => line.startsWith("::warning")),
+    false,
+  );
 });
 
 test("any failure, a missing key or nothing to cite leaves the release without highlights", async (t) => {

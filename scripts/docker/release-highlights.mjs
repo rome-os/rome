@@ -16,10 +16,11 @@ const MODEL_TIMEOUT_MS = 60_000;
  * A link, domain or email address. Highlights never need one, and a pull
  * request description could steer the model into writing one.
  */
-const LINK = /https?:|www\.|\b[\w-]+\.(com|io|cc|net|org|ai|dev|app|co|me|xyz)\b|\S+@\S+\.\S+/i;
+const LINK =
+  /https?:|www\.|\S+@\S+\.\S+|\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}\b/i;
 
 export const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
-export const DEEPSEEK_MODEL = "deepseek-chat";
+export const DEEPSEEK_MODEL = "deepseek-flash";
 
 /** No highlights: the dialog then links the full changes instead. */
 export const NO_HIGHLIGHTS = Object.freeze({ en: [], zh: [] });
@@ -34,6 +35,7 @@ Rules:
 - Leave out changes only an admin would notice, unless the owner would notice them too. When one stays, call that person "admin" (in Chinese "管理员"), never "dashboard admin".
 - Include every breaking change the owner has to act on, first, saying what they need to do.
 - For a security fix, write only "Improved security" (in Chinese "安全性改进"). Never describe the issue.
+- The owner reads these lines: address them as "you" (in Chinese "你"). Never call them "guardian" (never "监护人").
 - Write for the owner, not for engineers: plain words about what they can now do or what now works. No names of internal components, files, functions, services or endpoints, no pull request numbers in the text, no jargon.
 - One short sentence each: under 120 characters in English, under 60 characters in Chinese.
 - When several changes make one improvement, write one highlight and cite one of their pull request numbers.
@@ -140,6 +142,8 @@ export async function writeHighlights({ notes, descriptions, apiKey, fetch = glo
         model: DEEPSEEK_MODEL,
         messages: highlightsPrompt(notes, descriptions),
         response_format: { type: "json_object" },
+        // Thinking adds latency and nothing a short summary needs.
+        thinking: { type: "disabled" },
         temperature: 0.2,
       }),
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
@@ -148,13 +152,30 @@ export async function writeHighlights({ notes, descriptions, apiKey, fetch = glo
     const reply = await response.json();
     const content = reply?.choices?.[0]?.message?.content;
     if (typeof content !== "string") throw new Error("DeepSeek's answer has no message");
-    return validateHighlights(JSON.parse(content), notes);
+    const raw = JSON.parse(content);
+    const highlights = validateHighlights(raw, notes);
+    for (const language of ["en", "zh"]) {
+      const offered = Array.isArray(raw?.[language]) ? raw[language].length : 0;
+      const kept = highlights[language].length;
+      if (kept < Math.min(offered, HIGHLIGHT_LIMIT)) {
+        warn(
+          `dropped ${offered - kept} of ${offered} ${language} highlights that failed validation`,
+        );
+      }
+    }
+    return highlights;
   } catch (error) {
-    console.error(
-      `No highlights for this release: ${error instanceof Error ? error.message : error}`,
-    );
+    warn(`no highlights for this release: ${error instanceof Error ? error.message : error}`);
     return NO_HIGHLIGHTS;
   }
+}
+
+/**
+ * A GitHub Actions warning annotation, so a model failure shows on the run's
+ * summary while the release goes on.
+ */
+function warn(message) {
+  console.error(`::warning title=Release highlights::${message}`);
 }
 
 /**
