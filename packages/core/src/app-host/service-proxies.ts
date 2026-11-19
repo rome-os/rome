@@ -334,7 +334,13 @@ export class ChannelsServiceProxy implements ChannelsService {
   }
 
   chats(channel: Account | string, query: ChatListQuery = {}): Promise<ChatDescriptor[]> {
-    return callMain<ChatDescriptor[]>("channels.chats", { channel, ...query });
+    // Listing archived threads reads a platform chat by chat, which can
+    // take longer than a short call allows.
+    return callMain<ChatDescriptor[]>(
+      "channels.chats",
+      { channel, ...query },
+      { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS },
+    );
   }
 }
 

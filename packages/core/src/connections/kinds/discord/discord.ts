@@ -466,7 +466,7 @@ export class DiscordAdapter {
     const byId = new Map(chats.map((chat) => [chat.id, chat]));
     const threads = await archivedDiscordThreads(
       (route, query) => this.rest.get(route, query ? { query } : {}),
-      chats.map((chat) => chat.id),
+      chats.map((chat) => ({ id: chat.id, holdsPrivateThreads: chat.type === "text" })),
     );
     return threads.flatMap((thread) => {
       const chat = byId.get(thread.parentId);

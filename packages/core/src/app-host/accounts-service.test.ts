@@ -234,6 +234,29 @@ describe("createChannelsService", () => {
     );
   });
 
+  it("stops a listing whose directory hands back a cursor it already gave", async () => {
+    const directory = {
+      listConversations: async () => ({ conversations: [], nextCursor: "same" }),
+    };
+    const all = [
+      {
+        id: "discord-1",
+        connectionKind: "discord",
+        withTalker: (call: (live: object) => unknown) => call({ directory }),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+    ] as unknown as Connection[];
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+    });
+
+    await expect(channelsService.chats!("discord")).rejects.toThrow(
+      '"discord" listing did not advance',
+    );
+  });
+
   it("puts a cursor on each message and resumes after one", async () => {
     const query = rs.fn(async () => [line("m2", 2_000), line("m1", 1_000)]);
     const { channelsService } = service([

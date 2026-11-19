@@ -61,50 +61,74 @@ async function archive(
   }
 }
 
+/** A chat whose archive a listing reads. Only a text chat holds private
+ *  threads. */
+export interface ArchivedChat {
+  id: string;
+  holdsPrivateThreads: boolean;
+}
+
+/** How many chats' archives are read at once. Discord limits each chat's
+ *  route on its own, so a few at once stay within them. */
+const CONCURRENT_CHATS = 4;
+
 /**
- * The archived threads of each chat in `chatIds`, public and joined private,
+ * The archived threads of each chat in `chats`, public and joined private,
  * each once. A chat whose archive the bot may not see contributes none. Any
  * other failure rejects, naming the chat.
  */
 export async function archivedDiscordThreads(
   get: DiscordGet,
-  chatIds: readonly string[],
+  chats: readonly ArchivedChat[],
 ): Promise<ArchivedThread[]> {
   const found = new Map<string, ArchivedThread>();
-  for (const chatId of chatIds) {
-    const archives = [
-      // Public archives page by when a thread was archived.
-      () =>
-        archive(
-          get,
-          `/channels/${chatId}/threads/archived/public`,
-          (thread) => thread.thread_metadata?.archive_timestamp,
-        ),
-      // Joined private archives page by thread id.
-      () =>
-        archive(
-          get,
-          `/channels/${chatId}/users/@me/threads/archived/private`,
-          (thread) => thread.id,
-        ),
-    ];
-    for (const read of archives) {
-      let threads: WireThread[];
-      try {
-        threads = await read();
-      } catch (err) {
-        if (refusedAccess(err)) continue;
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(`Could not list the archived threads of Discord chat ${chatId}: ${reason}`);
-      }
-      for (const thread of threads) {
-        found.set(thread.id, {
-          id: thread.id,
-          name: thread.name,
-          parentId: thread.parent_id ?? chatId,
-        });
-      }
+  const queue = [...chats];
+  const worker = async () => {
+    for (let chat = queue.shift(); chat; chat = queue.shift()) {
+      for (const thread of await archivedIn(get, chat)) found.set(thread.id, thread);
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENT_CHATS }, worker));
+  return [...found.values()].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+}
+
+/** One chat's archived threads: public ones, and the private ones the bot
+ *  joined where the chat can hold any. */
+async function archivedIn(get: DiscordGet, chat: ArchivedChat): Promise<ArchivedThread[]> {
+  const chatId = chat.id;
+  const archives = [
+    // Public archives page by when a thread was archived.
+    () =>
+      archive(
+        get,
+        `/channels/${chatId}/threads/archived/public`,
+        (thread) => thread.thread_metadata?.archive_timestamp,
+      ),
+    // Joined private archives page by thread id.
+    ...(chat.holdsPrivateThreads
+      ? [
+          () =>
+            archive(
+              get,
+              `/channels/${chatId}/users/@me/threads/archived/private`,
+              (thread) => thread.id,
+            ),
+        ]
+      : []),
+  ];
+  const threads: ArchivedThread[] = [];
+  for (const read of archives) {
+    let page: WireThread[];
+    try {
+      page = await read();
+    } catch (err) {
+      if (refusedAccess(err)) continue;
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not list the archived threads of Discord chat ${chatId}: ${reason}`);
+    }
+    for (const thread of page) {
+      threads.push({ id: thread.id, name: thread.name, parentId: thread.parent_id ?? chatId });
     }
   }
-  return [...found.values()];
+  return threads;
 }

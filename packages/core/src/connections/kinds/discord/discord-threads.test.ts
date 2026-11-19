@@ -28,7 +28,11 @@ describe("archivedDiscordThreads", () => {
       return { threads: [], has_more: false };
     };
 
-    const threads = await archivedDiscordThreads(get, ["1", "2"]);
+    const threads = await archivedDiscordThreads(get, [
+      { id: "1", holdsPrivateThreads: true },
+      // A forum holds no private threads, so its private archive is not asked.
+      { id: "2", holdsPrivateThreads: false },
+    ]);
 
     expect(threads).toEqual([
       { id: "11", name: "thread 11", parentId: "1" },
@@ -38,6 +42,7 @@ describe("archivedDiscordThreads", () => {
     expect(calls).toContain(
       "/channels/1/threads/archived/public?limit=100&before=2026-02-01T00%3A00%3A00Z",
     );
+    expect(calls.some((call) => call.startsWith("/channels/2/users/"))).toBe(false);
   });
 
   it("skips a chat whose archive the bot may not see, and names a chat whose read fails", async () => {
@@ -51,10 +56,15 @@ describe("archivedDiscordThreads", () => {
       throw Object.assign(new Error("Internal Server Error"), { status: 500 });
     };
 
-    await expect(archivedDiscordThreads(refused, ["1", "2"])).resolves.toEqual([
-      { id: "21", name: "thread 21", parentId: "2" },
-    ]);
-    await expect(archivedDiscordThreads(broken, ["7"])).rejects.toThrow(
+    await expect(
+      archivedDiscordThreads(refused, [
+        { id: "1", holdsPrivateThreads: true },
+        { id: "2", holdsPrivateThreads: true },
+      ]),
+    ).resolves.toEqual([{ id: "21", name: "thread 21", parentId: "2" }]);
+    await expect(
+      archivedDiscordThreads(broken, [{ id: "7", holdsPrivateThreads: false }]),
+    ).rejects.toThrow(
       "Could not list the archived threads of Discord chat 7: Internal Server Error",
     );
   });

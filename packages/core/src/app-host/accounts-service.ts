@@ -165,8 +165,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const name = isAccount(target) ? accountLabel(target) : target;
     if (!connection) throw new Error(`No connection reaches "${name}"`);
     const listed: ChatDescriptor[] = [];
+    const seen = new Set<string>();
     let cursor: string | undefined;
     do {
+      // A directory whose cursor stops advancing would list forever.
+      if (cursor !== undefined) {
+        if (seen.has(cursor)) throw new Error(`"${name}" listing did not advance`);
+        seen.add(cursor);
+      }
       const page = connection.withTalker((talker) =>
         talker.directory
           ? talker.directory.listConversations({
