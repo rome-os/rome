@@ -69,6 +69,7 @@ export async function readApp(dir: string): Promise<AppFacts> {
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     target: ts.ScriptTarget.ES2022,
+    ...appPathAliases(dir),
   });
   const reader = new SourceReader(program, dir, sourceDir);
 
@@ -128,7 +129,7 @@ export async function readApp(dir: string): Promise<AppFacts> {
       (imp) =>
         // A type-only import is erased from the page bundle.
         pageFiles.has(imp.from) &&
-        !imp.from.startsWith("web/") &&
+        !/^(web|api|actions|db)\//.test(imp.from) &&
         !imp.typeOnly &&
         /^(api|actions|db)\//.test(imp.to),
     ),
@@ -192,7 +193,7 @@ class SourceReader {
         ) {
           specifier = node.arguments[0];
         }
-        if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith(".")) {
+        if (specifier && ts.isStringLiteral(specifier)) {
           const resolved = ts.resolveModuleName(
             specifier.text,
             source.fileName,
@@ -232,7 +233,8 @@ class SourceReader {
       if (pageFiles.has(file)) continue;
       pageFiles.add(file);
       for (const imp of imports) {
-        if (imp.from === file && !/^(api|actions|db)\//.test(imp.to) && !imp.to.startsWith("..")) {
+        // Everything the page bundles is the page; only erased types are not.
+        if (imp.from === file && !imp.typeOnly && !imp.to.startsWith("..")) {
           queue.push(imp.to);
         }
       }
@@ -569,7 +571,23 @@ class SourceReader {
     const holders = new Set(branches.map((branch) => enclosingFunction(branch.node)));
     for (const holder of holders) {
       if (!holder?.body) continue;
-      const { handsOff, ...rest } = this.effects(holder.body, thens);
+      const tests = unreadRequestTests(holder.body, thens);
+      for (const test of tests) {
+        const then = ts.isIfStatement(test) ? test.thenStatement : test.whenTrue;
+        const { handsOff: _, ...effects } = this.effects(then, thens);
+        routes.push({
+          method: "ANY",
+          path: "?",
+          at: this.at(entryFile, test),
+          ...effects,
+          unreadable: "a test on the request the reader cannot read as a route",
+        });
+      }
+      const placed = new Set<TS.Node>([
+        ...thens,
+        ...tests.map((test) => (ts.isIfStatement(test) ? test.thenStatement : test.whenTrue)),
+      ]);
+      const { handsOff, ...rest } = this.effects(holder.body, placed);
       if (rest.runs.length + rest.writes.length === 0 && !handsOff) continue;
       routes.push({
         method: "ANY",
@@ -636,7 +654,13 @@ class SourceReader {
             const body = functionBody(declaration);
             if (body && !seen.has(body)) {
               seen.add(body);
-              if (this.inApi(body.getSourceFile().fileName) && testsRoutes(body, literal)) {
+              const passesRequest = current.arguments.some((argument) =>
+                REQUEST_ARGUMENT.test(compact(argument.getText())),
+              );
+              if (
+                (this.inApi(body.getSourceFile().fileName) || passesRequest) &&
+                testsRoutes(body, literal)
+              ) {
                 handsOff ??= `\`${compact(callee.getText())}\``;
               }
               walk(body, depth + 1);
@@ -654,7 +678,13 @@ class SourceReader {
   private writesSql(argument: TS.Expression | undefined): boolean {
     const statement = argument && this.followIdentifier(argument);
     if (!statement) return true;
-    return !/^\s*(sql)?\s*[`'"(]*\s*(select|with|pragma)\b/i.test(statement.getText());
+    const text = statement.getText();
+    if (/^\s*(sql)?\s*[`'"(]*\s*(select|pragma)\b/i.test(text)) return false;
+    // `WITH … DELETE` writes; a CTE reads only when no write follows it.
+    if (/^\s*(sql)?\s*[`'"(]*\s*with\b/i.test(text)) {
+      return /\b(insert|update|delete|replace)\b/i.test(text);
+    }
+    return true;
   }
 
   /** The string `node` stands for: a literal, or a `const` initialized with one. */
@@ -769,6 +799,75 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
     if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) return init.body;
   }
   return undefined;
+}
+
+/** An argument that hands a dispatcher the request, or its path. */
+const REQUEST_ARGUMENT = /^(request|req|path|route|parts|segments)$|\.(path|route|pathname)$/;
+
+/**
+ * Tests on the request, outside the recognized route tests, that answer a
+ * request: an `if` or ternary that returns or throws. Guards that turn a
+ * request away (`!ok`, `!==`) are not routes.
+ */
+function unreadRequestTests(
+  body: TS.Node,
+  skip: ReadonlySet<TS.Node>,
+): (TS.IfStatement | TS.ConditionalExpression)[] {
+  const found: (TS.IfStatement | TS.ConditionalExpression)[] = [];
+  const isNegated = (node: TS.Expression) =>
+    (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) ||
+    (ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken));
+  const mentionsRequest = (node: TS.Node): boolean =>
+    (ts.isIdentifier(node) && /^(request|req|route|path|pathname|url)$/.test(node.text)) ||
+    (ts.isPropertyAccessExpression(node) && isDispatchSubject(node.getText())) ||
+    (ts.forEachChild(node, (child) => mentionsRequest(child) || undefined) ?? false);
+  // A test reads like a route when some part of it, not negated, reads the
+  // request. A guard (`!ok`, `method !== "GET"`) only rules requests out.
+  const readsRequest = (condition: TS.Expression): boolean => {
+    let node = condition;
+    while (ts.isParenthesizedExpression(node)) node = node.expression;
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        node.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+    ) {
+      return readsRequest(node.left) || readsRequest(node.right);
+    }
+    return !isNegated(node) && mentionsRequest(node);
+  };
+  const visit = (node: TS.Node) => {
+    // Error handling answers no route of its own.
+    if (skip.has(node) || ts.isFunctionLike(node) || ts.isCatchClause(node)) return;
+    if (ts.isIfStatement(node) && !skip.has(node.thenStatement) && readsRequest(node.expression)) {
+      if (hasExit(node.thenStatement, skip) || ts.isReturnStatement(node.thenStatement)) {
+        found.push(node);
+      }
+    } else if (
+      ts.isConditionalExpression(node) &&
+      !skip.has(node.whenTrue) &&
+      ts.isReturnStatement(node.parent) &&
+      readsRequest(node.condition)
+    ) {
+      found.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(body, visit);
+  return found;
+}
+
+/** The app's own import aliases (`@/*`), from its tsconfig, relative to the app. */
+function appPathAliases(dir: string): Pick<TS.CompilerOptions, "paths" | "baseUrl"> {
+  const path = join(dir, "tsconfig.json");
+  if (!existsSync(path)) return {};
+  const { config } = ts.readConfigFile(path, ts.sys.readFile);
+  const options = (
+    config as { compilerOptions?: { paths?: TS.MapLike<string[]>; baseUrl?: string } }
+  )?.compilerOptions;
+  if (!options?.paths) return {};
+  return { paths: options.paths, baseUrl: join(dir, options.baseUrl ?? ".") };
 }
 
 /** One branch on a route test: an `if`, or a ternary. */
@@ -924,10 +1023,33 @@ function readCondition(
   let root = false;
   let opaque = false;
   let patternOnPath = false;
+  let alternatives: string[] | undefined;
   const visit = (node: TS.Node) => {
     // A negated test (`!path.startsWith("x")`) excludes a path; it names none.
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
       return;
+    // `route === "a" || route === "b"` accepts either path: the first names
+    // the route, and every one is kept for exemptions. An `||` over methods
+    // (`POST || PUT`) is no alternation of paths.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+      const operands = [node.left, node.right].map((operand) => readCondition(operand, literal));
+      const pathOperands = operands.filter((o) => o.segments.length > 0 || o.root);
+      if (pathOperands.length === operands.length) {
+        const [first] = operands as [ReturnType<typeof readCondition>];
+        segments.push(...first.segments);
+        root ||= first.root;
+        if (first.depth !== undefined) depth = first.depth;
+        alternatives = operands.flatMap(
+          (o) => o.alternatives ?? [o.root ? "" : o.segments.map((sg) => sg.value).join("/")],
+        );
+        for (const o of operands) {
+          methods.push(...o.methods);
+          opaque ||= o.opaque;
+          patternOnPath ||= o.patternOnPath;
+        }
+        return;
+      }
+    }
     if (
       ts.isBinaryExpression(node) &&
       (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
@@ -979,31 +1101,15 @@ function readCondition(
     ts.forEachChild(node, visit);
   };
   visit(condition);
-  // `path === "" || path === "status"` matches either; the first names the route.
-  const alternation = isAlternation(condition) && segments.length + (root ? 1 : 0) > 1;
   return {
     methods,
-    segments: alternation ? segments.slice(0, 1) : segments,
-    ...(alternation
-      ? { alternatives: [...(root ? [""] : []), ...segments.map((s) => s.value)] }
-      : {}),
+    segments,
+    ...(alternatives ? { alternatives } : {}),
     root,
     opaque,
     patternOnPath,
     ...(depth !== undefined ? { depth } : {}),
   };
-}
-
-function isAlternation(condition: TS.Expression): boolean {
-  let node: TS.Expression = condition;
-  while (ts.isParenthesizedExpression(node)) node = node.expression;
-  if (
-    ts.isBinaryExpression(node) &&
-    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-  ) {
-    return isAlternation(node.right) || isAlternation(node.left);
-  }
-  return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken;
 }
 
 function enclosingRouteConditions(node: TS.Node, literal: LiteralOf): TS.Expression[] {

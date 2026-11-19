@@ -40,7 +40,7 @@ export const RULES = [
     id: "I1",
     goal: "interfaces",
     statement:
-      "Every app API route a person's page calls runs an agent-callable action, so an agent can do what a person can. Machine routes (`api.noAuth`) and the root status route are exempt. A route whose path the check cannot read is left for a person to judge, never passed.",
+      "Every app API route a person's page calls runs an agent-callable action, so an agent can do what a person can. Machine routes (`api.noAuth`) and the status routes (the root, and `GET /status`) are exempt. A route whose path the check cannot read is left for a person to judge, never passed.",
   },
   {
     id: "I2",
@@ -227,6 +227,12 @@ function judgeHumanInterface(
   );
 }
 
+/** The root route, or `GET /status`, which only report that the app is up. */
+function isStatusRoute(path: string, method: string): boolean {
+  if (path === "") return method === "GET" || method === "ANY";
+  return path === "status" && method === "GET";
+}
+
 /** Whether a page's call to `called` reaches `route`; `:id` and `*` match any segment. */
 function pathMatches(route: RouteFacts, called: string): boolean {
   const callSegments = called === "" ? [] : called.split("/");
@@ -273,14 +279,14 @@ function judgeRoute(
     );
   }
   if (route.unreadable) return;
-  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) {
-    // The root status route is exempt, but not the other paths it may also serve.
-    const others = (route.alternatives ?? []).filter((path) => path !== "");
+  if (isStatusRoute(route.path, route.method)) {
+    // A status route is exempt, but not the other paths it may also serve.
+    const others = (route.alternatives ?? []).filter((path) => !isStatusRoute(path, route.method));
     if (others.length > 0 && route.runs.length === 0) {
       cannotJudge(
         "I1",
         route.at,
-        `${label} also serves ${others.map((p) => `\`/${p}\``).join(", ")}, which the root exemption does not cover.`,
+        `${label} also serves ${others.map((p) => `\`/${p}\``).join(", ")}, which the status exemption does not cover.`,
       );
     }
     return;

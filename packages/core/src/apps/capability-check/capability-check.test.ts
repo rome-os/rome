@@ -523,6 +523,47 @@ declare const extra: unknown;
       ]);
     });
 
+    it("keeps the path when an `||` is over methods", async () => {
+      const gaps = await gapsOf(
+        withRoute(
+          'if (request.path[0] === "notes" && request.path[1] === "pin" && (request.method === "POST" || request.method === "PUT")) return "pinned";',
+        ),
+      );
+      expect(gaps.map((g) => g.message)).toEqual([
+        "`POST|PUT /notes/pin` runs no action, so no agent can do what it does.",
+      ]);
+    });
+
+    it("leaves a read-only route behind a test it cannot read to a person, but not a guard", async () => {
+      const verdict = await verdictOf(
+        withRoute(
+          'if (request.method !== "GET" && request.method !== "POST") return "not allowed";\n    if (is(request, "GET", "items")) return "items";',
+          "declare function is(...args: unknown[]): boolean;\n",
+        ),
+      );
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => [u.rule, u.at])).toEqual([
+        ["I1", "src/api/index.ts:10"],
+      ]);
+    });
+
+    it("leaves a hand-off of the request to a dispatcher outside the API to a person", async () => {
+      const verdict = await verdictOf({
+        ...withRoute(
+          'if (route.startsWith("more")) return handleMore(request);',
+          'import { handleMore } from "../lib/more.js";\n',
+        ),
+        "src/lib/more.ts": `export function handleMore(request: { method: string }) {
+  if (request.method === "GET") return "more";
+  return "none";
+}
+`,
+      });
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["I1", expect.stringContaining("hands off to `handleMore`")],
+      ]);
+    });
+
     it("finds a request the page makes through a shared helper", async () => {
       const gaps = await gapsOf({
         ...COMPLIANT,
@@ -566,6 +607,48 @@ declare const extra: unknown;
     const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api });
     expect(gaps.map((g) => [g.rule, g.message.slice(0, 27)])).toEqual([
       ["I3", "`GET /` writes app data its"],
+    ]);
+  });
+
+  it("I3: treats a CTE that deletes as a write", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace(
+        "return this.ctx.runAction",
+        "await this.db.connection.run(sql`WITH old AS (SELECT id FROM notes) DELETE FROM notes WHERE id IN (SELECT id FROM old)`);\n    return this.ctx.runAction",
+      )
+      .replace(
+        "export class Handler {",
+        "declare const sql: (s: TemplateStringsArray) => string;\nexport class Handler {\n  db = { connection: { run: (s: string) => s } };",
+      );
+    const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api });
+    expect(gaps.map((g) => g.rule)).toEqual(["I3"]);
+  });
+
+  it("I1: spares `GET /status` as a status route", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return "not found";',
+      'if (request.method === "GET" && route === "status") return "ok";\n    return "not found";',
+    );
+    expect(await gapsOf({ ...COMPLIANT, "src/api/index.ts": api })).toEqual([]);
+  });
+
+  it("I5: follows the app's own import aliases, and imports the page bundles from data", async () => {
+    const aliased = await gapsOf({
+      ...COMPLIANT,
+      "tsconfig.json": '{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }\n',
+      "src/lib/network.ts": 'export const load = () => fetch("/api/skills");\n',
+      "src/web/Skills.tsx": 'import { load } from "@/lib/network";\nexport const go = load;\n',
+    });
+    expect(aliased.map((g) => [g.rule, g.at])).toEqual([["I5", "src/lib/network.ts:1"]]);
+    const throughData = await gapsOf({
+      ...COMPLIANT,
+      "src/db/network.ts": 'export const load = () => fetch("/api/skills");\n',
+      "src/lib/helper.ts": 'export { load } from "../db/network.js";\n',
+      "src/web/Skills.tsx": 'import { load } from "../lib/helper.js";\nexport const go = load;\n',
+    });
+    expect(throughData.map((g) => [g.rule, g.at]).sort()).toEqual([
+      ["I4", "src/lib/helper.ts:1"],
+      ["I5", "src/db/network.ts:1"],
     ]);
   });
 
