@@ -377,9 +377,6 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         // https://openradar.appspot.com/40926834: prefetching keeps stale cells.
         view.isPrefetchingEnabled = false
         view.delegate = self
-        if #available(iOS 26, *) {
-            view.topEdgeEffect.style = .soft
-        }
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.
         NotificationCenter.default.addObserver(forName: PerfProbe.flingStarted, object: nil, queue: .main) { [weak self] _ in
