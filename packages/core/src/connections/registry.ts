@@ -29,6 +29,7 @@ import {
   CredentialRejected,
   Disconnected,
   DuplicateKindConnectionsError,
+  NotOfferedError,
   RenewalUnavailable,
 } from "./errors.js";
 import type {
@@ -493,6 +494,11 @@ export class ConnectionRegistry {
     const minting = !conn;
     if (minting && !registered) {
       throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
+    }
+    // A kind Rome no longer offers gets no new connection, from any path; a
+    // grant to one it holds still fixes that one.
+    if (minting && registered?.descriptor.offered === false) {
+      throw new NotOfferedError(connectionKind);
     }
 
     const id = conn?.id ?? crypto.randomUUID();

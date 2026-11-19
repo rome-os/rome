@@ -8,7 +8,8 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
-import { SetupManager, NoSetupError, NotOfferedError, type SetupRegistry } from "./manager.js";
+import { SetupManager, NoSetupError, type SetupRegistry } from "./manager.js";
+import { NotOfferedError } from "../errors.js";
 import type { SetupFn } from "./types.js";
 
 /** A stand-in transaction handle for the fake registry's `giveGrant` participant. */

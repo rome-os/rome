@@ -83,13 +83,29 @@ function makeLedger(): DrizzleConnectionsRepository {
   return new DrizzleConnectionsRepository(db);
 }
 
-function makeRegistry(): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ repository: makeLedger() });
+function makeRegistry(
+  ledger = makeLedger(),
+  { offerSlack = false }: { offerSlack?: boolean } = {},
+): ConnectionRegistry {
+  const registry = new ConnectionRegistry({ repository: ledger });
   for (const provider of ["github", "slack", "google"] as const) {
-    registry.register(makeOAuthProviderDescriptor(provider));
+    const descriptor = makeOAuthProviderDescriptor(provider);
+    registry.register(
+      offerSlack && provider === "slack" ? { ...descriptor, offered: true } : descriptor,
+    );
   }
   return registry;
 }
+
+const SLACK_REDEEMED = {
+  provider: "slack",
+  profile: "default",
+  tokens: {
+    accessToken: "xoxb-redeemed",
+    raw: { authed_user: { access_token: "xoxp-redeemed" }, team: { id: "T123" } },
+  },
+  metadata: null,
+};
 
 const logins: string[] = [];
 
@@ -155,26 +171,55 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     expect(logins).toEqual(["oauth"]);
   });
 
-  it("slack: imports the two-token bundle into the workspace grant", async () => {
-    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
-      provider: "slack",
-      profile: "default",
-      tokens: {
-        accessToken: "xoxb-redeemed",
-        raw: { authed_user: { access_token: "xoxp-redeemed" }, team: { id: "T123" } },
-      },
-      metadata: null,
+  // Rome's own Slack app replaces the Slack sign-in connection, so a redeem
+  // makes no new one, and fixes one Rome already holds.
+  it("slack: a connect makes no new Slack sign-in connection, and says why", async () => {
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({ ...SLACK_REDEEMED, intent: "connect" });
+    const registry = makeRegistry();
+
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringContaining("no longer connects"),
     });
+    expect(registry.find("slack")).toHaveLength(0);
+  });
+
+  it("slack: a sign-in to Rome goes on, and makes no Slack connection", async () => {
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce(SLACK_REDEEMED);
     const registry = makeRegistry();
 
     const res = await postRedeem(makeDeps(registry));
 
     expect(res.status).toBe(200);
-    const conn = registry.find("slack")[0];
+    expect(registry.find("slack")).toHaveLength(0);
+    expect(logins).toEqual(["oauth"]);
+  });
+
+  it("slack: imports the two-token bundle into the workspace grant it already holds", async () => {
+    const ledger = makeLedger();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      ...SLACK_REDEEMED,
+      tokens: { ...SLACK_REDEEMED.tokens, accessToken: "xoxb-before" },
+      intent: "connect",
+    });
+    expect((await postRedeem(makeDeps(makeRegistry(ledger, { offerSlack: true })))).status).toBe(
+      200,
+    );
+    const registry = makeRegistry(ledger);
+    await registry.load();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({ ...SLACK_REDEEMED, intent: "connect" });
+
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(200);
+    const [conn] = registry.find("slack");
     expect(conn).toBeDefined();
-    expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.grantOf(conn.id);
+    expect(conn!.auth.grants().workspace).toBe("authorized");
+    const grant = await registry.grantOf(conn!.id);
     expect(grant?.profile).toMatchObject({ teamId: "T123" });
+    expect(grant?.credential?.material).toMatchObject({ record: { botToken: "xoxb-redeemed" } });
     expect(registry.find("github")).toHaveLength(0);
   });
 

@@ -18,11 +18,8 @@
 
 import { Hono, type Context } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import {
-  NoSetupError,
-  NotOfferedError,
-  type SetupTarget,
-} from "../../connections/setup/manager.js";
+import { NoSetupError, type SetupTarget } from "../../connections/setup/manager.js";
+import { NotOfferedError } from "../../connections/errors.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import type { ApiDeps } from "../deps.js";

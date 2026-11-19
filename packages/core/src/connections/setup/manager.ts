@@ -28,6 +28,7 @@ import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
 } from "../../people/guardian-mapping.js";
+import { NotOfferedError } from "../errors.js";
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
@@ -68,14 +69,6 @@ export interface SetupTarget {
 }
 
 /** Raised when a start targets a grant whose descriptor declares no setup. */
-/** A setup for a new account of a connection kind Rome no longer offers. */
-export class NotOfferedError extends Error {
-  constructor(readonly connectionKind: string) {
-    super(`Rome no longer connects new accounts of connection kind "${connectionKind}".`);
-    this.name = "NotOfferedError";
-  }
-}
-
 export class NoSetupError extends Error {
   constructor(
     readonly connectionKind: string,

@@ -33,6 +33,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "./oauth/oauth-providers.js";
 import type { OAuthTokenBundle } from "./oauth/oauth-token-bundle.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
+import { NotOfferedError } from "./errors.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
   credentialFromBundle,
@@ -56,13 +57,21 @@ function freshDb(): DrizzleDb {
   return db;
 }
 
-/** A registry declaring every provider in `providers` over the test db's ledger. */
+/** A registry declaring every provider in `providers` over the test db's
+ *  ledger. Slack's sign-in connection is no longer offered; `offerSlack`
+ *  offers it, for tests of the import itself. */
 function makeRegistry(
   db: DrizzleDb,
   providers: OAuthProvider[] = ["github", "slack", "google"],
+  { offerSlack = false }: { offerSlack?: boolean } = {},
 ): ConnectionRegistry {
   const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
-  for (const provider of providers) registry.register(makeOAuthProviderDescriptor(provider));
+  for (const provider of providers) {
+    const descriptor = makeOAuthProviderDescriptor(provider);
+    registry.register(
+      offerSlack && provider === "slack" ? { ...descriptor, offered: true } : descriptor,
+    );
+  }
   return registry;
 }
 
@@ -251,7 +260,7 @@ async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvide
 
 describe("importProviderBundle records the grant profile", () => {
   it("writes the typed profile on the grant in the same import as the credential", async () => {
-    const registry = makeRegistry(freshDb());
+    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
     await importProviderBundle(
       registry,
       "slack",
@@ -373,7 +382,7 @@ const BUNDLES: Array<[OAuthProvider, string, OAuthTokenBundle]> = [
 
 describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) => {
   it("mints a connection and imports the grant on first call", async () => {
-    const registry = makeRegistry(freshDb());
+    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
     expect(registry.find(provider)).toHaveLength(0);
 
     const imported = await importProviderBundle(registry, provider, bundle);
@@ -385,7 +394,7 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
   });
 
   it("reuses the existing connection on re-import (idempotent — no duplicate)", async () => {
-    const registry = makeRegistry(freshDb());
+    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
     await importProviderBundle(registry, provider, bundle);
     await importProviderBundle(registry, provider, bundle);
     expect(registry.find(provider)).toHaveLength(1);
@@ -403,6 +412,47 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
     const registry = makeRegistry(freshDb(), []);
     const imported = await importProviderBundle(registry, provider, bundle);
     expect(imported).toBe(false);
+  });
+});
+
+describe("a kind Rome no longer offers", () => {
+  const SLACK = { accessToken: "xoxb-a", raw: { authed_user: { access_token: "xoxp-a" } } };
+
+  it("refuses a connect that would make a new connection, and writes nothing", async () => {
+    const registry = makeRegistry(freshDb());
+
+    await expect(importProviderBundle(registry, "slack", SLACK, {})).rejects.toBeInstanceOf(
+      NotOfferedError,
+    );
+    expect(registry.find("slack")).toEqual([]);
+  });
+
+  it("lets a sign-in to Rome go on without making a connection", async () => {
+    const registry = makeRegistry(freshDb());
+
+    await expect(
+      importProviderBundle(registry, "slack", SLACK, {}, { signIn: true }),
+    ).resolves.toBe(true);
+    expect(registry.find("slack")).toEqual([]);
+  });
+
+  it("still fixes the connection Rome holds", async () => {
+    const db = freshDb();
+    await importProviderBundle(
+      makeRegistry(db, undefined, { offerSlack: true }),
+      "slack",
+      SLACK,
+      {},
+    );
+    const registry = makeRegistry(db);
+    await registry.load();
+    const [held] = registry.find("slack");
+
+    await importProviderBundle(registry, "slack", { ...SLACK, accessToken: "xoxb-b" }, {});
+
+    expect(registry.find("slack").map((connection) => connection.id)).toEqual([held!.id]);
+    const rec = await registry.grantOf(held!.id);
+    expect(rec?.credential?.material).toMatchObject({ record: { botToken: "xoxb-b" } });
   });
 });
 

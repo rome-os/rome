@@ -72,7 +72,10 @@ async function makeAuthorizedRegistry(
 ): Promise<ConnectionRegistry> {
   const registry = new ConnectionRegistry({ repository: makeLedger() });
   for (const p of ["github", "slack", "google"] as const) {
-    registry.register(makeOAuthProviderDescriptor(p));
+    // Rome no longer offers new Slack sign-in connections; offer it here to
+    // make the one each test tears down.
+    const descriptor = makeOAuthProviderDescriptor(p);
+    registry.register(p === "slack" ? { ...descriptor, offered: true } : descriptor);
   }
   const bundle =
     provider === "slack"

@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import { NotOfferedError } from "../../connections/errors.js";
 import { getCookie } from "hono/cookie";
 import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../access/auth.js";
 import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
@@ -213,6 +214,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
         ...(ended ? { ended: true } : {}),
       });
     } catch (error) {
+      if (error instanceof NotOfferedError) return c.json({ error: error.message }, 409);
       const message = error instanceof Error ? error.message : "OAuth handoff redemption failed.";
       return c.json({ error: message }, 502);
     }

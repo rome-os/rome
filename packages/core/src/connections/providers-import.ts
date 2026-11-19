@@ -4,6 +4,7 @@
 // `grantProfileFromBundle`) turn a provider's OAuth bundle into the grant's
 // material and profile shapes.
 
+import { NotOfferedError } from "./errors.js";
 import { normalizeShopifyShopDomain, type OAuthProvider } from "./oauth/oauth-providers.js";
 import { normalizeScopes, type OAuthTokenBundle } from "./oauth/oauth-token-bundle.js";
 import {
@@ -151,7 +152,10 @@ export function grantProfileFromBundle(
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the
  * registry doesn't declare the provider's descriptor (a test wiring a subset of
- * connection kinds). Returns `true` when a credential was granted.
+ * connection kinds). Returns `true` when a credential was granted, and when a
+ * sign-in found no connection to grant on a kind Rome no longer offers: the
+ * sign-in goes on and makes none. A connect for such a kind throws
+ * `NotOfferedError` and writes nothing.
  *
  * `account` is the redeem side's non-secret identity as a RAW JSON object.
  * When supplied (live grant), the connection kind parses it against its own schema
@@ -176,11 +180,16 @@ export async function importProviderBundle(
   // In the grant's section, like every other grant, so a disconnect
   // running at the same time finishes before this redeem starts and the redeem
   // makes a fresh connection, rather than restoring custody to one going away.
-  await registry.withGrantSection(provider, grant, () =>
-    registry.giveGrant(provider, undefined, grant, credential, profile, {
-      ...(opts.signIn ? { signIn: true } : {}),
-      ...(opts.onEnded ? { onEnded: opts.onEnded } : {}),
-    }),
-  );
+  try {
+    await registry.withGrantSection(provider, grant, () =>
+      registry.giveGrant(provider, undefined, grant, credential, profile, {
+        ...(opts.signIn ? { signIn: true } : {}),
+        ...(opts.onEnded ? { onEnded: opts.onEnded } : {}),
+      }),
+    );
+  } catch (error) {
+    if (opts.signIn && error instanceof NotOfferedError) return true;
+    throw error;
+  }
   return true;
 }
