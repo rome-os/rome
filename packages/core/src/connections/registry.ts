@@ -1372,10 +1372,12 @@ class ConnectionImpl implements Connection {
   }
 
   /** The guardian's disconnect, under the grant lock so no renewal or fault
-   *  runs beside it: stop every capability, so a live transport never meets
-   *  the token being revoked; ask the kind to take back at the platform what
-   *  the grant gave (`onDisconnect`, at most {@link TAKE_BACK_TIMEOUT_MS});
-   *  then remove the connection as {@link disconnect} does.
+   *  runs beside it. A renewal a fault started asks the platform without the
+   *  lock, so the disconnect lets it land first and takes back what it
+   *  minted. Then: stop every capability, so a live transport never meets the
+   *  token being revoked; ask the kind to take back at the platform what the
+   *  grant gave (`onDisconnect`, at most {@link TAKE_BACK_TIMEOUT_MS}); then
+   *  remove the connection as {@link disconnect} does.
    *
    *  The take-back comes before the delete so that Rome never forgets a token
    *  the platform still honours: an instance that dies between the two keeps
@@ -1383,41 +1385,52 @@ class ConnectionImpl implements Connection {
    *  again cleanly. The cost is that a failed write, after a take-back that
    *  worked, leaves the same broken connection; its capabilities start again
    *  and the error is thrown. Answers why the take-back failed, or null. */
-  disconnectTakingBack(grant: GrantName): Promise<string | null> {
-    return this.withGrantLock(grant, async () => {
-      this.teardownAll();
-      const notTakenBack = await this.takeBack();
-      try {
-        await this.disconnectLocked(grant, {});
-      } catch (err) {
-        this.reconcile(grant);
-        throw err;
-      }
-      return notTakenBack;
-    });
+  async disconnectTakingBack(grant: GrantName): Promise<string | null> {
+    for (;;) {
+      await this.renewalsInFlight.get(grant)?.catch(() => {});
+      const ended = await this.withGrantLock(grant, async () => {
+        // A renewal applies its result under this lock, so one that started
+        // since is waited out with the lock free.
+        if (this.renewalsInFlight.has(grant)) return undefined;
+        this.teardownAll();
+        const notTakenBack = await this.takeBack();
+        try {
+          await this.disconnectLocked(grant, {});
+        } catch (err) {
+          this.reconcile(grant);
+          throw err;
+        }
+        return { notTakenBack };
+      });
+      if (ended) return ended.notTakenBack;
+    }
   }
 
   /** Null when the kind took back the access or holds nothing to take back;
-   *  otherwise why it failed or did not answer in time, which is logged. */
+   *  otherwise why it failed or did not answer in time, which is logged. The
+   *  time limit covers resolving the material too, and a take-back that runs
+   *  out of time never calls the kind later. */
   private async takeBack(): Promise<string | null> {
     const onDisconnect = this.descriptor.onDisconnect;
     if (!onDisconnect) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       const held = await this.store.grantOf(this.id);
       if (!held?.credential) return null;
       const { material } = fromPersisted(held.credential, this.descriptor.auth);
-      const hook = onDisconnect({
-        material: typeof material === "function" ? await material() : material,
-        profile: held.profile ?? {},
-      });
+      const taking = (async () => {
+        const resolved = typeof material === "function" ? await material() : material;
+        if (timedOut) return;
+        await onDisconnect({ material: resolved, profile: held.profile ?? {} });
+      })();
       const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`no answer within ${TAKE_BACK_TIMEOUT_MS / 1000}s`)),
-          TAKE_BACK_TIMEOUT_MS,
-        );
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error(`no answer within ${TAKE_BACK_TIMEOUT_MS / 1000}s`));
+        }, TAKE_BACK_TIMEOUT_MS);
       });
-      await Promise.race([hook, timeout]);
+      await Promise.race([taking, timeout]);
       return null;
     } catch (err) {
       this.log.warn("could not take back access at the platform on disconnect", {

@@ -13,6 +13,7 @@ import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { createTestDb } from "../test/db.js";
 import {
+  CredentialRejected,
   makeCustodyGrant,
   makeFakeTalker,
   makeGatedWatch,
@@ -997,6 +998,102 @@ describe("disconnect takes back access at the platform", () => {
       expect(taken).toEqual([{ accessToken: "renewed-token" }]);
       expect(registry.find("fake-oauth-provider")).toHaveLength(0);
     } finally {
+      close();
+    }
+  });
+
+  it("takes back the credential a renewal a fault started mints", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    let finishRenewal: (cred: Credential) => void = () => {};
+    let talker: ReturnType<typeof makeFakeTalker> | undefined;
+    const taken: unknown[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      auth: {
+        ...descriptor.auth,
+        renew: () =>
+          new Promise<Credential>((resolve) => {
+            finishRenewal = resolve;
+          }),
+      },
+      capabilities: {
+        talker: {
+          build(cred) {
+            talker = makeFakeTalker(cred);
+            return talker;
+          },
+        },
+      },
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+      },
+    });
+    try {
+      const conn = await registry.connect("fake-oauth-provider");
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
+      talker?.state.fault?.(new CredentialRejected());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const ended = registry.disconnect(conn.id);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(taken).toEqual([]);
+      finishRenewal({ material: { accessToken: "renewed-token" }, expiresAt: "never" });
+
+      expect(await ended).toEqual({});
+      expect(taken).toEqual([{ accessToken: "renewed-token" }]);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("counts resolving the material in the 10s, and never calls the kind after", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor, externalCredential } = makeExternalCustody();
+    let hang = false;
+    let resolveLate: (material: Record<string, string>) => void = () => {};
+    const resolveExternal = descriptor.auth.resolveExternal;
+    const taken: unknown[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      auth: {
+        ...descriptor.auth,
+        resolveExternal: () =>
+          hang
+            ? new Promise((resolve) => {
+                resolveLate = resolve;
+              })
+            : (resolveExternal?.() ?? Promise.resolve({})),
+      },
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+      },
+    });
+    try {
+      const conn = await registry.connect("fake-composio");
+      await registry.giveGrant(conn.connectionKind, conn.id, "account", externalCredential());
+      hang = true;
+      rs.useFakeTimers();
+
+      const ended = registry.disconnect(conn.id);
+      await rs.advanceTimersByTimeAsync(10_000);
+      expect(await ended).toEqual({ notTakenBack: "no answer within 10s" });
+      expect(registry.find("fake-composio")).toHaveLength(0);
+
+      resolveLate({ apiKey: "late" });
+      await rs.advanceTimersByTimeAsync(0);
+      expect(taken).toEqual([]);
+    } finally {
+      rs.useRealTimers();
       close();
     }
   });
