@@ -2,11 +2,14 @@
  * A Discord chat's history read from Discord itself, through its REST API, so
  * it holds messages Rome never heard. A thread is a chat of its own on
  * Discord, read by its own id, and a message a thread was opened from names
- * that thread. Contract: `TalkHistory` (connections/types.ts).
+ * that thread. A message read here is described as the same message heard
+ * live is (`DiscordAdapter.dispatchMessage`), so a reader can tell the two
+ * are one. Contract: `TalkHistory` (connections/types.ts).
  */
 
-import type { Attachment, ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TalkHistoryRead } from "../../types.js";
+import { discordAttachment } from "./discord-attachment.js";
 
 /** The first millisecond of 2015, from which Discord's ids count time. */
 const DISCORD_EPOCH = 1420070400000n;
@@ -39,6 +42,7 @@ export interface WireChannel {
   type: number;
   name?: string | null;
   parent_id?: string | null;
+  guild_id?: string;
 }
 
 /** A Discord message as its REST API spells it, in the fields read here. */
@@ -69,8 +73,8 @@ export interface DiscordHistoryDeps {
   /** Rome's bot on this account, so what it said reads as outbound. */
   botId: string | null;
   /** A message's text as an inbound message carries it, the bot's mention
-   *  stripped. */
-  textOf: (content: string) => string;
+   *  stripped, in the guild the chat is in, if any. */
+  textOf: (content: string, guildId?: string) => string;
   /** The DM channel with the user an id names, where a chat id is a user's,
    *  as a send takes it. Rejects when the id names no user. */
   directChannelFor?: (userId: string) => Promise<string>;
@@ -207,8 +211,15 @@ function toChannelMessage(
     senderDisplayName:
       message.member?.nick ?? message.author.global_name ?? message.author.username,
     senderUsername: message.author.username,
-    text: deps.textOf(message.content),
-    attachments: (message.attachments ?? []).map(toAttachment),
+    text: deps.textOf(message.content, channel.guild_id),
+    attachments: (message.attachments ?? []).map((attachment) =>
+      discordAttachment({
+        url: attachment.url,
+        name: attachment.filename,
+        title: attachment.title,
+        contentType: attachment.content_type,
+      }),
+    ),
     timestamp: new Date(message.timestamp),
     ...(replyTo ? { replyTo: { messageId: replyTo } } : {}),
     thread: {
@@ -217,19 +228,5 @@ function toChannelMessage(
     },
     ...(openedThread ? { openedThread: openedThread as ChatId } : {}),
     raw: message,
-  };
-}
-
-function toAttachment(attachment: NonNullable<WireMessage["attachments"]>[number]): Attachment {
-  const mimeType = attachment.content_type;
-  const fileName = attachment.filename ?? attachment.title;
-  const kind = mimeType?.split("/")[0];
-  const type =
-    kind === "image" || kind === "video" || kind === "audio" ? kind : ("document" as const);
-  return {
-    type,
-    url: attachment.url,
-    ...(mimeType ? { mimeType } : {}),
-    ...(fileName ? { fileName } : {}),
   };
 }

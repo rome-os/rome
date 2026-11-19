@@ -50,7 +50,7 @@ import {
 } from "../../outbound/send-refusals.js";
 import { saveUrlAttachments } from "../../inbound/attachment-files.js";
 import { createReadStream } from "node:fs";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 import {
   DISCORD_API_VERSION,
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
@@ -65,22 +65,10 @@ import { preserveMentionOnlyText } from "../../../participation/mention-only.js"
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
 import type { TalkHistoryRead } from "../../types.js";
 import { readDiscordHistory } from "./discord-history.js";
+import { discordAttachment } from "./discord-attachment.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
-
-/**
- * The human-readable attachment name as the uploader saw it. Discord sanitizes
- * filenames that contain non-ASCII characters (e.g. "腾讯会议录制转写文件.txt"
- * becomes "580f8fdeeb994c86.txt") and preserves the original — minus extension —
- * in the `title` field. Reconstruct the display name from `title` + the cleaned
- * extension; fall back to `filename` when no title is present.
- */
-function discordAttachmentName(filename: string, title?: string | null): string {
-  if (!title) return filename;
-  const ext = extname(filename);
-  return ext && !title.toLowerCase().endsWith(ext.toLowerCase()) ? `${title}${ext}` : title;
-}
 
 const log = createLogger("discord");
 
@@ -1440,10 +1428,19 @@ Use \`/channel agent clear\` to undo.`,
       {
         get: (route, query) => this.rest.get(route, query ? { query } : {}),
         botId,
-        textOf: (content) =>
+        // The bot's name as an inbound message of the same guild reads it.
+        textOf: (content, guildId) =>
           discordInboundText(
             content,
-            botUser ? { id: botUser.id, displayName: botUser.displayName } : { id: botId },
+            botUser
+              ? {
+                  id: botUser.id,
+                  displayName:
+                    (guildId
+                      ? this.client.guilds.cache.get(guildId)?.members.me?.displayName
+                      : undefined) ?? botUser.displayName,
+                }
+              : { id: botId },
           ),
         directChannelFor: (userId) => this.directConversationFor(userId),
       },
@@ -1603,28 +1600,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   private extractAttachments(message: Message): Attachment[] {
-    const attachments: Attachment[] = [];
-    for (const att of message.attachments.values()) {
-      const mimeType = att.contentType ?? undefined;
-      const fileName = att.name
-        ? discordAttachmentName(att.name, att.title)
-        : (att.title ?? undefined);
-      if (mimeType?.startsWith("image/")) {
-        attachments.push({ type: "image", url: att.url, fileName });
-      } else if (mimeType?.startsWith("video/")) {
-        attachments.push({ type: "video", url: att.url, mimeType, fileName });
-      } else if (mimeType?.startsWith("audio/")) {
-        attachments.push({ type: "audio", url: att.url, mimeType, fileName });
-      } else {
-        attachments.push({
-          type: "document",
-          url: att.url,
-          mimeType,
-          fileName,
-        });
-      }
-    }
-    return attachments;
+    return [...message.attachments.values()].map(discordAttachment);
   }
 
   private async sendAttachment(
