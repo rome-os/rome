@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
 import { contextRules } from "./rules/contexts.js";
+import { featureRules } from "./rules/features.js";
 import { layerRules } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 
@@ -88,13 +89,49 @@ write(
   ].join("\n"),
 );
 
+write("src/people/read.ts", 'import "./phone-book/index.js";\n');
+write("src/people/model/person.ts", "export type Person = { id: string };\n");
+write("src/people/infrastructure/repo.ts", 'import "drizzle-orm";\nimport "../model/person.js";\n');
+write("src/people/phone-book/index.ts", 'export * from "./edit.js";\n');
+write(
+  "src/people/phone-book/edit.ts",
+  ['import "../read.js";', 'import "../person-history/index.js";', 'import "drizzle-orm";'].join(
+    "\n",
+  ),
+);
+write("src/people/phone-book/edit.test.ts", 'import "drizzle-orm";\n');
+write("src/people/phone-book/list.ts", 'import "hono";\n');
+write("src/people/phone-book/http/people.ts", 'import "hono";\nimport "../list.js";\n');
+write(
+  "src/people/phone-book/application/edit.ts",
+  'import "../http/people.js";\nimport "../../model/person.js";\n',
+);
+write(
+  "src/people/phone-book/actions/list.ts",
+  'import "../http/people.js";\nimport "../application/edit.js";\n',
+);
+write("src/people/person-history/index.ts", "export const history = 1;\n");
+write("src/people/link-code/index.ts", "export const code = 1;\n");
+write(
+  "src/chats/people-probe.ts",
+  [
+    'import "../people/read.js";',
+    'import "../people/phone-book/index.js";',
+    'import "../people/phone-book/edit.js";',
+  ].join("\n"),
+);
+write("src/chats/people-probe.test.ts", 'import "../people/phone-book/index.js";\n');
+write("src/api/routes/people/phone-book.ts", 'import "../../../people/phone-book/index.js";\n');
+write("src/connections/kinds/discord/discord.ts", 'import "../../../people/link-code/index.js";\n');
+
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("checkImports with the layer rules", () => {
   it("judges each import by the file it resolves to", () => {
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), layerRules)
       .map(formatImportViolation)
-      .map((line) => line.replace(/: .*$/, ""));
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => line.startsWith("agent/") || line.startsWith("concierge/"));
     expect(lines).toEqual([
       "agent/application/sub/probe.ts:3 → ../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [application-imports-inward]",
       "agent/domain/probe.ts:3 → ../index.js (agent/index.ts) [domain-imports-domain]",
@@ -151,6 +188,36 @@ describe("checkImports with the library rule", () => {
     expect(lines).toEqual([
       "lib/probe.test.ts:1 → ../apps/catalog.js (apps/catalog.ts) [lib-imports-no-context]",
       "lib/probe.test.ts:2 → @/agent/index.js (agent/index.ts) [lib-imports-no-context]",
+    ]);
+  });
+});
+
+describe("checkImports with the feature rules", () => {
+  it("keeps features apart and off the root, and lets only routes, wiring, tests and listed files use them", () => {
+    const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), [
+      ...featureRules,
+      ...layerRules,
+    ])
+      .map(formatImportViolation)
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter(
+        (line) =>
+          line.startsWith("people/") ||
+          line.startsWith("chats/") ||
+          line.startsWith("api/") ||
+          line.startsWith("connections/"),
+      );
+    expect(lines).toEqual([
+      "chats/people-probe.ts:2 → ../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
+      "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [features-used-from-wiring]",
+      "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [enter-through-index]",
+      "people/phone-book/actions/list.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [adapters-import-inward]",
+      "people/phone-book/application/edit.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [adapters-import-inward]",
+      "people/phone-book/application/edit.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [application-imports-inward]",
+      "people/phone-book/edit.ts:2 → ../person-history/index.js (people/person-history/index.ts) [features-import-no-sibling]",
+      "people/phone-book/edit.ts:3 → drizzle-orm [drizzle-stays-in-infrastructure]",
+      "people/phone-book/list.ts:1 → hono [hono-stays-in-http]",
+      "people/read.ts:1 → ./phone-book/index.js (people/phone-book/index.ts) [domain-root-imports-no-feature]",
     ]);
   });
 });

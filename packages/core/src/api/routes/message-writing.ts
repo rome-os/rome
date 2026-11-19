@@ -7,7 +7,7 @@ import type { MessageWritingMode } from "@rome/api-types/concierge";
 import { bareTool } from "../../lib/tool-name.js";
 
 /** The tools whose call is itself a message the chat shows. */
-const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
+const MESSAGE_TOOLS = new Set(["say"]);
 
 /**
  * How a provider's turns show the typing dots: exactly where it streams a

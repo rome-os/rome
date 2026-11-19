@@ -240,13 +240,17 @@ export function tidyNewFile(file: string, text: string): string {
     const stmt = stmts[i];
     const start = stmt.getStart(sf);
     let gapStart = 0;
+    let scanFrom = 0;
     if (i > 0) {
       // A comment on the line of the statement before stays where it is.
       const newline = text.indexOf("\n", stmt.pos);
       if (newline === -1 || newline >= start) continue;
       gapStart = newline + 1;
+      // TypeScript counts a comment as leading only after a line break, so
+      // the scan starts on the break itself.
+      scanFrom = newline;
     }
-    const comments = (ts.getLeadingCommentRanges(text, gapStart) ?? []).filter(
+    const comments = (ts.getLeadingCommentRanges(text, scanFrom) ?? []).filter(
       (c) => c.end <= start,
     );
     const imports = i > 0 && ts.isImportDeclaration(stmt) && ts.isImportDeclaration(stmts[i - 1]);

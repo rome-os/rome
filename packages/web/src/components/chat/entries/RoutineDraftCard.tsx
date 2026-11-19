@@ -40,7 +40,7 @@ type Busy = "toggle" | "delete" | "run" | null;
 
 // Keys the server mints for chat cards (core's CHAT_ROUTINE_KEY_PREFIX). Only a
 // card keyed in this namespace may pause or delete what it finds: an app's
-// managed routine keys (e.g. `briefing-*`) never belong to a chat card.
+// managed routine keys never belong to a chat card.
 const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
 
 /** The routine this card created, if it still exists. Cards carry a unique

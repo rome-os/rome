@@ -68,6 +68,7 @@ import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.j
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
+import { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
@@ -79,8 +80,9 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
+import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -525,7 +527,7 @@ export async function buildTestDeps(
   }
 
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -896,6 +898,7 @@ export async function buildTestDeps(
     // Inert in tests: checkAndOffer is never invoked here, and the Rome Cloud
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
+    releaseNotes: new ReleaseNotes({ baseUrl: "https://release-notes.invalid", cacheDir: null }),
     isCloudAuthEnabled: async () => false,
     loginUsage: { recordLogin: () => {} },
     transports,

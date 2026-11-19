@@ -11,10 +11,8 @@
  * Most of this is two migrations: stock text sizes reaching for the typography
  * roles, and off-roster spacing steps reaching for the scale. The rest needs a
  * decision. Brand marks hold a literal because the literal is the spec, and an
- * owner\'s color is not Rome\'s to retune. The `text-[9px]` sizes sit below the
- * type scale\'s 12px floor and the hero sizes above its 30px ceiling. The amber
- * and emerald pairs in `rome_apps/briefing` are a second status palette, mapping
- * onto `warning` and `success`.
+ * owner\'s color is not Rome\'s to retune. The hero sizes sit above the type
+ * scale\'s 30px ceiling.
  */
 export const BASELINE = {
   "packages/app-template/workflow/src/web/App.tsx": {
@@ -82,80 +80,10 @@ export const BASELINE = {
   },
   "packages/web/src/pages/dev/ConnectionGalleryPage.tsx": { "ring-black/5": 1 },
   "packages/web/src/pages/dev/TypographyPage.tsx": { "md:text-[3.35rem]": 1, "text-[2.65rem]": 1 },
-  "rome_apps/briefing/src/web/App.tsx": {
-    "gap-1.5": 1,
-    "md:text-2xl": 1,
-    "py-1.5": 1,
-    "text-sm": 4,
-    "text-xl": 1,
-  },
-  "rome_apps/briefing/src/web/components/BriefBook.tsx": {
-    "gap-0.5": 1,
-    "gap-1.5": 2,
-    "mt-1.5": 1,
-    "pr-1.5": 2,
-    "px-2.5": 1,
-    "text-[13px]": 1,
-    "text-[15px]": 1,
-    "text-[9.5px]": 1,
-    "text-[9px]": 6,
-    "text-sm": 1,
-  },
-  "rome_apps/briefing/src/web/components/BriefsPanel.tsx": { "text-base": 1, "text-sm": 1 },
-  "rome_apps/briefing/src/web/components/Markdown.tsx": {
-    "mb-0.5": 1,
-    "py-0.5": 1,
-    "text-[0.85em]": 1,
-    "text-base": 1,
-    "text-sm": 3,
-  },
-  "rome_apps/briefing/src/web/components/ScoutForm.tsx": { "text-xs": 1 },
-  "rome_apps/briefing/src/web/components/ScoutHistory.tsx": {
-    "py-1.5": 1,
-    "text-amber-600": 1,
-    "text-emerald-600": 1,
-    "text-sm": 6,
-    "text-xs": 2,
-  },
-  "rome_apps/briefing/src/web/components/ScoutsPanel.tsx": {
-    "text-base": 1,
-    "text-sm": 3,
-    "text-xs": 2,
-  },
-  "rome_apps/briefing/src/web/components/SettingsPanel.tsx": {
-    "dark:text-amber-400": 1,
-    "text-amber-700": 1,
-    "text-base": 2,
-    "text-sm": 2,
-    "text-xs": 3,
-  },
-  "rome_apps/briefing/src/web/components/ui/badge.tsx": {
-    "bg-amber-100": 1,
-    "bg-emerald-100": 1,
-    "dark:bg-amber-950": 1,
-    "dark:bg-emerald-950": 1,
-    "dark:text-amber-300": 1,
-    "dark:text-emerald-300": 1,
-    "py-0.5": 1,
-    "text-amber-800": 1,
-    "text-emerald-800": 1,
-    "text-xs": 1,
-  },
-  "rome_apps/briefing/src/web/components/ui/button.tsx": { "text-sm": 1, "text-xs": 1 },
-  "rome_apps/briefing/src/web/components/ui/card.tsx": { "space-y-1.5": 1, "text-sm": 1 },
-  "rome_apps/briefing/src/web/components/ui/input.tsx": {
-    "file:text-sm": 1,
-    "md:text-sm": 1,
-    "text-base": 1,
-  },
-  "rome_apps/briefing/src/web/components/ui/label.tsx": { "text-sm": 1 },
-  "rome_apps/briefing/src/web/components/ui/textarea.tsx": { "md:text-sm": 1, "text-base": 1 },
-  "rome_apps/connector/src/web/connect-card.tsx": { "py-1.5": 5, "text-sm": 10, "text-xs": 4 },
+  "rome_apps/connector/src/web/connect-card.tsx": { "text-sm": 3, "text-xs": 4 },
   "rome_apps/connector/src/web/login-card.tsx": {
-    "gap-1.5": 1,
     "mt-0.5": 1,
-    "py-1.5": 4,
-    "text-sm": 7,
+    "text-sm": 2,
     "text-xs": 3,
   },
   "rome_apps/showcases/src/web/components/PresetCard.tsx": {

@@ -10,7 +10,7 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
+import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/link-code/index.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -106,7 +106,7 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { PeopleRepository } from "./db/repositories/people.js";
+import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
@@ -220,8 +220,9 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
-import { registerAgentNameAction } from "./people/agent-name.js";
-import { registerReadPersonAction } from "./people/read-person.js";
+import { registerAgentNameAction } from "./people/guardian-profile/index.js";
+import { phoneBook } from "./people/phone-book/index.js";
+import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -283,6 +284,7 @@ import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
+import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
@@ -328,6 +330,7 @@ import {
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
+  getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
@@ -454,7 +457,7 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -2359,11 +2362,22 @@ async function main() {
       favorService,
       appConnections,
       systemUpgradeService,
+      releaseNotes: new ReleaseNotes({
+        baseUrl: config.releaseNotesUrl,
+        cacheDir: getReleaseNotesCacheDir(),
+      }),
       isCloudAuthEnabled,
       loginUsage: usageRecorder,
       connectionRegistry,
       setupManager,
     };
+    // The phone book serves both of its interfaces from one value: leaving it
+    // out is not building it.
+    apiDeps.phoneBook = phoneBook({
+      ...apiDeps,
+      ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+    });
+    for (const action of apiDeps.phoneBook.actions) actionRegistry.register(action);
     internalApi = await startApi(config.internalApi, apiDeps);
   } catch (err) {
     log.warn("Failed to start internal API", {

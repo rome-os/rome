@@ -232,10 +232,13 @@ export async function renderTaskEvents(
     if (row.sessionId && wantsReply) {
       const final = await finalAnswer(messages, taskChatPlace(row.sessionId));
       const latest = final?.answer;
-      // A card the answer showed is what `chat_forward` sends, as it is,
-      // unless the answer has nothing to report, which it holds back.
-      if (final?.card && !(latest && hasNothingToReport(latest.body.text))) {
-        lines.push(`card: ${replyExcerpt(final.card.text.replace(/\s+/g, " "))}`);
+      // Every card the answer's turn showed is what `card_forward` sends by
+      // id, as it is, unless the answer has nothing to report, which holds
+      // them back.
+      if (!(latest && hasNothingToReport(latest.body.text))) {
+        for (const { id, card } of final?.cards ?? []) {
+          lines.push(`card id=${id}: ${replyExcerpt(card.text.replace(/\s+/g, " "))}`);
+        }
       }
       if (latest) {
         // The task's own conclusion comes whole, so the Concierge can tell
@@ -1091,8 +1094,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     approvals.onCreated(approvalChanged),
     approvals.onResolved(approvalChanged),
     // A write can move the row to another Concierge chat (a new source
-    // message, a forward): its task chat's answer is read again, and both
-    // chats are refreshed.
+    // message): its task chat's answer is read again, and both chats are
+    // refreshed.
     tasks.repo.onChange(({ row, conciergeChat }) => {
       if (row.sessionId) movedBy.delete(row.sessionId);
       void guard(tracker.taskChanged(row.id, conciergeChat.id));

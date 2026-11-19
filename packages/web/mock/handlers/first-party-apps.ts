@@ -4,7 +4,6 @@ import type { InstalledAppCard } from "@rome/api-types/apps";
 // Imported from each app's tree rather than copied, so an icon change in
 // rome_apps/ reaches the mock without a second edit.
 import assistantIcon from "../../../../rome_apps/assistant/assets/icon.svg";
-import briefingIcon from "../../../../rome_apps/briefing/src/assets/icon.svg";
 import browserAutomationIcon from "../../../../rome_apps/browser-automation/assets/icon.svg";
 import codingIcon from "../../../../rome_apps/coding/assets/icon.svg";
 import connectorIcon from "../../../../rome_apps/connector/assets/icon.svg";
@@ -30,15 +29,6 @@ const definitions = [
     hasFrontend: false,
     iconUrl: assistantIcon,
     hideInLauncher: true,
-  },
-  {
-    id: "briefing",
-    displayName: "Briefing",
-    version: "0.3.0",
-    description:
-      "Scheduled morning and evening briefings that fold in your calendar, recent messages, and the findings of recurring scouting tasks run by the assistant.",
-    hasFrontend: true,
-    iconUrl: briefingIcon,
   },
   {
     id: "browser-automation",

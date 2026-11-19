@@ -1,0 +1,179 @@
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { Hono } from "hono";
+import type { PersonResource, TimelinePage } from "@rome/api-types/people";
+import { createLinkedInDescriptor } from "../../../connections/integrations/linkedin.js";
+import type { Credential, RuntimeKit } from "../../../connections/types.js";
+import type { OpencliResult } from "../../../connections/kinds/linkedin/linkedin-cli.js";
+import {
+  buildTestDeps,
+  createTestConnections,
+  createTestDb,
+  FakeTransport,
+  ownedByGuardian,
+  testChannels,
+  type TestDb,
+  type TestDeps,
+} from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
+import { phoneBookRoutes } from "../../../people/phone-book/index.js";
+import { personHistoryRoutes } from "./person-history.js";
+
+const MEMBER = "ACoAARecipient";
+const SELF = "ACoAAOwner";
+const THREAD = "2-reply==";
+const URL = `https://www.linkedin.com/messaging/thread/${THREAD}/`;
+const reply = {
+  status: "sent",
+  thread_id: THREAD,
+  message_id: "provider-reply-1",
+  sender_is_self: true,
+  sender_profile_url: `https://www.linkedin.com/in/${SELF}/`,
+  sent_at: new Date().toISOString(),
+  text: "Thanks for reaching out",
+};
+
+describe("LinkedIn replies through People", () => {
+  let db: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let person: string;
+  const run = rs.fn<() => Promise<OpencliResult>>();
+
+  beforeEach(async () => {
+    db = createTestDb();
+    deps = await buildTestDeps(db.db);
+    // The LinkedIn account Rome is connected as is the guardian's own.
+    await seedBaseline(db.db);
+    ownedByGuardian(db.db, deps.peopleRepo, "guardian", [
+      { channel: "linkedin", platform: "linkedin" },
+    ]);
+    run.mockReset();
+    run.mockResolvedValue({ code: 0, stdout: JSON.stringify([reply]), stderr: "" });
+    await deps.linkedInStoreRepo.upsertThreads([
+      { threadId: THREAD, threadUrl: URL, unread: false },
+    ]);
+    await deps.linkedInStoreRepo.upsertThreadParticipants(THREAD, [
+      { participantId: MEMBER, type: "member", isSelf: false },
+      { participantId: SELF, type: "member", isSelf: true },
+    ]);
+    await deps.linkedInStoreRepo.markThreadSynced(THREAD, { isGroup: false });
+    const talker = createLinkedInDescriptor({
+      syncSink: deps.linkedInStoreRepo,
+      run,
+      minIntervalMs: 60_000,
+      maxIntervalMs: 60_000,
+    }).capabilities.talker!.build({} as Credential, {} as RuntimeKit);
+    // LinkedIn's Connection, live on that talker, behind the channel list.
+    deps.connections = createTestConnections(
+      new Map([["linkedin", new FakeTransport("linkedin")]]),
+      () => talker,
+    );
+    deps.channels = testChannels(deps, deps.connections);
+    person = await deps.peopleRepo.create({
+      displayName: "LinkedIn Recipient",
+      bondLevel: "acquaintance",
+      links: [{ platform: "linkedin", id: MEMBER }],
+    });
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
+  });
+
+  afterEach(() => db.close());
+
+  const post = () =>
+    app.request(`/people/${person}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text: reply.text }),
+    });
+
+  it("exposes the shared composer and puts the provider's receipt on the mirrored timeline", async () => {
+    const resource = (await (await app.request(`/people/${person}`)).json()) as PersonResource;
+    expect(resource.accounts[0].send).toBe("yes");
+    expect(run).not.toHaveBeenCalled();
+    const response = await post();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ref: `${THREAD}:${reply.message_id}` });
+    expect(run).toHaveBeenCalledWith(
+      [
+        "linkedin",
+        "reply",
+        "--thread-url",
+        URL,
+        "--expected-recipient",
+        MEMBER,
+        "--expected-self",
+        SELF,
+        "--message",
+        reply.text,
+        "--send",
+      ],
+      { timeoutMs: 180_000 },
+    );
+    const timeline = (await (
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries).toHaveLength(1);
+    expect(timeline.entries[0]).toMatchObject({
+      ref: `${THREAD}:${reply.message_id}`,
+      direction: "outbound",
+      body: reply.text,
+    });
+  });
+
+  it("passes a multiline reply through unchanged and mirrors its line breaks", async () => {
+    const text = "See https://example.com/demo\n\nExample signature";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text, text_matches: true }]),
+      stderr: "",
+    });
+    const response = await app.request(`/people/${person}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text }),
+    });
+    expect(response.status).toBe(200);
+    expect(run).toHaveBeenCalledWith(expect.arrayContaining([text]), expect.anything());
+    const timeline = (await (
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: text });
+  });
+
+  it("answers a reply LinkedIn stored with other text as sent, and mirrors what it stored", async () => {
+    const stored = "Thanks forreaching out";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text: stored, text_matches: false }]),
+      stderr: "",
+    });
+    expect((await post()).status).toBe(200);
+    expect(run).toHaveBeenCalledTimes(1);
+    const timeline = (await (
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: stored });
+  });
+
+  it("answers a failed reply with LinkedIn's error, and sends nothing more", async () => {
+    run.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "LinkedIn rejected the reply" });
+    const response = await post();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: expect.any(String) });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a reply LinkedIn took as sent when the local mirror write fails", async () => {
+    rs.spyOn(deps.linkedInStoreRepo, "upsertMessages").mockRejectedValueOnce(
+      new Error("disk unavailable"),
+    );
+    expect((await post()).status).toBe(200);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a group before spawning a send", async () => {
+    await deps.linkedInStoreRepo.markThreadSynced(THREAD, { isGroup: true });
+    expect((await post()).status).toBe(409);
+    expect(run).not.toHaveBeenCalled();
+  });
+});

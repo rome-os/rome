@@ -156,6 +156,14 @@ describe("moveSymbol", () => {
     );
   });
 
+  it("keeps the doc comment of every declaration in a new file, not only the first", () => {
+    const text = lines("/** A. */", "export type A = 1;", "/** B. */", "", "export type B = 2;");
+
+    expect(tidyNewFile("t.ts", text)).toBe(
+      lines("/** A. */", "export type A = 1;", "", "/** B. */", "export type B = 2;"),
+    );
+  });
+
   it("refuses a name the file does not declare at the top", () => {
     expect(() => moveSymbol(pkg("src/a/source.ts"), pkg("src/c/t.ts"), ["nope"])).toThrow(
       /nope not declared/,
