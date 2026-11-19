@@ -137,9 +137,12 @@ export class SlackAppAdapter {
   /** Whether a drain is open, so what it delivers is heard in it. */
   private draining = false;
   /** The app's posts in each direct message that Slack has not sent back as
-   *  events yet. Until it does, the drain does not know the chat's newest
-   *  message, so a read asks Slack. */
+   *  events yet. Until it does, and while a send waits on Slack's answer, the
+   *  drain does not know the chat's newest message, so a read asks Slack. */
   private readonly unheardPosts = new Map<string, Set<string>>();
+  /** Posts still waiting on Slack's answer in each direct message, with the
+   *  ones whose event came back before that answer did. */
+  private readonly posting = new Map<string, { sends: number; heard: Set<string> }>();
 
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
@@ -182,6 +185,7 @@ export class SlackAppAdapter {
     // A new drain: what came before it is a break in every chat's timeline.
     this.heads.clear();
     this.unheardPosts.clear();
+    this.posting.clear();
     this.draining = true;
     this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
@@ -461,15 +465,21 @@ export class SlackAppAdapter {
     const threadTs = parsed.threadTs ?? replyThreadOf(parsed.channelId, replyTo);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
-      const sent = await this.config.api.postMessage(
-        this.config.botToken,
-        { channel: parsed.channelId, markdown: chunk, threadTs },
-        this.abort.signal,
-      );
       // The post joins the drain's timeline from its own event, which Slack
       // sends in order with what others said: a send's answer shows nothing
-      // of what was said just before it.
-      if (!threadTs) this.awaitPost(parsed.channelId, sent.ts);
+      // of what was said just before it. The event can come before the answer.
+      const awaited = !threadTs && parsed.channelId.startsWith("D");
+      if (awaited) this.beginPost(parsed.channelId);
+      let sent: { ts: string } | undefined;
+      try {
+        sent = await this.config.api.postMessage(
+          this.config.botToken,
+          { channel: parsed.channelId, markdown: chunk, threadTs },
+          this.abort.signal,
+        );
+      } finally {
+        if (awaited) this.endPost(parsed.channelId, sent?.ts);
+      }
       firstTs ??= sent.ts;
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
@@ -490,7 +500,10 @@ export class SlackAppAdapter {
       copy: this.config.copy,
       heads: this.heads,
       hearsEvery: (channelId) =>
-        this.draining && channelId.startsWith("D") && !this.unheardPosts.has(channelId),
+        this.draining &&
+        channelId.startsWith("D") &&
+        !this.unheardPosts.has(channelId) &&
+        !this.posting.has(channelId),
       fetchPage: (channelId, bounds) =>
         this.readGate.run(
           `${channelId}:${bounds.latest ?? ""}`,
@@ -517,16 +530,31 @@ export class SlackAppAdapter {
     }
   }
 
-  private awaitPost(channelId: string, ts: string): void {
-    if (!channelId.startsWith("D")) return;
-    const posts = this.unheardPosts.get(channelId) ?? new Set<string>();
-    posts.add(ts);
-    this.unheardPosts.set(channelId, posts);
+  private beginPost(channelId: string): void {
+    const posting = this.posting.get(channelId) ?? { sends: 0, heard: new Set<string>() };
+    posting.sends += 1;
+    this.posting.set(channelId, posting);
+  }
+
+  /** Note a send's answer: its post waits for its event unless that came
+   *  first. Posts heard early are forgotten once no send waits, since only a
+   *  waiting one can claim them. */
+  private endPost(channelId: string, ts: string | undefined): void {
+    const posting = this.posting.get(channelId);
+    if (ts !== undefined && !posting?.heard.has(ts)) {
+      const posts = this.unheardPosts.get(channelId) ?? new Set<string>();
+      posts.add(ts);
+      this.unheardPosts.set(channelId, posts);
+    }
+    if (posting && --posting.sends === 0) this.posting.delete(channelId);
   }
 
   private postHeard(channelId: string, ts: string): void {
     const posts = this.unheardPosts.get(channelId);
-    if (!posts?.delete(ts)) return;
+    if (!posts?.delete(ts)) {
+      this.posting.get(channelId)?.heard.add(ts);
+      return;
+    }
     if (posts.size === 0) this.unheardPosts.delete(channelId);
   }
 

@@ -1012,6 +1012,34 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
+  it("reads from its copy again once a post's event came before Slack's answer to the send", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    const reply = slack.say(2, "bot");
+    const api = a as unknown as { config: { api: SlackAppWebApi } };
+    let answer!: (value: { ts: string }) => void;
+    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const sending = a.send("D_GUARDIAN" as never, { text: "message 2" } as never);
+    await mailbox.deposit(
+      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, user: BOT, bot_id: "B_ROME" } }),
+    );
+    answer({ ts: reply.ts });
+    await sending;
+
+    const asked = slack.calls.length;
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    expect(texts(read)).toEqual(["message 2"]);
+    expect(slack.calls.length).toBe(asked);
+  });
+
   it("asks Slack again after a message heard out of order", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
