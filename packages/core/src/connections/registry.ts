@@ -1408,25 +1408,29 @@ class ConnectionImpl implements Connection {
 
   /** Null when the kind took back the access or holds nothing to take back;
    *  otherwise why it failed or did not answer in time, which is logged. The
-   *  time limit covers resolving the material too, and a take-back that runs
-   *  out of time never calls the kind later. */
+   *  time limit covers resolving the material too. A take-back that runs out
+   *  of time never calls the kind later, and the kind's signal aborts, so it
+   *  changes nothing at the platform once the connection is gone. */
   private async takeBack(): Promise<string | null> {
     const onDisconnect = this.descriptor.onDisconnect;
     if (!onDisconnect) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
+    const stop = new AbortController();
     try {
       const held = await this.store.grantOf(this.id);
       if (!held?.credential) return null;
       const { material } = fromPersisted(held.credential, this.descriptor.auth);
       const taking = (async () => {
         const resolved = typeof material === "function" ? await material() : material;
-        if (timedOut) return;
-        await onDisconnect({ material: resolved, profile: held.profile ?? {} });
+        if (stop.signal.aborted) return;
+        await onDisconnect(
+          { material: resolved, profile: held.profile ?? {} },
+          { signal: stop.signal },
+        );
       })();
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          timedOut = true;
+          stop.abort();
           reject(new Error(`no answer within ${TAKE_BACK_TIMEOUT_MS / 1000}s`));
         }, TAKE_BACK_TIMEOUT_MS);
       });
