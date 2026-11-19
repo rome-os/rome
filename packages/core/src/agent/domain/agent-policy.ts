@@ -71,6 +71,11 @@ export interface PlaceSetup {
   withoutActions?: readonly string[];
   /** True when a session here may not wake itself later with `defer`. */
   withoutDefer?: boolean;
+  /**
+   * The agent's own instructions in this place, in place of its
+   * `systemPromptPrefix`, for an agent whose instructions assume another place.
+   */
+  systemPromptPrefix?: string;
 }
 
 /** The agent's policy in a place: what the place sets wins over the agent's own. */

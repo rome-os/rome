@@ -259,12 +259,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
-import {
-  agentOnConnect,
-  chatInstructionsOf,
-  conciergeOnConnection,
-  conciergePlaceSetup,
-} from "./concierge/on-connection.js";
+import { agentOnConnect, conciergePlaceSetup } from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -1360,10 +1355,7 @@ async function main() {
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       placeSetup: conciergePlaceSetup,
-      chatInstructions: chatInstructionsOf([
-        taskChatInstructions({ webchatRepo }),
-        conciergeOnConnection,
-      ]),
+      chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
