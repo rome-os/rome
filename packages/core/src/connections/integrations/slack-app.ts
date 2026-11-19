@@ -258,16 +258,28 @@ const RELEASE_LIMIT_MS = 60_000;
  * one bound. This Rome holds one connection per workspace, so the newest claim
  * of the workspace is that connection's.
  */
-export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
+export interface FencedSlackAppCloud extends SlackAppCloud {
+  /** The bot tokens of the installs of `teamId` redeemed since this was last
+   *  asked, once every redeem already running has ended. A setup cancelled
+   *  while its redeem ran keeps no grant, so a disconnect revokes its token
+   *  from here. */
+  redeemedTokens(teamId: string): Promise<string[]>;
+}
+
+export function fencedCloud(cloud: SlackAppCloud): FencedSlackAppCloud {
   const releasing = new Set<Promise<void>>();
   const redeeming = new Set<Promise<void>>();
   const newest = new Map<string, number>();
+  const tokens = new Map<string, Set<string>>();
   return {
     start: (input) => cloud.start(input),
     refreshMailbox: (teamId) => cloud.refreshMailbox(teamId),
     async redeem(input) {
       await Promise.allSettled([...releasing]);
       const run = cloud.redeem(input).then((install) => {
+        const held = tokens.get(install.teamId) ?? new Set<string>();
+        held.add(install.botToken);
+        tokens.set(install.teamId, held);
         const generation = install.generation;
         if (generation !== undefined && generation > (newest.get(install.teamId) ?? 0)) {
           newest.set(install.teamId, generation);
@@ -281,6 +293,12 @@ export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
       redeeming.add(tracked);
       void tracked.finally(() => redeeming.delete(tracked));
       return run;
+    },
+    async redeemedTokens(teamId) {
+      await Promise.allSettled([...redeeming]);
+      const held = [...(tokens.get(teamId) ?? [])];
+      tokens.delete(teamId);
+      return held;
     },
     release(teamId, signal, generation) {
       const pending = [...redeeming];
@@ -328,8 +346,14 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     // revoked, finishes the release.
     async onDisconnect({ material: record }, { signal }) {
       const material = materialOf(record);
+      // The grant's token, then any a fix cancelled by this disconnect was
+      // given while its redeem ran: no grant holds that one.
       try {
         await deps.api.revoke(material.botToken, signal);
+        const orphaned = await deps.cloud.redeemedTokens(material.teamId);
+        for (const token of orphaned) {
+          if (token !== material.botToken) await deps.api.revoke(token, signal);
+        }
       } catch (error) {
         throw new Error(`Slack did not revoke Rome's token (${describe(error)})`);
       }

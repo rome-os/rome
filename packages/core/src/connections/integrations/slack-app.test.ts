@@ -361,14 +361,14 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
         new Promise((resolve) => {
           land = () => {
             bound = 2;
-            resolve({ ...INSTALL, generation: 2 });
+            resolve({ ...INSTALL, botToken: "xoxb-fix", generation: 2 });
           };
         }),
       release: async (_teamId, _signal, generation) => {
         if (generation === undefined || generation === bound) bound = null;
       },
     });
-    const { descriptor } = descriptorWith(async () => {}, c);
+    const { descriptor, steps } = descriptorWith(async () => {}, c);
     const fixing = new AbortController();
     const setup = descriptor.auth.setup;
     if (!setup) throw new Error("no setup");
@@ -388,6 +388,8 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
     await fix.catch(() => {});
 
     expect(bound).toBeNull();
+    // The fix's token, which no grant holds, is revoked as well.
+    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-fix", "release T_A"]);
   });
 
   it("releases with no generation a grant made before Rome Cloud counted claims", async () => {
