@@ -17,6 +17,8 @@
 
 import { callMain, isTransportUncertain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import type { CreateRoutineResult, RoutineCreationService } from "../routines/create.js";
 import type {
   AgentFeedback,
   FeedbackOutcome,
@@ -154,6 +156,21 @@ export class RoutineEngineProxy implements RoutineEngine {
   /** Tear down a routine's triggers in the main process. */
   async deactivate(routineId: string): Promise<void> {
     await callMain("routines.cancel", { routineId });
+  }
+}
+
+/** Worker-side stand-in for core's routine creation: the main process creates
+ * the routine, for the app or agent running this worker's action. */
+export class RoutineCreationProxy implements RoutineCreationService {
+  async create(input: unknown): Promise<CreateRoutineResult> {
+    const context = actionExecutionContext.getStore();
+    return callMain<CreateRoutineResult>("routines.create", {
+      input,
+      caller: {
+        ...(context?.callerAppId ? { callerAppId: context.callerAppId } : {}),
+        ...(context?.agentName ? { agentName: context.agentName } : {}),
+      },
+    });
   }
 }
 

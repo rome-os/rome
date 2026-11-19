@@ -6,11 +6,16 @@ import { z } from "zod";
 import { toRoutine, type RoutinesRepository } from "../db/repositories/routines.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { RoutineEngine } from "../routines/engine.js";
+import type { RoutineCreationService } from "../routines/create.js";
 
 /** A call an app's worker makes on the main process: it takes the call's params and returns its result. */
 export type WorkerCallHandler = (params: unknown) => Promise<unknown>;
 
 const RoutineIdParams = z.object({ routineId: z.string().min(1) });
+const CreateParams = z.object({
+  input: z.unknown(),
+  caller: z.object({ callerAppId: z.string().optional(), agentName: z.string().optional() }),
+});
 
 function routineIdOf(method: string, params: unknown): string {
   return parseWorkerCallParams(method, RoutineIdParams, params).routineId;
@@ -19,6 +24,7 @@ function routineIdOf(method: string, params: unknown): string {
 export interface RoutineWorkerCallsDeps {
   routinesRepo: Pick<RoutinesRepository, "findById">;
   routineEngine: Pick<RoutineEngine, "activate" | "deactivate">;
+  routineCreation: RoutineCreationService;
 }
 
 /** The routine calls an app's worker makes, keyed by method name. */
@@ -38,6 +44,12 @@ export function routineWorkerCalls(
         await deps.routineEngine.deactivate(routineId);
       }
       return { ok: true };
+    },
+    // Creates a routine by core's rules, for the app or agent that asked in
+    // the worker.
+    "routines.create": async (params) => {
+      const { input, caller } = parseWorkerCallParams("routines.create", CreateParams, params);
+      return deps.routineCreation.create(input, { kind: "action", ...caller });
     },
     "routines.cancel": async (params) => {
       const routineId = routineIdOf("routines.cancel", params);
