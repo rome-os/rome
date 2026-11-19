@@ -55,6 +55,12 @@ const configSchema = z.object({
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
+  // Where runtime releases keep their release-notes.json, read as
+  // `<url>/v<version>/release-notes.json`. The upgrade dialog shows them.
+  releaseNotesUrl: z
+    .string()
+    .regex(/^https?:\/\//, "must be an http:// or https:// URL")
+    .default("https://github.com/rome-os/rome/releases/download"),
 
   // How long a question card or an approval in a Concierge task chat keeps
   // the task waiting for its owner. After it the task ends for no response
@@ -156,6 +162,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   // Scalars
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
+  }
+  if (env.ROME_RELEASE_NOTES_URL) {
+    raw.releaseNotesUrl = env.ROME_RELEASE_NOTES_URL;
   }
   if (env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES) {
     raw.conciergeTaskWaitExpiryMinutes = env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES;

@@ -17,8 +17,16 @@ async function freshApp(opts: { enrolled?: boolean } = {}) {
   // The countdown verbs drive the service's real hub; the manual relay verbs
   // (/check, POST /upgrade) leave it idle. Both talk to Rome Cloud through the
   // stubbed global fetch.
+  const { ReleaseNotes } = await import("../../instance/system-upgrade/release-notes.js");
   const service = new SystemUpgradeService({ countdownMs: 600_000 });
-  const app = new Hono().route("/", systemUpgradeRoutes({ systemUpgradeService: service }));
+  const releaseNotes = new ReleaseNotes({
+    baseUrl: "https://release-notes.test/download",
+    cacheDir: null,
+  });
+  const app = new Hono().route(
+    "/",
+    systemUpgradeRoutes({ systemUpgradeService: service, releaseNotes }),
+  );
   return { app, service };
 }
 
@@ -308,6 +316,56 @@ describe("system upgrade API", () => {
 
       expect(res.status).toBe(502);
       expect(await res.json()).toEqual({ error: "pantheon_unreachable" });
+    });
+  });
+
+  describe("GET /system/release-notes", () => {
+    it("rejects a target that is not a release version", async () => {
+      const { app } = await freshApp();
+      const res = await app.request("/system/release-notes?to=latest");
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_version" });
+    });
+
+    it("rejects a range whose start is not older than its target", async () => {
+      const { app } = await freshApp();
+      const res = await app.request("/system/release-notes?from=1.2.0&to=1.2.0");
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_range" });
+    });
+
+    it("reads the target's asset and answers with the range", async () => {
+      const requests = stubRomeCloud({
+        status: 200,
+        json: {
+          schema: 2,
+          version: "1.2.0",
+          previousVersion: "1.1.9",
+          date: "2026-11-19T00:10:13Z",
+          url: "https://github.com/rome-os/rome/releases/tag/v1.2.0",
+          breaking: [],
+          new: [{ scope: "web", text: "a thing", pr: 12 }],
+          fixes: [],
+          internal: 1,
+          highlights: { en: [{ text: "A thing.", pr: 12 }], zh: [] },
+        },
+      });
+      const { app } = await freshApp();
+
+      const res = await app.request("/system/release-notes?from=1.1.9&to=1.2.0");
+
+      expect(res.status).toBe(200);
+      expect(requests.map((r) => r.url)).toEqual([
+        "https://release-notes.test/download/v1.2.0/release-notes.json",
+      ]);
+      const body = await res.json();
+      expect(body.status).toBe("complete");
+      expect(body.highlights).toEqual({
+        en: [{ text: "A thing.", pr: 12, version: "1.2.0", breaking: false }],
+        zh: [],
+      });
+      expect(body.new).toBeUndefined();
+      expect(body.compareUrl).toBe("https://github.com/rome-os/rome/compare/v1.1.9...v1.2.0");
     });
   });
 });

@@ -283,6 +283,7 @@ import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
+import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
@@ -328,6 +329,7 @@ import {
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
+  getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
@@ -2359,6 +2361,10 @@ async function main() {
       favorService,
       appConnections,
       systemUpgradeService,
+      releaseNotes: new ReleaseNotes({
+        baseUrl: config.releaseNotesUrl,
+        cacheDir: getReleaseNotesCacheDir(),
+      }),
       isCloudAuthEnabled,
       loginUsage: usageRecorder,
       connectionRegistry,
