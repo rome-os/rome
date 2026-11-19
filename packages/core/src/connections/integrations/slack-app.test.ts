@@ -166,6 +166,7 @@ describe("the Slack app talker", () => {
         timelineBefore: () => [],
         timelineAfter: () => null,
         holdsNewer: () => false,
+        unlinkAcross: () => {},
       },
     });
     const talker = descriptor.capabilities.talker?.build(

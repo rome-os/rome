@@ -382,8 +382,7 @@ export class SlackAppAdapter {
     // Slack's history still shows such a message, so the drain's timeline
     // breaks there rather than linking across it.
     if (isExternalAuthor(payload)) {
-      if (direct) this.heads.delete(event.channel);
-      return { status: 200 };
+      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
     }
     // A bot or workflow that mentions the app posts as a bot_message, often
     // with no user: the bot is its author. Only a mention is taken from one,
@@ -393,8 +392,7 @@ export class SlackAppAdapter {
     if (!author || typeof event.text !== "string") {
       // Slack's history still shows a bot's post Rome does not hear, so the
       // drain's timeline breaks there rather than linking across it.
-      if (direct) this.heads.delete(event.channel);
-      return { status: 200 };
+      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
     }
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
@@ -545,6 +543,24 @@ export class SlackAppAdapter {
           this.abort.signal,
         ),
     };
+  }
+
+  /** Break a direct message's timeline at `wire`, a message Slack's history
+   *  shows that the connection does not keep: the drain links nothing across
+   *  it, and a link the copy already holds across it, written before it
+   *  arrived late, is forgotten. A write that fails answers 500, and the
+   *  mailbox delivers the event again. */
+  private breakAt(channelId: string, wire: SlackWireMessage): { status: number } {
+    this.heads.delete(channelId);
+    if (!inTimeline(wire)) return { status: 200 };
+    try {
+      this.config.copy.unlinkAcross(this.config.teamId, channelId, wire.ts);
+    } catch (error) {
+      log.error("slack app could not break its timeline", { error: describe(error) });
+      this.config.onFault?.({ kind: "transport", cause: error });
+      return { status: 500 };
+    }
+    return { status: 200 };
   }
 
   /** Note a direct message's timeline message heard in this drain. A failure

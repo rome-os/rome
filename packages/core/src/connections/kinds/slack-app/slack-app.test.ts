@@ -902,6 +902,35 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(older)).toEqual(["message 6", "message 5", "message 4"]);
   });
 
+  it("forgets a link across a message from another workspace that arrives late", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    // A read heads the chat at message 1; then message 3 is heard, and
+    // message 2, said before it by someone in another workspace, arrives late.
+    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    Object.assign(slack.say(2), { user: "U_EXT" });
+    slack.say(3);
+    await mailbox.deposit(frame(dmEvent(3)));
+    const late = dmEvent(2);
+    await mailbox.deposit(frame({ ...late, event: { ...late.event, user_team: "T_OTHER" } }));
+
+    const read = await a.readHistory("D_GUARDIAN" as never, {
+      olderThan: "1700000000.000003",
+      limit: 2,
+    });
+    db.delete(slackAppTimeline).run();
+    const wiped = await a.readHistory("D_GUARDIAN" as never, {
+      olderThan: "1700000000.000003",
+      limit: 2,
+    });
+
+    expect(texts(read)).toEqual(["message 2", "message 1"]);
+    expect(read).toEqual(wiped);
+  });
+
   it("reads past a message heard late when a page already kept newer ones", async () => {
     const slack = fakeSlackHistory();
     for (let i = 1; i <= 4; i++) slack.say(i);
