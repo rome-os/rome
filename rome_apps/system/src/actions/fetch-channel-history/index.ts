@@ -266,16 +266,17 @@ export function createAction(
           ...(cursor ? { after: cursor } : {}),
           ...(olderThan ? { olderThan } : {}),
           ...(newerThan ? { newerThan } : {}),
-          // Named whenever paging, so the page and the full-page check below
-          // agree on its size.
           ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),
         });
-        // A full page may have more behind it; a short one does not. A page
-        // read forward continues from its newest message, and any other from
-        // its oldest.
-        if (paging && page.length >= (limit ?? DEFAULT_LIMIT)) {
-          if (newerThan) nextNewerThan = page[0]?.messageId ?? null;
-          else nextCursor = page.at(-1)?.cursor ?? null;
+        // A page read forward continues from its newest message while it is
+        // full: a short one reached the present. A page read back continues
+        // from its oldest unless it is empty: a platform read live can answer
+        // fewer than the limit while it holds more, as Slack answers at most
+        // 15.
+        if (paging && newerThan) {
+          if (page.length >= (limit ?? DEFAULT_LIMIT)) nextNewerThan = page[0]?.messageId ?? null;
+        } else if (paging && page.length > 0) {
+          nextCursor = page.at(-1)?.cursor ?? null;
         }
         // `query` answers newest first; the transcript reads oldest first.
         messages = page.reverse();
