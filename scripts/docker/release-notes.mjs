@@ -11,12 +11,15 @@
 // the image's versions on Docker Hub, one per line. The backfill form writes
 // release-notes.json for releases that already exist, and prints the
 // `gh release upload` commands that attach them without running them.
+// DEEPSEEK_API_KEY lets both forms write highlights. Without it, or when the
+// model fails, the file has none and the release goes on.
 // IMAGE_NAME and GITHUB_REPOSITORY name the image and the repository.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { NO_HIGHLIGHTS, writeHighlights } from "./release-highlights.mjs";
 import { isRuntimeInput } from "./runtime-inputs.mjs";
 
 const STABLE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -152,8 +155,11 @@ export function releaseNotes({ tag, previousTag, sha, image, repository, commits
   return `${out.join("\n")}\n`;
 }
 
-/** The version of the release-notes.json format. A reader rejects any other. */
-export const NOTES_SCHEMA = 1;
+/**
+ * The version of the release-notes.json format. 2 adds `highlights` to the
+ * fields of 1. A reader accepts the versions it knows and rejects the rest.
+ */
+export const NOTES_SCHEMA = 2;
 
 /**
  * The release notes as release-notes.json, the asset instances read to show
@@ -162,7 +168,8 @@ export const NOTES_SCHEMA = 1;
  * Each entry is `{ scope, text, pr }`, where scope and pr may be null.
  * `internal` counts the changes it does not list: internal ones and subjects
  * that are not Conventional Commits. A first release has no previousVersion
- * and lists nothing.
+ * and lists nothing. `highlights` holds what the upgrade dialog shows, in
+ * English and Chinese (release-highlights.mjs), and may be empty.
  *
  * @param {object} release
  * @param {string} release.tag The release's git tag, `vX.Y.Z`.
@@ -170,8 +177,16 @@ export const NOTES_SCHEMA = 1;
  * @param {string} release.date When the release was published, as an ISO 8601 timestamp.
  * @param {string} release.repository The GitHub repository, `owner/name`.
  * @param {{ subject: string, body?: string, files: string[] }[]} release.commits Newest first.
+ * @param {{ en: { text: string, pr: number }[], zh: { text: string, pr: number }[] }} [release.highlights]
  */
-export function releaseNotesJson({ tag, previousTag, date, repository, commits }) {
+export function releaseNotesJson({
+  tag,
+  previousTag,
+  date,
+  repository,
+  commits,
+  highlights = NO_HIGHLIGHTS,
+}) {
   const grouped = previousTag ? groupChanges(commits) : new Map();
   return {
     schema: NOTES_SCHEMA,
@@ -183,6 +198,7 @@ export function releaseNotesJson({ tag, previousTag, date, repository, commits }
     new: grouped.get("new") ?? [],
     fixes: grouped.get("fixes") ?? [],
     internal: (grouped.get("internal")?.length ?? 0) + (grouped.get("other")?.length ?? 0),
+    highlights,
   };
 }
 
@@ -220,6 +236,37 @@ function previousTagOf(tag, published) {
     return null;
   }
   return `v${previous}`;
+}
+
+/** A commit trailer such as `Co-Authored-By: Name <email>`. */
+const TRAILER = /^[A-Za-z-]+: .*<[^>\n]*@[^>\n]*>$/gm;
+
+/**
+ * Each squash commit's body, keyed by its pull request: the description the
+ * pull request was merged with. Unlike the live description, it cannot be
+ * edited after merge, and reading it needs no GitHub API.
+ */
+export function descriptionsOf(commits) {
+  const descriptions = new Map();
+  for (const commit of commits) {
+    const { pr } = entryOf(commit.subject, commit.body);
+    if (pr === null || descriptions.has(pr)) continue;
+    const body = (commit.body ?? "").replace(TRAILER, "").trim();
+    if (body) descriptions.set(pr, body);
+  }
+  return descriptions;
+}
+
+/** release-notes.json for a release, with the model's highlights. */
+async function notesWithHighlights(release) {
+  const plain = releaseNotesJson(release);
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const highlights = await writeHighlights({
+    notes: plain,
+    descriptions: descriptionsOf(release.commits),
+    apiKey,
+  });
+  return { ...plain, highlights };
 }
 
 /** Every tag of the image on Docker Hub. */
@@ -274,7 +321,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         { encoding: "utf8" },
       ).trim();
       const previousTag = previousTagOf(tag, published);
-      const notes = releaseNotesJson({
+      const notes = await notesWithHighlights({
         tag,
         previousTag,
         date,
@@ -284,7 +331,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const file = join(outDir, tag, "release-notes.json");
       mkdirSync(join(outDir, tag), { recursive: true });
       writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
-      console.log(`gh release upload ${tag} ${file} --repo ${repository}`);
+      // --clobber replaces a file an earlier backfill attached.
+      console.log(`gh release upload ${tag} ${file} --repo ${repository} --clobber`);
     }
   } else {
     const jsonAt = args.indexOf("--json");
@@ -306,7 +354,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }),
     );
     if (jsonFile) {
-      const notes = releaseNotesJson({
+      const notes = await notesWithHighlights({
         tag,
         previousTag,
         date: new Date().toISOString(),
