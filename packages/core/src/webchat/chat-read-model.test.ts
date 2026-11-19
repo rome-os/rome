@@ -13,12 +13,7 @@ import {
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
-import {
-  ChatReadModel,
-  chatsSessionAwaitingGuardian,
-  type Transcript,
-  type TranscriptCursor,
-} from "./chat-read-model.js";
+import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
@@ -124,25 +119,6 @@ describe("ChatReadModel", () => {
         ["t-0", "turn-0"],
         ["t-1", "turn-1"],
       ]);
-      expect(transcript?.nextCursor).toBeNull();
-    });
-
-    it("pages newest turns first and walks back to the start once", async () => {
-      const chat = dashboardChat("chat-1");
-      for (let index = 0; index < 5; index += 1) {
-        await dashboardTurn(chat, "chat-1", index, 1_000 + index * 10);
-      }
-
-      const seen: string[] = [];
-      let before: TranscriptCursor | null = null;
-      for (;;) {
-        const page: Transcript | null = await reads.chatTranscript("chat-1", { limit: 3, before });
-        seen.unshift(...(page?.lines.map((line) => line.id) ?? []));
-        if (!page?.nextCursor) break;
-        before = page.nextCursor;
-      }
-
-      expect(seen).toEqual([0, 1, 2, 3, 4].flatMap((index) => [`u-${index}`, `a-${index}`]));
     });
 
     it("is null for a session that stands in no chat", async () => {
@@ -217,7 +193,7 @@ describe("ChatReadModel", () => {
       );
     });
 
-    it("pages whole turns even when two agents' turns interleave, and shows each once", async () => {
+    it("keeps the order lines were said in when two agents' turns interleave, and shows each once", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
       fixture.speaker({ id: "support", chat, accountId: "bot-support" });
@@ -234,14 +210,13 @@ describe("ChatReadModel", () => {
       links.answer(line("answer-a", 1_002, "sales"), "sales", "turn-a");
       links.answer(line("answer-b", 1_003, "support"), "support", "turn-b");
 
-      const newest = await reads.chatTranscript("sales", { limit: 1 });
-      expect(newest?.lines.map((l) => l.id)).toEqual(["prompt-b", "answer-b"]);
-      const older = await reads.chatTranscript("sales", {
-        limit: 1,
-        before: newest?.nextCursor ?? null,
-      });
-      expect(older?.lines.map((l) => l.id)).toEqual(["prompt-a", "answer-a"]);
-      expect(older?.nextCursor).toBeNull();
+      const transcript = await reads.chatTranscript("sales");
+      expect(transcript?.lines.map((l) => l.id)).toEqual([
+        "prompt-a",
+        "prompt-b",
+        "answer-a",
+        "answer-b",
+      ]);
     });
 
     it("shows the trace of every turn a shown line prompted, also one drawn under another's", async () => {
@@ -342,25 +317,20 @@ describe("ChatReadModel", () => {
       await setAt(`sa-${index}`, at + 2);
     }
 
-    it("draws a subagent's turns from its own prompt, answer and trace, paged by turn", async () => {
+    it("draws a subagent's turns from its own prompt, answer and trace, in the order they were said", async () => {
       await repo.ensureRomeSession({ id: "sub-1", name: "Sub", type: "subagent" } as never);
       for (let index = 0; index < 3; index += 1) await subagentTurn(index, 1_000 + index * 10);
 
-      const newest = await reads.sessionTranscript("sub-1", { limit: 2 });
-      expect(newest.lines.map((line) => [line.id, line.role])).toEqual([
+      const transcript = await reads.sessionTranscript("sub-1");
+      expect(transcript.lines.map((line) => [line.id, line.role])).toEqual([
+        ["sp-0", "user"],
+        ["sa-0", "assistant"],
         ["sp-1", "user"],
         ["sa-1", "assistant"],
         ["sp-2", "user"],
         ["sa-2", "assistant"],
       ]);
-      expect(newest.traces.map((trace) => trace.id)).toEqual(["st-1", "st-2"]);
-
-      const older = await reads.sessionTranscript("sub-1", {
-        limit: 2,
-        before: newest.nextCursor,
-      });
-      expect(older.lines.map((line) => line.id)).toEqual(["sp-0", "sa-0"]);
-      expect(older.nextCursor).toBeNull();
+      expect(transcript.traces.map((trace) => trace.id)).toEqual(["st-0", "st-1", "st-2"]);
     });
   });
 

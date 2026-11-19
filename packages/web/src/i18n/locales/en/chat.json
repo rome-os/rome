@@ -185,8 +185,7 @@
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message",
-    "openThread": "Open the chat thread"
+    "jump": "Go to the original message"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -221,7 +220,6 @@
     "title": "Share chat",
     "loading": "Loading…",
     "createError": "Couldn't create the link.",
-    "hydrateError": "Couldn't load the whole chat to share.",
     "selectedCount_one": "{{count}} message selected",
     "selectedCount_other": "{{count}} messages selected",
     "createTitle": "Create a share link",
@@ -686,16 +684,6 @@
       "label": "Morning brief",
       "prompt": "Build a morning brief app with frontend design to read my Gmail from the last 24 hours and my upcoming Google Calendar events. Update the dashboard every day at 8:00 AM with the latest priorities, urgent emails, key meetings, deadlines, and recommended next actions. Identify what needs my attention most and send me a short summary on Telegram after each daily update."
     }
-  },
-  "thread": {
-    "back": "Back to the chat: {{title}}",
-    "replyPlaceholder": "Reply: {{title}}",
-    "untitled": "Thread",
-    "open": "Open the thread: {{title}}",
-    "stack": "Open the thread, newest: {{preview}}",
-    "stackCount_one": "{{count}} reply",
-    "stackCount_other": "{{count}} replies",
-    "newReplies": "New replies in \"{{title}}\""
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",

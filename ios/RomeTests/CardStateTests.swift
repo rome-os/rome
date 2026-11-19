@@ -75,47 +75,7 @@ import Testing
 }
 
 @MainActor
-@Suite struct ThreadViewShapeTests {
-    private func message(_ id: String, at seconds: TimeInterval, thread: String? = nil) -> ChatMessage {
-        let content = String(data: try! JSONSerialization.data(withJSONObject: [["type": "text", "content": "hi"]]), encoding: .utf8)!
-        var held = ChatMessage(id: id, sessionId: "concierge", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), chatThreadId: thread, knowsThreads: true)
-        held.chatThreadTitle = thread == nil ? nil : "Book flights"
-        return held
-    }
-
-    private func chat() async -> (TranscriptStore, FakeBackend) {
-        let backend = FakeBackend()
-        backend.stored = [message("a1", at: 0, thread: "a1"), message("a2", at: 10, thread: "a1")]
-        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
-        // Read once, awaited: no polling that a slow simulator outlasts.
-        await store.reload()
-        return (store, backend)
-    }
-
-    /// Opened from its label, the thread shows no reply bar, and a send names the thread's root only.
-    @Test func aThreadOpenedFromItsLabelHasNoReplyBar() async {
-        let (store, _) = await chat()
-        store.openThread(at: "a2")
-        #expect(store.thread != nil)
-        #expect(!store.showsQuoteBar)
-        // The send names the thread by its root.
-        #expect(store.composerThread?.body == ["chatThread": .string("a1")])
-        store.closeThread()
-    }
-
-    /// Reply on a message inside the open view shows the bar, naming the
-    /// thread, and sends to the thread without quoting the message.
-    @Test func replyInsideTheViewShowsTheBar() async {
-        let (store, _) = await chat()
-        store.openThread(at: "a2")
-        #expect(store.thread != nil)
-        store.reply(to: "a2")
-        #expect(store.showsQuoteBar && store.threadReplyTitle == "Book flights")
-        // The send names the thread by its root.
-        #expect(store.composerThread?.body == ["chatThread": .string("a1")])
-        store.closeThread()
-    }
-
+@Suite struct ForwardedResultShapeTests {
     /// A forwarded result draws as a plain bubble: nothing of its task above it.
     @Test func aForwardedResultIsAPlainBubble() {
         let parts = MessagePart.parse(#"[{"type":"text","content":"Done","forwardedFrom":{"chatId":"c1","title":"Book"}}]"#)

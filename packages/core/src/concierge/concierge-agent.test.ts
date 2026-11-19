@@ -88,40 +88,43 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("The brief says what to do, never where to send it");
   });
 
-  it("tells the Concierge a message can reply to one earlier message, and that routing changes no thread", () => {
+  it("tells the Concierge to set replyTo to the message it answers, and that routing changes nothing", () => {
     const prompt = concierge.systemPromptPrefix;
-    expect(prompt).toContain('`<chat_thread message_id="…" root="…"/>`');
-    expect(prompt).toContain("set `replyTo` on `say`");
+    expect(prompt).toContain('`<chat_thread message_id="…"/>`');
+    expect(prompt).toContain("take `replyTo`: the message you answer");
     expect(prompt).toContain("the task's `start_message_id`");
-    expect(prompt).toContain("a `say` without `replyTo` replies to nothing");
-    expect(prompt).toContain("a `say` without `replyTo` replies there");
-    expect(prompt).toContain("`[thread name](#rome-thread=ID)`");
-    expect(prompt).toContain("Sending a message to a task changes no thread");
+    expect(prompt).toContain(
+      "Leave `replyTo` out, or set it to null, for a message that answers nothing",
+    );
+    expect(prompt).toContain("Sending a message to a task changes nothing here");
+    // Replies read in order: no stack to point at, and no link to a thread.
+    expect(prompt).not.toContain("#rome-thread");
+    expect(prompt).not.toContain("a stack under");
     // Rome sets threads from replies, so no rule asks the Concierge to place a message.
     for (const removed of [
       "never place a message",
       "never send it to another task",
       "joins that thread",
-      "`answers`",
       "task_title",
     ]) {
       expect(prompt).not.toContain(removed);
     }
   });
 
-  it("reports a finished task by forwarding its conclusion, never its whole report", () => {
+  it("tells a finished task's result with one say from its conclusion, never its whole report", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
     const finished = rule("- A turn that ended `by=concierge`");
     for (const text of [
-      "forward the conclusion with `chat_forward`",
+      "tell the result in ONE `say`",
+      "with `replyTo` set to the task's `start_message_id`",
+      "Write it yourself from the `conclusion:`",
+      "Keep every link, version, PR number, id and figure exactly as it is there",
       "Never paste or retell the rest of the answer",
       "never tell the guardian to open the task chat for details",
-      "refuses because the answer has no conclusion or it is too long",
-      "a few sentences with the key specifics",
-      "with `replyTo` set to the task's `start_message_id`",
-      "deliver the result in ONE message",
-      "(`full: true`) only when the guardian explicitly asked for the full text in a message they sent this turn",
+      "read the answer with `chat_read` and send it in one `say` with format long",
+      "When the guardian explicitly asked for the full text in a message they sent this turn",
+      "With no `conclusion:`, say the outcome yourself in one message of a few sentences with the key specifics",
       "A failed or stopped task: say so plainly",
     ])
       expect(finished).toContain(text);
@@ -133,14 +136,45 @@ describe("the Concierge agent", () => {
       "never the whole report, unless the guardian explicitly asks for the full text",
     );
     expect(concierge.systemPromptPrefix).toContain(
-      "Nor does a forwarded conclusion that asks the guardian something",
+      "Nor does a result you say that asks the guardian something",
     );
-    for (const obsolete of [
-      "Long content the guardian asked for: `chat_forward`",
-      "(`say` with format long, or `chat_forward`)",
-      "A short finding: 1 to 3 bubbles in your own words",
-    ])
+    // The only forward tool the prompt names is `card_forward`.
+    expect(concierge.systemPromptPrefix).not.toContain("chat_forward");
+    expect(concierge.systemPromptPrefix.replaceAll("card_forward", "")).not.toMatch(/forward/i);
+    for (const obsolete of ["A short finding: 1 to 3 bubbles in your own words"])
       expect(concierge.systemPromptPrefix).not.toContain(obsolete);
+  });
+
+  it("forwards a task's card with card_forward, alone, and never composes a card from a result", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
+    const finished = rule("- A turn that ended `by=concierge`");
+    for (const text of [
+      "each `card id=` line means the task's final answer showed a card, so send each one with `card_forward` and its id",
+      "sends the card as it is (or its text where cards cannot show) and nothing else",
+      "never retype their numbers",
+      "or when `card_forward` refuses, tell the result in ONE `say`",
+    ])
+      expect(finished).toContain(text);
+    const explained = rule("- `card id=ID: LINE`");
+    expect(explained).toContain(
+      "`card_forward` with that ID sends the card itself, one card per call",
+    );
+    expect(explained).toContain("find its `cardId` with `chat_read`");
+    expect(rule("- Show content as a card with `show_card`")).toContain(
+      "Never make a card from a task's result: the task chat draws its own card, and `card_forward` sends it as it is.",
+    );
+  });
+
+  it("tells the Concierge to name the guardian message a chat_send passes on when the turn has several", () => {
+    const rule =
+      concierge.systemPromptPrefix
+        .split("\n")
+        .find((line) => line.startsWith("- A follow-up on the topic of an existing task chat")) ??
+      "";
+    expect(rule).toContain(
+      "When the turn carries several guardian messages, pass `answers` with the `message_id` of the one you pass on.",
+    );
   });
 
   it("tells the Concierge to write a task's brief in the guardian's language", () => {
@@ -307,7 +341,7 @@ describe("the Concierge agent", () => {
     expect(rule).not.toContain("complex or long-running");
   });
 
-  it("forwards no conclusion that carries no news", () => {
+  it("tells no conclusion that carries no news", () => {
     const finished =
       concierge.systemPromptPrefix
         .split("\n")

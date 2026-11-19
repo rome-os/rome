@@ -12,7 +12,7 @@ import {
 } from "./task-chat.js";
 
 // A task chat read from Chats, the way Concierge reads it: chat_read's latest
-// messages, and the latest answer chat_forward and the task events quote.
+// messages, and the latest answer the task events quote.
 
 describe("chatsTaskChatMessages", () => {
   let testDb: TestDb;
@@ -131,12 +131,33 @@ describe("chatsTaskChatMessages", () => {
 
       const found = await final();
       expect(found?.answer?.id).toBe("a");
-      expect(found?.card).toMatchObject({ appId: "core", text: "Sleep 6.1 h" });
+      expect(found?.cards).toMatchObject([
+        { id: "card", card: { appId: "core", text: "Sleep 6.1 h" } },
+      ]);
 
       ask("q2", 4, "t2");
       answer("a2", 5, "t2", [text("Today's summary.")]);
       answer("card2", 6, "t2", [agentCard("Today")]);
-      expect(await final()).toMatchObject({ answer: { id: "a2" }, card: { text: "Today" } });
+      expect(await final()).toMatchObject({
+        answer: { id: "a2" },
+        cards: [{ id: "card2", card: { text: "Today" } }],
+      });
+    });
+
+    it("gives every card its turn showed, oldest first, and no earlier turn's", async () => {
+      ask("q", 1, "t1");
+      answer("old", 2, "t1", [agentCard("Yesterday")]);
+      ask("q2", 3, "t2");
+      answer("c1", 4, "t2", [agentCard("Sleep")]);
+      answer("a", 5, "t2", [text("Summary.")]);
+      answer("c2", 6, "t2", [agentCard("Steps")]);
+
+      const found = await final();
+      expect(found?.answer?.id).toBe("a");
+      expect(found?.cards.map(({ id, card }) => [id, card.text])).toEqual([
+        ["c1", "Sleep"],
+        ["c2", "Steps"],
+      ]);
     });
 
     it("makes a card the answer of a turn that showed only a card, never an earlier turn's text", async () => {
@@ -147,7 +168,7 @@ describe("chatsTaskChatMessages", () => {
 
       const found = await final();
       expect(found?.answer).toBeUndefined();
-      expect(found?.card?.text).toBe("Today");
+      expect(found?.cards.map(({ card }) => card.text)).toEqual(["Today"]);
     });
 
     it("never pairs an answer with an earlier turn's card when no prompt lies between them", async () => {
@@ -159,7 +180,7 @@ describe("chatsTaskChatMessages", () => {
 
       const found = await final();
       expect(found?.answer?.id).toBe("a");
-      expect(found?.card).toBeUndefined();
+      expect(found?.cards).toEqual([]);
     });
 
     it("gives no card for an answer that showed none, nor for an app's card", async () => {
@@ -169,7 +190,7 @@ describe("chatsTaskChatMessages", () => {
 
       const found = await final();
       expect(found?.answer?.id).toBe("a");
-      expect(found?.card).toBeUndefined();
+      expect(found?.cards).toEqual([]);
     });
 
     it("lets a message no turn is linked to answer alone", async () => {
@@ -177,7 +198,32 @@ describe("chatsTaskChatMessages", () => {
       answer("card", 2, "t1", [agentCard("Sleep")]);
       say("a", 3, true, [text("An older row.")]);
 
-      expect(await final()).toEqual({ answer: expect.objectContaining({ id: "a" }) });
+      expect(await final()).toEqual({ answer: expect.objectContaining({ id: "a" }), cards: [] });
+    });
+  });
+
+  describe("cardIn", () => {
+    const agentCard = (text: string, appId = "core") => ({
+      type: "widget",
+      toolUseId: "call-1",
+      appId,
+      text,
+      ui: { components: [{ id: "root", component: "Text", text }] },
+    });
+
+    it("finds the card in the message keyed by its id, with the chat it is in", async () => {
+      say("c1", 1, true, [agentCard("Sleep 6.1 h")]);
+      expect(await messages().cardIn("c1")).toMatchObject({
+        chatId: "task-1",
+        card: { appId: "core", text: "Sleep 6.1 h" },
+      });
+    });
+
+    it("finds no card in a text message, an app's widget, a guardian's line or an unknown key", async () => {
+      say("t", 1, true, [text("3 options")]);
+      say("w", 2, true, [agentCard("Sunny", "weather")]);
+      say("g", 3, false, [agentCard("Sleep")]);
+      for (const id of ["t", "w", "g", "missing"]) expect(await messages().cardIn(id)).toBeNull();
     });
   });
 

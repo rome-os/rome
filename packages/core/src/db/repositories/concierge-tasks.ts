@@ -372,33 +372,6 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * The newest task started in each chat thread of `roots` in Concierge chat
-   * `chatId`: the one whose start message is in the thread. The roots are the
-   * keys of the threads' first messages; a thread no task started in is left
-   * out.
-   */
-  async threadTasks(
-    chatId: string,
-    roots: readonly string[],
-  ): Promise<Map<string, { id: string; title: string }>> {
-    const tasks = new Map<string, { id: string; title: string }>();
-    if (roots.length === 0) return tasks;
-    const rows = this.db.all<{ root: string; id: string; title: string }>(sql`
-      SELECT r.key AS root, t.id, t.title
-      FROM ${CHAT_MESSAGES} r
-      JOIN ${CHAT_MESSAGES} s ON s.chat_id = r.chat_id
-        AND (s.id = r.id OR s.root_message_id = r.id)
-      JOIN concierge_tasks t ON t.source_message_id = s.id
-      WHERE r.chat_id = (SELECT chat_id FROM rome_sessions WHERE id = ${chatId})
-        AND r.key IN (SELECT value FROM json_each(${JSON.stringify([...new Set(roots)])}))
-      ORDER BY t.created_at, t.id
-    `);
-    // Oldest first, so the last one kept is the newest.
-    for (const row of rows) tasks.set(row.root, { id: row.id, title: row.title });
-    return tasks;
-  }
-
-  /**
    * The rows the panel shows: not archived, every state but the finished ones
    * whatever their age, and the finished ones completed at or after `doneSince`.
    */

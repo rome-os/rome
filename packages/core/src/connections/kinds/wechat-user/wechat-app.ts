@@ -1,6 +1,6 @@
 // The WeChat app: the desktop client on WeChat's own desktop, which the guardian
 // installs and opens from /desktop/wechat. Independent of the WeChat connection
-// (connections/integrations/wechat-user.ts): the app runs without one, and a
+// (connections/kinds/wechat-user/descriptor.ts): the app runs without one, and a
 // connection reads the same client, and starts it itself when it is missing.
 
 import type {

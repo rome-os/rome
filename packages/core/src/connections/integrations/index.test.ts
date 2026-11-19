@@ -4,14 +4,32 @@ import {
   GUARDIAN_OWN_KINDS,
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
+import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
+import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
+import { wechatUser } from "../kinds/wechat-user/index.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
-import {
-  type BuiltinConnectionDeps,
-  registerBuiltinConnections,
-  WECHAT_USER_KIND,
-} from "./index.js";
+import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
+
+/**
+ * Registers what boot registers: the built-in kinds, then each kind the wiring
+ * mounts on its own. A kind that moves to connections/kinds/ joins the list
+ * here too, so the checks over every kind keep covering it.
+ */
+function registerEveryKind(registry: ConnectionRegistry): void {
+  registerBuiltinConnections(registry, {
+    listAgents: () => [],
+  } as unknown as BuiltinConnectionDeps);
+  const mounted = [
+    feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
+    linkedin({} as unknown as LinkedInDescriptorDeps),
+    wechatUser({ runtime: {} as WechatUserRuntime, guardianOnly: (_c, next) => next() }),
+  ];
+  for (const kind of mounted) {
+    if (kind.descriptor) registry.register(kind.descriptor);
+  }
+}
 
 describe("registerBuiltinConnections", () => {
   it("renews through Rome Cloud only for providers Rome Cloud can refresh", async () => {
@@ -23,7 +41,6 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
     registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
     } as unknown as BuiltinConnectionDeps);
 
@@ -37,57 +54,6 @@ describe("registerBuiltinConnections", () => {
     rs.unstubAllGlobals();
   });
 
-  it("gives WeChat personal the client runtime boot shares with the channel list", async () => {
-    const bridgeCommand = rs.fn(async () => [
-      {
-        username: "wxid_friend",
-        displayName: "A Friend",
-        type: "private",
-        unread: 0,
-        lastMessage: { content: "hi", createdAt: "2026-10-01T00:00:00.000Z" },
-      },
-    ]);
-    const runtime = { bridgeCommand } as unknown as WechatUserRuntime;
-    const registered = new Map<string, ConnectionDescriptor>();
-    const registry = {
-      register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.connectionKind, descriptor),
-    } as unknown as ConnectionRegistry;
-
-    registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
-      listAgents: () => [],
-      wechatUserRuntime: runtime,
-    } as unknown as BuiltinConnectionDeps);
-
-    const kit = {
-      connectionId: "conn-wechat-user",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    } satisfies RuntimeKit;
-    const talker = registered
-      .get(WECHAT_USER_KIND)!
-      .capabilities.talker!.build({ material: { wxid: "wxid_guardian" }, expiresAt: "never" }, kit);
-    const page = await talker.directory!.listConversations({ limit: 10 });
-
-    expect(page.conversations.map((c) => c.ref.chatId)).toEqual(["wxid_friend"]);
-    expect(bridgeCommand).toHaveBeenCalled();
-  });
-  it("offers no WeChat personal connection without a runtime, so none is built twice", () => {
-    const registered = new Map<string, ConnectionDescriptor>();
-    const registry = {
-      register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.connectionKind, descriptor),
-    } as unknown as ConnectionRegistry;
-
-    registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
-      listAgents: () => [],
-    } as unknown as BuiltinConnectionDeps);
-
-    expect(registered.has(WECHAT_USER_KIND)).toBe(false);
-  });
-
   // A bot takes an agent as its own account and the guardian's signed-in
   // account as a delegate; Dream and the test fixtures keep their own lists of
   // these kinds, so all three must agree.
@@ -98,11 +64,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
-      listAgents: () => [],
-      wechatUserRuntime: {} as WechatUserRuntime,
-    } as unknown as BuiltinConnectionDeps);
+    registerEveryKind(registry);
 
     const links = Object.fromEntries(
       [...registered.values()]
@@ -142,11 +104,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
-      listAgents: () => [],
-      wechatUserRuntime: {} as WechatUserRuntime,
-    } as unknown as BuiltinConnectionDeps);
+    registerEveryKind(registry);
 
     const unnamed = [...registered.values()]
       .filter((descriptor) => !descriptor.accountIdOf)

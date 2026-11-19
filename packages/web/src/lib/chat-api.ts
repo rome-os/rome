@@ -15,7 +15,6 @@ import type {
   ReasoningEffort,
   RomeSessionsPageResult,
   SkillSummary,
-  ThreadSummary,
   TurnInfo,
 } from "./chat-types";
 import type {
@@ -213,14 +212,10 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   return jsonOrThrow<ChatMessage[]>(res);
 }
 
-/** One page of a session's history: whole turns, oldest first within the page. */
+/** One page of a session's history: messages in the order they were said, with the trace rows of their turns. */
 export interface ChatMessagePage {
-  /** Every message of the page. */
   messages: ChatMessage[];
-  /**
-   * Pass as `before` for the page of older history; null when this page
-   * reaches the start. A cursor reads only in the mode that made it.
-   */
+  /** Pass as `before` for the page of older messages; null when this page reaches the start. */
   nextCursor: string | null;
   /**
    * The session's saved workspace layout, as `GET /layout` returns it. Sent on
@@ -228,111 +223,11 @@ export interface ChatMessagePage {
    * older pages.
    */
   layout?: unknown[] | null;
-  /**
-   * Present when the server paged the chat by its main-line messages
-   * (`type=concierge`, docs/domains/chats.md#chat-thread); absent for turn
-   * paging.
-   */
-  concierge?: {
-    /** The main line and the newest reply of each thread (every reply, for one thread read by itself): what says where the loaded history stands. The waiting replies and trace rows are not in it. */
-    body: ChatMessage[];
-    /** When the oldest main-line message of the page was said, in ms; null for an empty page. */
-    oldestAt: number | null;
-    /** The name of each thread that waits with a root that is not on the page, by root, when it has one. */
-    titles: ReadonlyMap<string, string>;
-    /** What the page says of each thread with replies, by root: those of its main line, and the ones that wait outside it. */
-    threads: ReadonlyMap<string, ThreadSummary>;
-  };
-}
-
-/** What `GET /messages?type=concierge` answers. */
-interface ConciergeWirePage {
-  mainLine: {
-    message: ChatMessage;
-    thread: {
-      replyCount: number;
-      unreadCount: number;
-      latestReply: ChatMessage;
-      /** Only in an answer for one thread. */
-      replies?: ChatMessage[];
-    } | null;
-  }[];
-  outside: {
-    root: string;
-    title: string | null;
-    replyCount: number;
-    unreadCount: number;
-    latestUnread: ChatMessage;
-  }[];
-  /** The trace rows of the turns on the page. */
-  traces?: ChatMessage[];
-  nextCursor: string | null;
-  layout?: unknown[] | null;
-}
-
-/** When `message` was said, in ms. */
-const saidAt = (message: ChatMessage) => Date.parse(message.createdAt);
-
-/**
- * Reads a Concierge page into the messages the transcript keeps: the main
- * line, the newest reply of each thread (all of them, for one thread read by
- * itself), the one unread reply of each thread that waits outside the page,
- * and the trace rows of their turns. What the page says of each thread comes
- * apart, as its summary.
- */
-export function conciergePageOf(wire: ConciergeWirePage): ChatMessagePage {
-  const body = wire.mainLine.flatMap(({ message, thread }) => [
-    message,
-    ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
-  ]);
-  const times = wire.mainLine.map(({ message }) => saidAt(message));
-  const threads = new Map<string, ThreadSummary>();
-  for (const { message, thread } of wire.mainLine) {
-    if (!thread) continue;
-    threads.set(message.id, {
-      replyCount: thread.replyCount,
-      unreadCount: thread.unreadCount,
-      latestReply: thread.latestReply,
-      unreadAt: thread.unreadCount > 0 ? saidAt(thread.latestReply) : 0,
-    });
-  }
-  for (const entry of wire.outside) {
-    threads.set(entry.root, {
-      replyCount: entry.replyCount,
-      unreadCount: entry.unreadCount,
-      latestReply: entry.latestUnread,
-      unreadAt: saidAt(entry.latestUnread),
-    });
-  }
-  const messages = new Map(
-    [...body, ...wire.outside.map((entry) => entry.latestUnread), ...(wire.traces ?? [])].map(
-      (message) => [message.id, message],
-    ),
-  );
-  return {
-    messages: [...messages.values()],
-    nextCursor: wire.nextCursor,
-    ...(wire.layout === undefined ? {} : { layout: wire.layout }),
-    concierge: {
-      body,
-      oldestAt: times.length > 0 ? Math.min(...times) : null,
-      titles: new Map(
-        wire.outside.flatMap((entry) => (entry.title ? [[entry.root, entry.title] as const] : [])),
-      ),
-      threads,
-    },
-  };
 }
 
 /**
- * The newest `limit` turns of a session, or the `limit` turns before `before`.
- * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
- *
- * With `concierge`, the page is asked for by main-line messages and each
- * brings a summary of its thread. A chat that is not a Concierge chat refuses, and the
- * read is made again by turns, `fallbackLimit` of them, so a caller that does
- * not know the chat yet reads either kind. Which way it was paged is in the
- * page's `concierge`.
+ * The newest `limit` messages of a session, or the `limit` messages before
+ * `before`, with the trace rows of their turns. `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  */
 export async function listSessionMessagePage(
   sessionId: string,
@@ -341,58 +236,16 @@ export async function listSessionMessagePage(
     before?: string | null;
     /** A message the page must reach, however far back: one read lands on it. */
     through?: string;
-    concierge?: { fallbackLimit: number };
   },
 ): Promise<ChatMessagePage | null> {
-  const read = (params: URLSearchParams) =>
-    fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, { credentials: "include" });
-  const query = (limit: number, concierge: boolean) => {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (concierge) params.set("type", "concierge");
-    if (options.before) params.set("before", options.before);
-    if (options.through) params.set("through", options.through);
-    return params;
-  };
-  if (options.concierge) {
-    const res = await read(query(options.limit, true));
-    if (res.status === 404) return null;
-    if (res.ok) return conciergePageOf((await res.json()) as ConciergeWirePage);
-    const payload = await readErrorPayload(res);
-    const code = payload && typeof payload === "object" && "code" in payload ? payload.code : null;
-    if (res.status !== 400 || code !== "not_concierge") {
-      throw new ChatApiError(
-        payload && typeof payload === "object" && "error" in payload
-          ? String(payload.error)
-          : `Request failed with status ${res.status}`,
-        res.status,
-        payload,
-      );
-    }
-    const turns = await read(query(options.concierge.fallbackLimit, false));
-    if (turns.status === 404) return null;
-    return jsonOrThrow<ChatMessagePage>(turns);
-  }
-  const res = await read(query(options.limit, false));
-  if (res.status === 404) return null;
-  return jsonOrThrow<ChatMessagePage>(res);
-}
-
-/**
- * One chat thread of a Concierge chat, whole, named by any message of it: its
- * root, every reply, and the trace rows of their turns. `null` means the
- * session doesn't exist (HTTP 404). A thread the chat does not hold comes
- * back with no messages.
- */
-export async function listSessionThread(
-  sessionId: string,
-  key: string,
-): Promise<ChatMessagePage | null> {
-  const params = new URLSearchParams({ type: "concierge", thread: key });
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.before) params.set("before", options.before);
+  if (options.through) params.set("through", options.through);
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
     credentials: "include",
   });
   if (res.status === 404) return null;
-  return conciergePageOf(await jsonOrThrow<ConciergeWirePage>(res));
+  return jsonOrThrow<ChatMessagePage>(res);
 }
 
 export interface ListRomeSessionsOptions {
@@ -626,20 +479,6 @@ export async function markSessionRead(
   return jsonOrThrow<{ sessionId: string; lastSeenActivityAt: string | null; unread: boolean }>(
     res,
   );
-}
-
-/** Tells the server the owner has seen the messages `ids` of chat `sessionId`. */
-export async function markMessagesRead(
-  sessionId: string,
-  ids: readonly string[],
-): Promise<{ marked: number }> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/messages/read`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  return jsonOrThrow<{ marked: number }>(res);
 }
 
 export async function createProject(name: string): Promise<ProjectOption> {

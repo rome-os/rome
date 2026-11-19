@@ -1046,26 +1046,26 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
   transition-duration: 300ms;
   transition-timing-function: ease-out;
 }
-/* A bubble with a thread's stack under it is wide enough for the stack's
-   avatar, a few words of the newest message and the count, which sit inside
-   the bubble's width less 1rem of inset each side (ThreadStack.tsx). A bubble
-   with no thread keeps the width of its content. */
-[data-bubble-box]:has(> [data-thread-stack-slot]) > :first-child {
-  min-width: 14rem;
-}
 [data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
   border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
-/* A chat thread in focus hides what is outside it (ConciergeTranscript).
-   use-thread-focus.ts makes the change as a view transition, the old picture
-   fading into the new one. Every view transition of the dashboard takes 200ms. */
-[data-concierge-transcript] [data-thread-out] {
-  display: none;
+/* A run of the Concierge's replies to one message sits close: 2px between the
+   bubbles instead of the group's 8px (a quarter of the gap), and the corners
+   where they meet are 4px (ConciergeGroup, reply-drawing.ts). */
+[data-concierge-transcript] [data-join="mid"],
+[data-concierge-transcript] [data-join="last"] {
+  margin-top: calc(var(--rome-space-2) * -0.75);
 }
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 200ms;
+[data-concierge-transcript] [data-join="first"] [data-chat-bubble] {
+  border-bottom-left-radius: var(--rome-radius-4);
+}
+[data-concierge-transcript] [data-join="mid"] [data-chat-bubble] {
+  border-top-left-radius: var(--rome-radius-4);
+  border-bottom-left-radius: var(--rome-radius-4);
+}
+[data-concierge-transcript] [data-join="last"] [data-chat-bubble] {
+  border-top-left-radius: var(--rome-radius-4);
 }
 /* A reaction grows in from 0.6, as a tapback does, and fades out
    (reaction.tsx, MARK_FADE_MS). */

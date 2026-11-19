@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "25b95f89-f734-4e61-8c2e-8fa4d5d15748",
-  "prevId": "22d3dceb-0bd3-4fe8-abee-b4d817f9d8ee",
+  "id": "cf0c652a-851b-4a48-a043-137dd4260d46",
+  "prevId": "57db660b-8330-4a96-908b-6c182a48a6fd",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -1001,13 +1001,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },

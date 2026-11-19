@@ -1,9 +1,0 @@
-# esbuild works via its prebuilt platform binaries; its postinstall script is
-# not needed. Without an explicit decision here, `pnpm install` exits 1 with
-# ERR_PNPM_IGNORED_BUILDS (which also breaks drizzle-kit's install preflight)
-# and pnpm rewrites this file with an interactive placeholder.
-allowBuilds:
-  esbuild: false
-# Apps may depend on just-published packages (e.g. a fresh @rome-os SDK
-# release); don't quarantine new versions for 24h.
-minimumReleaseAge: 0

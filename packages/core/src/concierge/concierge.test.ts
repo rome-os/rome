@@ -419,6 +419,14 @@ function setup(
       },
       before: async (place: Place, cursor: { id: string }, limit: number) =>
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
+      cardIn: async (id: string) => {
+        for (const [chatId, rows] of messages) {
+          const row = rows.find((each) => each.id === id && each.role === "assistant");
+          const card = row && agentCardIn(JSON.parse(row.content) as unknown[]);
+          if (card) return { chatId, card };
+        }
+        return null;
+      },
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
     agentSessionManager: { find: rs.fn(() => ({ selectModel: rs.fn() })) },
@@ -656,7 +664,7 @@ describe("Concierge tools", () => {
       "chat_stop",
       "chat_list",
       "topic_start",
-      "chat_forward",
+      "card_forward",
       "chat_card",
       "connect_card",
       "show_card",
@@ -682,9 +690,7 @@ describe("Concierge tools", () => {
     expect(card.description).toContain(
       "The card replies to the task's start message, and the task's row then points to it.",
     );
-    expect(fields.messageId.description).toContain(
-      "chat_card and chat_forward update this anchor automatically",
-    );
+    expect(fields.messageId.description).toContain("chat_card updates this anchor automatically");
   });
 
   it("say posts one message under the running turn", async () => {
@@ -768,21 +774,21 @@ describe("Concierge tools", () => {
       );
     });
 
-    it("replies into the thread the guardian wrote in, to their latest message, when it names none", async () => {
+    it("replies to nothing when it names none, even where the guardian wrote inside a thread", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
       guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
-      guardianSays(s, { id: "g2", replyTo: "g0", chatThread: "g0" }, "And Nara");
-      const said = saidId(await s.tool("say", { text: "Added both" }));
-      expect([replyOf(s, said), threadOf(s, said)]).toEqual(["g2", "g0"]);
-      // A repeat in the same turn is the same message, as when it names the target.
-      expect(saidId(await s.tool("say", { text: "Added both" }))).toBe(said);
-      // Naming a message still wins.
+      const said = saidId(await s.tool("say", { text: "Added" }));
+      expect(replyOf(s, said)).toBeUndefined();
+      // Naming a message still replies to it.
       const named = saidId(await s.tool("say", { text: "About Kyoto", replyTo: "g0" }));
       expect(replyOf(s, named)).toBe("g0");
+      // So does a null, which is how the model says it answers nothing.
+      const none = saidId(await s.tool("say", { text: "Anything else?", replyTo: null }));
+      expect(replyOf(s, none)).toBeUndefined();
     });
 
-    it("shows a card that answers a threaded follow-up in that thread, with no quote, and settles it", async () => {
+    it("shows a card with no reply, and settles the turn's only guardian message", async () => {
       const s = setup({ said: false });
       const answer = rs.spyOn(s.taskRepo, "answerMessage");
       guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
@@ -797,31 +803,11 @@ describe("Concierge tools", () => {
       const result = await s.tool("show_card", { ui, text: "Saturday: 9:00 Fushimi Inari" });
       expect(result.isError).toBeFalsy();
       const card = saidId(result);
-      expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+      expect(replyOf(s, card)).toBeUndefined();
       expect(partsOf(s, card)).toEqual([
         expect.objectContaining({ type: "widget", appId: "core", ui }),
       ]);
       expect(answer).toHaveBeenCalledWith(CONCIERGE_CHAT, "g1");
-    });
-
-    it("replies to nothing when the guardian wrote in the main line, or in several threads", async () => {
-      const main = setup({ said: false });
-      guardianSays(main, { id: "g1" });
-      expect(replyOf(main, saidId(await main.tool("say", { text: "Hi" })))).toBeUndefined();
-
-      // A message that starts a thread is in the main line, not inside the thread.
-      const root = setup({ said: false });
-      guardianSays(root, { id: "g0", turnId: "older" }, "Plan Kyoto");
-      guardianSays(root, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
-      guardianSays(root, { id: "g2" });
-      expect(replyOf(root, saidId(await root.tool("say", { text: "Hi" })))).toBeUndefined();
-
-      const mixed = setup({ said: false });
-      guardianSays(mixed, { id: "a0", turnId: "older" }, "Plan Kyoto");
-      guardianSays(mixed, { id: "b0", turnId: "older" }, "Book a table");
-      guardianSays(mixed, { id: "g1", replyTo: "a0", chatThread: "a0" });
-      guardianSays(mixed, { id: "g2", replyTo: "b0", chatThread: "b0" });
-      expect(replyOf(mixed, saidId(await mixed.tool("say", { text: "Hi" })))).toBeUndefined();
     });
 
     it("replies to the guardian message it names, and shows its quote", async () => {
@@ -876,12 +862,12 @@ describe("Concierge tools", () => {
         render: { kind: "inline", componentId: "question-card", builtin: true },
       } as const;
 
-      it("replies like its messages do: into the thread the guardian wrote in", async () => {
+      it("replies to nothing when it names none, even where the guardian wrote inside a thread, with no quote", async () => {
         const s = setup({ said: false });
         guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
         guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
         const card = await s.service.addCard(CONCIERGE_CHAT, "concierge-turn-1", question);
-        expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+        expect(replyOf(s, card)).toBeUndefined();
         // A card is a message of its own: no quote beside it.
         expect(partsOf(s, card)).toEqual([question]);
       });
@@ -961,7 +947,7 @@ describe("Concierge tools", () => {
       return { ...started, ack };
     };
 
-    it("starts a task at its acknowledgement, and the task's cards and forwards reply to the start message", async () => {
+    it("starts a task at its acknowledgement, and the task's cards and results reply to the start message", async () => {
       const s = setup({ said: false });
       const { chatId, taskId, ack } = await startTask(s);
       expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(ack);
@@ -976,8 +962,8 @@ describe("Concierge tools", () => {
       const card = saidId(await s.tool("chat_card", { chatId }));
       expect([replyOf(s, card), threadOf(s, card)]).toEqual([ack, "g0"]);
       // The card is the task's start message from then on, so the next reply goes to it.
-      const forwarded = saidId(await s.tool("chat_forward", { chatId }));
-      expect([replyOf(s, forwarded), threadOf(s, forwarded)]).toEqual([card, "g0"]);
+      const told = saidId(await s.tool("say", { text: "Found 3 flights", replyTo: card }));
+      expect([replyOf(s, told), threadOf(s, told)]).toEqual([card, "g0"]);
       // Each shows the quote of the message it replies to.
       expect(partsOf(s, card)[0]).toEqual({
         type: "reply_to",
@@ -985,10 +971,10 @@ describe("Concierge tools", () => {
         author: "agent",
         text: "On it",
       });
-      expect(partsOf(s, forwarded)[0]).toMatchObject({ type: "reply_to", messageId: card });
+      expect(partsOf(s, told)[0]).toMatchObject({ type: "reply_to", messageId: card });
     });
 
-    it("replies to nothing for a forward or a card of a task whose start message is gone", async () => {
+    it("replies to nothing for a card of a task whose start message is gone", async () => {
       const s = setup({ said: false });
       const { chatId, taskId } = await startTask(s);
       await s.taskRepo.upsertMany([{ id: taskId, sourceMessageId: null }]);
@@ -996,10 +982,10 @@ describe("Concierge tools", () => {
         role: "assistant",
         content: JSON.stringify([{ type: "text", content: concluded("2 hotels") }]),
       });
-      const forwarded = saidId(await s.tool("chat_forward", { chatId }));
-      expect(replyOf(s, forwarded)).toBeUndefined();
-      expect(threadOf(s, forwarded)).toBeUndefined();
-      expect(partsOf(s, forwarded)[0]).not.toMatchObject({ type: "reply_to" });
+      const card = saidId(await s.tool("chat_card", { chatId }));
+      expect(replyOf(s, card)).toBeUndefined();
+      expect(threadOf(s, card)).toBeUndefined();
+      expect(partsOf(s, card)[0]).not.toMatchObject({ type: "reply_to" });
     });
 
     it("tells no result for a task another Concierge chat owns", async () => {
@@ -1050,13 +1036,14 @@ describe("Concierge tools", () => {
       expect(result.isError).toBeFalsy();
       expect(s.posted).toHaveLength(sent + 1);
       expect(threadOf(s, "g1")).toBe("g0");
-      // chat_send takes only the words for the task.
+      // chat_send takes the words for the task, and which guardian message it passes on: no thread.
       const send = (await buildConciergeTools(s.service, s.context())).find(
         (tool) => tool.name === "chat_send",
       )!;
       expect(Object.keys((send.inputSchema as { properties: object }).properties)).toEqual([
         "chatId",
         "text",
+        "answers",
       ]);
     });
 
@@ -1368,36 +1355,6 @@ describe("Concierge tools", () => {
     expect(await status()).toBe("waiting_input");
     s.chats.isRunning = () => true;
     expect(await status()).toBe("running");
-  });
-
-  it("chat_forward says the latest answer, not a later follow-up", async () => {
-    const s = setup();
-    const started = JSON.parse(
-      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
-    );
-    s.messages.get("task-1")?.push({
-      role: "assistant",
-      content: JSON.stringify([{ type: "text", content: concluded("# Report") }]),
-    });
-    await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
-    const result = await s.tool("chat_forward", { chatId: "task-1" });
-    expect(JSON.parse(result.content[0].text)).toEqual({
-      forwarded: "conclusion",
-      forwardedChars: 8,
-      messageId: "said-1",
-      taskAnchored: started.taskId,
-    });
-    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [
-        ACK_QUOTE,
-        {
-          type: "text",
-          content: "# Report",
-          format: "long",
-          forwardedFrom: { chatId: "task-1", title: "Flights" },
-        },
-      ],
-    ]);
   });
 
   it("chat_stop stops each of the task chat's turns, and its task", async () => {
@@ -1898,346 +1855,210 @@ describe("Concierge tools", () => {
     ]);
   });
 
-  it("chat_forward stores the task chat it came from, and the intro in the same message", async () => {
+  it("chat_start asks for a brief written in the guardian's language", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    s.messages.get("task-1")?.push({
-      role: "assistant",
-      content: JSON.stringify([{ type: "text", content: concluded("# Report\n\nThree options.") }]),
-    });
-    const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Here it is" });
-    expect(result.isError).toBeFalsy();
-    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [
-        ACK_QUOTE,
-        { type: "text", content: "Here it is" },
-        {
-          type: "text",
-          content: "# Report\n\nThree options.",
-          format: "long",
-          forwardedFrom: { chatId: "task-1", title: "Flights" },
-        },
-      ],
-    ]);
+    const tools = await buildConciergeTools(s.service, s.context());
+    const start = tools.find((candidate) => candidate.name === "chat_start")!;
+    expect(JSON.stringify(start.inputSchema)).toContain("written in the guardian's language");
   });
 
-  it("chat_forward without an intro stores the report alone", async () => {
-    const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    s.messages.get("task-1")?.push({
-      role: "assistant",
-      content: JSON.stringify([{ type: "text", content: concluded("Three options.") }]),
-    });
-    await s.tool("chat_forward", { chatId: "task-1" });
-    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [
-        ACK_QUOTE,
-        {
-          type: "text",
-          content: "Three options.",
-          format: "long",
-          forwardedFrom: { chatId: "task-1", title: "Flights" },
-        },
-      ],
-    ]);
-  });
-
-  describe("chat_forward passes on a task's conclusion", () => {
-    const DETAILS = "A long table of fares that must stay in the task chat.";
+  describe("card_forward sends a card of a task chat by its id", () => {
     const text = (result: { content: Array<{ text: string }> }) =>
       JSON.parse(result.content[0].text);
-    /** A started task chat whose latest answer is `answer`. */
-    const withAnswer = async (answer: string) => {
+    const stored = (s: ReturnType<typeof setup>) =>
+      (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
+    const HEALTH = {
+      components: [
+        { id: "root", component: "Row", children: ["sleep", "hr"] },
+        {
+          id: "sleep",
+          component: "Stat",
+          label: "Sleep",
+          value: 6.1,
+          unit: "h",
+          range: { low: 7, high: 9 },
+        },
+        {
+          id: "hr",
+          component: "Stat",
+          label: "Resting HR",
+          value: 58,
+          unit: "bpm",
+          range: { low: 50, high: 65 },
+        },
+      ],
+    };
+    const LINE = "Sleep 6.1 h (usual 7–9), resting HR 58 bpm (usual 50–65).";
+    const cardRow = (id: string, line = LINE, ui: unknown = HEALTH, turnId = "task-turn-1") => ({
+      id,
+      role: "assistant",
+      turnId,
+      content: JSON.stringify([
+        { type: "widget", toolUseId: "task-call-1", appId: "core", text: line, ui },
+      ]),
+    });
+    const textRow = (content: string, turnId = "task-turn-1") => ({
+      role: "assistant",
+      turnId,
+      content: JSON.stringify([{ type: "text", content }]),
+    });
+    /** A started task chat "Health" with `rows` as its messages. */
+    const withRows = async (...rows: Row[]) => {
       const s = setup();
-      await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-      s.messages.get("task-1")?.push({
-        role: "assistant",
-        content: JSON.stringify([{ type: "text", content: answer }]),
-      });
+      await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+      s.messages.get("task-1")?.push(...rows);
       return s;
     };
-    const stored = (s: Awaited<ReturnType<typeof withAnswer>>) =>
-      (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
-    /** The guardian sent a message in the running turn. */
-    const guardianAsked = (s: Awaited<ReturnType<typeof withAnswer>>) => {
-      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
-      list.push({
-        id: "g-ask",
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "show me the full report" }]),
-        turnId: "concierge-turn-1",
-      });
-      s.messages.set(CONCIERGE_CHAT, list);
-    };
+    const widgets = (s: ReturnType<typeof setup>) =>
+      stored(s).filter((parts) => parts[0]?.type === "widget");
 
-    it("forwards only the conclusion, word for word, with its source chat and no marker", async () => {
-      const s = await withAnswer(concluded("Found 3 flights. Which one?", DETAILS));
-      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-      expect(result).toMatchObject({
-        forwarded: "conclusion",
-        forwardedChars: "Found 3 flights. Which one?".length,
+    it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
+      const s = await withRows(cardRow("card-1"), textRow(concluded("Your daily health summary.")));
+      const result = text(await s.tool("card_forward", { cardId: "card-1" }));
+      expect(result).toMatchObject({ forwarded: "card" });
+      const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
+      const [part, ...rest] = JSON.parse(row?.content ?? "[]");
+      expect(rest).toEqual([]);
+      expect(part).toMatchObject({
+        type: "widget",
+        appId: "core",
+        text: LINE,
+        ui: HEALTH,
+        forwardedFrom: { chatId: "task-1", title: "Health" },
       });
-      const forwarded = stored(s).at(-1);
-      expect(forwarded).toEqual([
-        ACK_QUOTE,
-        {
-          type: "text",
-          content: "Found 3 flights. Which one?",
-          format: "long",
-          forwardedFrom: { chatId: "task-1", title: "Flights" },
-        },
+      expect(part.toolUseId).not.toBe("task-call-1");
+      expect(row?.replyTo).toBe("ack-1");
+    });
+
+    it("leaves the task's start message where it is", async () => {
+      const s = await withRows(cardRow("card-1"));
+      const taskId = (await s.taskRepo.findBySession("task-1"))!.id;
+      expect(await startKeyOf(s, taskId)).toBe("ack-1");
+      await s.tool("card_forward", { cardId: "card-1" });
+      expect(await startKeyOf(s, taskId)).toBe("ack-1");
+      const listed = text(await s.tool("task_list", {})).tasks;
+      expect(listed.find((task: { id: string }) => task.id === taskId)?.startMessageId).toBe(
+        "ack-1",
+      );
+    });
+
+    it("sends several cards one by one, each as a message of its own in the task's thread", async () => {
+      const s = await withRows(cardRow("card-1"), cardRow("card-2", "Steps 8,000."));
+      const first = text(await s.tool("card_forward", { cardId: "card-1" }));
+      const second = text(await s.tool("card_forward", { cardId: "card-2" }));
+      expect(first.messageId).not.toBe(second.messageId);
+      expect(widgets(s).map((parts) => [parts.length, parts[0].text])).toEqual([
+        [1, LINE],
+        [1, "Steps 8,000."],
       ]);
-      expect(JSON.stringify(stored(s))).not.toContain("rome:conclusion");
-      expect(JSON.stringify(stored(s))).not.toContain("long table of fares");
+      // Both reply to the task's start message, not to each other.
+      const replies = [first, second].map(
+        (sent) => s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === sent.messageId)?.replyTo,
+      );
+      expect(replies).toEqual(["ack-1", "ack-1"]);
     });
 
-    it("anchors the task's row to the forwarded message, so it can be needs_user", async () => {
-      const s = await withAnswer(concluded("Which one?", DETAILS));
-      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-      expect(
-        await s.taskRepo.getWithChat(result.taskAnchored)?.then((row) => row?.sourceMessageId),
-      ).toBe(result.messageId);
+    it("sends a card once when it is forwarded twice in a turn", async () => {
+      const s = await withRows(cardRow("card-1"));
+      const first = text(await s.tool("card_forward", { cardId: "card-1" }));
+      const again = text(await s.tool("card_forward", { cardId: "card-1" }));
+      expect(again.messageId).toBe(first.messageId);
+      expect(widgets(s)).toHaveLength(1);
     });
 
-    it("refuses an answer with no conclusion, sends nothing, and says what to do instead", async () => {
-      const s = await withAnswer(DETAILS);
-      const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Done" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("no conclusion section");
-      expect(result.content[0].text).toContain("Nothing was sent");
-      expect(result.content[0].text).toContain("a few sentences with the key specifics");
-      expect(result.content[0].text).not.toContain("open the task chat");
-      expect(stored(s)).toEqual([]);
+    it("forwards a card an earlier turn showed, by its id", async () => {
+      const s = await withRows(
+        cardRow("old-card", "Yesterday: sleep 7.2 h.", HEALTH, "task-turn-0"),
+        {
+          role: "user",
+          turnId: "task-turn-2",
+          content: JSON.stringify([{ type: "text", content: "And the steps?" }]),
+        },
+        textRow(concluded("8,000 steps."), "task-turn-2"),
+      );
+      const result = text(await s.tool("card_forward", { cardId: "old-card" }));
+      expect(result.forwarded).toBe("card");
+      expect(widgets(s).at(-1)?.[0].text).toBe("Yesterday: sleep 7.2 h.");
     });
 
-    it("refuses a conclusion with nothing to report, and sends nothing", async () => {
-      const s = await withAnswer(concluded(NOTHING_TO_REPORT, DETAILS));
-      const result = await s.tool("chat_forward", { chatId: "task-1" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("Send nothing about it");
-      expect(stored(s)).toEqual([]);
+    it("settles the task's result as told, and pushes the task's title and the card's line", async () => {
+      const s = await withRows(cardRow("card-1"));
+      const taskId = (await s.taskRepo.findBySession("task-1"))!.id;
+      const noted = rs.spyOn(s.service, "noteSaid");
+      const settled = rs.spyOn(s.tasks, "resultSaid");
+      s.pushLevel("active");
+      await s.tool("card_forward", { cardId: "card-1" });
+      await s.settle();
+      expect(noted).toHaveBeenCalledWith(taskId);
+      expect(settled).toHaveBeenCalledWith(taskId);
+      expect(s.pushes.map((push) => push.body)).toEqual([`Health: ${LINE}`]);
     });
 
-    it("refuses a conclusion over the cap and sends nothing", async () => {
-      const s = await withAnswer(concluded("x".repeat(CONCLUSION_MAX_CHARS + 1), DETAILS));
-      const result = await s.tool("chat_forward", { chatId: "task-1" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain(`over the ${CONCLUSION_MAX_CHARS} limit`);
-      expect(stored(s)).toEqual([]);
+    it("forwards the card's text where this chat cannot show cards", async () => {
+      const s = await withRows(cardRow("card-1"));
+      s.drawWidgets("plain_text");
+      const result = text(await s.tool("card_forward", { cardId: "card-1" }));
+      expect(result.forwarded).toBe("card_text");
+      expect(stored(s).at(-1)).toEqual([
+        ACK_QUOTE,
+        { type: "text", content: LINE, format: "long" },
+      ]);
     });
 
-    it("refuses the full text in a turn the guardian did not start, so a report turn never pastes a report", async () => {
-      const s = await withAnswer(concluded("Done.", DETAILS));
-      const result = await s.tool("chat_forward", { chatId: "task-1", full: true });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("only in a turn they started");
-      expect(stored(s)).toEqual([]);
-    });
-
-    it("sends the whole answer, without markers, when the guardian asked for it this turn", async () => {
-      const s = await withAnswer(concluded("Done.", DETAILS));
-      guardianAsked(s);
-      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
-      expect(result.forwarded).toBe("full");
-      const body = stored(s).at(-1).at(-1).content as string;
-      expect(body).toContain(DETAILS);
-      expect(body).toContain("Done.");
-      expect(body).not.toContain("rome:conclusion");
-    });
-
-    it("sends the whole answer byte for byte but for the markers, code block blank lines included", async () => {
-      const code = "```py\nx = 1\n\n\n\ny = 2\n```";
-      const answer = `Intro.\n\n\n\n${code}\n\n${CONCLUSION_OPEN}\nDone.\n${CONCLUSION_CLOSE}\n`;
-      const s = await withAnswer(answer);
-      guardianAsked(s);
-      await s.tool("chat_forward", { chatId: "task-1", full: true });
-      expect(stored(s).at(-1).at(-1).content).toBe(`Intro.\n\n\n\n${code}\n\nDone.\n`);
-    });
-
-    it("sends the whole answer even when it has no conclusion, in a guardian's turn", async () => {
-      const s = await withAnswer(DETAILS);
-      guardianAsked(s);
-      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
-      expect(result).toMatchObject({ forwarded: "full", forwardedChars: DETAILS.length });
-    });
-
-    describe("a card the final answer showed", () => {
-      const HEALTH = {
-        components: [
-          { id: "root", component: "Row", children: ["sleep", "hr"] },
-          {
-            id: "sleep",
-            component: "Stat",
-            label: "Sleep",
-            value: 6.1,
-            unit: "h",
-            range: { low: 7, high: 9 },
-          },
-          {
-            id: "hr",
-            component: "Stat",
-            label: "Resting HR",
-            value: 58,
-            unit: "bpm",
-            range: { low: 50, high: 65 },
-          },
-        ],
-      };
-      const LINE = "Sleep 6.1 h (usual 7–9), resting HR 58 bpm (usual 50–65).";
-      const cardRow = (ui: unknown = HEALTH, turnId = "task-turn-1") => ({
-        role: "assistant",
-        turnId,
-        content: JSON.stringify([
-          { type: "widget", toolUseId: "task-call-1", appId: "core", text: LINE, ui },
-        ]),
-      });
-      const textRow = (content: string, turnId = "task-turn-1") => ({
-        role: "assistant",
-        turnId,
-        content: JSON.stringify([{ type: "text", content }]),
-      });
-      /** A task chat whose final answer showed the card, then wrote `answer`. */
-      const withCard = async (answer = concluded("Your daily health summary.")) => {
-        const s = setup();
-        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages.get("task-1")?.push(cardRow(), textRow(answer));
-        return s;
-      };
-
-      it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
-        const s = await withCard();
-        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-        expect(result).toMatchObject({ forwarded: "card", forwardedChars: LINE.length });
-        const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
-        const [part, ...rest] = JSON.parse(row?.content ?? "[]");
-        expect(rest).toEqual([]);
-        expect(part).toMatchObject({
-          type: "widget",
-          appId: "core",
-          text: LINE,
-          ui: HEALTH,
-          forwardedFrom: { chatId: "task-1", title: "Health" },
-        });
-        expect(part.toolUseId).not.toBe("task-call-1");
-        expect(row?.replyTo).toBe("ack-1");
-        expect(
-          await s.taskRepo.getWithChat(result.taskAnchored)?.then((r) => r?.sourceMessageId),
-        ).toBe(result.messageId);
-      });
-
-      it("finds the card when it came after the answer in the same turn", async () => {
-        const s = setup();
-        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages.get("task-1")?.push(textRow(concluded("Summary.")), cardRow());
-        expect(text(await s.tool("chat_forward", { chatId: "task-1" })).forwarded).toBe("card");
-      });
-
-      it("forwards the card of a latest turn that showed only a card, not an earlier turn's text", async () => {
-        const s = setup();
-        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages
-          .get("task-1")
-          ?.push(textRow(concluded("Yesterday's summary."), "task-turn-0"), cardRow());
-        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-        expect(result.forwarded).toBe("card");
-        expect(JSON.stringify(stored(s))).not.toContain("Yesterday's summary.");
-      });
-
-      it("never pairs an answer with an earlier turn's card when no prompt lies between them", async () => {
-        const s = await withCard();
-        // A defer wake-up answers with no prompt of its own.
-        s.messages.get("task-1")?.push(textRow(concluded("Checked again."), "task-turn-2"));
-        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-        expect(result.forwarded).toBe("conclusion");
-        expect(stored(s).at(-1).at(-1).content).toBe("Checked again.");
-      });
-
-      it("sends an intro as a message of its own before the card", async () => {
-        const s = await withCard();
-        await s.tool("chat_forward", { chatId: "task-1", intro: "Today's numbers" });
-        expect(
-          stored(s)
-            .slice(-2)
-            .map((parts) => parts.map((part: { type: string }) => part.type)),
-        ).toEqual([["reply_to", "text"], ["widget"]]);
-      });
-
-      it("forwards the card's text where this chat cannot show cards", async () => {
-        const s = await withCard();
-        s.drawWidgets("plain_text");
-        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-        expect(result.forwarded).toBe("card_text");
-        expect(stored(s).at(-1)).toEqual([
-          ACK_QUOTE,
-          {
-            type: "text",
-            content: LINE,
-            format: "long",
-            forwardedFrom: { chatId: "task-1", title: "Health" },
-          },
-        ]);
-      });
-
-      it("never forwards a card an earlier turn showed", async () => {
-        const s = await withCard();
-        s.messages.get("task-1")?.push(
-          {
-            role: "user",
-            turnId: "task-turn-2",
-            content: JSON.stringify([{ type: "text", content: "And the steps?" }]),
-          },
-          textRow(concluded("8,000 steps."), "task-turn-2"),
-        );
-        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
-        expect(result.forwarded).toBe("conclusion");
-        expect(stored(s).at(-1).at(-1).content).toBe("8,000 steps.");
-      });
-
-      it("holds the card back when the conclusion has nothing to report", async () => {
-        const s = await withCard(concluded(NOTHING_TO_REPORT));
-        const result = await s.tool("chat_forward", { chatId: "task-1" });
+    it("refuses an id that names no card, and says to tell the result with say", async () => {
+      const s = await withRows(textRow(concluded("Found 3 flights.")));
+      const before = stored(s).length;
+      for (const cardId of ["no-such-id", "row-1"]) {
+        const result = await s.tool("card_forward", { cardId });
         expect(result.isError).toBe(true);
-        expect(
-          stored(s)
-            .flat()
-            .some((part: { type: string }) => part.type === "widget"),
-        ).toBe(false);
-      });
-
-      it("refuses a card that no longer passes the check, and sends nothing", async () => {
-        const s = setup();
-        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages
-          .get("task-1")
-          ?.push(
-            cardRow({ components: [{ id: "root", component: "Button", label: "Go" }] }),
-            textRow(concluded("Summary.")),
-          );
-        const before = stored(s).length;
-        const result = await s.tool("chat_forward", { chatId: "task-1" });
-        expect(result.isError).toBe(true);
-        expect(stored(s)).toHaveLength(before);
-      });
-
-      it("sends the whole answer, not the card, when full is set", async () => {
-        const s = await withCard();
-        guardianAsked(s);
-        const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
-        expect(result.forwarded).toBe("full");
-      });
+        expect(result.content[0].text).toContain("Nothing was sent");
+        expect(result.content[0].text).toContain("use say");
+        expect(result.content[0].text).toContain("start_message_id");
+      }
+      expect(stored(s)).toHaveLength(before);
     });
 
-    it("describes itself as conclusion-first, with an explicit full flag", async () => {
+    it("refuses a card that is not in a task chat, such as the Concierge's own", async () => {
+      const s = setup();
+      s.messages.set(CONCIERGE_CHAT, [cardRow("own-card")]);
+      const result = await s.tool("card_forward", { cardId: "own-card" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("No card own-card in a task chat");
+      expect(stored(s)).toHaveLength(1);
+    });
+
+    it("refuses a card that no longer passes the check, and sends nothing", async () => {
+      const s = await withRows(
+        cardRow("bad", LINE, { components: [{ id: "root", component: "Button", label: "Go" }] }),
+      );
+      const before = stored(s).length;
+      const result = await s.tool("card_forward", { cardId: "bad" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("with say");
+      expect(stored(s)).toHaveLength(before);
+    });
+
+    it("takes the card's id alone, and describes itself by id", async () => {
       const s = setup();
       const tools = await buildConciergeTools(s.service, s.context());
-      const forward = tools.find((candidate) => candidate.name === "chat_forward")!;
-      expect(forward.description).toContain("conclusion");
-      expect(forward.description).toContain(`${CONCLUSION_MAX_CHARS} characters`);
-      expect(forward.description).toContain("explicitly asks for the full text");
-      expect(forward.description).not.toContain("long content the guardian asked for");
-      expect(forward.inputSchema).toHaveProperty("properties.full");
-      const start = tools.find((candidate) => candidate.name === "chat_start")!;
-      expect(JSON.stringify(start.inputSchema)).toContain("written in the guardian's language");
+      const forward = tools.find((candidate) => candidate.name === "card_forward")!;
+      expect(Object.keys((forward.inputSchema as { properties: object }).properties)).toEqual([
+        "cardId",
+      ]);
+      expect(forward.description).toContain("`card id=…` line");
+      expect(forward.description).toContain("`cardId`");
+      expect(forward.description).toContain("call it once for each");
+      expect(tools.map((tool) => tool.name)).not.toContain("chat_forward");
+    });
+
+    it("shows a task chat's card in chat_read with its id and plain-text line", async () => {
+      const s = await withRows(cardRow("card-1"), textRow(concluded("Summary.")));
+      const read = text(await s.tool("chat_read", { chatId: "task-1" }));
+      const cardMessage = read.messages.find((message: { id: string }) => message.id === "card-1");
+      expect(cardMessage).toMatchObject({ cardId: "card-1", text: LINE });
+      expect(read.messages.filter((message: { cardId?: string }) => message.cardId)).toHaveLength(
+        1,
+      );
     });
   });
 
@@ -2459,7 +2280,7 @@ describe("Concierge task anchors", () => {
   const created = async (s: ReturnType<typeof setup>, entry: Record<string, unknown>) =>
     text(await s.tool("task_upsert", { tasks: [{ title: "Pay rent", ...entry }] })).tasks[0].id;
 
-  it("say, chat_card and chat_forward answer the id of the message they stored", async () => {
+  it("say and chat_card answer the id of the message they stored", async () => {
     const s = setup();
     const said = text(await s.tool("say", { text: "Looking for flights" }));
     expect(said).toEqual({ sent: expect.any(String), messageId: "said-1" });
@@ -2472,13 +2293,12 @@ describe("Concierge task anchors", () => {
       sent: expect.any(String),
       messageId: "said-2",
     });
-    expect(text(await s.tool("chat_forward", { chatId: "task-1" })).messageId).toBe("said-3");
   });
 
   it.each([
     [CONCIERGE_CHAT, CONCIERGE_CHAT],
     [TOPIC_CHAT, TOPIC_CHAT],
-  ] as const)("anchors a task created in %s to its result forwarded in %s before completion", async (createdIn, forwardedIn) => {
+  ] as const)("anchors a task created in %s to its card shown in %s before completion", async (createdIn, shownIn) => {
     const s = setup({ said: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
@@ -2512,21 +2332,16 @@ describe("Concierge task anchors", () => {
       content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
 
-    s.turnIn(forwardedIn);
-    const result = await s.tool("chat_forward", { chatId });
+    s.turnIn(shownIn);
+    const result = await s.tool("chat_card", { chatId });
     expect(result.isError).toBeFalsy();
-    const forwarded = text(result);
-    expect(s.messages.get(forwardedIn)?.at(-1)?.id).toBe(forwarded.messageId);
-    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
-    expect(forwarded).toEqual({
-      forwarded: "conclusion",
-      forwardedChars: 9,
-      messageId: "said-2",
-      taskAnchored: taskId,
-    });
+    const card = text(result);
+    expect(s.messages.get(shownIn)?.at(-1)?.id).toBe(card.messageId);
+    expect(await anchorOf(s, taskId)).toBe(card.messageId);
+    expect(card).toEqual({ sent: expect.any(String), messageId: "said-2" });
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
-      chatId: forwardedIn === CONCIERGE_CHAT ? null : forwardedIn,
+      chatId: shownIn === CONCIERGE_CHAT ? null : shownIn,
       sourceMessageId: expect.any(Number),
     });
     await s.settle();
@@ -2534,8 +2349,8 @@ describe("Concierge task anchors", () => {
     expect(emit).toHaveBeenCalledWith({
       task: expect.objectContaining({
         id: taskId,
-        conciergeChat: expect.objectContaining({ id: forwardedIn }),
-        sourceMessageId: forwarded.messageId,
+        conciergeChat: expect.objectContaining({ id: shownIn }),
+        sourceMessageId: card.messageId,
         notSynced: true,
       }),
     });
@@ -2543,12 +2358,12 @@ describe("Concierge task anchors", () => {
     const completed = text(
       await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "3 options" }] }),
     );
-    expect(completed.tasks[0]).toMatchObject({ anchor: forwarded.messageId, anchorKept: true });
-    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
+    expect(completed.tasks[0]).toMatchObject({ anchor: card.messageId, anchorKept: true });
+    expect(await anchorOf(s, taskId)).toBe(card.messageId);
     expect((await s.tasks.listForPanel())[0]).toMatchObject({
       summary: "3 options",
-      conciergeChat: expect.objectContaining({ id: forwardedIn }),
-      sourceMessageId: forwarded.messageId,
+      conciergeChat: expect.objectContaining({ id: shownIn }),
+      sourceMessageId: card.messageId,
       notSynced: false,
     });
   });
@@ -2588,11 +2403,25 @@ describe("Concierge task anchors", () => {
       expect(await s.taskRepo.get(taskId)).toEqual(row);
     });
 
-    it("refuses chat_forward from a topic chat, and nothing is posted or moved", async () => {
+    it("refuses card_forward for another Concierge chat's task card, and nothing is posted or moved", async () => {
       const { s, chatId, taskId, row } = await startInMain();
+      s.messages.get(chatId)?.push({
+        id: "card-x",
+        role: "assistant",
+        turnId: "task-turn-1",
+        content: JSON.stringify([
+          {
+            type: "widget",
+            toolUseId: "c",
+            appId: "core",
+            text: "Sleep 6.1 h",
+            ui: { components: [{ id: "root", component: "Text", text: "Sleep" }] },
+          },
+        ]),
+      });
       const messagesHere = s.messages.get(TOPIC_CHAT)?.length;
 
-      const result = await s.tool("chat_forward", { chatId });
+      const result = await s.tool("card_forward", { cardId: "card-x" });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("belongs to another Concierge chat");
@@ -2714,7 +2543,7 @@ describe("Concierge task anchors", () => {
     });
   });
 
-  it("forwarding again keeps a finished row's completion time and other fields", async () => {
+  it("showing the card again keeps a finished row's completion time and other fields", async () => {
     const s = setup();
     const { chatId, taskId } = text(
       await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
@@ -2727,16 +2556,15 @@ describe("Concierge task anchors", () => {
       role: "assistant",
       content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
-    const forwarded = text(await s.tool("chat_forward", { chatId }));
-    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
-    expect(forwarded.taskAnchored).toBe(taskId);
+    const card = text(await s.tool("chat_card", { chatId }));
+    expect(await anchorOf(s, taskId)).toBe(card.messageId);
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
       sourceMessageId: expect.any(Number),
     });
   });
 
-  it("forwards a task chat without a task row without creating one", async () => {
+  it("shows a card for a task chat without a task row without creating one", async () => {
     const s = setup();
     const chatId = await s.chats.startChat({}, "guardian");
     await s.deps.webchatRepo.setSessionTrigger(chatId, {
@@ -2749,13 +2577,9 @@ describe("Concierge task anchors", () => {
         content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
       },
     ]);
-    const result = await s.tool("chat_forward", { chatId });
+    const result = await s.tool("chat_card", { chatId });
     expect(result.isError).toBeFalsy();
-    expect(text(result)).toEqual({
-      forwarded: "conclusion",
-      forwardedChars: 9,
-      messageId: "said-1",
-    });
+    expect(text(result)).toEqual({ sent: expect.any(String), messageId: "said-1" });
     expect(await s.taskRepo.findBySession(chatId)).toBeNull();
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
@@ -2812,7 +2636,7 @@ describe("Concierge task anchors", () => {
     expect(await anchorOf(s, await created(s, {}))).toBe("said-2");
   });
 
-  it("points a new row at the message passed, which says, cards and forwards returned", async () => {
+  it("points a new row at the message passed, which says and cards returned", async () => {
     const s = setup({ said: false });
     const first = text(await s.tool("say", { text: "First" })).messageId;
     await s.tool("say", { text: "Second" });
@@ -3256,25 +3080,28 @@ describe("Concierge events", () => {
     expect(prompt).not.toContain("rome:conclusion");
   });
 
-  /** The prompt of the task event an answer `text` brings, with a card of `line` after it. */
-  const cardEventFor = async (text: string, line: string, answerTurn = "task-turn-1") => {
+  /** The prompt of the task event an answer `text` brings, with a card for each of `lines` after it. */
+  const cardEventFor = async (text: string, lines: string[], answerTurn = "task-turn-1") => {
     const s = setup();
     const { chatId } = await startTask(s, text);
     const rows = s.messages.get(chatId) ?? [];
     const answer = rows.at(-1);
     if (answer) answer.turnId = answerTurn;
-    rows.push({
-      role: "assistant",
-      turnId: "task-turn-1",
-      content: JSON.stringify([
-        {
-          type: "widget",
-          toolUseId: "c1",
-          appId: "core",
-          text: line,
-          ui: { components: [{ id: "root", component: "Text", text: "Sleep" }] },
-        },
-      ]),
+    lines.forEach((line, index) => {
+      rows.push({
+        id: `card-${index + 1}`,
+        role: "assistant",
+        turnId: "task-turn-1",
+        content: JSON.stringify([
+          {
+            type: "widget",
+            toolUseId: "c1",
+            appId: "core",
+            text: line,
+            ui: { components: [{ id: "root", component: "Text", text: "Sleep" }] },
+          },
+        ]),
+      });
     });
     s.fakeTimers();
     await finishTask(s, chatId);
@@ -3283,34 +3110,43 @@ describe("Concierge events", () => {
     return s.backendTurns[0]?.prompt ?? "";
   };
 
-  it("tells the Concierge the answer showed a card, by the card's plain-text line", async () => {
-    const prompt = await cardEventFor(
-      concluded("Your daily health summary."),
+  it("tells the Concierge the answer showed a card, by its id and plain-text line", async () => {
+    const prompt = await cardEventFor(concluded("Your daily health summary."), [
       "Sleep 6.1 h\n(usual 7–9)",
-    );
-    expect(prompt).toContain("\ncard: Sleep 6.1 h (usual 7–9)\n");
+    ]);
+    expect(prompt).toContain("\ncard id=card-1: Sleep 6.1 h (usual 7–9)\n");
     expect(prompt).toContain("\nconclusion: Your daily health summary.\n");
+  });
+
+  it("lists every card the answer's turn showed, one line each, in order", async () => {
+    const prompt = await cardEventFor(concluded("Today's summary."), [
+      "Sleep 6.1 h",
+      "Steps 8,000",
+    ]);
+    expect(prompt).toContain("\ncard id=card-1: Sleep 6.1 h\ncard id=card-2: Steps 8,000\n");
   });
 
   it("gives a turn that showed only a card as its card line, with no earlier turn's conclusion", async () => {
     const prompt = await cardEventFor(
       concluded("Yesterday's summary."),
-      "Sleep 6.1 h",
+      ["Sleep 6.1 h"],
       "task-turn-0",
     );
-    expect(prompt).toContain("\ncard: Sleep 6.1 h\n");
+    expect(prompt).toContain("\ncard id=card-1: Sleep 6.1 h\n");
     expect(prompt).not.toContain("Yesterday's summary.");
   });
 
   it("names no card when the answer has nothing to report, since no forward sends it", async () => {
-    const prompt = await cardEventFor(concluded(NOTHING_TO_REPORT), "Sleep 6.1 h");
+    const prompt = await cardEventFor(concluded(NOTHING_TO_REPORT), ["Sleep 6.1 h"]);
     expect(prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
-    expect(prompt).not.toContain("card:");
+    expect(prompt).not.toContain("card id=");
   });
 
   it("cuts a long card line like a long reply", async () => {
-    const prompt = await cardEventFor(concluded("Summary."), "w".repeat(1_000));
-    expect(prompt).toContain(`\ncard: ${"w".repeat(400)}${leftOut(300)}${"w".repeat(300)}\n`);
+    const prompt = await cardEventFor(concluded("Summary."), ["w".repeat(1_000)]);
+    expect(prompt).toContain(
+      `\ncard id=card-1: ${"w".repeat(400)}${leftOut(300)}${"w".repeat(300)}\n`,
+    );
   });
 
   it("gives only the conclusion when it is all the answer holds", async () => {
@@ -4180,23 +4016,13 @@ describe("Concierge pushes", () => {
   };
   const SECRET_ANSWER = "Your one-time login code is 7291.";
 
-  it("pushes the task's title and its forwarded text for a forward with no intro", async () => {
+  it("pushes the Concierge's own words for a say that tells a task's result, not the task's answer", async () => {
     const s = setup();
     const chatId = await finishedTask(s, SECRET_ANSWER);
-    const title = (await s.tasks.repo.findBySession(chatId))?.title ?? "";
+    const task = await s.tasks.repo.findBySession(chatId);
+    const start = (await s.taskRepo.getWithChat(task?.id ?? ""))?.sourceMessageId ?? undefined;
     s.pushLevel("active");
-    await s.tool("chat_forward", { chatId });
-    await s.settle();
-    expect(s.pushes).toHaveLength(1);
-    expect(s.pushes[0]?.body).toContain("7291");
-    if (title) expect(s.pushes[0]?.body?.startsWith(title)).toBe(true);
-  });
-
-  it("pushes only the intro of a forward that has one", async () => {
-    const s = setup();
-    const chatId = await finishedTask(s, SECRET_ANSWER);
-    s.pushLevel("active");
-    await s.tool("chat_forward", { chatId, intro: "The bank sent a sign-in code." });
+    await s.tool("say", { text: "The bank sent a sign-in code.", replyTo: start });
     await s.settle();
     expect(s.pushes.map((push) => push.body)).toEqual(["The bank sent a sign-in code."]);
   });
@@ -5589,7 +5415,7 @@ describe("Concierge connect_card", () => {
     expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: "said-1" });
   });
 
-  it("lands in the thread the guardian wrote in, as its messages do", async () => {
+  it("replies to nothing, even where the guardian wrote inside a thread", async () => {
     const s = setup({ said: false });
     withServices(s, [
       { service: "mail", label: "Mail", icon: "glyph:gmail", state: null, connect: MAIL_CONNECT },
@@ -5612,7 +5438,7 @@ describe("Concierge connect_card", () => {
       CONCIERGE_CHAT,
       "concierge-turn-1",
       [expect.objectContaining({ type: "connect_card", service: "mail" })],
-      { replyTo: "g1" },
+      {},
     );
   });
 
@@ -5875,7 +5701,7 @@ describe("Concierge tasks started for a guardian message", () => {
       content: JSON.stringify([{ type: "text", content: concluded("Sunny") }]),
     });
 
-  describe("a task's conclusion forwarded, or refused", () => {
+  describe("a task's result told with say", () => {
     /** The task finished with `answer`; its news waits for the Concierge's report turn. */
     const finishedWith = async (answer: string) => {
       const s = setup({ said: false });
@@ -5891,83 +5717,214 @@ describe("Concierge tasks started for a guardian message", () => {
     };
     const replyOfId = (s: ReturnType<typeof setup>, id: string) =>
       s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.replyTo;
+    const idOf = (result: { content: Array<{ text: string }> }) =>
+      JSON.parse(result.content[0].text).messageId as string;
 
-    it("forwards the conclusion as a reply to the task's start message and anchors the row to it", async () => {
-      const { s, chatId, taskId } = await finishedWith(concluded("Found 3 flights. Which one?"));
-      const start = (await s.taskRepo.getWithChat(taskId))?.sourceMessageId;
-      const forwarded = JSON.parse((await s.tool("chat_forward", { chatId })).content[0].text);
-      expect(replyOfId(s, forwarded.messageId)).toBe(start);
-      expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe(forwarded.messageId);
-    });
-
-    it("refuses the forward of a task with no conclusion, and the report said for the task replies to its start message", async () => {
-      const { s, chatId, taskId } = await finishedWith("Details, but no conclusion section.");
-      const start = (await s.taskRepo.getWithChat(taskId))?.sourceMessageId;
-      const refused = await s.tool("chat_forward", { chatId });
-      expect(refused.isError).toBe(true);
-      expect(refused.content[0].text).toContain("pass its start_message_id");
-      const said = JSON.parse(
-        (
-          await s.tool("say", {
-            text: "Found 3 flights, cheapest ¥4,380. Which one?",
-            replyTo: start,
-          })
-        ).content[0].text,
+    it("replies to the task's start message and settles the result as told", async () => {
+      const { s, taskId } = await finishedWith(concluded("Found 3 flights. Which one?"));
+      const start = await startKeyOf(s, taskId);
+      const noted = rs.spyOn(s.service, "noteSaid");
+      const settled = rs.spyOn(s.tasks, "resultSaid");
+      const said = idOf(
+        await s.tool("say", {
+          text: "Found 3 flights, cheapest ¥4,380. Which one?",
+          format: "long",
+          replyTo: start,
+        }),
       );
-      expect(replyOfId(s, said.messageId)).toBe(start);
+      expect(replyOfId(s, said)).toBe(start);
+      expect(noted).toHaveBeenCalledWith(taskId);
+      expect(settled).toHaveBeenCalledWith(taskId);
+      // The message tells the result: it moves neither the start message nor the row.
+      expect(await startKeyOf(s, taskId)).toBe(start);
     });
 
-    it("refuses the forward of a conclusion that is too long", async () => {
-      const { s, chatId } = await finishedWith("x".repeat(CONCLUSION_MAX_CHARS + 1));
-      expect((await s.tool("chat_forward", { chatId })).isError).toBe(true);
+    it("tells a task with no conclusion in one message that replies to its start message", async () => {
+      const { s, taskId } = await finishedWith("Details, but no conclusion section.");
+      const start = await startKeyOf(s, taskId);
+      const settled = rs.spyOn(s.tasks, "resultSaid");
+      const said = idOf(
+        await s.tool("say", { text: "Found 3 flights, cheapest ¥4,380.", replyTo: start }),
+      );
+      expect(replyOfId(s, said)).toBe(start);
+      expect(settled).toHaveBeenCalledWith(taskId);
     });
 
-    /** An input of the report turn that an automation or an agent wrote, stored as a user message. */
-    const automatedSays = (s: ReturnType<typeof setup>, id: string, senderId: string) => {
-      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
-      list.push({ id, role: "user", content: "[]", turnId: "report-turn", senderId });
-      s.messages.set(CONCIERGE_CHAT, list);
-    };
-
-    it.each([
-      ["a tagged routine", "automated::0::routine:Morning briefing"],
-      ["a tagged app on the guardian's behalf", "automated::1::app:daily-report"],
-      ["a tagged agent", "automated::0::agent:coding:coding"],
-      ["an agent's own account", "core:concierge"],
-    ])("refuses the full text in a turn only %s started, such as a continuation after a quota reset", async (_who, senderId) => {
-      const { s, chatId } = await finishedWith(concluded("Done."));
-      automatedSays(s, "auto", senderId);
-      const refused = await s.tool("chat_forward", { chatId, full: true });
-      expect(refused.isError).toBe(true);
-      expect(refused.content[0].text).toContain("only in a turn they started");
+    it("replies to nothing when a say in a report turn names no message, and says the result unsettled", async () => {
+      const { s, taskId } = await finishedWith(concluded("Found 3 flights."));
+      s.reportedTask(taskId);
+      const settled = rs.spyOn(s.tasks, "resultSaid");
+      const said = idOf(await s.tool("say", { text: "Found 3 flights, cheapest ¥4,380." }));
+      expect(replyOfId(s, said)).toBeUndefined();
+      expect(settled).not.toHaveBeenCalled();
     });
 
-    it("allows the full text when the guardian's own message is in the turn beside an automated input", async () => {
-      const { s, chatId } = await finishedWith(concluded("Done."));
-      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
-      guardianSays(s, "g2", "report-turn");
-      const allowed = await s.tool("chat_forward", { chatId, full: true });
-      expect(allowed.isError).toBeFalsy();
-    });
-
-    it("still takes an automated input as a message the turn answers, whatever the full-text gate says", async () => {
+    it("takes an automated input as a message the turn answers", async () => {
       const { s } = await finishedWith(concluded("Done."));
-      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
-      // `answers` may name it, as it may name any message of the turn.
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({
+        id: "auto",
+        role: "user",
+        content: "[]",
+        turnId: "report-turn",
+        senderId: "automated::0::routine:Morning briefing",
+      });
+      s.messages.set(CONCIERGE_CHAT, list);
       const said = await s.tool("say", { text: "Noted.", replyTo: "auto" });
       expect(said.isError).toBeFalsy();
     });
 
-    it("does not count a message an earlier, cut-short turn handed on as the guardian starting this turn", async () => {
-      const { s, chatId } = await finishedWith(concluded("Done."));
-      s.service.handOnPrompts(CONCIERGE_CHAT, ["g1"]);
-      const refused = await s.tool("chat_forward", { chatId, full: true });
-      expect(refused.isError).toBe(true);
-      expect(refused.content[0].text).toContain("only in a turn they started");
-      // Its own message in the turn does.
-      guardianSays(s, "g2", "report-turn");
-      const allowed = await s.tool("chat_forward", { chatId, full: true });
-      expect(allowed.isError).toBeFalsy();
+    describe("chat_send moves the start message to the guardian message it relays", () => {
+      /** The guardian follows up in turn `turn` with message `id`, and the Concierge relays it. */
+      const followUp = async (
+        s: ReturnType<typeof setup>,
+        chatId: string,
+        id: string,
+        turn: string,
+      ) => {
+        s.inTurn(turn);
+        guardianSays(s, id, turn);
+        await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+      };
+
+      it("so the next result replies to the latest request and settles as told", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        const { chatId, taskId } = await started(s);
+        expect(await startKeyOf(s, taskId)).toBe("g1");
+
+        await followUp(s, chatId, "g2", "follow-up");
+
+        expect(await startKeyOf(s, taskId)).toBe("g2");
+        const listed = JSON.parse((await s.tool("task_list", {})).content[0].text) as {
+          tasks: Array<{ id: string; startMessageId?: string }>;
+        };
+        expect(listed.tasks.find((task) => task.id === taskId)?.startMessageId).toBe("g2");
+
+        s.messages.get(chatId)?.push({
+          role: "assistant",
+          content: JSON.stringify([{ type: "text", content: concluded("Saturday works.") }]),
+        });
+        await finishTask(s, chatId, "completed", { reported: false });
+        s.inTurn("report-turn");
+        const noted = rs.spyOn(s.service, "noteSaid");
+        const settled = rs.spyOn(s.tasks, "resultSaid");
+        const said = idOf(await s.tool("say", { text: "Saturday works.", replyTo: "g2" }));
+        expect(replyOfId(s, said)).toBe("g2");
+        expect(noted).toHaveBeenCalledWith(taskId);
+        expect(settled).toHaveBeenCalledWith(taskId);
+      });
+
+      it("only once the task has taken it", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        const { chatId, taskId } = await started(s);
+        s.refuseSends({ ok: false, invalid: "busy" });
+        s.inTurn("follow-up");
+        guardianSays(s, "g2", "follow-up");
+        expect((await s.tool("chat_send", { chatId, text: "Faster" })).isError).toBe(true);
+        expect(await startKeyOf(s, taskId)).toBe("g1");
+      });
+
+      it("only for a message the guardian sent, not an automated input", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        const { chatId, taskId } = await started(s);
+        s.inTurn("wake-up");
+        const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+        list.push({
+          id: "auto",
+          role: "user",
+          content: "[]",
+          turnId: "wake-up",
+          senderId: "automated::0::routine:Morning briefing",
+        });
+        s.messages.set(CONCIERGE_CHAT, list);
+        await s.tool("chat_send", { chatId, text: "Check again" });
+        expect(await startKeyOf(s, taskId)).toBe("g1");
+      });
+
+      describe("when the turn carries several guardian messages", () => {
+        const statusOf = async (s: ReturnType<typeof setup>, key: string) =>
+          (await s.tasks.messageStatusesOf(CONCIERGE_CHAT, [key])).get(key) ?? null;
+        /** Task "Weather" started for g1; turn "follow-up" took g2 and g3. */
+        const twoInOneTurn = async () => {
+          const s = setup({ said: false });
+          guardianSays(s, "g1");
+          const { chatId, taskId } = await started(s);
+          s.inTurn("follow-up");
+          guardianSays(s, "g2", "follow-up");
+          guardianSays(s, "g3", "follow-up");
+          return { s, chatId, taskId };
+        };
+
+        it("links and moves nothing when no message is named, and still sends", async () => {
+          const { s, chatId, taskId } = await twoInOneTurn();
+          const sent = s.posted.length;
+          const result = await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+          expect(result.isError).toBeFalsy();
+          expect(s.posted).toHaveLength(sent + 1);
+          expect(await startKeyOf(s, taskId)).toBe("g1");
+          expect([await statusOf(s, "g2"), await statusOf(s, "g3")]).toEqual([null, null]);
+        });
+
+        it("links and moves to the message `answers` names", async () => {
+          const { s, chatId, taskId } = await twoInOneTurn();
+          await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "g2" });
+          expect(await startKeyOf(s, taskId)).toBe("g2");
+          expect([await statusOf(s, "g2"), await statusOf(s, "g3")]).toEqual(["working", null]);
+        });
+
+        it("takes a message an interrupted turn handed on as `answers`", async () => {
+          const s = setup({ said: false });
+          guardianSays(s, "g1");
+          const { chatId, taskId } = await started(s);
+          guardianSays(s, "g2", "cut-short");
+          s.inTurn("follow-up");
+          guardianSays(s, "g3", "follow-up");
+          s.service.handOnPrompts(CONCIERGE_CHAT, ["g2"]);
+          await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+          expect(await startKeyOf(s, taskId)).toBe("g1");
+          await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "g2" });
+          expect(await startKeyOf(s, taskId)).toBe("g2");
+        });
+
+        it("refuses an id that is no guardian message of this chat, and sends nothing", async () => {
+          const { s, chatId, taskId } = await twoInOneTurn();
+          const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+          list.push({
+            id: "auto",
+            role: "user",
+            content: "[]",
+            turnId: "follow-up",
+            senderId: "automated::0::routine:Morning briefing",
+          });
+          list.push({ id: "said", role: "assistant", content: "[]", turnId: "follow-up" });
+          const sent = s.posted.length;
+          for (const answers of ["no-such-message", "auto", "said"]) {
+            const result = await s.tool("chat_send", { chatId, text: "Faster", answers });
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain(`No guardian message ${answers}`);
+          }
+          expect(s.posted).toHaveLength(sent);
+          expect(await startKeyOf(s, taskId)).toBe("g1");
+        });
+      });
+
+      it("never for a task another Concierge chat started", async () => {
+        const s = setup({ said: false });
+        await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+        guardianSays(s, "g1");
+        const { chatId, taskId } = await started(s);
+        s.messages.set(TOPIC_CHAT, [
+          { id: "t1", role: "user", content: "[]", turnId: "follow-up" },
+        ]);
+        s.turnIn(TOPIC_CHAT);
+        s.inTurn("follow-up");
+        expect((await s.tool("chat_send", { chatId, text: "Faster" })).isError).toBe(true);
+        expect(await startKeyOf(s, taskId)).toBe("g1");
+        expect((await s.taskRepo.get(taskId))?.chatId).toBeNull();
+      });
     });
   });
 
@@ -6321,7 +6278,7 @@ describe("Concierge tasks started for a guardian message", () => {
     it("keeps a result that could not be shown to be reported again", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
-      const { chatId } = await started(s);
+      const { chatId, taskId } = await started(s);
       replies(s, chatId);
       guardianTyped(s, chatId);
       s.fakeTimers();
@@ -6330,13 +6287,15 @@ describe("Concierge tasks started for a guardian message", () => {
       await rs.advanceTimersByTimeAsync(60_000);
       expect(s.backendTurns).toHaveLength(1);
       s.onBackendTurn(() => "completed");
-      // The turn that took the report over fails to store the forward.
+      // The turn that took the report over fails to store the message.
       s.inTurn("takeover");
       guardianSays(s, "g2", "takeover");
       s.deps.webchatRepo.addBackendMessage = async () => {
         throw new Error("disk full");
       };
-      expect(await s.tool("chat_forward", { chatId })).toMatchObject({ isError: true });
+      expect(
+        await s.tool("say", { text: "Sunny", replyTo: await startKeyOf(s, taskId) }),
+      ).toMatchObject({ isError: true });
       await s.finish({
         turnId: "takeover",
         agentName: "core:concierge",
@@ -6650,33 +6609,16 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "g1")).toBeNull();
     });
 
-    it.each([
-      [
-        "a message naming the task",
-        (s: ReturnType<typeof setup>, task: { chatId: string; taskId: string }) =>
-          startKeyOf(s, task.taskId).then((replyTo) =>
-            s.tool("say", { text: "Sunny all week", replyTo }),
-          ),
-      ],
-      [
-        "a forward",
-        (s: ReturnType<typeof setup>, task: { chatId: string; taskId: string }) => {
-          s.messages.get(task.chatId)?.push({
-            role: "assistant",
-            content: JSON.stringify([{ type: "text", content: concluded("Sunny all week") }]),
-          });
-          return s.tool("chat_forward", { chatId: task.chatId });
-        },
-      ],
-    ])("clears a task's message the moment its result is sent as %s", async (_, send) => {
+    it("clears a task's message the moment its result is said", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const task = await started(s);
       await finishTask(s, task.chatId, "completed", { reported: false });
       expect(await statusOf(s, "g1")).toBe("working");
-      // The report turn sends the result; it has not ended yet.
+      // The report turn says the result; it has not ended yet.
       s.inTurn("report-turn");
-      expect((await send(s, task)).isError).toBeFalsy();
+      const replyTo = await startKeyOf(s, task.taskId);
+      expect((await s.tool("say", { text: "Sunny all week", replyTo })).isError).toBeFalsy();
       expect(await statusOf(s, "g1")).toBeNull();
       await reportEnds(s, task.chatId);
       expect(await statusOf(s, "g1")).toBeNull();
@@ -6998,7 +6940,7 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(await statusOf(s, "g1")).toBe("failed");
     });
 
-    it("settles a message in the task's thread that a forwarded report answers", async () => {
+    it("settles a message in the task's thread that a said result answers", async () => {
       const s = setup({ said: false });
       s.fakeTimers();
       guardianSays(s, "g0", "t0");
@@ -7008,12 +6950,12 @@ describe("Concierge tasks started for a guardian message", () => {
         role: "assistant",
         content: JSON.stringify([{ type: "text", content: concluded("Sunny") }]),
       });
-      // The guardian asks for the result, and the forward answers them.
+      // The guardian asks for the result, and the said result answers them.
       s.inTurn("ask-turn");
       guardianSays(s, "ask", "ask-turn");
       s.messages.get(CONCIERGE_CHAT)!.find((row) => row.id === "ask")!.chatThread = "g0";
       await taken(s, "ask", "ask-turn");
-      expect((await s.tool("chat_forward", { chatId })).isError).toBeFalsy();
+      expect((await s.tool("say", { text: "Sunny", replyTo: "g0" })).isError).toBeFalsy();
       await workedLong(s);
       expect(await statusOf(s, "ask")).toBeNull();
       await conciergeEnds(s, "error", "ask-turn");
@@ -7361,6 +7303,18 @@ describe("scheduled tasks", () => {
       { at: "12:25", report: "every_run", brief: "Sum up my last day" },
     );
     expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
+  });
+
+  it("leaves a scheduled task's start message where it is when a chat_send relays a guardian message", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    const before = await startKeyOf(s, taskId);
+    const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+    list.push({ id: "g9", role: "user", content: "[]", turnId: "concierge-turn-1" });
+    s.messages.set(CONCIERGE_CHAT, list);
+    await s.tool("chat_send", { chatId, text: "Add my sleep too" });
+    expect(await startKeyOf(s, taskId)).toBe(before);
   });
 
   it("runs a scheduled brief with no asking device, so a device saved by a handoff cannot pin it", async () => {

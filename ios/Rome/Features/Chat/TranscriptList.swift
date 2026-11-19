@@ -36,8 +36,6 @@ struct TranscriptList<Row: View>: View {
                 insets: proxy.safeAreaInsets,
                 alignTop: alignTop,
                 scroll: scroll,
-                watching: store.stackWatch,
-                onSeenStacks: { [store] in store.setSeenStacks($0) },
                 row: row,
                 onNearTop: {
                     Task {
@@ -78,8 +76,7 @@ struct TranscriptList<Row: View>: View {
         .onChange(of: store.pending.count) { old, new in
             if new > old { scroll.toBottom() }
         }
-        // A reply a stack stands for is not on the main line: it is nothing new to scroll to.
-        .onChange(of: store.mainArrivals) {
+        .onChange(of: store.arrivals) {
             if !scroll.following { scroll.unseen += 1 }
         }
         .onChange(of: composerFocused) { _, focused in
@@ -271,9 +268,6 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     let insets: EdgeInsets
     let alignTop: Bool
     let scroll: TranscriptScroll
-    /// The rows that carry a stack whose pill waits on whether it is on screen, with their threads.
-    let watching: [String: String]
-    let onSeenStacks: (Set<String>) -> Void
     let row: (TranscriptRow, TranscriptRow?) -> Row
     let onNearTop: () -> Void
     let onDividerAbove: (Bool) -> Void
@@ -297,8 +291,6 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.row = row
         coordinator.onNearTop = onNearTop
         coordinator.onDividerAbove = onDividerAbove
-        coordinator.watching = watching
-        coordinator.onSeenStacks = onSeenStacks
         coordinator.scroll = scroll
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
@@ -306,8 +298,6 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.cells.footer = footer
         coordinator.set(insets: insets)
         coordinator.apply(rows: rows, hasOlder: hasOlder, footer: footer != nil)
-        // The rows may not have changed while the stacks to watch did.
-        coordinator.readStacks()
     }
 }
 
@@ -317,20 +307,12 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     var row: (TranscriptRow, TranscriptRow?) -> RowView
     var onNearTop: () -> Void = {}
     var onDividerAbove: (Bool) -> Void = { _ in }
-    var watching: [String: String] = [:]
-    var onSeenStacks: (Set<String>) -> Void = { _ in }
     weak var scroll: TranscriptScroll?
     let cells = CellContext()
     private let alignTop: Bool
     private var boxes: [String: RowBox] = [:]
     /// Oldest first, as on screen.
-    private var items: [String] = [] {
-        didSet { itemIndex = Dictionary(items.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first }) }
-    }
-    /// Where each item stands; changes only with the items, not with a streamed row.
-    private var itemIndex: [String: Int] = [:]
-    /// The last answer given to `onSeenStacks`.
-    private var seenStacks: Set<String>?
+    private var items: [String] = []
     private var dataSource: ChatLayoutDiffableDataSource<Int, String>?
     private weak var view: UICollectionView?
     private let layout = CollectionViewChatLayout()
@@ -377,9 +359,6 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         // https://openradar.appspot.com/40926834: prefetching keeps stale cells.
         view.isPrefetchingEnabled = false
         view.delegate = self
-        if #available(iOS 26, *) {
-            view.topEdgeEffect.style = .soft
-        }
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.
         NotificationCenter.default.addObserver(forName: PerfProbe.flingStarted, object: nil, queue: .main) { [weak self] _ in
@@ -664,31 +643,6 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let fromTop = view.contentOffset.y + view.contentInset.top
         if items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < height * 4 { askOlder() }
         readDivider(in: view)
-        readStacks()
-    }
-
-    /// Which watched stacks are at least half on screen. Only the stacks of
-    /// threads with unread replies are watched, so a transcript with none does
-    /// no work here; the rest is a handful of frames read from the layout.
-    func readStacks() {
-        guard let view else { return }
-        var seen = Set<String>()
-        if !watching.isEmpty {
-            let top = view.contentOffset.y + view.contentInset.top
-            let bottom = view.contentOffset.y + view.bounds.height - view.contentInset.bottom
-            for (rowId, root) in watching {
-                guard let index = itemIndex[rowId],
-                      let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
-                // What shows of the stack: under the root bubble, above the room of its second layer.
-                let stackBottom = frame.maxY - ThreadStackMetrics.layerLift
-                let stackTop = stackBottom - ThreadStackMetrics.shown
-                let overlap = min(bottom, stackBottom) - max(top, stackTop)
-                if overlap >= ThreadStackMetrics.shown / 2 { seen.insert(root) }
-            }
-        }
-        guard seen != seenStacks else { return }
-        seenStacks = seen
-        onSeenStacks(seen)
     }
 
     private func askOlder() {

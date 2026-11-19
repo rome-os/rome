@@ -16,7 +16,11 @@ import {
 } from "./desktops/local-container-nodes.js";
 import { ContainerNodesRepository } from "./db/repositories/container-nodes.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
+import {
+  createGuardianLinkAdmission,
+  GuardianLinkCodes,
+  linkCode,
+} from "./people/link-code/index.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -57,7 +61,11 @@ import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
+import {
+  isGuardianSession,
+  type SessionActor,
+  withoutSessionActor,
+} from "./access/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./instance/runtime.js";
@@ -112,7 +120,7 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { PeopleRepository } from "./db/repositories/people.js";
+import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
@@ -160,8 +168,8 @@ import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
   WechatUserReader,
   WechatUserRuntime,
-} from "./connections/kinds/wechat-user/wechat-user.js";
-import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
+  wechatUser,
+} from "./connections/kinds/wechat-user/index.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -226,8 +234,10 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
-import { registerAgentNameAction } from "./people/agent-name.js";
-import { registerReadPersonAction } from "./people/read-person.js";
+import { registerAgentNameAction } from "./people/guardian-profile/index.js";
+import { personHistory } from "./people/person-history/index.js";
+import { phoneBook } from "./people/phone-book/index.js";
+import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -271,7 +281,7 @@ import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./app-host/routine-calls.js";
-import { appRoutinePauser } from "./routines/app-routine-pauser.js";
+import { appRoutinePauser, deleteRoutinesOfRemovedApps } from "./routines/app-routine-pauser.js";
 import { instanceWorkerCalls } from "./app-host/instance-calls.js";
 import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
@@ -289,6 +299,7 @@ import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
+import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
@@ -334,6 +345,7 @@ import {
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
+  getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
@@ -364,6 +376,10 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
+import type { KindMount } from "./connections/kind-mount.js";
+import { guardianOnly } from "./access/guardian-only.js";
+import { feishu } from "./connections/kinds/feishu/index.js";
+import { linkedin } from "./connections/kinds/linkedin/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -460,7 +476,7 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -481,9 +497,6 @@ async function main() {
   // The channel list and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
-  // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
-  // the same client, and needs no connection.
-  const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -797,6 +810,10 @@ async function main() {
         },
       },
     }),
+    deleteRoutines: async (appId) => {
+      const { deleted } = await routinesRepo.deleteManagedRoutines([appId]);
+      for (const id of deleted) await deactivateRoutine?.(id);
+    },
   });
   const appStore = createAppStoreService({ appCatalog });
 
@@ -910,6 +927,21 @@ async function main() {
     appCatalog,
     projectRoot: getProjectRoot(),
   });
+  // Uninstall deletes an app's managed routines. Apps removed before that rule
+  // existed, or routines kept for an active run, are deleted here.
+  try {
+    const removed = await deleteRoutinesOfRemovedApps({
+      repository: routinesRepo,
+      readLockfileEntry: (appId) => appManager.readLockfileEntry(appId),
+    });
+    if (removed.deleted + removed.kept > 0) {
+      appsLog.info("deleted routines of removed apps", removed);
+    }
+  } catch (err) {
+    appsLog.warn("could not delete routines of removed apps", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   const coreRequiredAppIds = await deriveCoreRequiredApps({ projectRoot: getProjectRoot() });
   assertCoreRequiredAppsPacked(coreRequiredAppIds, firstPartyBoot.firstPartyAppIds);
   appsLog.info("first-party apps converged at boot", {
@@ -1362,9 +1394,9 @@ async function main() {
         ),
         fallbackTimeoutMs: config.sessionHandoffFallbackTimeoutSeconds * 1_000,
         modelResolver,
-        page: async (chatId, turns, before) => {
+        page: async (chatId, limit, before) => {
           const page = await webchatRepo.getMessagesPage(chatId, {
-            limit: turns,
+            limit,
             before: before as MessagePageCursor | undefined,
           });
           return { rows: page.rows, next: page.nextCursor };
@@ -1863,19 +1895,6 @@ async function main() {
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),
-    linkedInSyncSink: refreshingAfter(
-      linkedInStoreRepo,
-      [
-        "replaceThreadParticipantMembership",
-        "upsertParticipantProfile",
-        "backfillParticipantsFromMessages",
-      ],
-      refreshLinkedInProfiles,
-    ),
-    linkedinPoll: {
-      minIntervalMs: config.linkedinPollMinMinutes * 60_000,
-      maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
-    },
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
@@ -1897,11 +1916,36 @@ async function main() {
     // The Rome Cloud-OAuth grant setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
-    // The personal WeChat connection is opt-in: its runtime exists only when
-    // config `wechatUserEnabled` is on, and its presence registers the
-    // connection. Its key recovery runs a local debugger in this container.
-    ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
+  // The kinds of connection laid out under connections/kinds/. Leaving a kind
+  // out is deleting its line.
+  const connectionKinds: KindMount[] = [
+    feishu({
+      chatSettings,
+      peopleRepo,
+      listAgents: () => agentLoader.list().map((agent) => agent.name),
+      accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
+      hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    linkedin({
+      syncSink: refreshingAfter(
+        linkedInStoreRepo,
+        [
+          "replaceThreadParticipantMembership",
+          "upsertParticipantProfile",
+          "backfillParticipantsFromMessages",
+        ],
+        refreshLinkedInProfiles,
+      ),
+      minIntervalMs: config.linkedinPollMinMinutes * 60_000,
+      maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
+    }),
+    // Offers the connection only when config `wechatUserEnabled` is on.
+    wechatUser({ ...(wechatUserRuntime ? { runtime: wechatUserRuntime } : {}), guardianOnly }),
+  ];
+  for (const kind of connectionKinds) {
+    if (kind.descriptor) connectionRegistry.register(kind.descriptor);
+  }
   // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
   const channels = channelList({
@@ -2338,7 +2382,7 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
-      wechatApp,
+      connectionKinds,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
@@ -2371,11 +2415,25 @@ async function main() {
       favorService,
       appConnections,
       systemUpgradeService,
+      releaseNotes: new ReleaseNotes({
+        baseUrl: config.releaseNotesUrl,
+        cacheDir: getReleaseNotesCacheDir(),
+      }),
       isCloudAuthEnabled,
       loginUsage: usageRecorder,
       connectionRegistry,
       setupManager,
     };
+    // Each feature serves both of its interfaces from one value: leaving one
+    // out of this list leaves it out of Rome.
+    apiDeps.features = [
+      linkCode({ ...apiDeps, isGuardian: isGuardianSession }),
+      phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
+      personHistory(apiDeps),
+    ];
+    for (const feature of apiDeps.features) {
+      for (const action of feature.actions) actionRegistry.register(action);
+    }
     internalApi = await startApi(config.internalApi, apiDeps);
   } catch (err) {
     log.warn("Failed to start internal API", {

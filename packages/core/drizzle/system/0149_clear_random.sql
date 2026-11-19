@@ -1,1 +1,0 @@
-ALTER TABLE `container_node_installations` ADD `deployment` text;

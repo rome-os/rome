@@ -30,7 +30,6 @@ function draftOf(overrides: Partial<ReplyDraft> = {}): ReplyDraft {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   };
@@ -223,7 +222,7 @@ describe("QuotedReply", () => {
     text: "Fly to Lisbon.",
   };
 
-  it("jumps to the original when the transcript holds it", () => {
+  it("goes to the original when pressed, which the chat loads when it must", () => {
     const draft = draftOf();
     render(withDraft(draft, <QuotedReply part={part} />));
 
@@ -257,13 +256,6 @@ describe("QuotedReply", () => {
     expect(quote.getAttribute("title")).toBe("Fly to Lisbon.");
   });
 
-  it("shows the snapshot without a button when the original is not loaded", () => {
-    render(withDraft(draftOf({ has: () => false }), <QuotedReply part={part} />));
-
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
-  });
-
   it("shows the snapshot without a button where the chat has no reply state", () => {
     render(<QuotedReply part={{ ...part, author: "guardian", name: "Ray" }} />);
 
@@ -273,40 +265,9 @@ describe("QuotedReply", () => {
   });
 });
 
-// History may load only a window of the chat. A quote keeps working from its
-// own snapshot and links to the original only while the window holds it.
-describe("a quote whose original is outside the loaded history", () => {
-  const part = {
-    type: "reply_to" as const,
-    messageId: "older",
-    author: "agent" as const,
-    text: "Fly to Lisbon.",
-  };
-
-  function Window({ loaded, jump }: { loaded: string[]; jump: (id: string) => void }) {
-    const draft = useReplyDraftState({
-      chatId: "chat-1",
-      sessionId: "s1",
-      messageIds: new Set(loaded),
-      jump,
-      focusComposer: () => {},
-    });
-    return withDraft(draft, <QuotedReply part={part} />);
-  }
-
-  it("shows the snapshot inertly, then links once older history loads", () => {
-    const jump = rs.fn();
-    const { rerender } = render(<Window loaded={["newer"]} jump={jump} />);
-
-    expect(screen.queryByRole("button")).toBeNull();
-    fireEvent.click(screen.getByText("Fly to Lisbon."));
-    expect(jump).not.toHaveBeenCalled();
-
-    rerender(<Window loaded={["older", "newer"]} jump={jump} />);
-    fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
-    expect(jump).toHaveBeenCalledWith("older");
-  });
-
+// History may load only a window of the chat, so a quote may name a message
+// the transcript does not draw yet.
+describe("the anchor of a quoted message", () => {
   it("finds no anchor for a message the transcript does not draw", () => {
     const root = document.createElement("div");
     root.innerHTML = '<div data-timeline-anchor="newer a2 a3"></div>';

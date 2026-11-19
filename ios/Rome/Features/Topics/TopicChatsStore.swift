@@ -162,10 +162,9 @@ final class TopicChatsStore {
 
     /// The composer's placeholder in a topic chat: "Message in <name>" once
     /// the chat has a name, as on the web. A chat with no name yet keeps
-    /// "Message", and a reply to a message reads "Reply".
-    static func composerPlaceholder(_ chat: ConciergeChat?, replying: Bool) -> String {
-        if replying { return String(localized: "Reply") }
-        return composerName(chat).map(messageIn) ?? String(localized: "Message")
+    /// "Message".
+    static func composerPlaceholder(_ chat: ConciergeChat?) -> String {
+        composerName(chat).map(messageIn) ?? String(localized: "Message")
     }
 
     /// The name the composer's placeholder shows: nil for a chat with no name yet.

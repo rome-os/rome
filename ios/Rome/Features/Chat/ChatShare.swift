@@ -70,11 +70,7 @@ final class ShareLinkSource: NSObject, UIActivityItemSource {
 final class ChatShareFlow {
     /// The turns picked; nil outside share mode.
     private(set) var selection: Set<String>? {
-        didSet {
-            if selection != oldValue { round += 1 }
-            // Share mode shows every message and no stacks: whole turns.
-            if (selection == nil) != (oldValue == nil) { chat?.shareModeChanged() }
-        }
+        didSet { if selection != oldValue { round += 1 } }
     }
     /// Goes up with every change to share mode or its picks: a create that
     /// finds it moved on stops, so Cancel never leaves a link behind.
@@ -108,11 +104,9 @@ final class ChatShareFlow {
         chat.map { ShareTurns(messages: $0.messages, rows: $0.rows) }
     }
 
-    /// Share mode, with `turn` picked. An open chat thread leaves the screen:
-    /// share mode works on the main timeline. A quoted reply and its draft
-    /// stay as they are.
+    /// Share mode, with `turn` picked. A quoted reply and its draft stay as
+    /// they are.
     func begin(turn: String?) {
-        if chat?.thread != nil { chat?.hideThread() }
         selection = turn.map { [$0] } ?? []
         error = nil
     }

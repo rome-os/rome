@@ -11,7 +11,7 @@ import type { Accounts } from "../accounts/accounts.js";
 import type { Channel, Channels } from "./connected-account.js";
 import { type ChannelOf, connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
 import { linkedInMessages } from "../history/linkedin-messages.js";
-import type { WechatUserReader } from "../../connections/kinds/wechat-user/wechat-user.js";
+import type { WechatUserReader } from "../../connections/kinds/wechat-user/index.js";
 import {
   WECHAT_USER_CHANNEL,
   wechatUserAccounts,

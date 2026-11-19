@@ -14,7 +14,6 @@ import {
   type MessageStatusEvent,
 } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
-import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
@@ -45,7 +44,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
-import { taskChatPlace } from "./task-chat.js";
+import { type TaskChatMessages, taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -54,7 +53,6 @@ import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../w
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
-import { defaultReplyTarget } from "./reply-target.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -254,7 +252,7 @@ export interface ConciergeDeps {
   /** Each task's repeating schedule. Absent, no task has one. */
   schedules?: TaskSchedules;
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
-  messages: Pick<MessageRepository, "recent" | "before">;
+  messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<Sessions, "find">;
@@ -1161,9 +1159,9 @@ export class ConciergeService {
 
   /**
    * Says a card the Concierge shows, which replies as its messages do: to the
-   * message `named`, else to the turn's default (reply-target.ts). A name that
-   * is no message of the chat is dropped, not refused: the guardian was shown
-   * the card already. A card is a message of its own, so it carries no quote.
+   * message `named`, if it names one. A name that is no message of the chat is
+   * dropped, not refused: the guardian was shown the card already. A card is a
+   * message of its own, so it carries no quote.
    */
   async addCard(
     chatId: string,
@@ -1173,13 +1171,11 @@ export class ConciergeService {
   ): Promise<string> {
     const { webchatRepo } = this.deps;
     const target = named ? await webchatRepo.getReplyTarget(chatId, named) : null;
-    const key = target ? undefined : await defaultReplyTarget(this, chatId, turnId);
-    const replyTo = target ?? (key ? await webchatRepo.getReplyTarget(chatId, key) : null);
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
       turnId,
       [part],
-      replyTo ? { replyTo: replyTo.id } : {},
+      target ? { replyTo: target.id } : {},
     );
     return id;
   }

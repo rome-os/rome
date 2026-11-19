@@ -18,6 +18,9 @@ private func message(
 
 private func text(_ value: String) -> [String: Any] { ["type": "text", "content": value] }
 
+/// What a reply to the guardian's message `original` starts with.
+private func replying(to original: String) -> [String: Any] { ["type": "reply_to", "messageId": original, "author": "guardian", "text": "hi"] }
+
 @Suite struct MessagePartTests {
     @Test func parsesTextFormatsAndForwardedOrigin() {
         let parts = MessagePart.parse(json([
@@ -67,22 +70,39 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 }
 
 @Suite struct TranscriptBuilderTests {
-    @Test func agentRunGetsFirstAndLastCornersAcrossCards() {
-        let rows = TranscriptBuilder.rows(
-            messages: [
-                message("u", role: "user", [text("hi")], at: 0),
-                message("a1", [text("one")], at: 10),
-                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
-                message("a2", [text("two")], at: 12),
-            ],
-            pending: [], answers: [:], options: .init()
-        )
-        let positions = rows.compactMap { row -> BubblePosition? in
+    private func positions(_ rows: [TranscriptRow]) -> [BubblePosition] {
+        rows.compactMap { row -> BubblePosition? in
             if case .agentText(_, _, _, _, let position) = row { return position }
             return nil
         }
-        #expect(positions == [.first, .last])
-        if case .separator = rows.first {} else { Issue.record("expected a leading separator") }
+    }
+
+    /// Replies to one message are a run, which gets first and last corners; a
+    /// card between them, which replies to nothing the app can see, ends it.
+    @Test func repliesToOneMessageGetFirstAndLastCorners() {
+        let user = message("u", role: "user", [text("hi")], at: 0)
+        let run = TranscriptBuilder.rows(
+            messages: [user, message("a1", [replying(to: "u"), text("one")], at: 10), message("a2", [replying(to: "u"), text("two")], at: 12)],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(run) == [.first, .last])
+        if case .separator = run.first {} else { Issue.record("expected a leading separator") }
+        let split = TranscriptBuilder.rows(
+            messages: [
+                user,
+                message("a1", [replying(to: "u"), text("one")], at: 10),
+                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
+                message("a2", [replying(to: "u"), text("two")], at: 12),
+            ],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(split) == [.single, .single])
+    }
+
+    /// Bubbles that reply to nothing stand apart, whoever said them.
+    @Test func bubblesThatReplyToNothingStandApart() {
+        let rows = TranscriptBuilder.rows(messages: [message("a1", [text("one")], at: 10), message("a2", [text("two")], at: 12)], pending: [], answers: [:], options: .init())
+        #expect(positions(rows) == [.single, .single])
     }
 
     @Test func aSeparatorComesAtAnHourAndNotBefore() {
@@ -276,10 +296,8 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         UnreadAtOpen.second(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
     }
 
-    private func turn(_ message: ChatMessage, _ id: String) -> ChatMessage {
-        var message = message
-        message.turnId = id
-        return message
+    private func opened(_ messages: [ChatMessage], mark markSeconds: TimeInterval) -> UnreadAtOpen.Snapshot {
+        UnreadAtOpen.Snapshot(mark: mark(markSeconds), through: UnreadAtOpen.newest(in: messages))
     }
 
     @Test func onlyAgentMessagesAfterTheMarksSecondAreUnread() {
@@ -288,7 +306,8 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
             message("same", [text("read")], at: 10.4),
             message("later", [text("new")], at: 11),
         ]
-        #expect(UnreadAtOpen.unread(messages, mark: mark(10)) == ["later"])
+        let summary = UnreadAtOpen.summary(in: messages, at: opened(messages, mark: 10), hasOlder: false)
+        #expect(summary == UnreadSummary(firstId: "later", count: 1, more: false))
     }
 
     @Test func theLineGoesAboveTheFirstUnreadMessageThatDrawsSomething() {
@@ -297,34 +316,54 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
             message("blank", [text("  ")], at: 20),
             message("a2", [text("new")], at: 21),
         ]
-        let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
-        #expect(UnreadAtOpen.summary(in: messages, unread: [], hasOlder: false) == nil)
-        #expect(UnreadAtOpen.summary(in: messages, unread: ["blank"], hasOlder: false) == nil)
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
+        // Nothing was unread when the chat held nothing newer than the mark.
+        #expect(UnreadAtOpen.summary(in: messages, at: opened([], mark: 10), hasOlder: false) == nil)
     }
 
     @Test func anUnreadRunThatMayStartOnAnOlderPageWaitsForIt() {
         let messages = [
-            turn(message("q", role: "user", [text("go")], at: 0), "t1"),
-            turn(message("r1", [text("new")], at: 30), "t1"),
-            turn(message("r2", [text("new too")], at: 40), "t2"),
+            message("q", role: "user", [text("go")], at: 20),
+            message("r1", [text("new")], at: 30),
+            message("r2", [text("new too")], at: 40),
         ]
-        let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
-        // The oldest loaded turn has nothing unread: the run starts here.
-        let read = [turn(message("old", [text("read")], at: 5), "t0")] + messages.dropFirst()
-        #expect(UnreadAtOpen.summary(in: Array(read), unread: unread, hasOlder: true)?.firstId == "r1")
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
+        // The oldest loaded message is read: the run starts here.
+        let read = [message("old", [text("read")], at: 5)] + messages
+        #expect(UnreadAtOpen.summary(in: read, at: open, hasOlder: true)?.firstId == "r1")
+    }
+
+    /// A trace comes with the page of its turn and may be older than every
+    /// message on it: it does not end the search for the first unread one.
+    @Test func aTraceOlderThanTheLoadedMessagesDoesNotEndTheRun() {
+        var trace = message("trace", [text("[]")], at: 0)
+        trace.role = "trace"
+        let messages = [trace, message("r1", [text("new")], at: 30), message("r2", [text("new too")], at: 40)]
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.newest(in: messages) == mark(40))
+        #expect(UnreadAtOpen.newest(in: []) == Int.min)
+    }
+
+    /// A message made after the newest one the chat opened with arrived live.
+    @Test func aMessageMadeAfterTheOpeningHistoryIsNeverUnread() {
+        let opening = [message("r1", [text("new")], at: 30)]
+        let open = opened(opening, mark: 10)
+        let later = opening + [message("live", [text("just now")], at: 50)]
+        #expect(UnreadAtOpen.summary(in: later, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 1, more: false))
     }
 
     @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {
         let messages = [
-            message("a1", [text("one")], at: 60 * 90),
-            message("a2", [text("two")], at: 60 * 90 + 10),
-            message("a3", [text("three")], at: 60 * 90 + 20),
+            message("a1", [replying(to: "u"), text("one")], at: 60 * 90),
+            message("a2", [replying(to: "u"), text("two")], at: 60 * 90 + 10),
+            message("a3", [replying(to: "u"), text("three")], at: 60 * 90 + 20),
         ]
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(unreadFrom: "a2"))
-        #expect(rows.map(\.id) == ["sep-a1", "a1:0", "unread-divider", "a2:0", "a3:0"])
+        #expect(rows.map(\.id) == ["sep-a1", "a1:1", "unread-divider", "a2:1", "a3:1"])
         let positions = rows.compactMap { row -> BubblePosition? in
             if case .agentText(_, _, _, _, let position) = row { return position }
             return nil
@@ -332,7 +371,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(positions == [.single, .first, .last])
 
         let after = TranscriptBuilder.rows(messages: [message("old", [text("x")], at: 0)] + messages, pending: [], answers: [:], options: .init(unreadFrom: "a1"))
-        #expect(after.map(\.id).prefix(5) == ["sep-old", "old:0", "sep-a1", "unread-divider", "a1:0"])
+        #expect(after.map(\.id).prefix(5) == ["sep-old", "old:0", "sep-a1", "unread-divider", "a1:1"])
     }
 
     @Test func noLineForAMessageTheChatDoesNotDraw() {
