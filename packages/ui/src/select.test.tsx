@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsIcon } from "lucide-react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select.js";
@@ -137,7 +137,7 @@ describe("SelectContent", () => {
       trigger.focus();
       fireEvent.keyDown(trigger, { key: "ArrowDown" });
       await waitFor(() => expect(shadowRoot.activeElement?.textContent).toBe("Selected"));
-      const list = shadowRoot.querySelector('[role="listbox"]');
+      const list = shadowRoot.querySelector<HTMLElement>('[role="listbox"]');
       expect(list?.contains(shadowRoot.activeElement)).toBe(true);
 
       for (const [key, expected] of [
@@ -149,6 +149,9 @@ describe("SelectContent", () => {
         fireEvent.keyDown(shadowRoot.activeElement!, { key });
         await waitFor(() => expect(shadowRoot.activeElement?.textContent).toBe(expected));
       }
+
+      await act(async () => list?.focus());
+      expect(shadowRoot.activeElement).toBe(list);
 
       fireEvent.keyDown(shadowRoot.activeElement!, { key: "Escape" });
       await waitFor(() => expect(shadowRoot.activeElement).toBe(trigger));
