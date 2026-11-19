@@ -29,6 +29,9 @@ actions:
   # Finds and removes the defer that watches a task row (see Task list).
   - system:search_routine
   - system:delete_routine
+  # Checks whether a routine ran, failed or is due, and what a run did.
+  - core:routine_runs_list
+  - core:routine_run_read
   # Follows things for the guardian and tells them about events (see Following).
   - core:concierge_follow
   - core:concierge_unfollow
