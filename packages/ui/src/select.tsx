@@ -81,11 +81,45 @@ function SelectTrigger({
   );
 }
 
+const enabledOption = '[role="option"]:not([data-disabled])';
+
+function moveShadowSelectFocus(event: React.KeyboardEvent<HTMLDivElement>) {
+  const { currentTarget, key } = event;
+  const root = currentTarget.getRootNode();
+  if (!(root instanceof ShadowRoot) || !["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) {
+    return;
+  }
+
+  // Radix sees the shadow host as document.activeElement and focuses every candidate.
+  event.preventDefault();
+  const options = Array.from(currentTarget.querySelectorAll<HTMLElement>(enabledOption));
+  const index = options.findIndex((option) => option === root.activeElement);
+  let next: HTMLElement | undefined;
+  switch (key) {
+    case "ArrowDown":
+      next = options[index + 1];
+      break;
+    case "ArrowUp":
+      next = index < 0 ? options.at(-1) : options[index - 1];
+      break;
+    case "Home":
+      next = options[0];
+      break;
+    case "End":
+      next = options.at(-1);
+      break;
+  }
+  next?.scrollIntoView({ block: "nearest" });
+  next?.focus({ preventScroll: true });
+}
+
 function SelectContent({
   className,
   children,
   position = "item-aligned",
   align = "center",
+  onFocus,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
@@ -101,6 +135,26 @@ function SelectContent({
         )}
         position={position}
         align={align}
+        onFocus={(event) => {
+          const { currentTarget, target } = event;
+          onFocus?.(event);
+          if (
+            event.defaultPrevented ||
+            target !== currentTarget ||
+            !(currentTarget.getRootNode() instanceof ShadowRoot)
+          ) {
+            return;
+          }
+          // Radix falls back to the listbox when it cannot see the selected option take focus.
+          const selected = currentTarget.querySelector<HTMLElement>(
+            `${enabledOption}[data-state="checked"]`,
+          );
+          (selected ?? currentTarget.querySelector<HTMLElement>(enabledOption))?.focus();
+        }}
+        onKeyDown={(event) => {
+          onKeyDown?.(event);
+          if (!event.defaultPrevented) moveShadowSelectFocus(event);
+        }}
         {...props}
       >
         <SelectScrollUpButton />

@@ -149,7 +149,6 @@ export const BASELINE = {
     "text-base": 1,
   },
   "rome_apps/briefing/src/web/components/ui/label.tsx": { "text-sm": 1 },
-  "rome_apps/briefing/src/web/components/ui/select.tsx": { "py-1.5": 2, "text-sm": 3 },
   "rome_apps/briefing/src/web/components/ui/textarea.tsx": { "md:text-sm": 1, "text-base": 1 },
   "rome_apps/connector/src/web/connect-card.tsx": { "py-1.5": 5, "text-sm": 10, "text-xs": 4 },
   "rome_apps/connector/src/web/login-card.tsx": {
