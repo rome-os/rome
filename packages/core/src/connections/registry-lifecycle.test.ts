@@ -1110,7 +1110,11 @@ describe("disconnect takes back access at the platform", () => {
       await rs.advanceTimersByTimeAsync(9_999);
       expect(taken).toEqual([]);
       await rs.advanceTimersByTimeAsync(1);
-      expect(await ended).toEqual({});
+      // The renewal may yet mint a token the take-back never saw.
+      expect(await ended).toEqual({
+        notTakenBack:
+          "a renewal of the token was still running, so a token it mints may still work",
+      });
       expect(taken).toEqual([{ accessToken: "initial-user-token" }]);
       expect(registry.find("fake-oauth-provider")).toHaveLength(0);
     } finally {
@@ -1205,6 +1209,50 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
+  it("keeps a connection whose access it took back broken and stopped when the delete fails", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    let builds = 0;
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      capabilities: {
+        talker: {
+          build(cred) {
+            builds++;
+            return makeFakeTalker(cred);
+          },
+        },
+      },
+      onDisconnect: async () => {},
+    });
+    try {
+      const conn = await registry.connect("fake-oauth-provider");
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
+      expect(builds).toBe(1);
+      const remove = ledger.remove.bind(ledger);
+      ledger.remove = () => {
+        throw new Error("disk full");
+      };
+
+      await expect(registry.disconnect(conn.id)).rejects.toThrow("disk full");
+
+      // The platform no longer honours the credential, so nothing uses it.
+      expect(builds).toBe(1);
+      expect(conn.isUnlocked("chat")).toBe(false);
+      expect(conn.auth.grants().user).not.toBe("authorized");
+      // The guardian can disconnect again.
+      ledger.remove = remove;
+      await registry.disconnect(conn.id);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
   async function withTransport(
     stop: () => Promise<void>,
     events: string[],
@@ -1242,6 +1290,32 @@ describe("disconnect takes back access at the platform", () => {
     try {
       await registry.disconnect(conn.id);
       expect(events).toEqual(["drained", "taken back"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("waits for a transport an earlier rebuild retired before the kind takes back its access", async () => {
+    const events: string[] = [];
+    let stops = 0;
+    const { registry, conn, close } = await withTransport(async () => {
+      stops++;
+      if (stops === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        events.push("retired drained");
+      }
+    }, events);
+    try {
+      // A new credential rebuilds the transport; the old one drains alone.
+      const { userCredential } = makeCustodyGrant();
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", {
+        ...userCredential(),
+        material: { accessToken: "renewed-user-token" },
+      });
+      expect(stops).toBe(1);
+
+      await registry.disconnect(conn.id);
+      expect(events).toEqual(["retired drained", "taken back"]);
     } finally {
       close();
     }

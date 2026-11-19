@@ -790,6 +790,36 @@ describe("DELETE /connections/:id", () => {
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
   });
 
+  it("takes back a kind's access at the platform, and warns when that failed", async () => {
+    const ledger = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const fixture = makePasteTalkWithProfile();
+    const taken: unknown[] = [];
+    registry.register({
+      ...fixture.descriptor,
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+        throw new Error("platform unreachable");
+      },
+    });
+    const conn = await registry.connect("fake-telegram", "Telegram");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+
+    const res = await makeApp(registry).request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+
+    expect(res.status).toBe(200);
+    expect(taken).toHaveLength(1);
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning:
+        "Disconnected in Rome, but the service may still hold Rome's access: platform unreachable. Remove Rome there too.",
+    });
+    expect(await ledger.all()).toEqual([]);
+  });
+
   it("404s an unknown connection and rejects cross-site requests", async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makePasteTalk().descriptor);
