@@ -192,6 +192,8 @@ export async function readDiscordHistory(
   const found: WireMessage[] = [];
   let from: bigint | null = forward ? lower : upper;
   const pages = Math.ceil(read.limit / PAGE) + SPARE_PAGES;
+  // Whether the read reached the end of the history or one of its bounds.
+  let ended = false;
   for (let request = 0; found.length < read.limit && request < pages; request++) {
     // A whole page each time: messages no read answers are dropped after it.
     const query = new URLSearchParams({ limit: String(PAGE) });
@@ -207,8 +209,22 @@ export async function readDiscordHistory(
     const bounded = ordered.filter((message) => inside(BigInt(message.id)));
     found.push(...bounded.filter((message) => READ_TYPES.has(message.type)));
     const last = ordered.at(-1);
-    if (!last || page.length < PAGE || bounded.length < ordered.length) break;
+    if (!last || page.length < PAGE || bounded.length < ordered.length) {
+      ended = true;
+      break;
+    }
     from = BigInt(last.id);
+  }
+  // A short page reads as the end of the history, so a read the page cap cut
+  // short says where to read on rather than pass for one.
+  if (!ended && found.length < read.limit) {
+    const resume = `${forward ? "newerThan" : "olderThan"}=${from}`;
+    const before = found.length
+      ? ` The ${found.length} messages read before that point are read with limit ${found.length}.`
+      : "";
+    throw new Error(
+      `Stopped after ${pages} pages of messages no read answers, such as joins and pins, in Discord chat ${chatId}. Read on with ${resume}.${before}`,
+    );
   }
   const page = found.slice(0, read.limit);
   return (forward ? page.reverse() : page).map((message) =>

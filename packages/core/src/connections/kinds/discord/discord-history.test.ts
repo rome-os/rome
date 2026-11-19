@@ -208,12 +208,14 @@ describe("readDiscordHistory", () => {
     expect(calls).toEqual([`/channels/${CHAT}`]);
   });
 
-  it("asks for whole pages and stops after a few spare ones in a chat of system messages", async () => {
+  it("asks for whole pages, and says where to read on after a few spare ones of system messages", async () => {
     const joins = Array.from({ length: 1000 }, (_, n) => said(n, { type: 7 }));
     const { get, calls } = discord({ [CHAT]: { channel: textChannel, messages: joins } });
 
-    await expect(readDiscordHistory(deps(get), CHAT, { limit: 1 })).resolves.toEqual([]);
-    // One page the limit needs, and five spare.
+    // One page the limit needs, and five spare, then where to read on.
+    await expect(readDiscordHistory(deps(get), CHAT, { limit: 1 })).rejects.toThrow(
+      `Read on with olderThan=${idAt(400)}.`,
+    );
     expect(calls.filter((call) => call.includes("/messages"))).toHaveLength(6);
   });
 
