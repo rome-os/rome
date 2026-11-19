@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { LinkCodeResponse } from "@rome/api-types/people";
 import { runWithSessionActor, type SessionActor } from "../../../access/session-actor.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../../test/helpers.js";
-import { peopleRoutes } from "./phone-book/people.js";
+import { linkCodeRoutes } from "./link-code.js";
 
 // POST /people/link-code: a redeemed code makes its sender the guardian, so the
 // route hands one only to the guardian, on the dashboard's own origin.
@@ -21,7 +21,7 @@ describe("People link code API", () => {
   function appAs(actor: SessionActor): Hono {
     const app = new Hono();
     app.use("*", (_c, next) => runWithSessionActor(actor, next));
-    return app.route("/", peopleRoutes(deps));
+    return app.route("/", linkCodeRoutes(deps));
   }
   const guardian: SessionActor = { kind: "guardian", userId: "owner", via: "cookie" };
   const sameOrigin = { method: "POST", headers: { "sec-fetch-site": "same-origin" } };

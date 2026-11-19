@@ -16,6 +16,7 @@ import {
 } from "../../../test/helpers.js";
 import { seedBaseline } from "../../../test/seeds.js";
 import { peopleRoutes } from "./phone-book/people.js";
+import { personHistoryRoutes } from "./person-history.js";
 
 const MEMBER = "ACoAARecipient";
 const SELF = "ACoAAOwner";
@@ -73,7 +74,7 @@ describe("LinkedIn replies through People", () => {
       bondLevel: "acquaintance",
       links: [{ platform: "linkedin", id: MEMBER }],
     });
-    app = new Hono().route("/", peopleRoutes(deps));
+    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
   });
 
   afterEach(() => db.close());
