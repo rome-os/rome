@@ -16,6 +16,7 @@ import {
   CredentialRejected,
   makeCustodyGrant,
   makeFakeTalker,
+  makeFakeWatcher,
   makeGatedWatch,
   makePasteTalk,
   makeRenewableAct,
@@ -1074,6 +1075,50 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
+  it("takes back what it holds when a renewal a fault started never answers", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    let talker: ReturnType<typeof makeFakeTalker> | undefined;
+    const taken: unknown[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      auth: { ...descriptor.auth, renew: () => new Promise<Credential>(() => {}) },
+      capabilities: {
+        talker: {
+          build(cred) {
+            talker = makeFakeTalker(cred);
+            return talker;
+          },
+        },
+      },
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+      },
+    });
+    try {
+      const conn = await registry.connect("fake-oauth-provider");
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
+      rs.useFakeTimers();
+      talker?.state.fault?.(new CredentialRejected());
+      await rs.advanceTimersByTimeAsync(0);
+
+      const ended = registry.disconnect(conn.id);
+      await rs.advanceTimersByTimeAsync(9_999);
+      expect(taken).toEqual([]);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(await ended).toEqual({});
+      expect(taken).toEqual([{ accessToken: "initial-user-token" }]);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      rs.useRealTimers();
+      close();
+    }
+  });
+
   it("counts resolving the material in the 10s, and never calls the kind after", async () => {
     const { ledger, close } = makeLedger();
     const { descriptor, externalCredential } = makeExternalCustody();
@@ -1160,7 +1205,11 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
-  async function withTransport(stop: () => Promise<void>, events: string[]) {
+  async function withTransport(
+    stop: () => Promise<void>,
+    events: string[],
+    watcherStop?: () => void,
+  ) {
     const { ledger, close } = makeLedger();
     const { descriptor, userCredential } = makeCustodyGrant();
     const registry = new ConnectionRegistry({
@@ -1171,6 +1220,9 @@ describe("disconnect takes back access at the platform", () => {
       ...descriptor,
       capabilities: {
         talker: { build: (cred) => ({ ...makeFakeTalker(cred), stop }) },
+        ...(watcherStop
+          ? { watcher: { build: (cred) => ({ ...makeFakeWatcher(cred), stop: watcherStop }) } }
+          : {}),
       },
       onDisconnect: async () => {
         events.push("taken back");
@@ -1190,6 +1242,27 @@ describe("disconnect takes back access at the platform", () => {
     try {
       await registry.disconnect(conn.id);
       expect(events).toEqual(["drained", "taken back"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("stops every capability before waiting on any one of them", async () => {
+    const events: string[] = [];
+    const { registry, conn, close } = await withTransport(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        events.push("chat drained");
+      },
+      events,
+      () => {
+        events.push("watch stopped");
+      },
+    );
+    try {
+      await registry.disconnect(conn.id);
+      // The watch stops while the chat still drains, and both before the take-back.
+      expect(events).toEqual(["watch stopped", "chat drained", "taken back"]);
     } finally {
       close();
     }
