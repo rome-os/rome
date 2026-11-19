@@ -236,7 +236,10 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
 
   it("revokes the token at Slack, then releases the workspace at Rome Cloud", async () => {
     const { descriptor, steps } = descriptorWith(async () => {});
-    await descriptor.onDisconnect?.({ material: MATERIAL, profile: {} });
+    await descriptor.onDisconnect?.(
+      { material: MATERIAL, profile: {} },
+      { signal: new AbortController().signal },
+    );
     expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
   });
 
@@ -244,9 +247,24 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
     const { descriptor, steps } = descriptorWith(async () => {
       throw new Error("Slack API returned HTTP 503");
     });
-    await expect(descriptor.onDisconnect?.({ material: MATERIAL, profile: {} })).rejects.toThrow(
-      "Slack did not revoke Rome's token (Slack API returned HTTP 503)",
-    );
+    await expect(
+      descriptor.onDisconnect?.(
+        { material: MATERIAL, profile: {} },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("Slack did not revoke Rome's token (Slack API returned HTTP 503)");
+    expect(steps).toEqual(["revoke xoxb-a"]);
+  });
+
+  it("releases nothing once the disconnect has stopped waiting", async () => {
+    const stop = new AbortController();
+    const { descriptor, steps } = descriptorWith(async () => {
+      // Slack answers after the disconnect's limit.
+      stop.abort();
+    });
+    await expect(
+      descriptor.onDisconnect?.({ material: MATERIAL, profile: {} }, { signal: stop.signal }),
+    ).rejects.toThrow("Rome stopped waiting before releasing the workspace");
     expect(steps).toEqual(["revoke xoxb-a"]);
   });
 
@@ -257,9 +275,12 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
       }),
     });
     const { descriptor } = descriptorWith(async () => {}, c);
-    await expect(descriptor.onDisconnect?.({ material: MATERIAL, profile: {} })).rejects.toThrow(
-      "Rome Cloud did not release the workspace",
-    );
+    await expect(
+      descriptor.onDisconnect?.(
+        { material: MATERIAL, profile: {} },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("Rome Cloud did not release the workspace");
   });
 
   it("counts a token Slack already refuses as revoked", async () => {

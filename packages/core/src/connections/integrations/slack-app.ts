@@ -244,15 +244,18 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     // two, the workspace stays bound with a dead token: the connection reads
     // broken, and a second disconnect, which takes a refused token as
     // revoked, finishes the release.
-    async onDisconnect({ material: record }) {
+    async onDisconnect({ material: record }, { signal }) {
       const material = materialOf(record);
       try {
-        await deps.api.revoke(material.botToken);
+        await deps.api.revoke(material.botToken, signal);
       } catch (error) {
         throw new Error(`Slack did not revoke Rome's token (${describe(error)})`);
       }
+      // Past the disconnect's wait, the workspace may be connected again, and
+      // releasing it now would release that connection.
+      if (signal.aborted) throw new Error("Rome stopped waiting before releasing the workspace");
       try {
-        await deps.cloud.release(material.teamId);
+        await deps.cloud.release(material.teamId, signal);
       } catch (error) {
         throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
       }

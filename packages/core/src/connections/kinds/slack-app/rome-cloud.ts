@@ -41,10 +41,15 @@ export interface SlackAppCloud {
   refreshMailbox(teamId: string): Promise<SlackAppMailbox>;
   /** Let go of the workspace, so its events go nowhere and any Rome may
    *  connect it again. Releasing one no longer bound is not an error. */
-  release(teamId: string): Promise<void>;
+  release(teamId: string, signal?: AbortSignal): Promise<void>;
 }
 
-async function post(path: string, body: unknown, fetchImpl: typeof fetch): Promise<unknown> {
+async function post(
+  path: string,
+  body: unknown,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const origin = getRomeCloudOrigin();
   if (!origin) {
     throw new SlackAppRefused("unconfigured", "This Rome is not set up to reach Rome Cloud.");
@@ -65,7 +70,9 @@ async function post(path: string, body: unknown, fetchImpl: typeof fetch): Promi
     },
     cache: "no-store",
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   const data = (await response.json().catch(() => null)) as
     | ({ error?: string; error_description?: string } & Record<string, unknown>)
@@ -121,8 +128,8 @@ export function romeCloudSlackApp(fetchImpl: typeof fetch = globalThis.fetch): S
       }
       return data.mailbox;
     },
-    async release(teamId) {
-      await post("/api/slack/app/release", { teamId }, fetchImpl);
+    async release(teamId, signal) {
+      await post("/api/slack/app/release", { teamId }, fetchImpl, signal);
     },
   };
 }
