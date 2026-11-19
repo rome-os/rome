@@ -40,6 +40,9 @@ const READ_TYPES = new Set([
 ]);
 /** A message reference that forwards rather than replies. */
 const FORWARD = 1;
+/** The flag on a message a thread was opened from; the thread's id is the
+ *  message's own. */
+const HAS_THREAD = 1 << 5;
 
 /** A Discord channel as its REST API spells it, in the fields read here. */
 export interface WireChannel {
@@ -67,6 +70,7 @@ export interface WireMessage {
   }>;
   message_reference?: { type?: number; message_id?: string; channel_id?: string };
   thread?: { id: string };
+  flags?: number;
 }
 
 /** What a read needs of Discord: a GET of a REST route. It rejects as
@@ -243,7 +247,9 @@ function toChannelMessage(
   const replyTo =
     message.type === REPLY && reference?.type !== FORWARD ? reference?.message_id : undefined;
   const openedThread =
-    message.thread?.id ?? (message.type === THREAD_CREATED ? reference?.channel_id : undefined);
+    message.thread?.id ??
+    (message.type === THREAD_CREATED ? reference?.channel_id : undefined) ??
+    ((message.flags ?? 0) & HAS_THREAD ? message.id : undefined);
   return {
     channel: "discord",
     direction: message.author.id === deps.botId ? "outbound" : "inbound",

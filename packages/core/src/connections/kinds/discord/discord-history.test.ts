@@ -123,9 +123,11 @@ describe("readDiscordHistory", () => {
       message_reference: { channel_id: THREAD },
     });
     const system = said(3, { type: 7 });
+    // Discord may flag a message HAS_THREAD without naming the thread.
+    const flagged = said(5, { flags: 32 });
     const inThread = said(4, { author: { id: BOT, username: "rome" } }, THREAD);
     const { get } = discord({
-      [CHAT]: { channel: textChannel, messages: [opener, created, system] },
+      [CHAT]: { channel: textChannel, messages: [opener, created, system, flagged] },
       [THREAD]: {
         channel: { id: THREAD, type: 11, name: "plans", parent_id: CHAT },
         messages: [inThread],
@@ -137,6 +139,7 @@ describe("readDiscordHistory", () => {
 
     // A member joining (type 7) is no message said.
     expect(chat.map((m) => [m.messageId, m.openedThread, m.text])).toEqual([
+      [flagged.id, flagged.id, "message 5"],
       [created.id, THREAD, 'started thread "plans"'],
       [opener.id, THREAD, "message 1"],
     ]);
