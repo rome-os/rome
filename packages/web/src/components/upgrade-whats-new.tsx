@@ -1,13 +1,12 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ReleaseNotesRange, ReleaseNotesRangeHighlight } from "@rome/api-types/release-notes";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { cn } from "@/lib/utils";
 
-/** Highlights listed before "Show all". Breaking ones always show in full. */
+/** Highlights listed before "Show all". */
 export const COLLAPSED_ENTRIES = 5;
 
 /**
@@ -110,9 +109,13 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
   const [expanded, setExpanded] = useState(false);
   const multi = notes.releases.length > 1 || notes.status === "partial";
   const highlights = notes.highlights[highlightLanguage(i18n.language)];
-  const breaking = highlights.filter((highlight) => highlight.breaking);
-  const others = highlights.filter((highlight) => !highlight.breaking);
-  const shown = expanded ? others : others.slice(0, COLLAPSED_ENTRIES);
+  // One list. A highlight the owner may have to act on comes first, styled
+  // like the rest.
+  const ordered = [
+    ...highlights.filter((highlight) => highlight.breaking),
+    ...highlights.filter((highlight) => !highlight.breaking),
+  ];
+  const shown = expanded ? ordered : ordered.slice(0, COLLAPSED_ENTRIES);
 
   return (
     <>
@@ -123,17 +126,9 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
             : t("system.notesPartialUnknown")}
         </p>
       ) : null}
-      {breaking.length > 0 ? (
-        <Alert variant="warning">
-          <AlertTitle>{t("system.notesBreaking")}</AlertTitle>
-          <AlertDescription>
-            <HighlightList highlights={breaking} withVersion={multi} />
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {shown.length > 0 ? <HighlightList highlights={shown} withVersion={false} /> : null}
+      {shown.length > 0 ? <HighlightList highlights={shown} /> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {others.length > COLLAPSED_ENTRIES ? (
+        {ordered.length > COLLAPSED_ENTRIES ? (
           <Button
             variant="link"
             size="sm"
@@ -143,7 +138,7 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
           >
             {expanded
               ? t("system.notesShowFewer")
-              : t("system.notesShowAll", { count: others.length })}
+              : t("system.notesShowAll", { count: ordered.length })}
           </Button>
         ) : null}
         {/* Releases without highlights add nothing above; this link covers them. */}
@@ -155,21 +150,12 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
   );
 }
 
-function HighlightList({
-  highlights,
-  withVersion,
-}: {
-  highlights: ReleaseNotesRangeHighlight[];
-  withVersion: boolean;
-}) {
+function HighlightList({ highlights }: { highlights: ReleaseNotesRangeHighlight[] }) {
   return (
     <ul className="flex list-disc flex-col gap-1 pl-5 text-ui">
       {highlights.map((highlight) => (
         <li key={highlight.pr} className="[overflow-wrap:anywhere]">
           {highlight.text}
-          {withVersion ? (
-            <span className="text-aux text-muted-foreground"> · {highlight.version}</span>
-          ) : null}
         </li>
       ))}
     </ul>

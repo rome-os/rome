@@ -971,7 +971,6 @@
     "notesOnGitHub": "在 GitHub 查看发行说明",
     "notesPartial": "{{version}} 之前版本的说明不可用，所以这里只列出了本次升级的一部分。",
     "notesPartialUnknown": "更早版本的说明不可用，所以这里只列出了本次升级的一部分。",
-    "notesBreaking": "不兼容的变更",
     "notesShowAll": "显示全部 {{count}} 项",
     "notesShowFewer": "收起",
     "notesSeeFull": "在 GitHub 查看完整变更",

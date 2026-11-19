@@ -129,7 +129,7 @@ describe("UpgradeWhatsNew", () => {
     ).toBe("https://github.com/rome-os/rome/compare/v1.1.205...v1.1.210");
   });
 
-  it("shows every breaking highlight with its version, and five others until Show all", async () => {
+  it("lists every highlight alike, breaking ones first, five until Show all", async () => {
     const many = (prefix: string, n: number, breaking: boolean) =>
       Array.from({ length: n }, (_, i) => ({
         text: `${prefix} ${i + 1}`,
@@ -137,7 +137,7 @@ describe("UpgradeWhatsNew", () => {
         version: "1.1.210",
         breaking,
       }));
-    const en = [...many("Change", 8, false), ...many("Act", 6, true)];
+    const en = [...many("Change", 6, false), ...many("Act", 2, true)];
     backend(() => ({
       status: 200,
       body: range({
@@ -151,13 +151,17 @@ describe("UpgradeWhatsNew", () => {
     renderNotes("1.1.208", "1.1.210");
     const user = userEvent.setup();
 
-    expect(await screen.findByText("Breaking changes")).toBeTruthy();
-    expect(screen.getAllByText(/^Act \d$/)).toHaveLength(6);
-    expect(screen.getAllByText("· 1.1.210").length).toBeGreaterThanOrEqual(6);
-    expect(screen.getAllByText(/^Change \d$/)).toHaveLength(5);
+    const list = await screen.findByRole("list");
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Act 1", "Act 2", "Change 1", "Change 2", "Change 3"]);
+    expect(screen.queryByText("Breaking changes")).toBeNull();
+    expect(screen.queryByText(/· 1\.1\.210/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Show all 8" }));
-    expect(screen.getAllByText(/^Change \d$/)).toHaveLength(8);
+    expect(within(screen.getByRole("list")).getAllByRole("listitem")).toHaveLength(8);
     expect(screen.getByRole("button", { name: "Show fewer" })).toBeTruthy();
   });
 

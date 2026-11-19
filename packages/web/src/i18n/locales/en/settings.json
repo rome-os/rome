@@ -971,7 +971,6 @@
     "notesOnGitHub": "Release notes on GitHub",
     "notesPartial": "Notes for releases before {{version}} are not available, so this list covers part of the upgrade.",
     "notesPartialUnknown": "Notes for earlier releases are not available, so this list covers part of the upgrade.",
-    "notesBreaking": "Breaking changes",
     "notesShowAll": "Show all {{count}}",
     "notesShowFewer": "Show fewer",
     "notesSeeFull": "See full changes on GitHub",
