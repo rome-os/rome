@@ -347,6 +347,55 @@ describe("Slack app mailbox key", () => {
       await t.adapter.stop();
     }));
 
+  it("lets the old drain finish its message before the renewed drain opens", () =>
+    withClock(async () => {
+      const first = keyExpiringAt(NOW + 8 * DAY, "first");
+      const second = keyExpiringAt(NOW + 98 * DAY, "second");
+      let releaseName!: () => void;
+      const nameHeld = new Promise<void>((resolve) => {
+        releaseName = resolve;
+      });
+      const order: string[] = [];
+      let inFlight: Promise<unknown> = Promise.resolve();
+      // Like the relay drainer, stopping waits for the delivery in flight.
+      const open: OpenMailbox = (mailbox, onFrame) => {
+        order.push(`open ${mailbox.drainKey.split(".")[1]}`);
+        if (mailbox.drainKey === first) inFlight = onFrame(frame(dmEvent(1)));
+        return {
+          stop: async () => {
+            await inFlight;
+            order.push(`stopped ${mailbox.drainKey.split(".")[1]}`);
+          },
+        };
+      };
+      let answer = first;
+      const a = new SlackAppAdapter({
+        channel: "slack_app",
+        botToken: "xoxb-a",
+        teamId: TEAM,
+        botUserId: BOT,
+        forwardSecret: SECRET,
+        mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: first },
+        api: fakeApi({
+          userName: rs.fn(async () => {
+            await nameHeld;
+            return { displayName: "Ouou" };
+          }),
+        }),
+        openMailbox: open,
+        refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
+      });
+      a.onInbound((message) => order.push(`delivered ${message.text}`));
+      await a.start();
+      answer = second;
+      await rs.advanceTimersByTimeAsync(DAY + 1000);
+      expect(order).toEqual(["open first"]);
+      releaseName();
+      await rs.advanceTimersByTimeAsync(0);
+      expect(order).toEqual(["open first", "delivered message 1", "stopped first", "open second"]);
+      await a.stop();
+    }));
+
   it("retries a failed renewal hourly, and reports the connection down once the key expires", () =>
     withClock(async () => {
       const key = keyExpiringAt(NOW + 7 * DAY + 2 * 60 * 60 * 1000);

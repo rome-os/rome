@@ -102,6 +102,7 @@ describe("registerBuiltinConnections", () => {
       linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
       wechatUserRuntime: {} as WechatUserRuntime,
+      slackApp: { api: {}, cloud: {}, openMailbox: () => ({ stop() {} }) },
     } as unknown as BuiltinConnectionDeps);
 
     const links = Object.fromEntries(
@@ -114,6 +115,7 @@ describe("registerBuiltinConnections", () => {
       telegram: "own_account",
       discord: "own_account",
       slack_bot: "own_account",
+      slack_app: "own_account",
       telegram_user: "delegate",
     });
     // Only a kind with a Talk can be a connected account.

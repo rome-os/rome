@@ -193,9 +193,13 @@ export class SlackAppAdapter {
       const changed = await this.refreshMailbox();
       if (signal.aborted) return;
       if (changed) {
+        // The old drain finishes the frame it is delivering before the new one
+        // opens, so a message cannot overtake the one before it.
         const old = this.drain;
-        this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+        this.drain = null;
         await old?.stop();
+        if (signal.aborted) return;
+        this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
         log.info("slack app mailbox key renewed", { teamId: this.config.teamId });
       }
       this.scheduleRenewal();
