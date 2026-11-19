@@ -410,6 +410,52 @@ enum MarkdownParser {
         return result
     }
 
+    /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
+    /// is a chip: the task chat's status mark and its current name in the tint
+    /// of inline code, the link's text only while the name is unknown. A task
+    /// chat the chat does not know reads as plain text
+    /// (docs/domains/chats.md#task-link). SwiftUI's text cannot tint an image,
+    /// so the mark sits just before the tinted name.
+    @MainActor
+    static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?) -> Text {
+        let styled = inline(source, linksAsText: linksAsText)
+        guard !linksAsText, let tasks, source.contains(TaskLink.prefix) else { return Text(styled) }
+        var out: Text?
+        var plain = AttributedString()
+        func flush() {
+            guard !plain.characters.isEmpty else { return }
+            out = out.map { $0 + Text(plain) } ?? Text(plain)
+            plain = AttributedString()
+        }
+        for run in styled.runs {
+            guard let url = run.link, let id = TaskLink.chatId(of: url) else {
+                plain.append(styled[run.range])
+                continue
+            }
+            flush()
+            let written = String(styled[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
+            let chip = chip(id: id, written: written, tasks: tasks)
+            out = out.map { $0 + chip } ?? chip
+        }
+        flush()
+        return out ?? Text(styled)
+    }
+
+    @MainActor
+    private static func chip(id: String, written: String, tasks: TaskLinkStore) -> Text {
+        guard let info = tasks.info[id] else {
+            // Not read yet, or none of this chat's: the link's own text.
+            return Text(AttributedString(written.isEmpty ? String(localized: "Task") : written))
+        }
+        var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
+        name.foregroundColor = Palette.fg
+        name.backgroundColor = Palette.fill
+        name.link = TaskLink.url(chatId: id)
+        let mark = Text(Image(systemName: info.symbol))
+            .foregroundColor(info.status == "needs_you" ? Palette.warning : Palette.sub)
+        return Text(verbatim: " ") + mark + Text(name)
+    }
+
     /// The blocks with each image and picture set drawn as its description,
     /// so nothing is loaded.
     static func withoutImages(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
@@ -640,6 +686,8 @@ struct MarkdownText: View {
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
     @Environment(\.chatLinkOpener) private var linkOpener
+    @Environment(\.taskLinks) private var taskLinks
+    @Environment(\.openTaskChat) private var openTaskChat
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -674,7 +722,21 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in textOnly ? .discarded : (linkOpener?.run(url) ?? .systemAction) })
+        .environment(\.openURL, OpenURLAction { url in
+            if textOnly { return .discarded }
+            // A chip for a task chat opens it; the Concierge's link to one is no page.
+            if let id = TaskLink.chatId(of: url) {
+                openTaskChat?.run((chatId: id, title: taskLinks?.info[id]?.name ?? ""))
+                return .handled
+            }
+            return linkOpener?.run(url) ?? .systemAction
+        })
+        // The task chats this text names are read for their chips.
+        .task(id: source) {
+            guard let taskLinks else { return }
+            let ids = TaskLink.ids(in: source)
+            if !ids.isEmpty { taskLinks.register(ids) }
+        }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
@@ -684,7 +746,7 @@ struct MarkdownText: View {
     private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(MarkdownParser.inline(text, linksAsText: textOnly))
+            MarkdownParser.text(text, linksAsText: textOnly, tasks: taskLinks)
                 .romeFont(fontSize)
                 .lineSpacing(lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
@@ -695,7 +757,7 @@ struct MarkdownText: View {
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly)
+            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly, tasks: taskLinks)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
@@ -742,6 +804,7 @@ struct MarkdownList: View {
     let fontSize: CGFloat
     let lineSpacing: CGFloat
     var linksAsText = false
+    var tasks: TaskLinkStore?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -752,13 +815,13 @@ struct MarkdownList: View {
                         .foregroundStyle(Palette.sub)
                         .frame(minWidth: 12, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(MarkdownParser.inline(item.text, linksAsText: linksAsText))
+                        MarkdownParser.text(item.text, linksAsText: linksAsText, tasks: tasks)
                             .romeFont(fontSize)
                             .lineSpacing(lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             if case .list(let ordered, let start, let items) = child {
-                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText)
+                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText, tasks: tasks)
                             }
                         }
                     }

@@ -5,9 +5,10 @@
 import type { ConciergeService } from "./service.js";
 
 /**
- * Chat `chatId`'s tasks that have not ended, one line each with its id,
- * title, status and when a check is due, or null when it has none or is no
- * Concierge chat. The status is the one Rome derives, as `task_list` reads it.
+ * Chat `chatId`'s tasks that have not ended, one line each with its task
+ * chat's id, name, status and when a check is due, or null when it has none
+ * or is no Concierge chat. The status is the one Rome derives, as `chat_list`
+ * reads it.
  */
 export async function conciergeOpenTasks(
   service: Pick<ConciergeService, "conciergeChat" | "ownerOfChat" | "deps">,
@@ -28,14 +29,12 @@ export async function conciergeOpenTasks(
   });
   if (open.length === 0) return null;
   return open
-    .map(({ row, chat, status: of }) =>
+    .map(({ row, status: of }) =>
       [
         `- ${row.id} · ${row.title} · ${of.status}`,
         of.status === "later" && of.laterAt !== null && Number.isFinite(of.laterAt)
           ? ` · check due ${new Date(of.laterAt).toISOString()}`
           : "",
-        chat ? ` · task chat ${chat.id}` : "",
-        row.summary ? `\n  ${row.summary}` : "",
       ].join(""),
     )
     .join("\n");

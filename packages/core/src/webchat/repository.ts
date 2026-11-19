@@ -2542,33 +2542,6 @@ export class WebChatRepository {
     return n === 0 ? 0 : n + THROUGH_CONTEXT_MESSAGES;
   }
 
-  /**
-   * The assistant messages of chat `sessionId` that hold a task chat part,
-   * in the order they were said: where a task's card can show. From `since`
-   * on, when given.
-   */
-  async taskChatPartMessages(
-    sessionId: string,
-    since?: Date,
-  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
-    return this.db
-      .select({
-        id: romeAgentMessages.id,
-        content: romeAgentMessages.content,
-        createdAt: romeAgentMessages.createdAt,
-      })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.role, "assistant"),
-          like(romeAgentMessages.content, '%"task_chat"%'),
-          since ? gte(romeAgentMessages.createdAt, since) : undefined,
-        ),
-      )
-      .orderBy(asc(romeAgentMessages.createdAt), sql`rowid`);
-  }
-
   private selectMessages(where: SQL | undefined) {
     // In the order the rows were said, whichever turn they belong to.
     return this.db

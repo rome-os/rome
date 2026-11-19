@@ -10,6 +10,7 @@
     "./chat": "./src/chat.ts",
     "./release-notes": "./src/release-notes.ts",
     "./task-list": "./src/task-list.ts",
+    "./task-link": "./src/task-link.ts",
     "./chat-outputs": "./src/chat-outputs.ts",
     "./concierge": "./src/concierge.ts",
     "./concierge-activity": "./src/concierge-activity.ts",

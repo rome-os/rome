@@ -133,6 +133,8 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
         var state: String
         /// `HH:mm`, sorted.
         var digestTimes: [String]
+        /// When its owner's next digest comes, epoch ms. Older instances leave it out.
+        var nextAt: Double?
         var createdAt: Double?
     }
 
@@ -244,7 +246,7 @@ extension TaskListItem.Check.Body {
 }
 
 extension TaskListItem.Follow {
-    private enum CodingKeys: String, CodingKey { case source, label, target, state, digestTimes, createdAt }
+    private enum CodingKeys: String, CodingKey { case source, label, target, state, digestTimes, nextAt, createdAt }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -253,6 +255,7 @@ extension TaskListItem.Follow {
         label = c.lenient(String.self, .label) ?? source
         state = c.lenient(String.self, .state) ?? "active"
         digestTimes = c.lenient([String].self, .digestTimes) ?? []
+        nextAt = c.lenient(Double.self, .nextAt)
         createdAt = c.lenient(Double.self, .createdAt)
     }
 }
