@@ -89,6 +89,12 @@ function detectLanguage(path: string): string {
 
 interface MonacoFileEditorProps {
   path: string;
+  /**
+   * The editor model's own key, when it must differ from `path`. Monaco keeps
+   * one model per key and disposes it when an editor using it unmounts, so two
+   * editors open on one file at once each need their own.
+   */
+  modelPath?: string;
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -97,6 +103,7 @@ interface MonacoFileEditorProps {
 
 export function MonacoFileEditor({
   path,
+  modelPath,
   value,
   onBlur,
   onChange,
@@ -108,7 +115,7 @@ export function MonacoFileEditor({
 
   return (
     <Editor
-      path={path}
+      path={modelPath ?? path}
       language={language}
       value={value}
       theme={theme}

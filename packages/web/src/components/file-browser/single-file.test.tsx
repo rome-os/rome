@@ -13,7 +13,9 @@ import { FileBrowserPage } from "@/components/file-browser-page";
 
 // The editor is a heavy lazy module with nothing to say here.
 rs.mock("@/components/monaco-file-editor", () => ({
-  MonacoFileEditor: () => <div data-testid="editor" />,
+  MonacoFileEditor: ({ path, modelPath }: { path: string; modelPath?: string }) => (
+    <div data-testid="editor" data-path={path} data-model={modelPath ?? path} />
+  ),
 }));
 
 const NOTES = "projects/demo/notes.md";
@@ -109,6 +111,22 @@ describe("FileBrowserPage singleFile", () => {
     await waitFor(() =>
       expect(screen.getByRole("radio", { name: "Edit" }).getAttribute("aria-checked")).toBe("true"),
     );
+  });
+
+  it("keeps its own editor model, so closing it leaves the full browser's editor whole", async () => {
+    stubApi();
+    renderBrowser(true);
+    const single = await screen.findByTestId("editor");
+    // It saves to the file, under a model key no other browser uses.
+    expect(single.getAttribute("data-path")).toBe(NOTES);
+    expect(single.getAttribute("data-model")).toBe(`single-file/${NOTES}`);
+    cleanup();
+
+    stubApi();
+    renderBrowser(false);
+    fireEvent.click(await screen.findByRole("radio", { name: "Edit" }));
+    const full = await screen.findByTestId("editor");
+    expect(full.getAttribute("data-model")).toBe(NOTES);
   });
 
   it("keeps the tree and the file list where nothing asks for one file", async () => {

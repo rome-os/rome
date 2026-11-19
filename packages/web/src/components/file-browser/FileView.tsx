@@ -281,6 +281,7 @@ export function FileViewBody() {
   const loadingFile = useFileBrowserStore((s) => s.file.loadingFile);
   const content = useFileBrowserStore((s) => s.file.content);
   const textViewMode = useFileBrowserStore((s) => s.file.textViewMode);
+  const singleFile = useFileBrowserStore((s) => s.config.singleFile ?? false);
 
   const textPreviewKind =
     selectedFile?.kind === "text"
@@ -380,6 +381,10 @@ export function FileViewBody() {
       <div className="h-full w-full bg-surface">
         <MonacoFileEditor
           path={selectedPath}
+          // A single-file browser can sit beside the full browser on the same
+          // file, so it keeps its own editor model: closing it must not
+          // dispose the model the other editor still shows.
+          modelPath={singleFile ? `single-file/${selectedPath}` : undefined}
           value={content}
           onChange={(next) => store.getState().file.setContent(next)}
           onBlur={() => void store.getState().file.flushAutoSave()}
