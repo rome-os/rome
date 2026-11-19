@@ -997,6 +997,9 @@ describe("Slack app reads a direct message (R13)", () => {
     await a.send("D_GUARDIAN" as never, { text: "message 3" } as never);
     // The send's answer shows nothing of message 2, so it links nothing.
     expect(copy.timelineRow(TEAM, "D_GUARDIAN", reply.ts)?.prevTs ?? null).toBeNull();
+    // Nor does a read before the events come trust the copy's newest.
+    const before = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(before)).toEqual(["message 3", "message 2", "message 1"]);
 
     await mailbox.deposit(
       frame(dmEvent(2)),

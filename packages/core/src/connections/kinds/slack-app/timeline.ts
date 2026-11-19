@@ -50,7 +50,8 @@ export interface SlackTimelineDeps {
   /** The newest message heard in each direct message in this drain, by chat. */
   heads: Map<string, string>;
   /** Whether a message newer than a page's newest would be heard in this
-   *  drain: true in a direct message while a drain is open. */
+   *  drain: true in a direct message while a drain is open, unless a post the
+   *  app sent there has not come back as an event yet. */
   hearsEvery: (channelId: string) => boolean;
 }
 
@@ -118,8 +119,8 @@ export async function readTimeline(
     next = row(read.olderThan)?.prevTs ?? null;
   } else {
     // With no upper bound, the newest message heard in this drain is the
-    // chat's newest.
-    next = deps.heads.get(channelId) ?? null;
+    // chat's newest, while the drain hears every message there.
+    next = deps.hearsEvery(channelId) ? (deps.heads.get(channelId) ?? null) : null;
   }
   while (found.length < read.limit) {
     if (next === "") return found;
@@ -178,7 +179,7 @@ async function readForward(
   const until = read.until ? tsAt(read.until) : undefined;
   const since = read.since ? tsAt(read.since) : undefined;
   const found: TimelineRow[] = [];
-  const head = deps.heads.get(channelId);
+  const head = deps.hearsEvery(channelId) ? deps.heads.get(channelId) : undefined;
   let current = from;
   let known = deps.copy.timelineRow(deps.teamId, channelId, from) !== null;
   // Whether the copy reached the chat's newest message or the read's bound.

@@ -136,6 +136,10 @@ export class SlackAppAdapter {
   private readonly heads = new Map<string, string>();
   /** Whether a drain is open, so what it delivers is heard in it. */
   private draining = false;
+  /** The app's posts in each direct message that Slack has not sent back as
+   *  events yet. Until it does, the drain does not know the chat's newest
+   *  message, so a read asks Slack. */
+  private readonly unheardPosts = new Map<string, Set<string>>();
 
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
@@ -177,6 +181,7 @@ export class SlackAppAdapter {
     }
     // A new drain: what came before it is a break in every chat's timeline.
     this.heads.clear();
+    this.unheardPosts.clear();
     this.draining = true;
     this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
@@ -357,7 +362,10 @@ export class SlackAppAdapter {
     // the app hears every message, its own too, so its own post still shows
     // the drain what comes after what there; it is never handed over.
     if (event.user === this.config.botUserId) {
-      if (direct) this.noteHeard(event.channel, wire);
+      if (direct) {
+        this.noteHeard(event.channel, wire);
+        this.postHeard(event.channel, event.ts);
+      }
       return { status: 200 };
     }
     // Slack user ids are per workspace: an author from another workspace
@@ -461,6 +469,7 @@ export class SlackAppAdapter {
       // The post joins the drain's timeline from its own event, which Slack
       // sends in order with what others said: a send's answer shows nothing
       // of what was said just before it.
+      if (!threadTs) this.awaitPost(parsed.channelId, sent.ts);
       firstTs ??= sent.ts;
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
@@ -480,7 +489,8 @@ export class SlackAppAdapter {
       teamId: this.config.teamId,
       copy: this.config.copy,
       heads: this.heads,
-      hearsEvery: (channelId) => this.draining && channelId.startsWith("D"),
+      hearsEvery: (channelId) =>
+        this.draining && channelId.startsWith("D") && !this.unheardPosts.has(channelId),
       fetchPage: (channelId, bounds) =>
         this.readGate.run(
           `${channelId}:${bounds.latest ?? ""}`,
@@ -505,6 +515,19 @@ export class SlackAppAdapter {
       this.heads.delete(channelId);
       log.warn("slack app could not note a message in its timeline", { error: describe(error) });
     }
+  }
+
+  private awaitPost(channelId: string, ts: string): void {
+    if (!channelId.startsWith("D")) return;
+    const posts = this.unheardPosts.get(channelId) ?? new Set<string>();
+    posts.add(ts);
+    this.unheardPosts.set(channelId, posts);
+  }
+
+  private postHeard(channelId: string, ts: string): void {
+    const posts = this.unheardPosts.get(channelId);
+    if (!posts?.delete(ts)) return;
+    if (posts.size === 0) this.unheardPosts.delete(channelId);
   }
 
   private async fetchPage(channelId: string, latest: string | undefined) {
