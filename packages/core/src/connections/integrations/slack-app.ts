@@ -225,7 +225,43 @@ export interface SlackAppDescriptorDeps {
   instanceOrigin?: () => string;
 }
 
-export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): ConnectionDescriptor {
+/** How long a release of a workspace may run at Rome Cloud. */
+const RELEASE_LIMIT_MS = 60_000;
+
+/**
+ * `cloud`, with each release fenced off from a later connect. Rome Cloud goes
+ * on releasing after Rome stops waiting, and a release that lands after a
+ * connect bound the workspace again would release that connection. So a
+ * release runs to its end, or to {@link RELEASE_LIMIT_MS}, whoever stops
+ * waiting for it, and a connect redeems its install only once every release
+ * has ended.
+ */
+export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
+  const releasing = new Set<Promise<void>>();
+  return {
+    start: (input) => cloud.start(input),
+    refreshMailbox: (teamId) => cloud.refreshMailbox(teamId),
+    async redeem(input) {
+      await Promise.allSettled([...releasing]);
+      return cloud.redeem(input);
+    },
+    release(teamId, signal) {
+      const run = cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS));
+      const tracked: Promise<void> = run.catch(() => {}).finally(() => releasing.delete(tracked));
+      releasing.add(tracked);
+      if (!signal) return run;
+      return new Promise<void>((resolve, reject) => {
+        const stop = () => reject(signal.reason ?? new Error("Rome stopped waiting"));
+        if (signal.aborted) return stop();
+        signal.addEventListener("abort", stop, { once: true });
+        run.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+      });
+    },
+  };
+}
+
+export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): ConnectionDescriptor {
+  const deps = { ...input, cloud: fencedCloud(input.cloud) };
   const scheme = slackAppScheme();
   scheme.setup = makeSlackAppSetup({ cloud: deps.cloud, instanceOrigin: deps.instanceOrigin });
   return {
@@ -252,7 +288,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
         throw new Error(`Slack did not revoke Rome's token (${describe(error)})`);
       }
       // Past the disconnect's wait, the workspace may be connected again, and
-      // releasing it now would release that connection.
+      // releasing it now would release that connection. A release already
+      // under way holds off a connect until it ends (fencedCloud).
       if (signal.aborted) throw new Error("Rome stopped waiting before releasing the workspace");
       try {
         await deps.cloud.release(material.teamId, signal);

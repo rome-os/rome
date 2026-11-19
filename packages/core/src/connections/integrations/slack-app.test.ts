@@ -3,7 +3,12 @@ import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-clo
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
 import { createSlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupForm, SetupInteraction } from "../setup/types.js";
-import { makeSlackAppDescriptor, makeSlackAppSetup, slackAppAccountId } from "./slack-app.js";
+import {
+  fencedCloud,
+  makeSlackAppDescriptor,
+  makeSlackAppSetup,
+  slackAppAccountId,
+} from "./slack-app.js";
 
 const INSTALL: SlackAppInstall = {
   teamId: "T_A",
@@ -254,6 +259,36 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
       ),
     ).rejects.toThrow("Slack did not revoke Rome's token (Slack API returned HTTP 503)");
     expect(steps).toEqual(["revoke xoxb-a"]);
+  });
+
+  it("holds off a connect until a release Rome stopped waiting for has ended", async () => {
+    let finish = () => {};
+    const steps: string[] = [];
+    const fenced = fencedCloud(
+      cloud({
+        release: async () => {
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          steps.push("released");
+        },
+        redeem: async () => {
+          steps.push("redeemed");
+          return INSTALL;
+        },
+      }),
+    );
+    const stop = new AbortController();
+    const releasing = fenced.release("T_A", stop.signal);
+    stop.abort(new Error("no answer within 10s"));
+    await expect(releasing).rejects.toThrow("no answer within 10s");
+
+    const redeeming = fenced.redeem({ handoff: "h", codeVerifier: "v" });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(steps).toEqual([]);
+    finish();
+    await redeeming;
+    expect(steps).toEqual(["released", "redeemed"]);
   });
 
   it("releases nothing once the disconnect has stopped waiting", async () => {
