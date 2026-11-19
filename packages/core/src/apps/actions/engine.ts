@@ -155,6 +155,8 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:personal_data_query",
   // The device actions (connections/device/actions.ts). The node client that
   // calls a device lives in main.
+  "core:gmail_read",
+  "core:gmail_send",
   "core:device_describe",
   "core:device_run",
   "core:app_connection_read",
