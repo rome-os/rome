@@ -83,6 +83,14 @@ function microsOf(ts: string | undefined): bigint | undefined {
   return BigInt(match[1] ?? "0") * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
 }
 
+/** `ts` spelled as a Slack message's own, `<seconds>.<6 digits>`, so a bound
+ *  given in whole seconds reads as one. Undefined when it is not a time. */
+function slackTsOf(ts: string): string | undefined {
+  const micros = microsOf(ts);
+  if (micros === undefined) return undefined;
+  return `${micros / 1_000_000n}.${String(micros % 1_000_000n).padStart(6, "0")}`;
+}
+
 /** The message's own `ts`: a reply's id names its thread first. */
 function tsOf(messageId: string | undefined): string | undefined {
   return messageId?.slice(messageId.lastIndexOf(":") + 1);
@@ -167,7 +175,13 @@ export async function slackAppProxyCall(params: {
           return refused('Slack "conversations.history" on Rome\'s Slack app takes "channel".');
         }
         const limit = numberArg(args, "limit") ?? 100;
-        const latest = stringArg(args, "latest");
+        const latestArg = stringArg(args, "latest");
+        const latest = latestArg === undefined ? undefined : slackTsOf(latestArg);
+        if (latestArg !== undefined && latest === undefined) {
+          return refused(
+            `Slack "conversations.history" takes "latest" as a Unix time such as 1700000000.000100, not "${latestArg}".`,
+          );
+        }
         const oldest = stringArg(args, "oldest");
         const since = oldest ? instantOf(oldest) : undefined;
         const page = await channels.query(account, {

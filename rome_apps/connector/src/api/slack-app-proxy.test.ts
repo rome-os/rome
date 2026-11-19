@@ -144,6 +144,33 @@ describe("Slack's Web API through Rome's Slack app", () => {
     });
   });
 
+  it("reads a latest given in whole seconds as a Slack message time, and refuses one that is no time", async () => {
+    const service = channels();
+
+    await call(service, "/api/conversations.history", undefined, {
+      channel: "D1",
+      latest: "1700000000",
+    });
+    await call(service, "/api/conversations.history", { channel: "D1", latest: 1700000000.5 });
+    const refused = await call(service, "/api/conversations.history", undefined, {
+      channel: "D1",
+      latest: "yesterday",
+    });
+
+    expect(service.query).toHaveBeenNthCalledWith(1, APP, {
+      chatId: "D1",
+      limit: 100,
+      olderThan: "1700000000.000000",
+    });
+    expect(service.query).toHaveBeenNthCalledWith(2, APP, {
+      chatId: "D1",
+      limit: 100,
+      olderThan: "1700000000.500000",
+    });
+    expect(refused.status).toBe("error");
+    expect(service.query).toHaveBeenCalledTimes(2);
+  });
+
   it("says more history may be left whenever a page held a message, even a short one", async () => {
     const short = await call(channels(), "/api/conversations.history", undefined, {
       channel: "D1",
