@@ -23,12 +23,14 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
       "api": "http://host:port/api",
       "headers": { "cookie": "..." },  // assumed: how the verifier signs in as the guardian
       "control": { "stop": "<URL to POST, or a shell command>", "start": "..." },
-      "connect": { "kind": "slack", "grant": "default" },   // assumed
+      "connect": { "kind": "slack_app", "grant": "default" },   // grant name assumed
       "messagesPath": "/..."           // assumed: see "Recorded messages"
     }
   ]
 }
 ```
+
+The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. That env.json names no checkouts yet, so R11 takes them from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
 
 ## Fake Slack control
 

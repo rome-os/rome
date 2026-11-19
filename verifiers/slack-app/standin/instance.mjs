@@ -24,7 +24,7 @@ const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
 const server = await serve(async (req, res, url) => {
   const p = url.pathname;
-  const setupStart = p.match(/^\/api\/connections\/slack\/grants\/default\/setup$/);
+  const setupStart = p.match(/^\/api\/connections\/slack_app\/grants\/default\/setup$/);
   if (setupStart && req.method === "POST") {
     const cid = rand();
     const state = rand();

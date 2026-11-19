@@ -16,7 +16,9 @@ export function instance(inst, slackOrigin) {
 
   async function control(what) {
     const target = inst.control[what];
-    if (/^https?:\/\//.test(target)) {
+    if (Array.isArray(target)) {
+      await run(target[0], target.slice(1), { timeout: 600_000 });
+    } else if (/^https?:\/\//.test(target)) {
       const res = await json(target, { method: "POST" });
       if (!res.ok) throw new Error(`${what} ${inst.name}: ${res.status}`);
     } else {

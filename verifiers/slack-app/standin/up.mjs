@@ -168,7 +168,7 @@ const env = {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
     },
-    connect: { kind: "slack", grant: "default" },
+    connect: { kind: "slack_app", grant: "default" },
     messagesPath: "/messages",
   })),
 };
