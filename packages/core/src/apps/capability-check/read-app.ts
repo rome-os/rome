@@ -972,6 +972,12 @@ function isRouteCondition(condition: TS.Expression, literal: LiteralOf): boolean
 /** The string a literal or a `const` bound to one stands for. */
 type LiteralOf = (node: TS.Expression) => string | undefined;
 
+/** One side of an alternation of paths. */
+interface Alternative {
+  segments: Segment[];
+  root: boolean;
+}
+
 /** One path segment a condition names, at its index when the test gives one. */
 interface Segment {
   index?: number;
@@ -987,35 +993,59 @@ function describeRoute(
   conditions: TS.Expression[],
   literal: LiteralOf,
 ): Pick<RouteFacts, "method" | "path" | "unreadable" | "alternatives"> {
-  const methods = new Set<string>();
-  const slots: string[] = [];
-  let next = 0;
-  let depth = 0;
-  let root = false;
-  let opaque = false;
-  let alternatives: string[] | undefined;
-  for (const condition of conditions) {
-    const read = readCondition(condition, literal);
-    alternatives = read.alternatives ?? alternatives;
-    for (const method of read.methods) methods.add(method);
-    for (const segment of read.segments) {
-      const index = segment.index ?? next;
-      slots[index] = segment.value;
-      next = Math.max(next, index + 1);
-    }
-    depth = Math.max(depth, read.depth ?? 0);
-    root ||= read.root;
-    opaque ||= read.opaque;
-  }
-  // `path[0] === "scouts" && path.length === 2` matches `scouts/:id`.
-  const length = Math.max(depth, slots.length);
-  const path = Array.from({ length }, (_, i) => slots[i] ?? ":id")
-    .join("/")
-    .replace(/\/+/g, "/")
-    .replace(/^\/|\/$/g, "");
+  const reads = conditions.map((condition) => readCondition(condition, literal));
+  const methods = new Set(reads.flatMap((read) => read.methods));
+  const depth = Math.max(0, ...reads.map((read) => read.depth ?? 0));
+  const opaque = reads.some((read) => read.opaque);
+  // The path the route matches when one side of an alternation stands in for
+  // the first: its segments take the first side's place, among the segments
+  // of the conditions around it.
+  const pathWith = (choice?: { read: number; side: Alternative }) => {
+    const slots: string[] = [];
+    let next = 0;
+    let root = false;
+    reads.forEach((read, n) => {
+      let segments = read.segments;
+      let readRoot = read.root;
+      const first = read.alternatives?.[0];
+      if (choice && choice.read === n && first) {
+        const at = segments.findIndex((segment) => first.segments.includes(segment));
+        const rest = segments.filter((segment) => !first.segments.includes(segment));
+        segments = [
+          ...rest.slice(0, Math.max(at, 0)),
+          ...choice.side.segments,
+          ...rest.slice(Math.max(at, 0)),
+        ];
+        readRoot = choice.side.root;
+      }
+      for (const segment of segments) {
+        const index = segment.index ?? next;
+        slots[index] = segment.value;
+        next = Math.max(next, index + 1);
+      }
+      root ||= readRoot;
+    });
+    // `path[0] === "scouts" && path.length === 2` matches `scouts/:id`.
+    const length = Math.max(depth, slots.length);
+    const path = Array.from({ length }, (_, i) => slots[i] ?? ":id")
+      .join("/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/|\/$/g, "");
+    return { path, root };
+  };
+  const { path, root } = pathWith();
+  const withAlternatives = reads.findIndex((read) => read.alternatives);
+  const alternatives =
+    withAlternatives < 0
+      ? undefined
+      : (reads[withAlternatives]?.alternatives ?? []).map((side) => {
+          const chosen = pathWith({ read: withAlternatives, side });
+          return chosen.root ? "" : chosen.path;
+        });
   const method = methods.size === 0 ? "ANY" : [...methods].join("|");
+  const extra = alternatives ? { alternatives } : {};
   // `path === "" || path === "status"` serves the root among its paths.
-  if (root) return { method, path: "", ...(alternatives ? { alternatives } : {}) };
+  if (root) return { method, path: "", ...extra };
   if (path === "") {
     return {
       method,
@@ -1023,7 +1053,7 @@ function describeRoute(
       unreadable: opaque ? "a path test the reader cannot follow" : "no path test",
     };
   }
-  return { method, path, ...(alternatives ? { alternatives } : {}) };
+  return { method, path, ...extra };
 }
 
 /** What one route condition tests. */
@@ -1034,8 +1064,11 @@ function readCondition(
   methods: string[];
   segments: Segment[];
   depth?: number;
-  /** Each path an alternation (`a || b`) accepts, when the condition is one. */
-  alternatives?: string[];
+  /**
+   * The path tests of each side of an alternation (`a || b`), when the
+   * condition holds one. The first side's segments are also in `segments`.
+   */
+  alternatives?: Alternative[];
   /** The condition matches the root path. */
   root: boolean;
   /** The condition tests something against a literal, or a pattern, the reader cannot place. */
@@ -1052,7 +1085,7 @@ function readCondition(
   let root = false;
   let opaque = false;
   let patternOnPath = false;
-  let alternatives: string[] | undefined;
+  let alternatives: Alternative[] | undefined;
   const visit = (node: TS.Node) => {
     // A negated test (`!path.startsWith("x")`) excludes a path; it names none.
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
@@ -1069,7 +1102,7 @@ function readCondition(
         root ||= first.root;
         if (first.depth !== undefined) depth = first.depth;
         alternatives = operands.flatMap(
-          (o) => o.alternatives ?? [o.root ? "" : o.segments.map((sg) => sg.value).join("/")],
+          (o) => o.alternatives ?? [{ segments: o.segments, root: o.root }],
         );
         for (const o of operands) {
           methods.push(...o.methods);

@@ -583,6 +583,24 @@ declare const extra: unknown;
       ]);
     });
 
+    it("keeps enclosing segments in each path of an alternation", async () => {
+      const route =
+        'if (request.path[0] === "notes") {\n      if (request.method === "POST" && (request.path[1] === "webhook" || request.path[1] === "hook")) return createNotesRepository(null).insert("x");\n    }';
+      const files = withRoute(route, 'import { createNotesRepository } from "../db/notes.js";\n');
+      const machine = await verdictOf({
+        ...files,
+        "app.yaml": (files["app.yaml"] as string).replace(
+          "  entry: api/index\n",
+          "  entry: api/index\n  noAuth:\n    - /webhook\n    - /hook\n",
+        ),
+      });
+      // `/notes/webhook` and `/notes/hook` are not the machine paths `/webhook` and `/hook`.
+      expect(machine.gaps.map((g) => [g.rule, g.message.slice(0, 26)])).toEqual([
+        ["I3", "`POST /notes/webhook` writ"],
+        ["I1", "`POST /notes/webhook` runs"],
+      ]);
+    });
+
     it("finds a request the page makes through a shared helper", async () => {
       const gaps = await gapsOf({
         ...COMPLIANT,
