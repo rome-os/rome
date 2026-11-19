@@ -125,6 +125,9 @@ export async function startCloud({
       // Broken R7-transport: an event with a bad signature never gets an
       // answer, as if the network dropped it.
       if (breaks.has("R7-transport") && !slackSigned(req, body)) return req.socket.destroy();
+      // Broken R7-gateway: a gateway in front answers 502 to each of them.
+      if (breaks.has("R7-gateway") && !slackSigned(req, body))
+        return send(res, 502, { error: "bad gateway" });
       if (!breaks.has("R7-signature") && !slackSigned(req, body))
         return send(res, 401, { error: "bad signature" });
       const payload = JSON.parse(body);

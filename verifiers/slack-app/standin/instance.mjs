@@ -182,6 +182,15 @@ async function drainOnce() {
     db.seen.push(payload.event_id);
     const ev = payload.event;
     if (ev?.type !== "message" || ev.channel_type !== "im") continue;
+    // Broken R7-blind: an event for a workspace this instance does not hold
+    // gets a generic answer in this instance's own workspace, unrecorded.
+    if (breaks.has("R7-blind") && !db.connections.some((c) => c.team === payload.team_id)) {
+      const own = db.connections[0];
+      const state = await (await fetch(`${SLACK}/_control/state`)).json();
+      const dm = state.workspaces.find((w) => w.id === own?.team)?.members[0]?.im_channel;
+      if (dm) await post(own.botToken, dm, "Sure, done.");
+      continue;
+    }
     // Broken R7-lookup: an event for a workspace this instance does not hold
     // is looked up in Slack, then dropped with nothing recorded.
     if (breaks.has("R7-lookup") && !db.connections.some((c) => c.team === payload.team_id)) {

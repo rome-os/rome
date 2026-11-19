@@ -61,6 +61,9 @@ export async function r4(ctx) {
     : { result: "fail", reason: summary(t), evidence };
 }
 
+/** A delivery Rome Cloud itself answered: any status but none or a 5xx. */
+const conclusive = (status) => Boolean(status) && status < 500;
+
 export async function r7(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
   const ws = ctx.wsA;
@@ -82,19 +85,20 @@ export async function r7(ctx) {
   const forged = [];
   for (let i = 1; i <= 10; i++) {
     const c = code("R7F", i);
-    // A forged event Rome Cloud never answered tests nothing: the fake Slack
-    // does not retry forgeries, so send it again, up to three times.
+    // A forged event Rome Cloud never answered, or answered only through a
+    // gateway error (5xx), tests nothing: the fake Slack does not retry
+    // forgeries, so send it again, up to three times.
     const tries = [];
     for (let t = 0; t < 3; t++) {
       const sent = await ctx.slack.forged(ws.id, ws.guardian, ask(c));
       tries.push({ eventId: sent.eventId, status: sent.delivery?.status ?? null });
-      if (tries.at(-1).status) break;
+      if (conclusive(tries.at(-1).status)) break;
     }
     forged.push({ code: c, eventId: tries.at(-1).eventId, tries, status: tries.at(-1).status });
   }
-  const undelivered = forged.filter((f) => !f.status);
+  const undelivered = forged.filter((f) => !conclusive(f.status));
   if (undelivered.length)
-    partial ??= `${undelivered.length} of 10 forged events never got an answer from Rome Cloud after 3 tries, so the signature check was not exercised`;
+    partial ??= `${undelivered.length} of 10 forged events got no answer or only a 5xx after 3 tries, so the signature check was not exercised`;
   const control = await oneReply(ctx, ws, "R7C");
   // Every post in the workspace since before the forged events, wherever it
   // went: a reply to a forged event in another conversation still answers it.
@@ -147,6 +151,9 @@ export async function r7(ctx) {
       const args = JSON.stringify(c.args ?? {});
       return marks.some((k) => args.includes(k));
     });
+    // B's workspace was quiet the whole time: a post there means one of A's
+    // events reached B, even if the post names nothing of A.
+    const postsInB = await ctx.slack.posts({ team: ctx.wsB.id, since: ctx.fromA.since });
     const accountsB = await readable(() => ctx.b.slackAccounts());
     const fromAOnB = accountsB?.filter((id) => id.startsWith(`${ws.id}/`));
     // B has no session for A's direct message unless an event of A reached it.
@@ -159,12 +166,20 @@ export async function r7(ctx) {
       fromWorkspace: ws.id,
       events: ctx.fromA.eventIds,
       slackCallsBySecondInstanceAboutThem: aboutA.map((c) => c.method),
+      postsInSecondWorkspace: postsInB.map((p) => ({
+        channel: p.channel,
+        text: p.text?.slice(0, 120),
+      })),
       accountsOfWorkspaceAOnSecond: fromAOnB ?? "not readable",
       recordedBySecondInstance: reachedB?.length ?? "not readable",
     };
     if (aboutA.length)
       problems.push(
         `the instance bound to ${ctx.wsB.id} made ${aboutA.length} Slack calls about ${ws.id}'s messages`,
+      );
+    if (postsInB.length)
+      problems.push(
+        `${postsInB.length} posts appeared in ${ctx.wsB.id} while only ${ws.id} was sent messages`,
       );
     if (fromAOnB?.length)
       problems.push(

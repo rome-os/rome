@@ -101,6 +101,19 @@ const CASES = [
     what: "every forged event is dropped on the way to Rome Cloud",
   },
   {
+    name: "R7-gateway",
+    breaks: "R7-gateway",
+    rule: "R7",
+    result: "not checked",
+    what: "a gateway answers 502 to every forged event",
+  },
+  {
+    name: "R7-blind",
+    breaks: "R7-route,R7-blind",
+    rule: "R7",
+    what: "the wrong instance answers workspace A's events in its own workspace, naming nothing of A",
+  },
+  {
     name: "R6-stop-error",
     breaks: "R6-stop-error",
     rule: "R6",
