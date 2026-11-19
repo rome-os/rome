@@ -59,6 +59,9 @@ const HISTORY_INTERVAL_MS = 60 * 1000;
 const HISTORY_PAGE = 15;
 /** The longest a read holds its turn waiting for Slack's next request. */
 const HISTORY_MAX_WAIT_MS = 60 * 1000;
+/** What a search covers, as its result says. */
+export const SEARCH_COVERAGE =
+  "The direct messages of Rome's Slack app in this workspace, and the messages that mention it, as far as Rome has kept them. This is not a workspace-wide search: other channels, and messages Rome never heard or read, are left out.";
 /** Slack's refusals that mean the app may not read a conversation. */
 const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
@@ -649,6 +652,26 @@ export class SlackAppAdapter {
       }
       throw error;
     }
+  }
+
+  /**
+   * Messages whose text holds `text`, newest first, from what this connection
+   * keeps: every direct message and mention it heard, and every message of a
+   * direct message's timeline it read. It searches no further, since Slack
+   * lets the app read a conversation's history only a page of 15 a minute,
+   * and holds no search scope.
+   */
+  search(input: { text: string; chatId?: ChatId; limit: number }): {
+    messages: ChannelMessage[];
+    coverage: string;
+  } {
+    const channelId = input.chatId ? parseSlackChatId(input.chatId).channelId : undefined;
+    const messages = this.config.copy.search(this.config.teamId, {
+      text: input.text,
+      ...(channelId ? { channelId } : {}),
+      limit: input.limit,
+    });
+    return { messages, coverage: SEARCH_COVERAGE };
   }
 
   /** The direct-message conversation with a member of this workspace. */

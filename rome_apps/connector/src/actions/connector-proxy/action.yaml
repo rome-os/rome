@@ -27,6 +27,13 @@ description: |
   connected (connector_connect) first. On a 2xx response, returns { status, data,
   headers } as `data`.
 
+  Slack through Rome's own Slack app takes three methods: `/api/chat.postMessage`
+  ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
+  ({ channel, limit?, latest?, oldest? }) reads, and `/api/search.messages`
+  ({ query, count?, channel? }) searches. Search covers only what Rome has kept
+  of the app's direct messages and mentions, and its `coverage` field says so.
+  Any other Slack method is refused.
+
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never
   reads as success.

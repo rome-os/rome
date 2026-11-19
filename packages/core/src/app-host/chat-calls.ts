@@ -50,6 +50,15 @@ const QueryParams = z
   })
   .strict();
 
+const SearchParams = z
+  .object({
+    channel: AccountOrChannel,
+    text: z.string().min(1),
+    chatId: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
 const ChatRefParams = z.object({
@@ -178,6 +187,32 @@ export function chatWorkerCalls(
           ...(after ? { after } : {}),
           ...(olderThan ? { olderThan } : {}),
           ...(newerThan ? { newerThan } : {}),
+          ...(limit ? { limit } : {}),
+        }),
+      );
+    },
+    "channels.search": async (params, caller) => {
+      const { channel, text, chatId, limit } = parseWorkerCallParams(
+        "channels.search",
+        SearchParams,
+        params,
+      );
+      if (!channelsService.search) throw new Error("This Rome searches no messages");
+      const context = caller?.callerActionContext;
+      const place = context?.channelContext;
+      // A search reads what it matches, so it reads only where `query` would.
+      if (
+        !readsAnyChat(context) &&
+        (!isOwnChat(chatId, place) ||
+          (await channelNamed(channelsService, channel)) !== place?.channel)
+      ) {
+        throw new Error("A turn others read searches only the chat it is in");
+      }
+      const search = channelsService.search.bind(channelsService);
+      return await webchatCaller.run(dashboardCallerOf(context), () =>
+        search(channel, {
+          text,
+          ...(chatId ? { chatId: chatId as ChatId } : {}),
           ...(limit ? { limit } : {}),
         }),
       );

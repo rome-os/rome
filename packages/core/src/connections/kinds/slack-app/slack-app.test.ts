@@ -1373,3 +1373,45 @@ describe("Slack app reads take turns with Slack's allowance (R13)", () => {
     expect(texts(delivered)).toEqual(["message 2"]);
   });
 });
+
+describe("Slack app searches what it keeps (R9)", () => {
+  it("finds heard mentions and read direct messages, each once, newest first, and says what it covered", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1, "member");
+    slack.say(2, "bot");
+    slack.say(3, "member");
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.handleFrame(frame(dmEvent(3)));
+    await a.handleFrame(frame(mentionEvent(7)));
+    await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+
+    const found = a.search({ text: "MESSAGE", limit: 10 });
+    const mentions = a.search({ text: "question", limit: 10 });
+    const inChat = a.search({ text: "e", chatId: "D_GUARDIAN" as never, limit: 2 });
+
+    // Message 3 was both heard and read: it counts once.
+    expect(texts(found.messages)).toEqual(["message 3", "message 2", "message 1"]);
+    expect(found.messages[1]).toMatchObject({ direction: "outbound" });
+    expect(found.coverage).toContain("not a workspace-wide search");
+    expect(texts(mentions.messages)).toEqual(["question 7"]);
+    expect(inChat.messages.map((m) => m.chatId)).toEqual(["D_GUARDIAN", "D_GUARDIAN"]);
+  });
+
+  it("takes a search's wildcards as plain text", async () => {
+    const { adapter: a } = adapter(fakeMailbox());
+    await a.start();
+    await a.handleFrame(frame(dmEvent(1, { event_id: "EvA" })));
+    await a.handleFrame(
+      frame({
+        ...dmEvent(2),
+        event: { ...dmEvent(2).event, text: "50% off_today" },
+      }),
+    );
+
+    expect(texts(a.search({ text: "%", limit: 10 }).messages)).toEqual(["50% off_today"]);
+    expect(texts(a.search({ text: "f_t", limit: 10 }).messages)).toEqual(["50% off_today"]);
+    expect(a.search({ text: "x_y", limit: 10 }).messages).toEqual([]);
+  });
+});

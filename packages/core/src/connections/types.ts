@@ -57,11 +57,24 @@ export interface TalkHistory {
   read(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]>;
 }
 
+/** Searching the messages a Connection can read, which it answers its own
+ *  way: from the platform, from what it keeps, or both. */
+export interface TalkSearch {
+  /** Messages whose text holds `text`, newest first, at most `limit`, and
+   *  which messages the search covered. `limit` is already defaulted and
+   *  capped. */
+  search(input: { text: string; chatId?: ChatId; limit: number }): Promise<{
+    messages: ChannelMessage[];
+    coverage: string;
+  }>;
+}
+
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
   history: TalkHistory;
+  search: TalkSearch;
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;

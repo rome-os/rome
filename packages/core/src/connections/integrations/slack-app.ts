@@ -362,6 +362,11 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
                 }
               },
             },
+            search: {
+              async search(input) {
+                return adapter.search(input);
+              },
+            },
             directMessaging: {
               async chatFor(senderId) {
                 try {

@@ -5,6 +5,7 @@ import {
   type Action,
   type ActionConfig,
   type AppActionRuntimeDeps,
+  type ChannelsService,
 } from "@rome-os/app-runtime";
 
 import type { ProxiedResponse } from "../../api/composio-client.js";
@@ -16,6 +17,11 @@ import {
   shopifyProxyCall,
   type ShopifyOAuthToken,
 } from "../../api/shopify-proxy.js";
+import {
+  SLACK_APP_CONNECT_HINT,
+  slackAppAccount,
+  slackAppProxyCall,
+} from "../../api/slack-app-proxy.js";
 import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
 import {
   buildProxyEndpoint,
@@ -95,7 +101,10 @@ const inputSchema = z.object({
     .describe("Extra request headers as { name: value }, e.g. { 'Notion-Version': '2022-06-28' }."),
 });
 
-export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
+export function createAction(
+  config: ActionConfig,
+  deps: AppActionRuntimeDeps<{ channelsService?: ChannelsService }>,
+): Action {
   return defineAction({
     config,
     schema: inputSchema,
@@ -162,7 +171,20 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (toolkit.toLowerCase() === SLACK_TOOLKIT) {
         const tokens = await readSlackOAuthTokens();
         if (!tokens) {
-          return { status: "error", error: romeManagedConnectHint(toolkit) };
+          // No Slack sign-in: answer through Rome's own Slack app connection,
+          // which keeps its token to itself.
+          const channels = deps.channelsService;
+          const account = channels ? await slackAppAccount(channels) : null;
+          if (!channels || !account) {
+            return { status: "error", error: SLACK_APP_CONNECT_HINT };
+          }
+          return await slackAppProxyCall({
+            channels,
+            account,
+            path: new URL(endpoint).pathname,
+            body,
+            query,
+          });
         }
         try {
           const res = await slackProxyCall({ tokens, endpoint, method, body, query, headers });

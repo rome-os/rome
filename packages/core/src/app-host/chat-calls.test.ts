@@ -367,3 +367,57 @@ describe("channels.query from a turn that is not the guardian's", () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("channels.search", () => {
+  const turnIn = (audience: "private" | "shared", threadId = "chat-a") => ({
+    callerActionContext: {
+      audience,
+      channelContext: {
+        channel: "slack_app",
+        threadId,
+        threadType: "private" as const,
+        senderBondLevel: audience === "private" ? "guardian" : "other",
+      },
+    },
+  });
+
+  it("searches any chat from a private turn, and only its own chat from one others read", async () => {
+    const search = rs.fn(async () => ({ messages: [], coverage: "kept" }));
+    const calls = makeCalls({
+      channelsService: {
+        list: rs.fn(async () => []),
+        send: rs.fn(),
+        query: rs.fn(),
+        search,
+      } as never,
+    });
+
+    await calls["channels.search"]({ channel: "slack_app", text: "launch" }, turnIn("private"));
+    await calls["channels.search"](
+      { channel: "slack_app", text: "launch", chatId: "chat-a", limit: 5 },
+      turnIn("shared"),
+    );
+    await expect(
+      calls["channels.search"]({ channel: "slack_app", text: "launch" }, turnIn("shared")),
+    ).rejects.toThrow("searches only the chat it is in");
+
+    expect(search).toHaveBeenNthCalledWith(1, "slack_app", { text: "launch" });
+    expect(search).toHaveBeenNthCalledWith(2, "slack_app", {
+      text: "launch",
+      chatId: "chat-a",
+      limit: 5,
+    });
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses empty text, and a host whose service searches nothing", async () => {
+    const calls = makeCalls();
+
+    await expect(
+      calls["channels.search"]({ channel: "slack_app", text: "" }, {}),
+    ).rejects.toThrow();
+    await expect(calls["channels.search"]({ channel: "slack_app", text: "x" }, {})).rejects.toThrow(
+      "This Rome searches no messages",
+    );
+  });
+});

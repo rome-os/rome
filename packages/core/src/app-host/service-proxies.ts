@@ -62,6 +62,8 @@ import type {
   Account,
   ChannelMessage,
   ChannelMessageQuery,
+  ChannelMessageSearch,
+  ChannelSearchResult,
   ChannelSummary,
   ChannelsService,
   MessageReceipt,
@@ -339,6 +341,18 @@ export class ChannelsServiceProxy implements ChannelsService {
         { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
       ),
     );
+  }
+
+  async search(
+    channel: Account | string,
+    search: ChannelMessageSearch,
+  ): Promise<ChannelSearchResult> {
+    const found = await callMain<{ messages: WireChannelMessage[]; coverage: string }>(
+      "channels.search",
+      { channel, ...search },
+      { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
+    );
+    return { messages: fromWire(found.messages), coverage: found.coverage };
   }
 }
 

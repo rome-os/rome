@@ -14,6 +14,8 @@ import type {
   Account,
   ChannelMessage,
   ChannelMessageQuery,
+  ChannelMessageSearch,
+  ChannelSearchResult,
   ChannelSummary,
   ChannelsService,
   ChatId,
@@ -23,7 +25,11 @@ import type {
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { platformOf } from "../connections/platform.js";
 import type { Connection } from "../connections/types.js";
-import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
+import {
+  AccountNotConnected,
+  type Channel,
+  type Channels,
+} from "../chats/connected-accounts/connected-account.js";
 import { sendThrough, type ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import { parseMessageCursor } from "@rome/api-types/message";
@@ -65,6 +71,10 @@ export interface ChannelsServiceDeps {
    *  names no account and takes only a channel's name. */
   accounts?: RomeAccounts;
 }
+
+/** How many matches a search answers when it names no limit, and at most. */
+const SEARCH_LIMIT = 20;
+const SEARCH_LIMIT_MAX = 100;
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
 function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
@@ -160,6 +170,46 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     }));
   }
 
+  /** The Connection backing `target`'s channel, and the account it is. */
+  function backing(target: Account | string): {
+    channel: string;
+    account: Account | null;
+    connection: Connection;
+  } {
+    if (isAccount(target)) {
+      const connection = holding(target);
+      const channel = deps.channelOf(connection);
+      if (channel === null) throw new AccountNotHeld(target);
+      return { channel, account: { platform: target.platform, id: target.id }, connection };
+    }
+    const connection = backingConnection(deps.registry, target, deps.channelOf);
+    if (!connection) throw new AccountNotConnected(target);
+    return { channel: target, account: accountOf(connection), connection };
+  }
+
+  async function search(
+    target: Account | string,
+    { text, chatId, limit }: ChannelMessageSearch,
+  ): Promise<ChannelSearchResult> {
+    const { channel, account, connection } = backing(target);
+    if (!text.trim()) throw new Error("A search names the text it looks for");
+    const capped = Math.min(Math.max(1, Math.floor(limit ?? SEARCH_LIMIT)), SEARCH_LIMIT_MAX);
+    const found = connection.withTalker((talker) =>
+      talker.search?.search({ text, ...(chatId ? { chatId } : {}), limit: capped }),
+    );
+    if (!found) throw new Error(`Channel "${channel}" searches no messages`);
+    const { messages, coverage } = await found;
+    return {
+      messages: messages.map((message) => ({
+        ...message,
+        channel,
+        ...(account ? { account } : {}),
+        cursor: channelMessageCursor(message),
+      })),
+      coverage,
+    };
+  }
+
   return withRemovedMembers<ChannelsService>(
     {
       async list(): Promise<ChannelSummary[]> {
@@ -169,7 +219,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           if (name === null) continue;
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           const account = accountOf(connection);
-          summaries.set(name, { name, ...(account ? { account } : {}), platform, sendable: true });
+          const searchable = connection.withTalker((talker) => talker.search !== undefined);
+          summaries.set(name, {
+            name,
+            ...(account ? { account } : {}),
+            platform,
+            sendable: true,
+            ...(searchable ? { searchable } : {}),
+          });
         }
         for (const channel of deps.own ?? []) {
           const platform = deps.platformOf?.(channel.name) ?? platformOf(channel.name);
@@ -207,6 +264,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
+      search,
     },
     REMOVED_SERVICE_MEMBERS,
   );

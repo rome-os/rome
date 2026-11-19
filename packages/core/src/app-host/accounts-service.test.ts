@@ -337,6 +337,78 @@ describe("ChannelsService — by account", () => {
   });
 });
 
+describe("ChannelsService — search", () => {
+  const SLACK = { platform: "slack", id: "T1/B1" };
+  const accounts: RomeAccounts = {
+    accountOf: (id) => (id === "slack-1" ? SLACK : null),
+    holderOf: (account) => (account.id === SLACK.id ? "slack-1" : null),
+  };
+
+  /** A Slack app Connection whose talker searches, beside a Discord one
+   *  whose talker does not. */
+  function searching() {
+    const search = rs.fn(async (input: { text: string; chatId?: ChatId; limit: number }) => ({
+      messages: [{ ...line("1700000000.000100", 1_000), text: `about ${input.text}` }],
+      coverage: "what the connection kept",
+    }));
+    const talkers: Record<string, object> = {
+      "slack-1": { send: async () => RECEIPT, search: { search } },
+      "discord-1": { send: async () => RECEIPT },
+    };
+    const all = Object.entries({ "slack-1": "slack_app", "discord-1": "discord" }).map(
+      ([id, kind]) =>
+        ({
+          id,
+          connectionKind: kind,
+          withTalker: (call: (live: object) => unknown) => call(talkers[id] as object),
+          status: () => ({ chat: { state: "unlocked" } }),
+        }) as unknown as Connection,
+    );
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+      accounts,
+    });
+    return { channelsService, search };
+  }
+
+  it("lists which channels search, and answers a search with what it covered", async () => {
+    const { channelsService, search } = searching();
+
+    const listed = await channelsService.list();
+    const found = await channelsService.search?.(SLACK, { text: "launch" });
+
+    expect(listed.find((each) => each.name === "slack_app")?.searchable).toBe(true);
+    expect(listed.find((each) => each.name === "discord")?.searchable).toBeUndefined();
+    expect(search).toHaveBeenCalledWith({ text: "launch", limit: 20 });
+    expect(found?.coverage).toBe("what the connection kept");
+    expect(found?.messages[0]).toMatchObject({
+      channel: "slack_app",
+      account: SLACK,
+      text: "about launch",
+    });
+    expect(found?.messages[0]?.cursor).toBeTruthy();
+  });
+
+  it("caps a search's limit, and refuses a channel that searches nothing or empty text", async () => {
+    const { channelsService, search } = searching();
+
+    await channelsService.search?.("slack_app", { text: "x", limit: 5_000 });
+
+    expect(search).toHaveBeenCalledWith({ text: "x", limit: 100 });
+    await expect(channelsService.search?.("discord", { text: "x" })).rejects.toThrow(
+      'Channel "discord" searches no messages',
+    );
+    await expect(channelsService.search?.(SLACK, { text: "  " })).rejects.toThrow(
+      "A search names the text it looks for",
+    );
+    await expect(
+      channelsService.search?.({ platform: "slack", id: "T9/B9" }, { text: "x" }),
+    ).rejects.toThrow(AccountNotHeld);
+  });
+});
+
 describe("ChannelsService — a channel Rome serves itself", () => {
   it("sends through its own port and lists it as sendable, with no Connection behind it", async () => {
     const own = rs.fn<ChannelsService["send"]>(async () => RECEIPT);

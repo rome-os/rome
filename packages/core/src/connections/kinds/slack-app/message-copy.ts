@@ -8,7 +8,7 @@
 // outside the connection can tell whether the copy exists.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, max, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
 import { slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
 import { compareTs } from "./timeline-order.js";
@@ -76,6 +76,13 @@ export interface SlackMessageCopy {
   timelineAfter(teamId: string, channelId: string, ts: string): TimelineRow | null;
   /** Whether the copy holds a timeline message of the chat newer than `ts`. */
   holdsNewer(teamId: string, channelId: string, ts: string): boolean;
+  /** Up to `limit` messages the copy holds for the workspace whose text holds
+   *  `text`, ignoring case, in chat `channelId` when named, newest first. Both
+   *  the messages heard and the timeline messages read count, each once. */
+  search(
+    teamId: string,
+    input: { text: string; channelId?: string; limit: number },
+  ): ChannelMessage[];
 }
 
 /** The copy in Rome's database. */
@@ -285,6 +292,51 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .get();
     return row !== undefined;
   }
+
+  search(
+    teamId: string,
+    { text, channelId, limit }: { text: string; channelId?: string; limit: number },
+  ): ChannelMessage[] {
+    const pattern = containing(text);
+    const heard = this.db
+      .select({ message: slackAppMessages.message, ts: slackAppMessages.ts })
+      .from(slackAppMessages)
+      .where(
+        and(
+          eq(slackAppMessages.teamId, teamId),
+          channelId === undefined ? undefined : eq(slackAppMessages.channelId, channelId),
+          sql`${slackAppMessages.text} LIKE ${pattern} ESCAPE '\\'`,
+        ),
+      )
+      .orderBy(desc(slackAppMessages.saidAt), desc(slackAppMessages.ts))
+      .limit(limit)
+      .all();
+    const read = this.db
+      .select({ message: slackAppTimeline.message, ts: slackAppTimeline.ts })
+      .from(slackAppTimeline)
+      .where(
+        and(
+          eq(slackAppTimeline.teamId, teamId),
+          channelId === undefined ? undefined : eq(slackAppTimeline.channelId, channelId),
+          sql`json_extract(${slackAppTimeline.message}, '$.text') LIKE ${pattern} ESCAPE '\\'`,
+        ),
+      )
+      .orderBy(desc(slackAppTimeline.saidAt), desc(slackAppTimeline.ts))
+      .limit(limit)
+      .all();
+    const found = new Map<string, ChannelMessage>();
+    for (const row of [...heard, ...read].sort((a, b) => compareTs(b.ts, a.ts))) {
+      const message = revive(row.message);
+      const key = `${message.chatId}:${message.messageId}`;
+      if (!found.has(key)) found.set(key, message);
+    }
+    return [...found.values()].slice(0, limit);
+  }
+}
+
+/** A LIKE pattern matching `text` anywhere, its wildcards taken literally. */
+function containing(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
 function timelineRowOf(row: typeof slackAppTimeline.$inferSelect): TimelineRow {
