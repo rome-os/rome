@@ -14,9 +14,9 @@ const DEFAULT_WEB_ROOT = "/app/packages/web/dist";
 const PROXIED_SURFACE_PATHS =
   "/api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* " +
   "/app-manifest/* /app-icon/* /ws/* /desktop-proxy /desktop-proxy/* " +
-  "/apps /apps/* /full/apps /full/apps/* /share/*";
+  "/apps /apps/* /full/apps /full/apps/* /share/* /v1/gateway/config";
 const PROXIED_SURFACE_PREFIXES =
-  "api|webhooks|app-assets|app-og|app-manifest|app-icon|ws|desktop-proxy|apps|full/apps|share";
+  "api|webhooks|app-assets|app-og|app-manifest|app-icon|ws|desktop-proxy|apps|full/apps|share|v1/gateway/config";
 
 // The one place the served-SPA disk root is resolved. The boot script writes
 // `runtime-config.js` into this same root — resolving it anywhere
@@ -129,7 +129,7 @@ header @sharePages X-Robots-Tag "${SHARE_ROBOTS}"
 handle @wsUpgrade {
 \t${proxy}
 }
-@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
+@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/* /v1/gateway/config
 handle @dynamic {
 ${indent(forwardAuth, 1)}
 \t${proxy}

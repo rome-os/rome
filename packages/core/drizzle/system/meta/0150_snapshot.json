@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b5bad1bb-72a8-4ccc-aa5e-bc7e0a4d2166",
-  "prevId": "28c4377b-fe7e-4651-91fa-597af5898325",
+  "id": "29620096-d0ee-44bd-88c5-a780781830cf",
+  "prevId": "cf0c652a-851b-4a48-a043-137dd4260d46",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -1997,6 +1997,115 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "container_node_installations": {
+      "name": "container_node_installations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guardian_id": {
+          "name": "guardian_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "grant_hash": {
+          "name": "grant_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deployment": {
+          "name": "deployment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verifier_hash": {
+          "name": "verifier_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "redeemed_at": {
+          "name": "redeemed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "container_node_installations_device_id_unique": {
+          "name": "container_node_installations_device_id_unique",
+          "columns": [
+            "device_id"
+          ],
+          "isUnique": true
+        },
+        "container_node_installations_token_hash_unique": {
+          "name": "container_node_installations_token_hash_unique",
+          "columns": [
+            "token_hash"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "container_node_installations_guardian_id_guardian_auth_id_fk": {
+          "name": "container_node_installations_guardian_id_guardian_auth_id_fk",
+          "tableFrom": "container_node_installations",
+          "tableTo": "guardian_auth",
+          "columnsFrom": [
+            "guardian_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -5003,67 +5112,6 @@
             "event_id"
           ],
           "name": "slack_app_messages_team_id_event_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "slack_app_timeline": {
-      "name": "slack_app_timeline",
-      "columns": {
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "prev_ts": {
-          "name": "prev_ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "said_at": {
-          "name": "said_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "slack_app_timeline_team_id_channel_id_ts_pk": {
-          "columns": [
-            "team_id",
-            "channel_id",
-            "ts"
-          ],
-          "name": "slack_app_timeline_team_id_channel_id_ts_pk"
         }
       },
       "uniqueConstraints": {},

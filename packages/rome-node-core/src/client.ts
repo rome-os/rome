@@ -56,8 +56,8 @@ export interface GatewayClientOptions {
   beforeConnect?(): Promise<string | null>;
 }
 
-export function connectGateway(options: GatewayClientOptions) {
-  let url = parseGatewayUrl(options.gatewayUrl);
+export function connectGateway(options: GatewayClientOptions, directHttpOrigin?: string) {
+  let url = parseGatewayUrl(options.gatewayUrl, directHttpOrigin);
   let stopped = false;
   let socket: ClientSocket | null = null;
   let attempt = 0;
@@ -111,7 +111,7 @@ export function connectGateway(options: GatewayClientOptions) {
           status("revoked");
           return;
         }
-        url = parseGatewayUrl(next);
+        url = parseGatewayUrl(next, directHttpOrigin);
       }
       current = options.createSocket(url.toString(), `Bearer ${token}`);
     } catch {
