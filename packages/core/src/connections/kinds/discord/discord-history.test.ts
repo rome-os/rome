@@ -119,7 +119,7 @@ describe("readDiscordHistory", () => {
     const opener = said(1, { thread: { id: THREAD } });
     const created = said(2, {
       type: 18,
-      content: "",
+      content: "plans",
       message_reference: { channel_id: THREAD },
     });
     const system = said(3, { type: 7 });
@@ -136,9 +136,9 @@ describe("readDiscordHistory", () => {
     const thread = await readDiscordHistory(deps(get), THREAD, { limit: 10 });
 
     // A member joining (type 7) is no message said.
-    expect(chat.map((m) => [m.messageId, m.openedThread])).toEqual([
-      [created.id, THREAD],
-      [opener.id, THREAD],
+    expect(chat.map((m) => [m.messageId, m.openedThread, m.text])).toEqual([
+      [created.id, THREAD, 'started thread "plans"'],
+      [opener.id, THREAD, "message 1"],
     ]);
     expect(thread).toEqual([
       expect.objectContaining({

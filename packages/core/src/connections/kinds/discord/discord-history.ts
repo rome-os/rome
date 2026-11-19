@@ -257,7 +257,11 @@ function toChannelMessage(
       message.author.global_name ??
       message.author.username,
     senderUsername: message.author.username,
-    text: deps.textOf(message.content, channel.guild_id),
+    // A thread-created message's content is the thread's name, said by no one.
+    text:
+      message.type === THREAD_CREATED
+        ? `started thread "${message.content}"`
+        : deps.textOf(message.content, channel.guild_id),
     attachments: (message.attachments ?? []).map((attachment) =>
       discordAttachment({
         url: attachment.url,
