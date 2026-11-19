@@ -10,6 +10,7 @@ import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-ap
 import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
 import { createTestDb } from "../../../test/db.js";
 import { SlackMessageCopyRepository } from "./message-copy.js";
+import { SlackApiError } from "../slack/slack.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -195,10 +196,29 @@ describe("Slack app direct messages (R4)", () => {
 
   it("reports a removed app as a refused credential", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, faults } = adapter(mailbox);
+    const api = fakeApi();
+    const { adapter: a, faults } = adapter(mailbox, api);
     await a.start();
+    api.authTest = rs.fn(async () => {
+      throw new SlackApiError("invalid_auth");
+    });
     await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
     expect(faults).toEqual(["credential"]);
+  });
+
+  it("keeps a connection whose new token outlived a removal that waited in the mailbox", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, faults } = adapter(mailbox);
+    await a.start();
+    await mailbox.deposit(
+      frame({ ...dmEvent(1), event_id: "Ev_old1", event: { type: "app_uninstalled" } }),
+      frame({
+        ...dmEvent(2),
+        event_id: "Ev_old2",
+        event: { type: "tokens_revoked", tokens: { bot: [BOT] } },
+      }),
+    );
+    expect(faults).toEqual([]);
   });
 });
 
