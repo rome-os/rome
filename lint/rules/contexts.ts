@@ -136,4 +136,18 @@ export const contextCrossings: ListedCrossing[] = [
     ticket: "ZHA-169",
     why: "The diagnostics report says whether the relay is set up, until the report gets each context's status from that context.",
   },
+  {
+    rule: "connections-never-imports-access",
+    from: "connections/kinds/wechat-user/http/wechat-app.ts",
+    to: "access/session-actor.ts",
+    ticket: "ZHA-220",
+    why: "The WeChat app routes let only the guardian in, until the wiring guards a kind's routes where it mounts them.",
+  },
+  {
+    rule: "connections-never-imports-access",
+    from: "connections/kinds/wechat-user/http/wechat-app.test.ts",
+    to: "access/session-actor.ts",
+    ticket: "ZHA-220",
+    why: "The WeChat app route test signs in as the guardian and as a guest, until the wiring guards a kind's routes where it mounts them.",
+  },
 ];

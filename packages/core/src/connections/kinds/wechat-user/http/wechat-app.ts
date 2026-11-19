@@ -6,12 +6,16 @@
 //   POST /api/wechat/app/start    — open the downloaded client
 
 import { Hono, type Context } from "hono";
-import { WechatAppNotInstalled } from "../../connections/kinds/wechat-user/wechat-app.js";
-import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../access/session-actor.js";
-import type { ApiDeps } from "../deps.js";
+import { type WechatApp, WechatAppNotInstalled } from "../wechat-app.js";
+import { isSameOriginMutationRequest } from "../../../../lib/mutation-origin.js";
+import { currentSessionActor } from "../../../../access/session-actor.js";
 
-export function wechatAppRoutes(deps: Pick<ApiDeps, "wechatApp">): Hono {
+/** The WeChat app the routes drive, or null when personal WeChat is off. */
+export interface WechatAppRoutesDeps {
+  wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
+}
+
+export function wechatAppRoutes(deps: WechatAppRoutesDeps): Hono {
   const app = new Hono();
 
   app.use("/wechat/app/*", async (c, next) => {

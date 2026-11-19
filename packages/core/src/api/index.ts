@@ -23,7 +23,6 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
-import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
@@ -165,7 +164,9 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  api.route("/", wechatAppRoutes(deps));
+  for (const kind of deps.connectionKinds ?? []) {
+    if (kind.routes) api.route("/", kind.routes);
+  }
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
