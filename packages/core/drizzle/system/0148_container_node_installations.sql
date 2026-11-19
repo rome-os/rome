@@ -1,4 +1,4 @@
-CREATE TABLE `lan_node_installations` (
+CREATE TABLE `container_node_installations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`guardian_id` text NOT NULL,
 	`name` text NOT NULL,
@@ -11,5 +11,5 @@ CREATE TABLE `lan_node_installations` (
 	FOREIGN KEY (`guardian_id`) REFERENCES `guardian_auth`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `lan_node_installations_device_id_unique` ON `lan_node_installations` (`device_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `lan_node_installations_token_hash_unique` ON `lan_node_installations` (`token_hash`);
+CREATE UNIQUE INDEX `container_node_installations_device_id_unique` ON `container_node_installations` (`device_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `container_node_installations_token_hash_unique` ON `container_node_installations` (`token_hash`);

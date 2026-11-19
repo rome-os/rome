@@ -445,7 +445,7 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const lanNodeInstallations = sqliteTable("lan_node_installations", {
+export const containerNodeInstallations = sqliteTable("container_node_installations", {
   id: text("id").primaryKey(),
   guardianId: text("guardian_id")
     .notNull()

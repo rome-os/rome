@@ -8,9 +8,12 @@ import {
   createVisitorSession,
   VISITOR_COOKIE_NAME,
 } from "../../access/auth.js";
-import { LanNodesRepository } from "../../db/repositories/lan-nodes.js";
+import { ContainerNodesRepository } from "../../db/repositories/container-nodes.js";
 import { guardianAuth } from "../../db/schema.js";
-import { createLocalLanNodes, withLocalLanNodes } from "../../desktops/local-lan-nodes.js";
+import {
+  createLocalContainerNodes,
+  withLocalContainerNodes,
+} from "../../desktops/local-container-nodes.js";
 import { createNodeDevicesService } from "../../desktops/node-devices.js";
 import { applyInstanceSlug } from "../../instance/instance-env.js";
 import { createTestDb } from "../../test/db.js";
@@ -18,7 +21,7 @@ import { buildTestDeps } from "../../test/helpers.js";
 import { startApi } from "../index.js";
 import type { ApiHandle } from "../deps.js";
 
-const path = "/api/devices/lan-nodes";
+const path = "/api/devices/container-nodes";
 const guardianId = randomUUID();
 const userId = "local-guardian";
 const verifier = "v".repeat(43);
@@ -54,7 +57,9 @@ async function database() {
 }
 
 async function server(db: Awaited<ReturnType<typeof database>>) {
-  const local = createLocalLanNodes(new LanNodesRepository(db), { PANTHEON_DOMAIN: "localhost" });
+  const local = createLocalContainerNodes(new ContainerNodesRepository(db), {
+    PANTHEON_DOMAIN: "localhost",
+  });
   if (!local) throw new Error("Expected the direct transport");
   const cloud = createNodeDevicesService(() => ({
     getDevicesStatus: async () => null,
@@ -70,15 +75,15 @@ async function server(db: Awaited<ReturnType<typeof database>>) {
     },
     disconnect() {},
   }));
-  const devices = withLocalLanNodes(cloud, local);
+  const devices = withLocalContainerNodes(cloud, local);
   const deps = await buildTestDeps(db);
   const api = await startApi(
     { host: "127.0.0.1", port: 0 },
     {
       ...deps,
       nodeDevices: devices,
-      localLanNodes: local,
-      lanNodes: local.service,
+      localContainerNodes: local,
+      containerNodes: local.service,
     },
   );
   apis.push(api);
@@ -88,7 +93,7 @@ async function server(db: Awaited<ReturnType<typeof database>>) {
 }
 
 function deviceSocket(origin: string, token: string) {
-  const socket = new WebSocket(origin.replace("http:", "ws:") + "/ws/lan-node", {
+  const socket = new WebSocket(origin.replace("http:", "ws:") + "/ws/container-node", {
     headers: authorization(token),
   });
   sockets.push(socket);
@@ -96,14 +101,14 @@ function deviceSocket(origin: string, token: string) {
 }
 
 it("keeps the Cloud transport when a warm instance gains a slug", async () => {
-  const repo = new LanNodesRepository(await database());
+  const repo = new ContainerNodesRepository(await database());
   const pool = { PANTHEON_DOMAIN: "romeos.cc" };
-  expect(createLocalLanNodes(repo, pool)).toBeUndefined();
+  expect(createLocalContainerNodes(repo, pool)).toBeUndefined();
 
   const adopted = { ...pool };
   expect(applyInstanceSlug("tenant", adopted)).toBe("https://tenant.romeos.cc");
-  expect(createLocalLanNodes(repo, adopted)).toBeUndefined();
-  expect(createLocalLanNodes(repo, { ...pool, PANTHEON_SLUG: "tenant" })).toBeUndefined();
+  expect(createLocalContainerNodes(repo, adopted)).toBeUndefined();
+  expect(createLocalContainerNodes(repo, { ...pool, PANTHEON_SLUG: "tenant" })).toBeUndefined();
 });
 
 it("pairs a local guardian's Node through the normal API and revokes it through device management", async () => {
@@ -170,7 +175,7 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
     await fetch(origin + "/v1/gateway/config", {
       headers: { ...credential, "X-Forwarded-Host": "unrelated.example" },
     }).then((r) => r.json()),
-  ).toEqual({ gatewayPath: "/ws/lan-node" });
+  ).toEqual({ gatewayPath: "/ws/container-node" });
   expect((await fetch(origin + "/api/account/devices", { headers: credential })).status).toBe(404);
   expect((await fetch(url, { headers: credential })).status).toBe(403);
 
@@ -192,7 +197,7 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
     from: session.caller_id,
     payload: {
       type: "request",
-      action: "lan.shelly.switch.status",
+      action: "shelly.switch.status",
       args: { address: "192.168.1.42" },
     },
   });
@@ -277,15 +282,19 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
 }, 15_000);
 
 it("bounds first redemption and recovery separately, and stores only hashes", async () => {
-  const repo = new LanNodesRepository(await database());
+  const repo = new ContainerNodesRepository(await database());
   const grant = repo.issue(guardianId, { name: "NAS" }, 0);
   if (grant.outcome !== "issued") throw new Error("No grant issued");
   const { id, installToken } = grant;
-  expect(repo.redeem(id, installToken, verifier, 600_000).outcome).toBe("expired");
-  const first = repo.redeem(id, installToken, verifier, 599_999);
+  const deadline = 2 * 60 * 60_000;
+  expect(Date.parse(grant.expiresAt)).toBe(deadline);
+  expect(repo.redeem(id, installToken, verifier, deadline).outcome).toBe("expired");
+  const first = repo.redeem(id, installToken, verifier, deadline - 1);
   expect(first.outcome).toBe("redeemed");
-  expect(repo.redeem(id, installToken, verifier, 600_001)).toEqual(first);
-  expect(repo.redeem(id, installToken, verifier, 1_200_000).outcome).toBe("expired");
+  expect(repo.redeem(id, installToken, verifier, deadline + 1)).toEqual(first);
+  expect(repo.redeem(id, installToken, verifier, deadline + 10 * 60_000 - 1).outcome).toBe(
+    "expired",
+  );
   const saved = JSON.stringify(repo.list(guardianId));
   expect(saved).not.toContain(installToken);
   expect(saved).not.toContain(verifier);

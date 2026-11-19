@@ -2361,8 +2361,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "lan_node_installations": {
-      "name": "lan_node_installations",
+    "container_node_installations": {
+      "name": "container_node_installations",
       "columns": {
         "id": {
           "name": "id",
@@ -2429,15 +2429,15 @@
         }
       },
       "indexes": {
-        "lan_node_installations_device_id_unique": {
-          "name": "lan_node_installations_device_id_unique",
+        "container_node_installations_device_id_unique": {
+          "name": "container_node_installations_device_id_unique",
           "columns": [
             "device_id"
           ],
           "isUnique": true
         },
-        "lan_node_installations_token_hash_unique": {
-          "name": "lan_node_installations_token_hash_unique",
+        "container_node_installations_token_hash_unique": {
+          "name": "container_node_installations_token_hash_unique",
           "columns": [
             "token_hash"
           ],
@@ -2445,9 +2445,9 @@
         }
       },
       "foreignKeys": {
-        "lan_node_installations_guardian_id_guardian_auth_id_fk": {
-          "name": "lan_node_installations_guardian_id_guardian_auth_id_fk",
-          "tableFrom": "lan_node_installations",
+        "container_node_installations_guardian_id_guardian_auth_id_fk": {
+          "name": "container_node_installations_guardian_id_guardian_auth_id_fk",
+          "tableFrom": "container_node_installations",
           "tableTo": "guardian_auth",
           "columnsFrom": [
             "guardian_id"

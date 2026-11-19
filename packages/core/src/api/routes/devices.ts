@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { CallerConfigurationError, DaemonVersionError } from "@rome-os/node-core/client";
 import { z } from "zod";
 import type { DeviceFilesErrorCode, DeviceManageErrorCode } from "@rome/api-types/devices";
-import { lanNodeGuardian } from "../../access/lan-node-guardian.js";
+import { containerNodeGuardian } from "../../access/container-node-guardian.js";
 import type { Context } from "hono";
 import type { ApiDeps } from "../deps.js";
 
@@ -25,12 +25,14 @@ const manageErrorStatus = {
 const renameSchema = z.object({ name: z.string() });
 
 export function devicesRoutes(
-  deps: Pick<ApiDeps, "nodeDevices" | "localLanNodes"> & Partial<Pick<ApiDeps, "db">>,
+  deps: Pick<ApiDeps, "nodeDevices" | "localContainerNodes"> & Partial<Pick<ApiDeps, "db">>,
 ): Hono {
   const app = new Hono();
   async function mayManage(c: Context, id: string) {
-    const owner = deps.localLanNodes?.deviceOwner(id);
-    return owner === undefined || (deps.db && owner === (await lanNodeGuardian(c, deps.db, true)));
+    const owner = deps.localContainerNodes?.deviceOwner(id);
+    return (
+      owner === undefined || (deps.db && owner === (await containerNodeGuardian(c, deps.db, true)))
+    );
   }
   app.get("/devices", async (c) => {
     c.header("Cache-Control", "no-store");

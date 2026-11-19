@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { afterEach, expect, it, rs } from "@rstest/core";
 import { WebSocketServer } from "ws";
 import { encodeMeta, FRAME_TYPE } from "./frame.js";
-import { runLanNode } from "./lan-node.js";
-import { createLanResponder } from "./lan-responder.js";
+import { runContainerNode } from "./container-node.js";
+import { CONTAINER_NODE_SOCKET_PATH } from "./container-node-address.js";
+import { createContainerNodeResponder } from "./container-node-responder.js";
 import type { OutboundEnvelope } from "./protocol.js";
 
 const installationId = "900bacd6-9988-4f9a-81ff-da8282621806";
@@ -28,14 +29,14 @@ afterEach(() => {
 });
 
 it("reports the network error code when pairing retries without exposing the error text", async () => {
-  const stateDir = await mkdtemp(join(tmpdir(), "lan-node-retry-"));
+  const stateDir = await mkdtemp(join(tmpdir(), "container-node-retry-"));
   const stop = new AbortController();
   const report = rs.fn();
   rs.spyOn(globalThis, "fetch").mockRejectedValue(
     new TypeError(first.grant, { cause: { code: "ENOTFOUND", message: first.token } }),
   );
   try {
-    const result = await runLanNode({
+    const result = await runContainerNode({
       cloudUrl: "https://rome.example",
       installationId,
       installToken: first.grant,
@@ -57,7 +58,7 @@ it("reports the network error code when pairing retries without exposing the err
 it("performs one bounded Shelly read and checks the Gateway sender on text and binary requests", async () => {
   const send = rs.fn<(message: OutboundEnvelope) => boolean>(() => true);
   const sendFrame = rs.fn(() => true);
-  const host = createLanResponder("NAS", callerId, send, sendFrame);
+  const host = createContainerNodeResponder("NAS", callerId, send, sendFrame);
   const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({
       id: 0,
@@ -65,7 +66,7 @@ it("performs one bounded Shelly read and checks the Gateway sender on text and b
       source: "ignored",
     }),
   );
-  const action = "lan.shelly.switch.status";
+  const action = "shelly.switch.status";
   const payload = { type: "request", action, args: { address: "192.168.10.4" }, from: callerId };
   const sibling = randomUUID();
   await host.receive({ id: randomUUID(), from: sibling, payload });
@@ -92,10 +93,10 @@ it("performs one bounded Shelly read and checks the Gateway sender on text and b
       payload: { ...payload, args: { address } },
     });
     expect(send.mock.lastCall?.[0].payload).toMatchObject({
-      error: { code: "invalid_lan_address" },
+      error: { code: "invalid_switch_address" },
     });
   }
-  for (const forbidden of ["exec", "fs.list", "transfer.open", "lan.shelly.switch.set"]) {
+  for (const forbidden of ["exec", "fs.list", "transfer.open", "shelly.switch.set"]) {
     await host.receive({
       id: randomUUID(),
       from: callerId,
@@ -118,18 +119,18 @@ it("performs one bounded Shelly read and checks the Gateway sender on text and b
   });
   fetch.mockResolvedValueOnce(new Response("x".repeat(9000)));
   await host.receive({ id: randomUUID(), from: callerId, payload });
-  expect(send.mock.lastCall?.[0].payload).toMatchObject({ error: { code: "lan_unreachable" } });
+  expect(send.mock.lastCall?.[0].payload).toMatchObject({ error: { code: "switch_unreachable" } });
 });
 
 it("recovers a lost exchange in the same volume, reconnects, and uses a fresh grant after revocation", async () => {
   const volumes = await Promise.all(
-    Array.from({ length: 3 }, () => mkdtemp(join(tmpdir(), "lan-node-"))),
+    Array.from({ length: 3 }, () => mkdtemp(join(tmpdir(), "container-node-"))),
   );
   const attempts: Array<{ grant?: string; verifier: string; id: string }> = [];
   const revoked = new Set<string>();
   const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
-    if (req.url === "/api/devices/lan-nodes/redeem") {
+    if (req.url === "/api/devices/container-nodes/redeem") {
       let body = "";
       for await (const chunk of req) body += chunk;
       const input = JSON.parse(body);
@@ -166,7 +167,7 @@ it("recovers a lost exchange in the same volume, reconnects, and uses a fresh gr
     } else if (req.url === "/v1/gateway/config") {
       const token = req.headers.authorization?.slice(7) ?? "";
       if (revoked.has(token)) res.writeHead(401).end('{"error":"invalid_device_session"}');
-      else res.end(JSON.stringify({ gatewayPath: "/connect" }));
+      else res.end(JSON.stringify({ gatewayPath: CONTAINER_NODE_SOCKET_PATH }));
     } else {
       res.end('{"items":[]}');
     }
@@ -182,7 +183,7 @@ it("recovers a lost exchange in the same volume, reconnects, and uses a fresh gr
     const online = new Promise<void>((resolve) => {
       reachedOnline = resolve;
     });
-    const running = runLanNode({
+    const running = runContainerNode({
       cloudUrl: `http://${hostname}:${port}`,
       installationId,
       installToken: grant,

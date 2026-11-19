@@ -64,10 +64,12 @@ A running daemon without a Gateway connection appears as **Idle**, not as a
 stopped service. The connection opens when a linked computer needs a reachability
 check or a remote action. An empty authorized-device list does not require it.
 
-The **Connect a computer** section stays visible even when the service is stopped.
-It directs users to run `rome-node connect` on the target computer, approve access
-with the same Cloud account, and keep the terminal open. Programs run as that
-computer's OS user. This is separate from starting the service on the Rome instance.
+**Connect a device** shows the desktop and iOS client, Rome Node CLI, and Rome Node
+container options when there are no linked devices or the service needs attention.
+When devices are listed, **Link device** opens the same options in a menu. Choose an
+option to open its setup instructions. For the CLI, run `rome-node connect` on
+the target computer. Approve access with the same Cloud account and keep the
+terminal open. Programs run as that computer's OS user.
 
 Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,
@@ -84,27 +86,22 @@ not checked within that budget remain unknown. Gateway connection setup has its
 own existing wait limits. No history, remote actions with side effects, or new
 Gateway presence protocol is involved.
 
-## Deploy a LAN Node on a NAS
+## Deploy a container node
 
-A guardian signed in to a Rome instance can pair a LAN Node in **Settings →
-Devices**. The Node uses outbound HTTPS and WebSocket connections and runs on
-the NAS's Docker bridge network.
+A guardian signed in to a Rome instance can pair a container node in **Settings →
+Devices**. The node opens outbound HTTP and WebSocket connections.
 
-1. Choose **Add LAN node**, enter a name, and select the NAS system.
-2. Generate the Compose file. Copy it or download it before it expires.
+1. Open **Rome Node container** under **Connect a device** or from **Link device**.
+   Enter a name for the node.
+2. Generate the Compose file, then review, copy, or download it. Deploy before
+   the deadline shown in Settings.
 3. Create the project under the name Rome shows and deploy the supplied configuration.
-4. Return to **Devices**. The node moves from **Waiting for deployment** to
-   **Online** when Rome can reach it.
-
-| NAS | Where to deploy |
-| --- | --- |
-| [UGREEN UGOS](https://ai.ugreen.com/blogs/knowledge/docker-docker-compose-ugreen-nas) | Docker → Project → Create |
-| [Synology DSM](https://kb.synology.com/en-global/DSM/help/ContainerManager/docker_project) | Container Manager → Project → Create |
-| [QNAP QTS / QuTS hero](https://www.qnap.com/en/how-to/tutorial/article/how-to-use-container-station-3) | Container Station → Applications → Create |
+4. In **Devices**, find the node under **Container nodes to pair** while it waits
+   for deployment. It appears in the device list once connected.
 
 Keep the named state volume when restarting or updating the project. It stores
 the device credential and preserves the device ID. Remove the device from
-**Manage device** to revoke the credential. To use that project again, choose
+the device list to revoke the credential. To use that project again, choose
 **Pair again** and redeploy it with the new Compose file and the same volume.
 Pairing again gives the Node a new device ID. If the first Compose file expires
 or is lost before deployment, use **Get a new Compose file** to replace it.
@@ -113,11 +110,9 @@ Choose **Remove node** on an unpaired entry to remove its installation record
 and invalidate any outstanding Compose file. For a paired node, remove its
 device before removing the installation.
 
-On an online Node, choose **Check Shelly switch** and enter the known private
-IPv4 address of a [Shelly Gen2 or newer switch](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Switch/#switchgetstatus).
-The Node reads relay 0 via `GET /rpc/Switch.GetStatus?id=0` and reports on or off.
-The switch must allow local status reads without authentication. The Node
-handles only `system.info` and the read-only switch query.
+The Node handles `system.info` and a read-only Shelly switch query. The latter
+reads relay 0 via `GET /rpc/Switch.GetStatus?id=0` on a known private IPv4 address
+of a Gen2 or newer switch that allows unauthenticated status reads.
 
 ### Build the image
 
@@ -149,37 +144,39 @@ that use `latest`.
 
 ### Connect directly to a self-hosted instance
 
-Open Rome at an HTTPS address the Node can reach and whose certificate the
-Node trusts. The [self-hosting Quickstart](self-hosting.md#quickstart) binds
-to loopback by default. Open the dashboard through the instance's HTTPS
-reverse proxy when pairing a Node.
+Compose fills in the address from the dashboard and lets you edit it. If you
+use a loopback address, the project uses [Docker host networking](https://docs.docker.com/engine/network/drivers/host/)
+to reach Rome on the same Docker host. For a container on another machine,
+open the dashboard at an address that machine can reach. Direct connections
+support HTTP on private addresses and local hostnames. Public addresses
+require HTTPS.
 
-The dashboard writes its current origin into Compose. Core issues the
-installation token and stores device credentials as hashes. The Node
-authenticates to `/v1/gateway/config`, gets `{ gatewayPath: "/ws/lan-node" }`,
-and connects to that path over WSS on the same host and port. A signed-in local
-guardian can pair a Node with Rome Cloud disabled.
+Core issues a two-hour installation token and stores device credentials as hashes.
+The Node authenticates to `/v1/gateway/config`, gets
+`{ gatewayPath: "/ws/container-node" }`, and connects on the same host and port
+using WS for local HTTP or WSS for HTTPS. A signed-in local guardian can pair a
+Node with Rome Cloud disabled.
 
 Core stores the installation records in the instance database. Keep that
 database and the Node's named volume across updates. Removing a device
 invalidates its credential and closes its active connection. Core serves
-only the devices paired to this instance and sends only the supported LAN
-actions. Cloud-provisioned instances show setup once their linked Rome Cloud
-serves the installer API below.
+only the devices paired to this instance and sends only the supported container
+node actions. Cloud-provisioned instances can generate Compose once their linked
+Rome Cloud serves the installer API below.
 
 ### Rome Cloud installer contract
 
 The existing [device-code flow](#authorization-and-transport) grants a computer
-access at account scope. The Cloud path of the LAN installer needs the
+access at account scope. Container node setup on hosted instances uses the
 following API in the private [Rome Cloud repository](https://github.com/amantru/rome-cloud).
 
 | Method and path on Rome Cloud | Request and response |
 | --- | --- |
-| `GET /api/instance/lan-nodes` | Returns `{ instanceId, nodes }` for the authenticated instance. Each node has `id`, `name`, and `state`. A `pending` node includes `expiresAt` as a UTC ISO timestamp. A `paired` node includes `deviceId`. A removed or revoked device leaves a `needs_pairing` node. |
-| `POST /api/instance/lan-nodes` | `{ name }` creates a pending node and returns `{ instanceId, id, installToken, expiresAt }`. |
-| `POST /api/instance/lan-nodes/{id}/pairing` | An empty JSON object replaces the grant for an existing pending or unpaired node. The response has the same fields as creation. Return 404 with `node_not_found` for nodes outside the instance and 409 with `already_paired` while a device is still authorized. |
-| `DELETE /api/instance/lan-nodes/{id}` | Removes an unpaired installation and invalidates its grant. Return 204 on removal, 404 with `node_not_found` for nodes outside the instance, or 409 with `already_paired` while a device is still authorized. |
-| `POST /api/devices/lan-nodes/redeem` | Accepts the install token as a Bearer and `{ installation_id, verifier }` as JSON. Returns `{ installation_id, access_token, token_type: "Bearer", device_id, caller_id }`. |
+| `GET /api/instance/container-nodes` | Returns `{ instanceId, nodes }` for the authenticated instance. Each node has `id`, `name`, and `state`. A `pending` node includes `expiresAt` as a UTC ISO timestamp. A `paired` node includes `deviceId`. A removed or revoked device leaves a `needs_pairing` node. |
+| `POST /api/instance/container-nodes` | `{ name }` creates a pending node and returns `{ instanceId, id, installToken, expiresAt }`. |
+| `POST /api/instance/container-nodes/{id}/pairing` | An empty JSON object replaces the grant for an existing pending or unpaired node. The response has the same fields as creation. Return 404 with `node_not_found` for nodes outside the instance and 409 with `already_paired` while a device is still authorized. |
+| `DELETE /api/instance/container-nodes/{id}` | Removes an unpaired installation and invalidates its grant. Return 204 on removal, 404 with `node_not_found` for nodes outside the instance, or 409 with `already_paired` while a device is still authorized. |
+| `POST /api/devices/container-nodes/redeem` | Accepts the install token as a Bearer and `{ installation_id, verifier }` as JSON. Returns `{ installation_id, access_token, token_type: "Bearer", device_id, caller_id }`. |
 
 For the instance routes, accept the existing instance bearer or signer JWT.
 Resolve its live account and instance in Cloud and scope every read and write
@@ -193,7 +190,7 @@ credential it is the actual caller device ID. Mark the installation as
 needing pairing and revoke the device session if this Gateway caller ID changes.
 
 Each `romeinstall_` token has 32 random bytes encoded as unpadded base64url
-after its prefix. Use a 10-minute lifetime and store a hash. Rotation
+after its prefix. Use a two-hour lifetime and store a hash. Rotation
 invalidates the outstanding token in the same transaction that creates its
 replacement. The Node generates and saves a separate 32-byte base64url verifier
 to the volume before its first request. On redemption, atomically check the
@@ -211,9 +208,9 @@ device is revoked, even if the account device row is deleted.
 Cloud limits the resulting `romedev_` credential to Gateway connection and
 reading its own device metadata. Use the account device API for the owner's
 rename and remove operations. Mark the device record with
-`device_kind: "lan_node"` so it stays out of the chat folder picker. Apply the
-instance binding to LAN device routing in both Gateway directions and close
-revoked connections with code 4001. For a revoked device session, Gateway
+`device_kind: "container_node"` so it stays out of the chat folder picker. Apply
+the instance binding to container node routing in both Gateway directions and
+close revoked connections with code 4001. For a revoked device session, Gateway
 configuration returns 401 with `invalid_device_session`. The Host also compares
 the Gateway-authenticated sender against `caller_id` on every text request and
 binary frame.

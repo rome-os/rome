@@ -19,7 +19,7 @@ export default defineConfig({
     "app_keys",
     "policies",
     "guardian_auth",
-    "lan_node_installations",
+    "container_node_installations",
     "oauth_pending_attempts",
     "webchat_projects",
     "webchat_sessions",

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { LAN_NODE_SOCKET_PATH, type LocalLanNodes } from "../../desktops/local-lan-nodes.js";
+import { CONTAINER_NODE_SOCKET_PATH } from "@rome-os/node-core/container-node-address";
+import type { LocalContainerNodes } from "../../desktops/local-container-nodes.js";
 
 const redeemBody = z
   .object({
@@ -10,16 +11,16 @@ const redeemBody = z
   })
   .strict();
 
-export function lanNodeTransportRoutes(local?: LocalLanNodes) {
+export function containerNodeTransportRoutes(local?: LocalContainerNodes) {
   const app = new Hono();
   app.get("/v1/gateway/config", (c) => {
     c.header("Cache-Control", "no-store");
     if (!local) return c.json({ error: "not_configured" }, 404);
     if (!local.findByBearer(c.req.header("Authorization")))
       return c.json({ error: "invalid_device_session" }, 401);
-    return c.json({ gatewayPath: LAN_NODE_SOCKET_PATH });
+    return c.json({ gatewayPath: CONTAINER_NODE_SOCKET_PATH });
   });
-  app.post("/api/devices/lan-nodes/redeem", bodyLimit({ maxSize: 1024 }), async (c) => {
+  app.post("/api/devices/container-nodes/redeem", bodyLimit({ maxSize: 1024 }), async (c) => {
     c.header("Cache-Control", "no-store");
     if (!local) return c.json({ error: "not_configured" }, 404);
     const token = /^Bearer (romeinstall_[A-Za-z0-9_-]{43})$/.exec(

@@ -141,7 +141,7 @@
         "src/index.ts",
         "src/daemon-entry.ts",
         // The standalone Docker image runs the compiled entry.
-        "src/lan-node-entry.ts",
+        "src/container-node-entry.ts",
         "bin/daemon.js",
         "src/daemon-client.ts",
         "src/host.ts",

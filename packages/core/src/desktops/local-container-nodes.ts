@@ -1,28 +1,36 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { lanNodeNameSchema, type DevicesStatus, type LanNode } from "@rome/api-types/devices";
+import {
+  containerNodeNameSchema,
+  type DevicesStatus,
+  type ContainerNode,
+} from "@rome/api-types/devices";
 import { isRecord, parseResponse } from "@rome-os/node-core";
+import { CONTAINER_NODE_SOCKET_PATH } from "@rome-os/node-core/container-node-address";
 import { isLoopbackHostname } from "@rome-os/libs/net";
 import { v5 as uuidv5 } from "uuid";
 import { WebSocket, WebSocketServer } from "ws";
-import type { LanNodesRepository } from "../db/repositories/lan-nodes.js";
+import type { ContainerNodesRepository } from "../db/repositories/container-nodes.js";
 import { deriveInstanceOrigin } from "../instance/instance-env.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
-import { LanNodeError, lanSwitchStatus, type LanNodesService } from "./lan-nodes.js";
+import {
+  ContainerNodeError,
+  shellySwitchStatus,
+  type ContainerNodesService,
+} from "./container-nodes.js";
 import type {
   createNodeDevicesService,
   DeviceManageResult,
   DeviceRunResult,
 } from "./node-devices.js";
 
-export const LAN_NODE_SOCKET_PATH = "/ws/lan-node";
-const switchAction = "lan.shelly.switch.status";
-const callerId = (guardianId: string) => uuidv5(`rome-lan-node:${guardianId}`, uuidv5.URL);
+const switchAction = "shelly.switch.status";
+const callerId = (guardianId: string) => uuidv5(`rome-container-node:${guardianId}`, uuidv5.URL);
 const offline = {
   ok: false,
   code: "target_unavailable",
-  message: "The LAN Node is offline.",
+  message: "The container node is offline.",
 } as const;
 
 interface Connection {
@@ -31,7 +39,7 @@ interface Connection {
   pending: Map<string, (result: DeviceRunResult) => void>;
 }
 
-export function createLocalLanNodes(repo: LanNodesRepository, env = process.env) {
+export function createLocalContainerNodes(repo: ContainerNodesRepository, env = process.env) {
   // Adoption can assign a slug at runtime. The hosting domain stays fixed.
   const hostedOrigin = URL.parse(deriveInstanceOrigin("probe", env) ?? "");
   if (hostedOrigin && !isLoopbackHostname(hostedOrigin.hostname)) return;
@@ -55,11 +63,11 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
   function attach(server: Server) {
     const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
     const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (req.url?.split("?")[0] !== LAN_NODE_SOCKET_PATH) return;
+      if (req.url?.split("?")[0] !== CONTAINER_NODE_SOCKET_PATH) return;
       socket.on("error", () => socket.destroy());
       try {
         const row =
-          req.url === LAN_NODE_SOCKET_PATH && req.headers.origin === undefined
+          req.url === CONTAINER_NODE_SOCKET_PATH && req.headers.origin === undefined
             ? findByBearer(req.headers.authorization)
             : undefined;
         if (!row?.deviceId) return rejectUpgrade(socket, 401, "Unauthorized");
@@ -125,14 +133,18 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
       return {
         ok: false,
         code: "unsupported_action",
-        message: "This action is unavailable on a LAN Node.",
+        message: "This action is unavailable on a container node.",
       };
     }
     const connection = connections.get(deviceId);
     const owner = deviceOwner(deviceId);
     if (!owner || connection?.socket.readyState !== WebSocket.OPEN) return offline;
     if (connection.pending.size >= 8)
-      return { ok: false, code: "lan_busy", message: "A LAN Node request is already running." };
+      return {
+        ok: false,
+        code: "node_busy",
+        message: "A container node request is already running.",
+      };
     const id = randomUUID();
     return new Promise((resolve) => {
       const finish = (result: DeviceRunResult) => {
@@ -145,7 +157,7 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
           finish({
             ok: false,
             code: "timeout",
-            message: "The LAN Node did not answer.",
+            message: "The container node did not answer.",
           }),
         6000,
       );
@@ -167,11 +179,11 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
     });
   }
 
-  const service: LanNodesService = {
+  const service: ContainerNodesService = {
     async list(guardianId) {
       return {
         nodes: repo.list(guardianId).map(
-          (row): LanNode => ({
+          (row): ContainerNode => ({
             id: row.id,
             name: row.name,
             deviceId: row.deviceId,
@@ -188,19 +200,19 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
     },
     async pair(guardianId, input) {
       const result = repo.issue(guardianId, input);
-      if (result.outcome !== "issued") throw new LanNodeError(result.outcome);
+      if (result.outcome !== "issued") throw new ContainerNodeError(result.outcome);
       const { id, installToken, expiresAt } = result;
       return { id, installToken, expiresAt, origin: null };
     },
     async removeInstallation(guardianId, id) {
       const outcome = repo.removeInstallation(guardianId, id);
-      if (outcome !== "removed") throw new LanNodeError(outcome);
+      if (outcome !== "removed") throw new ContainerNodeError(outcome);
     },
     async switchStatus(guardianId, id, address) {
       const node = repo.list(guardianId).find((row) => row.id === id);
-      if (!node) throw new LanNodeError("node_not_found");
-      if (!node.deviceId) throw new LanNodeError("needs_pairing");
-      return lanSwitchStatus(await run(node.deviceId, switchAction, { address }));
+      if (!node) throw new ContainerNodeError("node_not_found");
+      if (!node.deviceId) throw new ContainerNodeError("needs_pairing");
+      return shellySwitchStatus(await run(node.deviceId, switchAction, { address }));
     },
   };
 
@@ -239,7 +251,7 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
       );
     },
     rename(deviceId: string, name: string): DeviceManageResult {
-      const validated = lanNodeNameSchema.safeParse(name);
+      const validated = containerNodeNameSchema.safeParse(name);
       if (!validated.success) return { ok: false, code: "invalid_device_name" };
       return repo.rename(deviceId, validated.data)
         ? { ok: true }
@@ -253,11 +265,11 @@ export function createLocalLanNodes(repo: LanNodesRepository, env = process.env)
   };
 }
 
-export type LocalLanNodes = NonNullable<ReturnType<typeof createLocalLanNodes>>;
+export type LocalContainerNodes = NonNullable<ReturnType<typeof createLocalContainerNodes>>;
 
-export function withLocalLanNodes(
+export function withLocalContainerNodes(
   devices: ReturnType<typeof createNodeDevicesService>,
-  local: LocalLanNodes | undefined,
+  local: LocalContainerNodes | undefined,
 ): typeof devices {
   if (!local) return devices;
   return {

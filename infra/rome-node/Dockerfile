@@ -15,4 +15,4 @@ COPY --from=build /workspace/packages/rome-node-core/package.json ./
 COPY --from=build /workspace/packages/rome-node-core/dist ./dist
 COPY --from=build /ws ./node_modules/ws
 USER node
-CMD ["node", "dist/lan-node-entry.js"]
+CMD ["node", "dist/container-node-entry.js"]

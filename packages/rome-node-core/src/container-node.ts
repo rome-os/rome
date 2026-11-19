@@ -2,14 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./actions.js";
-import { cloudOrigin } from "./cloud.js";
+import { containerNodeOrigin } from "./container-node-address.js";
 import { deviceSessionFromToken } from "./device-session.js";
 import { isUuid } from "./frame.js";
 import { runHostConnection, type HostCredential, type HostEvent } from "./host-connection.js";
-import { createLanResponder } from "./lan-responder.js";
+import { createContainerNodeResponder } from "./container-node-responder.js";
 import { createFileCredentialStore } from "./storage.js";
 
-interface LanNodeState {
+interface ContainerNodeState {
   origin: string;
   installationId: string;
   verifier: string;
@@ -20,7 +20,7 @@ interface LanNodeState {
 
 class PairingRequired extends Error {}
 
-type LanNodeEvent = HostEvent | { type: "pairing_retry"; code: string };
+type ContainerNodeEvent = HostEvent | { type: "pairing_retry"; code: string };
 
 async function redeem(
   origin: string,
@@ -28,11 +28,11 @@ async function redeem(
   installToken: string,
   verifier: string,
   signal: AbortSignal,
-  onEvent?: (event: LanNodeEvent) => void,
+  onEvent?: (event: ContainerNodeEvent) => void,
 ) {
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted();
-    const response = await fetch(new URL("/api/devices/lan-nodes/redeem", origin), {
+    const response = await fetch(new URL("/api/devices/container-nodes/redeem", origin), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${installToken}` },
       body: JSON.stringify({ installation_id: installationId, verifier }),
@@ -76,18 +76,18 @@ async function redeem(
   }
 }
 
-export async function runLanNode(options: {
+export async function runContainerNode(options: {
   cloudUrl: string;
   installationId: string;
   installToken?: string;
   stateDir: string;
   signal: AbortSignal;
-  onEvent?(event: LanNodeEvent): void;
+  onEvent?(event: ContainerNodeEvent): void;
 }): Promise<"stopped" | "needs_pairing" | "superseded"> {
   const { installationId, installToken, signal } = options;
-  const origin = cloudOrigin(options.cloudUrl);
-  if (!isUuid(installationId)) throw new Error("Invalid LAN Node installation ID.");
-  const store = createFileCredentialStore<LanNodeState>(join(options.stateDir, "state.json"));
+  const origin = containerNodeOrigin(options.cloudUrl);
+  if (!isUuid(installationId)) throw new Error("Invalid container node installation ID.");
+  const store = createFileCredentialStore<ContainerNodeState>(join(options.stateDir, "state.json"));
   const existing = await store.load();
   if (
     existing !== null &&
@@ -97,9 +97,9 @@ export async function runLanNode(options: {
       typeof existing.verifier !== "string" ||
       !/^[A-Za-z0-9_-]{43}$/.test(existing.verifier))
   ) {
-    throw new Error("This volume belongs to a different LAN Node installation.");
+    throw new Error("This volume belongs to a different container node installation.");
   }
-  const state = (existing as LanNodeState | null) ?? {
+  const state = (existing as ContainerNodeState | null) ?? {
     origin,
     installationId,
     verifier: randomBytes(32).toString("base64url"),
@@ -128,7 +128,7 @@ export async function runLanNode(options: {
       await runHostConnection(
         {
           cloudUrl: origin,
-          name: "LAN Node",
+          name: "Container node",
           signal,
           credentials,
           async authorize(_origin, _name, signal) {
@@ -156,9 +156,15 @@ export async function runLanNode(options: {
           },
         },
         (session, send, sendFrame) => {
-          if (!isUuid(state.callerId)) throw new Error("Missing LAN Node caller identity.");
-          return createLanResponder(session.name, state.callerId.toLowerCase(), send, sendFrame);
+          if (!isUuid(state.callerId)) throw new Error("Missing container node caller identity.");
+          return createContainerNodeResponder(
+            session.name,
+            state.callerId.toLowerCase(),
+            send,
+            sendFrame,
+          );
         },
+        origin.startsWith("http:"),
       );
       return "stopped";
     } catch (error) {

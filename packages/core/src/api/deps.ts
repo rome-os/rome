@@ -8,8 +8,8 @@ import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
 import type { createNodeDevicesService } from "../desktops/node-devices.js";
-import type { LanNodesService } from "../desktops/lan-nodes.js";
-import type { LocalLanNodes } from "../desktops/local-lan-nodes.js";
+import type { ContainerNodesService } from "../desktops/container-nodes.js";
+import type { LocalContainerNodes } from "../desktops/local-container-nodes.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../apps/actions/loader.js";
@@ -194,8 +194,8 @@ export interface ApiDeps {
     ReturnType<typeof createNodeDevicesService>,
     "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
   >;
-  lanNodes: LanNodesService;
-  localLanNodes?: LocalLanNodes;
+  containerNodes: ContainerNodesService;
+  localContainerNodes?: LocalContainerNodes;
   /** Starts what needs a linked instance: node caller, relay mailbox, favor sync. Never rejects. */
   provisionAfterLink?: () => Promise<void>;
   /** The guardian's Rome Cloud account, whose signup survey a first sign-in reads. */

@@ -33,8 +33,8 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 
 `/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/desktop-proxy/*`, `/ws/terminal` and `/ws/events` also admit a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` they get the chat topics but not the app catalog, as on the matching SSE routes. `/ws/node` stays guardian-only. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
-The [direct LAN Node transport](../rome-node.md#connect-directly-to-a-self-hosted-instance)
-admits machine credentials on its exact HTTP paths and on `/ws/lan-node`.
+The [direct container node transport](../rome-node.md#connect-directly-to-a-self-hosted-instance)
+admits machine credentials on its exact HTTP paths and on `/ws/container-node`.
 The dashboard's pairing and device management paths require a guardian cookie.
 
 ### Invariants

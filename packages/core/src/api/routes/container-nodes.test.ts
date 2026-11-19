@@ -7,18 +7,18 @@ import {
   VISITOR_COOKIE_NAME,
 } from "../../access/auth.js";
 import { createCloudGuardian, setGuardianAccount } from "../../access/guardian-auth-state.js";
-import { createLanNodesService } from "../../desktops/lan-nodes.js";
+import { createContainerNodesService } from "../../desktops/container-nodes.js";
 import { proveIdentity } from "../../instance/instance-identity.js";
 import { createTestDb } from "../../test/db.js";
-import { lanNodesRoutes } from "./lan-nodes.js";
+import { containerNodesRoutes } from "./container-nodes.js";
 
-const path = "/api/devices/lan-nodes";
+const path = "/api/devices/container-nodes";
 const id = "3dc4a001-183f-4170-b150-1e2c0c792d72";
 const deviceId = "28f6417c-1167-4f52-9d25-e28d07804a78";
 const owner = "cloud-owner";
 const instanceId = "test-instance";
 const bearer = "romeinst_test";
-const cloudPath = "/api/instance/lan-nodes";
+const cloudPath = "/api/instance/container-nodes";
 const cloud = {
   origin: () => "https://cloud.example",
   bearer: async () => bearer,
@@ -35,7 +35,7 @@ function post(body: unknown, headers = guard()): RequestInit {
   };
 }
 
-describe("LAN Node device settings", () => {
+describe("container node device settings", () => {
   let db: ReturnType<typeof createTestDb>;
   let app: Hono;
   let cloudAccount: string;
@@ -62,9 +62,9 @@ describe("LAN Node device settings", () => {
     getStatus.mockResolvedValue({ connection: "online", devices: [] });
     app = new Hono().route(
       path,
-      lanNodesRoutes({
+      containerNodesRoutes({
         db: db.db,
-        lanNodes: createLanNodesService({ getStatus, runAction }, cloud),
+        containerNodes: createContainerNodesService({ getStatus, runAction }, cloud),
       }),
     );
   });
@@ -109,8 +109,8 @@ describe("LAN Node device settings", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the validated Cloud grant and origin without caching it", async () => {
-    const expiresAt = expiry();
+  it("returns a two-hour Cloud grant and origin without caching it", async () => {
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
     upstream = (url, init) => {
       expect(init?.method).toBe("POST");
       if (url === cloudPath) expect(JSON.parse(String(init?.body))).toEqual({ name: "My NAS" });
@@ -206,7 +206,7 @@ describe("LAN Node device settings", () => {
     const response = await check(id, { address: "192.168.1.4" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ on: true });
-    expect(runAction).toHaveBeenCalledWith(deviceId, "lan.shelly.switch.status", {
+    expect(runAction).toHaveBeenCalledWith(deviceId, "shelly.switch.status", {
       address: "192.168.1.4",
     });
   });

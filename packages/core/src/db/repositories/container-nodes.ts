@@ -1,12 +1,13 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { CONTAINER_NODE_GRANT_LIFETIME_MS } from "@rome/api-types/devices";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
-import { lanNodeInstallations as nodes } from "../schema.js";
+import { containerNodeInstallations as nodes } from "../schema.js";
 
-const grantLifetime = 10 * 60_000;
+const redemptionRecoveryWindow = 10 * 60_000;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-export class LanNodesRepository {
+export class ContainerNodesRepository {
   constructor(private db: DrizzleDb) {}
 
   list(guardianId: string) {
@@ -31,7 +32,7 @@ export class LanNodesRepository {
 
   issue(guardianId: string, input: { name: string } | { id: string }, now = Date.now()) {
     const installToken = `romeinstall_${randomBytes(32).toString("base64url")}`;
-    const expiresAt = now + grantLifetime;
+    const expiresAt = now + CONTAINER_NODE_GRANT_LIFETIME_MS;
     const grant = { grantHash: hash(installToken), expiresAt };
     return this.db.transaction(
       (tx) => {
@@ -72,12 +73,13 @@ export class LanNodesRepository {
         const verifierHash = hash(verifier);
         if (row.redeemedAt !== null && row.verifierHash !== verifierHash)
           return { outcome: "claimed" } as const;
-        const deadline = row.redeemedAt === null ? row.expiresAt : row.redeemedAt + grantLifetime;
+        const deadline =
+          row.redeemedAt === null ? row.expiresAt : row.redeemedAt + redemptionRecoveryWindow;
         if (now >= deadline) return { outcome: "expired" } as const;
         const deviceId = row.deviceId ?? randomUUID();
         // Only the original token and verifier can reconstruct a lost reply. The database holds hashes.
         const token = `romedev_${createHmac("sha256", installToken)
-          .update(`rome-lan-node:${id}:${deviceId}:${verifier}`)
+          .update(`rome-container-node:${id}:${deviceId}:${verifier}`)
           .digest("base64url")}`;
         if (row.redeemedAt === null) {
           tx.update(nodes)

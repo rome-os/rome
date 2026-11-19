@@ -2,7 +2,7 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
-import { LanNodeError } from "../desktops/lan-nodes.js";
+import { ContainerNodeError } from "../desktops/container-nodes.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
@@ -871,16 +871,16 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
-    lanNodes: {
+    containerNodes: {
       list: async () => ({ nodes: [] }),
       pair: async () => {
-        throw new LanNodeError("not_configured");
+        throw new ContainerNodeError("not_configured");
       },
       removeInstallation: async () => {
-        throw new LanNodeError("not_configured");
+        throw new ContainerNodeError("not_configured");
       },
       switchStatus: async () => {
-        throw new LanNodeError("not_configured");
+        throw new ContainerNodeError("not_configured");
       },
     },
     wechatApp: null,

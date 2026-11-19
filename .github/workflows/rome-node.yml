@@ -81,8 +81,8 @@ jobs:
           docker run --rm --network none --read-only --cap-drop ALL
           --security-opt no-new-privileges:true --entrypoint node rome-node:ci
           --input-type=module -e
-          'import { runLanNode } from "./dist/lan-node.js";
-          if (typeof runLanNode !== "function" || process.getuid() === 0) process.exit(1)'
+          'import { runContainerNode } from "./dist/container-node.js";
+          if (typeof runContainerNode !== "function" || process.getuid() === 0) process.exit(1)'
 
   publish-image:
     if: >-

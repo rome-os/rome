@@ -1,30 +1,32 @@
 import { z } from "zod";
 
-export const lanNodeNameSchema = z.string().trim().min(1).max(80);
+export const CONTAINER_NODE_GRANT_LIFETIME_MS = 2 * 60 * 60_000;
 
-export const lanNodeListSchema = z.object({
+export const containerNodeNameSchema = z.string().trim().min(1).max(80);
+
+export const containerNodeListSchema = z.object({
   transport: z.enum(["direct", "cloud"]),
   nodes: z.array(
     z.object({
       id: z.uuid(),
-      name: lanNodeNameSchema,
+      name: containerNodeNameSchema,
       deviceId: z.uuid().nullable(),
       status: z.enum(["waiting", "online", "offline", "needs_pairing", "unknown"]),
     }),
   ),
 });
-export type LanNode = z.infer<typeof lanNodeListSchema>["nodes"][number];
+export type ContainerNode = z.infer<typeof containerNodeListSchema>["nodes"][number];
 
-export const lanNodeGrantSchema = z.object({
+export const containerNodeGrantSchema = z.object({
   id: z.uuid(),
   installToken: z.string().regex(/^romeinstall_[A-Za-z0-9_-]{43}$/),
   expiresAt: z.iso.datetime(),
   origin: z.url({ protocol: /^https$/ }).nullable(),
 });
-export type LanNodeGrant = z.infer<typeof lanNodeGrantSchema>;
+export type ContainerNodeGrant = z.infer<typeof containerNodeGrantSchema>;
 
-export const lanSwitchAddressSchema = z.object({ address: z.ipv4() }).strict();
-export const lanSwitchStatusSchema = z.object({ on: z.boolean() });
+export const shellySwitchAddressSchema = z.object({ address: z.ipv4() }).strict();
+export const shellySwitchStatusSchema = z.object({ on: z.boolean() });
 
 export const devicesStatusSchema = z.object({
   connection: z.enum([

@@ -1,4 +1,5 @@
 import { isRecord } from "./actions.js";
+import { containerNodeOrigin, CONTAINER_NODE_SOCKET_PATH } from "./container-node-address.js";
 import { parseGatewayUrl } from "./gateway-url.js";
 
 const messages: Record<string, string> = {
@@ -43,9 +44,13 @@ export async function cloudRequest(
   method = "GET",
   json?: unknown,
 ): Promise<unknown> {
+  return request(() => new URL(path, cloudOrigin(origin)), token, method, json);
+}
+
+async function request(url: () => URL, token: TokenSource, method = "GET", json?: unknown) {
   let response: Response;
   try {
-    response = await fetch(new URL(path, cloudOrigin(origin)), {
+    response = await fetch(url(), {
       method,
       headers: {
         Authorization: `Bearer ${typeof token === "string" ? token : await token()}`,
@@ -70,13 +75,24 @@ export async function cloudRequest(
   return body;
 }
 
-export async function gatewayConfig(origin: string, token: TokenSource): Promise<string> {
-  const body = await cloudRequest(origin, "/v1/gateway/config", token);
+export async function gatewayConfig(
+  origin: string,
+  token: TokenSource,
+  directHttp = false,
+): Promise<string> {
+  const body = directHttp
+    ? await request(() => new URL("/v1/gateway/config", containerNodeOrigin(origin)), token)
+    : await cloudRequest(origin, "/v1/gateway/config", token);
   if (!isRecord(body)) throw new CloudError("invalid_response");
   try {
+    const base = new URL(origin);
+    if (directHttp) {
+      if (body.gatewayPath === CONTAINER_NODE_SOCKET_PATH)
+        return parseGatewayUrl(`ws://${base.host}${CONTAINER_NODE_SOCKET_PATH}`, base.origin).href;
+      throw new CloudError("invalid_response");
+    }
     if (typeof body.gatewayUrl === "string") return parseGatewayUrl(body.gatewayUrl).href;
     if (typeof body.gatewayPath === "string" && /^\/(?![/\\])/.test(body.gatewayPath)) {
-      const base = new URL(origin);
       const url = new URL(body.gatewayPath, base);
       if (url.origin === base.origin) {
         url.protocol = base.protocol === "https:" ? "wss:" : "ws:";

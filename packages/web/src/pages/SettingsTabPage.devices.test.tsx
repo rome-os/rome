@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-// @rstest-environment-options {"url":"https://rome.example:9443/settings/devices"}
+// @rstest-environment-options {"url":"http://rome.localhost:9443/settings/devices"}
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,7 +22,7 @@ afterEach(() => {
 function renderDevices(
   load: () => unknown,
   start?: () => Response | Promise<Response>,
-  lan?: (path: string, init?: RequestInit) => Response,
+  containerNodes?: (path: string, init?: RequestInit) => Response,
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input) === "/api/devices/start" && init?.method === "POST" && start) return start();
@@ -30,8 +30,11 @@ function renderDevices(
       return new Response(JSON.stringify(await load()), {
         headers: { "Content-Type": "application/json" },
       });
-    if (String(input).startsWith("/api/devices/lan-nodes"))
-      return lan?.(String(input), init) ?? Response.json({ nodes: [], transport: "direct" });
+    if (String(input).startsWith("/api/devices/container-nodes")) {
+      return (
+        containerNodes?.(String(input), init) ?? Response.json({ nodes: [], transport: "direct" })
+      );
+    }
     return new Response("{}", { status: 503 });
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -47,138 +50,6 @@ function renderDevices(
   /** Reads the devices again, as the 15-second poll does. */
   return { client, poll: () => act(() => client.refetchQueries({ queryKey: ["node-devices"] })) };
 }
-
-it("copies a new LAN Node configuration, then reads its status and starts a repair", async () => {
-  const path = "/api/devices/lan-nodes";
-  const id = "73426989-9646-4579-9869-af5a321ff48d";
-  const deviceId = "06954fc4-5a06-4dc8-898d-cffac7ac97a1";
-  const projectName = "rome-node-73426989964645799869";
-  const installToken = `romeinstall_${"A".repeat(43)}`;
-  let nodes: unknown[] = [];
-  const lan = rs.fn((url: string, init?: RequestInit) => {
-    if (url === path && init?.method !== "POST")
-      return Response.json({ nodes, transport: "direct" });
-    if (url.endsWith("/switch-status")) return Response.json({ on: false });
-    nodes = [{ id, deviceId: null, name: "Hall NAS", status: "waiting" }];
-    return Response.json({
-      id,
-      installToken,
-      origin: null,
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    });
-  });
-  const { client } = renderDevices(
-    () => ({ connection: "online", checkedAt: new Date().toISOString(), devices: [] }),
-    undefined,
-    lan,
-  );
-  const user = userEvent.setup();
-  const add = await screen.findByRole("button", { name: "Add LAN node" });
-  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
-  await user.click(add);
-  const setup = within(await screen.findByRole("dialog", { name: "Add LAN node" }));
-  expect(setup.getByRole("combobox", { name: "NAS system" }).textContent).toContain("UGREEN UGOS");
-  fireEvent.change(setup.getByLabelText("Node name"), { target: { value: "Hall NAS" } });
-  await user.click(setup.getByRole("button", { name: "Generate Compose" }));
-  expect(lan).toHaveBeenCalledWith(
-    path,
-    expect.objectContaining({
-      body: JSON.stringify({ name: "Hall NAS" }),
-      method: "POST",
-    }),
-  );
-  expect(await setup.findByText(projectName)).toBeTruthy();
-  expect(setup.getByRole("button", { name: "Download Compose" })).toBeTruthy();
-  await user.click(setup.getByRole("button", { name: "Copy Compose" }));
-  const compose = await navigator.clipboard.readText();
-  expect(compose).toContain('image: "ghcr.io/rome-os/rome-node:latest"');
-  expect(compose).toContain('ROME_NODE_CLOUD_URL: "https://rome.example:9443"');
-  expect(compose).toContain(`ROME_NODE_INSTALLATION_ID: "${id}"`);
-  expect(compose).toContain(`ROME_NODE_INSTALL_TOKEN: "${installToken}"`);
-  expect(compose).toContain(`rome-node-${id}-state`);
-  expect(compose).not.toMatch(/ports:|privileged:|network_mode:/);
-  await user.keyboard("{Escape}");
-  expect(await screen.findByText("Waiting for deployment")).toBeTruthy();
-
-  async function show(status: string, currentDeviceId: string | null) {
-    nodes = [{ id, deviceId: currentDeviceId, name: "Hall NAS", status }];
-    await act(() => client.refetchQueries({ queryKey: ["lan-nodes"] }));
-  }
-  await show("offline", deviceId);
-  expect(await screen.findByText("Offline")).toBeTruthy();
-  await show("online", deviceId);
-  expect((await screen.findByRole("link", { name: "Manage device" })).getAttribute("href")).toBe(
-    `/settings/devices/${deviceId}`,
-  );
-  await user.click(screen.getByRole("button", { name: "Check Shelly switch" }));
-  const check = within(await screen.findByRole("dialog", { name: "Check Shelly switch" }));
-  fireEvent.change(check.getByLabelText("Switch IPv4 address"), {
-    target: { value: "192.168.4.20" },
-  });
-  await user.click(check.getByRole("button", { name: "Read status" }));
-  expect(await check.findByText("Switch is off")).toBeTruthy();
-  await user.click(check.getByRole("button", { name: "Close", exact: true }));
-  await show("needs_pairing", null);
-  expect(await screen.findByText("Needs pairing")).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "Pair again" }));
-  const repair = within(await screen.findByRole("dialog", { name: "Pair again" }));
-  await user.click(repair.getByRole("button", { name: "Generate Compose" }));
-  expect(await repair.findByText(projectName)).toBeTruthy();
-  expect(lan).toHaveBeenCalledWith(
-    `${path}/${id}/pairing`,
-    expect.objectContaining({ method: "POST" }),
-  );
-}, 15_000);
-
-it("hides LAN node setup until the Cloud installer is available", async () => {
-  const { client } = renderDevices(
-    () => ({
-      connection: "online",
-      checkedAt: new Date().toISOString(),
-      devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
-    }),
-    undefined,
-    () => Response.json({ error: "cloud_unsupported" }, { status: 501 }),
-  );
-
-  await screen.findByRole("link", { name: /MacBook/ });
-  await waitFor(() => expect(client.getQueryState(["lan-nodes"])?.status).toBe("error"));
-  expect(screen.queryByRole("button", { name: "Add LAN node" })).toBeNull();
-  expect(screen.queryByRole("alert")).toBeNull();
-});
-
-it("removes an unpaired installation after confirmation and keeps paired devices listed", async () => {
-  const path = "/api/devices/lan-nodes";
-  const id = "73426989-9646-4579-9869-af5a321ff48d";
-  const paired = {
-    id: "3dc4a001-183f-4170-b150-1e2c0c792d72",
-    deviceId: "06954fc4-5a06-4dc8-898d-cffac7ac97a1",
-    name: "Paired node",
-    status: "offline",
-  };
-  let nodes = [{ id, deviceId: null, name: "Abandoned node", status: "waiting" }, paired];
-  const lan = rs.fn((url: string, init?: RequestInit) => {
-    if (url === `${path}/${id}` && init?.method === "DELETE") {
-      nodes = [paired];
-      return new Response(null, { status: 204 });
-    }
-    return Response.json({ nodes, transport: "direct" });
-  });
-  renderDevices(
-    () => ({ connection: "online", checkedAt: new Date().toISOString(), devices: [] }),
-    undefined,
-    lan,
-  );
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Remove node" }));
-  const confirmation = within(
-    await screen.findByRole("dialog", { name: "Remove Abandoned node?" }),
-  );
-  await user.click(confirmation.getByRole("button", { name: "Remove node" }));
-  await waitFor(() => expect(screen.queryByText("Abandoned node")).toBeNull());
-  expect(screen.getByText("Paired node")).toBeTruthy();
-  expect(lan).toHaveBeenCalledWith(`${path}/${id}`, expect.objectContaining({ method: "DELETE" }));
-});
 
 it("lists devices independently of the settings request", async () => {
   renderDevices(() => ({
@@ -233,7 +104,7 @@ it("holds the devices page in place while the first read is pending", async () =
   expect(await screen.findByRole("button", { name: "Link device" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Devices" })).toBeTruthy();
   // The service-recovery page waits for an answer that says the service needs it.
-  expect(screen.queryByRole("heading", { name: "Connect a computer" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Connect a device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 });
 
@@ -291,17 +162,207 @@ it("drops the device list when the service stops and does not start it on its ow
   ).toBe(true);
 });
 
-it("offers computer setup for an idle running service without an error", async () => {
+it("shows the three connection cards on an empty devices page", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
     devices: [],
   }));
-  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Link device" }));
-  expect(await screen.findByText("rome-node connect")).toBeTruthy();
+  const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
+  expect(
+    setup.getByRole("heading", { name: "Desktop/iOS client" }).closest('[data-slot="card"]'),
+  ).toBeTruthy();
+  expect(
+    setup.getByRole("heading", { name: "Rome Node CLI" }).closest('[data-slot="card"]'),
+  ).toBeTruthy();
+  expect(
+    setup.getByRole("heading", { name: "Rome Node container" }).closest('[data-slot="card"]'),
+  ).toBeTruthy();
+  expect(await setup.findByRole("button", { name: "Generate Compose" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("opens the selected connection instructions directly in the dialog", async () => {
+  renderDevices(() => ({
+    connection: "online",
+    checkedAt: new Date().toISOString(),
+    devices: [{ id: "mac", name: "MacBook", platform: "macos", status: "connected" }],
+  }));
+  await screen.findByRole("link", { name: /MacBook/ });
+  const user = userEvent.setup();
+  const trigger = screen.getByRole("button", { name: "Link device" });
+  const choices = [
+    ["Desktop/iOS client", "Download Rome", "https://romeos.cc/download"],
+    ["Rome Node CLI", "rome-node connect"],
+    ["Rome Node container", "Generate Compose"],
+  ];
+  for (const [name, content, href] of choices) {
+    await user.click(trigger);
+    const menu = within(await screen.findByRole("menu"));
+    expect(menu.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(
+      choices.map(([label]) => label),
+    );
+    await user.click(menu.getByRole("menuitem", { name }));
+    const dialog = await screen.findByRole("dialog", { name });
+    const action = await within(dialog).findByText(content);
+    expect(action).toBeTruthy();
+    if (href) expect(action.getAttribute("href")).toBe(href);
+    expect(dialog.querySelector('[data-slot="card"]')).toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  }
+  expect(screen.getByRole("link", { name: /MacBook/ })).toBeTruthy();
+});
+
+it("previews and copies Compose for the editable address and offers repair", async () => {
+  const path = "/api/devices/container-nodes";
+  const id = "73426989-9646-4579-9869-af5a321ff48d";
+  const projectName = "rome-node-73426989964645799869";
+  const installToken = `romeinstall_${"A".repeat(43)}`;
+  let nodes: unknown[] = [];
+  const containerNodes = rs.fn((url: string, init?: RequestInit) => {
+    if (url === path && init?.method !== "POST")
+      return Response.json({ nodes, transport: "direct" });
+    nodes = [{ id, deviceId: null, name: "Hall NAS", status: "waiting" }];
+    return Response.json({
+      id,
+      installToken,
+      origin: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+  });
+  const { client } = renderDevices(
+    () => ({
+      connection: "online",
+      checkedAt: new Date().toISOString(),
+      devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+    }),
+    undefined,
+    containerNodes,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Link device" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Rome Node container" }));
+  const setup = within(await screen.findByRole("dialog", { name: "Rome Node container" }));
+  expect(setup.queryByRole("combobox")).toBeNull();
+  fireEvent.change(await setup.findByLabelText("Node name"), { target: { value: "Hall NAS" } });
+  const address = setup.getByRole("textbox", { name: "Rome address" });
+  expect(address).toHaveProperty("value", "http://rome.localhost:9443");
+  await user.click(setup.getByRole("button", { name: "Generate Compose" }));
+  expect(containerNodes).toHaveBeenCalledWith(
+    path,
+    expect.objectContaining({
+      body: JSON.stringify({ name: "Hall NAS" }),
+      method: "POST",
+    }),
+  );
+  expect(await setup.findByText(projectName)).toBeTruthy();
+  const preview = setup.getByRole("region", { name: "Compose configuration" });
+  expect(setup.getByRole("button", { name: "Download Compose" })).toBeTruthy();
+  await user.click(setup.getByRole("button", { name: "Copy Compose" }));
+  const compose = await navigator.clipboard.readText();
+  expect(preview.textContent).toBe(compose);
+  expect(compose).toContain('image: "ghcr.io/rome-os/rome-node:latest"');
+  expect(compose).toContain('ROME_NODE_CLOUD_URL: "http://rome.localhost:9443"');
+  expect(compose).toContain("network_mode: host");
+  expect(compose).toContain('"rome.localhost": "127.0.0.1"');
+  expect(compose).toContain(`ROME_NODE_INSTALLATION_ID: "${id}"`);
+  expect(compose).toContain(`ROME_NODE_INSTALL_TOKEN: "${installToken}"`);
+  expect(compose).toContain(`rome-node-${id}-state`);
+  expect(compose).not.toMatch(/ports:|privileged:/);
+  fireEvent.change(address, { target: { value: "http://rome.home.arpa:7663" } });
+  fireEvent.submit(address.closest("form")!);
+  expect(preview.textContent).toContain('ROME_NODE_CLOUD_URL: "http://rome.home.arpa:7663"');
+  expect(preview.textContent).not.toMatch(/network_mode:|extra_hosts:/);
+  await user.click(setup.getByRole("button", { name: "Copy Compose" }));
+  expect(await navigator.clipboard.readText()).toBe(preview.textContent);
+  expect(containerNodes.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(setup.queryByText("Waiting for deployment")).toBeNull();
+  await user.click(setup.getByRole("button", { name: "Add another node" }));
+  expect(setup.getByLabelText("Node name")).toHaveProperty("value", "Container node");
+  expect(setup.queryByRole("button", { name: "Copy Compose" })).toBeNull();
+
+  await user.keyboard("{Escape}");
+  const deployments = within(
+    await screen.findByRole("region", { name: "Container nodes to pair" }),
+  );
+  expect(await deployments.findByText("Waiting for deployment")).toBeTruthy();
+  nodes = [{ id, deviceId: null, name: "Hall NAS", status: "needs_pairing" }];
+  await act(() => client.refetchQueries({ queryKey: ["container-nodes"] }));
+  expect(await screen.findByText("Needs pairing")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Pair again" }));
+  const repair = within(await screen.findByRole("dialog", { name: "Pair again" }));
+  await user.click(repair.getByRole("button", { name: "Generate Compose" }));
+  expect(await repair.findByText(projectName)).toBeTruthy();
+  expect(containerNodes).toHaveBeenCalledWith(
+    `${path}/${id}/pairing`,
+    expect.objectContaining({ method: "POST" }),
+  );
+}, 15_000);
+
+it("explains when the Cloud installer is unavailable", async () => {
+  renderDevices(
+    () => ({
+      connection: "online",
+      checkedAt: new Date().toISOString(),
+      devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+    }),
+    undefined,
+    () => Response.json({ error: "cloud_unsupported" }, { status: 501 }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Link device" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Rome Node container" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "Rome Node container" }));
+  expect((await dialog.findByRole("alert")).textContent).toBe(
+    "Container node deployment is unavailable on this Rome Cloud.",
+  );
+  expect(dialog.queryByRole("button", { name: "Generate Compose" })).toBeNull();
+});
+
+it("removes an unpaired installation after confirmation and keeps paired devices listed", async () => {
+  const path = "/api/devices/container-nodes";
+  const id = "73426989-9646-4579-9869-af5a321ff48d";
+  const paired = {
+    id: "3dc4a001-183f-4170-b150-1e2c0c792d72",
+    deviceId: "06954fc4-5a06-4dc8-898d-cffac7ac97a1",
+    name: "Paired node",
+    status: "offline",
+  };
+  let nodes = [{ id, deviceId: null, name: "Abandoned node", status: "waiting" }, paired];
+  const containerNodes = rs.fn((url: string, init?: RequestInit) => {
+    if (url === `${path}/${id}` && init?.method === "DELETE") {
+      nodes = [paired];
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ nodes, transport: "direct" });
+  });
+  renderDevices(
+    () => ({
+      connection: "not_running",
+      checkedAt: new Date().toISOString(),
+      devices: [
+        { id: paired.deviceId, name: paired.name, platform: "linux", status: "not_connected" },
+      ],
+    }),
+    undefined,
+    containerNodes,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Remove node" }));
+  const confirmation = within(
+    await screen.findByRole("dialog", { name: "Remove Abandoned node?" }),
+  );
+  await user.click(confirmation.getByRole("button", { name: "Remove node" }));
+  await waitFor(() => expect(screen.queryByText("Abandoned node")).toBeNull());
+  expect(screen.getByRole("link", { name: /Paired node/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Link device" })).toBeTruthy();
+  expect(containerNodes).toHaveBeenCalledWith(
+    `${path}/${id}`,
+    expect.objectContaining({ method: "DELETE" }),
+  );
 });
 
 it("starts only on explicit click and refreshes server truth after success", async () => {
@@ -325,7 +386,9 @@ it("starts only on explicit click and refreshes server truth after success", asy
     start,
   );
   const button = await screen.findByRole("button", { name: "Start service" });
-  expect(screen.getByRole("heading", { name: "Connect a computer" })).toBeTruthy();
+  const connection = screen.getByRole("heading", { name: "Rome connection" });
+  expect(connection.closest('[data-slot="card"]')).toBeNull();
+  expect(screen.getByRole("heading", { name: "Connect a device" })).toBeTruthy();
   expect(start).not.toHaveBeenCalled();
   await userEvent.click(button);
   const pending = await screen.findByRole("button", { name: "Starting…" });
@@ -333,8 +396,7 @@ it("starts only on explicit click and refreshes server truth after success", asy
   await userEvent.click(pending);
   expect(start).toHaveBeenCalledTimes(1);
   finish();
-  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Start service" })).toBeNull());
 });
 
 it.each([
@@ -362,7 +424,7 @@ it.each([
   expect(start).toHaveBeenCalledTimes(1);
 });
 
-it("localizes the service recovery and computer setup in Chinese", async () => {
+it("localizes the service recovery and device setup in Chinese", async () => {
   await i18n.changeLanguage("zh-CN");
   try {
     renderDevices(() => ({
@@ -371,7 +433,7 @@ it("localizes the service recovery and computer setup in Chinese", async () => {
       devices: [],
     }));
     expect(await screen.findByRole("button", { name: "启动服务" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "连接电脑" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "连接设备" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
   } finally {
     cleanup();

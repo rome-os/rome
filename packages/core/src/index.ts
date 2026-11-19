@@ -9,9 +9,12 @@ import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
-import { createLanNodesService } from "./desktops/lan-nodes.js";
-import { createLocalLanNodes, withLocalLanNodes } from "./desktops/local-lan-nodes.js";
-import { LanNodesRepository } from "./db/repositories/lan-nodes.js";
+import { createContainerNodesService } from "./desktops/container-nodes.js";
+import {
+  createLocalContainerNodes,
+  withLocalContainerNodes,
+} from "./desktops/local-container-nodes.js";
+import { ContainerNodesRepository } from "./db/repositories/container-nodes.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -506,11 +509,11 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
-  const localLanNodes = createLocalLanNodes(new LanNodesRepository(db));
+  const localContainerNodes = createLocalContainerNodes(new ContainerNodesRepository(db));
   // A device removed from the account through this Rome loses its connection
   // rows; an origin the removal leaves with no install is turned off.
   const nodeDevices = withDeviceLifecycle(
-    withLocalLanNodes(createNodeDevicesService(), localLanNodes),
+    withLocalContainerNodes(createNodeDevicesService(), localContainerNodes),
     {
       connections: () => deviceConnectionsRepo,
       turnOriginOff: (originId) => {
@@ -2290,8 +2293,8 @@ async function main() {
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       cloudProfile: cloudProfileClient,
       nodeDevices,
-      lanNodes: localLanNodes?.service ?? createLanNodesService(nodeDevices),
-      localLanNodes,
+      containerNodes: localContainerNodes?.service ?? createContainerNodesService(nodeDevices),
+      localContainerNodes,
       channelsService,
       chatSettings,
       actionEngine,

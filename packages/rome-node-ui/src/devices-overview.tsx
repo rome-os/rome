@@ -47,6 +47,8 @@ export interface NodeDevicesProps {
   manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
+  /** The host's link action and setup content when there are no active devices. */
+  setup?: { action: ReactNode; empty: ReactNode };
 }
 
 /**
@@ -294,6 +296,7 @@ export function NodeDevices({
   thisDevice,
   manage,
   loading = false,
+  setup,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -333,6 +336,7 @@ export function NodeDevices({
           a.name.localeCompare(b.name, locale),
       ),
   );
+  const showSetup = setup && ready && current.length === 0;
 
   return (
     <Section
@@ -340,7 +344,7 @@ export function NodeDevices({
       aria-busy={!(ready && settled) || undefined}
       className="@container gap-6"
     >
-      <SectionHeader>
+      <SectionHeader className="flex-nowrap items-center">
         <SectionHeading>
           {/* The host's tab already names the page, so the title is for screen readers. */}
           <SectionTitle id="node-devices-title" className="sr-only">
@@ -348,21 +352,28 @@ export function NodeDevices({
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />
         </SectionHeading>
-        <SectionActions>
-          <Button size="sm" onClick={() => setLinkOpen(true)}>
-            <Plus data-icon="inline-start" aria-hidden />
-            {m.linkDevice}
-          </Button>
-        </SectionActions>
+        {!showSetup && (
+          <SectionActions>
+            {setup ? (
+              setup.action
+            ) : (
+              <Button size="sm" onClick={() => setLinkOpen(true)}>
+                <Plus data-icon="inline-start" aria-hidden />
+                {m.linkDevice}
+              </Button>
+            )}
+          </SectionActions>
+        )}
       </SectionHeader>
 
       {ready && !supported && (
         <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
       )}
 
-      {ready && listed.length === 0 && (
-        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
-      )}
+      {showSetup
+        ? setup.empty
+        : ready &&
+          listed.length === 0 && <p className="text-ui text-muted-foreground">{m.noDevices}</p>}
 
       {current.length > 0 && (
         <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
@@ -415,7 +426,7 @@ export function NodeDevices({
         </section>
       )}
 
-      <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />
+      {!setup && <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />}
     </Section>
   );
 }

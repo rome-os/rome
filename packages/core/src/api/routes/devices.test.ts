@@ -251,7 +251,7 @@ describe("device list for the folder picker", () => {
           { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
           { id: "pc", platform: 3 },
           { id: "gone", device_name: "Old", platform: "linux", revoked_at: "2026-10-01T00:00:00Z" },
-          { id: "nas", device_name: "NAS", platform: "linux", device_kind: "lan_node" },
+          { id: "nas", device_name: "NAS", platform: "linux", device_kind: "container_node" },
         ],
       }),
     }));
