@@ -43,9 +43,9 @@ const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
 const RENEW_RETRY_MS = HOUR_MS;
-/** A message handed to Rome this recently before a start is handed over
- *  again: handing over does not wait for Rome to record it, so a stop may have
- *  cut it off. Rome ignores a message it already holds. */
+/** A message handed to Rome this soon before the last hand-off is handed over
+ *  again on start: handing over does not wait for Rome to record it, so a
+ *  stop may have cut it off. Rome ignores a message it already holds. */
 const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
 const MAX_TIMER_MS = 24 * HOUR_MS;
@@ -274,11 +274,10 @@ export class SlackAppAdapter {
   }
 
   /** Hand Rome again what it may not hold: what the copy kept but never
-   *  handed over, and what it handed over just before a stop. Rome ignores a
-   *  message it already holds. */
+   *  handed over, and what it handed over just before it last stopped,
+   *  however long ago. Rome ignores a message it already holds. */
   private handOverKept(): void {
-    const since = new Date(this.now().getTime() - HAND_OVER_AGAIN_MS);
-    const kept = this.config.copy.mayNotHold(this.config.teamId, since);
+    const kept = this.config.copy.mayNotHold(this.config.teamId, HAND_OVER_AGAIN_MS);
     if (kept.length > 0) {
       log.info("slack app handing over kept messages", { count: kept.length });
     }

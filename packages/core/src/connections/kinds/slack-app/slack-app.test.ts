@@ -251,7 +251,7 @@ describe("Slack app's own copy of its direct messages", () => {
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 
-  it("hands Rome on start what it kept but never handed over, once", async () => {
+  it("hands Rome on start what it kept but never handed over", async () => {
     const { db } = createTestDb();
     // Kept, then stopped before noting it was handed over.
     const interrupted = new SlackMessageCopyRepository(db);
@@ -267,12 +267,13 @@ describe("Slack app's own copy of its direct messages", () => {
     expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
     expect(restarted.delivered[0]?.timestamp).toEqual(first.delivered[0]?.timestamp);
 
+    // Each start offers the last hand-offs again; Rome ignores what it holds.
     const again = adapter(fakeMailbox(), fakeApi(), copy, at(50));
     await again.adapter.start();
-    expect(again.delivered).toHaveLength(0);
+    expect(again.delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 
-  it("hands Rome again on start what it handed over just before a stop", async () => {
+  it("hands Rome again on start what it handed over just before a stop, however long the stop", async () => {
     const { db } = createTestDb();
     const copy = new SlackMessageCopyRepository(db);
     const first = adapter(fakeMailbox(), fakeApi(), copy, at(0));
@@ -285,10 +286,33 @@ describe("Slack app's own copy of its direct messages", () => {
     await reloaded.adapter.start();
     expect(reloaded.delivered.map((m) => m.text)).toEqual(["message 1"]);
 
-    // Long after, what was handed over is Rome's.
-    const later = adapter(fakeMailbox(), fakeApi(), copy, at(40));
-    await later.adapter.start();
-    expect(later.delivered).toHaveLength(0);
+    // A restart hours later still hands over what came just before the stop.
+    const late = adapter(
+      fakeMailbox(),
+      fakeApi(),
+      copy,
+      () => new Date(Date.UTC(2026, 10, 19, 15)),
+    );
+    await late.adapter.start();
+    expect(late.delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("hands Rome again only what came just before the last hand-off", async () => {
+    const { db } = createTestDb();
+    const copy = new SlackMessageCopyRepository(db);
+    const first = adapter(fakeMailbox(), fakeApi(), copy, at(0));
+    await first.adapter.start();
+    await first.adapter.handleFrame(frame(dmEvent(1)));
+    await first.adapter.stop();
+    const second = adapter(fakeMailbox(), fakeApi(), copy, at(40));
+    await second.adapter.start();
+    await second.adapter.handleFrame(frame(dmEvent(2)));
+    await second.adapter.stop();
+
+    // Message 1 was handed over 40 minutes before the last hand-off.
+    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(50));
+    await restarted.adapter.start();
+    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 2"]);
   });
 
   it("hands over a message Slack delivers again after a restart only once", async () => {
@@ -301,9 +325,12 @@ describe("Slack app's own copy of its direct messages", () => {
 
     const restarted = adapter(mailbox, fakeApi(), copy, at(30));
     await restarted.adapter.start();
+    // Start offers it again, since a stop may have cut it off before Rome
+    // recorded it; Slack's own redelivery adds nothing on top.
+    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
     await mailbox.deposit(frame(dmEvent(1)));
     expect(first.delivered).toHaveLength(1);
-    expect(restarted.delivered).toHaveLength(0);
+    expect(restarted.delivered).toHaveLength(1);
   });
 });
 

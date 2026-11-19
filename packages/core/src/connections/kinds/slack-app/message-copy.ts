@@ -7,7 +7,7 @@
 // outside the connection can tell whether the copy exists.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import { and, asc, eq, gte, isNull, or } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, max, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
 import { slackAppMessages } from "../../../db/schema.js";
 
@@ -31,12 +31,14 @@ export interface KeptSlackMessage {
 export interface SlackMessageCopy {
   /** Keep `kept`, and answer false when its event was kept already. */
   keep(kept: KeptSlackMessage, at: Date): boolean;
-  /** Note that the message of event `eventId` was handed to Rome. */
+  /** Note that the message of event `eventId` was first handed to Rome. */
   handedOver(teamId: string, eventId: string, at: Date): void;
   /** The messages kept for workspace `teamId` that Rome may not hold, oldest
-   *  first: those never handed over, and those handed over at or after
-   *  `since`, which a stop may have cut off before Rome recorded them. */
-  mayNotHold(teamId: string, since: Date): Array<{ eventId: string; message: ChannelMessage }>;
+   *  first: those never handed over, and those handed over within `windowMs`
+   *  of the last hand-off, which a stop may have cut off before Rome recorded
+   *  them. The window runs back from the last hand-off, not from now, so a
+   *  long stop does not shrink it. */
+  mayNotHold(teamId: string, windowMs: number): Array<{ eventId: string; message: ChannelMessage }>;
 }
 
 /** The copy in Rome's database. */
@@ -69,11 +71,28 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     this.db
       .update(slackAppMessages)
       .set({ handedOverAt: at })
-      .where(and(eq(slackAppMessages.teamId, teamId), eq(slackAppMessages.eventId, eventId)))
+      // The first hand-off counts: handing a message over again on start
+      // does not move the window `mayNotHold` measures from.
+      .where(
+        and(
+          eq(slackAppMessages.teamId, teamId),
+          eq(slackAppMessages.eventId, eventId),
+          isNull(slackAppMessages.handedOverAt),
+        ),
+      )
       .run();
   }
 
-  mayNotHold(teamId: string, since: Date): Array<{ eventId: string; message: ChannelMessage }> {
+  mayNotHold(
+    teamId: string,
+    windowMs: number,
+  ): Array<{ eventId: string; message: ChannelMessage }> {
+    const last = this.db
+      .select({ at: max(slackAppMessages.handedOverAt) })
+      .from(slackAppMessages)
+      .where(eq(slackAppMessages.teamId, teamId))
+      .get()?.at;
+    const since = new Date((last ? last.getTime() : 0) - windowMs);
     return this.db
       .select({ eventId: slackAppMessages.eventId, message: slackAppMessages.message })
       .from(slackAppMessages)
