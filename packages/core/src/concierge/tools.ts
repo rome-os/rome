@@ -1202,7 +1202,7 @@ export async function buildConciergeTools(
     {
       name: "chat_list",
       description:
-        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded or a status. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded or a status. Pass here for only the task chats started from the chat you are in. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1217,10 +1217,16 @@ export async function buildConciergeTools(
             description:
               "Also answer each task chat's note, the one you wrote for your later self, its schedule's brief, and when it last changed.",
           },
+          here: {
+            type: "boolean",
+            description:
+              "List only the task chats started from the chat you are in (their from is this chat), and no other chats.",
+          },
         },
       },
       handler: (input) =>
         runTool("chat_list", input, async (args) => {
+          const onlyHere = args.here === true;
           const wanted = CONCIERGE_TASK_STATUSES.find((status) => status === args.status);
           const { chatId: here } = currentTurn();
           const owner = await ownerHere();
@@ -1231,19 +1237,21 @@ export async function buildConciergeTools(
           const taskChats = rows
             .map((task, index) => ({ task, schedule: schedules[index] }))
             .filter(({ task }) => !wanted || task.status?.status === wanted)
+            .filter(({ task }) => !onlyHere || task.conciergeChat.id === here)
             .map(({ task, schedule }) =>
               compactTask(task, task.status, args.details === true, schedule),
             )
             .sort((a, b) => a.chatId.localeCompare(b.chatId));
-          const conciergeChats = wanted
-            ? []
-            : (await service.listChats(owner))
-                .filter((chat) => chat.id !== here)
-                .map((chat) => ({
-                  chatId: chat.id,
-                  title: chat.name,
-                  kind: chat.main ? "main chat" : "topic chat",
-                }));
+          const conciergeChats =
+            wanted || onlyHere
+              ? []
+              : (await service.listChats(owner))
+                  .filter((chat) => chat.id !== here)
+                  .map((chat) => ({
+                    chatId: chat.id,
+                    title: chat.name,
+                    kind: chat.main ? "main chat" : "topic chat",
+                  }));
           return [...conciergeChats, ...taskChats];
         }),
     },

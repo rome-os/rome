@@ -1714,6 +1714,25 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_list with here lists only the task chats started from the chat the turn is in", async () => {
+    const s = setup();
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" });
+    const titles = async (input: Record<string, unknown>) =>
+      JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+    // No other Concierge chat and no task from another chat.
+    expect(await titles({ here: true })).toEqual(["Agenda"]);
+    expect(await titles({ here: true, status: "active" })).toEqual(["Agenda"]);
+    // Without it, everything as before.
+    expect(await titles({})).toEqual(["Concierge", "Flights", "Agenda"]);
+    s.turnIn(CONCIERGE_CHAT);
+    expect(await titles({ here: true })).toEqual(["Flights"]);
+  });
+
   it("chat_list leaves out an ended task's chat unless asked", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
