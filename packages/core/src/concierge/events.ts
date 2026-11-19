@@ -234,7 +234,7 @@ export async function renderTaskEvents(
       const latest = final?.answer;
       // A card the answer showed is what `chat_forward` sends, as it is,
       // unless the answer has nothing to report, which it holds back.
-      if (final?.card && !hasNothingToReport(final.answer.body.text)) {
+      if (final?.card && !(latest && hasNothingToReport(latest.body.text))) {
         lines.push(`card: ${replyExcerpt(final.card.text.replace(/\s+/g, " "))}`);
       }
       if (latest) {

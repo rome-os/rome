@@ -134,6 +134,7 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
       body: { text: card ? card.text : textOf(row.content) },
       at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
       ...(card ? { card } : {}),
+      ...(row.turnId ? { turnId: row.turnId } : {}),
     };
   });
   return {
@@ -2083,20 +2084,23 @@ describe("Concierge tools", () => {
         ],
       };
       const LINE = "Sleep 6.1 h (usual 7–9), resting HR 58 bpm (usual 50–65).";
-      const cardRow = (ui: unknown = HEALTH) => ({
+      const cardRow = (ui: unknown = HEALTH, turnId = "task-turn-1") => ({
         role: "assistant",
+        turnId,
         content: JSON.stringify([
           { type: "widget", toolUseId: "task-call-1", appId: "core", text: LINE, ui },
         ]),
+      });
+      const textRow = (content: string, turnId = "task-turn-1") => ({
+        role: "assistant",
+        turnId,
+        content: JSON.stringify([{ type: "text", content }]),
       });
       /** A task chat whose final answer showed the card, then wrote `answer`. */
       const withCard = async (answer = concluded("Your daily health summary.")) => {
         const s = setup();
         await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages.get("task-1")?.push(cardRow(), {
-          role: "assistant",
-          content: JSON.stringify([{ type: "text", content: answer }]),
-        });
+        s.messages.get("task-1")?.push(cardRow(), textRow(answer));
         return s;
       };
 
@@ -2124,14 +2128,28 @@ describe("Concierge tools", () => {
       it("finds the card when it came after the answer in the same turn", async () => {
         const s = setup();
         await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
-        s.messages.get("task-1")?.push(
-          {
-            role: "assistant",
-            content: JSON.stringify([{ type: "text", content: concluded("Summary.") }]),
-          },
-          cardRow(),
-        );
+        s.messages.get("task-1")?.push(textRow(concluded("Summary.")), cardRow());
         expect(text(await s.tool("chat_forward", { chatId: "task-1" })).forwarded).toBe("card");
+      });
+
+      it("forwards the card of a latest turn that showed only a card, not an earlier turn's text", async () => {
+        const s = setup();
+        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+        s.messages
+          .get("task-1")
+          ?.push(textRow(concluded("Yesterday's summary."), "task-turn-0"), cardRow());
+        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+        expect(result.forwarded).toBe("card");
+        expect(JSON.stringify(stored(s))).not.toContain("Yesterday's summary.");
+      });
+
+      it("never pairs an answer with an earlier turn's card when no prompt lies between them", async () => {
+        const s = await withCard();
+        // A defer wake-up answers with no prompt of its own.
+        s.messages.get("task-1")?.push(textRow(concluded("Checked again."), "task-turn-2"));
+        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+        expect(result.forwarded).toBe("conclusion");
+        expect(stored(s).at(-1).at(-1).content).toBe("Checked again.");
       });
 
       it("sends an intro as a message of its own before the card", async () => {
@@ -2165,12 +2183,10 @@ describe("Concierge tools", () => {
         s.messages.get("task-1")?.push(
           {
             role: "user",
+            turnId: "task-turn-2",
             content: JSON.stringify([{ type: "text", content: "And the steps?" }]),
           },
-          {
-            role: "assistant",
-            content: JSON.stringify([{ type: "text", content: concluded("8,000 steps.") }]),
-          },
+          textRow(concluded("8,000 steps."), "task-turn-2"),
         );
         const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
         expect(result.forwarded).toBe("conclusion");
@@ -2193,10 +2209,10 @@ describe("Concierge tools", () => {
         await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
         s.messages
           .get("task-1")
-          ?.push(cardRow({ components: [{ id: "root", component: "Button", label: "Go" }] }), {
-            role: "assistant",
-            content: JSON.stringify([{ type: "text", content: concluded("Summary.") }]),
-          });
+          ?.push(
+            cardRow({ components: [{ id: "root", component: "Button", label: "Go" }] }),
+            textRow(concluded("Summary.")),
+          );
         const before = stored(s).length;
         const result = await s.tool("chat_forward", { chatId: "task-1" });
         expect(result.isError).toBe(true);
@@ -3241,11 +3257,15 @@ describe("Concierge events", () => {
   });
 
   /** The prompt of the task event an answer `text` brings, with a card of `line` after it. */
-  const cardEventFor = async (text: string, line: string) => {
+  const cardEventFor = async (text: string, line: string, answerTurn = "task-turn-1") => {
     const s = setup();
     const { chatId } = await startTask(s, text);
-    s.messages.get(chatId)?.push({
+    const rows = s.messages.get(chatId) ?? [];
+    const answer = rows.at(-1);
+    if (answer) answer.turnId = answerTurn;
+    rows.push({
       role: "assistant",
+      turnId: "task-turn-1",
       content: JSON.stringify([
         {
           type: "widget",
@@ -3270,6 +3290,16 @@ describe("Concierge events", () => {
     );
     expect(prompt).toContain("\ncard: Sleep 6.1 h (usual 7–9)\n");
     expect(prompt).toContain("\nconclusion: Your daily health summary.\n");
+  });
+
+  it("gives a turn that showed only a card as its card line, with no earlier turn's conclusion", async () => {
+    const prompt = await cardEventFor(
+      concluded("Yesterday's summary."),
+      "Sleep 6.1 h",
+      "task-turn-0",
+    );
+    expect(prompt).toContain("\ncard: Sleep 6.1 h\n");
+    expect(prompt).not.toContain("Yesterday's summary.");
   });
 
   it("names no card when the answer has nothing to report, since no forward sends it", async () => {

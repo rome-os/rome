@@ -44,30 +44,46 @@ export async function latestSaid(
   }
 }
 
-/** A task chat's final answer: its latest message from Rome with text that
- *  is no card, and the agent card the same turn showed, before or after it,
- *  if any. A turn runs from the message that prompted it to the next one, so
- *  a card an earlier turn showed is never the answer's. Null for no answer. */
+/** A task chat's final answer, by the turn that said Rome's latest message
+ *  with text or a card: that turn's latest text, and its latest agent card.
+ *  A turn that showed only a card has no text, and the card is its answer. A
+ *  message no turn is linked to, such as an older row, answers alone. */
+export interface FinalAnswer {
+  readonly answer?: SaidMessage;
+  readonly card?: AgentCardPart;
+}
+
+/** The final answer of a task chat, or null for none yet. Turns are told
+ *  apart by the turn that said each message, never by where a prompt sits:
+ *  a defer wake-up or an approval's resumption answers with no prompt of its
+ *  own, and a card-only turn has no text to stop at. */
 export async function finalAnswer(
   messages: Pick<MessageRepository, "recent" | "before">,
   place: Place,
-): Promise<{ answer: SaidMessage; card?: AgentCardPart } | null> {
+): Promise<FinalAnswer | null> {
+  let turn: string | undefined;
   let answer: SaidMessage | undefined;
-  // The newest card of the turn being walked, newest message first.
   let card: AgentCardPart | undefined;
+  const found = (): FinalAnswer => ({
+    ...(answer ? { answer } : {}),
+    ...(card ? { card } : {}),
+  });
   let page = await messages.recent(place, MAX_READ_LIMIT, DASHBOARD);
   for (;;) {
+    // Newest message first.
     for (const message of [...page.messages].reverse()) {
-      if (message.direction === "toRome") {
-        if (answer) return { answer, ...(card ? { card } : {}) };
-        card = undefined;
-      } else if (message.card) {
-        card ??= message.card;
-      } else if (!answer && hasText(message)) {
-        answer = message;
+      if (message.direction !== "fromRome" || (!message.card && !hasText(message))) continue;
+      if (answer || card) {
+        // Only the latest answering turn counts.
+        if (!turn || message.turnId !== turn) return found();
+      } else {
+        turn = message.turnId;
       }
+      if (message.card) card ??= message.card;
+      else answer ??= message;
+      if (!turn) return found();
     }
-    if (!page.older) return answer ? { answer, ...(card ? { card } : {}) } : null;
+    if (!page.older) return answer || card ? found() : null;
     page = await messages.before(place, page.older, MAX_READ_LIMIT, DASHBOARD);
   }
 }
@@ -125,6 +141,7 @@ function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): Sai
     at: line.at,
     ...(line.chatThread === undefined ? {} : { chatThread: line.chatThread }),
     ...(card ? { card } : {}),
+    ...(link?.turnId ? { turnId: link.turnId } : {}),
   };
 }
 

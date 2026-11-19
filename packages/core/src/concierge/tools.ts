@@ -1570,16 +1570,17 @@ export async function buildConciergeTools(
           const chatId = requireString(args, "chatId");
           const chat = await requireOwnTaskChat(chatId);
           const final = await finalAnswer(messages, taskChatPlace(chatId));
-          const answer = final?.answer.body.text ?? null;
-          if (!answer) throw new Error("The task chat has no answer yet");
+          if (!final) throw new Error("The task chat has no answer yet");
+          const answer = final.answer?.body.text ?? null;
           currentTurn();
           const full = args.full === true;
           const from = { chatId, title: chat.name };
           // A card the final answer showed goes as it is, where this chat
           // draws cards, and as its plain-text line where it cannot. Only a
-          // conclusion with no news holds it back.
-          const card = full ? undefined : final?.card;
-          if (card && !hasNothingToReport(answer)) {
+          // conclusion with no news holds it back. A turn that showed only a
+          // card has no text, so its card goes whatever `full` says.
+          const card = full && answer ? undefined : final.card;
+          if (card && !(answer && hasNothingToReport(answer))) {
             const intro = optionalString(args, "intro");
             const messageId =
               context.widgets === "card"
@@ -1593,6 +1594,7 @@ export async function buildConciergeTools(
               ...(task ? { taskAnchored: task.id } : {}),
             };
           }
+          if (!answer) throw new Error("The task chat has no answer yet");
           // Everything that can refuse comes before anything is said.
           if (full && !(await guardianStartedTurn())) {
             throw new Error(
