@@ -1,7 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
 import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
-import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   cardKey,
   chatCardSettledSchema,
@@ -2407,9 +2406,9 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The header's Tasks and Routines buttons open the chat's lists: what runs for it.
+  // The badge's menu opens the chat's lists: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
-  // A dot on the Tasks button says a task chat needs its owner.
+  // A dot on the menu's Tasks entry says a task chat needs its owner.
   const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
   // On a narrow screen the task list's sheet covers the composer.
   useEffect(() => {
@@ -2481,16 +2480,11 @@ export function Chat({
     workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
     workspaceStore?.set("followTargetPath", logical);
   };
-  // The badge's menu: the project, and the model that answered last at its
-  // foot. No counts or marks. A Concierge chat's Tasks, Routines and Outputs
-  // are buttons beside the badge, except on a phone, where they do not fit
-  // beside the header's own buttons and stay in this menu. Any other chat
-  // keeps Outputs here.
-  const phoneHeader = useMediaQuery("(max-width: 767px)");
-  const toolsInMenu = !concierge || phoneHeader;
+  // The badge's menu: what opens in the side pane (a Concierge chat's Tasks
+  // and Routines, then Outputs), and the model that answered last at its foot.
   const menuItems: HeaderMenuItem[] = mainSessionId
     ? [
-        ...(concierge && phoneHeader
+        ...(concierge
           ? [
               {
                 key: "tasks",
@@ -2507,16 +2501,12 @@ export function Chat({
               },
             ]
           : []),
-        ...(toolsInMenu
-          ? [
-              {
-                key: "outputs",
-                icon: <FileOutput />,
-                label: t("concierge.menu.outputs"),
-                run: () => outputsPane.open(),
-              },
-            ]
-          : []),
+        {
+          key: "outputs",
+          icon: <FileOutput />,
+          label: t("concierge.menu.outputs"),
+          run: () => outputsPane.open(),
+        },
         ...(chosenProject
           ? [
               {
@@ -2532,7 +2522,7 @@ export function Chat({
       ]
     : [];
   const headerMenu: HeaderMenu | undefined =
-    menuItems.length > 0 || (mainSessionId && model)
+    menuItems.length > 0
       ? {
           items: menuItems,
           caption: model ? (
@@ -2546,45 +2536,6 @@ export function Chat({
           ) : undefined,
         }
       : undefined;
-  // The Concierge chat's side-pane views, beside its badge. Tasks carries the
-  // dot while a task chat needs its owner.
-  const toolButton = (key: string, label: string, icon: ReactNode, run: () => void) => (
-    <IconButton
-      key={key}
-      size={floating ? "md" : "sm"}
-      label={label}
-      icon={icon}
-      onClick={run}
-      className={actionBadge}
-    />
-  );
-  const headerTools =
-    concierge && mainSessionId && !phoneHeader
-      ? [
-          toolButton(
-            "tasks",
-            t("concierge.menu.tasks"),
-            <span className="relative">
-              <ListChecks />
-              {tasksNeedYou ? (
-                <span
-                  role="img"
-                  aria-label={t("concierge.menu.needsYouDot")}
-                  data-tasks-needs-you
-                  className="absolute -right-1 -top-1 size-1.5 rounded-full bg-primary"
-                />
-              ) : null}
-            </span>,
-            () => taskList.open("tasks"),
-          ),
-          toolButton("routines", t("concierge.menu.routines"), <CalendarClock />, () =>
-            taskList.open("routines"),
-          ),
-          toolButton("outputs", t("concierge.menu.outputs"), <FileOutput />, () =>
-            outputsPane.open(),
-          ),
-        ]
-      : null;
   const headerBadge = concierge ? (
     blankTopicChat ? null : (
       <ConciergeHeaderStatus
@@ -2595,7 +2546,6 @@ export function Chat({
         // A chat with no messages yet draws its own large mascot.
         badge={!conciergeEmpty}
         menu={headerMenu}
-        tools={headerTools}
       />
     )
   ) : (

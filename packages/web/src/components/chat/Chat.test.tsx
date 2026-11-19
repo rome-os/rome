@@ -2833,7 +2833,7 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
     expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "chatHeader.menu" })).toBeNull();
     view.unmount();
 
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
@@ -2847,7 +2847,7 @@ describe("Chat Concierge empty state", () => {
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByTestId("user-row");
-    expect(await screen.findByRole("button", { name: "concierge.menu.tasks" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "chatHeader.menu" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -3016,14 +3016,13 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task lists from buttons beside the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
+  it("opens Tasks, Routines and Outputs from the menu on the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    // A topic chat with a message: a blank one shows no header.
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
       {
         id: "m-1",
@@ -3034,43 +3033,7 @@ describe("Chat Concierge empty state", () => {
       },
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    // The header settles once the chat loads; Tasks, Routines and Outputs are buttons beside its badge.
-    await screen.findByRole("button", { name: "concierge.menu.tasks" });
-    fireEvent.click(screen.getByRole("button", { name: "concierge.menu.tasks" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
-    fireEvent.click(screen.getByRole("button", { name: "concierge.menu.routines" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
-    expect(screen.getByRole("button", { name: "concierge.menu.outputs" })).toBeTruthy();
-    // The badge's menu holds none of the three: with no project or model, it has no menu at all.
-    expect(screen.queryByRole("button", { name: "chatHeader.menu" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "navbar.more" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
-      "concierge.tasks.title",
-    );
-  });
-
-  it("keeps Tasks, Routines and Outputs in the badge's menu on a phone, where the header has no room for buttons", async () => {
-    rs.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(max-width: 767px)",
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }));
-    mockUseSessionIdentity.mockReturnValue({
-      sessionName: "Calendar",
-      pinnedAgentMention: null,
-      archivedAt: null,
-    });
-    rs.mocked(listSessionMessages).mockResolvedValueOnce([
-      {
-        id: "m-1",
-        sessionId: "topic-1",
-        role: "user" as const,
-        content: "hello",
-        createdAt: "2026-10-26T00:00:00.000Z",
-      },
-    ]);
-    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    // The header settles once the chat loads; its menu holds Tasks, Routines and Outputs, in that order.
     fireEvent.click(await screen.findByRole("button", { name: "chatHeader.menu" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.tasks",
@@ -3079,7 +3042,13 @@ describe("Chat Concierge empty state", () => {
     ]);
     fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
     expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
-    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "chatHeader.menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.tasks" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
+      "concierge.tasks.title",
+    );
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {

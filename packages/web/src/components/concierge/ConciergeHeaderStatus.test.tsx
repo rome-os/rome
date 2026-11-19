@@ -44,23 +44,6 @@ describe("ConciergeHeaderStatus", () => {
     expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
   });
 
-  it("holds its tool buttons beside the badge, to its right, and none without a badge", () => {
-    const tools = <button type="button">Routines</button>;
-    const { container, rerender } = render(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} tools={tools} />,
-    );
-    const holder = container.querySelector<HTMLElement>("[data-concierge-header-tools]")!;
-    expect(holder.contains(screen.getByRole("button", { name: "Routines" }))).toBe(true);
-    // The badge is the grid's middle column; the tools start in the next one.
-    expect(holder.className).toContain("col-start-3");
-    expect(holder.className).toContain("row-start-1");
-    expect(holder.className).toContain("justify-self-start");
-    rerender(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} badge={false} tools={tools} />,
-    );
-    expect(container.querySelector("[data-concierge-header-tools]")).toBeNull();
-  });
-
   it("shows its menu from the badge, or from the name tag without a badge, and opens nothing itself", () => {
     const opened: string[] = [];
     const menu = {

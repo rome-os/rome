@@ -222,7 +222,7 @@ A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[na
 
 ## Task list
 
-The Tasks and Routines views in a [Concierge chat](#concierge-chat)'s side panel that answer "what is my agent doing for me in this chat?". The dashboard labels them Tasks and Routines. Its owner opens each from its own button in the chat's header, beside the agent's logo, with Outputs as the third. The Tasks button has a dot while a task chat needs its owner. The logo itself carries none, and its menu holds neither view. On a phone the dashboard keeps the three in the menu on the agent's logo, since they do not fit beside the header's own buttons, and opens each in a sheet. The iOS app shows them as three tabs of the Agent page. Each view keeps the panel's title and has no tabs of its own.
+The Tasks and Routines views in a [Concierge chat](#concierge-chat)'s side panel that answer "what is my agent doing for me in this chat?". The dashboard labels them Tasks and Routines. Its owner opens each from the menu on the agent's logo in the chat's header, which lists Tasks, Routines and Outputs in that order. The Tasks entry has a dot while a task chat needs its owner; the logo itself carries none. On a phone each opens in a sheet. The iOS app shows them as three tabs of the Agent page. Each view keeps the panel's title and has no tabs of its own.
 
 - It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and a Stop on another person's chat is refused as if the chat did not exist. A common chat has none for now.
 - It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a follow and a routine show as their own record says.
@@ -470,4 +470,4 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A one-line summary of each task.** The Concierge wrote one on every report and no screen showed it. The Concierge's report and the task chat's own conclusion say it.
 - **Rows the Concierge writes to start later.** A task that was only a row had no chat, so it showed as later for good, and a day-old one was a reminder the Concierge raised. A task starts with its chat. A thing to look at again later is a check with no task.
 - **Copying a task chat's card into a Concierge chat.** A task card and a copied question gave the card a life of its own there: folded, waiting on a newer copy, closed. The owner now sees the task as a task link with its live status, and answers in the task chat or in words, as in Claude Code Projects.
-- **Task chats and routines side by side in one list.** A task is work that has a chat, and a routine or a follow is not. The Tasks view splits them into two tabs.
+- **Task chats and routines side by side in one list.** A task is work that has a chat, and a routine or a follow is not. Tasks and Routines are two views.
