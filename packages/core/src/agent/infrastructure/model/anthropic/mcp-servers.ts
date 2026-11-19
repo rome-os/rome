@@ -77,9 +77,9 @@ export function buildAnthropicMcpServers({
       tools: tools.listTools(group).map((toolDef) => wrapRomeTool(tools, group, toolDef)),
     });
 
-  // The actions + skills MCP servers always register so the agent can list
-  // them mid-session even when the live catalogs are currently empty — that's
-  // how `app_management` installs become discoverable in-session.
+  // The actions + skills MCP servers always register so an agent with actions
+  // can list them mid-session even when the live catalogs are currently empty
+  // — that's how `app_management` installs become discoverable in-session.
   const mcpServers: AnthropicMcpServers = {
     actions: server("actions"),
     skills: server("skills"),

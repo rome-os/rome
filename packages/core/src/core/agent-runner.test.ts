@@ -47,7 +47,7 @@ const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
 import type { ModelSessionEvent, RenewalHandoffs, RomeTools } from "../agent/index.js";
-import { ROME_TOOL_GROUPS } from "../agent/index.js";
+import { ROME_TOOL_GROUPS, type Skill } from "../agent/index.js";
 import {
   executeActionTool,
   executeSubagentTool,
@@ -8196,6 +8196,40 @@ describe("AgentRunner", () => {
         sideEffects: "write",
         requiresApproval: false,
       });
+    });
+
+    it("serves skills to an agent with actions and none to an agent without", async () => {
+      const skill: Skill = {
+        name: "notes:filing",
+        localName: "filing",
+        description: "How the guardian files notes",
+        content: "# Filing\n\nThe guardian's private filing steps.",
+        ownerType: "app",
+        ownerId: "notes",
+      };
+      const listSpy = rs.spyOn(SkillLoader.prototype, "list").mockReturnValue([skill]);
+      try {
+        const provider = new MockModelProvider([
+          [{ type: "result", content: "Done" }],
+          [{ type: "result", content: "Done" }],
+        ]);
+        const runner = createRunner(provider);
+
+        await collectMessages(runner.run({ agentName: "test-main", prompt: "Use tools" }));
+        const listed = parseToolText(
+          await provider.calls[0]!.tools.callTool("skills", "list_skills", {}),
+        ) as Array<{ name: string }>;
+        expect(listed.map((entry) => entry.name)).toEqual([skill.name]);
+
+        await collectMessages(runner.run({ agentName: "test-sentinel", prompt: "Triage" }));
+        const sentinel = provider.calls[1]!.tools;
+        expect(parseToolText(await sentinel.callTool("skills", "list_skills", {}))).toEqual([]);
+        const read = await sentinel.callTool("skills", "read_skill", { skill_name: skill.name });
+        expect(read.isError).toBe(true);
+        expect(read.content[0].text).toBe(`Unknown skill: ${skill.name}`);
+      } finally {
+        listSpy.mockRestore();
+      }
     });
 
     it("expands wildcard action access to public agent-callable actions", async () => {

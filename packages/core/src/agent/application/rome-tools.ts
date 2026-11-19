@@ -44,10 +44,18 @@ export function createRomeTools(options: RomeToolsOptions): RomeTools {
   const { turn, actions, skills, subagents, widgetsShow, log, defer, sessionTools, repliesTo } =
     options;
   const run = romeToolRunner(log);
+  // An agent with no actions may read untrusted text, as the inbox sentinel and
+  // the Concierge's triage do. A skill's body must not be something that text
+  // can pull out through `read_skill`, so such an agent sees none. Read on
+  // every call, like `turn.actions`, so a granted action exposes the catalog
+  // at once.
+  const servedSkills = {
+    list: () => (turn.actions.length > 0 ? skills.list() : []),
+  };
   const groups: Record<RomeToolGroup, RomeTool[]> = {
     actions: actionTools(actions, turn, widgetsShow, run, log),
     subagents: subagentTools(subagents, run),
-    skills: skillTools(skills, run),
+    skills: skillTools(servedSkills, run),
     ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, repliesTo, run }),
   };
 
