@@ -2,7 +2,9 @@ import { sendRefusalMessage, type SendRefusal } from "@rome/api-types/people";
 import type { Context } from "hono";
 import type { SendResult } from "../../../chats/send.js";
 
-/** The one answer every send route gives, so the dashboard reads one shape. */
+/** The one answer every send route gives, so the dashboard reads one shape.
+ *  It lives with person history's routes, which own the send to an account;
+ *  the assistants route is the one other user (features.ts lists it). */
 export function respondToSend(c: Context, result: SendResult) {
   if (result.ok) return c.json(result.sent, 200);
   if ("invalid" in result) return c.json({ error: result.invalid }, 400);
