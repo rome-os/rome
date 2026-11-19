@@ -67,6 +67,8 @@ export interface PlaceSetup {
   finalText?: AgentPolicy["finalText"];
   /** Actions of the agent's own list it may not call in this place. */
   withoutActions?: readonly string[];
+  /** True when a session here may not wake itself later with `defer`. */
+  withoutDefer?: boolean;
 }
 
 /** The agent's policy in a place: what the place sets wins over the agent's own. */
