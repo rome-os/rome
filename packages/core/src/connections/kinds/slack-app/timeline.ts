@@ -159,26 +159,28 @@ export async function readTimeline(
   const adjacent = above !== undefined && (bound === undefined || compareTs(above, bound) <= 0);
   const latest = adjacent ? above : bound;
   const page = await deps.fetchPage(channelId, latest !== undefined ? { latest } : {});
-  deps.copy.keepRun(deps.teamId, channelId, {
+  // The page as the copy keeps it: a change that arrived while it was read
+  // is taken.
+  const kept = deps.copy.keepRun(deps.teamId, channelId, {
     messages: page.messages,
     before: page.hasMore ? null : "",
     ...(adjacent ? { after: above } : {}),
   });
   // Slack's newest, read with no upper bound: anything newer is heard in the
   // drain, so it heads the chat unless a newer one was heard meanwhile.
-  const newest = page.messages[0]?.ts;
+  const newest = kept[0]?.ts;
   if (latest === undefined && newest !== undefined && deps.hearsEvery(channelId)) {
     const head = deps.heads.get(channelId);
     if (head === undefined || compareTs(head, newest) < 0) deps.heads.set(channelId, newest);
   }
-  for (const { ts, message } of page.messages) {
+  for (const { ts, message } of kept) {
     if (found.length >= read.limit) break;
     if (since !== undefined && compareTs(ts, since) < 0) break;
     if (within(ts)) found.push(message);
   }
   // An empty answer reads as the chat's start, so a page Slack answered with
   // none Rome reads says where to read on instead.
-  if (found.length === 0 && page.messages.length === 0 && page.hasMore && page.oldest) {
+  if (found.length === 0 && kept.length === 0 && page.hasMore && page.oldest) {
     throw new Error(
       `Slack's page of chat ${channelId} held only messages Rome does not read, such as joins or edits, and Slack holds older ones. Read on with olderThan=${page.oldest}.`,
     );
@@ -227,8 +229,11 @@ async function readForward(
       channelId,
       until !== undefined ? { latest: justAfter(until) } : {},
     );
-    deps.copy.keepRun(deps.teamId, channelId, { messages: page.messages, before: null });
-    const newer = page.messages.filter(({ ts }) => compareTs(ts, from) > 0);
+    const kept = deps.copy.keepRun(deps.teamId, channelId, {
+      messages: page.messages,
+      before: null,
+    });
+    const newer = kept.filter(({ ts }) => compareTs(ts, from) > 0);
     const wanted = newer.filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0);
     // The page reaches the read's lower bound, `from` or `since`, once it
     // holds a message at or below it.

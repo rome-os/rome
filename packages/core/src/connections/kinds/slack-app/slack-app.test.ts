@@ -1777,4 +1777,34 @@ describe("Slack app takes edits and deletions into its copy", () => {
     expect(texts(await a.readHistory("D_GUARDIAN" as never, { limit: 1 }))).toEqual(["edit B"]);
     expect(await search("edit")).toEqual(["edit B"]);
   });
+  it("answers a read with an edit or a deletion that arrived while Slack's page was read", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const reading = rs.fn(
+      async (token: string, input: { channel: string; latest?: string; limit: number }) => {
+        const page = await slack.conversationHistory(token, input);
+        // While the page is in flight, message 2 is edited and message 1 deleted.
+        await mailbox.deposit(
+          changeFrame(10, 2, "edited while read", "1700000001.000000"),
+          changeFrame(11, 1, null, "1700000002.000000"),
+        );
+        return page;
+      },
+    );
+    const db = createTestDb().db;
+    const { adapter: a } = adapter(
+      mailbox,
+      fakeApi({ conversationHistory: reading }),
+      new SlackMessageCopyRepository(db),
+      undefined,
+      openGate(),
+    );
+    await a.start();
+    slack.say(1);
+    slack.say(2);
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+
+    expect(texts(read)).toEqual(["edited while read"]);
+  });
 });

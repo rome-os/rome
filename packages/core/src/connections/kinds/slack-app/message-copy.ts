@@ -82,7 +82,9 @@ export interface SlackMessageCopy {
   /** Keep `run` in the timeline of chat `channelId`, linking each message to
    *  the one before it. A link the run shows wrong, because the run holds a
    *  message between its two ends, is forgotten. */
-  keepRun(teamId: string, channelId: string, run: TimelineRun): void;
+  /** Answers the run's messages as kept: without one deleted since, and
+   *  with an edit the copy took that is newer than the run's text. */
+  keepRun(teamId: string, channelId: string, run: TimelineRun): TimelineRun["messages"];
   /** The timeline message `ts` of chat `channelId`, if the copy holds it. */
   timelineRow(teamId: string, channelId: string, ts: string): TimelineRow | null;
   /** Up to `count` timeline messages of the chat older than `ts`, newest
@@ -189,7 +191,8 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .map((row) => ({ eventId: row.eventId, message: revive(row.message) }));
   }
 
-  keepRun(teamId: string, channelId: string, run: TimelineRun): void {
+  keepRun(teamId: string, channelId: string, run: TimelineRun): TimelineRun["messages"] {
+    let kept: TimelineRun["messages"] = [];
     const where = (ts: string) =>
       and(
         eq(slackAppTimeline.teamId, teamId),
@@ -220,6 +223,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         }
         return [m];
       });
+      kept = messages;
       // A row the copy holds between the run's oldest message and the one it
       // says comes before shows that link wrong, as a page Slack answered
       // before a late event does.
@@ -288,6 +292,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         if (between) tx.update(slackAppTimeline).set({ prevTs: null }).where(where(row.ts)).run();
       }
     });
+    return kept;
   }
 
   change(
