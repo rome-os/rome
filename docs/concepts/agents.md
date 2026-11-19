@@ -45,7 +45,7 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 
 | Field | Values | Default |
 |---|---|---|
-| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace of a dashboard chat, so the agent reaches the guardian there only through its tools. In a chat on a connection, the text is the reply either way. A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
+| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. A place can override it: on a connection the Concierge's text is the reply ([Concierge](../architecture/concierge.md#on-a-connection)). A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
 | `autoTitle` | Whether the chat's first message names the chat. | `true` |
 | `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
 | `freshSessionOnSetupChange` | Whether a session opened by continuity key is replaced by a fresh one when the agent's [setup](sessions.md#setup) changed since it opened. | `false` |

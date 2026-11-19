@@ -60,3 +60,16 @@ export function resolveAgentPolicy(agent: {
     delegatesWork: agent.policy?.delegatesWork ?? false,
   };
 }
+
+/** How one place changes an agent's setup for the sessions it serves there. */
+export interface PlaceSetup {
+  /** The agent's `finalText` in this place, in place of its own. */
+  finalText?: AgentPolicy["finalText"];
+  /** Actions of the agent's own list it may not call in this place. */
+  withoutActions?: readonly string[];
+}
+
+/** The agent's policy in a place: what the place sets wins over the agent's own. */
+export function policyInPlace(policy: AgentPolicy, place: PlaceSetup | null): AgentPolicy {
+  return place?.finalText ? { ...policy, finalText: place.finalText } : policy;
+}

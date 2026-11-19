@@ -205,6 +205,7 @@ import {
   codexLoginKind,
   SharedCodexAccountService,
   romeCreditsProxyRoutes,
+  policyInPlace,
   resolveAgentPolicy,
   createSystemPrompts,
 } from "./agent/index.js";
@@ -1461,13 +1462,13 @@ async function main() {
     // The place can change the agent's policy: on a connection the
     // Concierge's text is the reply (docs/architecture/concierge.md).
     isTextPrivate: (agentName, channel) => {
-      const place = conciergePlaceSetup(agentName, { channel });
-      if (place?.finalText) return place.finalText === "private";
       const agent = agentLoader.find(agentName);
       return (
         agent !== undefined &&
-        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
-          "private"
+        policyInPlace(
+          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+          conciergePlaceSetup(agentName, { channel }),
+        ).finalText === "private"
       );
     },
   });
