@@ -340,6 +340,16 @@ describe("Slack app events for its own posts", () => {
     );
     expect(delivered.map((m) => m.senderId)).toEqual(["T_A/U_OTHER_BOT"]);
   });
+
+  it("hears a workflow's mention, which Slack sends as a bot_message with no user", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    const event = mentionEvent(9, { subtype: "bot_message", bot_id: "B_WORKFLOW" });
+    delete (event.event as { user?: string }).user;
+    await mailbox.deposit(frame(event));
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_A/B_WORKFLOW"]);
+  });
 });
 
 describe("Slack app while the instance is stopped (R6)", () => {
@@ -896,6 +906,32 @@ describe("Slack app reads a direct message (R13)", () => {
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
     expect(slack.calls).toHaveLength(1);
+  });
+
+  it("links no message it sent to the one before, until Slack's event for it comes", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, copy } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    // Message 2 is said, and its event is still on the way when Rome posts 3.
+    slack.say(2);
+    const reply = slack.say(3, "bot");
+    const api = a as unknown as { config: { api: SlackAppWebApi } };
+    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockResolvedValueOnce({
+      ts: reply.ts,
+    });
+    await a.send("D_GUARDIAN" as never, { text: "message 3" } as never);
+    // The send's answer shows nothing of message 2, so it links nothing.
+    expect(copy.timelineRow(TEAM, "D_GUARDIAN", reply.ts)?.prevTs ?? null).toBeNull();
+
+    await mailbox.deposit(
+      frame(dmEvent(2)),
+      frame({ ...dmEvent(3), event: { ...dmEvent(3).event, user: BOT, bot_id: "B_ROME" } }),
+    );
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
   it("asks Slack again after a message heard out of order", async () => {

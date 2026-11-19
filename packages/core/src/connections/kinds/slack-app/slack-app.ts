@@ -27,7 +27,7 @@ import {
   splitSlackText,
 } from "../slack/slack.js";
 import { isForwardedBy } from "./forward.js";
-import { inTimeline, slackMessage, type SlackWireMessage } from "./message.js";
+import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackReadGate } from "./read-gate.js";
 import { noteInDrain, readTimeline, type SlackTimelineDeps } from "./timeline.js";
 import type { SlackMessageCopy } from "./message-copy.js";
@@ -360,12 +360,16 @@ export class SlackAppAdapter {
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
     if (isExternalAuthor(payload)) return { status: 200 };
-    if (event.subtype && event.subtype !== "file_share") return { status: 200 };
-    if (!event.user || typeof event.text !== "string") return { status: 200 };
+    // A bot or workflow that mentions the app posts as a bot_message, often
+    // with no user: the bot is its author. Only a mention is taken from one,
+    // since the app's own posts are told apart by their user.
+    if (!isSaid(event.subtype)) return { status: 200 };
+    const author = event.user ?? (mention ? authorOf(event) : undefined);
+    if (!author || typeof event.text !== "string") return { status: 200 };
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
 
-    const name = await this.lookUpName(event.user);
+    const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {
       ...said,
       ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
@@ -391,7 +395,7 @@ export class SlackAppAdapter {
           channelId: event.channel,
           ts: event.ts,
           ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
-          userId: event.user,
+          userId: author,
           text: message.text,
           message,
         },
@@ -436,10 +440,10 @@ export class SlackAppAdapter {
         { channel: parsed.channelId, markdown: chunk, threadTs },
         this.abort.signal,
       );
+      // The post joins the drain's timeline from its own event, which Slack
+      // sends in order with what others said: a send's answer shows nothing
+      // of what was said just before it.
       firstTs ??= sent.ts;
-      if (!threadTs && parsed.channelId.startsWith("D")) {
-        this.noteHeard(parsed.channelId, { ts: sent.ts, user: this.config.botUserId, text: chunk });
-      }
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
   }

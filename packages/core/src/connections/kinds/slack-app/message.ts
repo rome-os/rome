@@ -24,6 +24,17 @@ export interface SlackWireMessage {
 /** Subtypes someone said: a plain message has none. */
 const SAID = new Set(["file_share", "thread_broadcast", "bot_message"]);
 
+/** Whether a message of subtype `subtype` is one someone said. */
+export function isSaid(subtype: string | undefined): boolean {
+  return !subtype || SAID.has(subtype);
+}
+
+/** Who said `wire`: its user, or for a bot or workflow that posts with no
+ *  user, the bot. */
+export function authorOf(wire: Pick<SlackWireMessage, "user" | "bot_id">): string | undefined {
+  return wire.user ?? wire.bot_id;
+}
+
 /** Whether `wire` sits in its chat's timeline, the messages Slack's
  *  conversations.history answers: not a reply inside a thread, unless it was
  *  also sent to the chat. */
@@ -40,8 +51,8 @@ export function slackMessage(
   wire: SlackWireMessage,
   name: SlackUserName = {},
 ): ChannelMessage | null {
-  if (wire.subtype && !SAID.has(wire.subtype)) return null;
-  const author = wire.user;
+  if (!isSaid(wire.subtype)) return null;
+  const author = authorOf(wire);
   if (!author || typeof wire.text !== "string") return null;
   const text = decodeSlackText(wire.text, context.botUserId);
   if (!text) return null;
