@@ -250,16 +250,16 @@ function MoreMenu({
 }
 
 /**
- * A rule between the menu's parts: the shared menu separator's line, with no
- * space of its own, so rows keep one rhythm across it. In dark the stronger
- * border, or it is lost on the dark popover.
+ * A rule between the menu's parts: the shared menu separator, a line with a
+ * little space above and below. In dark the stronger border, or it is lost
+ * on the dark popover.
  */
 function MenuDivider() {
   return (
     <div
       role="separator"
       data-chat-header-menu-divider
-      className="-mx-1 h-px bg-border dark:bg-border-strong"
+      className="-mx-1 my-1 h-px bg-border dark:bg-border-strong"
     />
   );
 }
