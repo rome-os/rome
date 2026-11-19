@@ -181,7 +181,12 @@ export function buildEnvoys(
 
 /** The order Envoys offers services in. A service core reports that is not
  *  listed follows them. */
-const SERVICE_ORDER = ["feishu", "telegram", "discord", "slack_app", "slack_bot", "telegram_user"];
+const SERVICE_ORDER = ["feishu", "telegram", "discord", "slack_bot", "telegram_user"];
+
+/** Services Envoys does not offer. Rome's Slack app signs in by leaving the
+ *  page for Slack and returning to Settings, so the agent picked here would
+ *  never be linked; it connects from Settings, answering as the Concierge. */
+const NOT_FROM_ENVOYS = new Set(["slack_app"]);
 
 function serviceRank(service: string): number {
   const rank = SERVICE_ORDER.indexOf(service);
@@ -212,6 +217,7 @@ export interface ConnectChoice {
 export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
   const links = new Map<string, AccountLink>();
   for (const connection of connections) {
+    if (NOT_FROM_ENVOYS.has(connection.connectionKind)) continue;
     if (connection.link) links.set(connection.connectionKind, connection.link);
   }
   const services = [...links.keys()].sort(
