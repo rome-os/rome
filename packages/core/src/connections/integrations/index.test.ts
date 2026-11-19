@@ -4,6 +4,7 @@ import {
   GUARDIAN_OWN_KINDS,
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
+import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
 import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
