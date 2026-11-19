@@ -211,6 +211,31 @@ export class RoutinesRepository {
     return rows.map(toRoutine);
   }
 
+  /** The apps that manage at least one routine. */
+  async managingAppIds(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ managedBy: routines.managedBy })
+      .from(routines)
+      .where(isNotNull(routines.managedBy));
+    return rows.flatMap((row) => (row.managedBy ? [row.managedBy] : []));
+  }
+
+  /**
+   * Hands the routines these apps manage back to the guardian. Nobody can
+   * maintain a routine once its app is gone, so it becomes an ordinary routine
+   * a user can delete. Its enabled flag and run history stay as they are.
+   * Returns how many routines were released.
+   */
+  async releaseManagedRoutines(appIds: readonly string[]): Promise<number> {
+    if (appIds.length === 0) return 0;
+    const released = await this.db
+      .update(routines)
+      .set({ managedBy: null })
+      .where(inArray(routines.managedBy, [...appIds]))
+      .returning({ id: routines.id });
+    return released.length;
+  }
+
   /** Delete a routine only if it has no in-flight runs. The active-run count
    * and the delete run in one transaction so a run can't start (or finish)
    * between check and delete — without it, a concurrent fire could be counted

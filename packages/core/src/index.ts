@@ -789,6 +789,9 @@ async function main() {
         },
       },
     }),
+    releaseRoutines: async (appId) => {
+      await routinesRepo.releaseManagedRoutines([appId]);
+    },
   });
   const appStore = createAppStoreService({ appCatalog });
 
@@ -902,6 +905,19 @@ async function main() {
     appCatalog,
     projectRoot: getProjectRoot(),
   });
+  // Uninstall releases an app's managed routines. Apps removed before that
+  // rule existed left routines nobody can maintain, so release those here.
+  const installedAppIds = new Set(appCatalog.list().map((view) => view.appId));
+  const orphanedManagers = (await routinesRepo.managingAppIds()).filter(
+    (appId) => !installedAppIds.has(appId),
+  );
+  const releasedRoutines = await routinesRepo.releaseManagedRoutines(orphanedManagers);
+  if (releasedRoutines > 0) {
+    appsLog.info("released routines of removed apps", {
+      apps: orphanedManagers,
+      routines: releasedRoutines,
+    });
+  }
   const coreRequiredAppIds = await deriveCoreRequiredApps({ projectRoot: getProjectRoot() });
   assertCoreRequiredAppsPacked(coreRequiredAppIds, firstPartyBoot.firstPartyAppIds);
   appsLog.info("first-party apps converged at boot", {

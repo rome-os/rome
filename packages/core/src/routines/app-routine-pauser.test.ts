@@ -57,6 +57,9 @@ describe("AppManager routine lifecycle", () => {
       lockfilePath: join(root, "apps.lock.json"),
       installedRoot: join(root, "installed"),
       pauseRoutines: appRoutinePauser({ legacyBindings, repository, engine }),
+      releaseRoutines: async (appId) => {
+        await repository.releaseManagedRoutines([appId]);
+      },
     });
     legacyBindings.action.legacy = formatArtifactId("app-a", "run");
     domain.catalog.subscribe((event) => {
@@ -168,6 +171,58 @@ describe("AppManager routine lifecycle", () => {
       expect(active.has(qualified)).toBe(false);
       expect(update).toHaveBeenCalledTimes(2);
     }
+  });
+
+  it("uninstall hands the app's managed routines to the guardian, and disable does not", async () => {
+    const seed = (name: string, actionName: string, managedBy: string) =>
+      repository.create({
+        name,
+        actionName,
+        managedBy,
+        trigger: { type: "manual" },
+        args: {},
+      });
+    const own = await seed("own", "app-a:run", "app-a");
+    const other = await seed("other", "app-b:run", "app-b");
+    const historyId = await runs.create({
+      routineId: own,
+      executionId: "test-release-run",
+      status: "success",
+    });
+
+    await domain.manager.setEnabled("app-a", false);
+    expect(await repository.deleteIfNoActiveRuns(own)).toEqual({
+      status: "managed",
+      managedBy: "app-a",
+    });
+
+    await domain.manager.uninstall("app-a");
+    const released = await repository.findById(own);
+    expect(released?.managedBy).toBeNull();
+    expect(released?.enabled).toBe(false);
+    expect(await runs.findById(historyId)).toBeTruthy();
+    expect((await repository.findById(other))?.managedBy).toBe("app-b");
+    expect(await repository.deleteIfNoActiveRuns(own)).toEqual({ status: "deleted", name: "own" });
+  });
+
+  it("releases routines only of the apps it is given", async () => {
+    const seed = (name: string, managedBy?: string) =>
+      repository.create({
+        name,
+        actionName: "app-b:run",
+        managedBy,
+        trigger: { type: "manual" },
+        args: {},
+      });
+    const gone = await seed("gone", "removed-app");
+    const kept = await seed("kept", "app-b");
+    await seed("plain");
+
+    expect((await repository.managingAppIds()).sort()).toEqual(["app-b", "removed-app"]);
+    expect(await repository.releaseManagedRoutines([])).toBe(0);
+    expect(await repository.releaseManagedRoutines(["removed-app"])).toBe(1);
+    expect((await repository.findById(gone))?.managedBy).toBeNull();
+    expect((await repository.findById(kept))?.managedBy).toBe("app-b");
   });
 
   it.each([

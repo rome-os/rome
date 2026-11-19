@@ -102,6 +102,8 @@ export interface AppManagerOptions {
   installer: AppInstaller;
   /** Pauses the routines that fire the app's actions, when the app is disabled or removed. */
   pauseRoutines?: (appId: AppId) => Promise<void>;
+  /** Hands the routines the app managed back to the guardian, once it is uninstalled. */
+  releaseRoutines?: (appId: AppId) => Promise<void>;
 }
 
 /**
@@ -538,6 +540,16 @@ export class AppManager {
           delete fresh.apps[appId];
           await writeLockfile(this.lockfilePath, fresh);
         });
+        try {
+          await this.opts.releaseRoutines?.(appId);
+        } catch (err) {
+          // Boot releases routines of apps that are not installed, so a miss
+          // here heals at the next start.
+          log.warn("could not release the app's routines on uninstall", {
+            appId,
+            error: (err as Error).message,
+          });
+        }
         let diskCleanupError: string | null = null;
         try {
           await this.installer.tearDown(appId);
