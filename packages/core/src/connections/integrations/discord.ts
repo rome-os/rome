@@ -311,7 +311,11 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 throw new Error("Discord is not connected yet; list its chats again shortly");
               }
               const query = input.query?.toLocaleLowerCase();
-              const active = adapter.listGuildChannels();
+              // The gateway keeps a thread it saw archived; one is listed only
+              // when archived threads are asked for.
+              const active = adapter
+                .listGuildChannels()
+                .filter((channel) => input.includeArchived || !channel.archived);
               const named = new Set(active.map((channel) => channel.id));
               // Archived threads are read from Discord; the gateway names the
               // ones it has seen. A thread both name is listed once.

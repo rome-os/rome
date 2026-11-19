@@ -2,14 +2,22 @@ import type { ChatId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/a
 
 const MAX_DIRECTORY_OFFSET = 10_000;
 
+/** The offset a directory cursor names. A cursor past the deepest offset a
+ *  directory pages to throws, since starting over would list the same chats
+ *  again. */
 export function directoryCursorOffset(cursor?: string): number {
   if (!cursor) return 0;
+  let offset: number;
   try {
-    const offset = Number(Buffer.from(cursor, "base64url").toString("utf8"));
-    return Number.isInteger(offset) && offset >= 0 && offset <= MAX_DIRECTORY_OFFSET ? offset : 0;
+    offset = Number(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {
     return 0;
   }
+  if (!Number.isInteger(offset) || offset < 0) return 0;
+  if (offset > MAX_DIRECTORY_OFFSET) {
+    throw new Error(`A directory lists at most ${MAX_DIRECTORY_OFFSET} conversations by paging`);
+  }
+  return offset;
 }
 
 /** Provider-local bounded pagination for integrations whose SDK exposes an

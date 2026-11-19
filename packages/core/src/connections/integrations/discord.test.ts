@@ -368,6 +368,12 @@ describe("discord descriptor shape", () => {
       ["thread-2", true],
     ]);
 
+    const withoutArchived = await directory?.listConversations({ limit: 10, includeTopics: true });
+    expect(withoutArchived?.conversations.map(({ ref }) => ref.chatId)).toEqual([
+      "text-1",
+      "thread-1",
+    ]);
+
     fakeState.ready = false;
     await expect(directory?.listConversations({ limit: 10 })).rejects.toThrow(
       "Discord is not connected yet",
