@@ -801,6 +801,8 @@ const API_METHODS = {
     }
     const m = w.members.find((x) => x.id === args.user);
     if (!m) return { ok: false, error: "user_not_found" };
+    // Slack shows a member's email only to an app granted users:read.email.
+    const seesEmail = (this.state.installs[info.teamId]?.scopes ?? []).includes("users:read.email");
     return {
       ok: true,
       user: {
@@ -816,7 +818,7 @@ const API_METHODS = {
         profile: {
           real_name: m.real_name,
           display_name: m.display_name ?? m.name,
-          email: m.email,
+          ...(seesEmail && m.email ? { email: m.email } : {}),
           image_72: `https://fake-slack.invalid/avatars/${m.id}.png`,
         },
       },

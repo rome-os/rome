@@ -116,6 +116,8 @@ test("sign-in, Web API, signed events, uninstall", async () => {
 
   const user = await api("users.info", { user: "UA0000BOB01" }, a.access_token);
   assert.equal(user.user.real_name, "Bob Member");
+  // The app was not granted users:read.email, so Slack leaves the email out.
+  assert.equal("email" in user.user.profile, false);
   assert.equal(
     (await api("users.info", { user: "UB0000GUARD" }, a.access_token)).error,
     "user_not_found",

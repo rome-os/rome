@@ -237,6 +237,17 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
       content: [{ type: "text", text: "Cara likes green tea" }],
       created_at: 1,
     });
+    // The dashboard chat's model thread read the words too.
+    insert(db, "sessions", {
+      id: "p-dashboard",
+      agent_name: "concierge",
+      chat_id: "dashboard-chat",
+      provider: "claude",
+      provider_thread_id: "66666666-ffff",
+      created_at: 1,
+      last_active_at: 1,
+      status: "active",
+    });
     // An action the agent ran with the words, and its approval.
     const args = { channel: DM, text: words };
     const seeded = {
@@ -258,6 +269,10 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
       }),
     };
     db.close();
+    const projects = join(home, ".claude/projects/-home-rome");
+    mkdirSync(projects, { recursive: true });
+    for (const thread of ["33333333-cccc", "44444444-dddd", "66666666-ffff"])
+      writeFileSync(join(projects, `${thread}.jsonl`), "{}\n");
 
     const out = JSON.parse(
       execFileSync(
@@ -287,6 +302,15 @@ for (const words of ["Bob's locker code is 4417", 'Bob\'s locker code is "4417"\
     assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'unrelated'"), 1);
     assert.equal(count("SELECT count(*) AS n FROM chat_messages WHERE text LIKE '%green tea%'"), 1);
     assert.equal(count("SELECT count(*) AS n FROM chat_addresses WHERE address = ?", DM), 1);
+    assert.equal(count("SELECT count(*) AS n FROM sessions WHERE id = 'p-dashboard'"), 0);
+    assert.equal(
+      count("SELECT count(*) AS n FROM sessions WHERE chat_id = ?", `channel:slack_app:${OTHER}`),
+      1,
+    );
+    assert.ok(out.provider_sessions.includes("p-dashboard"), JSON.stringify(out.provider_sessions));
+    assert.ok(!existsSync(join(projects, "66666666-ffff.jsonl")));
+    assert.ok(!existsSync(join(projects, "33333333-cccc.jsonl")));
+    assert.ok(existsSync(join(projects, "44444444-dddd.jsonl")));
     after.close();
   });
 }

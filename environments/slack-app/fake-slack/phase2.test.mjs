@@ -237,6 +237,17 @@ test("an install without a scope gets no event that needs it", async () => {
   assert.equal(denied.needed, "users:read");
 });
 
+test("a member's email shows only to an app granted users:read.email", async () => {
+  const B = "TB0000BBBB";
+  const plain = await install(B, "UB0000GUARD", "users:read");
+  const without = await api("users.info", { user: "UB0000ERIN1" }, plain.access_token);
+  assert.equal(without.ok, true);
+  assert.equal("email" in without.user.profile, false);
+  const granted = await install(B, "UB0000GUARD", "users:read,users:read.email");
+  const withEmail = await api("users.info", { user: "UB0000ERIN1" }, granted.access_token);
+  assert.match(withEmail.user.profile.email, /@/);
+});
+
 test("a message is in history before the app hears of it", async () => {
   const C = "TA0000AAAA";
   const { access_token: token } = await install(C, GUARDIAN, `${APP_SCOPES},channels:history`);

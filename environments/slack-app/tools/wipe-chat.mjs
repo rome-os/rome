@@ -215,6 +215,9 @@ try {
  * still points at is retried once that one is gone.
  */
 function sweep() {
+  // Conversations whose rows the sweep takes: their provider sessions keep the
+  // words in the model's context and transcript, so those go too.
+  const touched = new Set();
   for (let pass = 0; pass < 5; pass++) {
     let progress = false;
     for (const [table, columns] of schema) {
@@ -224,6 +227,14 @@ function sweep() {
       const where = holdsNeedle(table, text);
       const found = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`)[0].n;
       if (!found) continue;
+      if (columns.has("session_id")) {
+        for (const r of all(`SELECT DISTINCT session_id AS id FROM "${table}" WHERE ${where}`))
+          if (r.id != null) touched.add(r.id);
+      }
+      if (table === "sessions" && columns.has("provider_thread_id")) {
+        for (const r of all(`SELECT id, provider_thread_id AS thread FROM sessions WHERE ${where}`))
+          providerSessions.set(r.id, r.thread);
+      }
       if (dryRun) {
         if (pass === 0) deleted[table] = (deleted[table] ?? 0) + found;
         continue;
@@ -240,6 +251,23 @@ function sweep() {
     }
     if (!progress) break;
   }
+  const ids = [...touched].filter((id) => !sessionIds.has(id));
+  if (!ids.length || !has("sessions", "chat_id")) return;
+  const more = all(
+    `SELECT id, provider_thread_id AS thread FROM sessions WHERE chat_id IN (${placeholders(ids)})`,
+    ...ids,
+  ).filter((r) => !providerSessions.has(r.id));
+  for (const r of more) providerSessions.set(r.id, r.thread);
+  remove(
+    "session_turn_checkpoints",
+    "session_id",
+    more.map((r) => r.id),
+  );
+  remove(
+    "sessions",
+    "id",
+    more.map((r) => r.id),
+  );
 }
 
 // ---- Provider transcripts
