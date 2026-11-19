@@ -10,6 +10,7 @@ import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
 import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
 import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
+import { r9, r10 } from "./rules/phase3.mjs";
 import { r11 } from "./rules/structure.mjs";
 
 const RULES = [
@@ -26,8 +27,13 @@ const RULES = [
     title: "Removal marks broken; fix returns the same connected account",
     check: r8,
   },
-  { id: "R9", phase: 3, title: "Every connector Slack action passes on the new connection" },
-  { id: "R10", phase: 3, title: "Connect shows one Slack entry" },
+  {
+    id: "R9",
+    phase: 3,
+    title: "Every connector Slack action passes on the new connection",
+    check: r9,
+  },
+  { id: "R10", phase: 3, title: "Connect shows one Slack entry", check: r10 },
   { id: "R11", phase: 1, title: "Lower layers stay ignorant", check: r11 },
   {
     id: "R12",
@@ -41,8 +47,9 @@ const RULES = [
 // Order matters: R3 and the second binding need R1's connection; R7 reads
 // R4's messages; R6 stops the instance; R8 removes the app and disconnects,
 // so it runs after the rest; R2 then signs the first instance in to a third
-// workspace.
-const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R6", "R8", "R2"];
+// workspace. R10 seeds the old connections on the second instance, whose
+// connector token file would turn R9's path to the old one, so it runs last.
+const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R6", "R8", "R2", "R10"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);

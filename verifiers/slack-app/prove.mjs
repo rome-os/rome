@@ -35,7 +35,7 @@ const dirty = execFileSync("git", ["-C", here, "status", "--porcelain", "--", ".
 const commit = `${execFileSync("git", ["-C", here, "rev-parse", "HEAD"]).toString().trim()}${dirty ? "+uncommitted" : ""}`;
 
 const PHASE1 = ["R1", "R3", "R4", "R6", "R7", "R11"];
-const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2"];
+const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2", "R9", "R10"];
 const CASES = [
   { name: "good", breaks: "", expect: "every scored rule passes" },
   {
@@ -82,6 +82,24 @@ const CASES = [
     rule: "R2",
     what: "Rome Cloud connects only the team's own workspaces (A and B)",
   },
+  { name: "R9-tests-fail", breaks: "R9-tests-fail", rule: "R9", what: "one of the existing tests fails on the product" },
+  { name: "R9-assert", breaks: "R9-assert", rule: "R9", what: "the product changed an assertion in the existing tests" },
+  { name: "R9-blind", breaks: "R9-blind", rule: "R9", what: "reads call Slack but the reply holds nothing read" },
+  { name: "R9-react", breaks: "R9-react", rule: "R9", what: "asked to react, the agent's reaction reaches Slack" },
+  { name: "R9-join", breaks: "R9-join", rule: "R9", what: "search also shows messages from a group the app is not in" },
+  { name: "R9-token-file", breaks: "R9-token-file", rule: "R9", what: "the instance keeps the new connection's bot token in the connector's token file" },
+  {
+    name: "R9-lazy",
+    breaks: "R9-lazy",
+    rule: "R9",
+    result: "not checked",
+    what: "the Concierge never attempts any Slack operation",
+  },
+  { name: "R10-two-entries", breaks: "R10-two-entries", rule: "R10", what: "Connect offers Slack bot beside Slack" },
+  { name: "R10-bot-connects", breaks: "R10-bot-connects", rule: "R10", what: "a new slack_bot setup can still start" },
+  { name: "R10-oauth-connects", breaks: "R10-oauth-connects", rule: "R10", what: "the old OAuth start still sends the guardian to Slack" },
+  { name: "R10-restart-loses", breaks: "R10-restart-loses", rule: "R10", what: "the old connections stop working after a restart" },
+  { name: "R10-reconnect", breaks: "R10-reconnect", rule: "R10", what: "once one is disconnected, the old kinds can be connected again" },
   { name: "R5-top", breaks: "R5-top", rule: "R5", what: "mentions are answered at the top of the group" },
   { name: "R5-twice", breaks: "R5-twice", rule: "R5", what: "each mention gets two replies in its thread" },
   {

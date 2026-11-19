@@ -63,6 +63,9 @@ export function instance(inst, slackOrigin) {
   return {
     name: inst.name,
     call,
+    /** The dashboard's origin and the guardian's headers, for a browser. */
+    origin,
+    headers: inst.headers,
 
     /** The connection's public view, or null when Rome no longer knows it. */
     async connection(id) {
@@ -80,6 +83,59 @@ export function instance(inst, slackOrigin) {
           `DELETE /connections/${id} on ${inst.name}: ${res.status} ${JSON.stringify(res.data)}`,
         );
       return res.data;
+    },
+
+    /**
+     * Root action executions started at or after `sinceMs`, each with its
+     * children, from the instance's own listing (`GET /action-executions`).
+     * Null when the route cannot be read.
+     */
+    async executions(sinceMs = 0) {
+      const res = await call("/action-executions?limit=200");
+      if (!res.ok || !Array.isArray(res.data)) return null;
+      const t = (x) => new Date(x?.startedAt ?? x?.createdAt ?? 0).getTime();
+      return res.data.filter((g) => t(g.rootExecution) >= sinceMs);
+    },
+
+    /**
+     * What the environment's probe says of the connector's Slack token file
+     * inside the instance: {exists, bot_token_tail, user_token_tail, team_id}.
+     * Null when the environment gives no probe.
+     */
+    async tokenFile() {
+      const target = inst.control.tokenFile;
+      if (!target) return null;
+      const { stdout } = Array.isArray(target)
+        ? await run(target[0], target.slice(1), { timeout: 60_000 })
+        : /^https?:\/\//.test(target)
+          ? { stdout: JSON.stringify((await json(target)).data) }
+          : await run("sh", ["-c", target], { timeout: 60_000 });
+      return JSON.parse(stdout);
+    },
+
+    /**
+     * Runs the environment's seed of the older slack_bot and slack
+     * connections an upgrade leaves (R10), and returns what it printed last:
+     * per kind its connection_id, account_id and app_id, plus `checks`.
+     * Throws with the output when it exits non-zero. Null without a seed.
+     */
+    async seedOldConnections() {
+      const target = inst.control.oldConnections;
+      if (!target) return null;
+      if (typeof target === "string" && /^https?:\/\//.test(target)) {
+        const res = await json(target, { method: "POST" });
+        if (!res.ok) throw new Error(`old_connections ${inst.name}: ${res.status} ${JSON.stringify(res.data)}`);
+        return res.data;
+      }
+      const { stdout } = await (
+        Array.isArray(target)
+          ? run(target[0], target.slice(1), { timeout: 900_000 })
+          : run("sh", ["-c", target], { timeout: 900_000 })
+      ).catch((err) => {
+        throw new Error(`old_connections on ${inst.name} exited ${err.code}: ${(err.stdout ?? "").slice(-800)} ${(err.stderr ?? "").slice(-800)}`);
+      });
+      const last = stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+      return JSON.parse(last);
     },
 
     /** Whether the environment can wipe Rome's copy of one chat. */

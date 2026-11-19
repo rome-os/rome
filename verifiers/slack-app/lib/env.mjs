@@ -96,6 +96,8 @@ function fromEnvironment(raw) {
         stop: i.stop,
         start: i.start,
         wipeChat: i.control?.wipe_chat ?? i.wipe_chat,
+        tokenFile: i.control?.token_file,
+        oldConnections: i.control?.old_connections,
       },
       connect: i.connect,
     })),

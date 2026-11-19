@@ -124,6 +124,56 @@ const control = await serve(async (req, res, url) => {
     await listening(`http://127.0.0.1:${ports[w[1]]}/`);
     return send(res, 200, { messages: before - db.messages.length });
   }
+  // R10's seed: the older slack_bot and slack an upgrade leaves, written
+  // into the stopped instance, which then starts again.
+  const oc = url.pathname.match(/^\/instances\/(a|b)\/old-connections$/);
+  if (oc && req.method === "POST") {
+    const name = oc[1];
+    const file = join(workDir, `instance-${name}.json`);
+    const team = slack.config.workspaces[name === "a" ? 0 : 1].id;
+    const other = async (kind) =>
+      (
+        await fetch(`${slackUrl}/_control/other-app`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ team, kind }),
+        })
+      ).json();
+    const bot = await other("socket_bot");
+    const oauth = await other("oauth");
+    await stopInstance(name);
+    const db = JSON.parse(readFileSync(file, "utf8"));
+    db.old = [
+      { kind: "slack_bot", id: `old_bot_${bot.app_id}`, appId: bot.app_id, botToken: bot.bot_token, appToken: bot.app_token },
+      { kind: "slack", id: `old_oauth_${oauth.app_id}`, appId: oauth.app_id, botToken: oauth.bot_token, userToken: oauth.user_token },
+    ];
+    db.tokenFile = { botToken: oauth.bot_token, userToken: oauth.user_token, teamId: team };
+    delete db.oldStarted;
+    writeFileSync(file, JSON.stringify(db));
+    startInstance(name);
+    await listening(`http://127.0.0.1:${ports[name]}/`);
+    const out = (o, id) => ({ connection_id: id, account_id: `${team}/${o.bot_user_id}`, app_id: o.app_id, bot_user_id: o.bot_user_id });
+    return send(res, 200, {
+      slack_bot: out(bot, db.old[0].id),
+      slack: out(oauth, db.old[1].id),
+      checks: { bot_listed: true, oauth_listed: true },
+    });
+  }
+  // The connector's Slack token file inside the instance. The stand-in keeps
+  // none; broken R9-token-file holds the new connection's bot token in it.
+  const tf = url.pathname.match(/^\/instances\/(a|b)\/token-file$/);
+  if (tf) {
+    if (!breaks.has("R9-token-file")) return send(res, 200, { instance: tf[1], exists: false });
+    const db = JSON.parse(readFileSync(join(workDir, `instance-${tf[1]}.json`), "utf8"));
+    const conn = db.connections[0];
+    return send(res, 200, {
+      instance: tf[1],
+      exists: true,
+      bot_token_tail: conn?.botToken?.slice(-6) ?? null,
+      user_token_tail: null,
+      team_id: conn?.team ?? null,
+    });
+  }
   const m = url.pathname.match(/^\/instances\/(a|b)\/(stop|start)$/);
   if (!m || req.method !== "POST") return send(res, 404, { error: "not found" });
   if (m[2] === "stop") await stopInstance(m[1]);
@@ -258,8 +308,28 @@ write(
   "packages/core/src/connections/legacy.ts",
   "import { old } from '../../../../rome_apps/legacy/index.js';\n",
 );
+// R9's four test files, as on main. Broken R9-assert changes one assertion
+// on the product branch.
+const connectorTests = [
+  "rome_apps/connector/src/api/slack-proxy.test.ts",
+  "rome_apps/connector/src/actions/connector-proxy.test.ts",
+  "rome_apps/connector/src/actions/connector-tool-execute.test.ts",
+  "rome_apps/connector/src/actions/connector-actions.test.ts",
+];
+for (const f of connectorTests)
+  write(
+    rome,
+    f,
+    `import { expect, it } from "@rstest/core";\nit("${f}", () => {\n  expect(selectSlackToken("search.messages")).toBe("xoxp-user");\n});\n`,
+  );
 commitAll(rome, "main");
 git(rome, "checkout", "-q", "-b", "product");
+if (breaks.has("R9-assert"))
+  write(
+    rome,
+    connectorTests[0],
+    `import { expect, it } from "@rstest/core";\nit("${connectorTests[0]}", () => {\n  expect(selectSlackToken("search.messages")).toBe("xoxb-bot");\n});\n`,
+  );
 write(
   rome,
   "packages/core/src/connections/slack-app.ts",
@@ -285,6 +355,13 @@ const env = {
   r12: { allowMembers: !breaks.has("R12-default-mode") },
   timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10 },
   repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
+  // R9's existing tests: the stand-in's rome has the four files but no test
+  // runner, so a stand-in command plays it. Broken R9-tests-fail fails.
+  r9: {
+    testCommand: breaks.has("R9-tests-fail")
+      ? [process.execPath, "-e", "console.log('Tests 13 passed | 1 failed'); process.exit(1)"]
+      : [process.execPath, "-e", "console.log('Tests 14 passed')"],
+  },
   slack: { url: slackUrl, control: `${slackUrl}/_control` },
   romeCloud: { url: cloud.url, query: [process.execPath, join(here, "query.mjs"), cloud.url] },
   instances: ["a", "b"].map((name) => ({
@@ -294,6 +371,8 @@ const env = {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
       wipeChat: `${control.url}/instances/${name}/wipe`,
+      tokenFile: `${control.url}/instances/${name}/token-file`,
+      oldConnections: `${control.url}/instances/${name}/old-connections`,
     },
     connect: { kind: "slack_app", grant: "bot" },
   })),

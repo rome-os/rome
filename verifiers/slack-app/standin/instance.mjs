@@ -147,6 +147,61 @@ const server = await serve(async (req, res, url) => {
     save();
     return send(res, 200, { replyToBondLevels: db.replyTo ?? ["guardian"] });
   }
+  // R10: the Connect picker, one Slack entry among placeholders (id null).
+  // Broken R10-two-entries also offers slack_bot.
+  if (p === "/api/connections" && req.method === "GET") {
+    const placeholders = [
+      { id: null, connectionKind: "slack_app", label: "Slack" },
+      { id: null, connectionKind: "discord", label: "Discord" },
+      ...(breaks.has("R10-two-entries") ? [{ id: null, connectionKind: "slack_bot", label: "Slack bot" }] : []),
+    ];
+    const held = [
+      ...db.connections.map((c) => ({ id: c.id, connectionKind: "slack_app", label: "Slack", state: "working" })),
+      ...(db.old ?? []).map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
+    ];
+    return send(res, 200, { connections: [...held, ...placeholders] });
+  }
+  if (p === "/settings/connections") {
+    const entries = [
+      "Slack",
+      "Discord",
+      ...(breaks.has("R10-two-entries") ? ["Slack bot"] : []),
+    ];
+    return send(
+      res,
+      200,
+      `<!doctype html><html><body><h1>Connections</h1><ul>${entries
+        .map((e) => `<li><button>Connect ${e}</button></li>`)
+        .join("")}</ul></body></html>`,
+      "text/html",
+    );
+  }
+  // The old kinds cannot be newly connected. Broken R10-bot-connects lets a
+  // slack_bot setup start; R10-oauth-connects sends the OAuth start on to
+  // Slack; R10-reconnect allows both once one was disconnected.
+  const reopened = breaks.has("R10-reconnect") && db.oldDisconnected;
+  if (p === "/api/connections/slack_bot/grants/bot/setup" && req.method === "POST") {
+    if (breaks.has("R10-bot-connects") || reopened)
+      return send(res, 200, { cid: rand(), state: { status: "awaiting-input", form: { fields: [{ name: "botToken" }] } }, reattached: false });
+    return send(res, 410, { error: "Slack bot connections are retired; use Slack." });
+  }
+  if (p === "/api/oauth/slack/start") {
+    if (breaks.has("R10-oauth-connects") || reopened) {
+      res.writeHead(302, { location: `${SLACK}/oauth/v2/authorize?client_id=old` });
+      return res.end();
+    }
+    return send(res, 410, { error: "This Slack connection is retired; use Slack." });
+  }
+  const oldView = p.match(/^\/api\/connections\/([^/]+)$/);
+  if (oldView && req.method === "DELETE" && (db.old ?? []).some((c) => c.id === decodeURIComponent(oldView[1]))) {
+    const gone = db.old.find((c) => c.id === decodeURIComponent(oldView[1]));
+    db.old = db.old.filter((c) => c !== gone);
+    if (gone.kind === "slack") delete db.tokenFile;
+    db.oldDisconnected = true;
+    save();
+    stopSocket(gone.id);
+    return send(res, 200, { ok: true, connection: null });
+  }
   // Like Rome, a Slack direct message with the bot is one session, and its
   // inbound messages are recorded with role "user" once they start a turn.
   // Its session is named after the connection's channel, which the
@@ -218,6 +273,77 @@ async function post(token, channel, text, threadTs) {
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({ channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) }),
   });
+}
+
+/** A Slack Web API call with the bot token, as JSON. */
+async function api(token, method, params = {}) {
+  const res = await fetch(`${SLACK}/api/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
+/** The groups the bot can see, by name, with whether it is in each. */
+async function groups(conn) {
+  const r = await api(conn.botToken, "conversations.list", { types: "public_channel" });
+  return r.ok ? r.channels : [];
+}
+
+/**
+ * R9: the agent acting in Slack through the connection, as send, read and
+ * search, and nothing else. Answers `text` when it asks for one of those,
+ * else returns null. Broken R9-lazy never acts; R9-blind reads but says
+ * nothing it read; R9-react adds the reaction; R9-join also searches groups it is
+ * not in, as a product with a wider reach would.
+ */
+async function act(conn, text) {
+  const send = text.match(/(?:post|send a message to)\b.*?(?:#|the )(general|news)\b.*?:\s*"?(.+?)"?$/i);
+  const read =
+    !/search|find|look up/i.test(text) &&
+    /(?:last|latest|recently).*(?:#news|news group)|(?:#news|news group).*(?:said|messages)/i.test(text);
+  const search = text.match(/(?:mentions|about the|Look up)\s+"?([^"]+?)"?(?:\s+and\b|\s+in\b|\.|$)/i);
+  const react = /\breact|reaction\b/i.test(text);
+  if (!send && !read && !search && !react) return null;
+  if (breaks.has("R9-lazy")) return "Sure, I'll look into that.";
+  const all = await groups(conn);
+  const named = (n) => all.find((c) => c.name === n);
+  if (react) {
+    if (!breaks.has("R9-react")) return "I can only send, read and search messages in Slack.";
+    const g = named(/news/i.test(text) ? "news" : "general");
+    const h = await api(conn.botToken, "conversations.history", { channel: g?.id, limit: 1 });
+    await api(conn.botToken, "reactions.add", { channel: g?.id, timestamp: h.messages?.[0]?.ts, name: "thumbsup" });
+    return "Done.";
+  }
+  if (send) {
+    // Like the connector, a Slack token file (an old OAuth slack connection)
+    // wins over the new connection.
+    const token = db.tokenFile?.botToken ?? conn.botToken;
+    const r = await api(token, "chat.postMessage", { channel: named(send[1])?.id, text: send[2] });
+    return r.ok ? `Posted it in #${send[1]}.` : `I could not post it: ${r.error}.`;
+  }
+  if (read) {
+    const h = await api(conn.botToken, "conversations.history", { channel: named("news")?.id, limit: 5 });
+    if (!h.ok) return `I could not read #news: ${h.error}.`;
+    if (breaks.has("R9-blind")) return "I read #news, there is nothing much there.";
+    return `The latest in #news: ${h.messages.map((m) => m.text).join(" / ")}`;
+  }
+  // Search: the groups it is in, through their history. Broken R9-join
+  // searches the others too.
+  const word = search[1].toLowerCase();
+  const found = [];
+  for (const g of all) {
+    let h;
+    if (g.is_member)
+      h = await api(conn.botToken, "conversations.history", { channel: g.id, limit: 100 });
+    else if (breaks.has("R9-join"))
+      h = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${g.id}`)).json();
+    if (h?.ok) found.push(...h.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text));
+  }
+  return found.length
+    ? `I found: ${found.join(" / ")} (searched the groups I am in)`
+    : `Nothing mentions ${word} in the groups I am in.`;
 }
 
 const slackState = async () => (await fetch(`${SLACK}/_control/state`)).json();
@@ -298,6 +424,10 @@ async function words(conn, event, team) {
     return "Noted, I'll remember that.";
   }
   const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
+  if (event.user === guardian) {
+    const acted = await act(conn, text);
+    if (acted) return acted;
+  }
   const mine = text.match(/What (?:is|are) my (.+?)\?/i);
   if (mine && event.user === guardian) {
     const things = mine[1].split(/, | and /);
@@ -456,6 +586,43 @@ if (breaks.has("R6") || breaks.has("R6-drop5")) {
     headers: { "content-type": "application/json", ...cloudAuth },
     body: JSON.stringify({ ids: dropped.map((f) => f.id) }),
   });
+}
+
+// R10: an old slack_bot hears over Socket Mode and answers with its own
+// token. Broken R10-restart-loses drops the old connections on a restart.
+const sockets = new Map();
+function stopSocket(id) {
+  sockets.get(id)?.close();
+  sockets.delete(id);
+}
+async function openSocket(c) {
+  const opened = await (
+    await fetch(`${SLACK}/api/apps.connections.open`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${c.appToken}` },
+    })
+  ).json();
+  if (!opened.ok) return;
+  const u = new URL(opened.url);
+  const ws = new WebSocket(`ws://${new URL(SLACK).host}${u.pathname}${u.search}`);
+  sockets.set(c.id, ws);
+  ws.addEventListener("message", async (m) => {
+    const frame = JSON.parse(String(m.data));
+    if (!frame.envelope_id) return;
+    ws.send(JSON.stringify({ envelope_id: frame.envelope_id }));
+    const ev = frame.payload?.event;
+    if (ev?.type === "message" && ev.channel_type === "im" && !ev.bot_id)
+      await post(c.botToken, ev.channel, "Hello back, from the Slack bot.");
+  });
+}
+if (db.old?.length) {
+  if (breaks.has("R10-restart-loses") && db.oldStarted) {
+    db.old = [];
+    delete db.tokenFile;
+  }
+  db.oldStarted = true;
+  save();
+  for (const c of db.old.filter((x) => x.kind === "slack_bot")) await openSocket(c).catch(() => {});
 }
 
 process.on("SIGTERM", () => {
