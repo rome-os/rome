@@ -128,6 +128,16 @@ const server = await serve(async (req, res, url) => {
   // Like Rome, it replies only to the guardian unless a guardian adds "other"
   // to replyToBondLevels. Broken R12-ignore-setting takes the setting and
   // keeps replying to the guardian alone.
+  // The dashboard's searches: memory files, and its own chats (none here).
+  if (p === "/api/memory/search" && req.method === "GET") {
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    if (!q) return send(res, 400, { error: "q parameter is required" });
+    const hits = (db.memory ?? [])
+      .map((content, i) => ({ content, file: "memory/notes.md", line: i + 1 }))
+      .filter((h) => h.content.toLowerCase().includes(q));
+    return send(res, 200, hits);
+  }
+  if (p === "/api/chat/sessions/search" && req.method === "GET") return send(res, 200, []);
   if (p === "/api/settings" && req.method === "GET")
     return send(res, 200, { replyToBondLevels: db.replyTo ?? ["guardian"] });
   if (p === "/api/settings" && req.method === "PUT") {
@@ -228,6 +238,8 @@ const noted = (texts, thing) =>
  * R13-forget never reads Slack.
  */
 async function recall(conn, channel, thing) {
+  // Variant R13-memory answers from its memory alone.
+  if (breaks.has("R13-memory")) return noted(db.memory ?? [], thing);
   const fromCopy = noted(
     db.messages.filter((m) => m.channel === channel).map((m) => m.text),
     thing,
@@ -275,7 +287,12 @@ async function recall(conn, channel, thing) {
  */
 async function words(conn, event, team) {
   const text = event.text ?? "";
-  if (REMEMBER.test(text)) return "Noted, I'll remember that.";
+  if (REMEMBER.test(text)) {
+    // It saves what it was told to its memory, as the Concierge does.
+    db.memory = [...(db.memory ?? []), text];
+    save();
+    return "Noted, I'll remember that.";
+  }
   const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
   const mine = text.match(/What (?:is|are) my (.+?)\?/i);
   if (mine && event.user === guardian) {

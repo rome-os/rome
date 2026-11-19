@@ -103,6 +103,19 @@ const CASES = [
     what: "with Rome's copy wiped, nothing reads Slack and the answers are lost",
   },
   {
+    name: "R13-memory",
+    breaks: "R13-memory",
+    rule: "R13",
+    what: "the instance answers from its memory alone, which the wipe takes",
+  },
+  {
+    name: "R13-memory-kept",
+    breaks: "R13-memory-kept",
+    rule: "R13",
+    result: "not checked",
+    what: "the wipe leaves the values in memory, so right answers would prove nothing",
+  },
+  {
     name: "R13-tell",
     breaks: "R13-tell",
     rule: "R13",

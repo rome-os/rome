@@ -87,23 +87,27 @@ export function instance(inst, slackOrigin) {
 
     /**
      * Runs the environment's command that wipes Rome's copy of the Slack
-     * conversation `conversation`. It returns once the instance is healthy
-     * again, with what the command printed.
+     * conversation `conversation`, and with `texts` every row holding one of
+     * them, memory included. Each text goes as `--text <text>` after the
+     * conversation id (assumed until the environment publishes its option).
+     * It returns once the instance is healthy again, with what it printed.
      */
-    async wipeChat(conversation) {
+    async wipeChat(conversation, { texts = [] } = {}) {
       const target = inst.control.wipeChat;
+      const extra = texts.flatMap((t) => ["--text", t]);
       if (typeof target === "string" && /^https?:\/\//.test(target)) {
-        const res = await json(`${target}?conversation=${encodeURIComponent(conversation)}`, {
-          method: "POST",
-        });
+        const q = new URLSearchParams([["conversation", conversation], ...texts.map((t) => ["text", t])]);
+        const res = await json(`${target}?${q}`, { method: "POST" });
         if (!res.ok) throw new Error(`wipe_chat ${inst.name}: ${res.status}`);
         return res.data;
       }
       // Exit 3: the command ran, and a copy is left. Its JSON says what.
       const { stdout } = await (
         Array.isArray(target)
-          ? run(target[0], [...target.slice(1), conversation], { timeout: 600_000 })
-          : run("sh", ["-c", `${target} "$1"`, "wipe", conversation], { timeout: 600_000 })
+          ? run(target[0], [...target.slice(1), conversation, ...extra], { timeout: 600_000 })
+          : run("sh", ["-c", `${target} "$@"`, "wipe", conversation, ...extra], {
+              timeout: 600_000,
+            })
       ).catch((err) => {
         if (err.code === 3 && err.stdout) return { stdout: err.stdout, left: true };
         throw new Error(`wipe_chat on ${inst.name}: ${err.message}`);
@@ -113,6 +117,25 @@ export function instance(inst, slackOrigin) {
       } catch {
         return stdout.trim();
       }
+    },
+
+    /**
+     * Where the instance still shows `text` through the dashboard's own
+     * search routes: its memory files (`GET /memory/search`) and its chats
+     * (`GET /chat/sessions/search`). Each count is null when that route
+     * cannot be read.
+     */
+    async holds(text) {
+      const count = async (path) => {
+        const res = await call(path);
+        if (!res.ok) return { count: null, status: res.status };
+        return { count: Array.isArray(res.data) ? res.data.length : null, status: res.status };
+      };
+      const q = encodeURIComponent(text);
+      return {
+        memory: await count(`/memory/search?q=${q}`),
+        chats: await count(`/chat/sessions/search?q=${q}`),
+      };
     },
 
     /**

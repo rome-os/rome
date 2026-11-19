@@ -111,8 +111,13 @@ const control = await serve(async (req, res, url) => {
     await stopInstance(w[1]);
     const file = join(workDir, `instance-${w[1]}.json`);
     const db = JSON.parse(readFileSync(file, "utf8"));
+    const texts = url.searchParams.getAll("text");
+    const holds = (t) => texts.some((x) => (t ?? "").includes(x));
     const before = db.messages.length;
-    db.messages = db.messages.filter((m) => m.channel !== conversation);
+    // The chat, and with texts every row holding one, memory included.
+    // Broken R13-memory-kept leaves memory as it is.
+    db.messages = db.messages.filter((m) => m.channel !== conversation && !holds(m.text));
+    if (!breaks.has("R13-memory-kept")) db.memory = (db.memory ?? []).filter((t) => !holds(t));
     writeFileSync(file, JSON.stringify(db));
     startInstance(w[1]);
     await listening(`http://127.0.0.1:${ports[w[1]]}/`);

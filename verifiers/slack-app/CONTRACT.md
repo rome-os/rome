@@ -63,7 +63,9 @@ R7 reads what Rome recorded through the session route above: a forged event must
 
 ## Wipe and query
 
-`control.wipe_chat` wipes Rome's copy of one Slack conversation. The verifier runs it with the conversation id appended (or POSTs to it with `?conversation=` when it is a URL) and takes exit 0 as the copy being gone and the instance healthy again. Exit 3 means a copy is left, and R13 is not checked. It prints JSON with what it removed, which goes into R13's evidence. The verifier never reads Rome's database itself.
+Before asking anything after the wipe, R13 searches the instance through the dashboard's own routes, `GET /memory/search?q=` and `GET /chat/sessions/search?q=`, for each fact's telling words. Any hit leaves R13 not checked, since a right answer could come from what the instance kept. If neither route answers, R13 relies on the wipe's `remaining` and says so.
+
+`control.wipe_chat` wipes Rome's copy of one Slack conversation. The verifier runs it with the conversation id appended, then a `--text <text>` pair for each of R13's fact values and their telling words of 8 characters or more, so the wipe also removes what Rome distilled from the chat, memory included (or POSTs to it with `?conversation=&text=` when it is a URL) and takes exit 0 as the copy being gone and the instance healthy again. Exit 3 means a copy is left, and R13 is not checked. It prints JSON with what it removed, which goes into R13's evidence. The verifier never reads Rome's database itself.
 
 `rome_cloud.query` takes SQL on stdin and prints rows as a JSON array, read only. R1 runs `select result is null as cleared, consumed_at is not null as consumed from slack_app_installs order by created_at desc limit 1`.
 

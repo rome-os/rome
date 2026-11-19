@@ -266,7 +266,7 @@ const NOTES = [
   ["favourite café", "Café Wendlebury", ["Wendlebury"]],
   ["bedtime book", "The Saltmarsh Orrery", ["Saltmarsh", "Orrery"]],
   ["team's meeting room", "the Halloran Room", ["Halloran"]],
-  ["houseplant's name", "Fernsby", ["Fernsby"]],
+  ["houseplant's name", "Fernsworth", ["Fernsworth"]],
   ["favourite biscuit", "Gingerwhistle", ["Gingerwhistle"]],
 ];
 
@@ -341,7 +341,7 @@ export async function r13(ctx) {
       reason: "the environment gives no command to wipe Rome's copy of a chat (control.wipe_chat)",
     };
   const ws = ctx.wsA;
-  const notes = NOTES.map(([thing, text, marks]) => ({ thing, v: value(text, marks) }));
+  const notes = NOTES.map(([thing, text, marks]) => ({ thing, marks, v: value(text, marks) }));
   const halves = [notes.slice(0, 5), notes.slice(5)];
   // The 10 facts in two messages, asked back in two: with the replies, the
   // facts sit within the last 15 messages of the chat when it is wiped.
@@ -360,13 +360,50 @@ export async function r13(ctx) {
   );
   const outsideBefore = await outside(ctx);
   const wipeSeq = await ctx.slack.seq();
-  const wiped = await ctx.a.wipeChat(channel);
+  // What the instance shows of each value through its public search routes,
+  // by the value's telling words.
+  const heldBy = async () => {
+    const out = [];
+    for (const n of notes)
+      for (const mark of n.marks) out.push({ thing: n.thing, mark, ...(await ctx.a.holds(mark)) });
+    return out;
+  };
+  const heldBefore = await heldBy();
+  // The wipe takes the chat and every row holding a fact's value, memory
+  // included, so right answers after it can only come through the connection.
+  // The environment takes texts of 8 characters or more: each value, and
+  // each of its telling words long enough, since a memory may keep a word
+  // without the rest.
+  const texts = [
+    ...new Set(notes.flatMap((n) => [n.v.text, ...n.marks]).filter((t) => t.length >= 8)),
+  ];
+  const wiped = await ctx.a.wipeChat(channel, { texts });
   // The environment's command says ok: false (exit 3) when a copy is left.
   if (wiped && typeof wiped === "object" && wiped.ok === false)
     return {
       result: "not checked",
       reason: `the wipe left a copy of the direct message: ${JSON.stringify(wiped.remaining ?? wiped)}`,
       evidence: { chat: channel, wipe: wiped },
+    };
+  // Before any question: the instance must show none of the values, or a
+  // right answer could come from what it kept.
+  const heldAfter = await heldBy();
+  const unreadable = heldAfter.every((h) => h.memory.count === null && h.chats.count === null);
+  const stillHeld = heldAfter.filter((h) => h.memory.count || h.chats.count);
+  const holdings = {
+    before: heldBefore.filter((h) => h.memory.count || h.chats.count),
+    after: stillHeld,
+    routes: unreadable
+      ? `no public search route answered (memory ${heldAfter[0]?.memory.status}, chats ${heldAfter[0]?.chats.status}); relying on the wipe's "remaining"`
+      : "GET /memory/search and GET /chat/sessions/search",
+  };
+  if (stillHeld.length)
+    return {
+      result: "not checked",
+      reason: `after the wipe the instance still shows ${[...new Set(stillHeld.map((h) => h.thing))].join(", ")} (${stillHeld
+        .map((h) => `${h.mark}: memory ${h.memory.count ?? "?"}, chats ${h.chats.count ?? "?"}`)
+        .join("; ")}), so right answers would not show they came through the connection`,
+      evidence: { chat: channel, wipe: wiped, holdings },
     };
   const withoutCopy = await askRound(
     ctx,
@@ -386,6 +423,7 @@ export async function r13(ctx) {
     chat: channel,
     notes: notes.map((n) => ({ thing: n.thing, value: n.v.text })),
     wipe: wiped,
+    holdings,
     withCopy: { said: summary(withCopy.t), right: withCopy.right },
     withoutCopy: { said: summary(withoutCopy.t), right: withoutCopy.right },
     slackHistoryRequestsAfterWipe: reads.length,
@@ -414,7 +452,14 @@ export async function r13(ctx) {
   if (outsideBefore !== outsideAfter)
     problems.push("Rome shows something different outside the connection once the copy is gone");
   if (problems.length) return { result: "fail", reason: `${said}. ${problems.join("; ")}`, evidence };
-  return { result: "pass", reason: `${said}; nothing outside the connection changed.`, evidence };
+  const shown = unreadable
+    ? "no public search route answered, so this relies on the wipe's report"
+    : "after the wipe the instance showed none of the 10 values in its memory or chat search";
+  return {
+    result: "pass",
+    reason: `${said}; ${shown}; nothing outside the connection changed.`,
+    evidence,
+  };
 }
 
 // R8 ---------------------------------------------------------------------
