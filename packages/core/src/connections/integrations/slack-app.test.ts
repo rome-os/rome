@@ -177,6 +177,7 @@ describe("the Slack app talker", () => {
           forwardSecret: "secret",
           connectUrl: "wss://relay.test/c/mbx",
           drainKey: "old",
+          generation: "4",
         },
         expiresAt: "never",
       },
@@ -197,6 +198,8 @@ describe("the Slack app talker", () => {
     expect(faults).toEqual([]);
     expect(opened).toEqual(["fresh"]);
     expect(persisted[0]?.drainKey).toBe("fresh");
+    // The release still names the connect's claim after a refresh.
+    expect(persisted[0]?.generation).toBe("4");
     expect(await talker?.send("D1" as never, { text: "hi" } as never)).toMatchObject({
       messageId: "3.0",
     });
@@ -229,9 +232,9 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
       },
       cloud: {
         ...c,
-        release: async (teamId) => {
+        release: async (teamId, signal, generation) => {
           steps.push(`release ${teamId}`);
-          await c.release(teamId);
+          await c.release(teamId, signal, generation);
         },
       },
       openMailbox: () => ({ stop: () => {} }),
@@ -302,6 +305,60 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
       descriptor.onDisconnect?.({ material: MATERIAL, profile: {} }, { signal: stop.signal }),
     ).rejects.toThrow("Rome stopped waiting before releasing the workspace");
     expect(steps).toEqual(["revoke xoxb-a"]);
+  });
+
+  it("names its connect's claim, so a release landing after a reconnect ends nothing", async () => {
+    // Rome Cloud's rule: each connect takes the next generation, and a release
+    // naming one ends that claim only.
+    let bound: number | null = null;
+    let claims = 0;
+    const late: Array<() => void> = [];
+    const c = cloud({
+      redeem: async () => {
+        bound = ++claims;
+        return { ...INSTALL, generation: claims };
+      },
+      // The release reaches Rome Cloud, but Rome stops waiting before it
+      // commits: it lands only later.
+      release: async (_teamId, _signal, generation) => {
+        late.push(() => {
+          if (generation === undefined || generation === bound) bound = null;
+        });
+        throw new Error("Rome Cloud did not answer within 60s");
+      },
+    });
+    const connect = async () =>
+      (
+        await makeSlackAppSetup({ cloud: c, instanceOrigin: () => "https://me.test" })(
+          interaction({ handoff: "h", state: "s" }).interact,
+          ctx,
+        )
+      ).credential.material as Record<string, string>;
+    const first = await connect();
+    const { descriptor } = descriptorWith(async () => {}, c);
+    await expect(
+      descriptor.onDisconnect?.(
+        { material: first, profile: {} },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("Rome Cloud did not release the workspace");
+
+    const second = await connect();
+    for (const land of late) land();
+
+    expect(first).toMatchObject({ generation: "1" });
+    expect(second).toMatchObject({ generation: "2" });
+    expect(bound).toBe(2);
+  });
+
+  it("releases with no generation a grant made before Rome Cloud counted claims", async () => {
+    const release = rs.fn(async () => {});
+    const { descriptor } = descriptorWith(async () => {}, cloud({ release }));
+    await descriptor.onDisconnect?.(
+      { material: MATERIAL, profile: {} },
+      { signal: new AbortController().signal },
+    );
+    expect(release).toHaveBeenCalledWith("T_A", expect.anything(), undefined);
   });
 
   it("says Rome Cloud kept the workspace when the release fails", async () => {

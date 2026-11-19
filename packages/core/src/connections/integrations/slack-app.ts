@@ -107,7 +107,19 @@ function materialOf(material: unknown): SlackAppMaterial {
     forwardSecret: record.forwardSecret,
     connectUrl: record.connectUrl,
     drainKey: record.drainKey,
+    // Kept through a mailbox refresh, which writes the material back.
+    ...(typeof record.generation === "string" ? { generation: record.generation } : {}),
   };
+}
+
+/** The claim of the workspace a grant's connect made, which its release
+ *  names, kept in the material as `generation` (a decimal). Undefined for a
+ *  grant made before Rome Cloud counted claims. */
+function generationOf(material: unknown): number | undefined {
+  const raw = (material as { generation?: unknown } | null)?.generation;
+  if (typeof raw !== "string") return undefined;
+  const generation = Number(raw);
+  return Number.isInteger(generation) && generation > 0 ? generation : undefined;
 }
 
 function base64Url(buffer: Buffer): string {
@@ -184,6 +196,7 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       forwardSecret: install.forwardSecret,
       connectUrl: install.mailbox.connectUrl,
       drainKey: install.mailbox.drainKey,
+      ...(install.generation !== undefined ? { generation: String(install.generation) } : {}),
     };
     const workspace = install.teamName ?? "your workspace";
     return {
@@ -234,7 +247,9 @@ const RELEASE_LIMIT_MS = 60_000;
  * connect bound the workspace again would release that connection. So a
  * release runs to its end, or to {@link RELEASE_LIMIT_MS}, whoever stops
  * waiting for it, and a connect redeems its install only once every release
- * has ended.
+ * has ended. A release that outlasts that, or one Rome restarted under, is
+ * fenced at Rome Cloud: it names the generation of the claim it ends, and a
+ * later connect holds a newer one.
  */
 export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
   const releasing = new Set<Promise<void>>();
@@ -245,8 +260,8 @@ export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
       await Promise.allSettled([...releasing]);
       return cloud.redeem(input);
     },
-    release(teamId, signal) {
-      const run = cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS));
+    release(teamId, signal, generation) {
+      const run = cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS), generation);
       const tracked: Promise<void> = run.catch(() => {}).finally(() => releasing.delete(tracked));
       releasing.add(tracked);
       if (!signal) return run;
@@ -289,10 +304,12 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
       }
       // Past the disconnect's wait, the workspace may be connected again, and
       // releasing it now would release that connection. A release already
-      // under way holds off a connect until it ends (fencedCloud).
+      // under way holds off a connect until it ends (fencedCloud), and names
+      // this connect's claim, so one that lands later still, or after a
+      // restart, ends nothing newer.
       if (signal.aborted) throw new Error("Rome stopped waiting before releasing the workspace");
       try {
-        await deps.cloud.release(material.teamId, signal);
+        await deps.cloud.release(material.teamId, signal, generationOf(record));
       } catch (error) {
         throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
       }
