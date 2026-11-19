@@ -1609,7 +1609,10 @@ async function openSession(
     sessionId,
     getRomeSessionId: () => impl.currentTurnRomeSessionIdRef,
     getTurnId: () => impl.currentTurnId,
-    getThreadContext: () => impl.currentTurnThreadContextRef,
+    // The session's tools are built while it first opens, before `impl`
+    // exists, and read the place it opens in then.
+    getThreadContext: () =>
+      impl === undefined ? init.threadContext : impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,

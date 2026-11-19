@@ -1935,6 +1935,27 @@ describe("AgentRunner", () => {
       expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
     });
 
+    it("lets the session's tools read its place while the session first opens", async () => {
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const places: Array<string | undefined> = [];
+      const runner = createRunner(provider, undefined, {
+        sessionTools: async (context) => {
+          places.push(context.getThreadContext()?.channel);
+          return [];
+        },
+      });
+      const events = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Hi",
+          channelThreadKey: "telegram:cold-1",
+          threadContext: { channel: "telegram", threadId: "cold-1" },
+        }),
+      );
+      expect(events.some((event) => event.type === "error")).toBe(false);
+      expect(places[0]).toBe("telegram");
+    });
+
     it("preserves App Store attribution on isolated forks", async () => {
       const find = agentLoader.find.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
@@ -2393,6 +2414,7 @@ describe("AgentRunner", () => {
       turnLinks?: PromptFacts;
       runLineDeps?: RunLineDeps;
       placeSetup?: Parameters<typeof createSessions>[0]["placeSetup"];
+      sessionTools?: Parameters<typeof romeToolPorts>[0]["sessionTools"];
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2404,6 +2426,14 @@ describe("AgentRunner", () => {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
         ...(options.placeSetup ? { placeSetup: options.placeSetup } : {}),
+        ...(options.sessionTools
+          ? romeToolPorts({
+              actionRegistry,
+              actionEngine,
+              webchatRepo: new ChatsWebChatRepository(testDb.db),
+              sessionTools: options.sessionTools,
+            })
+          : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
