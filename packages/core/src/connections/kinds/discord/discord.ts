@@ -422,6 +422,12 @@ export class DiscordAdapter {
 
   private _botToken: string;
 
+  /** Whether the gateway has logged in, so `listGuildChannels` names every
+   *  chat the bot sees rather than none. */
+  isReady(): boolean {
+    return this.client.isReady();
+  }
+
   /**
    * Enumerate text-capable channels across all guilds the bot is in, so an
    * caller (via Talk's `directory` feature) can resolve a
@@ -430,12 +436,6 @@ export class DiscordAdapter {
    * voice/category channels are filtered out. Quiet on uninitialized clients —
    * returns an empty array so the caller can surface a clean "no guilds" UX.
    */
-  /** Whether the gateway has logged in, so `listGuildChannels` names every
-   *  chat the bot sees rather than none. */
-  isReady(): boolean {
-    return this.client.isReady();
-  }
-
   listGuildChannels(): GuildChannelInfo[] {
     if (!this.client.isReady()) return [];
     const out: GuildChannelInfo[] = [];
