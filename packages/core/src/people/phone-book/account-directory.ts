@@ -26,7 +26,7 @@ import {
   type Channels,
   type PlatformOfChannel,
 } from "../../chats/connected-accounts/connected-account.js";
-import type { PeopleRepository } from "../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
 import type { SentinelLogRepository } from "../../db/repositories/sentinel-log.js";
 
 export interface AccountDirectoryDeps {

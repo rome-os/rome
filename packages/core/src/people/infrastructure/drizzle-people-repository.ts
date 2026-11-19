@@ -1,11 +1,10 @@
-// People's repository: the Person aggregate, loaded and saved whole with its
-// links, and the account verbs that move a link between persons.
-// Vocabulary: docs/domains/people.md.
+// People's repository on Drizzle: the persons, links and dismissed-accounts
+// tables behind the PeopleRepository port. Vocabulary: docs/domains/people.md.
 
 import { readdir } from "node:fs/promises";
 import { eq, and, or, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import type { Account, BondLevel } from "@rome-os/app-runtime";
+import type { BondLevel } from "@rome-os/app-runtime";
 import { persons, links, dismissedAccounts } from "../../db/schema.js";
 import { type DrizzleDb, inTransaction, type SqliteExec } from "../../db/index.js";
 import { getRelationshipDir } from "../../profile-memory.js";
@@ -14,100 +13,20 @@ import {
   nextAvailablePersonId,
   protectedPersonReason,
 } from "@rome/api-types/persons";
-
-export type { BondLevel };
-
-/**
- * The account a link names, the way Chats names it: the platform and the
- * platform's own id for it (docs/domains/chats.md#account). One account is one
- * link whichever of Rome's accounts met it.
- */
-export type Link = Account;
-
-/**
- * One of a person's links. `delegate` is set on a
- * [delegate link](docs/domains/people.md#delegate-link): the account is an
- * agent's, acting for this person. Absent on the person's own accounts.
- */
-export interface PersonLink extends Link {
-  delegate?: true;
-}
-
-/** Someone the guardian knows, with every account linked to them. */
-export interface Person {
-  id: string;
-  displayName: string;
-  bondLevel: BondLevel;
-  profilePath: string | null;
-  createdAt: Date;
-  links: PersonLink[];
-}
-
-/** A person as {@link PeopleRepository.create} takes them. */
-export interface NewPerson {
-  displayName: string;
-  bondLevel: BondLevel;
-  profilePath?: string;
-}
-
-/** The fields of a person that change in place. */
-export type PersonChanges = Partial<{
-  displayName: string;
-  bondLevel: BondLevel;
-  profilePath: string | null;
-}>;
-
-/** A dismissed account. */
-export type Dismissal = Link;
-
-/** An account a person already holds, and the person holding it. */
-export interface AccountHolder extends Link {
-  personId: string;
-  personName: string;
-}
-
-/**
- * Thrown when a create would take an account a real person already holds.
- *
- * Carries the holder rather than only reporting that there is one: every
- * caller has to name them, because the guardian decides whether to move the
- * account and cannot decide without knowing whose it is.
- *
- * A dismissed account has no holder. A dismissal names no person, so naming
- * its sender takes the account with nothing to refuse.
- */
-export class AccountHeldError extends Error {
-  constructor(readonly holder: AccountHolder) {
-    super(`Account ${holder.platform}:${holder.id} already belongs to person "${holder.personId}"`);
-    this.name = "AccountHeldError";
-  }
-}
-
-/** What a link, move or dismiss did: took the account, or refused it and named
- *  whoever holds it — null where nobody does, which is what a stale move runs
- *  into.
- *
- *  A result rather than an {@link AccountHeldError}: a refused link is the
- *  ordinary answer to a stale page, not the exceptional one it is for a create,
- *  where the account is the reason the person was being written at all. */
-export type LinkResult = { linked: true } | { linked: false; holder: AccountHolder | null };
-
-/** What a {@link PeopleRepository.merge} attempt did: absorbed the source,
- *  links and all, or refused and said which rule stopped it. The reason rather
- *  than the sentence, so the wording a caller answers with stays the
- *  contract's rather than this table's. */
-export type MergeResult = { merged: true; links: number } | { merged: false; reason: MergeRefusal };
-
-/** Why a merge did not happen. "unknown-*" describes an id that names nobody,
- *  and "guardian-source" a person who exists and stays. */
-export type MergeRefusal = "same-person" | "unknown-target" | "unknown-source" | "guardian-source";
-
-/** What a {@link PeopleRepository.delete} attempt did: removed the person and
- *  returned this many accounts to strangers, or refused because the id names
- *  nobody or names the guardian. */
-export type DeleteResult =
-  | { deleted: true; links: number }
-  | { deleted: false; reason: "unknown" | "guardian" };
+import {
+  PersonLink,
+  Person,
+  Link,
+  Dismissal,
+  NewPerson,
+  PersonChanges,
+  MergeResult,
+  DeleteResult,
+  LinkResult,
+  AccountHolder,
+  AccountHeldError,
+} from "../model/person.js";
+import type { PeopleRepository } from "../model/people-repository.js";
 
 type PersonRow = typeof persons.$inferSelect;
 
@@ -131,32 +50,15 @@ function toPerson(row: PersonRow, links: PersonLink[]): Person {
   };
 }
 
-/**
- * The people the guardian knows, each loaded whole with their links, and the
- * accounts the guardian dismissed.
- *
- * Reads answer {@link Person}. Writes on an account take a {@link Link} and
- * hold two rules: one account has at most one link, which the unique index on
- * the links table backstops, and an account is linked or dismissed, never
- * both, which every write that links an account keeps by deleting its
- * dismissal in the same transaction. Writes that a caller enlists in its own
- * transaction take an executor last, defaulting to this repository's database.
- */
-export class PeopleRepository {
+/** {@link PeopleRepository} on the persons, links and dismissed-accounts tables. */
+export class DrizzlePeopleRepository implements PeopleRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  /** The person `id` names, or null. */
   async byId(id: string): Promise<Person | null> {
     const row = this.db.select().from(persons).where(eq(persons.id, id)).get();
     return row ? (await this.withLinks([row]))[0] : null;
   }
 
-  /**
-   * Who is this: the person the account is linked to, or null. An account is
-   * one link whichever of Rome's accounts met it, so a Telegram sender heard by
-   * the bot and by the signed-in user is one person. Feishu's open_id is issued
-   * per app, so a sender on a second Feishu app is a second account there.
-   */
   async byAccount(account: Link): Promise<Person | null> {
     const row = this.db
       .select({ person: persons })
@@ -167,13 +69,11 @@ export class PeopleRepository {
     return row ? (await this.withLinks([row.person]))[0] : null;
   }
 
-  /** Every person named exactly `displayName`. */
   async byName(displayName: string): Promise<Person[]> {
     const rows = await this.db.select().from(persons).where(eq(persons.displayName, displayName));
     return this.withLinks(rows);
   }
 
-  /** The first person named `displayName` in any case. */
   async byNameIgnoringCase(displayName: string): Promise<Person | null> {
     const row = this.db
       .select()
@@ -188,15 +88,6 @@ export class PeopleRepository {
     return this.withLinks(rows);
   }
 
-  /**
-   * Every person with their links, read as one statement.
-   *
-   * One statement rather than one per person, and not only to save the reads:
-   * a link moving between two people mid-read would otherwise land under both
-   * of them (or neither), because each person's links would arrive in their
-   * own autocommit query. Every reader of this table assumes an account has
-   * one owner.
-   */
   async all(): Promise<Person[]> {
     const rows = await this.db
       .select({ person: persons, link: links })
@@ -215,14 +106,11 @@ export class PeopleRepository {
     return [...byPerson.values()];
   }
 
-  /** Every dismissed account. */
   async dismissals(): Promise<Dismissal[]> {
     const rows = await this.db.select().from(dismissedAccounts);
     return rows.map((row) => ({ platform: row.platform, id: row.accountId }));
   }
 
-  /** Whether the guardian dismissed the account. Who is this answers nobody
-   *  for it, the same as for a stranger. */
   async isDismissed(account: Link): Promise<boolean> {
     return this.dismissalOf(account) != null;
   }
@@ -244,21 +132,6 @@ export class PeopleRepository {
     );
   }
 
-  /**
-   * Create a person and link their accounts, both or neither.
-   *
-   * A dismissed account is taken, its dismissal deleted: naming its sender is
-   * the answer the dismissal declined to give. An account a person holds stays
-   * held: this throws {@link AccountHeldError} instead of stealing
-   * it, because creating a person is not a move. The refusal is a rollback,
-   * not a partial write — a person committed without their account would be
-   * unreachable and permanent, since {@link byName} would then reject every
-   * retry as a duplicate of the wreckage.
-   *
-   * Whatever the caller names, all of it or none of it: the accounts are
-   * settled together before the transaction opens, so one held account in a
-   * list of five leaves the other four where they were.
-   */
   async create(data: NewPerson & { links?: Link[] }): Promise<string> {
     const id = await this.mintId(data.displayName);
 
@@ -272,7 +145,6 @@ export class PeopleRepository {
     return id;
   }
 
-  /** Create a person under an id the caller chose, with no links. */
   async createWithId(id: string, data: NewPerson): Promise<string> {
     this.insertPerson(this.db, id, data);
     return id;
@@ -282,29 +154,6 @@ export class PeopleRepository {
     await this.db.update(persons).set(changes).where(eq(persons.id, id));
   }
 
-  /**
-   * Move every link `from` holds onto `into` and delete `from`, or do neither.
-   *
-   * One transaction because a merge is a re-attribution of history: half of a
-   * duplicate's accounts moved is a state no guardian asked for and no retry
-   * repairs — the second attempt reads a source that is missing the links it
-   * already gave away, so it looks like a smaller duplicate than it is.
-   *
-   * The links move rather than being rewritten, so each carries its
-   * channel-side name across the way a move does. Nothing can collide on the
-   * unique index: an account carries at most one link, so no account is held
-   * by both people to begin with.
-   *
-   * Both rows are read inside the transaction and the refusals are decided
-   * there, so a source that was deleted or a person that was never there
-   * cannot be reported as a merge that moved nothing. The caller phrases the
-   * refusal; this decides it.
-   *
-   * The persons row is the whole of what is deleted. The link table is the
-   * only thing that references it, so nothing is left pointing at an id that
-   * is gone — and nothing outside the database is touched, memory files
-   * included, because a file cannot join this transaction.
-   */
   async merge(into: string, from: string): Promise<MergeResult> {
     return this.db.transaction((tx): MergeResult => {
       // Guarded here as well as by the caller: this transaction would move a
@@ -334,14 +183,6 @@ export class PeopleRepository {
     });
   }
 
-  /**
-   * Delete a person and every link they hold, so their accounts are strangers
-   * again (docs/domains/people.md#person). Nothing is dismissed on the way: the
-   * guardian deleted a person, not a decision about each account.
-   *
-   * The links and the person go in one transaction, so no reader sees links
-   * onto a person who is gone. The guardian anchors the ladder and is refused.
-   */
   async delete(personId: string): Promise<DeleteResult> {
     return this.db.transaction((tx): DeleteResult => {
       const row = tx
@@ -358,38 +199,14 @@ export class PeopleRepository {
     });
   }
 
-  /**
-   * Link an account nobody holds to `personId`.
-   *
-   * Claims a stranger, a dismissed account, or one this person already holds,
-   * which is the same request arriving twice. An account another person holds
-   * is refused and its holder named: taking it is {@link move}, the guardian's
-   * explicit act.
-   */
   async link(account: Link, personId: string): Promise<LinkResult> {
     return this.swap(account, null, personId);
   }
 
-  /**
-   * Move an account from `from` to `to`, if `from` still holds it.
-   *
-   * The read and the move are one transaction, so of two callers working from
-   * the same page exactly one lands the account: the loser's expected owner is
-   * no longer the owner by the time its own transaction reads, and it is
-   * refused rather than overwriting a move it never saw.
-   */
   async move(account: Link, from: string, to: string): Promise<LinkResult> {
     return this.swap(account, from, to);
   }
 
-  /**
-   * Dismiss an account nobody holds. Dismissing an account already dismissed
-   * is the same request arriving twice, and lands.
-   *
-   * Decided on the same terms as {@link link}, in one transaction: an account a
-   * person holds is refused and its holder named, rather than its link
-   * dropped and the person lost.
-   */
   async dismiss(account: Link): Promise<LinkResult> {
     return this.db.transaction((tx): LinkResult => {
       const holder = this.holderOf(account, tx);
@@ -402,44 +219,14 @@ export class PeopleRepository {
     });
   }
 
-  /**
-   * Restore dismissed addresses of one account to strangers, as a single
-   * statement.
-   *
-   * Every address in one statement because they are one decision: a channel
-   * can reach an account several ways, a dismissal is stored against whichever
-   * one the guardian dismissed it by, and an undo that committed some of them
-   * would leave the account still dismissed by the address it missed. Links
-   * are not touched, so an address a person holds is left where it is.
-   */
   async restore(platform: string, addresses: readonly string[]): Promise<number> {
     return this.releaseDismissals(this.db, platform, addresses);
   }
 
-  /**
-   * Link an account to `personId` because a platform says it is theirs, in
-   * `exec`.
-   *
-   * Unlike {@link link}, this takes the account from whoever held it: the
-   * platform's statement about whose account it is outranks an earlier link.
-   * Claiming is one statement, not a read followed by a write, so a second
-   * writer re-points the link instead of adding a rival one, whatever order
-   * the two arrive in. A dismissal of the account goes with it, in the same
-   * transaction. Returns the link row's id.
-   */
   linkStated(account: Link, personId: string, exec: SqliteExec = this.db): string {
     return this.claim(account, personId, false, exec);
   }
 
-  /**
-   * Link an agent's account to the person behind the agent, because a
-   * platform says the agent is theirs, as a
-   * [delegate link](docs/domains/people.md#delegate-link). Rome Cloud says so
-   * for the guardian's own agents.
-   *
-   * Claims on the same terms as {@link linkStated}, and marks the link a
-   * delegate whether it was new or re-pointed. Returns the link row's id.
-   */
   linkDelegate(account: Link, personId: string): string {
     return this.claim(account, personId, true, this.db);
   }
@@ -475,17 +262,6 @@ export class PeopleRepository {
     return row.id;
   }
 
-  /**
-   * Re-address one of a person's accounts from `account.id` to `to`, in
-   * `exec`, leaving their other accounts on that platform alone. Heals
-   * a stale guardian self address (e.g. a device-suffixed WhatsApp id captured
-   * before canonicalization) onto its canonical form on reconnect.
-   *
-   * Takes `to` from whoever else holds it, on the same terms as
-   * {@link linkStated}: this is the channel reporting the address its account
-   * answers to now, so a rival claim on it is the stale one. Returns false when
-   * the person does not hold the account, having moved nothing.
-   */
   readdress(personId: string, account: Link, to: string, exec: SqliteExec = this.db): boolean {
     const { platform } = account;
     const from = account.id;
@@ -558,12 +334,6 @@ export class PeopleRepository {
     return result.changes > 0;
   }
 
-  /**
-   * Drop the account's link. Named `from`, only that person's link goes, and
-   * the result reports whether it was theirs to drop, which is the only way a
-   * caller can tell an unlink from a no-op. Unnamed, whoever holds it loses
-   * it. Either way the account becomes a stranger.
-   */
   async unlink(account: Link, from?: string): Promise<boolean> {
     const result = this.db
       .delete(links)

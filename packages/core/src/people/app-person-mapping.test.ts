@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import type { PersonMappingRepository } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 import { appPersonMapping } from "./app-person-mapping.js";
 
 describe("appPersonMapping", () => {
@@ -11,7 +12,7 @@ describe("appPersonMapping", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db);
+    people = new DrizzlePeopleRepository(testDb.db);
     app = appPersonMapping(people);
   });
 

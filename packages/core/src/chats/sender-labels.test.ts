@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account } from "@rome-os/app-runtime";
-import type { Person } from "../people/infrastructure/drizzle-people-repository.js";
+import type { Person } from "../people/model/person.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 import { SenderLabels, whoIs, whoSaid } from "./sender-labels.js";
 

@@ -14,7 +14,7 @@ import {
   WhatsAppAdapter,
   type WhatsAppSocketFactory,
 } from "../../connections/kinds/whatsapp/whatsapp.js";
-import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";

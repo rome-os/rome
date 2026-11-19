@@ -11,10 +11,8 @@ import {
   type NewPerson,
   type PersonResource,
 } from "@rome/api-types/people";
-import {
-  AccountHeldError,
-  type PeopleRepository,
-} from "../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
+import { AccountHeldError } from "../model/person.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
 import { accountOfWire, wireOf } from "../model/wire.js";
 

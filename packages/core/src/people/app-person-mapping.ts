@@ -12,7 +12,8 @@
 import type { PersonMappingRepository, PersonRecord } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
 import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
-import type { PeopleRepository, Person } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
+import type { Person } from "./model/person.js";
 
 function toRecord(person: Person): PersonRecord {
   const { links, ...rest } = person;

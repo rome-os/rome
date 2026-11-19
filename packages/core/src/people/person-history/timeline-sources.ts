@@ -35,7 +35,7 @@ import {
 import type { AccountMessages, MessageAccount } from "../../chats/history/messages.js";
 import { chatsAgentMessages } from "../../chats/history/messages-agent.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an

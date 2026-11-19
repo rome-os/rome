@@ -5,7 +5,7 @@ import {
   restoreAccount,
   type AccountDecision,
   type AccountRef,
-} from "../../people/phone-book/account-decisions.js";
+} from "../../people/phone-book/index.js";
 import type { ApiDeps } from "../deps.js";
 
 // The account directory's two writes: dismiss an account, and restore one.

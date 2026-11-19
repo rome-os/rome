@@ -2,7 +2,8 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../../connections/registry.js";
-import { PeopleRepository } from "../infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../../connections/kinds/email/rome-cloud-mail.js";
 import { createTestDb, identityConnectionKindOf, type TestDb } from "../../test/db.js";
@@ -60,7 +61,7 @@ describe("guardian link admission", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PeopleRepository(testDb.db);
+    repo = new DrizzlePeopleRepository(testDb.db);
     testDb.db
       .insert(persons)
       .values([

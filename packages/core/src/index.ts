@@ -10,10 +10,7 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import {
-  createGuardianLinkAdmission,
-  GuardianLinkCodes,
-} from "./people/link-code/guardian-link-code.js";
+import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/link-code/index.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -109,7 +106,7 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { PeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
@@ -223,7 +220,7 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
-import { registerAgentNameAction } from "./people/guardian-profile/agent-name.js";
+import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { registerReadPersonAction } from "./people/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -459,7 +456,7 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);

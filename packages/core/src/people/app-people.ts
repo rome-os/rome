@@ -2,7 +2,7 @@
 // People's repository. Vocabulary: docs/domains/people.md.
 
 import type { PeopleService } from "@rome-os/app-runtime";
-import type { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 
 export function appPeople(people: Pick<PeopleRepository, "byBondLevel">): PeopleService {
   return {

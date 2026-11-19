@@ -16,7 +16,7 @@
 //      setup through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import {
   TelegramUserAuthError,
   type TelegramUserLoginHandle,

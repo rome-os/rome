@@ -15,10 +15,8 @@ import type {
   SendInput,
   SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type {
-  Link,
-  PeopleRepository,
-} from "../../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
+import type { Link } from "../../../people/model/person.js";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
 import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
 

@@ -23,7 +23,7 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../kinds/email/rome-cloud-mail.js";
-import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../kinds/email/email-control.js";
 import { createTestDb } from "../../test/db.js";

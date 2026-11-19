@@ -11,7 +11,7 @@ import {
   callMain,
   setWorkerRpcInProcessDispatcher,
 } from "../../../apps/actions/worker-rpc-client.js";
-import type { PeopleRepository } from "../../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import {
   MAIL_REQUEST_TIMEOUT_MS,

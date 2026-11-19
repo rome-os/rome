@@ -21,19 +21,19 @@ import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../access/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { platformOf } from "@rome/api-types/platform";
-import { createPerson } from "../../people/phone-book/create.js";
-import { deletePerson } from "../../people/phone-book/delete.js";
-import { mergePeople } from "../../people/phone-book/merge.js";
-import { findPerson, readPeople, readPerson } from "../../people/phone-book/resource.js";
-import { updatePerson } from "../../people/phone-book/update.js";
+import { createPerson } from "../../people/phone-book/index.js";
+import { deletePerson } from "../../people/phone-book/index.js";
+import { mergePeople } from "../../people/phone-book/index.js";
+import { findPerson, readPeople, readPerson } from "../../people/phone-book/index.js";
+import { updatePerson } from "../../people/phone-book/index.js";
 import { send, type SendResult } from "../../chats/send.js";
-import { asGuardian, directPlace } from "../../people/person-history/send.js";
-import { readAccountTimeline } from "../../people/person-history/timeline.js";
+import { asGuardian, directPlace } from "../../people/person-history/index.js";
+import { readAccountTimeline } from "../../people/person-history/index.js";
 import {
   guardianChannels,
   personMessageStores,
   timelineAccounts,
-} from "../../people/person-history/timeline-sources.js";
+} from "../../people/person-history/index.js";
 import { accountOfWire, wireOf } from "../../people/model/wire.js";
 import type { ApiDeps } from "../deps.js";
 

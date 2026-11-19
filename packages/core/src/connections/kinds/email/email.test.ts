@@ -14,7 +14,7 @@ import type {
 } from "./rome-cloud-mail.js";
 import { MailProviderError } from "./rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
 const GUARDIAN = "guardian@example.com";

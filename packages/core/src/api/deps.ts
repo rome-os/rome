@@ -1,9 +1,9 @@
-import type { AgentNameEvents } from "../people/guardian-profile/agent-name.js";
+import type { AgentNameEvents } from "../people/guardian-profile/index.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import type { PlaceAudience } from "../core/place-audience.js";
-import type { GuardianLinkCodes } from "../people/link-code/guardian-link-code.js";
+import type { GuardianLinkCodes } from "../people/link-code/index.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
@@ -13,7 +13,7 @@ import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../apps/actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import type { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
 import type {
   Channels,
   PlatformOfChannel,

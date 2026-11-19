@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { appPeople } from "./app-people.js";
 
@@ -9,7 +10,7 @@ describe("appPeople", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db);
+    people = new DrizzlePeopleRepository(testDb.db);
   });
 
   afterEach(() => {

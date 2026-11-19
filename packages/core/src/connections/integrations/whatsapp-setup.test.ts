@@ -13,7 +13,7 @@
 //      through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";

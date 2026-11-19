@@ -18,14 +18,17 @@ import type {
 import type { MessageAccount } from "../../chats/history/messages.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
-import type { PeopleRepository } from "../infrastructure/drizzle-people-repository.js";
-import { assignAccountHeads } from "../person-history/timeline.js";
-import { asGuardian, readSendStates, sendersOf, type SendDeps } from "../person-history/send.js";
+import type { PeopleRepository } from "../model/people-repository.js";
 import {
+  asGuardian,
+  assignAccountHeads,
   guardianChannels,
   personMessageStores,
+  readSendStates,
+  type SendDeps,
+  sendersOf,
   timelineAccounts,
-} from "../person-history/timeline-sources.js";
+} from "../person-history/index.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;

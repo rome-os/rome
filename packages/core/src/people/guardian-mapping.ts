@@ -1,6 +1,6 @@
 import type { Account } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
-import type { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("guardian-mapping");

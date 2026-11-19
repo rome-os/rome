@@ -25,7 +25,7 @@ import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../people/guardian-profile/guardian-profile.js";
+} from "../../people/guardian-profile/index.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,

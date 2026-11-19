@@ -6,7 +6,9 @@ import {
   recordedConnectionKindOf,
   testAccountLinkOf,
 } from "../../test/helpers.js";
-import { AccountHeldError, PeopleRepository } from "./drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "./drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
+import { AccountHeldError } from "../model/person.js";
 import { eq } from "drizzle-orm";
 import { persons, links, dismissedAccounts } from "../../db/schema.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
@@ -17,7 +19,7 @@ describe("PeopleRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PeopleRepository(testDb.db);
+    repo = new DrizzlePeopleRepository(testDb.db);
   });
 
   afterEach(() => {

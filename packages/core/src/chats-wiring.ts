@@ -16,7 +16,7 @@ import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapt
 import { recordedSends } from "./connections/recorded-sends.js";
 import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
-import { PeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
 import { TurnLinks } from "./sessions/turn-links.js";
@@ -65,7 +65,7 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
   });
   const speakerMessages = new SpeakerMessages({ speakers, messages, adapters });
   const reads = new ChatReadModel(db, { messages, links });
-  const labels = new SenderLabels(new PeopleRepository(db));
+  const labels = new SenderLabels(new DrizzlePeopleRepository(db));
   return {
     chats,
     messages,

@@ -4,7 +4,8 @@
 import { readFile } from "node:fs/promises";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
-import type { PeopleRepository, Person } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
+import type { Person } from "./model/person.js";
 import { personProfilePath, resolveProfileMemoryPath } from "../profile-memory.js";
 
 export const READ_PERSON_ACTION = "core:read_person";

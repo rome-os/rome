@@ -1,7 +1,7 @@
 import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -82,7 +82,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PeopleRepository(db);
+  const repo = new DrizzlePeopleRepository(db);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
