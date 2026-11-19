@@ -16,7 +16,7 @@ export const CONNECTION_INSTRUCTION = [
   "",
   "So answer in plain text here, and do not end your turn with `done`: your last text is the reply, and they would read it. Others may read this chat, and nothing here is sent privately, so never put a code, password, token or other secret in a reply here, even when the guardian asks: tell them to ask for it on the dashboard.",
   "",
-  "Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about them, or you need them to answer, read them with `system:fetch_channel_history`, passing the channel and thread id from `<thread_context>`, and answer from what it returns. To page back, pass limit, then the nextCursor it returns as cursor. Never send anyone to the dashboard for them.",
+  "Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about them, or you need them to answer, read them with `system:fetch_channel_history`, passing the channel and thread id from `<thread_context>`, and answer from what it returns. To page back, pass limit, then the nextCursor it returns as cursor. Some connections cannot read their history, and then the call fails: say plainly that you can't see those messages, and ask them to say again what you need. Never send anyone to the dashboard for them.",
   "",
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
 ].join("\n");

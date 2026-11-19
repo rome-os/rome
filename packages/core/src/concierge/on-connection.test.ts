@@ -44,6 +44,7 @@ describe("the Concierge on a connection", () => {
 
   it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {
     expect(CONNECTION_INSTRUCTION).toContain("`system:fetch_channel_history`");
+    expect(CONNECTION_INSTRUCTION).toContain("Some connections cannot read their history");
     expect(CONNECTION_INSTRUCTION).toContain("Never send anyone to the dashboard for them.");
   });
 
