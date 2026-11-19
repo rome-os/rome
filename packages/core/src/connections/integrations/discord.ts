@@ -226,6 +226,9 @@ export function makeDiscordSetup(deps: {
   };
 }
 
+/** How many archived listings of one account may page at once. */
+const SNAPSHOTS = 4;
+
 /** A cursor into a snapshot of an archived listing: the snapshot's token,
  *  then the offset in it. Any other cursor names none. */
 function snapshotCursor(cursor: string | undefined): { token: string; offset: string } | undefined {
@@ -315,7 +318,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           // A listing of archived threads reads every archive from Discord,
           // so later pages read the first page's snapshot instead of reading
           // the archives again, which would also shift offsets between reads.
-          let snapshot: { token: string; items: GuildChannelInfo[] } | undefined;
+          // A few listings may run at once; the oldest is dropped past that.
+          const snapshots = new Map<string, GuildChannelInfo[]>();
           const listed = async (
             input: Parameters<TalkDirectory["listConversations"]>[0],
           ): Promise<GuildChannelInfo[]> => {
@@ -355,18 +359,23 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 throw new Error("Discord is not connected yet; list its chats again shortly");
               }
               const resumed = input.includeArchived ? snapshotCursor(input.cursor) : undefined;
-              if (resumed && resumed.token !== snapshot?.token) {
+              const kept = resumed ? snapshots.get(resumed.token) : undefined;
+              if (resumed && !kept) {
                 throw new Error("This Discord listing has expired; list its chats from the start");
               }
-              const items = resumed && snapshot ? snapshot.items : await listed(input);
+              const items = kept ?? (await listed(input));
               const cursor = resumed ? resumed.offset : input.cursor;
               const page = directoryPage(items, { ...input, ...(cursor ? { cursor } : {}) });
               let nextCursor = page.nextCursor;
               if (input.includeArchived) {
                 const token = resumed?.token ?? randomUUID();
-                if (!nextCursor) snapshot = undefined;
+                if (!nextCursor) snapshots.delete(token);
                 else {
-                  if (!resumed) snapshot = { token, items };
+                  if (!resumed) {
+                    snapshots.set(token, items);
+                    const oldest = snapshots.keys().next().value;
+                    if (snapshots.size > SNAPSHOTS && oldest) snapshots.delete(oldest);
+                  }
                   nextCursor = `${token}.${nextCursor}`;
                 }
               }

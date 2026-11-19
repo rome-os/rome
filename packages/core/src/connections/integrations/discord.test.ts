@@ -425,6 +425,13 @@ describe("discord descriptor shape", () => {
     ).toEqual(["thread-1", "thread-2", "text-1"]);
     expect(second?.nextCursor).toBeUndefined();
     expect(fakeState.archiveReads).toBe(1);
+    // Another listing running alongside keeps its own snapshot.
+    const other = await directory?.listConversations({ limit: 2, includeArchived: true });
+    const again = await directory?.listConversations({ limit: 2, includeArchived: true });
+    await expect(
+      directory?.listConversations({ limit: 2, includeArchived: true, cursor: other?.nextCursor }),
+    ).resolves.toBeDefined();
+    expect(again?.nextCursor).toBeDefined();
     // The snapshot ends with its last page.
     await expect(
       directory?.listConversations({ limit: 2, includeArchived: true, cursor: first?.nextCursor }),
