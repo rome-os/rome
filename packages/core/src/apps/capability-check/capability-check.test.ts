@@ -543,6 +543,37 @@ declare class NoSchemaAction { constructor(config: unknown); }
     expect(gaps.map((g) => g.rule)).toContain("I2");
   });
 
+  it("I3: reads writes in a function held by an object literal", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace(
+        'return "not found";',
+        'if (request.method === "DELETE" && route === "notes") return store.tidy();\n    return "not found";',
+      )
+      .replace(
+        "export class",
+        "const store = { tidy: async () => { await db.delete({}); } };\ndeclare const db: { delete(x: unknown): Promise<void> };\nexport class",
+      );
+    const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api });
+    expect(gaps.map((g) => g.rule)).toEqual(["I3", "I1"]);
+  });
+
+  it("I3: does not let a machine path spare a string prefix that reaches past it", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace(
+        'return "not found";',
+        'if (route.startsWith("webhook")) return this.ctx.db.delete({});\n    return "not found";',
+      )
+      .replace("runAction(name: string, input: unknown): Promise<unknown>", "$& ; db: any");
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "  entry: api/index\n",
+      "  entry: api/index\n  noAuth:\n    - /webhook/*\n",
+    );
+    const verdict = checkApp(
+      await readApp(writeApp({ ...COMPLIANT, "app.yaml": manifest, "src/api/index.ts": api })),
+    );
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I3"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

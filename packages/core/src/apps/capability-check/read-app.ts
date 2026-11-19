@@ -100,18 +100,25 @@ export async function readApp(dir: string): Promise<AppFacts> {
             const machinePaths = paths.filter(machine).length;
             // `route === "webhook" || route === "erase"` is a machine route for one path only.
             const mixed = machinePaths > 0 && machinePaths < paths.length;
+            // `startsWith("webhook")` also takes `/webhook-admin`, which no `/webhook/*` covers.
+            const loosePrefix = machinePaths > 0 && paths.some((p) => p.includes("**"));
             const unreadable =
               route.unreadable ??
               (mixed
                 ? `paths ${paths.map((p) => `\`/${p}\``).join(" and ")} that are not all machine routes`
-                : undefined);
+                : loosePrefix
+                  ? "a string prefix that also matches paths beside its machine route"
+                  : undefined);
             return {
               ...route,
               ...(unreadable ? { unreadable } : {}),
               noAuth: unreadable === undefined && machinePaths === paths.length,
               mayBeNoAuth:
                 unreadable !== undefined &&
-                (mixed || noAuth === true || (Array.isArray(noAuth) && noAuth.length > 0)),
+                (mixed ||
+                  loosePrefix ||
+                  noAuth === true ||
+                  (Array.isArray(noAuth) && noAuth.length > 0)),
             };
           });
   }
@@ -1096,7 +1103,10 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
     const init = declaration.initializer;
     if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) return init.body;
   }
-  if (ts.isPropertyDeclaration(declaration) && declaration.initializer) {
+  if (
+    (ts.isPropertyDeclaration(declaration) || ts.isPropertyAssignment(declaration)) &&
+    declaration.initializer
+  ) {
     const init = declaration.initializer;
     if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) return init.body;
   }
