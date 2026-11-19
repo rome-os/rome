@@ -41,6 +41,8 @@ const DIRECT_REQUESTS = new Set([
   "axios.get",
   "axios.post",
 ]);
+const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
+const ZOD_DESCRIBES = new Set(["describe", "meta"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
 /** How deep the reader follows calls from a route to find the actions it runs. */
@@ -82,10 +84,13 @@ export async function readApp(dir: string): Promise<AppFacts> {
         ? null
         : found.map((route) => ({
             ...route,
-            noAuth: isAppApiPathNoAuth(noAuth as boolean | string[], `/${route.path}`),
+            noAuth:
+              route.unreadable === undefined &&
+              isAppApiPathNoAuth(noAuth as boolean | string[], `/${route.path}`),
           }));
   }
 
+  const imports = reader.imports();
   return {
     id: manifest.id,
     dir,
@@ -95,8 +100,8 @@ export async function readApp(dir: string): Promise<AppFacts> {
     actions,
     routes,
     ...(apiEntryAt ? { apiEntry: apiEntryAt } : {}),
-    imports: reader.imports(),
-    pageRequests: reader.pageRequests(),
+    imports,
+    pageRequests: reader.pageRequests(imports),
   };
 }
 
@@ -179,12 +184,31 @@ class SourceReader {
     return found;
   }
 
-  /** Requests the page makes past its app API, such as a bare `fetch`. */
-  pageRequests(): PageRequestFacts[] {
+  /**
+   * Requests the page makes past its app API, such as a bare `fetch`, in its
+   * own files and in the shared files it imports. Imports of the API, the
+   * actions or the data are I4 gaps of their own, so their files are not read.
+   */
+  pageRequests(imports: readonly ImportFacts[]): PageRequestFacts[] {
+    const pageFiles = new Set<string>();
+    const queue = this.program
+      .getSourceFiles()
+      .map((source) => this.fromSource(source.fileName))
+      .filter((file) => file.startsWith("web/"));
+    while (queue.length > 0) {
+      const file = queue.pop() as string;
+      if (pageFiles.has(file)) continue;
+      pageFiles.add(file);
+      for (const imp of imports) {
+        if (imp.from === file && !/^(api|actions|db)\//.test(imp.to) && !imp.to.startsWith("..")) {
+          queue.push(imp.to);
+        }
+      }
+    }
     const found: PageRequestFacts[] = [];
     for (const source of this.program.getSourceFiles()) {
       if (!this.ownFile(source.fileName) || isTestFile(source.fileName)) continue;
-      if (!this.fromSource(source.fileName).startsWith("web/")) continue;
+      if (!pageFiles.has(this.fromSource(source.fileName))) continue;
       const visit = (node: TS.Node) => {
         const callee =
           ts.isCallExpression(node) || ts.isNewExpression(node) ? node.expression : undefined;
@@ -257,11 +281,16 @@ class SourceReader {
     if (ts.isObjectLiteralExpression(node)) return this.jsonSchemaArguments(node);
     const zodShape = findZodObjectShape(node);
     if (zodShape) {
-      const undescribed = zodShape.properties
-        .filter(
-          (p) => !(ts.isPropertyAssignment(p) && p.initializer.getText().includes(".describe(")),
-        )
-        .map((p) => propertyName(p));
+      const undescribed: string[] = [];
+      for (const property of zodShape.properties) {
+        const value = ts.isPropertyAssignment(property)
+          ? this.followIdentifier(property.initializer)
+          : ts.isShorthandPropertyAssignment(property)
+            ? this.followIdentifier(property.name)
+            : undefined;
+        if (!value) return { kind: "unknown" };
+        if (!isDescribedZod(value)) undescribed.push(propertyName(property));
+      }
       return undescribed.length === 0
         ? { kind: "described" }
         : { kind: "undescribed", names: undescribed };
@@ -270,6 +299,7 @@ class SourceReader {
   }
 
   private jsonSchemaArguments(schema: TS.ObjectLiteralExpression): ArgumentDescriptions {
+    if (schema.properties.some((p) => ts.isSpreadAssignment(p))) return { kind: "unknown" };
     const properties = propertyValue(schema, "properties");
     if (!properties) return { kind: "described" };
     const literal = this.followIdentifier(properties);
@@ -331,45 +361,53 @@ class SourceReader {
       ts.forEachChild(node, visit);
     };
     visit(entry);
-    // A route is a route test with no narrower route test inside it.
-    const leaves = routeIfs.filter(
-      (candidate) =>
-        !routeIfs.some((other) => other !== candidate && contains(candidate.thenStatement, other)),
-    );
-    return leaves.map((leaf) => {
-      const conditions = [leaf.expression, ...enclosingRouteConditions(leaf, literal)];
-      const methods = new Set<string>();
-      const segments: string[] = [];
-      let depth = 0;
-      for (const condition of conditions.reverse()) {
-        const { methods: m, segments: s, depth: d } = readCondition(condition, literal);
-        for (const method of m) methods.add(method);
-        segments.push(...s);
-        depth = Math.max(depth, d ?? 0);
+    const nested = (outer: TS.IfStatement) =>
+      routeIfs.filter((other) => other !== outer && contains(outer.thenStatement, other));
+    const routes: Omit<RouteFacts, "noAuth">[] = [];
+    for (const routeIf of routeIfs) {
+      const inner = nested(routeIf);
+      // A route test with narrower tests inside it is a route only for the
+      // code that runs outside them, such as a write after a method check.
+      const effects = this.effects(routeIf.thenStatement, new Set(inner));
+      if (inner.length > 0 && effects.runs.length === 0 && effects.writes.length === 0) continue;
+      const conditions = [routeIf.expression, ...enclosingRouteConditions(routeIf, literal)];
+      routes.push({
+        ...describeRoute(conditions.reverse(), literal),
+        at: this.at(entryFile, routeIf),
+        ...effects,
+      });
+    }
+    // A switch on the method or path dispatches routes the reader cannot follow.
+    const findSwitches = (node: TS.Node) => {
+      if (ts.isSwitchStatement(node) && isDispatchSubject(node.expression.getText())) {
+        routes.push({
+          method: "ANY",
+          path: "?",
+          at: this.at(entryFile, node),
+          runs: [],
+          writes: [],
+          unreadable: `a \`switch (${node.expression.getText()})\` dispatch`,
+        });
       }
-      // `path[0] === "scouts" && path.length === 2` matches `scouts/:id`.
-      while (segments.length < depth) segments.push(":id");
-      return {
-        method: methods.size === 0 ? "ANY" : [...methods].join("|"),
-        path: segments
-          .join("/")
-          .replace(/\/+/g, "/")
-          .replace(/^\/|\/$/g, ""),
-        at: this.at(entryFile, leaf),
-        ...this.effects(leaf.thenStatement),
-      };
-    });
+      ts.forEachChild(node, findSwitches);
+    };
+    findSwitches(entry);
+    return routes;
   }
 
   /**
    * What `node` does through the app's own calls: the names it passes to
    * `runAction`, and the app data it writes itself, without an action.
    */
-  private effects(node: TS.Node): { runs: string[]; writes: string[] } {
+  private effects(
+    node: TS.Node,
+    skip: ReadonlySet<TS.Node> = new Set(),
+  ): { runs: string[]; writes: string[] } {
     const names = new Set<string>();
     const writes = new Set<string>();
     const seen = new Set<TS.Node>();
     const walk = (current: TS.Node, depth: number) => {
+      if (skip.has(current)) return;
       if (ts.isCallExpression(current)) {
         const callee = current.expression;
         const calleeName = ts.isPropertyAccessExpression(callee)
@@ -459,7 +497,11 @@ function findInputSchema(source: TS.SourceFile): TS.Expression | undefined {
   return found;
 }
 
-/** The shape literal of `z.object({...})`, through any chained calls such as `.strict()`. */
+/**
+ * The shape literal of `z.object({...})`, through chained calls such as
+ * `.strict()`. Undefined when a call in the chain adds fields the reader
+ * cannot see (`.extend`, `.merge`) or the shape spreads another.
+ */
 function findZodObjectShape(node: TS.Expression): TS.ObjectLiteralExpression | undefined {
   let current: TS.Expression = node;
   while (ts.isCallExpression(current)) {
@@ -467,11 +509,22 @@ function findZodObjectShape(node: TS.Expression): TS.ObjectLiteralExpression | u
     if (!ts.isPropertyAccessExpression(callee)) return undefined;
     const first = current.arguments[0];
     if (callee.name.text === "object" && first && ts.isObjectLiteralExpression(first)) {
-      return first;
+      return first.properties.some((p) => ts.isSpreadAssignment(p)) ? undefined : first;
     }
+    if (ZOD_ADDS_FIELDS.has(callee.name.text)) return undefined;
     current = callee.expression;
   }
   return undefined;
+}
+
+/** Whether the outermost chain of a zod field ends in `.describe(...)` or `.meta(...)`. */
+function isDescribedZod(node: TS.Expression): boolean {
+  let current: TS.Expression = node;
+  while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+    if (ZOD_DESCRIBES.has(current.expression.name.text)) return true;
+    current = current.expression.expression;
+  }
+  return false;
 }
 
 function propertyName(property: TS.ObjectLiteralElementLike): string {
@@ -519,27 +572,85 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
   return undefined;
 }
 
-/** Whether `condition` tests the request method or path against a literal. */
+/** Whether `condition` tests the request method or path. */
 function isRouteCondition(condition: TS.Expression, literal: LiteralOf): boolean {
-  const { methods, segments } = readCondition(condition, literal);
-  return methods.length > 0 || segments.length > 0;
+  const { methods, segments, root } = readCondition(condition, literal);
+  return methods.length > 0 || segments.length > 0 || root;
 }
 
-/** The methods and path segments a route condition compares against. */
 /** The string a literal or a `const` bound to one stands for. */
 type LiteralOf = (node: TS.Expression) => string | undefined;
 
+/** One path segment a condition names, at its index when the test gives one. */
+interface Segment {
+  index?: number;
+  value: string;
+}
+
+function isDispatchSubject(text: string): boolean {
+  return /method$/i.test(text) || ROUTE_SUBJECT.test(text) || /path\[\d+\]$/.test(text);
+}
+
+/** The method and path a stack of route conditions, outermost first, matches. */
+function describeRoute(
+  conditions: TS.Expression[],
+  literal: LiteralOf,
+): Pick<RouteFacts, "method" | "path" | "unreadable"> {
+  const methods = new Set<string>();
+  const slots: string[] = [];
+  let next = 0;
+  let depth = 0;
+  let root = false;
+  let opaque = false;
+  for (const condition of conditions) {
+    const read = readCondition(condition, literal);
+    for (const method of read.methods) methods.add(method);
+    for (const segment of read.segments) {
+      const index = segment.index ?? next;
+      slots[index] = segment.value;
+      next = Math.max(next, index + 1);
+    }
+    depth = Math.max(depth, read.depth ?? 0);
+    root ||= read.root;
+    opaque ||= read.opaque;
+  }
+  // `path[0] === "scouts" && path.length === 2` matches `scouts/:id`.
+  const length = Math.max(depth, slots.length);
+  const path = Array.from({ length }, (_, i) => slots[i] ?? ":id")
+    .join("/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/|\/$/g, "");
+  const method = methods.size === 0 ? "ANY" : [...methods].join("|");
+  // `path === "" || path === "status"` serves the root among its paths.
+  if (root) return { method, path: "" };
+  if (path === "") {
+    return {
+      method,
+      path: "?",
+      unreadable: opaque ? "a path test the reader cannot follow" : "no path test",
+    };
+  }
+  return { method, path };
+}
+
+/** What one route condition tests. */
 function readCondition(
   condition: TS.Expression,
   literal: LiteralOf,
 ): {
   methods: string[];
-  segments: string[];
+  segments: Segment[];
   depth?: number;
+  /** The condition matches the root path. */
+  root: boolean;
+  /** The condition tests something against a literal, or a pattern, the reader cannot place. */
+  opaque: boolean;
 } {
   const methods: string[] = [];
-  const segments: string[] = [];
+  const segments: Segment[] = [];
   let depth: number | undefined;
+  let root = false;
+  let opaque = false;
   const visit = (node: TS.Node) => {
     // A negated test (`!path.startsWith("x")`) excludes a path; it names none.
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
@@ -549,31 +660,42 @@ function readCondition(
       (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
         node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken)
     ) {
+      if (ts.isNumericLiteral(node.right) && /path\.length$/i.test(node.left.getText())) {
+        depth = Number(node.right.text);
+        if (depth === 0) root = true;
+      }
       const right = literal(node.right);
       const left = literal(node.left);
       const [value, subject] =
         right !== undefined ? [right, node.left] : left !== undefined ? [left, node.right] : [];
-      if (ts.isNumericLiteral(node.right) && /path\.length$/i.test(node.left.getText())) {
-        depth = Number(node.right.text);
-      }
       if (value !== undefined && subject) {
         const subjectText = subject.getText();
+        const indexed = /path\[(\d+)\]$/.exec(subjectText);
         if (/method$/i.test(subjectText) && HTTP_METHODS.has(value.toUpperCase())) {
           methods.push(value.toUpperCase());
-        } else if (ROUTE_SUBJECT.test(subjectText) || /path\[\d+\]$/.test(subjectText)) {
-          segments.push(value);
+        } else if (indexed) {
+          segments.push({ index: Number(indexed[1]), value });
+        } else if (ROUTE_SUBJECT.test(subjectText)) {
+          if (value === "" || value === "/") root = true;
+          else segments.push({ value });
+        } else {
+          opaque = true;
         }
       }
     }
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "startsWith" &&
-      ROUTE_SUBJECT.test(node.expression.expression.getText()) &&
-      node.arguments[0] &&
-      literal(node.arguments[0]) !== undefined
-    ) {
-      segments.push(`${(literal(node.arguments[0]) as string).replace(/\/$/, "")}/*`);
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const name = node.expression.name.text;
+      const first = node.arguments[0];
+      if (
+        name === "startsWith" &&
+        ROUTE_SUBJECT.test(node.expression.expression.getText()) &&
+        first &&
+        literal(first) !== undefined
+      ) {
+        segments.push({ value: `${(literal(first) as string).replace(/\/$/, "")}/*` });
+      } else if (name === "match" || name === "test" || name === "exec") {
+        opaque = true;
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -581,7 +703,9 @@ function readCondition(
   // `path === "" || path === "status"` matches either; the first names the route.
   return {
     methods,
-    segments: segments.length > 1 && isAlternation(condition) ? [segments[0] as string] : segments,
+    segments: segments.length > 1 && isAlternation(condition) ? segments.slice(0, 1) : segments,
+    root,
+    opaque,
     ...(depth !== undefined ? { depth } : {}),
   };
 }

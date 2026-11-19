@@ -40,7 +40,7 @@ export const RULES = [
     id: "I1",
     goal: "interfaces",
     statement:
-      "Every app API route a person's page calls runs an agent-callable action, so an agent can do what a person can. Machine routes (`api.noAuth`) and the root status route are exempt.",
+      "Every app API route a person's page calls runs an agent-callable action, so an agent can do what a person can. Machine routes (`api.noAuth`) and the root status route are exempt. A route whose path the check cannot read is left for a person to judge, never passed.",
   },
   {
     id: "I2",
@@ -190,7 +190,7 @@ function judgeRoute(
   cannotJudge: (at: string, message: string) => void,
 ): void {
   if (route.noAuth) return;
-  if (route.path === "" && route.method === "GET") return;
+  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) return;
   const label = `\`${route.method} /${route.path}\``;
   if (route.writes.length > 0) {
     gap(
@@ -198,6 +198,13 @@ function judgeRoute(
       route.at,
       `${label} writes app data itself (${route.writes.map((w) => `\`${w}\``).join(", ")}), so an agent cannot make the same change.`,
     );
+  }
+  if (route.unreadable) {
+    cannotJudge(
+      route.at,
+      `Could not tell which path a \`${route.method}\` route matches (${route.unreadable}), so I1 and its exemptions were not judged.`,
+    );
+    return;
   }
   if (route.runs.length === 0) {
     gap("I1", route.at, `${label} runs no action, so no agent can do what it does.`);

@@ -37,6 +37,8 @@ export interface RouteFacts {
   runs: string[];
   /** Calls through which the route writes app data itself, not through an action. */
   writes: string[];
+  /** Why the reader could not tell which path the route matches, when it could not. */
+  unreadable?: string;
   /** The route is declared `api.noAuth`: a machine endpoint, such as a webhook. */
   noAuth: boolean;
 }

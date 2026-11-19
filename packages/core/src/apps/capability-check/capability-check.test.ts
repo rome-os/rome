@@ -215,4 +215,102 @@ declare function defineAction(spec: unknown): unknown;
     });
     expect(gaps.map((g) => g.rule)).toContain("I1");
   });
+
+  describe("never passes what it cannot read", () => {
+    const withRoute = (route: string, imports = "") => ({
+      ...COMPLIANT,
+      "src/api/index.ts": `${imports}${COMPLIANT["src/api/index.ts"] as string}`.replace(
+        'return "not found";',
+        `${route}\n    return "not found";`,
+      ),
+    });
+
+    async function verdictOf(files: Record<string, string>) {
+      return checkApp(await readApp(writeApp(files)));
+    }
+
+    it("leaves a route on a subject it does not know to a person, not to the root exemption", async () => {
+      const verdict = await verdictOf(
+        withRoute(
+          'const parts = request.path;\n    if (request.method === "GET" && parts[0] === "items") return "items";',
+        ),
+      );
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.message)).toEqual([
+        expect.stringContaining("a path test the reader cannot follow"),
+      ]);
+    });
+
+    it("leaves a pattern-matched route and a switch dispatch to a person", async () => {
+      const verdict = await verdictOf(
+        withRoute(
+          `if (/^items\\/\\d+$/.test(route) && request.method === "GET") return "item";
+    switch (route) {
+      case "other":
+        return "other";
+    }`,
+        ),
+      );
+      expect(verdict.unverified).toHaveLength(2);
+    });
+
+    it("judges code that runs after a nested method check", async () => {
+      const gaps = await gapsOf(
+        withRoute(
+          `if (route === "notes/bulk") {
+      if (request.method === "GET") return this.add();
+      return createNotesRepository(null).insert("many");
+    }`,
+          'import { createNotesRepository } from "../db/notes.js";\n',
+        ),
+      );
+      expect(gaps.map((g) => [g.rule, g.message])).toEqual([
+        ["I3", expect.stringContaining("`ANY /notes/bulk` writes app data itself")],
+        ["I1", "`ANY /notes/bulk` runs no action, so no agent can do what it does."],
+      ]);
+    });
+
+    it("keeps an indexed path segment at its index", async () => {
+      const gaps = await gapsOf(
+        withRoute(
+          'if (request.method === "POST" && request.path[0] === "notes" && request.path[2] === "pin" && request.path.length === 3) return "pinned";',
+        ),
+      );
+      expect(gaps.map((g) => g.message)).toEqual([
+        "`POST /notes/:id/pin` runs no action, so no agent can do what it does.",
+      ]);
+    });
+
+    it("leaves a schema built by spreading another to a person", async () => {
+      const spread = SCHEMA_ACTION.replace(
+        'inputSchema: {\n      type: "object",',
+        'inputSchema: {\n      ...base,\n      type: "object",',
+      ).replace("export function", "const base = {};\nexport function");
+      const verdict = await verdictOf({ ...COMPLIANT, ...ACTION("add_note", spread) });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.message)).toEqual([
+        "Could not read the input schema of `add_note` (D3).",
+      ]);
+    });
+
+    it("judges a zod field by its own description, through names", async () => {
+      const zod = `import { z } from "zod";
+const text = z.string().describe("The note.");
+const schema = z.object({ text, items: z.array(z.object({ x: z.string().describe("x") })) });
+export function createAction(config: unknown) { return defineAction({ config, schema, execute: async () => ({}) }); }
+declare function defineAction(spec: unknown): unknown;
+`;
+      const gaps = await gapsOf({ ...COMPLIANT, ...ACTION("add_note", zod) });
+      expect(gaps.map((g) => g.message)).toEqual(["`add_note` leaves `items` undescribed."]);
+    });
+
+    it("finds a request the page makes through a shared helper", async () => {
+      const gaps = await gapsOf({
+        ...COMPLIANT,
+        "src/lib/network.ts": 'export const load = () => fetch("/api/skills");\n',
+        "src/web/App.tsx": 'import { load } from "../lib/network.js";\nexport const go = load;\n',
+      });
+      expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/lib/network.ts:1"]]);
+    });
+  });
 });
