@@ -18,12 +18,13 @@
 # old-connections writes the two older Slack connections an upgrade leaves
 # (tools/old-connections.mjs) into the stopped instance and starts it again.
 # product-tests runs test files of the rome commit under test, unchanged, in
-# an image of that commit with its dependencies (test-runner/Dockerfile).
+# an image of that commit with its dependencies (test-runner/Dockerfile). Like
+# every command here it needs a bring-up first: it reads .state/rome-src.
 set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$ENV_DIR/.state"
 [ -f "$STATE_DIR/compose.env" ] || {
-  echo "the environment is not running (no .state/compose.env)" >&2
+  echo "the environment is not running (no .state/compose.env); run up.sh first" >&2
   exit 1
 }
 compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/compose.yml" "$@"; }
@@ -47,7 +48,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,21p' "$0"
+    sed -n '2,22p' "$0"
     exit 2
     ;;
 esac
