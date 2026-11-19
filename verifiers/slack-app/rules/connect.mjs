@@ -33,7 +33,11 @@ export async function oneReply(ctx, ws, rule) {
   // A reply carrying another seeded code answers another message, so only
   // replies with no code at all count against this one.
   const stray = t.repliesWithNoCode.filter((p) => !SEEDED.test(p.text ?? ""));
-  return { ok: t.answeredOnce === 1 && stray.length === 0, eventId: sent.eventId, ...t };
+  return {
+    ok: t.answeredOnce === 1 && stray.length === 0 && t.postsElsewhere.length === 0,
+    eventId: sent.eventId,
+    ...t,
+  };
 }
 
 /** Connects `inst` to workspace `ws` as its guardian, by Connect and the approve screen. */

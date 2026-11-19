@@ -12,9 +12,13 @@ const summary = (t) =>
   (t.answeredMoreThanOnce.length
     ? `; ${t.answeredMoreThanOnce.length} answered more than once`
     : "") +
-  (t.repliesWithNoCode.length ? `; ${t.repliesWithNoCode.length} replies matched no message` : "");
+  (t.repliesWithNoCode.length ? `; ${t.repliesWithNoCode.length} replies matched no message` : "") +
+  (t.postsElsewhere.length
+    ? `; ${t.postsElsewhere.length} posts went to another conversation`
+    : "");
 
-const allOnce = (t) => t.answeredOnce === t.sent && t.repliesWithNoCode.length === 0;
+const allOnce = (t) =>
+  t.answeredOnce === t.sent && t.repliesWithNoCode.length === 0 && t.postsElsewhere.length === 0;
 
 export async function r4(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
@@ -90,6 +94,12 @@ export async function r7(ctx) {
   // that repeats no code still answers one of them.
   const others = posts.filter((p) => !p.text?.includes(code("R7C", 0)));
   const recorded = await readable(() => ctx.a.recordedFrom(ws.id, ws.guardian));
+  // The good message must show in the same read, or an empty read proves
+  // nothing about the forged ones.
+  const sawGood = recorded?.some((b) => b.includes(code("R7C", 0)));
+  if (recorded && !sawGood)
+    partial ??=
+      "the read of what Rome recorded does not show the good message, so it cannot show the forged ones are absent";
   const recordedForged = recorded && forged.filter((f) => recorded.some((b) => b.includes(f.code)));
   evidence.forged = {
     sent: forged.map((f) => f.eventId),
@@ -97,6 +107,7 @@ export async function r7(ctx) {
     replied: replied.map((f) => f.eventId),
     otherPosts: others.map((p) => ({ ts: p.ts, text: p.text?.slice(0, 120) })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
+    goodMessageVisibleInRecord: Boolean(sawGood),
     goodMessageAfter: { eventId: control.eventId, replies: control.replies },
   };
   if (!control.ok)

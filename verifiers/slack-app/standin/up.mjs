@@ -132,6 +132,12 @@ write(
     (breaks.has("R11-store") ? "  botToken: text('bot_token'),\n" : "") +
     "  createdAt: integer('created_at'),\n});\n",
 );
+if (breaks.has("R11-sql"))
+  write(
+    romeCloud,
+    "packages/pantheon/drizzle/0003_slack_secrets.sql",
+    "CREATE TABLE slack_secrets (team_id TEXT, bot_token TEXT);\n",
+  );
 if (breaks.has("R11-migration"))
   write(
     romeCloud,

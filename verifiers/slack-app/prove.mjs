@@ -50,6 +50,12 @@ const CASES = [
   },
   { name: "R4", breaks: "R4", rule: "R4", what: "the instance replies twice to each message" },
   {
+    name: "R4-elsewhere",
+    breaks: "R4-elsewhere",
+    rule: "R4",
+    what: "each reply is also posted in another member's direct message",
+  },
+  {
     name: "R6",
     breaks: "R6",
     rule: "R6",
@@ -85,6 +91,12 @@ const CASES = [
     breaks: "R11-migration",
     rule: "R11",
     what: "a migration adds a bot token column",
+  },
+  {
+    name: "R11-sql",
+    breaks: "R11-sql",
+    rule: "R11",
+    what: "a one-line CREATE TABLE stores the bot token",
   },
   { name: "R11-store", breaks: "R11-store", rule: "R11", what: "Rome Cloud stores the bot token" },
 ];

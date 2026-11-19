@@ -92,22 +92,54 @@ async function storedColumns(dir, base) {
       (f) => /(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) && !/\.(md|json|snap)$/.test(f),
     );
   const columns = [];
+  const TYPE = "text|integer|varchar|timestamp|boolean|jsonb?|uuid|serial|bigint|real|blob|numeric";
   for (const file of files) {
     const diff = await git(dir, "diff", "-U0", base, "--", file);
-    for (const line of diff.split("\n")) {
-      if (!line.startsWith("+") || line.startsWith("+++")) continue;
-      const drizzle = line.match(
-        /^\+\s*(\w+)\s*:\s*(text|integer|varchar|timestamp|boolean|jsonb?|uuid|serial|bigint|real|blob)\(\s*(?:["'](\w+)["'])?/,
-      );
-      const sql = line.match(
-        /^\+\s*[`"]?(\w+)[`"]?\s+(TEXT|INTEGER|VARCHAR|TIMESTAMP|BOOLEAN|JSONB?|UUID|BIGINT|BLOB)\b/i,
-      );
-      const altered = line.match(/\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?/i);
-      const name = drizzle ? (drizzle[3] ?? drizzle[1]) : (sql?.[1] ?? altered?.[1]);
-      if (name) columns.push({ file, name });
-    }
+    const added = diff
+      .split("\n")
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+      .map((l) => l.slice(1))
+      .join("\n");
+    const names = new Set();
+    // Drizzle: `teamId: text("team_id")`, anywhere on a line.
+    for (const m of added.matchAll(
+      new RegExp(`(\\w+)\\s*:\\s*(?:${TYPE})\\(\\s*(?:["'](\\w+)["'])?`, "g"),
+    ))
+      names.add(m[2] ?? m[1]);
+    // SQL: every column of a CREATE TABLE, one line or many.
+    for (const m of added.matchAll(/CREATE\s+TABLE[^(]*\(([\s\S]*?)\)\s*;/gi))
+      for (const part of splitTop(m[1])) {
+        const id = part.trim().match(/^[`"]?(\w+)[`"]?/)?.[1];
+        if (id && !/^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK|KEY|INDEX)$/i.test(id)) names.add(id);
+      }
+    // SQL: a column line added inside an existing CREATE TABLE.
+    for (const m of added.matchAll(new RegExp(`^\\s*[\`"]?(\\w+)[\`"]?\\s+(?:${TYPE})\\b`, "gim")))
+      names.add(m[1]);
+    // SQL: ALTER TABLE ... ADD [COLUMN] [IF NOT EXISTS] name.
+    for (const m of added.matchAll(
+      /\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?/gi,
+    ))
+      if (!/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|INDEX|CHECK)$/i.test(m[1])) names.add(m[1]);
+    for (const name of names) columns.push({ file, name });
   }
   return { files, columns };
+}
+
+/** Splits a column list on the commas outside parentheses. */
+function splitTop(list) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === "(") depth++;
+    else if (list[i] === ")") depth--;
+    else if (list[i] === "," && depth === 0) {
+      parts.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(list.slice(start));
+  return parts;
 }
 
 /** Imports in packages/core/src/connections whose source is an app. */

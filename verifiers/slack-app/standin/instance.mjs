@@ -144,6 +144,14 @@ async function answer(event, team) {
       : (event.text.match(/code and nothing else: (\S+)/)?.[1] ?? "hello");
   const times = breaks.has("R4") ? 2 : 1;
   for (let i = 0; i < times; i++) await post(conn.botToken, event.channel, asked);
+  // Broken R4-elsewhere: each reply is also posted in another member's direct message.
+  if (breaks.has("R4-elsewhere")) {
+    const state = await (await fetch(`${SLACK}/_control/state`)).json();
+    const other = state.workspaces
+      .find((w) => w.id === team)
+      ?.members.find((m) => m.im_channel !== event.channel)?.im_channel;
+    if (other) await post(conn.botToken, other, asked);
+  }
 }
 
 async function drainOnce() {
