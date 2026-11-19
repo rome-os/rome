@@ -155,8 +155,10 @@ interface RegisteredDescriptor {
   readonly descriptor: ConnectionDescriptor;
 }
 
-/** How long a guardian's disconnect waits for a kind to take back its access
- *  at the platform. The disconnect holds the kind's locks meanwhile. */
+/** How long a guardian's disconnect waits for each step before a kind takes
+ *  back its access: a renewal in flight, the transports' drain, and the
+ *  take-back at the platform. It holds the kind's locks for the last two, so
+ *  for at most twice this. */
 const TAKE_BACK_TIMEOUT_MS = 10 * 1000;
 
 export class ConnectionRegistry {
@@ -1214,27 +1216,28 @@ class ConnectionImpl implements Connection {
       epoch.dead = true;
       epoch.backoffGen++; // cancel any in-flight backoff loop
       await this.stopInstanceAwaiting(slot, epoch);
-      // A slot started again meanwhile keeps its new epoch.
-      if (slot.epoch !== epoch) continue;
       slot.epoch = null;
       slot.messageHandlers = [];
       slot.eventHandlers = [];
     }
   }
 
-  /** Tear down every capability and wait, at most `ms`, for each stop() to
-   *  drain. Answers false when a drain ran out of time; it goes on alone. */
+  /** Tear down every capability at once, then wait, at most `ms`, for every
+   *  stop() to drain. No capability is live once it returns. Answers false
+   *  when a drain ran out of time; it goes on alone. */
   private async teardownAllWithin(ms: number): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const drained = this.teardownAllAwaiting().then(() => true);
-    const late = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), ms);
-    });
-    try {
-      return await Promise.race([drained, late]);
-    } finally {
-      clearTimeout(timer);
+    const stopping: Promise<void>[] = [];
+    for (const slot of this.slots.values()) {
+      const epoch = slot.epoch;
+      if (!epoch) continue;
+      epoch.dead = true;
+      epoch.backoffGen++; // cancel any in-flight backoff loop
+      slot.epoch = null;
+      slot.messageHandlers = [];
+      slot.eventHandlers = [];
+      stopping.push(this.stopInstanceAwaiting(slot, epoch));
     }
+    return await within(Promise.all(stopping), ms);
   }
 
   /** Re-evaluate every capability that needs `grant` (or all, when grant is
@@ -1404,14 +1407,20 @@ class ConnectionImpl implements Connection {
    *  worked, leaves the same broken connection; its capabilities start again
    *  and the error is thrown. Answers why the take-back failed, or null. */
   async disconnectTakingBack(grant: GrantName): Promise<string | null> {
+    let renewalWaitedOut = false;
     for (;;) {
-      // Only a kind that takes back access needs what a renewal mints.
+      // Only a kind that takes back access needs what a renewal mints. It
+      // waits at most TAKE_BACK_TIMEOUT_MS; past that it takes back what it
+      // holds, and a renewal that lands later finds its epoch dead.
       const takesBack = this.descriptor.onDisconnect !== undefined;
-      if (takesBack) await this.renewalsInFlight.get(grant)?.catch(() => {});
+      const renewal = takesBack ? this.renewalsInFlight.get(grant) : undefined;
+      if (renewal && !renewalWaitedOut) {
+        renewalWaitedOut = !(await within(renewal, TAKE_BACK_TIMEOUT_MS));
+      }
       const ended = await this.withGrantLock(grant, async () => {
         // A renewal applies its result under this lock, so one that started
         // since is waited out with the lock free.
-        if (takesBack && this.renewalsInFlight.has(grant)) return undefined;
+        if (takesBack && !renewalWaitedOut && this.renewalsInFlight.has(grant)) return undefined;
         // The kind takes back the token only once no transport uses it, so
         // its stop() drains first. A kind with nothing to take back does not
         // wait.
@@ -1799,4 +1808,23 @@ class AuthStateImpl implements AuthState {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Whether `work` settles within `ms`. It goes on alone when it does not. */
+async function within(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([
+      work.then(
+        () => true,
+        () => true,
+      ),
+      late,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
