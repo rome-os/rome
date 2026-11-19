@@ -1451,7 +1451,7 @@ Use \`/channel agent clear\` to undo.`,
       return Promise.race([request, aborted]);
     };
     try {
-      return await this.readHistoryWith(get, chatId, read);
+      return await this.readHistoryWith(get, chatId, read, controller.signal);
     } finally {
       // Whatever ended the read, nothing it started sends on.
       controller.abort();
@@ -1463,6 +1463,7 @@ Use \`/channel agent clear\` to undo.`,
     get: DiscordGet,
     chatId: ChatId,
     read: TalkHistoryRead,
+    signal: AbortSignal,
   ): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
     const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
@@ -1484,7 +1485,7 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        readsHistoryIn: (channelId) => this.readsHistoryIn(get, channelId, botId),
+        readsHistoryIn: (channelId) => this.readsHistoryIn(get, channelId, botId, signal),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
@@ -1501,13 +1502,14 @@ Use \`/channel agent clear\` to undo.`,
     get: DiscordGet,
     channelId: string,
     botId: string,
+    signal: AbortSignal,
   ): Promise<boolean | null> {
     try {
       return await botReadsHistory(get, channelId, botId);
     } catch (err) {
       const status = (err as { status?: unknown } | null)?.status;
-      // A 401 is already reported by `get`; it ends the read.
-      if (status === 401) throw err;
+      // A stopped read, and a 401 (already reported by `get`), end the read.
+      if (signal.aborted || status === 401) throw err;
       if (status === 403 || status === 404) return false;
       return null;
     }
