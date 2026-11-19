@@ -407,6 +407,12 @@
   --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
 }
 
+/* Inline chat cards use the card's text scale for headings and actions. */
+[data-ui-typography="inline-card"] {
+  --text-ui: var(--rome-font-size-14);
+  --text-ui--line-height: var(--rome-line-height-143);
+}
+
 @layer base {
   :is(input, textarea, select) {
     font-size: max(var(--field-min-font-size), var(--text-ui));

@@ -60,7 +60,10 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
   }
 
   return (
-    <div className="connector-inline-card rounded-12 border border-border bg-surface p-4">
+    <div
+      data-ui-typography="inline-card"
+      className="rounded-12 border border-border bg-surface p-4"
+    >
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
           <PlugZap size={18} strokeWidth={1.75} />

@@ -3,9 +3,3 @@
    tracks Rome's design language (including `.dark`) automatically. The full
    token reference lives in @rome-os/app-web-sdk → src/runtime/styles.css. */
 @import "@rome-os/app-web-sdk/styles";
-
-/* Keep inline card type compact at the large touch scale. */
-.connector-inline-card {
-  --text-ui: var(--rome-font-size-14);
-  --text-ui--line-height: var(--rome-line-height-143);
-}
