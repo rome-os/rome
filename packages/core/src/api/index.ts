@@ -51,6 +51,8 @@ import { vaultRoutes } from "./routes/vault.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { featuresRoutes } from "./routes/features.js";
+import { hideGatedFeatureRoutes } from "./middleware/feature-routes.js";
+import { resolveFeatureVisibility } from "../instance/feature-visibility.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
@@ -162,6 +164,9 @@ export function buildApp(
   // so any action run during the request is stamped with who triggered it —
   // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
+
+  // A hidden feature's routes answer as if they did not exist.
+  api.use("*", hideGatedFeatureRoutes(resolveFeatureVisibility));
 
   api.route("/", healthRoutes(deps));
   api.route("/", uptimeRoutes());

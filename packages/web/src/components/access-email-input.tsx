@@ -9,6 +9,7 @@ import { parseEmailTextarea } from "@/lib/email-list";
 import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
+import { useFeatureState } from "@/hooks/use-features";
 
 /**
  * The email field of an access allow-list, completing from the contacts list
@@ -54,8 +55,11 @@ export function AccessEmailInput({
   // A space can sit inside a name ("Mira Chen"), so only a comma or semicolon
   // says a list is being typed. A pasted list takes the paste path anyway.
   const searchable = term.length > 0 && !/[,;]/.test(term);
+  // Suggestions come from the contacts People keeps, so none show while it is
+  // hidden.
+  const people = useFeatureState("people");
   const search = useAccountSearch(searchable ? term : "", {
-    enabled: searchable && !disabled,
+    enabled: searchable && !disabled && people === "shown",
     channel: EMAIL_CHANNEL,
   });
   // The page lags the typed term by the debounce, so an answer to an older

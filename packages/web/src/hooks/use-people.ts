@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { PeopleList, PersonResource } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
+import { useFeatureState } from "@/hooks/use-features";
 
 const PEOPLE_QUERY_KEY = ["people"] as const;
 
@@ -13,11 +14,14 @@ const PEOPLE_QUERY_KEY = ["people"] as const;
  * fetch is a menu with nothing in it, not a chatbox that will not mount.
  *
  * One cache, so several subscribers do not each fire their own mount-time
- * fetch.
+ * fetch. Nothing is read while People is hidden, since core serves no people
+ * then.
  */
 export function usePeople() {
+  const people = useFeatureState("people");
   return useQuery<PersonResource[]>({
     queryKey: PEOPLE_QUERY_KEY,
+    enabled: people === "shown",
     staleTime: 60_000,
     queryFn: ({ signal }) =>
       fetchJson<PeopleList>("/api/people", { signal, fallback: "" })
