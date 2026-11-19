@@ -465,7 +465,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     // and matched here, folding any script's case. Each table is read by one
     // statement, streamed until enough match, so a search sorts once however
     // far back it reads.
-    const needle = folded(text);
+    const needle = phraseOf(text);
     const heard = this.newestMatching(
       limit,
       needle,
@@ -550,10 +550,20 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
   }
 }
 
-/** `text` with its case folded in any script, and its characters composed
- *  one way, so `Équipe` matches `équipe` however each was typed. */
+/** `text` with its case folded in any script, its characters composed one
+ *  way and each run of whitespace made one space, so `Équipe` matches
+ *  `équipe` however each was typed, and a phrase matches across a line break. */
 function folded(text: string): string {
-  return text.normalize("NFC").toLowerCase();
+  return text.normalize("NFC").toLowerCase().replace(/\s+/g, " ");
+}
+
+/** What a search looks for: its text folded, without the quotation marks an
+ *  agent wraps a phrase in. A search matches its words in that order anyway. */
+function phraseOf(text: string): string {
+  return folded(text)
+    .trim()
+    .replace(/^["\u201c\u201d']+(.*?)["\u201c\u201d']+$/s, "$1")
+    .trim();
 }
 
 function timelineRowOf(row: typeof slackAppTimeline.$inferSelect): TimelineRow {

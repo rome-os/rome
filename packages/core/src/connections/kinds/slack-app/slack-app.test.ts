@@ -1565,6 +1565,26 @@ describe("Slack app searches what it keeps (R9)", () => {
     ]);
   });
 
+  it("finds a phrase in a heard mention however an agent quotes or capitalizes it", async () => {
+    const { adapter: a } = adapter(fakeMailbox());
+    await a.start();
+    await a.handleFrame(
+      frame(
+        mentionEvent(1, {
+          text: `<@${BOT}> The rowing club picnic will be at Hollyfold Meadow.`,
+        }),
+      ),
+    );
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    const said = ["The rowing club picnic will be at Hollyfold Meadow."];
+
+    expect(await search("rowing club")).toEqual(said);
+    expect(await search('"rowing club"')).toEqual(said);
+    expect(await search("\u201cRowing  Club\u201d")).toEqual(said);
+    expect(await search("Rowing Club")).toEqual(said);
+    expect(await search("club rowing")).toEqual([]);
+  });
+
   it("folds case in any script, however each side's accents were typed", async () => {
     const { adapter: a } = adapter(fakeMailbox());
     await a.start();
