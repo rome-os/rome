@@ -264,16 +264,16 @@ function walk(dir, depth) {
 // ---- Look for anything left
 // A dry run changed nothing, so it has nothing to check. The chat's place and
 // address name the conversation and hold no message: they are reported as kept.
+// Both count rows per column: a row whose two columns both hold a needle is
+// counted under each, and `deleted` counts each row once, per table.
 const remaining = {};
 const kept = {};
 for (const [table, columns] of dryRun ? [] : schema) {
   for (const column of columns) {
     if (!isTextColumn(table, column)) continue;
     const needles = [conversation, ...escapedToo(words)];
-    let n = 0;
-    for (const needle of needles) {
-      n += all(`SELECT count(*) AS n FROM ${table} WHERE instr("${column}", ?) > 0`, needle)[0].n;
-    }
+    const where = needles.map(() => `instr("${column}", ?) > 0`).join(" OR ");
+    const n = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`, ...needles)[0].n;
     if (n) ((PLACES.has(table) ? kept : remaining)[table] ??= {})[column] = n;
   }
 }
