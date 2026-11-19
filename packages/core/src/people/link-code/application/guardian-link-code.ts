@@ -12,12 +12,12 @@
 
 import { randomInt, timingSafeEqual } from "node:crypto";
 import type { Account } from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../../connections/registry.js";
-import type { PeopleRepository } from "../model/people-repository.js";
-import { createLogger } from "../../logger.js";
-import type { Admission } from "../../chats/connected-accounts/admission.js";
-import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
-import { platformOf } from "../../connections/platform.js";
+import type { ConnectionRegistry } from "../../../connections/registry.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import { createLogger } from "../../../logger.js";
+import type { Admission } from "../../../chats/connected-accounts/admission.js";
+import { sendThrough } from "../../../chats/connected-accounts/connection-ports.js";
+import { platformOf } from "../../../connections/platform.js";
 
 const log = createLogger("guardian-link-code");
 
