@@ -200,7 +200,7 @@ function buildConnectionView(
     // Null means silent, so a connection kind that takes no link reports none.
     agent: link === null ? undefined : agent,
     link,
-    severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
+    severalAccounts: offersAnother(registry.getDescriptor(conn.connectionKind)),
   };
 }
 
@@ -278,8 +278,14 @@ function placeholderView(
     platform: null,
     account: null,
     link: descriptor.link ?? null,
-    severalAccounts: descriptor.severalAccounts === true,
+    severalAccounts: offersAnother(descriptor),
   };
+}
+
+/** Whether the guardian can connect another account of a kind: one Rome no
+ *  longer offers takes no new account. */
+function offersAnother(descriptor: ConnectionDescriptor | null | undefined): boolean {
+  return descriptor?.severalAccounts === true && descriptor.offered !== false;
 }
 
 /** The offerable catalog: every registered connection kind with no connection row.
@@ -294,6 +300,7 @@ function placeholderViews(
   return registry
     .registeredKinds()
     .filter((connectionKind) => registry.find(connectionKind).length === 0)
+    .filter((connectionKind) => registry.getDescriptor(connectionKind)?.offered !== false)
     .filter(
       (connectionKind) =>
         !isOAuthProvider(connectionKind) || isEnabledOAuthProvider(connectionKind),

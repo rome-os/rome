@@ -39,6 +39,7 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - A kind of connection says how Rome got in. Where an account lives and who is who is the account's [platform](chats.md#platform), never its kind of connection.
 - Some kinds have no platform, such as GitHub, since no chats live there.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
+- A kind another one replaces is no longer offered: the guardian can't connect a new account of it, and its existing connections keep working, and can be fixed, until the guardian disconnects them. Rome's own Slack app replaces the Slack bot and the Slack sign-in, so Connect shows one Slack.
 
 ## Watch
 

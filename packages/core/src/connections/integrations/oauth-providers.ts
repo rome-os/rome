@@ -373,6 +373,9 @@ export function makeOAuthProviderDescriptor(
     connectionKind: provider,
     label: OAUTH_PROVIDER_DESCRIPTORS[provider].label,
     grant: OAUTH_PROVIDER_GRANTS[provider],
+    // Rome's own Slack app replaces the Slack OAuth connection; existing ones
+    // keep working until the guardian disconnects them.
+    ...(provider === "slack" ? { offered: false } : {}),
     auth: scheme,
     reviveProfile: (record) => OAUTH_PROVIDER_REVIVERS[provider](record),
     // The provider's own id for the signed-in identity: the user, or for Slack

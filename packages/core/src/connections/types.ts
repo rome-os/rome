@@ -383,6 +383,11 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
+  /** False when the guardian may no longer connect a new account of this
+   *  kind, as for a kind another one replaces. Its connections keep loading,
+   *  sending and being fixed until the guardian disconnects them. Unset, the
+   *  kind is offered. */
+  offered?: boolean;
   /** The platform's own id for the account a grant's profile names (a bot id,
    *  an app id, an inbox address), or null when the profile names none. It reads
    *  the one field rather than parsing the strict profile schema, so a stored

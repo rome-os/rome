@@ -329,6 +329,8 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
     connectionKind: SLACK_BOT_KIND,
     label: "Slack bot",
     severalAccounts: true,
+    // Rome's own Slack app replaces it; existing bots keep working.
+    offered: false,
     reviveProfile: (record) => reviveSlackBotProfile(record),
     accountIdOf: (record) => slackBotAccountId(record),
     link: "own_account",

@@ -236,6 +236,21 @@ describe("GET /connections", () => {
     });
   });
 
+  it("offers no placeholder, and no further account, for a kind Rome no longer offers", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    const telegram = makePasteTalkWithProfile();
+    const discord = makeBotAll();
+    registry.register({ ...telegram.descriptor, severalAccounts: true, offered: false });
+    registry.register({ ...discord.descriptor, offered: false });
+    // An existing connection of a kind no longer offered still lists.
+    const tg = await registry.connect("fake-telegram", "Telegram");
+
+    const { connections } = await (await makeApp(registry).request("/connections")).json();
+
+    expect(connections.map((c: { id: string | null }) => c.id)).toEqual([tg.id]);
+    expect(connections[0].severalAccounts).toBe(false);
+  });
+
   it("offers OAuth placeholders only for host-enabled providers", async () => {
     const prev = process.env.SHOW_GOOGLE_OAUTH;
     delete process.env.SHOW_GOOGLE_OAUTH;

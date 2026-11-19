@@ -68,6 +68,14 @@ export interface SetupTarget {
 }
 
 /** Raised when a start targets a grant whose descriptor declares no setup. */
+/** A setup for a new account of a connection kind Rome no longer offers. */
+export class NotOfferedError extends Error {
+  constructor(readonly connectionKind: string) {
+    super(`Rome no longer connects new accounts of connection kind "${connectionKind}".`);
+    this.name = "NotOfferedError";
+  }
+}
+
 export class NoSetupError extends Error {
   constructor(
     readonly connectionKind: string,
@@ -175,6 +183,9 @@ export class SetupManager {
     const descriptor = this.#deps.registry.getDescriptor(target.connectionKind);
     const fn = descriptor?.grant === grant ? descriptor.auth.setup : undefined;
     if (!fn) throw new NoSetupError(target.connectionKind, grant);
+    if (descriptor?.offered === false && target.connectionId === undefined) {
+      throw new NotOfferedError(target.connectionKind);
+    }
 
     const cid = randomUUID();
     const session = new SetupSession({
