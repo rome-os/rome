@@ -25,6 +25,7 @@
     "db:push:app": "mkdir -p ~/.rome/${ROME_PROFILE:-default} && drizzle-kit push --config drizzle.authoring.config.ts",
     "db:studio": "drizzle-kit studio",
     "seed:sessions-explorer": "tsx src/bin/seed-sessions-explorer.ts",
+    "app:check": "tsx bin/apps-cli.js check",
     "app:pack": "tsx bin/apps-cli.js pack",
     "app:pack:first-party": "tsx bin/apps-cli.js pack:first-party",
     "app:install": "tsx bin/apps-cli.js install",

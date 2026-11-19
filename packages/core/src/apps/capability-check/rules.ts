@@ -1,0 +1,264 @@
+// The rules for two goals. Agents can discover what an app can do, and every
+// app capability has an interface for agents and one for people.
+//
+// The model the rules hold an app to: a capability is an action. The action
+// is the domain core. Agents reach it through the agent catalog (an input
+// schema and public visibility). People reach it through the app's page,
+// which calls the app API, which runs the action with `runAction`. Both
+// interfaces adapt the same action, and neither re-implements it.
+
+import type { ActionFacts, AppFacts, ImportFacts, RouteFacts } from "./facts.js";
+
+export type Goal = "discover" | "interfaces";
+
+export interface Rule {
+  id: string;
+  goal: Goal;
+  /** The rule, stated so a person can apply it to a diff. */
+  statement: string;
+}
+
+export const RULES = [
+  {
+    id: "D1",
+    goal: "discover",
+    statement:
+      "Every app says what it is for in `app.yaml#description`, in at least 40 characters. Every agent reads it under Installed Apps.",
+  },
+  {
+    id: "D2",
+    goal: "discover",
+    statement:
+      "Every public action declares an input schema, so it appears in agent catalogs. An action only routines or hooks run declares `visibility: explicit`.",
+  },
+  {
+    id: "D3",
+    goal: "discover",
+    statement: "Every argument of an agent-callable action has a description.",
+  },
+  {
+    id: "I1",
+    goal: "interfaces",
+    statement:
+      "Every app API route a person's page calls runs an agent-callable action, so an agent can do what a person can. Machine routes (`api.noAuth`) and the root status route are exempt.",
+  },
+  {
+    id: "I2",
+    goal: "interfaces",
+    statement:
+      "Every agent-callable action is run by an app API route, so a person can do from the app's page what an agent can. Webhook actions are exempt.",
+  },
+  {
+    id: "I3",
+    goal: "interfaces",
+    statement:
+      "An app API route never writes app data itself. Every write goes through an action, so the agent and the page change data the same way.",
+  },
+  {
+    id: "I4",
+    goal: "interfaces",
+    statement:
+      "Both interfaces share the actions as one core, and lower code never knows upper code. Actions, data and shared code never import the API or the page, and data and shared code never import actions. The page never imports actions, data or the API. The API reaches an action only through `runAction`, never by importing it.",
+  },
+  {
+    id: "I5",
+    goal: "interfaces",
+    statement:
+      "The page reaches Rome and the world only through its app API and the web SDK, never with its own `fetch`, so nothing a person does from it skips the actions.",
+  },
+] as const satisfies readonly Rule[];
+
+export type RuleId = (typeof RULES)[number]["id"];
+
+/** One place where an app falls short of a rule. */
+export interface Gap {
+  rule: RuleId;
+  appId: string;
+  /** Where the gap is, relative to the app directory. */
+  at: string;
+  message: string;
+}
+
+/** Something the check could not judge, so a person has to. */
+export interface Unverified {
+  appId: string;
+  at: string;
+  message: string;
+}
+
+export interface AppVerdict {
+  appId: string;
+  gaps: Gap[];
+  unverified: Unverified[];
+}
+
+const MIN_DESCRIPTION_LENGTH = 40;
+
+export function isAgentCallable(action: ActionFacts): boolean {
+  return action.hasInputSchema && action.visibility === "public";
+}
+
+/** Applies every rule to one app. */
+export function checkApp(app: AppFacts): AppVerdict {
+  const gaps: Gap[] = [];
+  const unverified: Unverified[] = [];
+  const gap = (rule: RuleId, at: string, message: string) =>
+    gaps.push({ rule, appId: app.id, at, message });
+  const cannotJudge = (at: string, message: string) =>
+    unverified.push({ appId: app.id, at, message });
+
+  // D1
+  if (app.description.trim().length < MIN_DESCRIPTION_LENGTH) {
+    gap(
+      "D1",
+      "app.yaml",
+      `The description has ${app.description.trim().length} characters, too few to tell an agent what the app can do.`,
+    );
+  }
+
+  for (const action of app.actions) {
+    // D2
+    if (action.visibility === "public" && !action.hasInputSchema && !action.webhook) {
+      gap(
+        "D2",
+        action.at,
+        `\`${action.name}\` is public but has no input schema, so no agent can find it.`,
+      );
+    }
+    // D3
+    if (isAgentCallable(action)) {
+      if (action.arguments.kind === "undescribed") {
+        gap(
+          "D3",
+          action.at,
+          `\`${action.name}\` leaves ${action.arguments.names.map((n) => `\`${n}\``).join(", ")} undescribed.`,
+        );
+      } else if (action.arguments.kind === "unknown") {
+        cannotJudge(action.at, `Could not read the input schema of \`${action.name}\` (D3).`);
+      }
+    }
+  }
+
+  // I1 and I2
+  if (app.routes === null) {
+    gap(
+      "I1",
+      app.apiEntry ?? "app.yaml",
+      "The app declares an API, but its routes could not be read, so neither interface can be checked.",
+    );
+  } else {
+    const ranByRoutes = new Set<string>();
+    for (const route of app.routes) {
+      for (const name of route.runs) ranByRoutes.add(localName(app.id, name));
+      judgeRoute(app, route, gap, cannotJudge);
+    }
+    for (const action of app.actions) {
+      if (!isAgentCallable(action) || action.webhook) continue;
+      if (ranByRoutes.has(action.name)) continue;
+      gap(
+        "I2",
+        action.at,
+        app.hasPage
+          ? `No app API route runs \`${action.name}\`, so a person cannot do it from the app's page.`
+          : `\`${action.name}\` has no human interface: the app has no page.`,
+      );
+    }
+  }
+
+  // I4
+  for (const imp of app.imports) {
+    const reason = layerViolation(imp);
+    if (reason) gap("I4", `${app.sourceRoot}/${imp.from}:${imp.line}`, reason);
+  }
+
+  // I5
+  for (const request of app.pageRequests) {
+    gap(
+      "I5",
+      request.at,
+      `The page calls \`${request.call}(${request.target})\` past its app API, so no action stands behind what it does.`,
+    );
+  }
+
+  return { appId: app.id, gaps, unverified };
+}
+
+function judgeRoute(
+  app: AppFacts,
+  route: RouteFacts,
+  gap: (rule: RuleId, at: string, message: string) => void,
+  cannotJudge: (at: string, message: string) => void,
+): void {
+  if (route.noAuth) return;
+  if (route.path === "" && route.method === "GET") return;
+  const label = `\`${route.method} /${route.path}\``;
+  if (route.writes.length > 0) {
+    gap(
+      "I3",
+      route.at,
+      `${label} writes app data itself (${route.writes.map((w) => `\`${w}\``).join(", ")}), so an agent cannot make the same change.`,
+    );
+  }
+  if (route.runs.length === 0) {
+    gap("I1", route.at, `${label} runs no action, so no agent can do what it does.`);
+    return;
+  }
+  for (const name of route.runs) {
+    if (name === "<dynamic>") {
+      cannotJudge(route.at, `${label} runs an action whose name is computed (I1).`);
+      continue;
+    }
+    const own = app.actions.find((action) => action.name === localName(app.id, name));
+    if (!own) {
+      cannotJudge(route.at, `${label} runs \`${name}\`, which another app owns (I1).`);
+      continue;
+    }
+    if (!isAgentCallable(own)) {
+      gap(
+        "I1",
+        route.at,
+        `${label} runs \`${own.name}\`, which is ${own.hasInputSchema ? "explicit" : "missing an input schema"}, so agents cannot find it.`,
+      );
+    }
+  }
+}
+
+/** `briefing:add_scout` and `add_scout` both name `add_scout` in app `briefing`. */
+function localName(appId: string, name: string): string {
+  const prefix = `${appId}:`;
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name;
+}
+
+type Layer = "actions" | "api" | "web" | "data" | "shared" | "outside";
+
+function layerOf(path: string): Layer {
+  if (path.startsWith("../")) return "outside";
+  const top = path.split("/")[0];
+  if (top === "actions" || top === "api" || top === "web") return top;
+  if (top === "db") return "data";
+  return "shared";
+}
+
+/** Why `imp` crosses a layer it may not, or undefined. */
+export function layerViolation(imp: ImportFacts): string | undefined {
+  const from = layerOf(imp.from);
+  const to = layerOf(imp.to);
+  if (from === to || from === "outside" || to === "outside") return undefined;
+  const crossing = `\`${imp.from}\` imports \`${imp.to}\``;
+  if ((to === "api" || to === "web") && from !== "web" && from !== "api") {
+    return `${crossing}: core code must not know about an interface.`;
+  }
+  if ((from === "data" || from === "shared") && to === "actions") {
+    return `${crossing}: lower code must not know about the actions built on it.`;
+  }
+  if (from === "web" && to !== "shared") {
+    return `${crossing}: the page reaches the app only through the app API.`;
+  }
+  if (from === "api" && to === "web") {
+    return `${crossing}: the API must not know about the page.`;
+  }
+  if (from === "api" && to === "actions") {
+    return `${crossing}: the API runs an action through \`runAction\`, so approval, attribution and visibility apply.`;
+  }
+  return undefined;
+}

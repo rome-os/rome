@@ -69,6 +69,7 @@
     "app:install": "pnpm --filter @rome/core app:install",
     "app:uninstall": "pnpm --filter @rome/core app:uninstall",
     "app:list:required": "pnpm --filter @rome/core app:list:required",
+    "check:apps": "pnpm --filter @rome/core app:check",
     "build:apps": "pnpm -r --filter '@rome-os/app-runtime' --filter '@rome-os/app-web-sdk' --filter './rome_apps/*' run --if-present build && pnpm --filter @rome/core app:pack:first-party",
     "obs:dashboards": "node infra/observability/dashboards/apply.mjs",
     "test:ci:areas": "scripts/test-env.sh node --test scripts/ci-changed-areas.test.mjs",
