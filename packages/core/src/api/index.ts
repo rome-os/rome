@@ -1,5 +1,7 @@
 import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
+import { lanNodesRoutes } from "./routes/lan-nodes.js";
+import { lanNodeTransportRoutes } from "./routes/lan-node-transport.js";
 import { personalDataRoutes } from "../personal-data/routes.js";
 import { deviceConnectionRoutes } from "./routes/device-connections.js";
 import type { Server } from "node:http";
@@ -105,6 +107,7 @@ export function buildApp(
 ): { app: Hono; webchatRuntime: WebchatRuntime } {
   const app = new Hono();
   app.onError(errorHandler);
+  app.route("/", lanNodeTransportRoutes(deps.localLanNodes));
 
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
@@ -205,6 +208,7 @@ export function buildApp(
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
+  api.route("/devices/lan-nodes", lanNodesRoutes(deps));
   api.route("/", personalDataRoutes(deps));
   api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
@@ -364,6 +368,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             terminalServer.close();
             liveEvents.close();
             nodeConsole.close();
+            localLanNodes?.close();
             desktopProxy.close();
             appWebSocket.close();
             voiceInput.close();
@@ -410,6 +415,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
+      const localLanNodes = deps.localLanNodes?.attach(server as Server);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       const voiceInput = attachVoiceInputServer(

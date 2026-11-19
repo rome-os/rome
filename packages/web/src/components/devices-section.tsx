@@ -19,6 +19,7 @@ import { useDeviceManage } from "@/hooks/use-device-manage";
 import { useThisDevice } from "@/hooks/use-this-device";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
+import { LanNodesSection } from "./lan-nodes-section";
 
 export function nodeConsoleUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -47,6 +48,15 @@ export function useDevicesQuery() {
 }
 
 export function DevicesSection() {
+  return (
+    <div className="space-y-6">
+      <LanNodesSection deviceHref={deviceHref} />
+      <DeviceServiceSection />
+    </div>
+  );
+}
+
+function DeviceServiceSection() {
   const { t, i18n } = useTranslation("settings");
   const queryClient = useQueryClient();
   const navigate = useNavigate();

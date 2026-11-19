@@ -1008,6 +1008,76 @@
     "start": "Start service",
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
+    "lan": {
+      "title": "LAN nodes",
+      "description": "Use a NAS on your local network to read supported device status.",
+      "add": "Add LAN node",
+      "newCompose": "Get a new Compose file",
+      "repair": "Pair again",
+      "manage": "Manage device",
+      "setupDescription": "Pick your NAS for deployment instructions.",
+      "name": "Node name",
+      "defaultName": "NAS LAN node",
+      "vendorLabel": "NAS system",
+      "vendors": {
+        "ugos": {
+          "name": "UGREEN UGOS",
+          "guide": "In Docker, open Project → Create. Paste the Compose configuration into the editor or import the downloaded file, then deploy."
+        },
+        "synology": {
+          "name": "Synology DSM",
+          "guide": "In Container Manager, open Project → Create. Choose a project folder, upload the Compose file or paste it into the editor, then start the project."
+        },
+        "qnap": {
+          "name": "QNAP QTS / QuTS hero",
+          "guide": "In Container Station, open Applications → Create. Paste the Compose configuration into the YAML editor, then create the application."
+        }
+      },
+      "generate": "Generate Compose",
+      "generating": "Generating…",
+      "openHttps": "Open Rome at an HTTPS address your Docker host can reach, then generate the file.",
+      "projectName": "Use this project name",
+      "replaceProject": "Redeploy this project with the new configuration and keep its state volume",
+      "expires": "Deploy before {{time}}. Keep this one-time configuration private.",
+      "expired": "This Compose file has expired.",
+      "returnToRome": "Return to Devices to see when the node comes online.",
+      "copy": "Copy Compose",
+      "copied": "Copied",
+      "download": "Download Compose",
+      "copyFailed": "Clipboard access failed. Download the Compose file instead.",
+      "close": "Close",
+      "status": {
+        "waiting": "Waiting for deployment",
+        "online": "Online",
+        "offline": "Offline",
+        "needs_pairing": "Needs pairing",
+        "unknown": "Status unavailable"
+      },
+      "switch": {
+        "title": "Check Shelly switch",
+        "description": "Read the first relay on a Shelly Gen2 or newer switch through {{name}}. Use a switch that allows local status reads without credentials.",
+        "address": "Switch IPv4 address",
+        "submit": "Read status",
+        "checking": "Checking…",
+        "on": "Switch is on",
+        "off": "Switch is off"
+      },
+      "errors": {
+        "sign_in_required": "Sign in as the owner of this Rome instance to manage LAN nodes.",
+        "not_configured": "LAN node deployment is unavailable on this instance.",
+        "cloud_unsupported": "LAN node deployment is unavailable on this Rome Cloud.",
+        "unavailable": "Could not reach LAN node services. Try again.",
+        "invalid_device_name": "Enter a node name.",
+        "node_not_found": "This LAN node is unavailable on this instance.",
+        "already_paired": "This node is already paired. Remove the device before pairing it again.",
+        "needs_pairing": "Pair this LAN node again to check its status.",
+        "offline": "The LAN node is offline.",
+        "invalid_lan_address": "Enter the switch’s private IPv4 address.",
+        "lan_busy": "A switch check is already running. Try again in a moment.",
+        "lan_auth_required": "This switch requires local authentication.",
+        "lan_unreachable": "Could not read the switch. Check its address and LAN connection."
+      }
+    },
     "setup": {
       "title": "Connect a computer",
       "description": "Connect each computer separately.",

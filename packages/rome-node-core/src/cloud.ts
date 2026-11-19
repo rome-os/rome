@@ -72,11 +72,19 @@ export async function cloudRequest(
 
 export async function gatewayConfig(origin: string, token: TokenSource): Promise<string> {
   const body = await cloudRequest(origin, "/v1/gateway/config", token);
-  if (!isRecord(body) || typeof body.gatewayUrl !== "string")
-    throw new CloudError("invalid_response");
+  if (!isRecord(body)) throw new CloudError("invalid_response");
   try {
-    return parseGatewayUrl(body.gatewayUrl).toString();
+    if (typeof body.gatewayUrl === "string") return parseGatewayUrl(body.gatewayUrl).href;
+    if (typeof body.gatewayPath === "string" && /^\/(?![/\\])/.test(body.gatewayPath)) {
+      const base = new URL(origin);
+      const url = new URL(body.gatewayPath, base);
+      if (url.origin === base.origin) {
+        url.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+        return parseGatewayUrl(url.href).href;
+      }
+    }
   } catch {
     throw new CloudError("invalid_response");
   }
+  throw new CloudError("invalid_response");
 }

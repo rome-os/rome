@@ -9,6 +9,9 @@ import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
+import { createLanNodesService } from "./desktops/lan-nodes.js";
+import { createLocalLanNodes, withLocalLanNodes } from "./desktops/local-lan-nodes.js";
+import { LanNodesRepository } from "./db/repositories/lan-nodes.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -45,6 +48,7 @@ import {
   applyInstanceSlug,
   decideAdoptedSlug,
   INSTANCE_SLUG_SETTING_KEY,
+  isInstanceHosted,
 } from "./instance/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
@@ -503,15 +507,22 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+  const localLanNodes =
+    isInstanceHosted() && resolveInstanceSlug()
+      ? undefined
+      : createLocalLanNodes(new LanNodesRepository(db));
   // A device removed from the account through this Rome loses its connection
   // rows; an origin the removal leaves with no install is turned off.
-  const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
-    connections: () => deviceConnectionsRepo,
-    turnOriginOff: (originId) => {
-      for (const spec of PERSONAL_DATA_SOURCES)
-        personalDataRepo.setState(spec.source, originId, "off");
+  const nodeDevices = withDeviceLifecycle(
+    withLocalLanNodes(createNodeDevicesService(), localLanNodes),
+    {
+      connections: () => deviceConnectionsRepo,
+      turnOriginOff: (originId) => {
+        for (const spec of PERSONAL_DATA_SOURCES)
+          personalDataRepo.setState(spec.source, originId, "off");
+      },
     },
-  });
+  );
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -2283,6 +2294,8 @@ async function main() {
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       cloudProfile: cloudProfileClient,
       nodeDevices,
+      lanNodes: localLanNodes?.service ?? createLanNodesService(nodeDevices),
+      localLanNodes,
       channelsService,
       chatSettings,
       actionEngine,

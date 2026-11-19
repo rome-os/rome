@@ -30,6 +30,24 @@ it.each([
   );
 });
 
+it("resolves a Gateway path on the connection origin, including its port", async () => {
+  rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ gatewayPath: "/ws/lan-node" }));
+  expect(await gatewayConfig("https://rome.example:9443", "token")).toBe(
+    "wss://rome.example:9443/ws/lan-node",
+  );
+});
+
+it.each([
+  "//other.example/connect",
+  "/\\other.example/connect",
+  "wss://other.example/connect",
+])("rejects a non-local Gateway path %s", async (gatewayPath) => {
+  rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ gatewayPath }));
+  await expect(gatewayConfig("https://rome.example", "token")).rejects.toEqual(
+    new CloudError("invalid_response"),
+  );
+});
+
 it("sends a JSON body with its content type", async () => {
   const fetch = rs
     .spyOn(globalThis, "fetch")

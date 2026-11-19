@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+// @rstest-environment-options {"url":"https://rome.example:9443/settings/devices"}
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,13 +19,19 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderDevices(load: () => unknown, start?: () => Response | Promise<Response>) {
+function renderDevices(
+  load: () => unknown,
+  start?: () => Response | Promise<Response>,
+  lan?: (path: string, init?: RequestInit) => Response,
+) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input) === "/api/devices/start" && init?.method === "POST" && start) return start();
     if (String(input) === "/api/devices")
       return new Response(JSON.stringify(await load()), {
         headers: { "Content-Type": "application/json" },
       });
+    if (String(input).startsWith("/api/devices/lan-nodes"))
+      return lan?.(String(input), init) ?? Response.json({ nodes: [], transport: "direct" });
     return new Response("{}", { status: 503 });
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,6 +47,88 @@ function renderDevices(load: () => unknown, start?: () => Response | Promise<Res
   /** Reads the devices again, as the 15-second poll does. */
   return { client, poll: () => act(() => client.refetchQueries({ queryKey: ["node-devices"] })) };
 }
+
+it("copies a new LAN Node configuration, then reads its status and starts a repair", async () => {
+  const path = "/api/devices/lan-nodes";
+  const id = "73426989-9646-4579-9869-af5a321ff48d";
+  const deviceId = "06954fc4-5a06-4dc8-898d-cffac7ac97a1";
+  const projectName = "rome-node-73426989964645799869";
+  const installToken = `romeinstall_${"A".repeat(43)}`;
+  let nodes: unknown[] = [];
+  const lan = rs.fn((url: string, init?: RequestInit) => {
+    if (url === path && init?.method !== "POST")
+      return Response.json({ nodes, transport: "direct" });
+    if (url.endsWith("/switch-status")) return Response.json({ on: false });
+    nodes = [{ id, deviceId: null, name: "Hall NAS", status: "waiting" }];
+    return Response.json({
+      id,
+      installToken,
+      origin: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+  });
+  const { client } = renderDevices(
+    () => ({ connection: "online", checkedAt: new Date().toISOString(), devices: [] }),
+    undefined,
+    lan,
+  );
+  const user = userEvent.setup();
+  const add = await screen.findByRole("button", { name: "Add LAN node" });
+  await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
+  await user.click(add);
+  const setup = within(await screen.findByRole("dialog", { name: "Add LAN node" }));
+  expect(setup.getByRole("combobox", { name: "NAS system" }).textContent).toContain("UGREEN UGOS");
+  fireEvent.change(setup.getByLabelText("Node name"), { target: { value: "Hall NAS" } });
+  await user.click(setup.getByRole("button", { name: "Generate Compose" }));
+  expect(lan).toHaveBeenCalledWith(
+    path,
+    expect.objectContaining({
+      body: JSON.stringify({ name: "Hall NAS" }),
+      method: "POST",
+    }),
+  );
+  expect(await setup.findByText(projectName)).toBeTruthy();
+  expect(setup.getByRole("button", { name: "Download Compose" })).toBeTruthy();
+  await user.click(setup.getByRole("button", { name: "Copy Compose" }));
+  const compose = await navigator.clipboard.readText();
+  expect(compose).toContain('image: "yunfanye/rome-node:latest"');
+  expect(compose).toContain('ROME_NODE_CLOUD_URL: "https://rome.example:9443"');
+  expect(compose).toContain(`ROME_NODE_INSTALLATION_ID: "${id}"`);
+  expect(compose).toContain(`ROME_NODE_INSTALL_TOKEN: "${installToken}"`);
+  expect(compose).toContain(`rome-node-${id}-state`);
+  expect(compose).not.toMatch(/ports:|privileged:|network_mode:/);
+  await user.keyboard("{Escape}");
+  expect(await screen.findByText("Waiting for deployment")).toBeTruthy();
+
+  async function show(status: string, currentDeviceId: string | null) {
+    nodes = [{ id, deviceId: currentDeviceId, name: "Hall NAS", status }];
+    await act(() => client.refetchQueries({ queryKey: ["lan-nodes"] }));
+  }
+  await show("offline", deviceId);
+  expect(await screen.findByText("Offline")).toBeTruthy();
+  await show("online", deviceId);
+  expect((await screen.findByRole("link", { name: "Manage device" })).getAttribute("href")).toBe(
+    `/settings/devices/${deviceId}`,
+  );
+  await user.click(screen.getByRole("button", { name: "Check Shelly switch" }));
+  const check = within(await screen.findByRole("dialog", { name: "Check Shelly switch" }));
+  fireEvent.change(check.getByLabelText("Switch IPv4 address"), {
+    target: { value: "192.168.4.20" },
+  });
+  await user.click(check.getByRole("button", { name: "Read status" }));
+  expect(await check.findByText("Switch is off")).toBeTruthy();
+  await user.click(check.getByRole("button", { name: "Close", exact: true }));
+  await show("needs_pairing", null);
+  expect(await screen.findByText("Needs pairing")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Pair again" }));
+  const repair = within(await screen.findByRole("dialog", { name: "Pair again" }));
+  await user.click(repair.getByRole("button", { name: "Generate Compose" }));
+  expect(await repair.findByText(projectName)).toBeTruthy();
+  expect(lan).toHaveBeenCalledWith(
+    `${path}/${id}/pairing`,
+    expect.objectContaining({ method: "POST" }),
+  );
+}, 15_000);
 
 it("lists devices independently of the settings request", async () => {
   renderDevices(() => ({

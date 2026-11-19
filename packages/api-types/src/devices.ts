@@ -1,5 +1,31 @@
 import { z } from "zod";
 
+export const lanNodeNameSchema = z.string().trim().min(1).max(80);
+
+export const lanNodeListSchema = z.object({
+  transport: z.enum(["direct", "cloud"]),
+  nodes: z.array(
+    z.object({
+      id: z.uuid(),
+      name: lanNodeNameSchema,
+      deviceId: z.uuid().nullable(),
+      status: z.enum(["waiting", "online", "offline", "needs_pairing", "unknown"]),
+    }),
+  ),
+});
+export type LanNode = z.infer<typeof lanNodeListSchema>["nodes"][number];
+
+export const lanNodeGrantSchema = z.object({
+  id: z.uuid(),
+  installToken: z.string().regex(/^romeinstall_[A-Za-z0-9_-]{43}$/),
+  expiresAt: z.iso.datetime(),
+  origin: z.url({ protocol: /^https$/ }).nullable(),
+});
+export type LanNodeGrant = z.infer<typeof lanNodeGrantSchema>;
+
+export const lanSwitchAddressSchema = z.object({ address: z.ipv4() }).strict();
+export const lanSwitchStatusSchema = z.object({ on: z.boolean() });
+
 export const devicesStatusSchema = z.object({
   connection: z.enum([
     "not_running",
