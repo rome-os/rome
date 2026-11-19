@@ -128,12 +128,22 @@ multi-platform archive without pushing it.
 ```sh
 docker buildx build --platform linux/amd64,linux/arm64 \
   --file infra/rome-node/Dockerfile \
-  --tag yunfanye/rome-node:1.0.0 \
+  --tag ghcr.io/rome-os/rome-node:latest \
   --output type=oci,dest=rome-node.oci.tar .
 ```
 
-Compose references `yunfanye/rome-node:1.0.0`. Publish each version as a new
-tag. For a local build, load the archive on the Docker host.
+Compose uses `ghcr.io/rome-os/rome-node:latest`. To run a local build, load the
+archive on the Docker host and start it with `docker compose up --pull never`.
+
+### Release the image
+
+Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) at the
+reviewed branch or tag with **Publish the Docker image to GitHub Container
+Registry** selected. The workflow checks both architectures before publishing
+`latest` with the source commit recorded in the image.
+
+The first publish creates a private package. A package admin sets it to
+public so Docker hosts can pull the image without credentials.
 
 ### Connect directly to a self-hosted instance
 

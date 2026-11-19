@@ -91,7 +91,7 @@ it("copies a new LAN Node configuration, then reads its status and starts a repa
   expect(setup.getByRole("button", { name: "Download Compose" })).toBeTruthy();
   await user.click(setup.getByRole("button", { name: "Copy Compose" }));
   const compose = await navigator.clipboard.readText();
-  expect(compose).toContain('image: "yunfanye/rome-node:1.0.0"');
+  expect(compose).toContain('image: "ghcr.io/rome-os/rome-node:latest"');
   expect(compose).toContain('ROME_NODE_CLOUD_URL: "https://rome.example:9443"');
   expect(compose).toContain(`ROME_NODE_INSTALLATION_ID: "${id}"`);
   expect(compose).toContain(`ROME_NODE_INSTALL_TOKEN: "${installToken}"`);

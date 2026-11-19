@@ -40,6 +40,7 @@ import {
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
+import romeNodeImage from "@/lib/rome-node-image.json";
 import { shareableOrigin } from "@/lib/shareable-origin";
 
 const path = "/api/devices/lan-nodes";
@@ -54,7 +55,7 @@ function lanNodeCompose({ id, expiresAt, installToken }: LanNodeGrant, origin: s
     expiresAt,
     compose: `services:
   rome-node:
-    image: "yunfanye/rome-node:1.0.0"
+    image: "${romeNodeImage.image}"
     container_name: "${projectName}"
     restart: unless-stopped
     read_only: true
