@@ -27,6 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  CalendarClock,
   Cpu,
   FileOutput,
   FolderOpen,
@@ -61,6 +62,7 @@ import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
+import { TaskLinksScope } from "@/components/chat/task-link/task-links";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -141,12 +143,14 @@ import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
+  BackToConciergeChat,
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
   type HeaderMenu,
   type HeaderMenuItem,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { useChatTaskList } from "@/components/concierge/TaskList";
 import { useTaskList } from "@/components/concierge/TaskListPane";
 import { useOutputsPane } from "./outputs/OutputsPane";
 import {
@@ -612,6 +616,7 @@ export function Chat({
     archivedAt,
     forkable,
     isTaskChat,
+    taskOf,
     projectPath,
     isConciergeSession,
   } = useSessionIdentity(mainSessionId);
@@ -2401,8 +2406,10 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The agent's logo in the header opens the chat's task list: what runs for it.
+  // The badge's menu opens the chat's lists: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // A dot on the menu's Tasks entry says a task chat needs its owner.
+  const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
   // On a narrow screen the task list's sheet covers the composer.
   useEffect(() => {
     if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
@@ -2473,8 +2480,8 @@ export function Chat({
     workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
     workspaceStore?.set("followTargetPath", logical);
   };
-  // The badge's menu: what opens in the side pane, and the model that answered
-  // last at its foot. No counts or marks.
+  // The badge's menu: what opens in the side pane (a Concierge chat's Tasks
+  // and Routines, then Outputs), and the model that answered last at its foot.
   const menuItems: HeaderMenuItem[] = mainSessionId
     ? [
         ...(concierge
@@ -2483,7 +2490,14 @@ export function Chat({
                 key: "tasks",
                 icon: <ListChecks />,
                 label: t("concierge.menu.tasks"),
-                run: taskList.open,
+                dot: tasksNeedYou,
+                run: () => taskList.open("tasks"),
+              },
+              {
+                key: "routines",
+                icon: <CalendarClock />,
+                label: t("concierge.menu.routines"),
+                run: () => taskList.open("routines"),
               },
             ]
           : []),
@@ -2629,7 +2643,14 @@ export function Chat({
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. */}
-      {paneCoversChat ? null : (
+      {taskOf ? (
+        // A task chat names the Concierge chat it reports to, and goes back
+        // there. On the phone it takes the place of the chat list's button.
+        <BackToConciergeChat
+          to={taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`}
+          name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
+        />
+      ) : paneCoversChat ? null : (
         <SlotOutlet
           name={CONCIERGE_LEADING_SLOT}
           className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
@@ -2746,42 +2767,44 @@ export function Chat({
                     {hasOlder(mainSessionId) ? (
                       <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                     ) : null}
-                    <TaskChatContext.Provider value={isTaskChat}>
-                      <MessageList
-                        rows={rows}
-                        live={{
-                          isStreaming: displayedStreaming,
-                          runningTurnId,
-                          quiet: activeSessionStream?.quiet,
-                          writing: liveWriting.get(activeSessionId) ?? null,
-                          snapshot: currentSnapshot,
-                          textStore: liveTextStore,
-                          blockIx: activeSessionStream?.assistantBlockIx,
-                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                          identity: mainIdentity,
-                        }}
-                        selection={
-                          shareMode
-                            ? {
-                                selectedTurns: selectedShareTurns,
-                                selectableSessionId: mainSessionId,
-                                onToggleTurn: toggleShareTurn,
-                              }
-                            : undefined
-                        }
-                        contentRef={attachContent}
-                        onOpenLiveTrace={openLiveTraceDrawer}
-                        onOpenStoredTrace={openStoredTraceDrawer}
-                        onOpenSubagentTrace={openSubagentTraceDrawer}
-                        activeTraceTarget={traceDrawerTarget}
-                        subagentIconByName={subagentIconByName}
-                        actions={blockActions}
-                        feedback
-                        fork={forkable}
-                        variant={variant}
-                        unreadFrom={unread?.firstId ?? null}
-                      />
-                    </TaskChatContext.Provider>
+                    <TaskLinksScope chatId={concierge ? mainSessionId : null}>
+                      <TaskChatContext.Provider value={isTaskChat}>
+                        <MessageList
+                          rows={rows}
+                          live={{
+                            isStreaming: displayedStreaming,
+                            runningTurnId,
+                            quiet: activeSessionStream?.quiet,
+                            writing: liveWriting.get(activeSessionId) ?? null,
+                            snapshot: currentSnapshot,
+                            textStore: liveTextStore,
+                            blockIx: activeSessionStream?.assistantBlockIx,
+                            textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                            identity: mainIdentity,
+                          }}
+                          selection={
+                            shareMode
+                              ? {
+                                  selectedTurns: selectedShareTurns,
+                                  selectableSessionId: mainSessionId,
+                                  onToggleTurn: toggleShareTurn,
+                                }
+                              : undefined
+                          }
+                          contentRef={attachContent}
+                          onOpenLiveTrace={openLiveTraceDrawer}
+                          onOpenStoredTrace={openStoredTraceDrawer}
+                          onOpenSubagentTrace={openSubagentTraceDrawer}
+                          activeTraceTarget={traceDrawerTarget}
+                          subagentIconByName={subagentIconByName}
+                          actions={blockActions}
+                          feedback
+                          fork={forkable}
+                          variant={variant}
+                          unreadFrom={unread?.firstId ?? null}
+                        />
+                      </TaskChatContext.Provider>
+                    </TaskLinksScope>
                   </>
                 ) : (
                   emptyState

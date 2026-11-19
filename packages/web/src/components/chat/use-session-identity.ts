@@ -33,6 +33,8 @@ export interface SessionIdentity {
   forkable: boolean;
   /** A task chat the Concierge started. */
   isTaskChat: boolean;
+  /** For a task chat: the Concierge chat it reports to, or null. */
+  taskOf: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
   /** The chat's project, as the chat list names it, or null while loading. */
   projectPath: string | null;
   /**
@@ -66,6 +68,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [forkable, setForkable] = useState(false);
   const [isTaskChat, setIsTaskChat] = useState(false);
+  const [taskOf, setTaskOf] = useState<SessionIdentity["taskOf"]>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [isConciergeSession, setIsConciergeSession] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
@@ -111,6 +114,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setArchivedAt(session?.archivedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
         const agentName = session?.agentName ?? null;
@@ -142,6 +146,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setArchivedAt(null);
           setForkable(false);
           setIsTaskChat(false);
+          setTaskOf(null);
           setIsConciergeSession(false);
         }
       }
@@ -173,6 +178,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setArchivedAt(session?.archivedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
       } catch {
@@ -192,6 +198,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     archivedAt,
     forkable,
     isTaskChat,
+    taskOf,
     projectPath,
     isConciergeSession,
   };

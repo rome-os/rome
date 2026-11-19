@@ -1,7 +1,7 @@
 // A task's repeating schedule: every day, or on some weekdays, at a time in its
 // owner's zone, its brief goes straight into its own task chat, with no
 // Concierge turn. The work comes back the way any task's does. A schedule is a
-// routine on the routine engine, one per task, keyed by the task's id
+// routine on the routine engine, one per task, keyed by the task chat's id
 // (docs/adrs/scheduled-tasks.md).
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -20,7 +20,7 @@ const log = createLogger("concierge-task-schedule");
 export const CONCIERGE_TASK_RUN_ACTION = "core:concierge_task_run";
 
 /** The key of task `taskId`'s schedule routine. */
-export const taskScheduleKey = (taskId: string) => `concierge-task-schedule:${taskId}`;
+export const taskScheduleKey = (chatId: string) => `concierge-task-schedule:${chatId}`;
 
 export const SCHEDULE_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export type ScheduleWeekday = (typeof SCHEDULE_WEEKDAYS)[number];
@@ -133,13 +133,13 @@ export function scheduleOfRoutine(routine: Routine): (TaskSchedule & { taskId: s
     return null;
   }
   const args = routine.args as Record<string, unknown>;
-  if (typeof args.taskId !== "string" || typeof args.brief !== "string") return null;
+  if (typeof args.chatId !== "string" || typeof args.brief !== "string") return null;
   const byDay = /BYDAY=([A-Z,]+)/.exec(routine.trigger.rrule?.toUpperCase() ?? "")?.[1];
   const days = byDay
     ? SCHEDULE_WEEKDAYS.filter((day) => byDay.split(",").includes(RRULE_DAY[day]))
     : undefined;
   return {
-    taskId: args.taskId,
+    taskId: args.chatId,
     at: routine.trigger.localTime,
     ...(days ? { days } : {}),
     report: args.report === "when_it_matters" ? "when_it_matters" : "every_run",
@@ -195,7 +195,7 @@ export class TaskSchedules {
     // The task is the one source of truth for where a run goes: its task
     // chat and the Concierge chat it reports to are read from its row.
     const args = {
-      taskId: task.id,
+      chatId: task.id,
       report: schedule.report,
       brief: schedule.brief,
       ...(schedule.skill ? { skill: schedule.skill } : {}),
@@ -230,7 +230,7 @@ export class TaskSchedules {
   async rezone(owner: ConciergeOwner, timezone: string): Promise<void> {
     for (const routine of await this.deps.routines.listRoutines()) {
       const trigger = routine.trigger;
-      const taskId = (routine.args as Record<string, unknown>).taskId;
+      const taskId = (routine.args as Record<string, unknown>).chatId;
       if (
         routine.actionName !== CONCIERGE_TASK_RUN_ACTION ||
         trigger.type !== "schedule" ||
@@ -244,6 +244,13 @@ export class TaskSchedules {
       await this.deps.routines.update(routine.id, { trigger: { ...trigger, tzid: timezone } });
       await this.reactivate(routine.id);
     }
+  }
+
+  /** Renames task `taskId`'s schedule routine to its task chat's new name, when it has one. */
+  async rename(taskId: string, title: string): Promise<void> {
+    const routine = await this.deps.routines.findByKey(taskScheduleKey(taskId));
+    if (routine && routine.name !== title)
+      await this.deps.routines.update(routine.id, { name: title });
   }
 
   /** Removes task `taskId`'s schedule. Answers whether it had one. */
@@ -364,9 +371,9 @@ export function registerTaskRunAction(
       sideEffects: "write",
     },
     execute: async (args) => {
-      const taskId = (args as Record<string, unknown>).taskId;
+      const taskId = (args as Record<string, unknown>).chatId;
       if (typeof taskId !== "string") {
-        return { status: "error", error: `${CONCIERGE_TASK_RUN_ACTION} needs a taskId` };
+        return { status: "error", error: `${CONCIERGE_TASK_RUN_ACTION} needs a chatId` };
       }
       try {
         return {

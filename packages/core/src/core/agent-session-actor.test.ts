@@ -354,6 +354,9 @@ for (const pauseAt of ["chat-creation", "cold-open"] as const) {
         const repo = {
           getSession: async (id: string) => rows.get(id) ?? null,
           getTurnChatMessages: async () => [],
+          // The message the task points to, which the Concierge said earlier.
+          getReplyTarget: async (_chat: string, id: string) =>
+            id === "start" ? { id, role: "assistant" } : null,
           setSessionTrigger: async () => {},
           updateSessionName: async () => {},
           deleteSession: rs.fn(async () => {}),
@@ -375,8 +378,7 @@ for (const pauseAt of ["chat-creation", "cold-open"] as const) {
                   row: { id: "task" },
                   conciergeChat: { id: "source" },
                 }),
-                upsertMany: async () => [{ id: "task" }],
-                resume: async () => {},
+                create: async () => ({ id: "target" }),
                 markStartFailed: failed,
               },
             },
@@ -423,7 +425,11 @@ for (const pauseAt of ["chat-creation", "cold-open"] as const) {
         const tools = await buildConciergeTools(service, context);
         const pending = tools
           .find((tool) => tool.name === "chat_start")!
-          .handler({ taskId: "task", title: "Synthetic", brief: "Synthetic public metadata only" });
+          .handler({
+            messageId: "start",
+            title: "Synthetic",
+            brief: "Synthetic public metadata only",
+          });
         await setup.promise;
         session.submit({ prompt: "one extra detail" }, { actor: originalActor, priority: "now" });
         acknowledge();

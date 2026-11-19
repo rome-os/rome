@@ -102,7 +102,11 @@ private let listJSON = #"""
         #expect(TaskListWords.age(nowMs - day, now: now, calendar: calendar, locale: zh) == "昨天")
         #expect(TaskListWords.age(nowMs - 3 * day, now: now, calendar: calendar, locale: zh) == "3天前")
         let fresh = ConciergeTask(id: "n", title: "N", state: .next, createdAt: nowMs - 3 * day, updatedAt: nowMs, status: "later")
-        #expect(TaskListWords.task(.init(task: fresh, schedule: nil, check: nil, cardMessageId: nil), now: now).hasPrefix("Not started · Created ") == true)
+        // A task is its task chat: there is no unstarted one, so a later task with no check says nothing.
+        #expect(TaskListWords.task(.init(task: fresh, schedule: nil, check: nil, cardMessageId: nil), now: now) == "")
+        // Active says how long ago it began.
+        let active = ConciergeTask(id: "a", title: "A", state: .doing, createdAt: nowMs - day, updatedAt: nowMs - 25 * 60_000, status: "active")
+        #expect(TaskListWords.task(.init(task: active, schedule: nil, check: nil, cardMessageId: nil), now: now).hasPrefix("Active · "))
         let scheduled = TaskListItem.Task(task: fresh, schedule: .init(at: "09:00", days: nil), check: nil, cardMessageId: nil)
         #expect(TaskListWords.task(scheduled, now: now).hasPrefix("Daily at "))
         let checked = TaskListItem.Task(task: fresh, schedule: nil, check: .init(id: "k", at: nowMs + 3_600_000, recurring: false), cardMessageId: nil)
@@ -241,5 +245,56 @@ private let listJSON = #"""
         backend.taskLists["concierge"] = list
         await store.load()
         #expect(store.stopping.isEmpty)
+    }
+}
+
+
+@Suite struct TaskLinkTests {
+    @Test func readsAndBuildsTheLinkTheConciergeWrites() {
+        #expect(TaskLink.chatId(ofHref: "#rome-task=abc-123") == "abc-123")
+        #expect(TaskLink.chatId(ofHref: "#rome-task=a%2Fb%20c") == "a/b c")
+        #expect(TaskLink.chatId(of: URL(string: "#rome-task=c1")!) == "c1")
+        #expect(TaskLink.url(chatId: "a b").flatMap(TaskLink.chatId(of:)) == "a b")
+        #expect(TaskLink.chatId(ofHref: nil) == nil)
+        #expect(TaskLink.chatId(ofHref: "https://example.com/#rome-task=c1") == nil)
+        #expect(TaskLink.chatId(ofHref: "#rome-task=") == nil)
+        #expect(TaskLink.chatId(ofHref: "#rome-task=%E0%A4%A") == nil)
+    }
+
+    @Test func findsEveryTaskChatATextNames() {
+        let text = "On it: [Flights](#rome-task=c1) and [Hotels](#rome-task=c2), not [a page](https://example.com)."
+        #expect(TaskLink.ids(in: text) == ["c1", "c2"])
+        #expect(TaskLink.ids(in: "no links") == [])
+    }
+
+    @Test func marksEachStatusWithItsOwnSymbol() {
+        func symbol(_ status: String, _ reason: String? = nil) -> String {
+            TaskLinkInfo(id: "c", name: "N", status: status, endReason: reason).symbol
+        }
+        #expect(symbol("needs_you") == "exclamationmark.circle")
+        #expect(symbol("active") == "arrow.triangle.2.circlepath")
+        #expect(symbol("later") == "clock")
+        #expect(symbol("ended", "done") == "checkmark.circle")
+        #expect(symbol("ended", "failed") == "xmark.circle")
+        #expect(symbol("ended", "stopped") == "stop.circle")
+        #expect(symbol("ended", "no_response") == "circle")
+        // A status this build does not know reads as active.
+        #expect(symbol("sleeping") == "arrow.triangle.2.circlepath")
+    }
+
+    @Test func readsTheLinksResponseLeniently() throws {
+        let json = #"{"tasks":[{"id":"c1","name":"Flights","status":"needs_you","endReason":null},{"id":"c2","name":"Hotels","status":"ended","endReason":"stopped"}]}"#
+        let response = try JSONDecoder().decode(TaskLinksResponse.self, from: Data(json.utf8))
+        #expect(response.tasks.map(\.id) == ["c1", "c2"])
+        #expect(response.tasks[1].endReason == "stopped")
+        // An older server has no such route; a body with no tasks reads as none.
+        #expect(try JSONDecoder().decode(TaskLinksResponse.self, from: Data("{}".utf8)).tasks.isEmpty)
+    }
+
+    @Test func readsAnOlderServersTaskListWithRowsThisBuildNoLongerDraws() throws {
+        // A row from before: a title, a summary, no task chat, a card message.
+        let json = #"{"chatId":"c","groups":[{"key":"later","items":[{"kind":"task","task":{"id":"t","title":"Old row","state":"next","status":"later","summary":"x","waitingOn":null,"dueAt":null,"rank":null,"chat":null,"createdAt":1,"updatedAt":1},"schedule":null,"check":null,"cardMessageId":null}]}]}"#
+        let list = try JSONDecoder().decode(TaskListResponse.self, from: Data(json.utf8))
+        #expect(list.groups.first?.items.count == 1)
     }
 }

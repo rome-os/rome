@@ -26,7 +26,6 @@ const ANSWER_TOOLS = new Set([
   "react",
   "say",
   "card_forward",
-  "chat_card",
   "connect_card",
   "show_card",
   "toolsearch",

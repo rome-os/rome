@@ -3305,6 +3305,16 @@
         }
       }
     },
+    "No routines yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有定时任务"
+          }
+        }
+      }
+    },
     "Not started · Created %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4199,12 +4209,12 @@
         }
       }
     },
-    "Running on its own" : {
+    "Routines" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "自动运行"
+            "value" : "定时任务"
           }
         }
       }
