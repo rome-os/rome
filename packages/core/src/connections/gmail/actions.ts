@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { actionExecutionContext } from "../../apps/actions/context.js";
+import { hashArgs } from "../../apps/actions/replay.js";
 import { z } from "zod";
 import type { ActionRegistry, ActionResult } from "../../apps/actions/types.js";
 import type { ConnectionRegistry } from "../registry.js";
@@ -5,6 +8,25 @@ import { gmailReadSchema, gmailSendSchema, type GmailResponse } from "./api.js";
 
 export const GMAIL_READ_ACTION = "core:gmail_read";
 export const GMAIL_SEND_ACTION = "core:gmail_send";
+
+const forwardedApproval = new AsyncLocalStorage<{ id?: string }>();
+export function withGmailApprovalId<T>(id: string | undefined, call: () => T): T {
+  return forwardedApproval.run({ id }, call);
+}
+function approvalId(): string | undefined {
+  const forwarded = forwardedApproval.getStore();
+  if (forwarded) return forwarded.id;
+  const initiator = actionExecutionContext.getStore()?.initiator;
+  return initiator?.startsWith("approval:") ? initiator.slice("approval:".length) : undefined;
+}
+interface GmailActionOptions {
+  forward?: (
+    name: string,
+    args: Record<string, unknown>,
+    approvalId?: string,
+  ) => Promise<ActionResult>;
+  claimApprovedSend?: (approvalId: string, argsHash: string) => Promise<boolean>;
+}
 
 function response(result: unknown, connectionId: string): ActionResult {
   const reply = result as GmailResponse;
@@ -17,7 +39,7 @@ function response(result: unknown, connectionId: string): ActionResult {
 export function registerGmailActions(
   actions: Pick<ActionRegistry, "register">,
   connections: Pick<ConnectionRegistry, "find" | "grantOf"> | undefined,
-  forward?: (name: string, args: Record<string, unknown>) => Promise<ActionResult>,
+  options: GmailActionOptions = {},
 ): void {
   actions.register({
     config: {
@@ -45,7 +67,7 @@ export function registerGmailActions(
         .strict(),
     ),
     async execute(args) {
-      if (forward) return forward(GMAIL_READ_ACTION, args);
+      if (options.forward) return options.forward(GMAIL_READ_ACTION, args);
       if (!connections) return { status: "error", error: "Gmail service unavailable." };
       const found = connections.find("google").filter((connection) => connection.state() !== null);
       if (found.length === 0)
@@ -131,7 +153,7 @@ export function registerGmailActions(
       };
     },
     async execute(args) {
-      if (forward) return forward(GMAIL_SEND_ACTION, args);
+      if (options.forward) return options.forward(GMAIL_SEND_ACTION, args, approvalId());
       if (!connections) return { status: "error", error: "Gmail service unavailable." };
       const parsed = gmailSendSchema.safeParse(args);
       if (!parsed.success)
@@ -154,6 +176,17 @@ export function registerGmailActions(
           status: "error",
           error:
             "The approved Google connection needs Gmail read and send permissions. Reconnect Google. Nothing was sent.",
+        };
+      }
+      const approved = approvalId();
+      if (
+        !approved ||
+        !options.claimApprovedSend ||
+        !(await options.claimApprovedSend(approved, hashArgs(parsed.data)))
+      ) {
+        return {
+          status: "error",
+          error: "This exact Gmail message has no unused guardian approval. Nothing was sent.",
         };
       }
       try {

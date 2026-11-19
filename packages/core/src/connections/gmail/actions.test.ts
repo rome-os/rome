@@ -1,7 +1,12 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import type { ConnectionRegistry } from "../registry.js";
-import { GMAIL_READ_ACTION, GMAIL_SEND_ACTION, registerGmailActions } from "./actions.js";
+import {
+  GMAIL_READ_ACTION,
+  GMAIL_SEND_ACTION,
+  registerGmailActions,
+  withGmailApprovalId,
+} from "./actions.js";
 
 const message = {
   connectionId: "google-1",
@@ -17,10 +22,14 @@ const GMAIL_SCOPES = [
 function harness(entries?: unknown[], scopes = GMAIL_SCOPES) {
   const invoke = rs.fn().mockResolvedValue({ status: 200, data: { id: "message-1" }, headers: {} });
   const actions = new ActionRegistryImpl();
-  registerGmailActions(actions, {
-    grantOf: async () => ({ profile: { scopes } }),
-    find: () => entries ?? [{ id: "google-1", state: () => "working", act: { invoke } }],
-  } as unknown as ConnectionRegistry);
+  registerGmailActions(
+    actions,
+    {
+      grantOf: async () => ({ profile: { scopes } }),
+      find: () => entries ?? [{ id: "google-1", state: () => "working", act: { invoke } }],
+    } as unknown as ConnectionRegistry,
+    { claimApprovedSend: async () => true },
+  );
   return { actions, invoke };
 }
 
@@ -39,7 +48,10 @@ describe("Gmail actions", () => {
       ],
     });
     expect(invoke).not.toHaveBeenCalled();
-    expect(await send.execute(message)).toMatchObject({ status: "ok" });
+    expect(await send.execute(message)).toMatchObject({ status: "error" });
+    expect(await withGmailApprovalId("test-approved", () => send.execute(message))).toMatchObject({
+      status: "ok",
+    });
     expect(invoke).toHaveBeenCalledWith({ operation: "send", input: message });
   });
 
@@ -105,7 +117,11 @@ describe("Gmail actions", () => {
   it("does not retry provider errors or uncertain send outcomes", async () => {
     const { actions, invoke } = harness();
     invoke.mockRejectedValue(new Error("timeout"));
-    expect(await actions.get(GMAIL_SEND_ACTION)!.execute(message)).toMatchObject({
+    expect(
+      await withGmailApprovalId("test-approved", () =>
+        actions.get(GMAIL_SEND_ACTION)!.execute(message),
+      ),
+    ).toMatchObject({
       status: "error",
       error: expect.stringContaining("do not automatically retry"),
     });

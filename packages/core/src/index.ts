@@ -227,7 +227,7 @@ import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
-import { registerGmailActions } from "./connections/gmail/actions.js";
+import { GMAIL_SEND_ACTION, registerGmailActions } from "./connections/gmail/actions.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
@@ -1456,7 +1456,10 @@ async function main() {
     },
   });
 
-  registerGmailActions(actionRegistry, connectionRegistry);
+  registerGmailActions(actionRegistry, connectionRegistry, {
+    claimApprovedSend: (id, argsHash) =>
+      approvalsRepo.claimApprovedEffect(id, GMAIL_SEND_ACTION, argsHash),
+  });
   registerShowFileAction(actionRegistry);
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,

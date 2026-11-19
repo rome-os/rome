@@ -26,17 +26,24 @@ it("parks every direct, nested and scheduled send before Gmail; approving sends 
       },
     },
   });
-  registerGmailActions(rome.actionRegistry, {
-    grantOf: async () => ({
-      profile: {
-        scopes: [
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.send",
-        ],
-      },
-    }),
-    find: () => [{ id: "google-1", state: () => "working", act: { invoke } }],
-  } as unknown as ConnectionRegistry);
+  registerGmailActions(
+    rome.actionRegistry,
+    {
+      grantOf: async () => ({
+        profile: {
+          scopes: [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+          ],
+        },
+      }),
+      find: () => [{ id: "google-1", state: () => "working", act: { invoke } }],
+    } as unknown as ConnectionRegistry,
+    {
+      claimApprovedSend: (id, argsHash) =>
+        rome.repos.approvals.claimApprovedEffect(id, GMAIL_SEND_ACTION, argsHash),
+    },
+  );
   rome.actionRegistry.register({
     config: {
       name: "test:scheduled_gmail",
