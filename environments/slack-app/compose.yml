@@ -97,7 +97,7 @@ services:
       - 127.0.0.1:${FAKE_SLACK_PORT}:8080
     networks:
       default:
-        aliases: [slack.com, api.slack.com]
+        aliases: [slack.com, api.slack.com, wss-primary.slack.com]
 
   relay:
     <<: *node

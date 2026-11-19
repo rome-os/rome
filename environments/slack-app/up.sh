@@ -137,7 +137,14 @@ set +a
 
 # The fake Slack answers as https://slack.com inside the network with this
 # certificate. SLACKENV_EXTRA_CA adds a CA the host's own network needs.
-if [ ! -f "$STATE_DIR/tls/tls.crt" ]; then node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" slack.com api.slack.com; fi
+# wss-primary.slack.com is where Socket Mode connects (slack_bot). A certificate
+# made for fewer names is made again.
+TLS_NAMES="slack.com api.slack.com wss-primary.slack.com"
+if [ ! -f "$STATE_DIR/tls/tls.crt" ] || [ "$(cat "$STATE_DIR/tls/names" 2>/dev/null)" != "$TLS_NAMES" ]; then
+  # shellcheck disable=SC2086 # one argument per name
+  node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" $TLS_NAMES
+  echo "$TLS_NAMES" >"$STATE_DIR/tls/names"
+fi
 cat "$STATE_DIR/tls/tls.crt" ${SLACKENV_EXTRA_CA:+"$SLACKENV_EXTRA_CA"} >"$STATE_DIR/trust.pem"
 chmod 644 "$STATE_DIR/tls/tls.key" # read by the fake Slack's container user; the key guards nothing outside this environment
 

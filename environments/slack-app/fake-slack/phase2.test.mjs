@@ -553,3 +553,109 @@ test("a group the bot is not in: no reads, posts or search hits from outside it"
   );
   await ctl("/config", { history_limit: true });
 });
+
+test("older Slack apps an upgrade finds: a Socket Mode bot and Rome Cloud's OAuth app", async () => {
+  const B = "TB0000BBBB";
+  const bot = await ctl("/other-app", { team: B, kind: "socket_bot", name: "Rome Bot" });
+  assert.equal(bot.kind, "socket_bot");
+  assert.match(bot.bot_token, /^xoxb-/);
+  assert.match(bot.app_token, /^xapp-/);
+  assert.equal(
+    (await ctl("/other-app", { team: B, kind: "socket_bot", name: "Rome Bot" })).bot_token,
+    bot.bot_token,
+  );
+
+  // Its own identity, distinct from Rome's app.
+  const who = await api("auth.test", {}, bot.bot_token);
+  assert.deepEqual([who.user_id, who.bot_id, who.user], [bot.bot_user_id, bot.bot_id, "rome-bot"]);
+  // An app-level token opens Socket Mode and nothing else; a bot token cannot open it.
+  assert.equal(
+    (await api("apps.connections.open", {}, bot.bot_token)).error,
+    "not_allowed_token_type",
+  );
+  assert.equal(
+    (await api("chat.postMessage", { channel: "UB0000ERIN1", text: "x" }, bot.app_token)).error,
+    "not_allowed_token_type",
+  );
+  const opened = await api("apps.connections.open", {}, bot.app_token);
+  assert.match(opened.url, /^wss:\/\/wss-primary\.slack\.com\/link\/\?ticket=/);
+
+  const url = new URL(opened.url);
+  const ws = new WebSocket(`ws://127.0.0.1:${new URL(base).port}${url.pathname}${url.search}`);
+  const frames = [];
+  ws.onmessage = (m) => {
+    const frame = JSON.parse(m.data);
+    frames.push(frame);
+    if (frame.envelope_id) ws.send(JSON.stringify({ envelope_id: frame.envelope_id }));
+  };
+  await new Promise((r, j) => {
+    ws.onopen = r;
+    ws.onerror = j;
+  });
+  while (!frames.length) await sleep(10);
+  assert.equal(frames[0].type, "hello");
+  assert.equal(frames[0].connection_info.app_id, bot.app_id);
+  // A used ticket does not open a second connection.
+  const reused = new WebSocket(`ws://127.0.0.1:${new URL(base).port}${url.pathname}${url.search}`);
+  await new Promise((r) => {
+    reused.onerror = r;
+    reused.onclose = r;
+  });
+
+  const event = {
+    type: "message",
+    channel_type: "im",
+    channel: "DB000B0000ERIN1",
+    user: "UB0000ERIN1",
+    text: "hi bot",
+    ts: "1700000001.000100",
+  };
+  const sent = await ctl("/socket-event", { app_id: bot.app_id, event });
+  assert.equal(sent.acked, true);
+  assert.equal(frames[1].type, "events_api");
+  assert.equal(frames[1].payload.api_app_id, bot.app_id);
+  assert.equal(frames[1].payload.event.text, "hi bot");
+
+  const posted = await api(
+    "chat.postMessage",
+    { channel: "UB0000ERIN1", text: "from the old bot" },
+    bot.bot_token,
+  );
+  assert.equal(posted.ok, true);
+  const { posts } = await ctl(`/posts?team=${B}`);
+  assert.deepEqual(
+    [posts.at(-1).appId, posts.at(-1).user, posts.at(-1).text],
+    [bot.app_id, bot.bot_user_id, "from the old bot"],
+  );
+  ws.close();
+  for (let i = 0; i < 50 && (await ctl("/state")).open_sockets.length; i++) await sleep(10);
+  const { sockets } = await ctl(`/sockets`);
+  assert.deepEqual(
+    sockets.filter((x) => x.appId === bot.app_id).map((x) => x.event),
+    ["opened", "hello", "sent", "acked", "closed"],
+  );
+
+  // Rome Cloud's earlier OAuth app: a bot token and the installer's user token.
+  const oauth = await ctl("/other-app", { team: B, kind: "oauth", name: "Rome" });
+  assert.equal(oauth.app_token, null);
+  assert.equal(oauth.installed_by, "UB0000GUARD");
+  assert.equal(
+    (await api("chat.postMessage", { channel: "CB0000GENRL", text: "old oauth" }, oauth.bot_token))
+      .ok,
+    true,
+  );
+  assert.equal(
+    (await api("search.messages", { query: "old oauth" }, oauth.user_token)).messages.total,
+    1,
+  );
+  const state = await ctl("/state");
+  assert.deepEqual(
+    state.other_apps.map((a) => [a.kind, a.bot_token_tail]),
+    [
+      ["socket_bot", bot.bot_token.slice(-6)],
+      ["oauth", oauth.bot_token.slice(-6)],
+    ],
+  );
+  assert.ok(!JSON.stringify(state).includes(oauth.bot_token));
+  assert.equal(state.workspaces[1].bot_token_tail.length, 6);
+});

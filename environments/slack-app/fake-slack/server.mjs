@@ -7,7 +7,7 @@
 // Dependency-free on purpose: it runs on a stock Node 22+ image.
 // Usage and the control API are in ../README.md.
 
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -56,6 +56,8 @@ export function loadConfig(overrides = {}) {
       String(overrides.distributed ?? env.FAKE_SLACK_DISTRIBUTED ?? "on"),
     ),
     homeTeam: overrides.homeTeam ?? env.FAKE_SLACK_HOME_TEAM ?? workspaces[0]?.id,
+    // The host a Socket Mode URL names. Inside the network it is the fake.
+    socketHost: overrides.socketHost ?? env.FAKE_SLACK_SOCKET_HOST ?? "wss-primary.slack.com",
     historyWindowMs: Number(
       overrides.historyWindowMs ?? env.FAKE_SLACK_HISTORY_WINDOW_MS ?? 60_000,
     ),
@@ -89,6 +91,11 @@ function emptyState() {
     defaultSignIn: null, // { teamId, userId } preselected on the approve screen
     history: {}, // "teamId/channel" -> messages as Slack holds them, oldest first
     approvals: [], // { seq, at, teamId, userId, outcome: approved|cancelled|refused, error }
+    // Other Slack apps installed in a workspace, as an upgrade finds them: a
+    // guardian's own Socket Mode bot app (slack_bot) or Rome Cloud's earlier
+    // OAuth app (slack). appId -> { appId, teamId, kind, name, botUserId, botId, ... }
+    otherApps: {},
+    sockets: [], // { seq, at, appId, event: opened|hello|closed|sent|acked, detail }
   };
 }
 
@@ -104,6 +111,8 @@ export class FakeSlack {
     }
     this.seedHistory();
     this.saveTimer = null;
+    this.socketTickets = new Map(); // ticket -> appId, one use each
+    this.openSockets = new Set();
     this.rateLimited = new Map(); // "teamId method" -> time of the last call let through
   }
 
@@ -369,6 +378,20 @@ export class FakeSlack {
         profile: { real_name: "Rome", display_name: "Rome", bot_id: botId },
       };
     }
+    const other = Object.values(this.state.otherApps).find(
+      (a) => a.teamId === teamId && a.botUserId === userId,
+    );
+    if (other) {
+      return {
+        id: other.botUserId,
+        team_id: teamId,
+        name: other.botName,
+        real_name: other.name,
+        is_bot: true,
+        deleted: false,
+        profile: { real_name: other.name, display_name: other.botName, bot_id: other.botId },
+      };
+    }
     const m = this.workspace(teamId).members.find((x) => x.id === userId);
     if (!m) return null;
     // Slack shows a member's email only to a token granted users:read.email.
@@ -451,6 +474,10 @@ export class FakeSlack {
     if (!token) return { ok: false, error: "not_authed" };
     if (!tokenInfo) return { ok: false, error: "invalid_auth" };
     if (tokenInfo.revoked) return { ok: false, error: "token_revoked" };
+    // An app-level token opens Socket Mode connections and nothing else.
+    if ((method === "apps.connections.open") !== (tokenInfo.kind === "app")) {
+      return { ok: false, error: "not_allowed_token_type" };
+    }
     if (USER_TOKEN_ONLY.has(method) && tokenInfo.kind === "bot") {
       return { ok: false, error: "not_allowed_token_type" };
     }
@@ -649,6 +676,130 @@ export class FakeSlack {
   }
 
   /** What a message event's message looks like in the conversation's history. */
+  /**
+   * Installs another Slack app in a workspace, as a workspace that used Rome
+   * before the official app would hold one: `socket_bot`, a guardian's own app
+   * on Socket Mode with a bot token and an app-level token (slack_bot), or
+   * `oauth`, Rome Cloud's earlier OAuth app with a bot and a user token
+   * (slack). The same name in the same workspace answers the same app.
+   */
+  addOtherApp({ team, kind, name, scopes, userScopes, installedBy }) {
+    const w = this.workspace(team);
+    if (kind !== "socket_bot" && kind !== "oauth") {
+      throw httpError(400, "kind must be socket_bot or oauth");
+    }
+    const label = name || (kind === "socket_bot" ? "Rome Bot" : "Rome (OAuth)");
+    const found = Object.values(this.state.otherApps).find(
+      (a) => a.teamId === team && a.name === label,
+    );
+    if (found) return found;
+    const n = Object.keys(this.state.otherApps).length + 1;
+    const tag = `${kind === "socket_bot" ? "S" : "O"}${String(n).padStart(2, "0")}`;
+    const suffix = team.replace(/^T/, "").slice(0, 4);
+    const app = {
+      appId: `A0OTHER${tag}${suffix}`,
+      teamId: team,
+      kind,
+      name: label,
+      botName: slackHandle(label),
+      botUserId: `UOTHER${tag}${suffix}`,
+      botId: `BOTHER${tag}${suffix}`,
+      scopes: splitScopes(
+        scopes ??
+          (kind === "socket_bot"
+            ? "app_mentions:read,channels:history,chat:write,groups:history,im:history,im:read,im:write,users:read"
+            : "channels:read,chat:write,groups:read,im:read,mpim:read,users:read"),
+      ),
+      userScopes: splitScopes(userScopes ?? (kind === "oauth" ? "search:read" : "")),
+      installedBy: installedBy ?? w.members.find((m) => m.is_owner)?.id ?? w.members[0].id,
+      installedAt: new Date().toISOString(),
+    };
+    app.botToken = `xoxb-${team}-${randomBytes(12).toString("hex")}`;
+    this.state.tokens[app.botToken] = {
+      teamId: team,
+      kind: "bot",
+      userId: app.botUserId,
+      botId: app.botId,
+      botName: app.botName,
+      appId: app.appId,
+      scopes: app.scopes,
+      revoked: false,
+    };
+    if (kind === "socket_bot") {
+      app.appToken = `xapp-1-${app.appId}-${randomBytes(12).toString("hex")}`;
+      this.state.tokens[app.appToken] = {
+        teamId: team,
+        kind: "app",
+        appId: app.appId,
+        scopes: ["connections:write"],
+        revoked: false,
+      };
+    }
+    if (app.userScopes.length) {
+      app.userToken = `xoxp-${team}-${randomBytes(12).toString("hex")}`;
+      this.state.tokens[app.userToken] = {
+        teamId: team,
+        kind: "user",
+        userId: app.installedBy,
+        appId: app.appId,
+        scopes: app.userScopes,
+        revoked: false,
+      };
+    }
+    this.state.otherApps[app.appId] = app;
+    this.save();
+    return app;
+  }
+
+  recordSocket(appId, event, detail = null) {
+    this.state.sockets.push({
+      seq: this.nextSeq(),
+      at: new Date().toISOString(),
+      appId,
+      event,
+      detail,
+    });
+    this.save();
+  }
+
+  /**
+   * Sends an Events API payload to an app over its open Socket Mode
+   * connection, as Slack does for a Socket Mode app, and waits for the ack.
+   */
+  async sendSocketEvent(appId, event) {
+    const app = this.state.otherApps[appId];
+    if (!app) throw httpError(404, `no app ${appId}`);
+    const open = [...this.openSockets].filter((x) => x.appId === appId);
+    if (!open.length) throw httpError(409, `${appId} has no open Socket Mode connection`);
+    const envelopeId = randomUUID();
+    const payload = {
+      ...this.envelope(app.teamId, event),
+      api_app_id: appId,
+      authorizations: [
+        { enterprise_id: null, team_id: app.teamId, user_id: app.botUserId, is_bot: true },
+      ],
+    };
+    const frame = {
+      envelope_id: envelopeId,
+      payload,
+      type: "events_api",
+      accepts_response_payload: false,
+      retry_attempt: 0,
+      retry_reason: "",
+    };
+    const socket = open.at(-1);
+    const acked = new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), this.config.deliveryTimeoutMs);
+      socket.waiting.set(envelopeId, () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+    socket.send(JSON.stringify(frame));
+    this.recordSocket(appId, "sent", { envelope_id: envelopeId, type: event.type });
+    return { envelope_id: envelopeId, acked: await acked, payload };
+  }
+
   /** Records who answered the approve screen, from which workspace, and how. */
   recordApproval(teamId, userId, outcome, error = null) {
     this.state.approvals.push({
@@ -751,6 +902,9 @@ export class FakeSlack {
               ? "revoked"
               : "active"
             : null,
+          // The last 6 characters of the newest bot token, to tell which
+          // token a copy holds without showing it.
+          bot_token_tail: install ? install.botToken.slice(-6) : null,
           scopes: install?.scopes ?? [],
           members: w.members.map((m) => ({ ...m, im_channel: this.imChannel(w.id, m.id) })),
           groups: (w.channels ?? []).map((c) => ({
@@ -761,6 +915,8 @@ export class FakeSlack {
       }),
       default_sign_in: this.state.defaultSignIn,
       distribution: { on: this.config.distributed, home_team: this.config.homeTeam },
+      other_apps: Object.values(this.state.otherApps).map(publicOtherApp),
+      open_sockets: [...this.openSockets].map((x) => ({ app_id: x.appId, since: x.since })),
       approvals: this.state.approvals,
       history_limit: {
         on: this.config.historyLimit,
@@ -780,11 +936,22 @@ const API_METHODS = {
       ok: true,
       url: `https://${w.domain}.slack.com/`,
       team: w.name,
-      user: isBot ? "rome" : this.member(info.teamId, info.userId).name,
+      user: isBot ? (info.botName ?? "rome") : this.member(info.teamId, info.userId).name,
       team_id: info.teamId,
       user_id: info.userId,
-      ...(isBot ? { bot_id: install.botId } : {}),
+      ...(isBot ? { bot_id: info.botId ?? install.botId } : {}),
       is_enterprise_install: false,
+    };
+  },
+
+  "apps.connections.open"(_args, _token, info) {
+    const app = this.state.otherApps[info.appId];
+    if (!app || app.kind !== "socket_bot") return { ok: false, error: "invalid_auth" };
+    const ticket = randomUUID();
+    this.socketTickets.set(ticket, app.appId);
+    return {
+      ok: true,
+      url: `wss://${this.config.socketHost}/link/?ticket=${ticket}&app_id=${app.appId}`,
     };
   },
 
@@ -838,11 +1005,15 @@ const API_METHODS = {
       blocks: blocks ?? null,
       user: info.userId,
       tokenKind: info.kind,
+      // Which app posted: Rome's, or another installed in the workspace.
+      appId: info.appId ?? this.config.appId,
     };
     this.state.posts.push(post);
     const said = this.remember(info.teamId, channel, {
       user: info.userId,
-      ...(info.kind === "bot" ? { bot_id: install.botId, app_id: this.config.appId } : {}),
+      ...(info.kind === "bot"
+        ? { bot_id: info.botId ?? install.botId, app_id: info.appId ?? this.config.appId }
+        : {}),
       text: post.text,
       ts,
       ...(post.threadTs ? { thread_ts: post.threadTs } : {}),
@@ -851,7 +1022,7 @@ const API_METHODS = {
     });
     // Slack tells an app subscribed to message.im of its own posts in a
     // direct message too, after it answered the call; an app must ignore them.
-    if (info.kind === "bot" && channel.startsWith("D") && this.config.selfEvents) {
+    if (info.kind === "bot" && !info.appId && channel.startsWith("D") && this.config.selfEvents) {
       const { type: _type, ...message } = said;
       const event = {
         type: "message",
@@ -878,7 +1049,9 @@ const API_METHODS = {
       message: {
         type: "message",
         user: info.userId,
-        ...(info.kind === "bot" ? { bot_id: install.botId, app_id: this.config.appId } : {}),
+        ...(info.kind === "bot"
+          ? { bot_id: info.botId ?? install.botId, app_id: info.appId ?? this.config.appId }
+          : {}),
         text: post.text,
         ts,
         ...(post.threadTs ? { thread_ts: post.threadTs } : {}),
@@ -1107,7 +1280,9 @@ const LIST_SCOPES = {
 
 /** The scopes a token holds: a bot token the install's, a user token its own. */
 function granted(slack, info) {
-  return info.kind === "bot"
+  // Rome's app's bot token holds its install's scopes; every other token,
+  // another app's bot token included, holds its own.
+  return info.kind === "bot" && !info.appId
     ? (slack.state.installs[info.teamId]?.scopes ?? [])
     : (info.scopes ?? []);
 }
@@ -1455,6 +1630,28 @@ async function control(slack, method, url, body) {
       return { ok: true, seq: slack.state.seq, posts: slack.posts(q) };
     case "GET /calls":
       return { ok: true, seq: slack.state.seq, calls: slack.calls(q) };
+    case "POST /other-app": {
+      // Setup only: answers the tokens, so a seed can hand them to Rome.
+      const app = slack.addOtherApp({
+        team: body.team,
+        kind: body.kind,
+        name: body.name,
+        scopes: body.scopes,
+        userScopes: body.user_scopes,
+        installedBy: body.installed_by,
+      });
+      return {
+        ok: true,
+        ...publicOtherApp(app),
+        bot_token: app.botToken,
+        app_token: app.appToken ?? null,
+        user_token: app.userToken ?? null,
+      };
+    }
+    case "GET /sockets":
+      return { ok: true, seq: slack.state.seq, sockets: slack.since(slack.state.sockets, q) };
+    case "POST /socket-event":
+      return { ok: true, ...(await slack.sendSocketEvent(body.app_id, body.event)) };
     case "GET /approvals":
       return { ok: true, seq: slack.state.seq, approvals: slack.since(slack.state.approvals, q) };
     case "GET /events":
@@ -1497,6 +1694,7 @@ async function control(slack, method, url, body) {
         ...emptyState(),
         installs: keep.installs,
         tokens: keep.tokens,
+        otherApps: keep.otherApps ?? {},
         history: body.history ? {} : slack.state.history,
         seq: slack.state.seq,
         // Kept, so a message after a reset never takes an earlier one's ts.
@@ -1510,6 +1708,144 @@ async function control(slack, method, url, body) {
     default:
       throw httpError(404, `no control route ${route}`);
   }
+}
+
+function publicOtherApp(app) {
+  return {
+    app_id: app.appId,
+    team_id: app.teamId,
+    kind: app.kind,
+    name: app.name,
+    bot_user_id: app.botUserId,
+    bot_id: app.botId,
+    scopes: app.scopes,
+    user_scopes: app.userScopes,
+    installed_by: app.installedBy,
+    bot_token_tail: app.botToken.slice(-6),
+    user_token_tail: app.userToken ? app.userToken.slice(-6) : null,
+  };
+}
+
+/** Slack's bot handle: lowercase letters, digits, `.`, `-` and `_`. */
+function slackHandle(name) {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "bot"
+  );
+}
+
+/**
+ * Socket Mode, as Slack serves it: a WebSocket at the URL apps.connections.open
+ * answered, which says hello, sends Events API payloads, and takes an ack per
+ * envelope. Only what RFC 6455 needs for text frames, ping and close.
+ */
+function acceptSocket(slack, req, socket) {
+  const url = new URL(req.url, "http://fake-slack");
+  const appId = slack.socketTickets.get(url.searchParams.get("ticket") ?? "");
+  const key = req.headers["sec-websocket-key"];
+  if (url.pathname !== "/link/" || !appId || !key) {
+    socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+    return;
+  }
+  slack.socketTickets.delete(url.searchParams.get("ticket"));
+  const accept = createHash("sha1")
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest("base64");
+  socket.write(
+    `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+  const conn = {
+    appId,
+    since: new Date().toISOString(),
+    waiting: new Map(),
+    send: (text) => socket.write(wsFrame(0x1, Buffer.from(text))),
+  };
+  slack.openSockets.add(conn);
+  slack.recordSocket(appId, "opened");
+  conn.send(
+    JSON.stringify({
+      type: "hello",
+      num_connections: [...slack.openSockets].filter((x) => x.appId === appId).length,
+      debug_info: { host: "fake-slack", build_number: 1, approximate_connection_time: 3600 },
+      connection_info: { app_id: appId },
+    }),
+  );
+  slack.recordSocket(appId, "hello");
+  let buffer = Buffer.alloc(0);
+  socket.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    for (;;) {
+      const frame = readWsFrame(buffer);
+      if (!frame) break;
+      buffer = buffer.subarray(frame.length);
+      if (frame.opcode === 0x8) {
+        socket.end(wsFrame(0x8, Buffer.alloc(0)));
+        return;
+      }
+      if (frame.opcode === 0x9) socket.write(wsFrame(0xa, frame.payload));
+      if (frame.opcode !== 0x1) continue;
+      try {
+        const message = JSON.parse(frame.payload.toString("utf8"));
+        const done = message.envelope_id && conn.waiting.get(message.envelope_id);
+        if (done) {
+          conn.waiting.delete(message.envelope_id);
+          slack.recordSocket(appId, "acked", { envelope_id: message.envelope_id });
+          done();
+        }
+      } catch {
+        // Not JSON: Slack ignores it too.
+      }
+    }
+  });
+  const close = () => {
+    if (!slack.openSockets.delete(conn)) return;
+    slack.recordSocket(appId, "closed");
+  };
+  socket.on("close", close);
+  socket.on("error", close);
+}
+
+function wsFrame(opcode, payload) {
+  const length = payload.length;
+  const head =
+    length < 126
+      ? Buffer.from([0x80 | opcode, length])
+      : length < 65536
+        ? Buffer.from([0x80 | opcode, 126, length >> 8, length & 0xff])
+        : Buffer.concat([Buffer.from([0x80 | opcode, 127]), bigLength(length)]);
+  return Buffer.concat([head, payload]);
+}
+
+function bigLength(length) {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64BE(BigInt(length));
+  return b;
+}
+
+/** One frame from the front of `buffer`, unmasked, or null until it is whole. */
+function readWsFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  const masked = (buffer[1] & 0x80) !== 0;
+  let length = buffer[1] & 0x7f;
+  let offset = 2;
+  if (length === 126) {
+    if (buffer.length < 4) return null;
+    length = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (length === 127) {
+    if (buffer.length < 10) return null;
+    length = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+  const maskAt = offset;
+  if (masked) offset += 4;
+  if (buffer.length < offset + length) return null;
+  const payload = Buffer.from(buffer.subarray(offset, offset + length));
+  if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= buffer[maskAt + (i % 4)];
+  return { opcode, payload, length: offset + length };
 }
 
 /** Sends a member's message event. The message enters Slack's history once
@@ -1531,6 +1867,8 @@ export function start(config = loadConfig()) {
       ).listen(config.tlsPort),
     );
   }
+  for (const server of servers)
+    server.on("upgrade", (req, socket) => acceptSocket(slack, req, socket));
   return { slack, servers };
 }
 
