@@ -114,11 +114,7 @@ export function chatWorkerCalls(
     },
     "channels.query": async (params, caller) => {
       const { channel, chatId, since, until, after, olderThan, newerThan, limit } =
-        parseWorkerCallParams(
-        "channels.query",
-        QueryParams,
-        params,
-      );
+        parseWorkerCallParams("channels.query", QueryParams, params);
       // The dashboard chat reads as the person accountable for the calling
       // action's turn, in the chat it runs in.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>

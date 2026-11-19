@@ -429,7 +429,13 @@ describe("messages port", () => {
 
     await messages!.query({
       chatId,
-      after: { source: "discord_2", timestamp: 1, direction: "inbound", ref: "chat-1:42", body: null },
+      after: {
+        source: "discord_2",
+        timestamp: 1,
+        direction: "inbound",
+        ref: "chat-1:42",
+        body: null,
+      },
     });
     await messages!.query({ chatId });
 
@@ -440,7 +446,13 @@ describe("messages port", () => {
     await expect(
       messages!.query({
         chatId,
-        after: { source: "discord_2", timestamp: 1, direction: "inbound", ref: "other:42", body: null },
+        after: {
+          source: "discord_2",
+          timestamp: 1,
+          direction: "inbound",
+          ref: "other:42",
+          body: null,
+        },
       }),
     ).rejects.toThrow("another chat");
   });

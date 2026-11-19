@@ -23,7 +23,13 @@ const THREAD_CREATED = 18;
 const REPLY = 19;
 const CHAT_INPUT_COMMAND = 20;
 const CONTEXT_MENU_COMMAND = 23;
-const READ_TYPES = new Set([DEFAULT, THREAD_CREATED, REPLY, CHAT_INPUT_COMMAND, CONTEXT_MENU_COMMAND]);
+const READ_TYPES = new Set([
+  DEFAULT,
+  THREAD_CREATED,
+  REPLY,
+  CHAT_INPUT_COMMAND,
+  CONTEXT_MENU_COMMAND,
+]);
 /** A message reference that forwards rather than replies. */
 const FORWARD = 1;
 
@@ -119,7 +125,8 @@ async function channelOf(deps: DiscordHistoryDeps, chatId: string): Promise<Wire
   try {
     return (await deps.get(`/channels/${chatId}`)) as WireChannel;
   } catch (err) {
-    if (refusal(err).status !== 404 || !deps.directChannelFor) throw notReadable(chatId, err) ?? err;
+    if (refusal(err).status !== 404 || !deps.directChannelFor)
+      throw notReadable(chatId, err) ?? err;
     const direct = await deps.directChannelFor(chatId).catch(() => null);
     if (!direct) throw notReadable(chatId, err) ?? err;
     return asReadable(chatId, async () => (await deps.get(`/channels/${direct}`)) as WireChannel);
@@ -197,7 +204,8 @@ function toChannelMessage(
     chatId: message.channel_id as ChatId,
     ...(parent ? { parentChatId: parent as ChatId } : {}),
     senderId: message.author.id,
-    senderDisplayName: message.member?.nick ?? message.author.global_name ?? message.author.username,
+    senderDisplayName:
+      message.member?.nick ?? message.author.global_name ?? message.author.username,
     senderUsername: message.author.username,
     text: deps.textOf(message.content),
     attachments: (message.attachments ?? []).map(toAttachment),

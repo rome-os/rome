@@ -1434,7 +1434,8 @@ Use \`/channel agent clear\` to undo.`,
    *  as a send takes it. */
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
-    const botId = botUser?.id ?? ((await this.rest.get(discordJs().Routes.user())) as { id: string }).id;
+    const botId =
+      botUser?.id ?? ((await this.rest.get(discordJs().Routes.user())) as { id: string }).id;
     return readDiscordHistory(
       {
         get: (route, query) => this.rest.get(route, query ? { query } : {}),
