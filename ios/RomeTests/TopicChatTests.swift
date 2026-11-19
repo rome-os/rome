@@ -90,12 +90,11 @@ import Testing
 
     /// As on the web, a named chat's composer says which chat a message goes to.
     @Test func theComposerNamesTheChatOnceItHasOne() {
-        #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(nil) == "Message")
         let unnamed = ConciergeChat(id: "topic-1", name: "  ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(unnamed, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(unnamed) == "Message")
         let named = ConciergeChat(id: "topic-1", name: " Kyoto trip ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: false) == "Message in Kyoto trip")
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: true) == "Reply")
+        #expect(TopicChatsStore.composerPlaceholder(named) == "Message in Kyoto trip")
     }
 
     /// A chat read beside the pinned drawer (iPad) loses its badge at once.

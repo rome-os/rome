@@ -8,7 +8,7 @@
 //   4. inbound/outbound messages map through the Connection's talker.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
+import { sendThrough } from "../../../chats/connected-accounts/connection-ports.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import {
   type CardActionEvent,
@@ -17,14 +17,14 @@ import {
   type SendInput,
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
-import { isFeishuAuthError } from "../kinds/feishu/feishu.js";
-import { createTestDb } from "../../test/db.js";
-import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleConnectionsRepository } from "../repository-db.js";
-import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talker } from "../types.js";
-import { createFeishuDescriptor, feishuRegistrationAddons } from "./feishu.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
+import { isFeishuAuthError } from "./feishu.js";
+import { createTestDb } from "../../../test/db.js";
+import { CredentialRejected, Disconnected } from "../../errors.js";
+import { DrizzleConnectionsRepository } from "../../repository-db.js";
+import { ConnectionRegistry } from "../../registry.js";
+import type { Connection, StreamFault, Talker } from "../../types.js";
+import { createFeishuDescriptor, feishuRegistrationAddons } from "./descriptor.js";
 
 // A fresh drizzle-backed ledger per test; opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];

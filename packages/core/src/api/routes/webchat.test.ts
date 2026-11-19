@@ -251,7 +251,6 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
-      expect(await status(visitor, `/chat/sessions/${id}/messages/read`, post)).toBe(404);
     }
     // Nor the guardian the visitor's.
     expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
@@ -296,13 +295,7 @@ describe("Webchat API", () => {
         waitExpiry: 60_000,
       }),
       onCardSettled: () => () => {},
-      deps: {
-        tasks: {
-          repo: {
-            threadTasks: async () => new Map(),
-          },
-        },
-      },
+      deps: { tasks: {} },
     } as never;
     const app = createWebchatRuntime(deps).routes;
     const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
@@ -2146,49 +2139,6 @@ describe("Webchat API", () => {
     expect(afterRead.find((session) => session.id === created.id)).toMatchObject({
       unread: false,
     });
-  });
-
-  it("marks the messages it is given read, one chat's only, and reads each message's mark", async () => {
-    const app = createWebchatRuntime(deps).routes;
-    await deps.webchatRepo.createSession("read-chat", "Reads");
-    await deps.webchatRepo.recordUserInput("m1", "read-chat", "[]");
-    const reply = (
-      await deps.webchatRepo.addBackendMessage(
-        "read-chat",
-        "turn-1",
-        [{ type: "text", content: "Sunny" }],
-        { replyTo: "m1" },
-      )
-    ).id;
-    const mark = (id: string, body: unknown) =>
-      app.request(`/chat/sessions/${id}/messages/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    const readOf = async () =>
-      new Map(
-        (
-          (await (await app.request("/chat/sessions/read-chat/messages")).json()) as {
-            id: string;
-            read?: boolean;
-          }[]
-        ).map((message) => [message.id, message.read]),
-      );
-    expect(await readOf()).toEqual(
-      new Map([
-        ["m1", true],
-        [reply, false],
-      ]),
-    );
-
-    expect((await mark("read-chat", { ids: "nope" })).status).toBe(400);
-    expect((await mark("read-chat", { ids: [1] })).status).toBe(400);
-    expect((await mark("missing-chat", { ids: [reply] })).status).toBe(404);
-    const res = await mark("read-chat", { ids: [reply, "m1", "unknown"] });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ marked: 1 });
-    expect((await readOf()).get(reply)).toBe(true);
   });
 
   it("emits a content-free OTLP event after a chat session is created", async () => {
@@ -4815,9 +4765,8 @@ describe("Webchat API", () => {
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
-      const repo = new ConciergeTasksRepository(testDb.db);
       deps.concierge = {
-        deps: { tasks: { repo } },
+        deps: { tasks: {} },
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
@@ -4848,7 +4797,7 @@ describe("Webchat API", () => {
       // The Concierge reads which message it is, and its thread's root: a
       // message sent from the composer replies to nothing, so it is its own.
       const first = sentTurns[0]?.prompt.match(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" root="\1"\/>\n\nhello$/,
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
       )?.[1] as string;
       expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
@@ -4879,9 +4828,7 @@ describe("Webchat API", () => {
 
       // The dashboard's Reply replies to that message and shows its quote.
       await send({ text: "about that", replyToMessageId: first });
-      expect(sentTurns[2]?.prompt).toMatch(
-        new RegExp(`<chat_thread message_id="[^"]+" root="${first}"/>`),
-      );
+      expect(sentTurns[2]?.prompt).toMatch(/<chat_thread message_id="[^"]+"\/>/);
       const replied = lineOf(sentTurns[2]?.prompt);
       expect(replied).toMatchObject({ replyTo: firstLine.id, root: firstLine.id });
       expect(JSON.parse(replied.parts)).toEqual([
@@ -4889,51 +4836,18 @@ describe("Webchat API", () => {
         { type: "text", content: "about that" },
       ]);
 
-      // A task started in the thread adds nothing to the line: it names the message and its root.
-      await repo.upsertMany([
-        { title: 'Book "dinner"', state: "doing", chatId: "topic-1", sourceMessageId: first },
-      ]);
-      // A composer focused on the thread replies to its last message, and shows its quote.
-      await send({ text: "and later?", chatThread: first });
-      expect(sentTurns[3]?.prompt).toContain(
-        `<chat_thread message_id="${lineOf(sentTurns[3]?.prompt).key}" root="${first}"/>`,
-      );
-      const focused = lineOf(sentTurns[3]?.prompt);
-      expect(focused).toMatchObject({ replyTo: replied.id, root: firstLine.id });
-      expect(JSON.parse(focused.parts)).toEqual([
+      // A reply to that reply is in the same thread, and quotes it.
+      await send({ text: "and later?", replyToMessageId: replied.key });
+      const later = lineOf(sentTurns[3]?.prompt);
+      expect(later).toMatchObject({ replyTo: replied.id, root: firstLine.id });
+      expect(JSON.parse(later.parts)).toEqual([
         expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
         { type: "text", content: "and later?" },
       ]);
 
-      // A Reply wins over the focus.
-      await send({ text: "no, that one", chatThread: first, replyToMessageId: first });
-      expect(lineOf(sentTurns[4]?.prompt)).toMatchObject({
-        replyTo: firstLine.id,
-        root: firstLine.id,
-      });
-
-      // A client that sends the message it tapped, not the root, gets the same thread.
-      await send({ text: "from an older build", chatThread: lineOf(sentTurns[3]?.prompt).key });
-      expect(lineOf(sentTurns[5]?.prompt)).toMatchObject({
-        replyTo: lineOf(sentTurns[4]?.prompt).id,
-        root: firstLine.id,
-      });
-
-      // A focus on no thread of the chat replies to nothing.
-      await send({ text: "hello again", chatThread: "elsewhere" });
-      expect(lineOf(sentTurns[6]?.prompt)).toMatchObject({ replyTo: null, root: null });
-
-      // A client that names the message it quotes gets exactly that one, not
-      // the thread's last: the server does not resolve the thread again.
-      await send({ text: "as shown", chatThread: first, replyToMessageId: replied.key });
-      expect(lineOf(sentTurns[7]?.prompt)).toMatchObject({
-        replyTo: replied.id,
-        root: firstLine.id,
-      });
-      expect(JSON.parse(lineOf(sentTurns[7]?.prompt).parts)).toEqual([
-        expect.objectContaining({ type: "reply_to", messageId: replied.key, text: "about that" }),
-        { type: "text", content: "as shown" },
-      ]);
+      // A field a client from before sent for a focused composer changes nothing.
+      await send({ text: "hello again", chatThread: first });
+      expect(lineOf(sentTurns[4]?.prompt)).toMatchObject({ replyTo: null, root: null });
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -4980,7 +4894,7 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({
         ...deps,
         accounts: deps.modelAccounts,
-        tasks: { repo: { threadTasks: async () => new Map() }, onMessageStatus: () => () => {} },
+        tasks: { onMessageStatus: () => () => {} },
       } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
       deps.agentSessionManager.open = rs.fn(async (key: AgentSessionKey, init?: SessionOpening) => {
@@ -6401,16 +6315,15 @@ describe("Webchat API", () => {
       const cardOf = (toolUseId: string) => rows().find((row) => row.parts.includes(toolUseId))!;
       const startRow = rows().find((row) => row.key === start.id)!;
 
-      // The owner wrote inside the thread: the card replies there, with no name.
+      // The owner wrote inside a thread: the card that names no message replies to nothing.
       await send("topic-1", { replyToMessageId: start.id });
       const inThread = cardOf("tu-1");
-      expect(inThread.replyTo).not.toBeNull();
-      expect(inThread.root).toBe(startRow.id);
+      expect([inThread.replyTo, inThread.root]).toEqual([null, null]);
       expect(JSON.parse(inThread.parts)).toEqual([
         expect.objectContaining({ type: "pending_interaction", toolUseId: "tu-1" }),
       ]);
 
-      // The owner wrote on the main line: the card replies to the message it names.
+      // The card replies to the message it names.
       ask = { toolUseId: "tu-2", replyTo: start.id };
       await send("topic-1", {});
       const named = cardOf("tu-2");
@@ -6423,6 +6336,63 @@ describe("Webchat API", () => {
       await send(plain, {});
       expect(await findCard(plain, "tu-3")).toBeDefined();
       expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
+    });
+
+    it("answers a request to page a chat as a Concierge chat with not_concierge, which clients read as: page the way any chat is paged", async () => {
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      const res = await app.request(`/chat/sessions/${sessionId}/messages?type=concierge&limit=40`);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "not_concierge" });
+      // The same chat pages by message.
+      const page = await app.request(`/chat/sessions/${sessionId}/messages?limit=20`);
+      expect(page.status).toBe(200);
+    });
+
+    it("pages a chat by message in the order they were said, with the traces of its turns, when two turns interleave", async () => {
+      await deps.webchatRepo.createSession("paged", "Paged");
+      rs.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const say = async (
+          seconds: number,
+          id: string,
+          role: "user" | "assistant" | "trace",
+          turn: string,
+        ) => {
+          rs.setSystemTime(new Date(1_800_000_000_000 + seconds * 1_000));
+          const parts = JSON.stringify([{ type: "text", content: id }]);
+          await deps.webchatRepo.addMessage(
+            id,
+            "paged",
+            role,
+            role === "trace" ? "[]" : parts,
+            turn,
+          );
+        };
+        // Owner-A, owner-B queued behind A's turn, then A's answer and B's.
+        await say(0, "owner-a", "user", "turn-a");
+        await say(1, "owner-b", "user", "turn-b");
+        await say(2, "trace-a", "trace", "turn-a");
+        await say(3, "answer-a", "assistant", "turn-a");
+        await say(4, "answer-b", "assistant", "turn-b");
+      } finally {
+        rs.useRealTimers();
+      }
+      const app = createWebchatRuntime(deps).routes;
+      type Page = { messages: { id: string }[]; nextCursor: string | null };
+      const read = async (query: string) =>
+        (await (await app.request(`/chat/sessions/paged/messages?${query}`)).json()) as Page;
+      const ids = (page: Page) => page.messages.map((message) => message.id);
+
+      const newest = await read("limit=2");
+      expect(ids(newest)).toEqual(["answer-a", "trace-a", "answer-b"]);
+      expect(newest.nextCursor).toEqual(expect.any(String));
+      const older = await read(`limit=2&before=${newest.nextCursor}`);
+      expect(ids(older)).toEqual(["owner-a", "owner-b", "trace-a"]);
+      expect(older.nextCursor).toBeNull();
+      expect((await app.request("/chat/sessions/paged/messages?limit=2&before=abc")).status).toBe(
+        400,
+      );
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {
@@ -8060,12 +8030,7 @@ describe("Webchat API", () => {
       await events.cancel();
     });
 
-    it("names a chat thread on its messages when they arrive, and leaves a thread no task started in unnamed", async () => {
-      const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = {
-        deps: { tasks: new ConciergeTasks(repo) },
-        onCardSettled: () => () => {},
-      } as never;
+    it("tells the thread a message is in, and sends no thread name", async () => {
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -8075,6 +8040,7 @@ describe("Webchat API", () => {
         undefined,
         "core:concierge",
       );
+      deps.concierge = { onCardSettled: () => () => {}, deps: { tasks: {} } } as never;
       const text = (content: string) => JSON.stringify([{ type: "text", content }]);
       const reply = async (to: string, content: string) =>
         (
@@ -8085,52 +8051,23 @@ describe("Webchat API", () => {
       await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
       const answer = await reply("g1", "Looking it up");
       await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
-      // A thread no task started in has a thread, and no title: a client names it.
-      const long = "Tell me a long story about a lighthouse keeper and the sea, in detail.";
-      await deps.webchatRepo.addMessage("g4", "topic", "user", text(long), "turn-4");
-      const story = await reply("g4", "Once upon a time");
-      const [tokyo] = await repo.upsertMany(
-        [{ title: "Tokyo weather", state: "doing", chatId: "topic", sourceMessageId: "g1" }],
-        new Date(1_000),
-      );
-      // Several tasks started in one thread: it takes the newest one's title.
-      await repo.upsertMany(
-        [{ title: "London weather", state: "doing", chatId: "topic", sourceMessageId: answer }],
-        new Date(2_000),
-      );
-      expect(tokyo).toBeDefined();
       const app = createWebchatRuntime(deps).routes;
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
         id: string;
         chatThreadId?: string | null;
-        chatThreadTitle?: string;
       }[];
       const named = (id: string) => listed.find((m) => m.id === id);
-      expect(named("g1")).toMatchObject({ chatThreadId: "g1", chatThreadTitle: "London weather" });
-      expect(named(answer)).toMatchObject({
-        chatThreadId: "g1",
-        chatThreadTitle: "London weather",
-      });
-      for (const id of ["g4", story]) {
-        expect(named(id)).toMatchObject({ chatThreadId: "g4" });
-        expect(named(id)).not.toHaveProperty("chatThreadTitle");
-      }
-      // A message alone is the root of its own thread, which no task started in.
+      expect(named("g1")).toMatchObject({ chatThreadId: "g1" });
+      expect(named(answer)).toMatchObject({ chatThreadId: "g1" });
+      // A message alone is the root of its own thread.
       expect(named("g3")).toMatchObject({ chatThreadId: "g3" });
-      expect(named("g3")).not.toHaveProperty("chatThreadTitle");
-      // The thread reads whole by its root or by any message of it, as shipped apps send the one tapped.
-      for (const key of ["g1", answer]) {
-        const thread = (await (
-          await app.request(`/chat/sessions/topic/messages?thread=${key}`)
-        ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
-        expect(thread.messages.map((m) => [m.id, m.chatThreadId])).toEqual([
-          ["g1", "g1"],
-          [answer, "g1"],
-        ]);
-      }
+      for (const message of listed) expect(message).not.toHaveProperty("chatThreadTitle");
+      // The thread is read with the chat's own pages: `thread` asks for nothing more.
+      const paged = await app.request("/chat/sessions/topic/messages?thread=g1&limit=10");
+      expect(((await paged.json()) as { messages: unknown[] }).messages).toHaveLength(3);
 
-      // A message that arrives live carries its thread and the thread's name.
+      // A message that arrives live carries its thread.
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
       const arrived = readSseUntil(events, "Same thread");
       const live = await reply("g1", "Same thread");
@@ -8138,15 +8075,7 @@ describe("Webchat API", () => {
       expect(told).toContain("event: message_insert");
       expect(told).toContain(`"id":"${live}"`);
       expect(told).toContain('"chatThreadId":"g1"');
-      expect(told).toContain('"chatThreadTitle":"London weather"');
-      // One that replies to nothing is the root of its own thread, which has no name.
-      const fresh = readSseUntil(events, "Fresh start");
-      const { id: freshId } = await deps.webchatRepo.addBackendMessage("topic", "turn-5", [
-        { type: "text", content: "Fresh start" },
-      ]);
-      const freshTold = await fresh;
-      expect(freshTold).toContain(`"chatThreadId":"${freshId}"`);
-      expect(freshTold).not.toContain("chatThreadTitle");
+      expect(told).not.toContain("chatThreadTitle");
       await events.cancel();
     });
 

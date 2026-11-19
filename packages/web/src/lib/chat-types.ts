@@ -163,20 +163,6 @@ export interface CreateTurnResponse {
   content?: string;
 }
 
-/**
- * What a Concierge chat knows of a chat thread without having its replies: how
- * many replies its stack counts, how many of them the owner has not seen, and
- * the newest one (docs/domains/chats.md#chat-thread).
- */
-export interface ThreadSummary {
-  replyCount: number;
-  unreadCount: number;
-  /** The newest reply that counts. */
-  latestReply: ChatMessage;
-  /** When the newest reply the owner has not seen was said, in ms; 0 when none waits. Orders the threads that wait. */
-  unreadAt: number;
-}
-
 export interface ChatMessage {
   id: string;
   sessionId: string;
@@ -189,21 +175,9 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
-  /** The chat thread the message is in, in a Concierge chat: the key of its
-   *  root, the first message of the reply chain. The server sends it only for
-   *  a message in a thread of more than one, and not again for a root that
-   *  gains its first reply: a root's own id names its thread then. Absent or
-   *  null for a message alone in its thread. */
-  chatThreadId?: string | null;
-  /** The thread's name, on every message of a thread of more than one: its
-   *  newest task's title, else the start of its root's text. */
-  chatThreadTitle?: string | null;
   /** The emoji the Concierge reacted to a guardian message of its chat with.
    *  Absent when it has none, and from servers before it. */
   reaction?: string | null;
-  /** Whether the owner has seen the message (docs/domains/chats.md#chat-thread).
-   *  Absent from servers before it, and then every message reads as seen. */
-  read?: boolean;
   /** Rome's status on a guardian message of a Concierge chat, shown over its
    *  reaction. Absent when it has none, and from servers before it. */
   status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;

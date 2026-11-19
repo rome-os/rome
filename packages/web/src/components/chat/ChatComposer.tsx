@@ -100,8 +100,6 @@ export interface ChatComposerSnapshot {
   // The message this turn replies to, sent as `replyToMessageId` (and
   // `replyQuote` for a selection).
   replyTo?: ReplyTarget;
-  // The root of the chat thread the chat is focused on, sent as `chatThread`.
-  chatThread?: string;
 }
 
 export interface ChatComposerSendControls {

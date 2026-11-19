@@ -29,7 +29,7 @@ extension EnvironmentValues {
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
 /// The long-press menu of a message bubble: its time on top, then Reply
-/// where a thread can open, Copy and Share.
+/// where a message can be replied to, Copy and Share.
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
@@ -37,8 +37,6 @@ struct BubbleMenu {
     var onReply: (() -> Void)? = nil
     /// Opens share mode on the message's turn; nil shares the text.
     var onShare: (() -> Void)? = nil
-    /// Inside a thread view: a tap on the bubble stays on it.
-    var inThread = false
     /// A message that did not go through: its reason and what to do come first.
     var problem: SendProblem? = nil
 }
@@ -74,15 +72,9 @@ private struct BubbleMenuItems: View {
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu. Inside a
-    /// thread view it keeps its own tap, so one on the message never closes it.
-    @ViewBuilder
+    /// The bubble lifts under the finger with the system's menu.
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        if menu.inThread {
-            self.onTapGesture {}.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        } else {
-            self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        }
+        contextMenu { BubbleMenuItems(text: text, menu: menu) }
     }
 }
 
@@ -96,13 +88,11 @@ struct UserBubble: View {
     var menu = BubbleMenu()
     /// The badge on the message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark? = nil
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
-    /// The thread this message roots, as a stack under its bubble.
-    var stack: ThreadStack? = nil
-    var onOpenStack: () -> Void = {}
     @Environment(\.rowTinted) private var tinted
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
@@ -134,15 +124,11 @@ struct UserBubble: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
-                            // Only photos alone carry it, and the stack hangs from them.
+                            // Only photos alone carry it.
                             .markBadge(hasBubble ? nil : mark)
-                            .threadStack(hasBubble ? nil : stack, onOpen: onOpenStack)
                     }
                     if hasBubble {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let quote {
-                                QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
-                            }
+                        Group {
                             if !text.isEmpty {
                                 Text(text)
                                     .romeFont(16)
@@ -150,14 +136,13 @@ struct UserBubble: View {
                                     .foregroundStyle(.white)
                             }
                         }
-                            .stackMinWidth(stack)
+                            .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
                             .markBadge(mark)
-                            .threadStack(stack, onOpen: onOpenStack)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -363,13 +348,11 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
-    /// The thread this message roots, as a stack under its bubble.
-    var stack: ThreadStack? = nil
-    var onOpenStack: () -> Void = {}
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
     static var startsExpanded = false
@@ -424,9 +407,6 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let quote {
-                QuotedReply(quote: quote, tone: .received, onTap: onQuote)
-            }
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -440,13 +420,13 @@ struct AgentBubble: View {
             // Open, it sits right under the last line.
             if folds && expanded { expandButton.padding(.top, -6) }
         }
-        .stackMinWidth(stack)
+        .quotedAbove(quote, tone: .received, onTap: onQuote)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
-        .bubbleWidth(stack: stack, onOpenStack: onOpenStack)
+        .bubbleWidth()
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into
@@ -536,9 +516,6 @@ struct TaskCard: View {
     let title: String
     /// How the task chat stands; nil keeps the bare "Task".
     var state: TaskCardState? = nil
-    /// The thread this message roots, as a stack under the card.
-    var stack: ThreadStack? = nil
-    var onOpenStack: () -> Void = {}
     let action: () -> Void
 
     /// The line above the title.
@@ -570,7 +547,7 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .bubbleWidth(stack: stack, onOpenStack: onOpenStack)
+        .bubbleWidth()
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
         .accessibilityIdentifier("task-card")
     }
@@ -591,8 +568,9 @@ struct TimeSeparator: View {
     }
 }
 
-/// The spacing above a row, which carries the design's rhythm: 3 pt inside a
-/// run, 18 pt when the sender changes, room around time separators.
+/// The spacing above a row, which carries the design's rhythm: 2 pt inside a
+/// run of replies to one message, 8 pt between other bubbles, 18 pt when the
+/// sender changes, room around time separators.
 enum TranscriptSpacing {
     static func top(_ row: TranscriptRow, after previous: TranscriptRow?) -> CGFloat {
         guard let previous else { return 8 }
@@ -611,7 +589,8 @@ enum TranscriptSpacing {
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {
-        case (.agentText, .agentText): return 3
+        case (.agentText(_, _, _, _, let position), .agentText(_, _, _, _, let above)):
+            return position.joinsAbove && above.joinsBelow ? 2 : 8
         case (.taskCard, .agentText), (.agentText, .taskCard), (.taskCard, .taskCard): return 6
         case (.taskAsk, .agentText), (.agentText, .taskAsk): return 6
         default: return 12

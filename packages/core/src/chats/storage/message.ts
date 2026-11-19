@@ -48,10 +48,6 @@ export interface InboundMessage {
    *  as the dashboard does. Absent, the body's text is its one part. */
   readonly parts?: readonly MessagePart[];
   readonly replyTo?: string;
-  /** Whether the chat's owner has seen it by the time it is recorded, as
-   *  for what the owner said themselves. Absent, it is unread
-   *  (docs/domains/chats.md#chat-thread). */
-  readonly read?: boolean;
   readonly at: Date;
 }
 

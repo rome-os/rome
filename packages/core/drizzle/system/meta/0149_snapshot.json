@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e458fb9d-0fb5-4bd9-af4d-d2ae8999fa6a",
-  "prevId": "834b45fc-1377-4e62-b602-5ac0e78f1720",
+  "id": "28c4377b-fe7e-4651-91fa-597af5898325",
+  "prevId": "57db660b-8330-4a96-908b-6c182a48a6fd",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -1001,13 +1001,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -5010,67 +5003,6 @@
             "event_id"
           ],
           "name": "slack_app_messages_team_id_event_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "slack_app_timeline": {
-      "name": "slack_app_timeline",
-      "columns": {
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "prev_ts": {
-          "name": "prev_ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "said_at": {
-          "name": "said_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "slack_app_timeline_team_id_channel_id_ts_pk": {
-          "columns": [
-            "team_id",
-            "channel_id",
-            "ts"
-          ],
-          "name": "slack_app_timeline_team_id_channel_id_ts_pk"
         }
       },
       "uniqueConstraints": {},

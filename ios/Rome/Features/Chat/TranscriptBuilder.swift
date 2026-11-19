@@ -23,8 +23,8 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     var files: [OutgoingFile] = []
     let createdAt: Date
     var state: State
-    /// Sent from a chat thread: a retry goes to the same thread.
-    var thread: ThreadTarget? = nil
+    /// The message it replies to: a retry replies to it too.
+    var reply: ReplyTarget? = nil
     /// Kept as a draft until the server takes it; a resend keeps none.
     var keepsDraft = true
 }
@@ -35,10 +35,16 @@ enum UserImage: Hashable, Sendable {
     case stored(UploadLines.Upload)
 }
 
-/// Where a bubble sits in its run of same-sender bubbles. It decides the
-/// small corner: the first bubble's bottom-left, the last bubble's top-left.
+/// Where a bubble sits in its run of the Concierge's bubbles that reply to the
+/// same message. It decides the small corner: the first bubble's bottom-left,
+/// the last bubble's top-left, and the gap between them.
 enum BubblePosition: Hashable, Sendable {
     case single, first, middle, last
+
+    /// Joined to the bubble above it.
+    var joinsAbove: Bool { self == .middle || self == .last }
+    /// Joined to the bubble below it.
+    var joinsBelow: Bool { self == .first || self == .middle }
 }
 
 /// One row of a transcript, ready to draw.
@@ -123,11 +129,10 @@ enum TranscriptRow: Identifiable, Hashable {
     }
 }
 
-/// Turns stored messages into rows. Messages from one sender less than five
-/// minutes apart form a group; a gap of an hour or a new day gets a
-/// time separator, which also ends the group.
+/// Turns stored messages into rows. The Concierge's messages that reply to
+/// the same message, one after the other, form a run, however far apart; a gap
+/// of an hour or a new day gets a time separator, which also ends the run.
 enum TranscriptBuilder {
-    static let groupGap: TimeInterval = 5 * 60
     static let separatorGap: TimeInterval = 60 * 60
 
     struct Options {
@@ -139,9 +144,6 @@ enum TranscriptBuilder {
         var typing = false
         /// The message the unread line goes above; it ends the run before it.
         var unreadFrom: String? = nil
-        /// The replies of a chat thread that a stack under their root stands
-        /// for: counted in everything the turns say, drawn as no row.
-        var stacked: Set<String> = []
     }
 
     static func rows(
@@ -160,6 +162,15 @@ enum TranscriptBuilder {
             let bubbleIndexes: [Int]
             /// A faint line of its own, which ends a run of bubbles.
             var notice = false
+            /// The message the Concierge's message replies to, by its quote.
+            var replyTarget: String? = nil
+
+            /// Whether this entry goes on the run `previous` is in: both the
+            /// Concierge's, replying to the same message.
+            func continues(_ previous: Entry?) -> Bool {
+                guard let previous, !guardian, !notice, !previous.guardian, !previous.notice else { return false }
+                return replyTarget != nil && replyTarget == previous.replyTarget
+            }
         }
 
         var entries: [Entry] = []
@@ -236,7 +247,6 @@ enum TranscriptBuilder {
             // rule, said on the owner's behalf or not, draws nothing. What the
             // Concierge answers it with shows as it always did.
             if options.showNotices, Self.isAutomated(message) { continue }
-            if options.stacked.contains(message.id) { continue }
             if message.isTrace {
                 var rows: [TranscriptRow] = []
                 if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
@@ -301,7 +311,8 @@ enum TranscriptBuilder {
                 rows.append(.sourceLabel(id: "source-\(message.id)", text: SourceCopy.label(source)))
             }
             if !rows.isEmpty {
-                entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
+                let target = message.isUser ? nil : parsed[position].lazy.compactMap(\.replyQuote).first?.messageId
+                entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles, replyTarget: target))
             }
         }
         // What the guardian just sent is newer than anything stored.
@@ -313,7 +324,8 @@ enum TranscriptBuilder {
             ))
         }
 
-        // Walk the entries: separators, then corner shapes for each agent run.
+        // Walk the entries: separators, then corner shapes for each run of the
+        // Concierge's messages that reply to the same message.
         var output: [TranscriptRow] = []
         var previous: Entry?
         var agentRun: [Int] = []
@@ -343,7 +355,7 @@ enum TranscriptBuilder {
             if previous == nil || gap >= separatorGap || newDay {
                 closeRun()
                 output.append(.separator(id: "sep-\(entry.id)", date: entry.date))
-            } else if entry.guardian != previous?.guardian || gap >= groupGap || entry.notice || previous?.notice == true {
+            } else if !entry.continues(previous) {
                 closeRun()
             }
             if entry.id == options.unreadFrom {
@@ -351,8 +363,8 @@ enum TranscriptBuilder {
                 output.append(.unreadDivider)
             }
             for (index, row) in entry.rows.enumerated() {
-                // Cards sit inside an agent run without breaking its corner chain:
-                // the run's first and last bubbles keep their small corners.
+                // A run's bubbles join: its first keeps a small bottom-left corner
+                // and its last a small top-left corner.
                 if entry.bubbleIndexes.contains(index) {
                     agentRun.append(output.count)
                 }
@@ -416,75 +428,6 @@ enum TranscriptBuilder {
         // "Didn't finish: <text>".
         let summary = trace.traceSummary
         return TurnError(text: text, code: summary?.terminalErrorCode, provider: summary?.terminalErrorProvider, reason: summary?.terminalErrorReason, didntFinish: true)
-    }
-
-    /// The thread each message of `messages` that is in a thread of more than
-    /// one is in, by message id, as the root's key. The server sends
-    /// `chatThreadId` for every message of a Concierge chat: the root's key,
-    /// the message's own when it replies to nothing. A message is in a thread
-    /// of more than one when its root is another message, or when a loaded
-    /// message says it is the root.
-    static func threadRoots(_ messages: [ChatMessage]) -> [String: String] {
-        let named = Set(messages.compactMap { $0.chatThreadId == $0.id ? nil : $0.chatThreadId })
-        var roots: [String: String] = [:]
-        for message in messages {
-            // A message that names no root of its own is its own: a root held
-            // from before its first reply says none, and the reply names it.
-            let own = message.chatThreadId ?? message.id
-            if own != message.id || named.contains(message.id) { roots[message.id] = own }
-        }
-        return roots
-    }
-
-    /// The name of each chat thread of more than one, by its root: the title
-    /// of the newest task whose start message is in it, which any of its
-    /// messages carries, else the start of the root's text when the root is
-    /// loaded.
-    static func threadTitles(_ messages: [ChatMessage], roots: [String: String]? = nil) -> [String: String] {
-        var titles: [String: String] = [:]
-        for message in messages {
-            if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
-                titles[root] = title
-            }
-        }
-        let named = Set((roots ?? threadRoots(messages)).values)
-        for message in messages where named.contains(message.id) && titles[message.id] == nil {
-            if let name = startOfText(message) { titles[message.id] = name }
-        }
-        return titles
-    }
-
-    /// The first line of a message's text, as plain reading text, cut short
-    /// with an ellipsis; nil when it has none.
-    static func startOfText(_ message: ChatMessage) -> String? {
-        guard let text = message.parts.lazy.compactMap(\.textContent).first else { return nil }
-        let line = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        let plain = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "").replacingOccurrences(of: "`", with: "")
-            .drop(while: { "#>-*+ \t".contains($0) })
-            .trimmingCharacters(in: .whitespaces)
-        guard !plain.isEmpty else { return nil }
-        return plain.count > 50 ? String(plain.prefix(49)) + "…" : plain
-    }
-
-    /// The adjacent replies of `messages`, by message id
-    /// (docs/domains/chats.md#chat-thread). A reply is adjacent when the
-    /// previous message that is drawn is its target, or answers the same
-    /// target. An adjacent reply shows no quote and nothing in its place. A
-    /// trace and a message with no words are not drawn, so they do not count,
-    /// and neither does a message in `hidden`, such as a reply a stack stands for.
-    static func adjacentReplies(_ messages: [ChatMessage], hidden: Set<String> = []) -> Set<String> {
-        var adjacent: Set<String> = []
-        var previous: (id: String, target: String?)?
-        for message in messages where !message.isTrace && !hidden.contains(message.id) {
-            let parts = message.parts
-            guard parts.contains(where: { $0.textContent != nil }) || parts.contains(where: { $0.isVisible }) else { continue }
-            let target = parts.lazy.compactMap(\.replyQuote).first?.messageId
-            if let target, let previous, previous.id == target || previous.target == target {
-                adjacent.insert(message.id)
-            }
-            previous = (message.id, target)
-        }
-        return adjacent
     }
 
     /// The lines a turn's trace summary asks for: the session it renewed.

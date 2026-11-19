@@ -4,7 +4,6 @@ import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../oauth/oauth-providers.js";
@@ -20,22 +19,18 @@ import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
-import { createFeishuDescriptor } from "./feishu.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
 import { createWechatDescriptor } from "./wechat.js";
-import { createWechatUserDescriptor } from "./wechat-user.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
-export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
-export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -54,9 +49,9 @@ export interface BuiltinConnectionDeps {
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
-  /** Loaded-agent lister (Discord/Feishu agent-binding validation + autocomplete). */
+  /** Loaded-agent lister (Discord agent-binding validation + autocomplete). */
   listAgents: () => string[];
-  /** The agent linked to a Connection's channel (Discord/Feishu in-chat settings). */
+  /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** A test-only back door: whether an agent keeps the Inbox app off the
    *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
@@ -77,11 +72,6 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
-  /** The personal WeChat client runtime, present only when config
-   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
-   *  the channel list's reader shares it, so the account is read through one
-   *  client. */
-  wechatUserRuntime?: WechatUserRuntime;
   /** Rome's own Slack app: its Web API client, Rome Cloud, and how to drain a
    *  workspace's relay mailbox. Absent, the kind is not offered. */
   slackApp?: SlackAppDescriptorDeps;
@@ -112,23 +102,6 @@ export function registerBuiltinConnections(
   registry.register(makeSlackBotDescriptor());
   if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
   registry.register(createWechatDescriptor());
-  // The personal WeChat connection is opt-in: boot passes its runtime only when
-  // config `wechatUserEnabled` is on.
-  // It runs the client in this container and recovers its store key with a
-  // local debugger, so it needs no host execution — only the container's own
-  // capability to ptrace the client it launches.
-  if (deps.wechatUserRuntime) {
-    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
-  }
-  registry.register(
-    createFeishuDescriptor({
-      chatSettings: deps.chatSettings,
-      peopleRepo: deps.peopleRepo,
-      listAgents: deps.listAgents,
-      accountAgentOf: deps.accountAgentOf,
-      hasAgent: deps.hasAgent,
-    }),
-  );
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,

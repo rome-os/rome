@@ -29,15 +29,16 @@ import {
 } from "./messages.js";
 import {
   isWechatUserSessionRejected,
+  WECHAT_USER_KIND,
   WechatUserStorePending,
   type WechatUserChat,
   type WechatUserMessage,
   type WechatUserReader,
-} from "../../connections/kinds/wechat-user/wechat-user.js";
+} from "../../connections/kinds/wechat-user/index.js";
 
 /** The channel name every stored WeChat-account row spells, matching the
  *  connection kind and the person mappings that link to it. */
-export const WECHAT_USER_CHANNEL = "wechat_user";
+export const WECHAT_USER_CHANNEL = WECHAT_USER_KIND;
 
 /** A bounded window for one live read. The reader ranks newest-first and has no
  *  native cursor, so a page is taken locally over a bounded fetch — the same

@@ -30,18 +30,13 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { SessionRecords } from "../sessions/session-records.js";
 import {
-  type ConciergeMainLine,
-  type ConciergeOutside,
-  type ConciergePage,
-  type ConciergePageCursor,
-  type ConciergePageOptions,
   type EnsureRomeSessionInput,
   type InterruptedTurn,
   type MessagePageCursor,
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
-  THROUGH_CONTEXT_GROUPS,
+  pageStartingWithAMessage,
   THROUGH_CONTEXT_MESSAGES,
   type TraceBatch,
   WebChatRepository,
@@ -250,7 +245,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
           saidBy: fromAgent ? agentSender(standing) : dashboardSender(line.actor ?? undefined),
           body: { text: partsText(parts) },
           parts,
-          read: true,
           at: line.createdAt,
         });
         const lineId = recorded?.id ?? this.lines.idOf(standing.place.chat, line.id);
@@ -386,7 +380,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
         body: { text: partsText(parts) },
         parts,
         ...(replyTo === undefined ? {} : { replyTo }),
-        read: saidByOwner(sender),
         at: new Date(),
       });
       if (!recorded) return false;
@@ -394,22 +387,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
-  }
-
-  /**
-   * Opening the chat reads its main line too: every message that is not a
-   * reply inside a thread. The messages of a thread are read when the
-   * reader opens the thread ({@link markMessagesRead}).
-   */
-  override async markSessionRead(id: string) {
-    const standing = this.standingOf(id);
-    if (standing) this.lines.markMainLineRead(standing.place.chat);
-    return await super.markSessionRead(id);
-  }
-
-  override async markMessagesRead(sessionId: string, keys: readonly string[]): Promise<number> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.markRead(standing.place.chat, keys) : 0;
   }
 
   override async setMessageReaction(
@@ -422,22 +399,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
       return false;
     this.emitMessageReaction({ sessionId, messageId, reaction });
     return true;
-  }
-
-  /**
-   * The messages of the chat thread of the message keyed `key`, which may be
-   * any message of it, in the order they were said. Empty when the chat
-   * holds no such message.
-   */
-  override async getChatThreadMessages(sessionId: string, key: string): Promise<TranscriptLine[]> {
-    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, key);
-  }
-
-  /** The key of the last message of the chat thread of the message keyed
-   *  `key` in chat `sessionId`, or null when the chat holds none. */
-  override async lastInChatThread(sessionId: string, key: string): Promise<string | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.lastInChatThread(standing.place.chat, key) : null;
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
@@ -725,7 +686,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
       role,
       content: JSON.stringify(parts),
       ...(thread ? { chatThreadId: thread } : {}),
-      read: false,
       createdAt: new Date(Math.floor(at.getTime() / 1000) * 1000),
     };
     this.emitMessageInserted(message);
@@ -761,368 +721,64 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return super.widgetMessage(id);
   }
 
-  /** The newest `options.limit` turn groups of a session, as
-   *  WebChatRepository pages them, over the lines where it stands too. */
+  /** The newest `options.limit` messages of a session, as WebChatRepository
+   *  pages them, over the lines where it stands too. */
   override async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
     const limit = options.through
-      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      ? Math.max(options.limit, await this.messagesThrough(sessionId, before, options.through))
       : options.limit;
-    const groups = this.db.all<{ key: string; startedAt: number }>(sql`
-      SELECT key, startedAt FROM (
-        SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
-        FROM ${sessionLines([sessionId])}
-        GROUP BY key
-      )
-      ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
-      ORDER BY startedAt DESC, key DESC
+    const upTo = before ? sql`AND (created_at, seq) < (${before.at}, ${before.seq})` : sql``;
+    const found = this.db.all<{ at: number; seq: number; turn_id: string | null }>(sql`
+      SELECT created_at AS at, seq, turn_id
+      FROM ${sessionLines([sessionId])}
+      WHERE role != 'trace' ${upTo}
+      ORDER BY created_at DESC, seq DESC
       LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, limit);
-    if (pageGroups.length === 0) return { rows: [], nextCursor: null };
-    const keys = JSON.stringify(pageGroups.map((group) => group.key));
-    const rows = this.selectLines(
-      [sessionId],
-      sql`WHERE COALESCE(turn_id, id) IN (SELECT value FROM json_each(${keys}))`,
+    const page = found.slice(0, limit);
+    const oldest = page[page.length - 1];
+    if (!oldest) return { rows: [], nextCursor: null };
+    const turnIds = JSON.stringify([
+      ...new Set(page.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
+    ]);
+    // The page's messages are every one from the oldest up to the cursor, and
+    // its turns' traces come along, however old, in the order they were said.
+    const rows = pageStartingWithAMessage(
+      this.selectLines(
+        [sessionId],
+        sql`WHERE (role != 'trace'
+          AND (created_at, seq) >= (${oldest.at}, ${oldest.seq}) ${upTo})
+        OR (role = 'trace' AND turn_id IN (SELECT value FROM json_each(${turnIds})))`,
+      ),
     );
-    const oldest = pageGroups[pageGroups.length - 1];
     return {
       rows,
       nextCursor:
-        groups.length > limit && oldest
-          ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
+        found.length > limit
+          ? ({ at: oldest.at, seq: oldest.seq } satisfies MessagePageCursor)
           : null,
     };
   }
 
-  protected override async groupsThrough(
+  protected override async messagesThrough(
     sessionId: string,
     before: MessagePageCursor | null | undefined,
     through: string,
   ): Promise<number> {
     const [row] = this.db.all<{ n: number }>(sql`
-      WITH g AS (
-        SELECT COALESCE(turn_id, id) AS key, MIN(created_at) AS startedAt
-        FROM ${sessionLines([sessionId])}
-        GROUP BY key
-      ),
-      t AS (
-        SELECT g.key, g.startedAt FROM g
-        WHERE g.key = (
-          SELECT COALESCE(turn_id, id) FROM ${sessionLines([sessionId])} WHERE id = ${through}
-        )
+      WITH l AS (
+        SELECT id, role, created_at, seq FROM ${sessionLines([sessionId])}
       )
-      SELECT count(*) AS n FROM g, t
-      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
-      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
-    `);
-    const n = row?.n ?? 0;
-    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
-  }
-
-  /**
-   * A page of the session's chat by its main-line messages, newest first by
-   * (`said_at`, record order), as the transcript draws them: what the
-   * session has seen since it started, in its place. A main-line message is
-   * one that replies to none (`root_message_id` null or its own id), so a
-   * reply never counts toward `limit`. Each carries a summary of the thread it
-   * roots, with its newest reply, so a reply never comes without its root.
-   * The newest page, the one
-   * with no `before`, also names the threads with unread replies whose root
-   * is on none of it. The trace rows of the turns on the page come with it.
-   */
-  override async getConciergePage(
-    sessionId: string,
-    options: ConciergePageOptions,
-  ): Promise<ConciergePage> {
-    const { before } = options;
-    const limit = options.through
-      ? Math.max(options.limit, await this.mainLineThrough(sessionId, before, options.through))
-      : options.limit;
-    const found = this.db.all<MainLineKey>(sql`
-      SELECT m.id AS id, m.key AS key, m.said_at AS said_at
-      ${this.sessionPlace(sessionId)}
-        AND ${MAIN_LINE}
-        ${
-          before
-            ? sql`AND (m.said_at, m.id) < (${before.saidAt},
-                COALESCE((SELECT b.id FROM chat_messages b
-                  WHERE b.chat_id = s.chat_id AND b.key = ${before.key}), 0))`
-            : sql``
-        }
-      ORDER BY m.said_at DESC, m.id DESC
-      LIMIT ${limit + 1}
-    `);
-    const page = found.slice(0, limit);
-    const oldest = page[page.length - 1];
-    const nextCursor: ConciergePageCursor | null =
-      found.length > limit && oldest ? { saidAt: oldest.said_at, key: oldest.key } : null;
-    const mainLine = this.threadsOf(sessionId, page);
-    const outside = before ? [] : this.threadsWaiting(sessionId, new Set(page.map((m) => m.key)));
-    return { mainLine, outside, traces: this.tracesOf(sessionId, mainLine, outside), nextCursor };
-  }
-
-  /** The chat thread of the message keyed `key`, any message of it, as a page of its root alone, with every reply: empty when the chat holds none. */
-  override async getConciergeThread(sessionId: string, key: string): Promise<ConciergePage> {
-    const root = this.db.all<MainLineKey>(sql`
-      SELECT r.id AS id, r.key AS key, r.said_at AS said_at FROM chat_messages r
-      WHERE r.id = (
-        SELECT COALESCE(m.root_message_id, m.id)
-        ${this.sessionPlace(sessionId)}
-          AND m.key = ${key}
-      )
-    `);
-    const mainLine = this.threadsOf(sessionId, root, true);
-    return {
-      mainLine,
-      outside: [],
-      traces: this.tracesOf(sessionId, mainLine, []),
-      nextCursor: null,
-    };
-  }
-
-  /** The session's place in its chat, to read `m`, a message it has seen: the
-   *  scoping {@link sessionLines} gives its lines. */
-  private sessionPlace(sessionId: string): SQL {
-    return sql`FROM rome_sessions s
-      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-        AND m.said_at >= s.created_at
-      WHERE s.id = ${sessionId}`;
-  }
-
-  /**
-   * The session's place, to read `m`, a reply it has seen: only those of the
-   * threads rooted at `roots`, or of every thread. Read by the root index:
-   * left to guess, the planner walks every message of the place since the
-   * session started to find the few that reply.
-   */
-  private repliesPlace(sessionId: string, roots?: readonly number[]): SQL {
-    return sql`FROM rome_sessions s
-      ${roots ? sql`CROSS JOIN json_each(${JSON.stringify(roots)}) j` : sql``}
-      CROSS JOIN chat_messages m INDEXED BY idx_chat_messages_root
-      WHERE s.id = ${sessionId} AND m.chat_id = s.chat_id
-        AND m.thread_id IS s.thread_id AND m.said_at >= s.created_at
-        AND ${roots ? sql`m.root_message_id = j.value` : sql`m.root_message_id IS NOT NULL`}
-        AND m.root_message_id != m.id`;
-  }
-
-  /**
-   * How many main-line messages a page from `before` must hold to reach the
-   * root of the thread of message `through`, with
-   * {@link THROUGH_CONTEXT_MESSAGES} older ones. Zero when the chat does not
-   * hold that message, or its root is not older than `before`.
-   */
-  private async mainLineThrough(
-    sessionId: string,
-    before: ConciergePageCursor | null | undefined,
-    through: string,
-  ): Promise<number> {
-    const [row] = this.db.all<{ n: number }>(sql`
-      SELECT count(*) AS n
-      ${this.sessionPlace(sessionId)}
-        AND ${MAIN_LINE}
-        AND (m.said_at, m.id) >= (
-          SELECT r.said_at, r.id FROM chat_messages t
-          JOIN chat_messages r ON r.id = COALESCE(t.root_message_id, t.id)
-          WHERE t.chat_id = s.chat_id AND t.key = ${through}
-        )
-        ${
-          before
-            ? sql`AND (m.said_at, m.id) < (${before.saidAt},
-                COALESCE((SELECT b.id FROM chat_messages b
-                  WHERE b.chat_id = s.chat_id AND b.key = ${before.key}), 0))`
-            : sql``
-        }
+      SELECT count(*) AS n FROM l, (
+        SELECT created_at, seq FROM l WHERE id = ${through} AND role != 'trace'
+      ) t
+      WHERE l.role != 'trace'
+        AND (l.created_at, l.seq) >= (t.created_at, t.seq)
+        ${before ? sql`AND (l.created_at, l.seq) < (${before.at}, ${before.seq})` : sql``}
     `);
     const n = row?.n ?? 0;
     return n === 0 ? 0 : n + THROUGH_CONTEXT_MESSAGES;
-  }
-
-  /**
-   * The main-line messages `roots` with a summary of the thread each roots,
-   * read over {@link sessionLines}: how many replies the stack counts, how
-   * many of them are unread, and the newest of them, by {@link COUNTED_REPLY}
-   * and {@link UNREAD_REPLY}. With `whole`, each also has every reply of its
-   * thread, in the order they were said; a thread none of whose replies
-   * counts then has the newest reply it has as its latest.
-   */
-  private threadsOf(
-    sessionId: string,
-    roots: readonly MainLineKey[],
-    whole = false,
-  ): ConciergeMainLine[] {
-    if (roots.length === 0) return [];
-    const ids = roots.map((root) => root.id);
-    // One pass over the replies of the roots, by the root index: a window
-    // counts each root's replies and picks its newest.
-    const summaries = new Map(
-      this.db
-        .all<{ root_id: number; key: string; n: number; unread: number }>(sql`
-          SELECT root_id, key, n, unread FROM (
-            SELECT m.root_message_id AS root_id, m.key AS key,
-              row_number() OVER (
-                PARTITION BY m.root_message_id ORDER BY m.said_at DESC, m.id DESC
-              ) AS rn,
-              count(*) OVER (PARTITION BY m.root_message_id) AS n,
-              sum(${UNREAD_REPLY}) OVER (PARTITION BY m.root_message_id) AS unread
-            ${this.repliesPlace(sessionId, ids)}
-              AND ${COUNTED_REPLY}
-          ) WHERE rn = 1
-        `)
-        .map((row) => [row.root_id, row]),
-    );
-    const replyKeys = whole
-      ? this.db
-          .all<{ key: string }>(sql`SELECT m.key AS key ${this.repliesPlace(sessionId, ids)}`)
-          .map((reply) => reply.key)
-      : [];
-    const rows = this.linesByKey(sessionId, [
-      ...roots.map((root) => root.key),
-      ...[...summaries.values()].map((summary) => summary.key),
-      ...replyKeys,
-    ]);
-    const lines = new Map(rows.map((row) => [row.id, row]));
-    const rootKeys = new Set(roots.map((root) => root.key));
-    return rows
-      .filter((row) => row.chat_thread_id === row.id && rootKeys.has(row.id))
-      .map((row): ConciergeMainLine => {
-        const rootId = roots.find((root) => root.key === row.id)?.id;
-        const summary = rootId === undefined ? undefined : summaries.get(rootId);
-        const replies = whole
-          ? rows.filter((r) => r.chat_thread_id === row.id && r.id !== row.id)
-          : [];
-        const latest = summary ? lines.get(summary.key) : replies.at(-1);
-        return {
-          message: storedLine(row),
-          thread: latest
-            ? {
-                replyCount: summary?.n ?? 0,
-                unreadCount: summary?.unread ?? 0,
-                latestReply: storedLine(latest),
-                ...(whole ? { replies: replies.map(storedLine) } : {}),
-              }
-            : null,
-        };
-      });
-  }
-
-  /**
-   * The threads with a reply the owner has not seen whose root is not among
-   * `onPage`, the keys of the page's main-line messages, with each one's
-   * newest unread reply, oldest waiting first. Found by the unread marks, not
-   * by walking the transcript.
-   */
-  private threadsWaiting(sessionId: string, onPage: ReadonlySet<string>): ConciergeOutside[] {
-    const unread = this.db.all<{
-      key: string;
-      said_at: number;
-      id: number;
-      root_id: number;
-      root: string;
-    }>(
-      sql`
-      SELECT m.key AS key, m.said_at AS said_at, m.id AS id,
-        m.root_message_id AS root_id,
-        (SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id) AS root
-      ${this.repliesPlace(sessionId)}
-        AND ${UNREAD_REPLY}
-    `,
-    );
-    const waiting = new Map<
-      number,
-      { root: string; unread: number; latest: (typeof unread)[number] }
-    >();
-    for (const reply of unread) {
-      if (onPage.has(reply.root)) continue;
-      const seen = waiting.get(reply.root_id);
-      const newer =
-        !seen ||
-        reply.said_at > seen.latest.said_at ||
-        (reply.said_at === seen.latest.said_at && reply.id > seen.latest.id);
-      waiting.set(reply.root_id, {
-        root: reply.root,
-        unread: (seen?.unread ?? 0) + 1,
-        latest: newer ? reply : (seen?.latest ?? reply),
-      });
-    }
-    if (waiting.size === 0) return [];
-    const counted = new Map(
-      this.db
-        .all<{ root_id: number; n: number }>(sql`
-          SELECT m.root_message_id AS root_id, count(*) AS n
-          ${this.repliesPlace(sessionId, [...waiting.keys()])}
-            AND ${COUNTED_REPLY}
-          GROUP BY m.root_message_id
-        `)
-        .map((row) => [row.root_id, row.n]),
-    );
-    const latest = new Map(
-      this.linesByKey(
-        sessionId,
-        [...waiting.values()].map((entry) => entry.latest.key),
-      ).map((row) => [row.id, row]),
-    );
-    return [...waiting.entries()]
-      .flatMap(([rootId, entry]): (ConciergeOutside & { at: number; order: number })[] => {
-        const row = latest.get(entry.latest.key);
-        return row
-          ? [
-              {
-                root: entry.root,
-                replyCount: counted.get(rootId) ?? entry.unread,
-                unreadCount: entry.unread,
-                latestUnread: storedLine(row),
-                at: entry.latest.said_at,
-                order: entry.latest.id,
-              },
-            ]
-          : [];
-      })
-      .sort((a, b) => a.at - b.at || a.order - b.order)
-      .map(({ at: _at, order: _order, ...outside }) => outside);
-  }
-
-  /**
-   * The trace rows of the turns of the lines a page returns, as
-   * {@link sessionLines} reads them, in the order they were said. A turn's
-   * trace is where a client reads its source, its model switch and whether it
-   * failed. Found by turn, not by walking the session's traces.
-   */
-  private tracesOf(
-    sessionId: string,
-    mainLine: readonly ConciergeMainLine[],
-    outside: readonly ConciergeOutside[],
-  ): TranscriptLine[] {
-    const turns = new Set(
-      [
-        ...mainLine.flatMap(({ message, thread }) => [
-          message,
-          ...(thread ? (thread.replies ?? [thread.latestReply]) : []),
-        ]),
-        ...outside.map((entry) => entry.latestUnread),
-      ].flatMap((line) => line.turnId ?? []),
-    );
-    if (turns.size === 0) return [];
-    return this.db
-      .all<LineRow>(sql`
-        SELECT ${OWN_LINE_COLUMNS}
-        FROM rome_sessions s
-        CROSS JOIN json_each(${JSON.stringify([...turns])}) j
-        CROSS JOIN rome_agent_messages r
-        WHERE s.id = ${sessionId} AND r.session_id = s.id AND r.role = 'trace' AND r.turn_id = j.value
-        ORDER BY r.created_at, r.rowid
-      `)
-      .map(storedLine);
-  }
-
-  /** The transcript lines keyed `keys`, in the order they were said. */
-  private linesByKey(sessionId: string, keys: readonly string[]): LineRow[] {
-    return this.db.all<LineRow>(sql`
-      SELECT * FROM ${sessionLines([sessionId])}
-      WHERE id IN (SELECT value FROM json_each(${JSON.stringify(keys)}))
-        AND role IN ('user', 'assistant')
-      ORDER BY created_at, seq
-    `);
   }
 
   override async getMessagesBatch(sessionIds: string[]) {
@@ -1209,8 +865,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         FROM ${sessionLines(sessions)} l JOIN rome_sessions s ON s.id = l.session_id
         WHERE l.created_at >= ${Math.floor(since.getTime() / 1000)}
           AND l.role IN ('user', 'assistant')
-        ORDER BY MIN(l.created_at) OVER (PARTITION BY l.session_id, COALESCE(l.turn_id, l.id)),
-          l.session_id, COALESCE(l.turn_id, l.id), l.created_at, l.line_order, l.seq
+        ORDER BY l.created_at, l.session_id, l.seq, l.line_order
       `)
       .map((row) => ({
         ...storedLine(row),
@@ -1234,7 +889,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .all<LineRow>(sql`
         SELECT * FROM ${sessionLines([sessionId])}
         WHERE turn_id = ${turnId} AND role IN ('user', 'assistant')
-        ORDER BY created_at, line_order, seq
+        ORDER BY created_at, seq, line_order
       `)
       .map((row) => ({
         id: row.id,
@@ -1386,7 +1041,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
         body: { text: partsText(parts) },
         parts,
         ...(replyTo === undefined ? {} : { replyTo }),
-        read: role === "user",
         at,
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
@@ -1403,43 +1057,23 @@ export class ChatsWebChatRepository extends WebChatRepository {
     since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
     const from = since ? sql` AND p.created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
-    // A turn starts where its first line does, its prompt or trace included:
-    // the start is read over all of them, before the filter keeps the cards,
-    // so two turns whose cards share a second keep the transcript's order.
     return this.db
       .all<LineRow>(sql`
-        WITH lines AS ${sessionLines([sessionId])}
-        SELECT p.* FROM lines p
+        SELECT p.* FROM ${sessionLines([sessionId])} p
         WHERE p.role = 'assistant' AND p.content LIKE '%"task_chat"%'${from}
-        ORDER BY (
-            SELECT MIN(l.created_at) FROM lines l
-            WHERE COALESCE(l.turn_id, l.id) = COALESCE(p.turn_id, p.id)
-          ),
-          p.turn_id, p.created_at, p.line_order, p.seq
+        ORDER BY p.created_at, p.seq
       `)
       .map(storedLine)
       .map(({ id, content, createdAt }) => ({ id, content, createdAt }));
   }
 
-  private selectLines(
-    sessionIds: readonly string[],
-    where: SQL = sql``,
-    chatThread?: string,
-  ): TranscriptLine[] {
-    // Partitioning by turn keeps a turn's user, assistant and trace lines
-    // contiguous even when a later turn's prompt was said before an earlier
-    // turn's reply. A chat thread reads in the order its lines were said.
-    const order =
-      chatThread === undefined
-        ? sql`ORDER BY session_id,
-          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, created_at, line_order, seq`
-        : sql`ORDER BY created_at, seq`;
+  private selectLines(sessionIds: readonly string[], where: SQL = sql``): TranscriptLine[] {
+    // In the order the lines were said, whichever turn they belong to.
     return this.db
       .all<LineRow>(sql`
-        SELECT * FROM ${sessionLines(sessionIds, chatThread)}
+        SELECT * FROM ${sessionLines(sessionIds)}
         ${where}
-        ${order}
+        ORDER BY session_id, created_at, seq, line_order
       `)
       .map(storedLine);
   }
@@ -1460,13 +1094,6 @@ function dashboardSender(actor: SessionActor | undefined): SaidBy {
     };
   }
   return { account: { platform: WEBCHAT_PLATFORM, id: "guardian" } };
-}
-
-/** Whether `saidBy` is the chat's owner: the guardian, or a visitor on the
- *  dashboard. What the owner says is read the moment it is recorded. */
-function saidByOwner(saidBy: SaidBy): boolean {
-  const id = saidBy.account.id;
-  return id === "guardian" || id.startsWith("visitor:");
 }
 
 /** The agent's dashboard account where `standing` is, as the sender of its
@@ -1505,24 +1132,6 @@ function partsOf(content: string): MessagePart[] {
   return [{ type: "text", content }];
 }
 
-/** A main-line message found by its place, before its lines are read. */
-interface MainLineKey {
-  id: number;
-  key: string;
-  said_at: number;
-}
-
-/**
- * What a reply the reader's stack counts is, on `m`: not said by an
- * automation. An unread one is also from Rome and not yet seen by the owner.
- * One definition for every count a Concierge page gives.
- */
-const COUNTED_REPLY = sql`(COALESCE(m.sender_account_id, '') NOT GLOB 'automated::*')`;
-const UNREAD_REPLY = sql`(m.read_at IS NULL AND m.sender_agent IS NOT NULL)`;
-
-/** A message that replies to none: its own root. */
-const MAIN_LINE = sql`(m.root_message_id IS NULL OR m.root_message_id = m.id)`;
-
 interface LineRow {
   id: string;
   session_id: string;
@@ -1539,8 +1148,6 @@ interface LineRow {
   source_id: string | null;
   chat_thread_id: string | null;
   reaction: string | null;
-  /** 0 or 1: whether the chat's owner has seen the line. */
-  is_read: number;
   line_order: number;
   seq: number;
 }
@@ -1559,26 +1166,9 @@ function storedLine(row: LineRow): TranscriptLine {
     content: row.content,
     chatThreadId: row.chat_thread_id,
     ...(row.reaction === null ? {} : { reaction: row.reaction }),
-    read: row.is_read === 1,
     createdAt: new Date(row.created_at * 1000),
   };
 }
-
-/**
- * The columns of a session's own row, `r` in `rome_agent_messages`, as a line
- * of {@link sessionLines}, read beside its session `s`.
- */
-const OWN_LINE_COLUMNS = sql.raw(`r.id, r.session_id, r.turn_id, r.input_state, r.role,
-      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
-      r.created_at,
-      CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
-        WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
-      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      NULL AS chat_thread_id, NULL AS reaction, 1 AS is_read,
-      -- A session in no chat keeps its rows in the order they were written;
-      -- beside a chat's lines, a trace goes after its turn's first prompt.
-      CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
-      r.rowid AS seq`);
 
 /**
  * The transcript lines of `sessionIds`, as one table: what was said where
@@ -1588,11 +1178,11 @@ const OWN_LINE_COLUMNS = sql.raw(`r.id, r.session_id, r.turn_id, r.input_state, 
  * group is one (#1670), and a dashboard notice is not a line (#1672). A line is the session's prompt or answer by its turn link; a line
  * with none, or only caught up on, is its agent's when its account said it,
  * the guardian's on the dashboard, and a notification elsewhere.
- * Lines keep the order they were said in; within one second, `line_order`
- * puts a turn's first prompt before its trace, and the trace before the
- * turn's other lines.
+ * Lines keep the order they were said in, by `created_at`, then `seq`, whichever
+ * turn they belong to. A trace has no say of its own: its `seq` is its turn's
+ * first prompt's, and `line_order` puts it after that prompt.
  */
-export function sessionLines(sessionIds: readonly string[], chatThread?: string) {
+export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
     SELECT m.key AS id, s.id AS session_id,
@@ -1609,41 +1199,37 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       COALESCE((SELECT r.key FROM chat_messages r WHERE r.id = m.root_message_id), m.key)
         AS chat_thread_id,
       m.reaction AS reaction,
-      m.read_at IS NOT NULL AS is_read,
-      -- A turn's first prompt goes before its trace in the same second; every
-      -- other line goes after it, in the order it was said, as a steered
-      -- input after the card it answers.
-      CASE WHEN l.role = 'prompt' AND l.turn_id IS NOT NULL AND m.id = (
-          SELECT min(f.message_id) FROM agent_turn_messages f
-          WHERE f.session_id = s.id AND f.turn_id = l.turn_id AND f.role = 'prompt'
-        ) THEN 0 ELSE 2 END AS line_order,
+      0 AS line_order,
       m.seq AS seq
     FROM rome_sessions s
     JOIN ${CHATS} c ON c.id = s.chat_id
     JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
-      ${
-        // The thread of the message keyed `chatThread`, any message of it: its
-        // root and every message that replies down to it.
-        chatThread === undefined
-          ? sql``
-          : sql`AND COALESCE(m.root_message_id, m.id) = (
-              SELECT COALESCE(t.root_message_id, t.id) FROM chat_messages t
-              WHERE t.chat_id = s.chat_id AND t.key = ${chatThread}
-            )`
-      }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
-    SELECT ${OWN_LINE_COLUMNS}
+    SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
+      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
+      r.created_at,
+      CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
+        WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
+      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
+      NULL AS chat_thread_id, NULL AS reaction,
+      -- A session in no chat keeps its rows in the order they were written.
+      -- Beside a chat's lines, a trace stands where its turn's first prompt
+      -- does, and after it when both were said in the same second.
+      CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
+      CASE WHEN s.chat_id IS NULL THEN r.rowid ELSE COALESCE((
+        SELECT min(f.message_id) FROM agent_turn_messages f
+        WHERE f.session_id = r.session_id AND f.turn_id = r.turn_id AND f.role = 'prompt'
+      ), r.rowid) END AS seq
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role = 'trace')
-      ${chatThread === undefined ? sql`` : sql`AND 0`}
   )`;
 }
 
