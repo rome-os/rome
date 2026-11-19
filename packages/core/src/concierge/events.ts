@@ -232,8 +232,11 @@ export async function renderTaskEvents(
     if (row.sessionId && wantsReply) {
       const final = await finalAnswer(messages, taskChatPlace(row.sessionId));
       const latest = final?.answer;
-      // A card the answer showed is what `chat_forward` sends, as it is.
-      if (final?.card) lines.push(`card: ${final.card.text.replace(/\s+/g, " ")}`);
+      // A card the answer showed is what `chat_forward` sends, as it is,
+      // unless the answer has nothing to report, which it holds back.
+      if (final?.card && !hasNothingToReport(final.answer.body.text)) {
+        lines.push(`card: ${replyExcerpt(final.card.text.replace(/\s+/g, " "))}`);
+      }
       if (latest) {
         // The task's own conclusion comes whole, so the Concierge can tell
         // whether the task waits on the guardian. The rest keeps its excerpt.

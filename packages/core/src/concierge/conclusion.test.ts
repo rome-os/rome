@@ -118,6 +118,13 @@ describe("the instruction every task chat gets", () => {
     expect(CONCLUSION_INSTRUCTION).not.toContain("one or two sentences");
   });
 
+  it("puts everything the guardian needs on a card, and keeps the conclusion to the card's gist", () => {
+    expect(CONCLUSION_INSTRUCTION).toContain("The guardian receives only the card");
+    expect(CONCLUSION_INSTRUCTION).toContain("as its callout");
+    expect(CONCLUSION_INSTRUCTION).toContain("add nothing the card does not hold");
+    expect(CONCLUSION_INSTRUCTION).not.toContain("add only what it does not hold");
+  });
+
   it("gives a result that only carries out the guardian's own choice the fixed no-news line", () => {
     expect(CONCLUSION_INSTRUCTION).toContain("only confirms or carries out what they just chose");
     expect(CONCLUSION_INSTRUCTION).toContain(`exactly "${NOTHING_TO_REPORT}", word for word`);

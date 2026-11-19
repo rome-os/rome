@@ -3240,9 +3240,10 @@ describe("Concierge events", () => {
     expect(prompt).not.toContain("rome:conclusion");
   });
 
-  it("tells the Concierge the answer showed a card, by the card's plain-text line", async () => {
+  /** The prompt of the task event an answer `text` brings, with a card of `line` after it. */
+  const cardEventFor = async (text: string, line: string) => {
     const s = setup();
-    const { chatId } = await startTask(s, concluded("Your daily health summary."));
+    const { chatId } = await startTask(s, text);
     s.messages.get(chatId)?.push({
       role: "assistant",
       content: JSON.stringify([
@@ -3250,7 +3251,7 @@ describe("Concierge events", () => {
           type: "widget",
           toolUseId: "c1",
           appId: "core",
-          text: "Sleep 6.1 h\n(usual 7–9)",
+          text: line,
           ui: { components: [{ id: "root", component: "Text", text: "Sleep" }] },
         },
       ]),
@@ -3259,9 +3260,27 @@ describe("Concierge events", () => {
     await finishTask(s, chatId);
     await rs.advanceTimersByTimeAsync(2_000);
     rs.useRealTimers();
-    const prompt = s.backendTurns[0].prompt;
+    return s.backendTurns[0]?.prompt ?? "";
+  };
+
+  it("tells the Concierge the answer showed a card, by the card's plain-text line", async () => {
+    const prompt = await cardEventFor(
+      concluded("Your daily health summary."),
+      "Sleep 6.1 h\n(usual 7–9)",
+    );
     expect(prompt).toContain("\ncard: Sleep 6.1 h (usual 7–9)\n");
     expect(prompt).toContain("\nconclusion: Your daily health summary.\n");
+  });
+
+  it("names no card when the answer has nothing to report, since no forward sends it", async () => {
+    const prompt = await cardEventFor(concluded(NOTHING_TO_REPORT), "Sleep 6.1 h");
+    expect(prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
+    expect(prompt).not.toContain("card:");
+  });
+
+  it("cuts a long card line like a long reply", async () => {
+    const prompt = await cardEventFor(concluded("Summary."), "w".repeat(1_000));
+    expect(prompt).toContain(`\ncard: ${"w".repeat(400)}${leftOut(300)}${"w".repeat(300)}\n`);
   });
 
   it("gives only the conclusion when it is all the answer holds", async () => {
