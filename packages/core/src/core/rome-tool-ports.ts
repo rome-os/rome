@@ -8,6 +8,7 @@ import type { PlaceAudience } from "./place-audience.js";
 import {
   type AgentAction,
   type AgentActions,
+  type Audience,
   narrowerAudience,
   type DeferTool,
   type RomeTool,
@@ -85,25 +86,32 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // model-facing catalog and the execution gate derive from it, so they can't
   // disagree. It's consulted per request, so an action installed
   // mid-conversation by `app_management` is callable in the same session.
+  // What the session's place withholds comes off after "*" resolves, so a
+  // wildcard grant cannot bring a withheld action back.
+  const permittedActions = (turn: TurnFacts): Action[] => {
+    const granted = actionRegistry.getForAgent([...turn.actions]);
+    const withheld = turn.withheldActions ?? [];
+    if (withheld.length === 0) return granted;
+    const names = new Set(withheld.map((name) => actionRegistry.get(name)?.config.name ?? name));
+    return granted.filter((action) => !names.has(action.config.name));
+  };
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
     if (!requestedAction) throw new Error(`Unknown action: ${name}`);
-    return actionRegistry
-      .getForAgent([...turn.actions])
-      .find((action) => action.config.name === requestedAction.config.name);
+    return permittedActions(turn).find(
+      (action) => action.config.name === requestedAction.config.name,
+    );
   };
 
   const actions: AgentActions = {
-    list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
+    list: (turn) => permittedActions(turn).map(toAgentAction),
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
     permits: (turn, name) => {
       const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return actionRegistry
-        .getForAgent([...turn.actions])
-        .some((action) => action.config.name === canonical);
+      return permittedActions(turn).some((action) => action.config.name === canonical);
     },
     run: (turn, name, input) =>
       turn.inTurn(() =>
@@ -115,12 +123,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
-            // Read again on each call, so a chat that opens to visitors after
-            // the turn started reads no personal data.
-            audience: narrowerAudience(
-              turn.audience(),
-              (await deps.placeAudience?.(turn.threadContext())) ?? "shared",
-            ),
+            audience: await callAudience(turn, deps.placeAudience),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -340,4 +343,18 @@ async function dashboardChatOwner(
   if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
   const chat = await webchatRepo.getSession(thread.threadId);
   return chat ? (chat.ownerKey ?? "guardian") : undefined;
+}
+
+/** The audience an agent's action call runs with: the turn's, read again
+ *  against its chat on each call so a chat that opens to visitors after the
+ *  turn started reads no personal data. A turn with no chat of its own, such
+ *  as a summoned agent's, has only the audience of the turn that started it,
+ *  which its own already holds. Domain: docs/domains/participation.md#audience. */
+async function callAudience(
+  turn: Pick<TurnFacts, "audience" | "threadContext">,
+  placeAudience: PlaceAudience | undefined,
+): Promise<Audience> {
+  const place = turn.threadContext();
+  if (!place) return turn.audience();
+  return narrowerAudience(turn.audience(), (await placeAudience?.(place)) ?? "shared");
 }
