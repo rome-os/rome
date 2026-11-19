@@ -15,7 +15,7 @@ import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
 import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";

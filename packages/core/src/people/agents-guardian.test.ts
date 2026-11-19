@@ -1,7 +1,7 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { persons } from "../db/schema.js";
 import type { AgentMessageEnvelope } from "../connections/integrations/rome-cloud-agents.js";

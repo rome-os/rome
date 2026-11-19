@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/db.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { PeopleRepository } from "./infrastructure/drizzle-people-repository.js";
 import {
   applyGuardianMappingWithinTx,
   linkGuardianToAccount,

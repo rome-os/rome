@@ -10,7 +10,7 @@ import {
 } from "../../access/auth.js";
 import { resolveAndRecordAccount } from "../../access/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../access/bootstrap-state.js";
-import { applySetupDefaults } from "../../people/guardian-profile.js";
+import { applySetupDefaults } from "../../people/guardian-profile/guardian-profile.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { isInstanceLinked } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";

@@ -16,7 +16,7 @@ import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapt
 import { recordedSends } from "./connections/recorded-sends.js";
 import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
-import { PeopleRepository } from "./db/repositories/people.js";
+import { PeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
 import { TurnLinks } from "./sessions/turn-links.js";

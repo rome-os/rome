@@ -17,7 +17,7 @@ import {
   replyToShaped,
 } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../db/repositories/people.js";
+import type { PeopleRepository } from "../../../people/infrastructure/drizzle-people-repository.js";
 import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {

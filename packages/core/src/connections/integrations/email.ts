@@ -38,7 +38,7 @@ import {
   EmailAdapter,
   type EmailInboxCoordinates,
 } from "../kinds/email/email.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
 import { z } from "zod";

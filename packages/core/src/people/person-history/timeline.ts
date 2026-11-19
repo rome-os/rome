@@ -13,7 +13,7 @@ import {
   messageCursor,
   type Message,
 } from "@rome/api-types/message";
-import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
+import type { AccountMessages, MessageAccount } from "../../chats/history/messages.js";
 
 /**
  * One page of an account's history, newest first, resuming after `cursor`.

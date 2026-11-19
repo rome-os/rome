@@ -16,7 +16,10 @@
 // for the guardian or the agent to fold in as prose.
 
 import { type PersonResource } from "@rome/api-types/people";
-import type { MergeRefusal, PeopleRepository } from "../db/repositories/people.js";
+import type {
+  MergeRefusal,
+  PeopleRepository,
+} from "../infrastructure/drizzle-people-repository.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleMergeDeps extends PeopleReadDeps {

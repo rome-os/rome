@@ -16,7 +16,7 @@ import type { SaidMessage } from "../../chats/storage/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/storage/message-repository.js";
 import { chatKey, placeIn } from "../../chats/storage/place.js";
 import { send } from "../../chats/send.js";
-import { directPlace } from "../../people/send.js";
+import { directPlace } from "../../people/person-history/send.js";
 import type { ApiDeps } from "../deps.js";
 import { respondToSend } from "./people.js";
 

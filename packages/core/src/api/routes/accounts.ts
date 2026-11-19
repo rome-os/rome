@@ -7,13 +7,13 @@ import {
   sliceAccountDirectory,
   type AccountState,
 } from "@rome/api-types/people";
-import { readAccountDirectory } from "../../people/account-directory.js";
+import { readAccountDirectory } from "../../people/phone-book/account-directory.js";
 import type { ApiDeps } from "../deps.js";
 
 // The account read: every account Rome has observed, and what the guardian has
 // decided about each. What a page is, how it is ordered, how it resumes and
 // what its numbers count are the contract's (@rome/api-types/people). Which
-// sources they are folded from is `src/people/account-directory.ts`. This
+// sources they are folded from is `src/people/phone-book/account-directory.ts`. This
 // route is the join between a query string and those two, and holds no rule of
 // its own.
 //

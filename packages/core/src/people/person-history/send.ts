@@ -31,16 +31,16 @@ import type { AccountSendState } from "@rome/api-types/people";
 import {
   AccountNotConnected,
   type ChannelSend,
-} from "../chats/connected-accounts/connected-account.js";
-import { chatKey, placeIn, type Place } from "../chats/place.js";
-import type { RefusedState, Sender, SendResult } from "../chats/send.js";
+} from "../../chats/connected-accounts/connected-account.js";
+import { chatKey, placeIn, type Place } from "../../chats/place.js";
+import type { RefusedState, Sender, SendResult } from "../../chats/send.js";
 import {
   senderNamed,
   soleSender,
   sendersOf,
   type SendDeps,
   type SendIntoPlaceDeps,
-} from "../connections/send.js";
+} from "../../connections/send.js";
 
 export { sendersOf, type SendDeps };
 

@@ -4,7 +4,11 @@
 
 import type { Account, SaidSender } from "@rome-os/app-runtime";
 import type { PromptMessage, UnseenMessage } from "../agent/index.js";
-import type { BondLevel, Person, PeopleRepository } from "../db/repositories/people.js";
+import type {
+  BondLevel,
+  Person,
+  PeopleRepository,
+} from "../people/infrastructure/drizzle-people-repository.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 
 const BOND_LEVEL_WORDS: Record<BondLevel, string> = {

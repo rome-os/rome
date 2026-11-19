@@ -2,7 +2,7 @@
 
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";

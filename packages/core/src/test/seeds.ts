@@ -1,7 +1,7 @@
 import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";

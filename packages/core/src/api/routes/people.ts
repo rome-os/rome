@@ -21,28 +21,28 @@ import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../access/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { platformOf } from "@rome/api-types/platform";
-import { createPerson } from "../../people/create.js";
-import { deletePerson } from "../../people/delete.js";
-import { mergePeople } from "../../people/merge.js";
-import { findPerson, readPeople, readPerson } from "../../people/resource.js";
-import { updatePerson } from "../../people/update.js";
+import { createPerson } from "../../people/phone-book/create.js";
+import { deletePerson } from "../../people/phone-book/delete.js";
+import { mergePeople } from "../../people/phone-book/merge.js";
+import { findPerson, readPeople, readPerson } from "../../people/phone-book/resource.js";
+import { updatePerson } from "../../people/phone-book/update.js";
 import { send, type SendResult } from "../../chats/send.js";
-import { asGuardian, directPlace } from "../../people/send.js";
-import { readAccountTimeline } from "../../people/timeline.js";
+import { asGuardian, directPlace } from "../../people/person-history/send.js";
+import { readAccountTimeline } from "../../people/person-history/timeline.js";
 import {
   guardianChannels,
   personMessageStores,
   timelineAccounts,
-} from "../../people/timeline-sources.js";
-import { accountOfWire, wireOf } from "../../people/wire.js";
+} from "../../people/person-history/timeline-sources.js";
+import { accountOfWire, wireOf } from "../../people/model/wire.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People surface. What a person and their accounts are, how the listing
 // orders and counts, what a valid create is, when a link may be taken and what
 // a refused one answers are the contract's (@rome/api-types/people);
-// serializing a person is `src/people/resource.ts`, creating one is
-// `src/people/create.ts`, editing one `src/people/update.ts`, absorbing one
-// `src/people/merge.ts`, deleting one `src/people/delete.ts`, and which stores an
+// serializing a person is `src/people/phone-book/resource.ts`, creating one is
+// `src/people/phone-book/create.ts`, editing one `src/people/phone-book/update.ts`, absorbing one
+// `src/people/phone-book/merge.ts`, deleting one `src/people/phone-book/delete.ts`, and which stores an
 // account's history is read from is the rest of `src/people/`. The compare-and-swap a link rides on is the person
 // repository's, because only a transaction there can decide it. These handlers
 // read the request and pick a status code, and hold no rule of their own.

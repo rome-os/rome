@@ -6,10 +6,10 @@ import {
   recordedConnectionKindOf,
   testAccountLinkOf,
 } from "../../test/helpers.js";
-import { AccountHeldError, PeopleRepository } from "./people.js";
+import { AccountHeldError, PeopleRepository } from "./drizzle-people-repository.js";
 import { eq } from "drizzle-orm";
-import { persons, links, dismissedAccounts } from "../schema.js";
-import { ChannelRecordsRepository } from "./channel-records.js";
+import { persons, links, dismissedAccounts } from "../../db/schema.js";
+import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 
 describe("PeopleRepository", () => {
   let testDb: TestDb;

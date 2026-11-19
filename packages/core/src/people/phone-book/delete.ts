@@ -10,7 +10,7 @@
 // relationship directory. A filesystem write cannot join the transaction the
 // links go in, and the file is the guardian's prose to keep or remove in Memory.
 
-import type { PeopleRepository } from "../db/repositories/people.js";
+import type { PeopleRepository } from "../infrastructure/drizzle-people-repository.js";
 
 export interface PeopleDeleteDeps {
   peopleRepo: Pick<PeopleRepository, "delete">;

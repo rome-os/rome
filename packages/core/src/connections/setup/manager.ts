@@ -23,7 +23,7 @@ import { randomUUID } from "node:crypto";
 import type { DrizzleTx } from "../../db/index.js";
 import { platformOf } from "@rome/api-types/platform";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,

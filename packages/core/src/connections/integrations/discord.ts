@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";

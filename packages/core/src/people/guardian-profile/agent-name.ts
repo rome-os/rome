@@ -1,7 +1,7 @@
-import { actionExecutionContext } from "../apps/actions/context.js";
-import type { ActionRegistry } from "../apps/actions/types.js";
-import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { LiveEventEmit } from "../lib/live-event.js";
+import { actionExecutionContext } from "../../apps/actions/context.js";
+import type { ActionRegistry } from "../../apps/actions/types.js";
+import type { SettingsRepository } from "../../db/repositories/settings.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import { applyAgentName } from "./guardian-profile.js";
 
 export interface AgentNameEvents {

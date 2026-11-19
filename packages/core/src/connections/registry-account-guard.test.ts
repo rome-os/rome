@@ -3,7 +3,7 @@
 // setup. Observed through the ledger and the setup state.
 
 import { describe, expect, it } from "@rstest/core";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/db.js";
 import { platformOf } from "@rome/api-types/platform";

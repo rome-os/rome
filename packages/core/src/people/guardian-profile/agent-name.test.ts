@@ -4,18 +4,18 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 const state = rs.hoisted(() => ({ memoryDir: "" }));
-rs.mock("../profile-memory.js", () => ({
+rs.mock("../../profile-memory.js", () => ({
   ensureProfileMemoryInitialized: rs.fn(() => state.memoryDir),
   getRelationshipDir: rs.fn(() => `${state.memoryDir}/relationship`),
   getGuardianProfileFile: rs.fn(() => `${state.memoryDir}/relationship/GUARDIAN.md`),
   GUARDIAN_PROFILE_PATH: "memory/relationship/GUARDIAN.md",
 }));
 
-import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { SettingsRepository } from "../db/repositories/settings.js";
-import { persons } from "../db/schema.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { ActionEngine, type ActionRunContext } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { SettingsRepository } from "../../db/repositories/settings.js";
+import { persons } from "../../db/schema.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
 import { registerAgentNameAction } from "./agent-name.js";
 
 type Actor = NonNullable<ActionRunContext["actor"]>;

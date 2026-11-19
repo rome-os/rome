@@ -34,7 +34,7 @@ import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../apps/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../apps/repositories/action-executions.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";

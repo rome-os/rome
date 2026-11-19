@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/db.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import { PeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
 import type { LinkedInHistoryMessage } from "../../connections/kinds/linkedin/linkedin-sync.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";

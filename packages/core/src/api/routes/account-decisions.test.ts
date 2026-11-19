@@ -9,7 +9,10 @@ import {
 } from "@rome/api-types/people";
 import { accountDecisionRoutes } from "./account-decisions.js";
 import { accountsRoutes } from "./accounts.js";
-import { dismissAccount, type AccountDecisionDeps } from "../../people/account-decisions.js";
+import {
+  dismissAccount,
+  type AccountDecisionDeps,
+} from "../../people/phone-book/account-decisions.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { dismissedAccounts, links } from "../../db/schema.js";

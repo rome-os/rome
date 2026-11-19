@@ -80,8 +80,8 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import { PeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import { GuardianLinkCodes } from "../people/link-code/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";

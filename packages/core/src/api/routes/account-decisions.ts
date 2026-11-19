@@ -5,12 +5,12 @@ import {
   restoreAccount,
   type AccountDecision,
   type AccountRef,
-} from "../../people/account-decisions.js";
+} from "../../people/phone-book/account-decisions.js";
 import type { ApiDeps } from "../deps.js";
 
 // The account directory's two writes: dismiss an account, and restore one.
 // What either means, when either refuses, and what each answers are
-// `src/people/account-decisions.ts`'s and the contract's
+// `src/people/phone-book/account-decisions.ts`'s and the contract's
 // (@rome/api-types/people). This route is the join between a path and those,
 // and holds no rule of its own beyond which status each outcome is.
 //
