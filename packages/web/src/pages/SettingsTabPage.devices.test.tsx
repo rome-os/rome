@@ -331,38 +331,45 @@ it("reopens the original Compose while the node is waiting for deployment", asyn
   expect(screen.getByRole("button", { name: "Link device" })).toBeTruthy();
 }, 15_000);
 
-it("lists a waiting container node when it is the first device and the service is stopped", async () => {
+it("opens Compose when generating the first container node with the service stopped", async () => {
+  const path = "/api/devices/container-nodes";
   const id = "73426989-9646-4579-9869-af5a321ff48d";
+  const grant = {
+    id,
+    installToken: `romeinstall_${"A".repeat(43)}`,
+    origin: "https://rome.example",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  let nodes: ContainerNode[] = [];
   renderDevices(
     () => ({ connection: "not_running", checkedAt: new Date().toISOString(), devices: [] }),
     undefined,
-    (url) =>
-      url.endsWith("/compose")
-        ? Response.json({
-            id,
-            installToken: `romeinstall_${"A".repeat(43)}`,
-            origin: "https://rome.example",
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          })
-        : Response.json({
-            nodes: [
-              {
-                id,
-                deviceId: null,
-                name: "First node",
-                status: "waiting",
-              },
-            ],
-            transport: "direct",
-          }),
+    (url, init) => {
+      if (url === `${path}/${id}/compose`) return Response.json(grant);
+      if (init?.method === "POST") {
+        nodes = [{ id, deviceId: null, name: "First node", status: "waiting" }];
+        return Response.json(grant, { status: 201 });
+      }
+      return Response.json({ nodes, transport: "direct" });
+    },
   );
+  const user = userEvent.setup();
+  const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
+  fireEvent.change(await setup.findByLabelText("Node name"), { target: { value: "First node" } });
+  fireEvent.change(setup.getByLabelText("Rome address"), { target: { value: grant.origin } });
+  await user.click(setup.getByRole("button", { name: "Generate Compose" }));
+  const firstPreview = within(await screen.findByRole("dialog", { name: "First node" }));
+  expect(
+    (await firstPreview.findByRole("region", { name: "Compose configuration" })).textContent,
+  ).toContain(grant.installToken);
+  await user.keyboard("{Escape}");
+
   const devices = within(await screen.findByRole("list", { name: "Devices" }));
   expect(devices.getByText("First node")).toBeTruthy();
   expect(devices.getByText("Waiting for deployment")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Link device" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Start service" })).toBeTruthy();
 
-  const user = userEvent.setup();
   const card = devices.getByRole("button", { name: /First node/ });
   card.focus();
   await user.keyboard("{Enter}");

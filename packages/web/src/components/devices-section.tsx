@@ -67,7 +67,13 @@ export function DevicesSection() {
     : query.isError;
   const thisDevice = useThisDevice(() => void query.refetch());
   const manage = useDeviceManage();
-  const { devices, pairings, dialogs: pairingDialogs } = useContainerNodeCards(data?.devices ?? []);
+  const {
+    devices,
+    pairings,
+    openPairing,
+    dialogs: pairingDialogs,
+  } = useContainerNodeCards(data?.devices ?? []);
+  const emptySetup = <DeviceConnectionCards onContainerIssued={openPairing} />;
 
   // A direct container can be connected even when the shared device service is stopped.
   const showList = !unavailable || devices.length > 0 || pairings.length > 0;
@@ -83,7 +89,7 @@ export function DevicesSection() {
           locale={i18n.language}
           thisDevice={thisDevice ?? undefined}
           manage={manage}
-          setup={{ action: <LinkDeviceMenu />, empty: <DeviceConnectionCards /> }}
+          setup={{ action: <LinkDeviceMenu />, empty: emptySetup }}
           // The order is set when the cards first draw, so they wait to learn which is this computer.
           loading={query.isPending || thisDevice === undefined}
         />
@@ -144,7 +150,7 @@ export function DevicesSection() {
           </Card>
         </Section>
       )}
-      {!showList && <DeviceConnectionCards />}
+      {!showList && emptySetup}
       {pairingDialogs}
     </div>
   );

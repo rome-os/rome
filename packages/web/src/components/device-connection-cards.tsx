@@ -16,7 +16,13 @@ import {
 const methods = ["desktop", "cli", "container"] as const;
 type Method = (typeof methods)[number];
 
-function DeviceConnectionContent({ method }: { method: Method }) {
+function DeviceConnectionContent({
+  method,
+  onContainerIssued,
+}: {
+  method: Method;
+  onContainerIssued?: (id: string) => void;
+}) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   return (
     <>
@@ -48,12 +54,16 @@ function DeviceConnectionContent({ method }: { method: Method }) {
           </Button>
         </>
       )}
-      {method === "container" && <ContainerNodeSetup />}
+      {method === "container" && <ContainerNodeSetup onIssued={onContainerIssued} />}
     </>
   );
 }
 
-export function DeviceConnectionCards() {
+export function DeviceConnectionCards({
+  onContainerIssued,
+}: {
+  onContainerIssued: (id: string) => void;
+}) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   return (
     <Section aria-labelledby="connect-device-title">
@@ -68,7 +78,7 @@ export function DeviceConnectionCards() {
             <CardTitle>{t(`methods.${method}`)}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <DeviceConnectionContent method={method} />
+            <DeviceConnectionContent method={method} onContainerIssued={onContainerIssued} />
           </CardContent>
         </Card>
       ))}

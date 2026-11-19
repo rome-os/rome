@@ -92,7 +92,7 @@ function useContainerNodes() {
   });
 }
 
-export function ContainerNodeSetup() {
+export function ContainerNodeSetup({ onIssued }: { onIssued?: (id: string) => void }) {
   const { t } = useContainerNodeText();
   const query = useContainerNodes();
   return (
@@ -104,7 +104,9 @@ export function ContainerNodeSetup() {
         </p>
       )}
       {query.error && <ContainerNodeError error={query.error} />}
-      {query.data && <PairContainerNode direct={query.data.transport === "direct"} />}
+      {query.data && (
+        <PairContainerNode direct={query.data.transport === "direct"} onIssued={onIssued} />
+      )}
     </>
   );
 }
@@ -123,14 +125,15 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
   useEffect(() => {
     if (selected && !pairing) setSelected(null);
   }, [selected, pairing]);
+  const openPairing = (id: string, trigger: HTMLButtonElement | null = null) => {
+    pairingTrigger.current = trigger;
+    setSelected(id);
+  };
   const pairings = waiting.map<NodeDevicePairing>((node) => ({
     id: node.id,
     name: node.name,
     waitingLabel: t("status.waiting"),
-    onOpen: (event) => {
-      pairingTrigger.current = event.currentTarget;
-      setSelected(node.id);
-    },
+    onOpen: (event) => openPairing(node.id, event.currentTarget),
     onRename: () => setRenaming(node),
     onRemove: () => setRemoving(node),
   }));
@@ -155,6 +158,7 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
       ...linked,
     ],
     pairings,
+    openPairing,
     dialogs: (
       <>
         {pairing && (
@@ -164,8 +168,10 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
             className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] flex-col"
             {...{
               onCloseAutoFocus: (event: Event) => {
-                event.preventDefault();
-                pairingTrigger.current?.focus();
+                if (pairingTrigger.current?.isConnected) {
+                  event.preventDefault();
+                  pairingTrigger.current.focus();
+                }
               },
             }}
           >
@@ -265,7 +271,13 @@ function RemoveContainerNode({ node, onClose }: { node: ContainerNode; onClose: 
   );
 }
 
-function PairContainerNode({ direct }: { direct: boolean }) {
+function PairContainerNode({
+  direct,
+  onIssued,
+}: {
+  direct: boolean;
+  onIssued?: (id: string) => void;
+}) {
   const { t } = useContainerNodeText();
   const nameId = useId();
   const addressId = useId();
@@ -290,8 +302,9 @@ function PairContainerNode({ direct }: { direct: boolean }) {
       if (!direct && !grant.origin) throw new Error("unavailable");
       return grant;
     },
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ["container-nodes"] });
+    onSettled: (grant) => {
+      const refresh = client.invalidateQueries({ queryKey: ["container-nodes"] });
+      if (grant && onIssued) void refresh.then(() => onIssued(grant.id));
     },
     onSuccess: (data) => setInstallationId(data.id),
   });
