@@ -56,7 +56,7 @@ import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attrib
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import {
-  currentSessionActor,
+  isGuardianSession,
   type SessionActor,
   withoutSessionActor,
 } from "./access/session-actor.js";
@@ -2383,10 +2383,7 @@ async function main() {
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
     apiDeps.features = [
-      linkCode({
-        ...apiDeps,
-        isGuardian: async () => (await currentSessionActor())?.kind === "guardian",
-      }),
+      linkCode({ ...apiDeps, isGuardian: isGuardianSession }),
       phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
       personHistory(apiDeps),
     ];

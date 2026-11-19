@@ -23,7 +23,7 @@ const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> =
   },
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
-    why: "an assistant's page sends to an account the way a person's page does, through directPlace",
+    why: "an assistant's page sends to an account the way a person's page does, through directPlace, and answers with the same respondToSend so the dashboard reads one shape",
   },
   "people/guardian-profile": {
     files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],

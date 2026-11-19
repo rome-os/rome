@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import type { LinkCodeResponse } from "@rome/api-types/people";
 import {
-  currentSessionActor,
+  isGuardianSession,
   runWithSessionActor,
   type SessionActor,
 } from "../../../access/session-actor.js";
@@ -25,8 +25,7 @@ describe("People link code API", () => {
   function appAs(actor: SessionActor): Hono {
     const app = new Hono();
     app.use("*", (_c, next) => runWithSessionActor(actor, next));
-    const isGuardian = async () => (await currentSessionActor())?.kind === "guardian";
-    return app.route("/", linkCode({ ...deps, isGuardian }).routes);
+    return app.route("/", linkCode({ ...deps, isGuardian: isGuardianSession }).routes);
   }
   const guardian: SessionActor = { kind: "guardian", userId: "owner", via: "cookie" };
   const sameOrigin = { method: "POST", headers: { "sec-fetch-site": "same-origin" } };
