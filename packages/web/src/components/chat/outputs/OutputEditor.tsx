@@ -42,8 +42,10 @@ export function projectPathOf(output: Pick<ChatOutput, "link">): string | null {
 
 /**
  * The projects-folder path an output opens for editing at, or null while it
- * cannot be edited: the projects folder says the file is editable text of at
- * most the size the Projects page treats as large.
+ * cannot be edited: the projects folder says the file is editable text that
+ * the Projects page saves by itself (`.txt`, `.md`, `.mdx`), of at most the size
+ * it treats as large. Anything else stays a preview, since the narrow tab has
+ * no room to ask for a save by hand.
  */
 export function useEditablePath(output: ChatOutput, candidate: boolean): string | null {
   const path = candidate && !output.missing && output.contentUrl ? projectPathOf(output) : null;
@@ -63,7 +65,9 @@ export function useEditablePath(output: ChatOutput, candidate: boolean): string 
   });
   const file = resolved.data;
   if (!path || file?.type !== "file") return null;
-  return file.editable && file.kind === "text" && file.size <= LARGE_TEXT_FILE_BYTES ? path : null;
+  return getProjectsAutoSavePolicy(file) !== null && file.size <= LARGE_TEXT_FILE_BYTES
+    ? path
+    : null;
 }
 
 /**

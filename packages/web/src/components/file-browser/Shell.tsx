@@ -126,7 +126,7 @@ export function Shell({
   useUrlSelectionSync({ embedded });
   useFileBrowserWatch({ watchEventsUrl });
   useBeforeUnloadGuard();
-  useDocumentLinkInterceptor();
+  useDocumentLinkInterceptor({ handBack: singleFile });
   usePageHideKeepalive();
   useAutoSaveOrchestration();
   useExternalSelection(externalSelection);
@@ -145,6 +145,8 @@ export function Shell({
 
   const fileDrop = useFileDropArea({
     onActiveChange: (active) => store.getState().ui.setIsDragActive(active),
+    // A browser of one file the host chose takes no uploads into the folder.
+    refuse: () => singleFile,
     onDrop: (event) => {
       void getUploadEntriesFromDataTransfer(event.dataTransfer).then((entries) =>
         store.getState().ui.uploadFiles(entries),

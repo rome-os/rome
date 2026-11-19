@@ -164,13 +164,38 @@ export function OutputsPanel({
   const [filter, setFilter] = useState<Filter>("all");
   const ownGuard: LeaveGuard = useRef(null);
   const guard = leaveGuard ?? ownGuard;
+  // The file being edited, as it was when Edit was chosen. The edit lives on
+  // this, not on the list or the folder's answer: the agent writing the file
+  // again swaps its record, and neither may take the editor from under the
+  // owner. Only the guarded exits below end it.
+  const [editing, setEditing] = useState<{ path: string; output: ChatOutput } | null>(null);
+  const list = outputs.data?.outputs ?? [];
+  const listRef = useRef(list);
+  listRef.current = list;
+  // Back to the preview of the file just edited: its record as the list now has
+  // it, which is a new one when the file was written again meanwhile.
+  const leaveEditing = (then: (output: ChatOutput | null) => void) => {
+    const snapshot = editing?.output ?? null;
+    const latest = snapshot
+      ? (listRef.current.find((output) => output.id === snapshot.id) ??
+        listRef.current.find((output) => output.link !== null && output.link === snapshot.link) ??
+        null)
+      : null;
+    leaveEditor(guard, () => {
+      setEditing(null);
+      then(latest);
+    });
+  };
   // A link opened on an output opens that one, once a file being edited has
   // settled; if it stays open, so does the file.
   useEffect(
-    () => leaveEditor(guard, () => setChosen(selectedId)),
+    () =>
+      leaveEditor(guard, () => {
+        setEditing(null);
+        setChosen(selectedId);
+      }),
     [guard, selectedId, selectionSeq],
   );
-  const list = outputs.data?.outputs ?? [];
   const indexing = outputs.data?.indexing === true;
   // Earlier outputs still being read back, said quietly where the list is.
   const indexingNote = indexing ? (
@@ -179,6 +204,22 @@ export function OutputsPanel({
     </p>
   ) : null;
   const current = list.find((output) => output.id === chosen) ?? null;
+
+  const preview = (output: ChatOutput) => (
+    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
+      <OutputPreview
+        key={output.id}
+        output={output}
+        leaveGuard={guard}
+        editingPath={editing?.path ?? null}
+        onEdit={(path) => setEditing({ path, output })}
+        onDone={() => leaveEditing((latest) => latest && setChosen(latest.id))}
+        onBack={() => leaveEditing(() => setChosen(null))}
+        onNavigate={onNavigate}
+      />
+    </div>
+  );
+  if (editing) return preview(editing.output);
 
   if (outputs.isPending) {
     return (
@@ -192,19 +233,7 @@ export function OutputsPanel({
   if (outputs.isError) {
     return <p className="p-4 text-ui text-muted-foreground">{t("outputs.loadFailed")}</p>;
   }
-  if (current) {
-    return (
-      <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
-        <OutputPreview
-          key={current.id}
-          output={current}
-          leaveGuard={guard}
-          onBack={() => leaveEditor(guard, () => setChosen(null))}
-          onNavigate={onNavigate}
-        />
-      </div>
-    );
-  }
+  if (current) return preview(current);
   if (list.length === 0) {
     if (indexing) return <div className="p-4">{indexingNote}</div>;
     return (
@@ -368,11 +397,18 @@ export async function readPrefix(
 function OutputPreview({
   output,
   leaveGuard,
+  editingPath,
+  onEdit,
+  onDone,
   onBack,
   onNavigate,
 }: {
   output: ChatOutput;
   leaveGuard: LeaveGuard;
+  /** The project path being edited in place of the preview, or null. */
+  editingPath: string | null;
+  onEdit: (path: string) => void;
+  onDone: () => void;
   onBack: () => void;
   onNavigate?: () => void;
 }) {
@@ -380,13 +416,14 @@ function OutputPreview({
   const kind = previewOf(output);
   const url = output.contentUrl;
   const textual = kind === "markdown" || kind === "text";
-  const [editing, setEditing] = useState(false);
-  // A text file the agent wrote into the projects folder can be edited in place.
-  const editablePath = useEditablePath(output, textual && output.kind === "written");
+  const editing = editingPath !== null;
+  // A text file the agent wrote into the projects folder can be edited in
+  // place. Once it is being edited the folder's answer is not asked again.
+  const editablePath = useEditablePath(output, textual && output.kind === "written" && !editing);
   const text = useQuery({
     queryKey: outputTextKey(url),
     queryFn: () => readPrefix(url ?? "", PREVIEW_CHARS),
-    enabled: textual && Boolean(url),
+    enabled: textual && Boolean(url) && !editing,
   });
 
   const download = url ? (
@@ -398,12 +435,8 @@ function OutputPreview({
     </Button>
   ) : null;
   const editToggle =
-    editablePath !== null && editing ? (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => leaveEditor(leaveGuard, () => setEditing(false))}
-      >
+    editingPath !== null ? (
+      <Button variant="outline" size="sm" onClick={onDone}>
         {t("outputs.doneEditing")}
       </Button>
     ) : editablePath !== null ? (
@@ -411,7 +444,7 @@ function OutputPreview({
         size="sm"
         label={t("outputs.edit")}
         icon={<Pencil />}
-        onClick={() => setEditing(true)}
+        onClick={() => onEdit(editablePath)}
       />
     ) : null;
   const header = (
@@ -432,12 +465,12 @@ function OutputPreview({
     </div>
   );
 
-  if (editing && editablePath !== null) {
+  if (editingPath !== null) {
     return (
       <div className="flex h-full flex-col gap-3">
         {header}
         <div className="min-h-0 flex-1">
-          <OutputEditor path={editablePath} textUrl={url} leaveGuard={leaveGuard} />
+          <OutputEditor path={editingPath} textUrl={url} leaveGuard={leaveGuard} />
         </div>
       </div>
     );

@@ -20,7 +20,7 @@ import { projectPathOf } from "./OutputEditor";
 // The editor is the Projects page's own browser; here it shows what it was
 // asked to select and how, saves by itself or not, and holds the panel's exits
 // until `canLeave` says they may go on.
-const browser = { canLeave: true, mounts: 0 };
+const browser = { canLeave: true, mounts: 0, guardCalls: 0 };
 rs.mock("@/components/file-browser-page", () => ({
   FileBrowserPage: ({
     apiBasePath,
@@ -39,11 +39,17 @@ rs.mock("@/components/file-browser-page", () => ({
     embedded?: boolean;
     logicalRootPath: string;
   }) => {
-    browser.mounts += 1;
+    // Mounts, not renders: a remount is what would drop the editor.
+    useEffect(() => {
+      browser.mounts += 1;
+    }, []);
     // As the real browser does: filled while it is mounted, empty after.
     useEffect(() => {
       if (!leaveGuard) return;
-      leaveGuard.current = async () => browser.canLeave;
+      leaveGuard.current = async () => {
+        browser.guardCalls += 1;
+        return browser.canLeave;
+      };
       return () => {
         leaveGuard.current = null;
       };
@@ -106,6 +112,7 @@ beforeEach(() => {
   resolved = {};
   browser.canLeave = true;
   browser.mounts = 0;
+  browser.guardCalls = 0;
   rs.stubGlobal(
     "fetch",
     rs.fn(async (input: RequestInfo | URL) => {
@@ -152,7 +159,7 @@ afterEach(() => {
 
 function renderPanel(props: { selectedId?: string; taskChats?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <ThemeProvider>
@@ -163,6 +170,7 @@ function renderPanel(props: { selectedId?: string; taskChats?: boolean } = {}) {
       </LiveEventsClientContext.Provider>
     </QueryClientProvider>,
   );
+  return Object.assign(view, { client });
 }
 
 describe("OutputsPanel", () => {
@@ -352,6 +360,11 @@ describe("editing an output in the projects folder", () => {
         ["a file the folder has not got", { name: "a.txt" }, null],
         ["a binary file", { name: "a.txt" }, { kind: "binary" }],
         ["a file over 1 MB", { name: "big.txt" }, { size: LARGE_TEXT_FILE_BYTES + 1 }],
+        // Text, but not what the Projects page saves by itself.
+        ["a JSON file", { name: "a.json", mimeType: "application/json" }],
+        ["a CSV file", { name: "a.csv", mimeType: "text/csv" }],
+        ["a script", { name: "a.py", mimeType: "text/x-python" }],
+        ["a YAML file", { name: "a.yaml", mimeType: "application/yaml" }],
         ["a path that climbs out", { name: "a.txt", link: "/projects/demo/../a.txt" }],
       ];
     for (const [label, extra, answer, path] of cases) {
@@ -405,6 +418,52 @@ describe("editing an output in the projects folder", () => {
     browser.canLeave = true;
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
     expect(await screen.findByRole("list", { name: "Today" })).toBeTruthy();
+  });
+
+  it("keeps the editor, and its edits, when the agent writes the same file again", async () => {
+    const user = userEvent.setup();
+    outputs = [output("one", { name: "notes.txt", link: "/projects/demo/notes.txt", from: null })];
+    files[outputs[0].contentUrl!] = "hello";
+    resolved["projects/demo/notes.txt"] = {};
+    renderPanel({ selectedId: "one", taskChats: true });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByTestId("project-browser");
+    const mounts = browser.mounts;
+
+    // The same file again: a new record, so the old one's id is gone.
+    browser.canLeave = false;
+    outputs = [output("two", { name: "notes.txt", link: "/projects/demo/notes.txt" })];
+    files[outputs[0].contentUrl!] = "hello again";
+    acceptLatestSocket().receive({
+      type: "event",
+      topic: chatTasksTopicName("chat-1"),
+      event: TASK_LIST_CHANGED_EVENT,
+      data: { chatId: "chat-1" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.getByTestId("project-browser")).toBeTruthy();
+    expect(browser.guardCalls).toBe(0);
+    expect(browser.mounts).toBe(mounts);
+
+    // Done lands on the new record's preview.
+    browser.canLeave = true;
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByText("hello again")).toBeTruthy();
+  });
+
+  it("keeps the editor when the folder later says the file cannot be edited", async () => {
+    const user = userEvent.setup();
+    await open({ name: "notes.txt" });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByTestId("project-browser");
+
+    resolved["projects/demo/notes.txt"] = { editable: false, size: LARGE_TEXT_FILE_BYTES + 1 };
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.getByTestId("project-browser")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(browser.guardCalls).toBe(0);
   });
 
   it("shows the file as it was saved once Done returns to the preview", async () => {

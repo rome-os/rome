@@ -1,11 +1,12 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { FileBrowserStoreProvider, useFileBrowserStoreApi } from "./store/context";
 import { FileViewHeader } from "./FileView";
+import { useDocumentLinkInterceptor } from "./hooks/useDocumentLinkInterceptor";
 import i18n from "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { FileBrowserPage } from "@/components/file-browser-page";
@@ -177,5 +178,135 @@ describe("FileViewHeader autosave status", () => {
     expect(label.className).toContain("hidden");
     expect(label.className).toContain("@min-[1024px]/fb:inline");
     expect(screen.getByText("a.txt")).toBeTruthy();
+  });
+});
+
+describe("a file dropped on the browser", () => {
+  const dropped = new File(["x"], "dropped.txt", { type: "text/plain" });
+  const drop = (target: Element) =>
+    fireEvent.drop(target, {
+      dataTransfer: {
+        types: ["Files"],
+        files: [dropped],
+        items: [
+          {
+            webkitGetAsEntry: () => ({
+              isFile: true,
+              isDirectory: false,
+              fullPath: "/dropped.txt",
+              file: (done: (file: File) => void) => done(dropped),
+            }),
+          },
+        ],
+        dropEffect: "",
+      },
+    });
+  // Uploads go out as an XHR POST, which the stub only counts.
+  let posts = 0;
+  const realOpen = XMLHttpRequest.prototype.open;
+  const realSend = XMLHttpRequest.prototype.send;
+  beforeEach(() => {
+    posts = 0;
+    XMLHttpRequest.prototype.open = function (method: string) {
+      if (method === "POST") posts += 1;
+    } as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = () => undefined;
+  });
+  afterEach(() => {
+    XMLHttpRequest.prototype.open = realOpen;
+    XMLHttpRequest.prototype.send = realSend;
+  });
+  const uploads = () => Array.from({ length: posts });
+
+  it("uploads nothing in a single-file browser", async () => {
+    stubApi();
+    const { container } = renderBrowser(true);
+    await screen.findByTestId("editor");
+    drop(container.querySelector("main") as Element);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(uploads()).toHaveLength(0);
+  });
+
+  it("is uploaded to the folder as ever where there is a file list", async () => {
+    stubApi();
+    const { container } = renderBrowser(false);
+    await screen.findAllByPlaceholderText("Search projects");
+    drop(container.querySelector("main") as Element);
+    await waitFor(() => expect(uploads().length).toBeGreaterThan(0));
+  });
+});
+
+describe("a chat link clicked with edits unsaved", () => {
+  const config = {
+    apiBasePath: "/api/projects",
+    logicalRootPath: "projects",
+    rootLabel: "projects",
+    initialSelectedFolderPath: null,
+    queryClient: new QueryClient(),
+    navigate: rs.fn(),
+    getRouteSnapshot: () => ({ pathname: "/", search: "", hash: "" }),
+    t: i18n.getFixedT("en", "files"),
+    embedded: true,
+  };
+  let dirty = true;
+
+  function Where() {
+    return <output data-testid="where">{useLocation().pathname}</output>;
+  }
+  function Page({ handBack, onLink }: { handBack: boolean; onLink: () => void }) {
+    const api = useFileBrowserStoreApi();
+    useEffect(() => {
+      // Unsaved edits that settle when asked, as an autosave flush does.
+      api.setState((state) => ({
+        file: {
+          ...state.file,
+          hasUnsavedEdits: () => dirty,
+          resolveUnsavedEditsBeforeLeaving: async () => {
+            dirty = false;
+            return true;
+          },
+        },
+      }));
+    }, [api]);
+    useDocumentLinkInterceptor({ handBack });
+    return (
+      <a
+        href="/chat/other"
+        onClick={(event) => {
+          // As a chat link does: it opens the output itself.
+          event.preventDefault();
+          onLink();
+        }}
+      >
+        link
+      </a>
+    );
+  }
+  function setup(handBack: boolean, onLink: () => void) {
+    dirty = true;
+    render(
+      <MemoryRouter>
+        <FileBrowserStoreProvider config={config}>
+          <Page handBack={handBack} onLink={onLink} />
+        </FileBrowserStoreProvider>
+        <Where />
+      </MemoryRouter>,
+    );
+  }
+
+  it("goes back to the link's own handler once settled, and does not navigate", async () => {
+    const onLink = rs.fn();
+    setup(true, onLink);
+    fireEvent.click(screen.getByText("link"));
+    await waitFor(() => expect(onLink).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("where").textContent).toBe("/");
+  });
+
+  it("still navigates to the href where the browser owns the page", async () => {
+    const onLink = rs.fn();
+    setup(false, onLink);
+    fireEvent.click(screen.getByText("link"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/chat/other"));
+    expect(onLink).not.toHaveBeenCalled();
   });
 });
