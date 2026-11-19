@@ -202,6 +202,105 @@ describe("Slack app direct messages (R4)", () => {
   });
 });
 
+function mentionEvent(i: number, event: Record<string, unknown> = {}) {
+  return {
+    type: "event_callback",
+    team_id: TEAM,
+    api_app_id: "A_ROME",
+    event_id: `EvM${i}`,
+    event: {
+      type: "app_mention",
+      channel_type: "channel",
+      channel: "C_TEAM",
+      user: "U_MEMBER",
+      text: `<@${BOT}> question ${i}`,
+      ts: `1700000100.${String(i).padStart(6, "0")}`,
+      ...event,
+    },
+  };
+}
+
+describe("Slack app mentions in a group (R5)", () => {
+  it("hands over 10 of 10 mentions once each, as a mention in the group", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    for (let i = 0; i < 10; i++) await mailbox.deposit(frame(mentionEvent(i)));
+    for (let i = 0; i < 10; i++) await mailbox.deposit(frame(mentionEvent(i)));
+
+    expect(delivered).toHaveLength(10);
+    expect(new Set(delivered.map((m) => m.messageId)).size).toBe(10);
+    for (const [i, message] of delivered.entries()) {
+      expect(message).toMatchObject({
+        chatId: "C_TEAM",
+        senderId: "T_A/U_MEMBER",
+        text: `question ${i}`,
+        thread: { kind: "group" },
+        addressing: "mention",
+      });
+    }
+  });
+
+  it("replies in a thread under the mention", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered, api } = adapter(mailbox);
+    await a.start();
+    await mailbox.deposit(frame(mentionEvent(1)));
+    const mention = delivered[0];
+
+    await a.send(mention.chatId, { text: "answer", replyToMessageId: mention.messageId } as never);
+    expect(api.postMessage).toHaveBeenCalledWith(
+      "xoxb-a",
+      { channel: "C_TEAM", markdown: "answer", threadTs: "1700000100.000001" },
+      expect.anything(),
+    );
+  });
+
+  it("answers a mention inside an existing thread in that thread", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered, api } = adapter(mailbox);
+    await a.start();
+    await mailbox.deposit(frame(mentionEvent(2, { thread_ts: "1700000050.000000" })));
+    const mention = delivered[0];
+    expect(mention.replyTo).toEqual({ messageId: "1700000050.000000" });
+
+    await a.send(mention.chatId, { text: "answer", replyToMessageId: mention.messageId } as never);
+    expect(api.postMessage).toHaveBeenCalledWith(
+      "xoxb-a",
+      { channel: "C_TEAM", markdown: "answer", threadTs: "1700000050.000000" },
+      expect.anything(),
+    );
+  });
+
+  it("neither answers nor keeps a group message that does not mention it", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered, copy } = adapter(mailbox);
+    await a.start();
+    const unmentioned = mentionEvent(3, { type: "message", text: "lunch?" });
+    await mailbox.deposit(frame(unmentioned));
+
+    expect(mailbox.statuses).toEqual([200]);
+    expect(delivered).toHaveLength(0);
+    expect(copy.mayNotHold(TEAM, Number.MAX_SAFE_INTEGER)).toEqual([]);
+  });
+
+  it("hands a mention over again on start when Rome may not hold it", async () => {
+    const mailbox = fakeMailbox();
+    const copy = testCopy();
+    const first = adapter(mailbox, fakeApi(), copy);
+    first.adapter.onInbound(() => {
+      throw new Error("Rome is busy");
+    });
+    await first.adapter.start();
+    await mailbox.deposit(frame(mentionEvent(4)));
+    await first.adapter.stop();
+
+    const second = adapter(mailbox, fakeApi(), copy);
+    await second.adapter.start();
+    expect(second.delivered.map((m) => m.text)).toEqual(["question 4"]);
+  });
+});
+
 describe("Slack app while the instance is stopped (R6)", () => {
   it("answers each of 20 messages sent during a stop once, after restart", async () => {
     const mailbox = fakeMailbox();

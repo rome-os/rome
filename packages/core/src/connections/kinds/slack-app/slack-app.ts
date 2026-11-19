@@ -6,10 +6,9 @@
 // workspace's forward secret, into that workspace's relay mailbox. This adapter
 // drains that mailbox, checks the forward signature and the workspace, drops
 // what it has already seen by Slack's event id, and delivers each direct
-// message as the connection's own record. Replies go straight to Slack's Web
-// API with the bot token the instance got at sign-in.
-//
-// Phase 1 hears direct messages only. Mentions in a group come in phase 2.
+// message, and each mention of the app in a group, as the connection's own
+// record. Replies go straight to Slack's Web API with the bot token the
+// instance got at sign-in; a reply to a mention goes in a thread under it.
 
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
@@ -306,13 +305,22 @@ export class SlackAppAdapter {
     eventId: string,
   ): Promise<{ status: number }> {
     const event = payload.event;
-    if (event.type !== "message") {
+    // A direct message arrives as `message` in an `im`. In a group the app
+    // hears only what mentions it, as `app_mention`; Slack sends no other
+    // group message, and one that came anyway is neither answered nor kept.
+    const direct = event.type === "message" && event.channel_type === "im";
+    const mention =
+      event.type === "app_mention" &&
+      event.channel_type !== "im" &&
+      typeof event.channel === "string" &&
+      !event.channel.startsWith("D");
+    if (event.type !== "message" && event.type !== "app_mention") {
       // Slack retries and the relay delivers at least once.
       if (this.dedup.checkAndRecord(eventId)) return { status: 200 };
       this.handleSignal(payload);
       return { status: 200 };
     }
-    if (event.channel_type !== "im") return { status: 200 };
+    if (!direct && !mention) return { status: 200 };
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
     if (isExternalAuthor(payload)) return { status: 200 };
@@ -337,9 +345,12 @@ export class SlackAppAdapter {
       attachments: [],
       timestamp: new Date(Number.parseFloat(event.ts) * 1_000),
       raw: payload,
+      // A thread lives inside its conversation's chat. The reply finds the
+      // thread from the id of the message it answers.
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-      thread: { kind: "dm" },
-      addressing: "direct",
+      ...(direct
+        ? { thread: { kind: "dm" as const }, addressing: "direct" as const }
+        : { thread: { kind: "group" as const }, addressing: "mention" as const }),
     };
     // The mailbox is told the message was received only once the copy holds
     // it: a write that fails answers 500, and the mailbox delivers it again.
