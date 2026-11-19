@@ -63,6 +63,9 @@ const ChatSettingsInput = z.custom<
 export interface WorkerCaller {
   callerActionContext?: {
     actor?: SessionActor;
+    /** Who reads the calling turn's answer, as the host read it when the
+     *  turn started. Absent for an action that is not the host's own. */
+    audience?: "private" | "shared";
     channelContext?: ThreadContext;
     agentName?: string;
   };
@@ -84,6 +87,33 @@ export interface ChatWorkerCallsDeps {
     message: OutgoingMessage,
     agentName: string | undefined,
   ) => Promise<MessageReceipt | null>;
+}
+
+/**
+ * Whether the calling action may read any chat: it runs outside a chat, or in
+ * a turn whose audience is private, so nobody but the guardian reads what it
+ * says. A turn others read, such as one for a visitor, in a group or in an
+ * email thread, could pass on what another chat holds, so it reads only the
+ * chat it is in. An action with no audience reads as a shared turn. Domain:
+ * docs/domains/participation.md#audience.
+ */
+function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
+  if (context?.actor && context.actor.kind !== "guardian") return false;
+  if (!context?.channelContext) return true;
+  return context.audience === "private";
+}
+
+/** The channel a query names: its name, or the channel holding the account. */
+async function channelNamed(
+  channelsService: ChannelsService,
+  target: Account | string,
+): Promise<string | null> {
+  if (typeof target === "string") return target;
+  const summaries = await channelsService.list();
+  const held = summaries.find(
+    (summary) => summary.account?.platform === target.platform && summary.account?.id === target.id,
+  );
+  return held?.name ?? null;
 }
 
 /** The chat calls an app's worker makes, keyed by method name. */
@@ -115,6 +145,16 @@ export function chatWorkerCalls(
     "channels.query": async (params, caller) => {
       const { channel, chatId, since, until, after, olderThan, newerThan, limit } =
         parseWorkerCallParams("channels.query", QueryParams, params);
+      const context = caller?.callerActionContext;
+      const place = context?.channelContext;
+      if (
+        !readsAnyChat(context) &&
+        (chatId === undefined ||
+          chatId !== place?.threadId ||
+          (await channelNamed(channelsService, channel)) !== place.channel)
+      ) {
+        throw new Error("A turn others read reads only the chat it is in");
+      }
       // The dashboard chat reads as the person accountable for the calling
       // action's turn, in the chat it runs in.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
