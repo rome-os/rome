@@ -77,7 +77,6 @@ function readRatio() {
 interface ToolTabProps {
   id: string;
   label: string;
-  icon: ReactNode;
   active: boolean;
   unread?: boolean;
   /** Shown as a pulsing dot with this accessible name. */
@@ -85,20 +84,25 @@ interface ToolTabProps {
   onClose: () => void;
 }
 
-function ToolTab({ id, label, icon, active, unread = false, liveLabel, onClose }: ToolTabProps) {
+/**
+ * One tab of the strip: its name and its close button, with no icon, so
+ * several fit before the strip drops some into its menu. The menu keeps the
+ * icons.
+ */
+function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: ToolTabProps) {
   const { t } = useTranslation("common");
 
   return (
     <div
       style={{ minWidth: MIN_TAB_WIDTH }}
-      className={`relative flex h-9 shrink items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      className={`relative flex h-9 shrink items-center rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
         value={id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="h-full min-w-0 max-w-48 flex-1 gap-2 after:hidden"
+        className="h-full min-w-0 max-w-48 flex-1 gap-1 px-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
@@ -106,7 +110,6 @@ function ToolTab({ id, label, icon, active, unread = false, liveLabel, onClose }
           }
         }}
       >
-        {icon}
         <span className="truncate">{label}</span>
         {unread && (
           <span
@@ -409,7 +412,6 @@ export function ToolWorkspace({
             <ToolTab
               id={TRACE_TAB_ID}
               label={tActivity("trace.drawer.title")}
-              icon={<ListTree className="size-3.5" />}
               active={traceActive}
               liveLabel={trace.streaming ? tActivity("trace.drawer.live") : undefined}
               onClose={() => traceCloseRef.current?.()}
@@ -419,13 +421,6 @@ export function ToolWorkspace({
             <ToolTab
               id={TASKS_TAB_ID}
               label={tasksView === "routines" ? t("chat.routinesTab") : t("chat.tasksTab")}
-              icon={
-                tasksView === "routines" ? (
-                  <CalendarClock className="size-3.5" />
-                ) : (
-                  <ListChecks className="size-3.5" />
-                )
-              }
               active={tasksActive}
               onClose={hideTasks}
             />
@@ -434,7 +429,6 @@ export function ToolWorkspace({
             <ToolTab
               id={OUTPUTS_TAB_ID}
               label={tChat("outputs.title")}
-              icon={<FileOutput className="size-3.5" />}
               active={outputsActive}
               onClose={closeOutputsTab}
             />
@@ -446,7 +440,6 @@ export function ToolWorkspace({
                 key={widget.id}
                 id={widget.id}
                 label={label(widget)}
-                icon={icon(widget)}
                 active={!builtinActive && widget.id === view.activeId}
                 unread={view.unreadIds.includes(widget.id)}
                 onClose={() => closeTab(widget.id)}

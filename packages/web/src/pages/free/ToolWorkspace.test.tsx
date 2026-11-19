@@ -8,6 +8,7 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
+import { MIN_TAB_WIDTH, TAB_GAP } from "./tool-tab-fit";
 import { useToolOutputs } from "./tool-outputs";
 import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
@@ -161,21 +162,21 @@ describe("ToolWorkspace", () => {
       workspace(view, many, rs.fn(), rs.fn(), (widget) => `app ${widget.id}`);
 
     it("draws the tabs that fit, and counts the rest on the all-apps menu", () => {
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
       expect(tabNames()).toEqual(["app a", "app b", "app c"]);
       expect(screen.getByRole("button", { name: "All open apps, 2 more" }).textContent).toBe("+2");
     });
 
     it("moves a hidden active tab into the last slot", () => {
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       render(labelled({ activeId: "e", collapsed: false, unreadIds: [] }));
       expect(tabNames()).toEqual(["app a", "app b", "app e"]);
     });
 
     it("lists every tab on the menu and keeps the plain label when all fit", async () => {
       const user = userEvent.setup();
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       const { unmount } = render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
       await user.click(screen.getByRole("button", { name: "All open apps, 2 more" }));
       expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
@@ -270,7 +271,7 @@ describe("ToolWorkspace in the Mac app's title bar", () => {
   });
 
   it("fits the tabs to the strip in the title bar too", () => {
-    stripWidth = 128;
+    stripWidth = MIN_TAB_WIDTH;
     render(inTitlebar({ activeId: "b", collapsed: false, unreadIds: [] }));
     const end = screen.getByTestId("titlebar-end");
     expect(Array.from(end.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual([

@@ -1,5 +1,8 @@
-/** Narrowest a tab shrinks to, in px, before the strip drops a tab instead. */
-export const MIN_TAB_WIDTH = 128;
+/**
+ * Narrowest a tab shrinks to, in px, before the strip drops a tab instead:
+ * a short name such as "Outputs" and its close button, with no icon.
+ */
+export const MIN_TAB_WIDTH = 96;
 /** Space the strip leaves between two tabs, in px. */
 export const TAB_GAP = 4;
 
