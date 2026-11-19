@@ -132,6 +132,14 @@ write(
     (breaks.has("R11-store") ? "  botToken: text('bot_token'),\n" : "") +
     "  createdAt: integer('created_at'),\n});\n",
 );
+// Constraints on the binding table are not stored data, so R11 passes them.
+write(
+  romeCloud,
+  "packages/pantheon/drizzle/0001_slack_bindings.sql",
+  "CREATE TABLE slack_bindings_sql (team_id TEXT, instance_id TEXT, PRIMARY KEY (team_id), UNIQUE (instance_id, team_id));\n" +
+    'ALTER TABLE "slack_bindings" ADD CONSTRAINT "slack_bindings_instance_fk" FOREIGN KEY ("instance_id") REFERENCES "instances"("id");\n' +
+    'ALTER TABLE "slack_bindings" ADD UNIQUE ("team_id");\n',
+);
 if (breaks.has("R11-sql"))
   write(
     romeCloud,
