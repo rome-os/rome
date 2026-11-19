@@ -472,7 +472,11 @@ export class DiscordAdapter {
    * contributes none; any other failure rejects, naming the chat.
    */
   async listArchivedThreads(): Promise<GuildChannelInfo[]> {
-    const chats = this.listGuildChannels().filter((channel) => channel.type !== "thread");
+    // A chat the bot may not read answers 403, which Discord counts toward
+    // banning the bot's address, so only chats it may read are asked.
+    const chats = this.listGuildChannels().filter(
+      (channel) => channel.type !== "thread" && this.readsArchiveOf(channel),
+    );
     const byId = new Map(chats.map((chat) => [chat.id, chat]));
     const threads = await archivedDiscordThreads(
       (route, query) => this.rest.get(route, query ? { query } : {}),
@@ -493,6 +497,16 @@ export class DiscordAdapter {
         },
       ];
     });
+  }
+
+  /** Whether the gateway says the bot may read `chat`'s history. A chat it
+   *  cannot tell about is asked, and a 403 then skips it. */
+  private readsArchiveOf(chat: GuildChannelInfo): boolean {
+    const channel = this.client.guilds.cache.get(chat.guildId)?.channels.cache.get(chat.id);
+    const me = this.client.guilds.cache.get(chat.guildId)?.members.me;
+    if (!channel || !me) return true;
+    const flags = discordJs().PermissionFlagsBits;
+    return me.permissionsIn(channel).has([flags.ViewChannel, flags.ReadMessageHistory]);
   }
 
   /** Execute a provider-relative request through the epoch-owned discord.js
