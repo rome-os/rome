@@ -1,7 +1,7 @@
 // Reading what a routine's runs did: its run history and one run's action tree.
 // The Routines page reads these through `GET /routines/:id/runs[/:runId/trace]`
-// and agents through `core:routine_runs_list` and `core:routine_run_read`
-// (routines/run-actions.ts), so both see the same records.
+// and agents through `system:list_routine_runs` and `system:read_routine_run`
+// (routines/control.ts), so both see the same records.
 
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";

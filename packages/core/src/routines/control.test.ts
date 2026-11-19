@@ -1,38 +1,31 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { routineRuns as routineRunsTable } from "../db/schema.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
-import {
-  registerRoutineRunActions,
-  ROUTINE_RUN_READ_ACTION,
-  ROUTINE_RUNS_LIST_ACTION,
-} from "./run-actions.js";
+import { createTestDb, type TestDb } from "../test/db.js";
+import { type RoutineOperations, type RoutineTurn, routineOperations } from "./control.js";
 
-type Actor = NonNullable<ActionRunContext["actor"]>;
-
-const guardian: Actor = { kind: "guardian", userId: "guardian", via: "cookie" };
-const visitor: Actor = { kind: "visitor", accountId: "visitor", email: "visitor@example.test" };
+const guardian: RoutineTurn = { actor: { kind: "guardian", userId: "guardian", via: "cookie" } };
+const visitor: RoutineTurn = {
+  actor: { kind: "visitor", accountId: "visitor", email: "visitor@example.test" },
+};
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
 let routineRuns: RoutineRunsRepository;
 let actionExecutions: ActionExecutionsRepository;
-let registry: ActionRegistryImpl;
-let engine: ActionEngine;
+let ops: RoutineOperations;
 
 beforeEach(async () => {
   testDb = createTestDb();
   routines = new RoutinesRepository(testDb.db);
   routineRuns = new RoutineRunsRepository(testDb.db);
   actionExecutions = new ActionExecutionsRepository(testDb.db);
-  registry = new ActionRegistryImpl();
-  registerRoutineRunActions(registry, {
+  ops = routineOperations({
     routines,
+    engine: { activate: async () => {}, deactivate: async () => {} },
     routineRuns,
     actionExecutions,
     ownerOfChat: async (chatId) =>
@@ -41,14 +34,6 @@ beforeEach(async () => {
         : chatId === "guardian-chat"
           ? "guardian"
           : null,
-  });
-  engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
-    processRole: "main",
-    workerWarmPoolSize: 0,
-    isFirstPartyAction: (name) => name.startsWith("core:routine_run"),
-    actionWorkerFork: rs.fn(() => {
-      throw new Error("Reading a routine's runs must run in main");
-    }),
   });
 });
 
@@ -63,12 +48,12 @@ const createRoutine = () =>
     enabled: true,
   });
 
-const list = (args: Record<string, unknown>, context: ActionRunContext = { actor: guardian }) =>
-  engine.run(ROUTINE_RUNS_LIST_ACTION, args, context);
-const read = (args: Record<string, unknown>, context: ActionRunContext = { actor: guardian }) =>
-  engine.run(ROUTINE_RUN_READ_ACTION, args, context);
+const list = (args: Record<string, unknown>, turn: RoutineTurn = guardian) =>
+  ops.listRuns(args, turn);
+const read = (args: Record<string, unknown>, turn: RoutineTurn = guardian) =>
+  ops.readRun(args, turn);
 
-describe("core:routine_runs_list", () => {
+describe("listing a routine's runs", () => {
   it("returns the routine's state and its runs newest first, with each run's error", async () => {
     const routineId = await createRoutine();
     const first = await routineRuns.create({ routineId, executionId: "exec-1", status: "running" });
@@ -133,7 +118,7 @@ describe("core:routine_runs_list", () => {
   });
 });
 
-describe("core:routine_run_read", () => {
+describe("reading one run", () => {
   it("returns the run with the actions it ran as a tree", async () => {
     const routineId = await createRoutine();
     const runId = await routineRuns.create({ routineId, executionId: "exec-1", status: "success" });
@@ -201,7 +186,7 @@ describe("core:routine_run_read", () => {
 describe("who may read a routine's runs", () => {
   it("refuses a visitor, and a turn no one started in a chat a visitor owns or that is gone", async () => {
     const routineId = await createRoutine();
-    expect((await list({ routineId }, { actor: visitor })).status).toBe("error");
+    expect((await list({ routineId }, visitor)).status).toBe("error");
     const visitorChat = { channel: "webchat", threadId: "visitor-chat" };
     expect((await list({ routineId }, { channelContext: visitorChat })).status).toBe("error");
     const goneChat = { channel: "webchat", threadId: "gone-chat" };
@@ -219,11 +204,5 @@ describe("who may read a routine's runs", () => {
     const routineId = await createRoutine();
     const guardianChat = { channel: "webchat", threadId: "guardian-chat" };
     expect((await list({ routineId }, { channelContext: guardianChat })).status).toBe("ok");
-  });
-
-  it("is available through the main agent wildcard", () => {
-    expect(registry.getForAgent(["*"]).map((action) => action.config.name)).toEqual(
-      expect.arrayContaining([ROUTINE_RUNS_LIST_ACTION, ROUTINE_RUN_READ_ACTION]),
-    );
   });
 });

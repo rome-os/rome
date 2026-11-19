@@ -1,27 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
+import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { systemClock } from "../lib/clock.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import {
-  registerRoutineEnabledActions,
-  ROUTINE_PAUSE_ACTION,
-  ROUTINE_RESUME_ACTION,
-} from "./enabled-actions.js";
+  type RoutineOperations,
+  type RoutineTurn,
+  routineControlService,
+  routineOperations,
+} from "./control.js";
 import { RoutineEngine } from "./engine.js";
 import type { Trigger } from "./types.js";
 
-const guardianAsked: ActionRunContext = {
+const guardianAsked: RoutineTurn = {
   actor: { kind: "guardian", userId: "guardian", via: "cookie" },
   audience: "private",
 };
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
-let engine: ActionEngine;
+let ops: RoutineOperations;
 const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn(async () => {}) };
 
 beforeEach(() => {
@@ -30,15 +31,12 @@ beforeEach(() => {
   routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.activate.mockClear();
   routineEngine.deactivate.mockClear();
-  const registry = new ActionRegistryImpl();
-  registerRoutineEnabledActions(registry, { routines, engine: routineEngine });
-  engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
-    processRole: "main",
-    workerWarmPoolSize: 0,
-    isFirstPartyAction: (name) => name === ROUTINE_PAUSE_ACTION || name === ROUTINE_RESUME_ACTION,
-    actionWorkerFork: rs.fn(() => {
-      throw new Error("Pausing a routine must run in main");
-    }),
+  ops = routineOperations({
+    routines,
+    engine: routineEngine,
+    routineRuns: new RoutineRunsRepository(testDb.db),
+    actionExecutions: new ActionExecutionsRepository(testDb.db),
+    ownerOfChat: async () => "guardian",
   });
 });
 
@@ -55,12 +53,12 @@ const daily: Trigger = {
 const createRoutine = (enabled: boolean, trigger: Trigger = daily) =>
   routines.create({ name: "Water reminder", trigger, actionName: "summon", args: {}, enabled });
 
-const pause = (routineId: string, context: ActionRunContext = guardianAsked) =>
-  engine.run(ROUTINE_PAUSE_ACTION, { routineId }, context);
-const resume = (routineId: string, context: ActionRunContext = guardianAsked) =>
-  engine.run(ROUTINE_RESUME_ACTION, { routineId }, context);
+const pause = (routineId: string, turn: RoutineTurn = guardianAsked) =>
+  ops.pause({ routineId }, turn);
+const resume = (routineId: string, turn: RoutineTurn = guardianAsked) =>
+  ops.resume({ routineId }, turn);
 
-describe("core:routine_pause and core:routine_resume", () => {
+describe("pausing and resuming a routine", () => {
   it("pauses a routine and stops its trigger", async () => {
     const id = await createRoutine(true);
 
@@ -105,7 +103,7 @@ describe("core:routine_pause and core:routine_resume", () => {
   });
 
   it("names the field to pass when the id comes under another name", async () => {
-    expect(await engine.run(ROUTINE_PAUSE_ACTION, { id: "a-routine" }, guardianAsked)).toEqual({
+    expect(await ops.pause({ id: "a-routine" }, guardianAsked)).toEqual({
       status: "error",
       error: "Pass the routine's id as routineId. Find it with system:search_routine.",
     });
@@ -121,6 +119,15 @@ describe("who may pause or resume a routine", () => {
   });
 
   it("refuses a routine's fire, though the guardian made the routine in their private chat", async () => {
+    // The system action as it runs in the main process: the engine puts the
+    // fire's context in the action's store, and the action asks for its turn.
+    const engine = {
+      run: (_name: string, args: Record<string, unknown>, context: ActionRunContext) =>
+        actionExecutionContext.run(
+          { ...context, executionId: "fire", rootExecutionId: "fire", initiator: "routine" },
+          () => routineControlService(ops).call("pause", args),
+        ),
+    } as unknown as ActionEngine;
     const target = await createRoutine(true);
     const firing = await actionExecutionContext.run(
       {
@@ -133,7 +140,7 @@ describe("who may pause or resume a routine", () => {
         routines.create({
           name: "Pause the water reminder",
           trigger: { type: "manual" },
-          actionName: ROUTINE_PAUSE_ACTION,
+          actionName: "system:pause_routine",
           args: { routineId: target },
           chatId: "guardian-chat",
         }),
@@ -154,7 +161,7 @@ describe("who may pause or resume a routine", () => {
 
   it("refuses a visitor", async () => {
     const id = await createRoutine(true);
-    const visitor: ActionRunContext = {
+    const visitor: RoutineTurn = {
       actor: { kind: "visitor", accountId: "v", email: "v@example.test" },
       audience: "private",
     };
