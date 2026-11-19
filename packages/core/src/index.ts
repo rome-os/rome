@@ -378,6 +378,9 @@ import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
+import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
+import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -1859,6 +1862,28 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
+    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
+    // Cloud for sign-in and the workspace binding, and a relay drain per
+    // workspace for its events.
+    slackApp: {
+      api: createSlackAppWebApi(config.slackApiBaseUrl),
+      cloud: romeCloudSlackApp(),
+      openMailbox: (mailbox, onFrame) => {
+        const drainer = new RelayDrainer(
+          [
+            {
+              connectUrl: mailbox.connectUrl,
+              drainKey: mailbox.drainKey,
+              targetAppId: SLACK_APP_KIND,
+              targetPath: [],
+            },
+          ],
+          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
+        );
+        drainer.start();
+        return { stop: () => drainer.stop() };
+      },
+    },
     settingsRepo,
     chatSettings,
     chatStop,

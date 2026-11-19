@@ -181,7 +181,7 @@ export function buildEnvoys(
 
 /** The order Envoys offers services in. A service core reports that is not
  *  listed follows them. */
-const SERVICE_ORDER = ["feishu", "telegram", "discord", "slack_bot", "telegram_user"];
+const SERVICE_ORDER = ["feishu", "telegram", "discord", "slack_app", "slack_bot", "telegram_user"];
 
 function serviceRank(service: string): number {
   const rank = SERVICE_ORDER.indexOf(service);

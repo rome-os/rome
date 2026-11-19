@@ -133,6 +133,15 @@ const configSchema = z.object({
   // only the mailbox credential — the delivery target is resolved at runtime
   // from whichever installed app declares `api.relayWebhook` (see
   // resolveRelayTarget in relay/settings.ts), never named here.
+  // Slack's origin for Rome's own Slack app connection (`slack_app`): its Web
+  // API calls go to `<origin>/api/<method>`. A test environment points it at a
+  // stand-in Slack. The guardian-made Slack bot (`slack_bot`) does not read it.
+  slackApiBaseUrl: z
+    .string()
+    .url()
+    .default("https://slack.com")
+    .transform((value) => new URL(value).origin),
+
   relay: z
     .object({
       drainUrl: z
@@ -244,6 +253,8 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     raw.otelExporterEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
   }
+
+  if (env.SLACK_API_BASE_URL) raw.slackApiBaseUrl = env.SLACK_API_BASE_URL;
 
   // Webhook relay drainer. Build the object only when a RELAY_DRAIN_* var is
   // set, then let the schema enforce that BOTH fields are present — a partial

@@ -206,6 +206,14 @@
           }
         }
       },
+      "slack_app": {
+        "bot": {
+          "title": "Slack 里的 Rome",
+          "bullets": {
+            "reply": "在你的 Slack 工作区里以你的 Concierge 身份回复私信"
+          }
+        }
+      },
       "slack_bot": {
         "bot": {
           "titleFallback": "智能体的 Slack 账号",

@@ -27,6 +27,7 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
+import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -43,6 +44,7 @@ export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
 export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
+export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts
@@ -87,6 +89,9 @@ export interface BuiltinConnectionDeps {
    *  the channel list's reader shares it, so the account is read through one
    *  client. */
   wechatUserRuntime?: WechatUserRuntime;
+  /** Rome's own Slack app: its Web API client, Rome Cloud, and how to drain a
+   *  workspace's relay mailbox. Absent, the kind is not offered. */
+  slackApp?: SlackAppDescriptorDeps;
 }
 
 /**
@@ -112,6 +117,7 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(makeSlackBotDescriptor());
+  if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
   registry.register(createWechatDescriptor());
   // The personal WeChat connection is opt-in: boot passes its runtime only when
   // config `wechatUserEnabled` is on.
