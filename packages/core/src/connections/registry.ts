@@ -155,6 +155,10 @@ interface RegisteredDescriptor {
   readonly descriptor: ConnectionDescriptor;
 }
 
+/** How long a guardian's disconnect waits for a kind to take back its access
+ *  at the platform. The disconnect holds the kind's locks meanwhile. */
+const TAKE_BACK_TIMEOUT_MS = 10 * 1000;
+
 export class ConnectionRegistry {
   private readonly store: ConnectionsRepository;
   private readonly log: Logger;
@@ -369,13 +373,10 @@ export class ConnectionRegistry {
     });
   }
 
-  /** End a connection, whatever its kind: take back at the platform what the
-   *  grant gave (`onDisconnect`), remove it and its grant in one transaction
-   *  that raises disconnected, then stop its capabilities and clear the
-   *  grant's custody artifacts. Runs in the grant's section, so it never
-   *  interleaves with a setup's terminal write. A failed write throws and
-   *  leaves the connection as it was. Answers why the platform may still hold
-   *  the access, when taking it back failed; the connection ends either way. */
+  /** End a connection, whatever its kind, as {@link ConnectionImpl.disconnectTakingBack}
+   *  does. Runs in the grant's section, so it never interleaves with a setup's
+   *  terminal write. Answers why the platform may still hold the access, when
+   *  taking it back failed; the connection ends either way. */
   async disconnect(id: ConnectionId): Promise<{ notTakenBack?: string }> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
@@ -392,8 +393,7 @@ export class ConnectionRegistry {
           current = this.startedInPlaceOf.get(current);
         }
         if (!current) return {};
-        const notTakenBack = await current.takeBack();
-        await current.disconnect(grant);
+        const notTakenBack = await current.disconnectTakingBack(grant);
         this.connections.delete(current.id);
         return notTakenBack === null ? {} : { notTakenBack };
       }),
@@ -1371,20 +1371,53 @@ class ConnectionImpl implements Connection {
     return this.withGrantLock(grant, () => this.revokeLocked(grant, opts));
   }
 
-  /** Ask the kind to take back at the platform what the grant gave, before
-   *  the guardian's disconnect deletes it. Null when that is done or there is
-   *  nothing to take back; otherwise why it failed, which is logged. */
-  async takeBack(): Promise<string | null> {
+  /** The guardian's disconnect, under the grant lock so no renewal or fault
+   *  runs beside it: stop every capability, so a live transport never meets
+   *  the token being revoked; ask the kind to take back at the platform what
+   *  the grant gave (`onDisconnect`, at most {@link TAKE_BACK_TIMEOUT_MS});
+   *  then remove the connection as {@link disconnect} does.
+   *
+   *  The take-back comes before the delete so that Rome never forgets a token
+   *  the platform still honours: an instance that dies between the two keeps
+   *  the connection with a revoked token, which reads broken and disconnects
+   *  again cleanly. The cost is that a failed write, after a take-back that
+   *  worked, leaves the same broken connection; its capabilities start again
+   *  and the error is thrown. Answers why the take-back failed, or null. */
+  disconnectTakingBack(grant: GrantName): Promise<string | null> {
+    return this.withGrantLock(grant, async () => {
+      this.teardownAll();
+      const notTakenBack = await this.takeBack();
+      try {
+        await this.disconnectLocked(grant, {});
+      } catch (err) {
+        this.reconcile(grant);
+        throw err;
+      }
+      return notTakenBack;
+    });
+  }
+
+  /** Null when the kind took back the access or holds nothing to take back;
+   *  otherwise why it failed or did not answer in time, which is logged. */
+  private async takeBack(): Promise<string | null> {
     const onDisconnect = this.descriptor.onDisconnect;
     if (!onDisconnect) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const held = await this.store.grantOf(this.id);
       if (!held?.credential) return null;
       const { material } = fromPersisted(held.credential, this.descriptor.auth);
-      await onDisconnect({
+      const hook = onDisconnect({
         material: typeof material === "function" ? await material() : material,
         profile: held.profile ?? {},
       });
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no answer within ${TAKE_BACK_TIMEOUT_MS / 1000}s`)),
+          TAKE_BACK_TIMEOUT_MS,
+        );
+      });
+      await Promise.race([hook, timeout]);
       return null;
     } catch (err) {
       this.log.warn("could not take back access at the platform on disconnect", {
@@ -1392,6 +1425,8 @@ class ConnectionImpl implements Connection {
         error: errMsg(err),
       });
       return errMsg(err);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -1402,19 +1437,24 @@ class ConnectionImpl implements Connection {
    *  store comes first, so a failed write throws with nothing changed in
    *  memory. */
   disconnect(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
-    return this.withGrantLock(grant, async () => {
-      const connection = { id: this.id, connectionKind: this.connectionKind };
-      this.store.transaction((tx) => {
-        this.store.remove(tx, this.id);
-        this.registry.raise(tx, { kind: "disconnected", connection });
-        opts.inTx?.(tx);
-      });
-      this.grantState.set(grant, "unauthorized");
-      this.liveCreds.delete(grant);
-      this.renewedSinceGranted.delete(grant);
-      this.teardownAll();
-      await this.clearCustody(grant);
+    return this.withGrantLock(grant, () => this.disconnectLocked(grant, opts));
+  }
+
+  private async disconnectLocked(
+    grant: GrantName,
+    opts: { inTx?: (tx: DrizzleTx) => void },
+  ): Promise<void> {
+    const connection = { id: this.id, connectionKind: this.connectionKind };
+    this.store.transaction((tx) => {
+      this.store.remove(tx, this.id);
+      this.registry.raise(tx, { kind: "disconnected", connection });
+      opts.inTx?.(tx);
     });
+    this.grantState.set(grant, "unauthorized");
+    this.liveCreds.delete(grant);
+    this.renewedSinceGranted.delete(grant);
+    this.teardownAll();
+    await this.clearCustody(grant);
   }
 
   private async revokeLocked(
