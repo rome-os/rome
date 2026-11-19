@@ -8,12 +8,13 @@
 //   Extra: externalCustody — ledger row kind "external", no secret, build
 //          receives resolver-produced material; also after rehydration.
 
-import { describe, it, expect } from "@rstest/core";
+import { describe, it, expect, rs } from "@rstest/core";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { createTestDb } from "../test/db.js";
 import {
   makeCustodyGrant,
+  makeFakeTalker,
   makeGatedWatch,
   makePasteTalk,
   makeRenewableAct,
@@ -21,6 +22,7 @@ import {
   makeRecordingSleep,
 } from "./test-fixtures.js";
 import type { ConnectionsRepository } from "./repository.js";
+import type { Credential } from "./types.js";
 
 // Ledger factory — a fresh drizzle-backed ledger per test
 
@@ -934,6 +936,106 @@ describe("disconnect takes back access at the platform", () => {
     try {
       expect(await registry.disconnect(conn.id)).toEqual({ notTakenBack: "Slack is unreachable" });
       expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("ends the connection when the kind does not answer within 10s, and says so", async () => {
+    const { registry, conn, close } = await connected(() => new Promise<never>(() => {}));
+    rs.useFakeTimers();
+    try {
+      const ended = registry.disconnect(conn.id);
+      await rs.advanceTimersByTimeAsync(10_000);
+      expect(await ended).toEqual({ notTakenBack: "no answer within 10s" });
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      rs.useRealTimers();
+      close();
+    }
+  });
+
+  it("takes back the credential a renewal in flight mints, not the one it replaced", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor } = makeCustodyGrant();
+    let finishRenewal: (cred: Credential) => void = () => {};
+    const taken: unknown[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      auth: {
+        ...descriptor.auth,
+        renew: () =>
+          new Promise<Credential>((resolve) => {
+            finishRenewal = resolve;
+          }),
+      },
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+      },
+    });
+    try {
+      const conn = await registry.connect("fake-oauth-provider");
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", {
+        material: { accessToken: "old-token" },
+        expiresAt: new Date(Date.now() + 1_000),
+      });
+      const renewal = registry.renewExpiring(60_000);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const ended = registry.disconnect(conn.id);
+      // Give the disconnect every chance to take back before the renewal answers.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(taken).toEqual([]);
+      finishRenewal({ material: { accessToken: "renewed-token" }, expiresAt: "never" });
+      await renewal;
+
+      expect(await ended).toEqual({});
+      expect(taken).toEqual([{ accessToken: "renewed-token" }]);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("stops the connection's capabilities before the kind takes back its access", async () => {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    const events: string[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      capabilities: {
+        talker: {
+          build(cred) {
+            const talker = makeFakeTalker(cred);
+            return {
+              ...talker,
+              stop() {
+                events.push("stopped");
+              },
+            };
+          },
+        },
+      },
+      onDisconnect: async () => {
+        events.push("taken back");
+      },
+    });
+    try {
+      const conn = await registry.connect("fake-oauth-provider");
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
+      expect(conn.isUnlocked("chat")).toBe(true);
+
+      await registry.disconnect(conn.id);
+
+      expect(events).toEqual(["stopped", "taken back"]);
     } finally {
       close();
     }

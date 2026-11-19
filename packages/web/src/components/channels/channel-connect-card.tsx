@@ -6,6 +6,7 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
+import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import {
   SetupRenderer,
   StandardSetupRenderer,
@@ -240,8 +241,7 @@ export function ChannelConnectCard({
       // fresh Connect instead of the previous "done" view (no page reload).
       setup.reset();
       await onRefresh();
-      // Ended in Rome, but the service may still hold the access.
-      if (result.warning) setError(result.warning);
+      warnIfAccessKept(result);
     }
     setDisconnecting(false);
   }
