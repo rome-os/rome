@@ -72,5 +72,5 @@ It passes when every phase 1 rule passes on the good stand-in and each break get
 ## Limits
 
 - The verifier trusts the fake Slack's records of what the bot posted. A reply posted some other way is not seen.
-- R6's stop is `stopSeconds` long, which the environment may shorten from production's hour.
+- R6's stop is `stopSeconds` long: `run.sh --r6-stop <seconds>` (or `VERIFIER_R6_STOP_SECONDS`) wins, then env.json, then 120 s. The rule's stop is 3600 s, so a full-length run is `run.sh --r6-stop 3600 <env.json>`.
 - R6 cannot tell which of the 20 waiting messages a reply answers, since they share a direct message: it wants exactly 20 replies in all. A Concierge that answers one message twice and another not at all passes R6; R4 catches that case one message at a time.

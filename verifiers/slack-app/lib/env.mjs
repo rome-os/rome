@@ -31,7 +31,13 @@ export function loadEnv(path) {
     inst.connect.kind ??= "slack_app";
     inst.connect.grant ??= "bot";
   }
-  env.stopSeconds ??= 3600;
+  // R6's stop: VERIFIER_R6_STOP_SECONDS (run.sh --r6-stop) wins, then
+  // env.json, then a quick 120 s. Production's stop is 3600 s.
+  const stop = Number(process.env.VERIFIER_R6_STOP_SECONDS);
+  if (process.env.VERIFIER_R6_STOP_SECONDS && !(stop > 0))
+    throw new Error(`VERIFIER_R6_STOP_SECONDS must be a positive number of seconds`);
+  if (stop > 0) env.stopSeconds = stop;
+  env.stopSeconds ??= 120;
   env.timeouts ??= {};
   env.timeouts.replySeconds ??= 90;
   env.timeouts.settleSeconds ??= 10;
