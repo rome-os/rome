@@ -4,8 +4,11 @@ import { z } from "zod";
 export const RELEASE_VERSION =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$/;
 
-/** The release-notes.json format version this reader understands. */
-export const RELEASE_NOTES_SCHEMA = 1;
+/**
+ * The release-notes.json format versions this reader understands. 2 adds
+ * `highlights` to the fields of 1.
+ */
+export const RELEASE_NOTES_SCHEMAS = [1, 2] as const;
 
 /**
  * One change in a release: the commit's scope (`web`, `ios`, …), its subject
@@ -18,12 +21,24 @@ export const releaseNoteEntrySchema = z.object({
 });
 
 /**
+/**
+ * One user-facing line a model wrote at release time
+ * (scripts/docker/release-highlights.mjs), citing the release's pull request.
+ */
+export const releaseHighlightSchema = z.object({
+  text: z.string().min(1),
+  pr: z.number().int().positive(),
+});
+
+/**
  * The release-notes.json asset on a runtime release, written by
  * scripts/docker/release-notes.mjs (docs/releases.md#github-release).
- * `internal` counts the changes it does not list.
+ * `internal` counts the changes it does not list. `highlights` is absent in
+ * schema 1, and in schema 2 may be empty when nothing qualified or the model
+ * failed.
  */
 export const releaseNotesFileSchema = z.object({
-  schema: z.literal(RELEASE_NOTES_SCHEMA),
+  schema: z.union([z.literal(RELEASE_NOTES_SCHEMAS[0]), z.literal(RELEASE_NOTES_SCHEMAS[1])]),
   version: z.string().regex(RELEASE_VERSION),
   previousVersion: z.string().regex(RELEASE_VERSION).nullable(),
   date: z.string(),
@@ -32,6 +47,18 @@ export const releaseNotesFileSchema = z.object({
   new: z.array(releaseNoteEntrySchema),
   fixes: z.array(releaseNoteEntrySchema),
   internal: z.number().int().nonnegative(),
+  highlights: z
+    .object({ en: z.array(releaseHighlightSchema), zh: z.array(releaseHighlightSchema) })
+    .optional(),
+});
+
+/**
+ * A highlight in an upgrade range, with the release that made it. `breaking`
+ * marks one that cites a breaking change: the owner may have to act on it.
+ */
+export const rangeHighlightSchema = releaseHighlightSchema.extend({
+  version: z.string(),
+  breaking: z.boolean(),
 });
 
 /** A change in an upgrade range, with the release that made it. */
@@ -66,6 +93,11 @@ export const releaseNotesRangeSchema = z.object({
   new: z.array(rangeEntrySchema),
   /** Fixes across the range, one entry per pull request. */
   fixes: z.array(rangeEntrySchema),
+  /**
+   * Highlights across the range in English and Chinese, newest release first,
+   * one per pull request. A covered release without highlights adds none.
+   */
+  highlights: z.object({ en: z.array(rangeHighlightSchema), zh: z.array(rangeHighlightSchema) }),
   /** Changes the notes do not list, summed over the covered releases. */
   internal: z.number().int().nonnegative(),
   /** The target's release page. Set in every status, for the full notes. */
@@ -77,5 +109,6 @@ export const releaseNotesRangeSchema = z.object({
 export type ReleaseNoteEntry = z.infer<typeof releaseNoteEntrySchema>;
 export type ReleaseNotesFile = z.infer<typeof releaseNotesFileSchema>;
 export type ReleaseNotesRangeEntry = z.infer<typeof rangeEntrySchema>;
+export type ReleaseNotesRangeHighlight = z.infer<typeof rangeHighlightSchema>;
 export type ReleaseNotesStatus = z.infer<typeof releaseNotesStatusSchema>;
 export type ReleaseNotesRange = z.infer<typeof releaseNotesRangeSchema>;

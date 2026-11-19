@@ -1,14 +1,13 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ReleaseNotesRange, ReleaseNotesRangeEntry } from "@rome/api-types/release-notes";
+import type { ReleaseNotesRange, ReleaseNotesRangeHighlight } from "@rome/api-types/release-notes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { cn } from "@/lib/utils";
-import { scopeName } from "@/lib/release-scope";
 
-/** New features and fixes listed before "Show all". Breaking changes always show in full. */
+/** Highlights listed before "Show all". Breaking ones always show in full. */
 export const COLLAPSED_ENTRIES = 5;
 
 /**
@@ -101,17 +100,19 @@ function Fallback({ text, url }: { text: string; url: string }) {
   );
 }
 
+/** The language highlights are shown in: Chinese for a Chinese UI, English otherwise. */
+export function highlightLanguage(language: string | undefined): "en" | "zh" {
+  return language?.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
 function Loaded({ notes }: { notes: ReleaseNotesRange }) {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
   const [expanded, setExpanded] = useState(false);
   const multi = notes.releases.length > 1 || notes.status === "partial";
-  const listed = notes.new.length + notes.fixes.length;
-  const hidden = expanded ? 0 : Math.max(0, listed - COLLAPSED_ENTRIES);
-  // The collapsed view fills from New first, then Fixes.
-  const shownNew = expanded ? notes.new : notes.new.slice(0, COLLAPSED_ENTRIES);
-  const shownFixes = expanded
-    ? notes.fixes
-    : notes.fixes.slice(0, Math.max(0, COLLAPSED_ENTRIES - shownNew.length));
+  const highlights = notes.highlights[highlightLanguage(i18n.language)];
+  const breaking = highlights.filter((highlight) => highlight.breaking);
+  const others = highlights.filter((highlight) => !highlight.breaking);
+  const shown = expanded ? others : others.slice(0, COLLAPSED_ENTRIES);
 
   return (
     <>
@@ -122,30 +123,17 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
             : t("system.notesPartialUnknown")}
         </p>
       ) : null}
-      {notes.breaking.length > 0 ? (
+      {breaking.length > 0 ? (
         <Alert variant="warning">
           <AlertTitle>{t("system.notesBreaking")}</AlertTitle>
           <AlertDescription>
-            <EntryList entries={notes.breaking} withVersion={multi} />
+            <HighlightList highlights={breaking} withVersion={multi} />
           </AlertDescription>
         </Alert>
       ) : null}
-      {shownNew.length > 0 ? (
-        <EntrySection title={t("system.notesNew")} entries={shownNew} />
-      ) : null}
-      {shownFixes.length > 0 ? (
-        <EntrySection title={t("system.notesFixes")} entries={shownFixes} />
-      ) : null}
-      {notes.breaking.length === 0 && listed === 0 ? (
-        <p className="text-ui text-muted-foreground">{t("system.notesNone")}</p>
-      ) : null}
-      {notes.internal > 0 && (expanded || hidden === 0) ? (
-        <p className="text-aux text-muted-foreground">
-          {t("system.notesInternal", { count: notes.internal })}
-        </p>
-      ) : null}
+      {shown.length > 0 ? <HighlightList highlights={shown} withVersion={false} /> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {listed > COLLAPSED_ENTRIES ? (
+        {others.length > COLLAPSED_ENTRIES ? (
           <Button
             variant="link"
             size="sm"
@@ -153,50 +141,39 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >
-            {expanded ? t("system.notesShowFewer") : t("system.notesShowAll", { count: listed })}
+            {expanded
+              ? t("system.notesShowFewer")
+              : t("system.notesShowAll", { count: others.length })}
           </Button>
         ) : null}
+        {/* Releases without highlights add nothing above; this link covers them. */}
         <ExternalLink href={multi && notes.compareUrl ? notes.compareUrl : notes.releaseUrl}>
-          {multi ? t("system.notesAllChanges") : t("system.notesFull")}
+          {t("system.notesSeeFull")}
         </ExternalLink>
       </div>
     </>
   );
 }
 
-function EntrySection({ title, entries }: { title: string; entries: ReleaseNotesRangeEntry[] }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <h4 className="text-badge text-muted-foreground">{title}</h4>
-      <EntryList entries={entries} withVersion={false} />
-    </div>
-  );
-}
-
-function EntryList({
-  entries,
+function HighlightList({
+  highlights,
   withVersion,
 }: {
-  entries: ReleaseNotesRangeEntry[];
+  highlights: ReleaseNotesRangeHighlight[];
   withVersion: boolean;
 }) {
   return (
     <ul className="flex list-disc flex-col gap-1 pl-5 text-ui">
-      {entries.map((entry, index) => (
-        <li key={`${entry.version}-${entry.pr ?? index}`} className="[overflow-wrap:anywhere]">
-          {entry.scope ? <span className="text-badge">{scopeName(entry.scope)}: </span> : null}
-          {sentenceCase(entry.text)}
+      {highlights.map((highlight) => (
+        <li key={highlight.pr} className="[overflow-wrap:anywhere]">
+          {highlight.text}
           {withVersion ? (
-            <span className="text-aux text-muted-foreground"> · {entry.version}</span>
+            <span className="text-aux text-muted-foreground"> · {highlight.version}</span>
           ) : null}
         </li>
       ))}
     </ul>
   );
-}
-
-function sentenceCase(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function ExternalLink({ href, children }: { href: string; children: string }) {

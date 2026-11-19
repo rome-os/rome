@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ReleaseNotesFile } from "@rome/api-types/release-notes";
-import { compareVersions, ReleaseNotes } from "./release-notes.js";
+import { compareVersions, REFRESH_WITHOUT_HIGHLIGHTS_MS, ReleaseNotes } from "./release-notes.js";
 
 const BASE = "https://notes.test/download";
 
@@ -13,7 +13,7 @@ function notes(
   extra: Partial<ReleaseNotesFile> = {},
 ) {
   return {
-    schema: 1,
+    schema: 2,
     version,
     previousVersion,
     date: "2026-11-18T00:00:00Z",
@@ -22,8 +22,15 @@ function notes(
     new: [],
     fixes: [],
     internal: 0,
+    highlights: { en: [], zh: [] },
     ...extra,
   } satisfies ReleaseNotesFile;
+}
+
+/** A schema 1 file: the same fields, without highlights. */
+function schemaOne(version: string, previousVersion: string | null) {
+  const { highlights: _, ...rest } = notes(version, previousVersion);
+  return { ...rest, schema: 1 };
 }
 
 /** A fake GitHub: `assets` maps a version to its file, a status, or a thrown error. */
@@ -195,7 +202,7 @@ describe("ReleaseNotes.range", () => {
     const cases: unknown[] = [
       new TypeError("fetch failed"),
       500,
-      { ...notes("1.0.1", "1.0.0"), schema: 2 },
+      { ...notes("1.0.1", "1.0.0"), schema: 3 },
       { ...notes("1.0.1", "v1.0.0") },
       notes("1.0.2", "1.0.0"),
     ];
@@ -272,5 +279,90 @@ describe("ReleaseNotes.range", () => {
     assets["1.0.1"] = notes("1.0.1", "1.0.0");
     now += 11 * 60_000;
     expect((await store.range(null, "1.0.1")).status).toBe("complete");
+  });
+
+  it("merges highlights newest first, one per pull request, flagging breaking ones", async () => {
+    const { fetch } = github({
+      "1.0.3": notes("1.0.3", "1.0.2", {
+        new: [{ scope: "web", text: "a", pr: 5 }],
+        highlights: {
+          en: [{ text: "Dictate messages.", pr: 5 }],
+          zh: [{ text: "语音输入消息。", pr: 5 }],
+        },
+      }),
+      "1.0.2": schemaOne("1.0.2", "1.0.1"),
+      "1.0.1": notes("1.0.1", "1.0.0", {
+        breaking: [{ scope: "core", text: "b", pr: 3 }],
+        new: [{ scope: "web", text: "c", pr: 5 }],
+        highlights: {
+          en: [
+            { text: "Sign in again after upgrading.", pr: 3 },
+            { text: "Older wording.", pr: 5 },
+          ],
+          zh: [],
+        },
+      }),
+    });
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
+
+    const range = await store.range("1.0.0", "1.0.3");
+
+    expect(range.status).toBe("complete");
+    expect(range.highlights.en).toEqual([
+      { text: "Dictate messages.", pr: 5, version: "1.0.3", breaking: false },
+      { text: "Sign in again after upgrading.", pr: 3, version: "1.0.1", breaking: true },
+    ]);
+    expect(range.highlights.zh).toEqual([
+      { text: "语音输入消息。", pr: 5, version: "1.0.3", breaking: false },
+    ]);
+  });
+
+  it("downloads a file without highlights again after a while, and keeps it when that fails", async () => {
+    let now = 0;
+    const assets: Record<string, unknown> = { "1.0.1": schemaOne("1.0.1", "1.0.0") };
+    const { fetch, requested } = github(assets);
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch, now: () => now });
+    expect((await store.range(null, "1.0.1")).highlights.en).toEqual([]);
+    await store.range(null, "1.0.1");
+    expect(requested).toHaveLength(1);
+
+    now += REFRESH_WITHOUT_HIGHLIGHTS_MS + 1;
+    assets["1.0.1"] = new TypeError("fetch failed");
+    expect((await store.range(null, "1.0.1")).status).toBe("complete");
+    expect(requested).toHaveLength(2);
+
+    now += REFRESH_WITHOUT_HIGHLIGHTS_MS + 1;
+    assets["1.0.1"] = notes("1.0.1", "1.0.0", {
+      highlights: { en: [{ text: "Backfilled.", pr: 9 }], zh: [] },
+      new: [{ scope: null, text: "x", pr: 9 }],
+    });
+    expect((await store.range(null, "1.0.1")).highlights.en).toHaveLength(1);
+    now += 10 * REFRESH_WITHOUT_HIGHLIGHTS_MS;
+    await store.range(null, "1.0.1");
+    expect(requested).toHaveLength(3);
+  });
+
+  it("downloads again after a restart when the file kept on disk has no highlights", async () => {
+    const dir = cacheDir();
+    const first = github({ "1.0.1": schemaOne("1.0.1", "1.0.0") });
+    await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: first.fetch }).range(
+      null,
+      "1.0.1",
+    );
+
+    const backfilled = github({
+      "1.0.1": notes("1.0.1", "1.0.0", {
+        highlights: { en: [{ text: "Backfilled.", pr: 9 }], zh: [] },
+        new: [{ scope: null, text: "x", pr: 9 }],
+      }),
+    });
+    const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: backfilled.fetch });
+    expect((await restarted.range(null, "1.0.1")).highlights.en).toHaveLength(1);
+    expect(backfilled.requested).toHaveLength(1);
+
+    const offline = github({});
+    const again = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: offline.fetch });
+    expect((await again.range(null, "1.0.1")).highlights.en).toHaveLength(1);
+    expect(offline.requested).toHaveLength(0);
   });
 });
