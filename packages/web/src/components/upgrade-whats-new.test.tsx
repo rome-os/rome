@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReleaseNotesRange } from "@rome/api-types/release-notes";
@@ -29,10 +29,6 @@ function range(overrides: Partial<ReleaseNotesRange> = {}): ReleaseNotesRange {
       },
     ],
     coveredFrom: "1.1.209",
-    breaking: [],
-    new: [{ scope: "connector", text: "add Freshdesk", pr: 2375, version: "1.1.210" }],
-    fixes: [{ scope: "ios", text: "keep the reply", pr: 2373, version: "1.1.210" }],
-    internal: 0,
     highlights: {
       en: [
         { text: "Connect Freshdesk.", pr: 2375, version: "1.1.210", breaking: false },
@@ -64,8 +60,11 @@ function backend(answer: (to: string) => { status: number; body: unknown } | Pro
   return requested;
 }
 
-function renderNotes(from: string | null, to: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderNotes(
+  from: string | null,
+  to: string,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   const view = (f: string | null, t: string) => (
     <QueryClientProvider client={client}>
       <UpgradeWhatsNew key={t} from={f} to={t} />
@@ -165,6 +164,22 @@ describe("UpgradeWhatsNew", () => {
     expect(screen.getByRole("button", { name: "Show fewer" })).toBeTruthy();
   });
 
+  it("reads the notes again when the dialog opens after an hour", async () => {
+    const requested = backend(() => ({ status: 200, body: range() }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const first = renderNotes("1.1.209", "1.1.210", client);
+    await screen.findByText("Connect Freshdesk.");
+    first.unmount();
+
+    renderNotes("1.1.209", "1.1.210", client).unmount();
+    expect(requested).toHaveLength(1);
+
+    const later = Date.now() + 61 * 60_000;
+    rs.spyOn(Date, "now").mockReturnValue(later);
+    renderNotes("1.1.209", "1.1.210", client);
+    await waitFor(() => expect(requested).toHaveLength(2));
+  });
+
   it("shows only the link to the full changes when no release has highlights", async () => {
     backend(() => ({ status: 200, body: range({ highlights: { en: [], zh: [] } }) }));
     renderNotes("1.1.209", "1.1.210");
@@ -203,7 +218,10 @@ describe("UpgradeWhatsNew", () => {
   it("says the notes are missing, or could not load, and links GitHub either way", async () => {
     backend((to) =>
       to === "1.1.210"
-        ? { status: 200, body: range({ status: "missing", releases: [], new: [], fixes: [] }) }
+        ? {
+            status: 200,
+            body: range({ status: "missing", releases: [], highlights: { en: [], zh: [] } }),
+          }
         : { status: 502, body: { error: "bad gateway" } },
     );
     const view = renderNotes("1.1.209", "1.1.210");

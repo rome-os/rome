@@ -38,6 +38,14 @@ function notes(
   } satisfies ReleaseNotesFile;
 }
 
+/** A file with one English highlight for pull request 9. */
+function withHighlight(version: string, text: string, previousVersion = "1.0.0") {
+  return notes(version, previousVersion, {
+    new: [{ scope: null, text: "x", pr: 9 }],
+    highlights: { en: [{ text, pr: 9 }], zh: [] },
+  });
+}
+
 /** A schema 1 file: the same fields, without highlights. */
 function schemaOne(version: string, previousVersion: string | null) {
   const { highlights: _, ...rest } = notes(version, previousVersion);
@@ -80,22 +88,11 @@ describe("compareVersions", () => {
 });
 
 describe("ReleaseNotes.range", () => {
-  it("walks back to the running version and merges, breaking first and one entry per PR", async () => {
+  it("walks back to the running version, covering each release on the way", async () => {
     const { fetch } = github({
-      "1.1.210": notes("1.1.210", "1.1.209", {
-        new: [{ scope: "web", text: "newer wording", pr: 5 }],
-        fixes: [{ scope: "web", text: "a fix", pr: 6 }],
-        internal: 2,
-      }),
-      "1.1.209": notes("1.1.209", "1.1.207", {
-        breaking: [{ scope: "core", text: "drop a route", pr: 4 }],
-        new: [
-          { scope: "web", text: "older wording", pr: 5 },
-          { scope: null, text: "a direct push", pr: null },
-        ],
-        internal: 1,
-      }),
-      "1.1.207": notes("1.1.207", "1.1.206", { fixes: [{ scope: "ios", text: "old", pr: 1 }] }),
+      "1.1.210": notes("1.1.210", "1.1.209"),
+      "1.1.209": notes("1.1.209", "1.1.207"),
+      "1.1.207": notes("1.1.207", "1.1.206"),
     });
     const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
 
@@ -104,37 +101,16 @@ describe("ReleaseNotes.range", () => {
     expect(range.status).toBe("complete");
     expect(range.releases.map((r) => r.version)).toEqual(["1.1.210", "1.1.209"]);
     expect(range.coveredFrom).toBe("1.1.207");
-    expect(range.breaking).toEqual([
-      { scope: "core", text: "drop a route", pr: 4, version: "1.1.209" },
-    ]);
-    expect(range.new).toEqual([
-      { scope: "web", text: "newer wording", pr: 5, version: "1.1.210" },
-      { scope: null, text: "a direct push", pr: null, version: "1.1.209" },
-    ]);
-    expect(range.fixes).toEqual([{ scope: "web", text: "a fix", pr: 6, version: "1.1.210" }]);
-    expect(range.internal).toBe(3);
     expect(range.compareUrl).toBe("https://github.com/rome-os/rome/compare/v1.1.208...v1.1.210");
-  });
-
-  it("keeps a pull request's entry from the newest release that lists it, in any section", async () => {
-    const { fetch } = github({
-      "1.0.3": notes("1.0.3", "1.0.2", { fixes: [{ scope: "web", text: "newest", pr: 7 }] }),
-      "1.0.2": notes("1.0.2", "1.0.1", {
-        new: [
-          { scope: "web", text: "older", pr: 7 },
-          { scope: "web", text: "both", pr: 8 },
-        ],
-        breaking: [{ scope: "web", text: "both, breaking", pr: 8 }],
-      }),
-    });
-    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
-
-    const range = await store.range("1.0.1", "1.0.3");
-
-    expect(range.fixes).toEqual([{ scope: "web", text: "newest", pr: 7, version: "1.0.3" }]);
-    expect(range.new).toEqual([]);
-    expect(range.breaking).toEqual([
-      { scope: "web", text: "both, breaking", pr: 8, version: "1.0.2" },
+    expect(Object.keys(range).sort()).toEqual([
+      "compareUrl",
+      "coveredFrom",
+      "from",
+      "highlights",
+      "releaseUrl",
+      "releases",
+      "status",
+      "to",
     ]);
   });
 
@@ -151,7 +127,10 @@ describe("ReleaseNotes.range", () => {
 
   it("is partial when an older release has no notes, and covers what it found", async () => {
     const { fetch } = github({
-      "1.1.210": notes("1.1.210", "1.1.209", { new: [{ scope: "web", text: "a", pr: 9 }] }),
+      "1.1.210": notes("1.1.210", "1.1.209", {
+        new: [{ scope: "web", text: "a", pr: 9 }],
+        highlights: { en: [{ text: "A.", pr: 9 }], zh: [] },
+      }),
     });
     const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
 
@@ -159,7 +138,7 @@ describe("ReleaseNotes.range", () => {
 
     expect(range.status).toBe("partial");
     expect(range.coveredFrom).toBe("1.1.209");
-    expect(range.new).toHaveLength(1);
+    expect(range.highlights.en).toHaveLength(1);
   });
 
   it("is partial when a release in the range does not name its predecessor", async () => {
@@ -328,7 +307,7 @@ describe("ReleaseNotes.range", () => {
     ]);
   });
 
-  it("downloads a file without highlights again after a while, and keeps it when that fails", async () => {
+  it("refreshes a file without highlights after an hour, in the background, keeping it on failure", async () => {
     let now = 0;
     const assets: Record<string, unknown> = { "1.0.1": schemaOne("1.0.1", "1.0.0") };
     const { fetch, requested } = github(assets);
@@ -340,102 +319,118 @@ describe("ReleaseNotes.range", () => {
     now += REFRESH_WITHOUT_HIGHLIGHTS_MS + 1;
     assets["1.0.1"] = new TypeError("fetch failed");
     expect((await store.range(null, "1.0.1")).status).toBe("complete");
+    await store.whenIdle();
+    expect(requested).toHaveLength(2);
+    await store.range(null, "1.0.1");
     expect(requested).toHaveLength(2);
 
     now += REFRESH_WITHOUT_HIGHLIGHTS_MS + 1;
-    assets["1.0.1"] = notes("1.0.1", "1.0.0", {
-      highlights: { en: [{ text: "Backfilled.", pr: 9 }], zh: [] },
-      new: [{ scope: null, text: "x", pr: 9 }],
-    });
-    expect((await store.range(null, "1.0.1")).highlights.en).toHaveLength(1);
-    now += 10 * REFRESH_WITHOUT_HIGHLIGHTS_MS;
-    await store.range(null, "1.0.1");
-    expect(requested).toHaveLength(3);
+    assets["1.0.1"] = withHighlight("1.0.1", "Backfilled.");
+    // The kept copy answers while the refresh runs, and the next read has it.
+    expect((await store.range(null, "1.0.1")).highlights.en).toEqual([]);
+    await store.whenIdle();
+    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Backfilled.");
   });
 
-  it("downloads again after a restart once the file kept on disk without highlights is an hour old", async () => {
+  it("treats a file whose highlights are empty like one without them", async () => {
+    let now = 0;
+    const assets: Record<string, unknown> = { "1.0.1": notes("1.0.1", "1.0.0") };
+    const { fetch } = github(assets);
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch, now: () => now });
+    await store.range(null, "1.0.1");
+    assets["1.0.1"] = withHighlight("1.0.1", "Backfilled.");
+    now += REFRESH_WITHOUT_HIGHLIGHTS_MS + 1;
+    await store.range(null, "1.0.1");
+    await store.whenIdle();
+    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Backfilled.");
+
     const dir = cacheDir();
-    const first = github({ "1.0.1": schemaOne("1.0.1", "1.0.0") });
+    const first = github({ "1.0.1": notes("1.0.1", "1.0.0") });
     await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: first.fetch }).range(
       null,
       "1.0.1",
     );
-    const early = github({});
-    await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: early.fetch }).range(
-      null,
-      "1.0.1",
-    );
-    expect(early.requested).toHaveLength(0);
     age(dir, "1.0.1", REFRESH_WITHOUT_HIGHLIGHTS_MS + 60_000);
-
-    const backfilled = github({
-      "1.0.1": notes("1.0.1", "1.0.0", {
-        highlights: { en: [{ text: "Backfilled.", pr: 9 }], zh: [] },
-        new: [{ scope: null, text: "x", pr: 9 }],
-      }),
-    });
-    const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: backfilled.fetch });
-    expect((await restarted.range(null, "1.0.1")).highlights.en).toHaveLength(1);
-    expect(backfilled.requested).toHaveLength(1);
-
-    const offline = github({});
-    const again = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: offline.fetch });
-    expect((await again.range(null, "1.0.1")).highlights.en).toHaveLength(1);
-    expect(offline.requested).toHaveLength(0);
+    const later = github({ "1.0.1": withHighlight("1.0.1", "Backfilled.") });
+    const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: later.fetch });
+    await restarted.range(null, "1.0.1");
+    await restarted.whenIdle();
+    expect(later.requested).toHaveLength(1);
   });
 
-  it("downloads a file with highlights again after a day, so a corrected backfill arrives", async () => {
+  it("refreshes a file with highlights after a day, so a corrected backfill arrives", async () => {
     let now = 0;
-    const assets: Record<string, unknown> = {
-      "1.0.1": notes("1.0.1", "1.0.0", {
-        new: [{ scope: null, text: "x", pr: 9 }],
-        highlights: { en: [{ text: "First wording.", pr: 9 }], zh: [] },
-      }),
-    };
+    const assets: Record<string, unknown> = { "1.0.1": withHighlight("1.0.1", "First wording.") };
     const { fetch, requested } = github(assets);
     const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch, now: () => now });
     await store.range(null, "1.0.1");
     now += REVALIDATE_MS - 1;
     await store.range(null, "1.0.1");
+    await store.whenIdle();
     expect(requested).toHaveLength(1);
 
-    assets["1.0.1"] = notes("1.0.1", "1.0.0", {
-      new: [{ scope: null, text: "x", pr: 9 }],
-      highlights: { en: [{ text: "Corrected wording.", pr: 9 }], zh: [] },
-    });
+    assets["1.0.1"] = withHighlight("1.0.1", "Corrected wording.");
     now += 2;
+    await store.range(null, "1.0.1");
+    await store.whenIdle();
     expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
 
     // A failed or missing download keeps the copy in hand.
-    now += REVALIDATE_MS + 1;
-    assets["1.0.1"] = 500;
-    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
-    now += REVALIDATE_MS + 1;
-    delete assets["1.0.1"];
-    expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
+    for (const asset of [500, undefined]) {
+      now += REVALIDATE_MS + 1;
+      if (asset === undefined) delete assets["1.0.1"];
+      else assets["1.0.1"] = asset;
+      await store.range(null, "1.0.1");
+      await store.whenIdle();
+      expect((await store.range(null, "1.0.1")).highlights.en[0]?.text).toBe("Corrected wording.");
+    }
   });
 
-  it("downloads again after a restart once the file kept on disk is a day old", async () => {
+  it("answers from kept copies without waiting on a slow refresh", async () => {
+    let now = 0;
+    const assets: Record<string, unknown> = {};
+    for (let patch = 1; patch <= 4; patch += 1) {
+      assets[`1.0.${patch}`] = notes(`1.0.${patch}`, `1.0.${patch - 1}`, {
+        new: [{ scope: null, text: "x", pr: patch }],
+        highlights: { en: [{ text: `Change ${patch}.`, pr: patch }], zh: [] },
+      });
+    }
+    const online = github(assets);
+    let slow = false;
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!slow) return online.fetch(input, init);
+      // Never answers, as an unreachable server would until its timeout.
+      return new Promise<Response>(() => {});
+    }) as typeof globalThis.fetch;
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch, now: () => now });
+    expect((await store.range("1.0.0", "1.0.4")).releases).toHaveLength(4);
+
+    slow = true;
+    now += REVALIDATE_MS + 1;
+    const range = await store.range("1.0.0", "1.0.4");
+    expect(range.status).toBe("complete");
+    expect(range.highlights.en).toHaveLength(4);
+  });
+
+  it("refreshes after a restart once the file kept on disk is past its interval", async () => {
     const dir = cacheDir();
-    const first = github({
-      "1.0.1": notes("1.0.1", "1.0.0", {
-        new: [{ scope: null, text: "x", pr: 9 }],
-        highlights: { en: [{ text: "First wording.", pr: 9 }], zh: [] },
-      }),
-    });
+    const first = github({ "1.0.1": withHighlight("1.0.1", "First wording.") });
     await new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: first.fetch }).range(
       null,
       "1.0.1",
     );
-    age(dir, "1.0.1", REVALIDATE_MS + 60_000);
 
-    const corrected = github({
-      "1.0.1": notes("1.0.1", "1.0.0", {
-        new: [{ scope: null, text: "x", pr: 9 }],
-        highlights: { en: [{ text: "Corrected wording.", pr: 9 }], zh: [] },
-      }),
-    });
+    const early = github({});
+    const soon = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: early.fetch });
+    await soon.range(null, "1.0.1");
+    await soon.whenIdle();
+    expect(early.requested).toHaveLength(0);
+
+    age(dir, "1.0.1", REVALIDATE_MS + 60_000);
+    const corrected = github({ "1.0.1": withHighlight("1.0.1", "Corrected wording.") });
     const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: corrected.fetch });
+    expect((await restarted.range(null, "1.0.1")).highlights.en[0]?.text).toBe("First wording.");
+    await restarted.whenIdle();
     expect((await restarted.range(null, "1.0.1")).highlights.en[0]?.text).toBe(
       "Corrected wording.",
     );

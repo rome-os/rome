@@ -338,7 +338,7 @@ describe("system upgrade API", () => {
       const requests = stubRomeCloud({
         status: 200,
         json: {
-          schema: 1,
+          schema: 2,
           version: "1.2.0",
           previousVersion: "1.1.9",
           date: "2026-11-19T00:10:13Z",
@@ -347,6 +347,7 @@ describe("system upgrade API", () => {
           new: [{ scope: "web", text: "a thing", pr: 12 }],
           fixes: [],
           internal: 1,
+          highlights: { en: [{ text: "A thing.", pr: 12 }], zh: [] },
         },
       });
       const { app } = await freshApp();
@@ -359,7 +360,11 @@ describe("system upgrade API", () => {
       ]);
       const body = await res.json();
       expect(body.status).toBe("complete");
-      expect(body.new).toEqual([{ scope: "web", text: "a thing", pr: 12, version: "1.2.0" }]);
+      expect(body.highlights).toEqual({
+        en: [{ text: "A thing.", pr: 12, version: "1.2.0", breaking: false }],
+        zh: [],
+      });
+      expect(body.new).toBeUndefined();
       expect(body.compareUrl).toBe("https://github.com/rome-os/rome/compare/v1.1.9...v1.2.0");
     });
   });

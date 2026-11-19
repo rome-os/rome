@@ -14,11 +14,9 @@ export function useReleaseNotes(from: string | null, to: string | null) {
     queryKey: ["release-notes", from, to] as const,
     enabled: to !== null,
     retry: false,
-    // A published release's notes do not change. A partial or missing answer
-    // may fill in once older releases get their notes, so it is read again on
-    // the next open after a few minutes.
-    staleTime: (query) =>
-      query.state.data?.status === "complete" ? Number.POSITIVE_INFINITY : 5 * 60_000,
+    // The server refreshes its copies after a backfill, so an answer is read
+    // again on the next open once it is an hour old.
+    staleTime: 60 * 60_000,
     queryFn: ({ signal }) => {
       const params = new URLSearchParams({ to: to ?? "" });
       if (from) params.set("from", from);

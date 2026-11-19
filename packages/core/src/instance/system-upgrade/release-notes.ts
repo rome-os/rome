@@ -8,7 +8,6 @@ import {
   RELEASE_VERSION,
   type ReleaseNotesFile,
   type ReleaseNotesRange,
-  type ReleaseNotesRangeEntry,
   type ReleaseNotesRangeHighlight,
   releaseNotesFileSchema,
 } from "@rome/api-types/release-notes";
@@ -72,9 +71,9 @@ export interface ReleaseNotesOptions {
 /**
  * Downloads, checks and caches each release's notes, and merges a range of
  * them. A read file is kept in memory and in `cacheDir`, and downloaded
- * again once it is older than REVALIDATE_MS, or REFRESH_WITHOUT_HIGHLIGHTS_MS
- * when it has no highlights. The kept copy still answers when that download
- * fails or finds nothing.
+ * again in the background once it is older than REVALIDATE_MS, or
+ * REFRESH_WITHOUT_HIGHLIGHTS_MS when it has no highlights. The kept copy
+ * answers meanwhile, and stays when that download fails or finds nothing.
  */
 export class ReleaseNotes {
   private readonly baseUrl: string;
@@ -153,37 +152,13 @@ export class ReleaseNotes {
       en: this.mergeHighlights(found, "en"),
       zh: this.mergeHighlights(found, "zh"),
     };
-    // One entry per pull request: the newest release's, whatever its
-    // section there. Within one release a breaking entry wins over new, and
-    // new over fixes. `found` is newest first, so each section keeps that order.
-    const seen = new Set<number>();
-    const merged: Record<"breaking" | "new" | "fixes", ReleaseNotesRangeEntry[]> = {
-      breaking: [],
-      new: [],
-      fixes: [],
-    };
-    for (const notes of found) {
-      for (const section of ["breaking", "new", "fixes"] as const) {
-        for (const entry of notes[section]) {
-          if (entry.pr !== null) {
-            if (seen.has(entry.pr)) continue;
-            seen.add(entry.pr);
-          }
-          merged[section].push({ ...entry, version: notes.version });
-        }
-      }
-    }
     return {
       status,
       from,
       to,
       releases: found.map(({ version, date, url }) => ({ version, date, url })),
       coveredFrom: found.at(-1)?.previousVersion ?? null,
-      breaking: merged.breaking,
-      new: merged.new,
-      fixes: merged.fixes,
       highlights,
-      internal: found.reduce((sum, notes) => sum + notes.internal, 0),
       releaseUrl: `https://github.com/${this.repository}/releases/tag/v${to}`,
       compareUrl: from ? `https://github.com/${this.repository}/compare/v${from}...v${to}` : null,
     };
@@ -207,44 +182,64 @@ export class ReleaseNotes {
     return merged;
   }
 
-  /** Keeps `notes`, read at `readAt`, until its refresh interval ends. */
-  private remember(version: string, notes: ReleaseNotesFile, readAt = this.now()): number {
-    const freshUntil = readAt + (notes.highlights ? REVALIDATE_MS : REFRESH_WITHOUT_HIGHLIGHTS_MS);
+  /**
+   * Keeps `notes`, read at `readAt`, until its refresh interval ends: a day
+   * when it has highlights, an hour when it has none, since a backfill may
+   * still add them.
+   */
+  private remember(version: string, notes: ReleaseNotesFile, readAt = this.now()): void {
+    const count = (notes.highlights?.en.length ?? 0) + (notes.highlights?.zh.length ?? 0);
+    const freshUntil = readAt + (count > 0 ? REVALIDATE_MS : REFRESH_WITHOUT_HIGHLIGHTS_MS);
     this.cached.set(version, { notes, freshUntil });
-    return freshUntil;
+  }
+
+  /** Resolves once no download is in flight, background refreshes included. */
+  async whenIdle(): Promise<void> {
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight.values()]);
   }
 
   private async lookup(version: string, deadline: number): Promise<Lookup> {
+    if (!this.cached.has(version)) {
+      // After a restart the file's age on disk decides whether it is fresh.
+      const onDisk = await this.readDisk(version);
+      if (onDisk && !this.cached.has(version)) {
+        this.remember(version, onDisk.notes, onDisk.writtenAt);
+      }
+    }
     const cached = this.cached.get(version);
-    if (cached && cached.freshUntil > this.now()) return { kind: "found", notes: cached.notes };
-    if (!cached && (this.missingUntil.get(version) ?? 0) > this.now()) return { kind: "missing" };
+    if (cached) {
+      // A kept copy answers at once. A stale one is downloaded again in the
+      // background, so a slow or unreachable server never spends the range's
+      // budget on notes already in hand.
+      if (cached.freshUntil <= this.now()) this.refresh(version, cached.notes);
+      return { kind: "found", notes: cached.notes };
+    }
+    if ((this.missingUntil.get(version) ?? 0) > this.now()) return { kind: "missing" };
     const pending = this.inFlight.get(version);
     if (pending) return pending;
-    const lookup = this.load(version, deadline).finally(() => this.inFlight.delete(version));
+    const lookup = this.downloadAndKeep(version, deadline).finally(() =>
+      this.inFlight.delete(version),
+    );
     this.inFlight.set(version, lookup);
     return lookup;
   }
 
-  private async load(version: string, deadline: number): Promise<Lookup> {
-    let kept = this.cached.get(version)?.notes ?? null;
-    if (!kept) {
-      // After a restart the file's age on disk decides whether it is fresh.
-      const onDisk = await this.readDisk(version);
-      if (onDisk && this.remember(version, onDisk.notes, onDisk.writtenAt) > this.now()) {
-        return { kind: "found", notes: onDisk.notes };
-      }
-      kept = onDisk?.notes ?? null;
-    }
+  /** Downloads `version` again behind the kept copy, which stays whatever the outcome. */
+  private refresh(version: string, kept: ReleaseNotesFile): void {
+    if (this.inFlight.has(version)) return;
+    // Counts the attempt as a read, so a failure waits a full interval to retry.
+    this.remember(version, kept);
+    const refresh = this.downloadAndKeep(version, this.now() + FETCH_TIMEOUT_MS)
+      .then((lookup): Lookup => (lookup.kind === "found" ? lookup : { kind: "found", notes: kept }))
+      .finally(() => this.inFlight.delete(version));
+    this.inFlight.set(version, refresh);
+  }
+
+  private async downloadAndKeep(version: string, deadline: number): Promise<Lookup> {
     const downloaded = await this.download(version, deadline);
     if (downloaded.kind === "found") {
       this.remember(version, downloaded.notes);
       await this.writeDisk(version, downloaded.notes);
-      return downloaded;
-    }
-    if (kept) {
-      // Ask again after the refresh interval, not on every request.
-      this.remember(version, kept);
-      return { kind: "found", notes: kept };
     }
     return downloaded;
   }

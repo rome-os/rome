@@ -61,9 +61,6 @@ export const rangeHighlightSchema = releaseHighlightSchema.extend({
   breaking: z.boolean(),
 });
 
-/** A change in an upgrade range, with the release that made it. */
-export const rangeEntrySchema = releaseNoteEntrySchema.extend({ version: z.string() });
-
 /**
  * How much of the upgrade range `GET /api/system/release-notes` covers.
  *   complete — every release from `from` (exclusive) to `to`
@@ -87,19 +84,11 @@ export const releaseNotesRangeSchema = z.object({
    * predecessor. Null when that release does not name one.
    */
   coveredFrom: z.string().nullable(),
-  /** Breaking changes across the range, newest release first. */
-  breaking: z.array(rangeEntrySchema),
-  /** New features across the range, one entry per pull request. */
-  new: z.array(rangeEntrySchema),
-  /** Fixes across the range, one entry per pull request. */
-  fixes: z.array(rangeEntrySchema),
   /**
    * Highlights across the range in English and Chinese, newest release first,
    * one per pull request. A covered release without highlights adds none.
    */
   highlights: z.object({ en: z.array(rangeHighlightSchema), zh: z.array(rangeHighlightSchema) }),
-  /** Changes the notes do not list, summed over the covered releases. */
-  internal: z.number().int().nonnegative(),
   /** The target's release page. Set in every status, for the full notes. */
   releaseUrl: z.string(),
   /** GitHub's comparison from `from` to `to`, when the request named both. */
@@ -108,7 +97,6 @@ export const releaseNotesRangeSchema = z.object({
 
 export type ReleaseNoteEntry = z.infer<typeof releaseNoteEntrySchema>;
 export type ReleaseNotesFile = z.infer<typeof releaseNotesFileSchema>;
-export type ReleaseNotesRangeEntry = z.infer<typeof rangeEntrySchema>;
 export type ReleaseNotesRangeHighlight = z.infer<typeof rangeHighlightSchema>;
 export type ReleaseNotesStatus = z.infer<typeof releaseNotesStatusSchema>;
 export type ReleaseNotesRange = z.infer<typeof releaseNotesRangeSchema>;
