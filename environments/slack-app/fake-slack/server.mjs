@@ -46,6 +46,10 @@ export function loadConfig(overrides = {}) {
     historyLimit: !/^(0|false|off)$/i.test(
       String(overrides.historyLimit ?? env.FAKE_SLACK_HISTORY_LIMIT ?? "on"),
     ),
+    // Whether the app hears of its own posts in a direct message, as on Slack.
+    selfEvents: !/^(0|false|off)$/i.test(
+      String(overrides.selfEvents ?? env.FAKE_SLACK_SELF_EVENTS ?? "on"),
+    ),
     historyWindowMs: Number(
       overrides.historyWindowMs ?? env.FAKE_SLACK_HISTORY_WINDOW_MS ?? 60_000,
     ),
@@ -278,7 +282,8 @@ export class FakeSlack {
   remember(teamId, channel, message) {
     const key = `${teamId}/${channel}`;
     const list = (this.state.history[key] ??= []);
-    const kept = { type: "message", ...message };
+    // An event's own type (app_mention) is not a message's type in history.
+    const kept = { ...message, type: "message" };
     if (kept.thread_ts && kept.thread_ts !== kept.ts) {
       const parent = list.find((m) => m.ts === kept.thread_ts);
       if (parent) {
@@ -680,7 +685,7 @@ const API_METHODS = {
       tokenKind: info.kind,
     };
     this.state.posts.push(post);
-    this.remember(info.teamId, channel, {
+    const said = this.remember(info.teamId, channel, {
       user: info.userId,
       ...(info.kind === "bot" ? { bot_id: install.botId, app_id: this.config.appId } : {}),
       text: post.text,
@@ -689,6 +694,28 @@ const API_METHODS = {
       team: info.teamId,
       ...(blocks ? { blocks } : {}),
     });
+    // Slack tells an app subscribed to message.im of its own posts in a
+    // direct message too, after it answered the call; an app must ignore them.
+    if (info.kind === "bot" && channel.startsWith("D") && this.config.selfEvents) {
+      const { type: _type, ...message } = said;
+      const event = {
+        type: "message",
+        ...message,
+        channel,
+        channel_type: "im",
+        bot_profile: {
+          id: install.botId,
+          app_id: this.config.appId,
+          name: "rome",
+          team_id: info.teamId,
+        },
+      };
+      setImmediate(() => {
+        this.sendEvent(info.teamId, event).catch(() => {
+          // Not installed any more, or without im:history: Slack sends nothing.
+        });
+      });
+    }
     return {
       ok: true,
       channel,
@@ -1165,12 +1192,14 @@ async function control(slack, method, url, body) {
       }
       if (body.history_window_ms !== undefined)
         slack.config.historyWindowMs = body.history_window_ms;
+      if (body.self_events !== undefined) slack.config.selfEvents = Boolean(body.self_events);
       return {
         ok: true,
         events_url: slack.config.eventsUrl,
         retry_delays_ms: slack.config.retryDelaysMs,
         history_limit: slack.config.historyLimit,
         history_window_ms: slack.config.historyWindowMs,
+        self_events: slack.config.selfEvents,
       };
     case "POST /reset": {
       // Clears the records. Keeps installs and tokens unless {"installs": true},

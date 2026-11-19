@@ -284,3 +284,38 @@ test("a reset never lets a later message take an earlier one's ts", async () => 
     Date.now = realNow;
   }
 });
+
+test("the app hears of its own post in a direct message, and history keeps mentions as messages", async () => {
+  const C = "TA0000AAAA";
+  const { access_token: token, bot_user_id: bot } = await install(C, GUARDIAN, APP_SCOPES);
+  await ctl("/config", { history_limit: false });
+  try {
+    const dm = await ctl("/dm", { team: C, user: BOB, text: "ping" });
+    const count = received.length;
+    await api("chat.postMessage", { channel: dm.event.channel, text: "pong" }, token);
+    for (let i = 0; i < 50 && received.length === count; i++) await sleep(10);
+    const own = received.at(-1).event;
+    assert.equal(own.type, "message");
+    assert.equal(own.channel_type, "im");
+    assert.equal(own.user, bot);
+    assert.equal(own.bot_id, "BBOTA0000AAAA");
+    assert.equal(own.text, "pong");
+    // A post in a group sends nothing: the app subscribes to no group messages.
+    const quiet = received.length;
+    await api("chat.postMessage", { channel: "CA0000GENRL", text: "hello all" }, token);
+    await sleep(100);
+    assert.equal(received.length, quiet);
+    // A mention is an ordinary message in the group's history.
+    await install(C, GUARDIAN, `${APP_SCOPES},channels:history`);
+    const mention = await ctl("/mention", { team: C, user: BOB, text: "typed" });
+    const read = await api(
+      "conversations.replies",
+      { channel: "CA0000GENRL", ts: mention.event.ts },
+      token,
+    );
+    assert.equal(read.messages[0].type, "message");
+    assert.equal(read.messages[0].text, "<@UBOTA0000AAAA> typed");
+  } finally {
+    await ctl("/config", { history_limit: true });
+  }
+});
