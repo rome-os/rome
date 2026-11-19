@@ -164,6 +164,18 @@ describe("readDiscordHistory", () => {
     );
   });
 
+  it("refuses a guild chat whose history the bot may not read, where Discord answers none", async () => {
+    // Discord answers a bot without Read Message History an empty page.
+    const { get } = discord({ [CHAT]: { channel: textChannel, messages: [] } });
+
+    await expect(
+      readDiscordHistory({ ...deps(get), readsHistoryIn: async () => false }, CHAT, { limit: 5 }),
+    ).rejects.toThrow(`This Discord account may not read chat ${CHAT}`);
+    await expect(
+      readDiscordHistory({ ...deps(get), readsHistoryIn: async () => null }, CHAT, { limit: 5 }),
+    ).resolves.toEqual([]);
+  });
+
   it("reads the DM with a user a chat id names, as a send takes it", async () => {
     const dm = "100000000000000004";
     const { get } = discord({

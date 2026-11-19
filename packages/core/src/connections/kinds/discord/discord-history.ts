@@ -78,6 +78,10 @@ export interface DiscordHistoryDeps {
   /** The DM channel with the user an id names, where a chat id is a user's,
    *  as a send takes it. Rejects when the id names no user. */
   directChannelFor?: (userId: string) => Promise<string>;
+  /** Whether the bot holds Read Message History in a guild chat, or null
+   *  where that cannot be told. Discord answers a bot without it an empty
+   *  history, not a refusal, so a read asks first. */
+  readsHistoryIn?: (chatId: string) => Promise<boolean | null>;
 }
 
 /** The lowest Discord id of a message said at `ms` or later. */
@@ -100,14 +104,18 @@ const MISSING_ACCESS = 50001;
 const MISSING_PERMISSIONS = 50013;
 const UNKNOWN_CHANNEL = 10003;
 
+function mayNotRead(chatId: string): Error {
+  return new Error(
+    `This Discord account may not read chat ${chatId}: the bot needs View Channel and Read Message History there`,
+  );
+}
+
 /** Why the account may not read `chatId`, from Discord's refusal, or null
  *  when the failure says nothing about access. */
 function notReadable(chatId: string, err: unknown): Error | null {
   const { status, code } = refusal(err);
   if (status === 403 || code === MISSING_ACCESS || code === MISSING_PERMISSIONS) {
-    return new Error(
-      `This Discord account may not read chat ${chatId}: the bot needs View Channel and Read Message History there`,
-    );
+    return mayNotRead(chatId);
   }
   if (status === 404 || code === UNKNOWN_CHANNEL) {
     return new Error(`This Discord account sees no chat ${chatId}`);
@@ -149,6 +157,8 @@ export async function readDiscordHistory(
   read: TalkHistoryRead,
 ): Promise<ChannelMessage[]> {
   const channel = await channelOf(deps, chatId);
+  const isDm = channel.type === DM || channel.type === GROUP_DM;
+  if (!isDm && (await deps.readsHistoryIn?.(channel.id)) === false) throw mayNotRead(chatId);
   // Bounds as Discord ids, both exclusive.
   const lowers = [
     read.newerThan === undefined ? null : BigInt(read.newerThan),

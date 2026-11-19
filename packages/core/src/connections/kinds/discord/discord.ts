@@ -1443,10 +1443,24 @@ Use \`/channel agent clear\` to undo.`,
               : { id: botId },
           ),
         directChannelFor: (userId) => this.directConversationFor(userId),
+        readsHistoryIn: (channelId) => this.readsHistoryIn(channelId),
       },
       chatId,
       read,
     );
+  }
+
+  /** Whether the bot holds Read Message History in a guild chat or thread,
+   *  or null where the gateway cannot tell, such as before it is ready. */
+  private async readsHistoryIn(channelId: string): Promise<boolean | null> {
+    const user = this.client.user;
+    if (!user) return null;
+    const channel = await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !("permissionsFor" in channel)) return null;
+    const permissions = channel.permissionsFor(user);
+    if (!permissions) return null;
+    const flags = discordJs().PermissionFlagsBits;
+    return permissions.has([flags.ViewChannel, flags.ReadMessageHistory]);
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
