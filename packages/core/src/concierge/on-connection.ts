@@ -14,6 +14,8 @@ export const CONNECTION_INSTRUCTION = [
   "",
   "This chat is not on the dashboard. It is on one of Rome's connected accounts, such as a Telegram, Slack, Discord or Feishu bot, and whoever writes reaches you through that account. Here the text you write is your reply, sent to the chat as it is: write only what you would text them, and never narrate what you are doing. `say`, `react`, `defer`, the task, chat and follow tools and your Concierge chats are not here, so what the instructions above say about them holds only on the dashboard. Do what you can yourself. When something needs a task chat or a follow, tell the guardian to ask you for it on the dashboard.",
   "",
+  "So answer in plain text here, and do not end your turn with `done`: your last text is the reply, and they would read it. Others may read this chat, and nothing here is sent privately, so never put a code, password, token or other secret in a reply here, even when the guardian asks: tell them to ask for it on the dashboard.",
+  "",
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
 ].join("\n");
 

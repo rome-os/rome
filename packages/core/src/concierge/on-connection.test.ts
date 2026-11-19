@@ -37,6 +37,11 @@ describe("the Concierge on a connection", () => {
     expect(await conciergeOnConnection(undefined, "core:concierge")).toBeNull();
   });
 
+  it("cancels the dashboard's closing `done` and private sends, since its text is the reply", () => {
+    expect(CONNECTION_INSTRUCTION).toContain("do not end your turn with `done`");
+    expect(CONNECTION_INSTRUCTION).toContain("never put a code, password, token or other secret");
+  });
+
   it("joins every chat instruction that adds one, and answers null when none does", async () => {
     const combined = chatInstructionsOf([
       async () => "first",
