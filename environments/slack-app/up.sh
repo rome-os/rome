@@ -93,7 +93,11 @@ export MODEL_PROXY_API_KEY MODEL_PROXY_OAUTH_TOKEN
 mkdir -p "$STATE_DIR"/{home,corepack,pnpm-store,relay-data,bin}
 worktree() { # <repo> <sha> <dir>
   local repo="$1" sha="$2" dir="$3"
-  if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$sha" ]; then
+  # Only a complete worktree of its own: git run in a directory that is not one
+  # walks up to the enclosing checkout, which the reset below must never touch.
+  if [ -e "$dir/.git" ] &&
+    [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$dir" && pwd -P)" ] &&
+    [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$sha" ]; then
     # Reused only as the commit says: a tracked file changed by hand is put back.
     # Untracked files (node_modules, .dev.vars) stay.
     git -C "$dir" reset -q --hard "$sha"

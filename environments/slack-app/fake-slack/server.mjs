@@ -756,9 +756,7 @@ const API_METHODS = {
     if (!parent) return { ok: false, error: "thread_not_found" };
     const root = parent.thread_ts ?? parent.ts;
     const window = timeWindow(args);
-    const thread = all
-      .filter((m) => m.ts === root || m.thread_ts === root)
-      .filter((m) => m.ts === root || window(m)); // oldest first, the parent at the top
+    const thread = all.filter((m) => m.ts === root || m.thread_ts === root).filter(window); // oldest first; the parent at the top when the window holds it
     return page(this, thread, args);
   },
 

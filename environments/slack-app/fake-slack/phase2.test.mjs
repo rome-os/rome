@@ -315,6 +315,41 @@ test("the app hears of its own post in a direct message, and history keeps menti
     );
     assert.equal(read.messages[0].type, "message");
     assert.equal(read.messages[0].text, "<@UBOTA0000AAAA> typed");
+    // oldest and latest bound every message of the thread, the parent too.
+    const replyTs = (
+      await api(
+        "chat.postMessage",
+        { channel: "CA0000GENRL", text: "answer", thread_ts: mention.event.ts },
+        token,
+      )
+    ).ts;
+    const after = await api(
+      "conversations.replies",
+      { channel: "CA0000GENRL", ts: mention.event.ts, oldest: mention.event.ts },
+      token,
+    );
+    assert.deepEqual(
+      after.messages.map((m) => m.ts),
+      [replyTs],
+    );
+    const both = await api(
+      "conversations.replies",
+      { channel: "CA0000GENRL", ts: mention.event.ts, oldest: mention.event.ts, inclusive: true },
+      token,
+    );
+    assert.deepEqual(
+      both.messages.map((m) => m.ts),
+      [mention.event.ts, replyTs],
+    );
+    const before = await api(
+      "conversations.replies",
+      { channel: "CA0000GENRL", ts: mention.event.ts, latest: replyTs },
+      token,
+    );
+    assert.deepEqual(
+      before.messages.map((m) => m.ts),
+      [mention.event.ts],
+    );
   } finally {
     await ctl("/config", { history_limit: true });
   }
