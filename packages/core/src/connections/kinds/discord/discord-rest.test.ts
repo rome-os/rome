@@ -217,4 +217,29 @@ describe("DiscordAdapter REST broker capability", () => {
       },
     });
   });
+
+  it("stops a history read, and sends it no further requests, when the credential epoch stops", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const routes: string[] = [];
+    let signal: AbortSignal | undefined;
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        routes.push(request.fullRoute);
+        signal = request.signal;
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+
+    const read = adapter.readHistory("100000000000000003" as never, { limit: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await adapter.stop();
+
+    await expect(read).rejects.toThrow("Discord connection stopped during the read");
+    expect(signal?.aborted).toBe(true);
+    await expect(adapter.readHistory("100000000000000003" as never, { limit: 5 })).rejects.toThrow(
+      "Discord connection has stopped",
+    );
+    expect(routes).toHaveLength(1);
+  });
 });

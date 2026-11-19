@@ -64,7 +64,7 @@ import {
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
 import type { TalkHistoryRead } from "../../types.js";
-import { readDiscordHistory } from "./discord-history.js";
+import { type DiscordGet, readDiscordHistory } from "./discord-history.js";
 import { discordAttachment } from "./discord-attachment.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
@@ -348,6 +348,8 @@ export class DiscordAdapter {
   private readonly rest: REST;
   /** Broker requests that must not survive this credential-owning epoch. */
   private readonly activeApiRequestControllers = new Set<AbortController>();
+  /** Set by `stop`: this epoch's credential sends no further reads. */
+  private stopped = false;
 
   constructor(config: {
     botToken: string;
@@ -1398,6 +1400,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     // Epoch teardown must synchronously invalidate work still queued behind a
     // rate-limit bucket; otherwise it could later dispatch with this manager's
     // retained, now-stale credential.
@@ -1421,12 +1424,47 @@ Use \`/channel agent clear\` to undo.`,
    *  (discord-history.ts). A DM is read by its own chat id, the one its
    *  messages carry. */
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
+    // A read must not outlive this credential's epoch: `stop` aborts it, and
+    // no request is sent once it has.
+    if (this.stopped) throw new Error("Discord connection has stopped");
+    const controller = new AbortController();
+    this.activeApiRequestControllers.add(controller);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("Discord connection stopped during the read")),
+        { once: true },
+      );
+    });
+    void aborted.catch(() => undefined);
+    const get: DiscordGet = async (route, query) => {
+      if (controller.signal.aborted) return aborted;
+      const request = this.rest.get(route, {
+        ...(query ? { query } : {}),
+        signal: controller.signal,
+      });
+      // discord.js does not observe the signal while it waits on a bucket.
+      void request.catch(() => undefined);
+      return Promise.race([request, aborted]);
+    };
+    try {
+      return await this.readHistoryWith(get, chatId, read, () => controller.signal.aborted);
+    } finally {
+      this.activeApiRequestControllers.delete(controller);
+    }
+  }
+
+  private async readHistoryWith(
+    get: DiscordGet,
+    chatId: ChatId,
+    read: TalkHistoryRead,
+    stopped: () => boolean,
+  ): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
-    const botId =
-      botUser?.id ?? ((await this.rest.get(discordJs().Routes.user())) as { id: string }).id;
+    const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
     return readDiscordHistory(
       {
-        get: (route, query) => this.rest.get(route, query ? { query } : {}),
+        get,
         botId,
         // The bot's name as an inbound message of the same guild reads it.
         textOf: (content, guildId) =>
@@ -1442,7 +1480,11 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        readsHistoryIn: (channelId) => this.readsHistoryIn(channelId),
+        readsHistoryIn: async (channelId) => {
+          const reads = await this.readsHistoryIn(channelId);
+          if (stopped()) throw new Error("Discord connection stopped during the read");
+          return reads;
+        },
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
@@ -1452,16 +1494,33 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   /** Whether the bot holds Read Message History in a guild chat or thread,
-   *  or null where the gateway cannot tell, such as before it is ready. */
+   *  or null where that cannot be told, such as before the gateway is ready.
+   *  Discord answers a read it refuses with no messages, so the answer is
+   *  read from Discord now, not from what the gateway last heard: the chat
+   *  (and a thread's parent), the guild's roles, and the bot's own member. */
   private async readsHistoryIn(channelId: string): Promise<boolean | null> {
     const user = this.client.user;
     if (!user) return null;
-    const channel = await this.client.channels.fetch(channelId).catch(() => null);
-    if (!channel || !("permissionsFor" in channel)) return null;
-    const permissions = channel.permissionsFor(user);
-    if (!permissions) return null;
-    const flags = discordJs().PermissionFlagsBits;
-    return permissions.has([flags.ViewChannel, flags.ReadMessageHistory]);
+    try {
+      const channel = await this.client.channels.fetch(channelId, { force: true });
+      if (!channel || !("permissionsFor" in channel) || !("guild" in channel)) return null;
+      if (channel.isThread() && channel.parentId) {
+        await this.client.channels.fetch(channel.parentId, { force: true });
+      }
+      await Promise.all([
+        channel.guild.roles.fetch(undefined, { force: true }),
+        channel.guild.members.fetchMe({ force: true }),
+      ]);
+      const permissions = channel.permissionsFor(user);
+      if (!permissions) return null;
+      const flags = discordJs().PermissionFlagsBits;
+      return permissions.has([flags.ViewChannel, flags.ReadMessageHistory]);
+    } catch (err) {
+      // Discord refusing the chat itself is an answer.
+      const status = (err as { status?: unknown } | null)?.status;
+      if (status === 403 || status === 404) return false;
+      return null;
+    }
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
