@@ -303,6 +303,28 @@ describe("channels.query from a turn that is not the guardian's", () => {
     ).rejects.toThrow("reads only the chat it is in");
   });
 
+  it("reads no chat from a shared turn with no chat of its own", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+    // An agent a guardian's group turn summoned, or a shared routine's fire:
+    // the guardian acts, others read, and there is no chat to read.
+    const summoned = {
+      callerActionContext: { actor: { kind: "guardian" }, audience: "shared" },
+    } as never;
+
+    await expect(
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, summoned),
+    ).rejects.toThrow("reads only the chat it is in");
+    // A private one, and a call outside any turn, read any chat.
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {
+      callerActionContext: { actor: { kind: "guardian" }, audience: "private" },
+    } as never);
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {});
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
   it("reads any chat only from a turn whose audience is private", async () => {
     const query = rs.fn(async () => []);
     const calls = makeCalls({
