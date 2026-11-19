@@ -45,7 +45,9 @@ export function startRoutineRun(
 
 const notFound = (routineId: string) => ({
   status: "error" as const,
-  error: `No routine found with id "${routineId}". Use system:search_routine to find the right id.`,
+  error: routineId
+    ? `No routine found with id "${routineId}". Use system:search_routine to find the right id.`
+    : "Pass the routine's id as routineId. Find it with system:search_routine.",
 });
 
 const idOf = (args: Record<string, unknown>) =>

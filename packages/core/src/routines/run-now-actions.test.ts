@@ -98,6 +98,15 @@ describe("core:routine_run_now", () => {
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 
+  it("names the field to pass when the id comes under another name", async () => {
+    const result = await engine.run(ROUTINE_RUN_NOW_ACTION, { id: "a-routine" }, guardianAsked);
+    expect(result).toEqual({
+      status: "error",
+      error: "Pass the routine's id as routineId. Find it with system:search_routine.",
+    });
+    expect(routineEngine.runNow).not.toHaveBeenCalled();
+  });
+
   it("refuses a turn the guardian's own message did not start, and runs nothing", async () => {
     const id = await createRoutine();
     const result = await engine.run(
