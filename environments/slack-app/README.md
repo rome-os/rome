@@ -7,7 +7,7 @@ Everything the official Slack app and its verifier need to run with no person pr
 ```bash
 environments/slack-app/up.sh --rome <ref> --rome-cloud <ref>   # default origin/main for both
 environments/slack-app/ctl.sh stop rome-a                       # and start, status; logs <service>
-environments/slack-app/ctl.sh wipe-chat rome-a DA000BOB01       # wipe Rome's copy of one chat
+environments/slack-app/ctl.sh wipe-chat rome-a DA000A0000BOB01      # wipe Rome's copy of one chat
 echo 'select count(*) from users' | environments/slack-app/ctl.sh cloud-query
 environments/slack-app/down.sh                                  # removes containers, volumes and .state
 ```

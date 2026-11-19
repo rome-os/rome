@@ -126,7 +126,7 @@ GRANT CONNECT ON DATABASE pantheon TO slackenv_reader;
 GRANT USAGE ON SCHEMA public TO slackenv_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO slackenv_reader;
 SQL
-    printf 'BEGIN TRANSACTION READ ONLY;\nSELECT coalesce(json_agg(q), json_build_array()) FROM (\n%s\n) q;\nROLLBACK;\n' "$sql" |
+    printf 'BEGIN TRANSACTION READ ONLY;\nSELECT coalesce(jsonb_agg(q), jsonb_build_array()) FROM (\n%s\n) q;\nROLLBACK;\n' "$sql" |
       compose exec -T postgres psql -q -At -v ON_ERROR_STOP=1 -U slackenv_reader -d pantheon
     ;;
 esac
