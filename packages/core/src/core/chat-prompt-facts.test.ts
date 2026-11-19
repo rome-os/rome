@@ -104,7 +104,15 @@ describe("chatPromptFacts earlier messages", () => {
     });
     return { promptFacts, latest, read };
   };
-  const place = { channel: "slack_app", threadId: "D1" };
+  const place = { channel: "slack_app", threadId: "D1", threadType: "private" as const };
+
+  it("reads nothing in a group, where the platform holds what was said before Rome joined", async () => {
+    const { promptFacts, latest } = earlierFacts([message(1)]);
+    expect(
+      await promptFacts.earlier?.({ ...place, threadId: "C1", threadType: "group" }, new Date()),
+    ).toBeNull();
+    expect(latest).not.toHaveBeenCalled();
+  });
 
   it("reads nothing where the channel hands the agent every message", async () => {
     const { promptFacts, latest } = earlierFacts([message(1)], false);
