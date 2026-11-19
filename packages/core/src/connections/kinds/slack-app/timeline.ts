@@ -66,8 +66,8 @@ function justAfter(ts: string): string {
 
 /** Note a message the connection heard or sent in a direct message, in the
  *  drain open now. One the copy holds already, such as from a page Slack
- *  answered before its event arrived, still moves the drain on: the next one
- *  heard comes after it. Its link is written only where the copy had none,
+ *  answered before its event arrived, still moves the drain on past the head:
+ *  the next one heard comes after it. Its link is written only where the copy had none,
  *  since a link from Slack's page is the surer of the two. */
 export function noteInDrain(
   deps: SlackTimelineDeps,
@@ -89,7 +89,10 @@ export function noteInDrain(
       before: head,
     });
   }
-  if (head === undefined || follows) deps.heads.set(channelId, ts);
+  // A drain's first message heads the chat only when the copy did not hold
+  // it: one it held came before, so Slack is sending it again, such as a
+  // retry into a new drain, and newer ones may have been said since.
+  if (follows || (head === undefined && !held)) deps.heads.set(channelId, ts);
 }
 
 /** The messages of `chatId` within `read`'s bounds, newest first, at most
