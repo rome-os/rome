@@ -13,7 +13,7 @@ if [ -f "$STATE_DIR/compose.env" ]; then
 fi
 if [ "${1:-}" = "--images" ]; then
   # A cloud-only run built no instance image, and finding none is fine.
-  docker images --format '{{.Repository}}:{{.Tag}}' | { grep -E '^slackenv-rome(-test)?:' || true; } | xargs -r docker rmi
+  docker images --format '{{.Repository}}:{{.Tag}}' | { grep -E '^slackenv-rome(-test)?:' || true; } | xargs -r docker rmi || true
 fi
 git -C "$ROME_DIR" worktree remove --force "$STATE_DIR/rome-src" 2>/dev/null || true
 [ -d "$ROME_CLOUD_DIR" ] && git -C "$ROME_CLOUD_DIR" worktree remove --force "$STATE_DIR/rome-cloud-src" 2>/dev/null || true

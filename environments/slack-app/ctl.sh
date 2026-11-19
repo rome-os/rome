@@ -223,12 +223,22 @@ case "$action" in
       echo "building $image from rome $sha (first time for this commit: several minutes)" >&2
       ctx="$(mktemp -d)"
       git -C "$src" archive HEAD | tar -x -C "$ctx"
+      # rome's .dockerignore drops test files; test-runner/Dockerfile.dockerignore
+      # replaces it, and the copy in the context goes too in case a builder
+      # reads that one.
+      rm -f "$ctx/.dockerignore"
       docker build -q -t "$image" --label "slackenv.rome_sha=$sha" -f "$ENV_DIR/test-runner/Dockerfile" "$ctx" >&2 ||
         {
           rm -rf "$ctx"
           result 1 "" ',"error":"the test image did not build"'
         }
       rm -rf "$ctx"
+    fi
+    # An image without the files cannot check them: 126, as for a runner that
+    # cannot start.
+    missing="$(docker run --rm --network none "$image" sh -c 'for f; do [ -f "/repo/$f" ] || echo "$f"; done' sh "$@")"
+    if [ -n "$missing" ]; then
+      result 126 "" ",\"error\":\"not in the test image $image: $(echo "$missing" | tr '\n' ' ' | sed 's/ $//')\""
     fi
     # Each file runs in the package whose rstest config takes it, the way that
     # package's own test script runs: rome_apps' tests run under packages/core.
@@ -237,7 +247,7 @@ case "$action" in
       d="$(dirname "$f")"
       pkg=""
       while [ "$d" != . ] && [ "$d" != / ]; do
-        if compgen -G "$src/$d/rstest.config.*" >/dev/null; then
+        if [ -n "$(find "$src/$d" -maxdepth 1 -name 'rstest.config.*' -print -quit)" ]; then
           pkg="$d"
           break
         fi

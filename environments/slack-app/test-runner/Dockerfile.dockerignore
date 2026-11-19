@@ -1,0 +1,4 @@
+# The context is a git archive of the commit under test. This file takes the
+# place of rome's own .dockerignore, which leaves its test files out of the
+# instance image; here they are the point.
+.git

@@ -145,7 +145,8 @@ console.log(
       // that commit with every dependency (built on first use per commit).
       // Append repo-relative paths. Prints the runner's output, then a last
       // line {ok, commit, runs: [{package, files, exit_code}], error?}; exits
-      // 0 when all pass, 2 when a file is not in the commit.
+      // 0 when all pass, 2 when a file is not in the commit, 126 when the test
+      // image lacks a file.
       product_tests: [ctl, "product-tests"],
       // A Playwright browser in a container on the host's network, so the
       // instances' own origins work. Connect with the client below:
