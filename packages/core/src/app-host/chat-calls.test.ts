@@ -279,6 +279,30 @@ describe("channels.query from a turn that is not the guardian's", () => {
     ).rejects.toThrow("reads only the chat it is in");
   });
 
+  it("reads the chat around a native thread the turn is in", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+    const inThread = visitorOn("thread-1");
+    const turn = {
+      callerActionContext: {
+        ...inThread.callerActionContext,
+        channelContext: {
+          ...inThread.callerActionContext.channelContext,
+          parentThreadId: "chat-a",
+        },
+      },
+    };
+
+    await calls["channels.query"]({ channel: "telegram", chatId: "thread-1" }, turn);
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-a" }, turn);
+    expect(query).toHaveBeenCalledTimes(2);
+    await expect(
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, turn),
+    ).rejects.toThrow("reads only the chat it is in");
+  });
+
   it("reads any chat only from a turn whose audience is private", async () => {
     const query = rs.fn(async () => []);
     const calls = makeCalls({

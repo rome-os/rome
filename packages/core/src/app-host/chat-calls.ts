@@ -91,13 +91,21 @@ export interface ChatWorkerCallsDeps {
  * a turn whose audience is private, so nobody but the guardian reads what it
  * says. A turn others read, such as one for a visitor, in a group or in an
  * email thread, could pass on what another chat holds, so it reads only the
- * chat it is in. An action with no audience reads as a shared turn. Domain:
- * docs/domains/participation.md#audience.
+ * chat it is in. An action with no audience reads as a shared turn. A routine
+ * fire runs outside a chat, so it reads any chat whatever its audience, a
+ * known gap. Domain: docs/domains/participation.md#audience.
  */
 function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
   if (context?.actor && context.actor.kind !== "guardian") return false;
   if (!context?.channelContext) return true;
   return context.audience === "private";
+}
+
+/** Whether `chatId` is the chat a turn is in: its own, or, in a native
+ *  thread, the chat the thread hangs off, which the same people read. */
+function isOwnChat(chatId: string | undefined, place: ThreadContext | undefined): boolean {
+  if (chatId === undefined || !place) return false;
+  return chatId === place.threadId || chatId === place.parentThreadId;
 }
 
 /** The channel a query names: its name, or the channel holding the account. */
@@ -149,9 +157,8 @@ export function chatWorkerCalls(
       const place = context?.channelContext;
       if (
         !readsAnyChat(context) &&
-        (chatId === undefined ||
-          chatId !== place?.threadId ||
-          (await channelNamed(channelsService, channel)) !== place.channel)
+        (!isOwnChat(chatId, place) ||
+          (await channelNamed(channelsService, channel)) !== place?.channel)
       ) {
         throw new Error("A turn others read reads only the chat it is in");
       }
