@@ -19,6 +19,7 @@ const upstream = (process.env.MODEL_PROXY_UPSTREAM ?? "https://api.anthropic.com
 );
 const apiKey = process.env.MODEL_PROXY_API_KEY ?? "";
 const oauthToken = process.env.MODEL_PROXY_OAUTH_TOKEN ?? "";
+const OAUTH_BETA = "oauth-2025-04-20";
 const stats = { requests: 0, asked: {}, statuses: {} };
 
 // Headers that must not be forwarded as they are.
@@ -74,8 +75,16 @@ createServer(async (req, res) => {
     headers["x-api-key"] = apiKey;
     delete headers.authorization;
   } else if (oauthToken) {
+    // A subscription token is accepted only with the OAuth beta, which the
+    // instances, holding a placeholder API key, never send themselves.
     headers.authorization = `Bearer ${oauthToken}`;
     delete headers["x-api-key"];
+    const betas = String(headers["anthropic-beta"] ?? "")
+      .split(",")
+      .map((b) => b.trim())
+      .filter(Boolean);
+    if (!betas.includes(OAUTH_BETA)) betas.push(OAUTH_BETA);
+    headers["anthropic-beta"] = betas.join(",");
   }
 
   stats.requests += 1;
