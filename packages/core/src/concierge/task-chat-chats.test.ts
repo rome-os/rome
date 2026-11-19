@@ -3,7 +3,13 @@ import type { ChatRef } from "../chats/storage/place.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
-import { chatsTaskChatMessages, hasText, latestSaid, taskChatPlace } from "./task-chat.js";
+import {
+  chatsTaskChatMessages,
+  finalAnswer,
+  hasText,
+  latestSaid,
+  taskChatPlace,
+} from "./task-chat.js";
 
 // A task chat read from Chats, the way Concierge reads it: chat_read's latest
 // messages, and the latest answer chat_forward and the task events quote.
@@ -89,6 +95,90 @@ describe("chatsTaskChatMessages", () => {
       ["follow-up", "toRome"],
     ]);
     expect((await latestAnswer())?.body.text).toBe("3 options");
+  });
+
+  describe("finalAnswer", () => {
+    const agentCard = (text: string) => ({
+      type: "widget",
+      toolUseId: `call-${text}`,
+      appId: "core",
+      text,
+      ui: { components: [{ id: "root", component: "Text", text }] },
+    });
+    const final = () => finalAnswer(messages(), taskChatPlace("task-1"));
+    const links = () => new TurnLinks(testDb.db);
+    /** The guardian's prompt that woke `turn`. */
+    const ask = (id: string, at: number, turn: string) =>
+      links().prompt(said(id, at, false, [text(id)]), "task-1", turn);
+    /** What the agent said in `turn`. */
+    const answer = (id: string, at: number, turn: string, parts: unknown[]) =>
+      links().answer(said(id, at, true, parts), "task-1", turn);
+    function said(id: string, at: number, fromRome: boolean, parts: unknown[]) {
+      return fixture.say({
+        id,
+        chat,
+        from: fromRome ? "agent:main" : "guardian",
+        agent: fromRome ? "main" : null,
+        parts,
+        at: new Date(at * 1000),
+      });
+    }
+
+    it("gives the answer with the card its turn showed, before or after it", async () => {
+      ask("q", 1, "t1");
+      answer("card", 2, "t1", [agentCard("Sleep 6.1 h")]);
+      answer("a", 3, "t1", [text("Your summary.")]);
+
+      const found = await final();
+      expect(found?.answer?.id).toBe("a");
+      expect(found?.card).toMatchObject({ appId: "core", text: "Sleep 6.1 h" });
+
+      ask("q2", 4, "t2");
+      answer("a2", 5, "t2", [text("Today's summary.")]);
+      answer("card2", 6, "t2", [agentCard("Today")]);
+      expect(await final()).toMatchObject({ answer: { id: "a2" }, card: { text: "Today" } });
+    });
+
+    it("makes a card the answer of a turn that showed only a card, never an earlier turn's text", async () => {
+      ask("q", 1, "t1");
+      answer("a", 2, "t1", [text("Yesterday's summary.")]);
+      ask("q2", 3, "t2");
+      answer("card", 4, "t2", [agentCard("Today")]);
+
+      const found = await final();
+      expect(found?.answer).toBeUndefined();
+      expect(found?.card?.text).toBe("Today");
+    });
+
+    it("never pairs an answer with an earlier turn's card when no prompt lies between them", async () => {
+      // A defer wake-up or an approval's resumption answers with no prompt row.
+      ask("q", 1, "t1");
+      answer("old-card", 2, "t1", [agentCard("Yesterday")]);
+      answer("old", 3, "t1", [text("Yesterday's summary.")]);
+      answer("a", 4, "t2", [text("Checked again: nothing new.")]);
+
+      const found = await final();
+      expect(found?.answer?.id).toBe("a");
+      expect(found?.card).toBeUndefined();
+    });
+
+    it("gives no card for an answer that showed none, nor for an app's card", async () => {
+      ask("q", 1, "t1");
+      answer("w", 2, "t1", [{ ...agentCard("Sunny"), appId: "weather" }]);
+      answer("a", 3, "t1", [text("Sunny.")]);
+
+      const found = await final();
+      expect(found?.answer?.id).toBe("a");
+      expect(found?.card).toBeUndefined();
+    });
+
+    it("lets a message no turn is linked to answer alone", async () => {
+      ask("q", 1, "t1");
+      answer("card", 2, "t1", [agentCard("Sleep")]);
+      say("a", 3, true, [text("An older row.")]);
+
+      expect(await final()).toEqual({ answer: expect.objectContaining({ id: "a" }) });
+    });
   });
 
   it("reads nothing for a chat Chats does not hold", async () => {

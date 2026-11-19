@@ -3,6 +3,7 @@
 
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
+import { type AgentCardPart, agentCardIn } from "../chats/agent-card.js";
 import { messageContentText } from "../chats/history/messages-agent.js";
 import type { SaidMessage as StoredLine } from "../chats/storage/message.js";
 import { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
@@ -40,6 +41,50 @@ export async function latestSaid(
     found.unshift(...page.messages.filter(keep));
     if (found.length >= limit || !page.older) return found.slice(-limit);
     page = await messages.before(place, page.older, pageSize, DASHBOARD);
+  }
+}
+
+/** A task chat's final answer, by the turn that said Rome's latest message
+ *  with text or a card: that turn's latest text, and its latest agent card.
+ *  A turn that showed only a card has no text, and the card is its answer. A
+ *  message no turn is linked to, such as an older row, answers alone. */
+export interface FinalAnswer {
+  readonly answer?: SaidMessage;
+  readonly card?: AgentCardPart;
+}
+
+/** The final answer of a task chat, or null for none yet. Turns are told
+ *  apart by the turn that said each message, never by where a prompt sits:
+ *  a defer wake-up or an approval's resumption answers with no prompt of its
+ *  own, and a card-only turn has no text to stop at. */
+export async function finalAnswer(
+  messages: Pick<MessageRepository, "recent" | "before">,
+  place: Place,
+): Promise<FinalAnswer | null> {
+  let turn: string | undefined;
+  let answer: SaidMessage | undefined;
+  let card: AgentCardPart | undefined;
+  const found = (): FinalAnswer => ({
+    ...(answer ? { answer } : {}),
+    ...(card ? { card } : {}),
+  });
+  let page = await messages.recent(place, MAX_READ_LIMIT, DASHBOARD);
+  for (;;) {
+    // Newest message first.
+    for (const message of [...page.messages].reverse()) {
+      if (message.direction !== "fromRome" || (!message.card && !hasText(message))) continue;
+      if (answer || card) {
+        // Only the latest answering turn counts.
+        if (!turn || message.turnId !== turn) return found();
+      } else {
+        turn = message.turnId;
+      }
+      if (message.card) card ??= message.card;
+      else answer ??= message;
+      if (!turn) return found();
+    }
+    if (!page.older) return answer || card ? found() : null;
+    page = await messages.before(place, page.older, MAX_READ_LIMIT, DASHBOARD);
   }
 }
 
@@ -86,6 +131,7 @@ export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "r
  *  input to the task, also Concierge's own follow-up, which one of Rome's
  *  agents said; any other line from Rome is the task's. */
 function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): SaidMessage {
+  const card = agentCardOf(line.parts);
   return {
     id: line.key,
     direction: link?.role === "prompt" ? "toRome" : line.direction,
@@ -94,5 +140,16 @@ function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): Sai
     body: { text: messageContentText(line.parts) ?? "" },
     at: line.at,
     ...(line.chatThread === undefined ? {} : { chatThread: line.chatThread }),
+    ...(card ? { card } : {}),
+    ...(link?.turnId ? { turnId: link.turnId } : {}),
   };
+}
+
+function agentCardOf(parts: string): AgentCardPart | undefined {
+  try {
+    const parsed: unknown = JSON.parse(parts);
+    return Array.isArray(parsed) ? agentCardIn(parsed) : undefined;
+  } catch {
+    return undefined;
+  }
 }

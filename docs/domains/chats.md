@@ -331,6 +331,7 @@ Rome's own widget whose look the agent composes, to show structured content laid
 - An agent shows one only where the place draws cards. Anywhere else it sends the content as a message.
 - Any agent may show one: the Concierge in its chats, and every other agent in its chat or task chat, such as a routine's daily summary. Only Rome's own card tool shows one. Anything else that looks like one, such as an app's action, a command's output or another tool with the same name, is not a card.
 - The agent uses one only for content with a real structure, at most one per reply, and its messages around the card never repeat it.
+- A [task chat](#task-chat) may give its result as a card: a few key numbers against their usual ranges, steps, or options side by side, never a short answer or a result that asks its owner something. It still writes its conclusion. The Concierge forwards that card as it is, issued again by Rome and marked as forwarded from the task chat. Like any forward, it replies to the task's start message. Only a card from the turn of the task's final answer goes, and a turn that showed only a card answers with it. A Concierge chat that cannot draw cards gets the card's plain-text line instead. The Concierge never composes a card from a task's result itself, so no number is typed twice.
 
 ## Outputs
 
