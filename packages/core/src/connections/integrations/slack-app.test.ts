@@ -167,8 +167,8 @@ describe("the Slack app talker", () => {
         timelineAfter: () => null,
         holdsNewer: () => false,
         unlinkAcross: () => {},
-        edit: () => {},
-        remove: () => {},
+        change: () => true,
+        deleted: () => false,
         search: () => [],
       },
     });

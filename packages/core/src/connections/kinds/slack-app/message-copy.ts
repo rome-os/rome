@@ -9,9 +9,23 @@
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import type Database from "better-sqlite3";
-import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, max, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  max,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
-import { slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
+import { slackAppChanges, slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
 import { compareTs } from "./timeline-order.js";
 
 /** One message of a chat's timeline as the copy holds it. */
@@ -80,12 +94,19 @@ export interface SlackMessageCopy {
   /** Forget any link across `ts`: a timeline message the connection did not
    *  keep sits there, so the messages either side of it are not adjacent. */
   unlinkAcross(teamId: string, channelId: string, ts: string): void;
-  /** Take message `ts` of chat `channelId` as edited to `text`. */
-  edit(teamId: string, channelId: string, ts: string, text: string): void;
-  /** Forget message `ts` of chat `channelId`, which was deleted. The timeline
-   *  message after it links to the one before it, as Slack's history now
-   *  shows them. */
-  remove(teamId: string, channelId: string, ts: string): void;
+  /** Take a change Slack made to message `ts` of chat `channelId` at
+   *  `changedTs`: its text now `text`, or deleted when null. A change older
+   *  than one the copy took changes nothing, and answers false. A deleted
+   *  timeline message's successor links to the one before it, as Slack's
+   *  history now shows them. */
+  change(
+    teamId: string,
+    channelId: string,
+    ts: string,
+    change: { changedTs: string; text: string | null },
+  ): boolean;
+  /** Whether message `ts` of chat `channelId` was deleted. */
+  deleted(teamId: string, channelId: string, ts: string): boolean;
   /** Up to `limit` messages the copy holds for the workspace whose text holds
    *  `text`, ignoring case, in chat `channelId` when named, newest first. Both
    *  the messages heard and the timeline messages read count, each once. */
@@ -100,7 +121,13 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
   constructor(private readonly db: DrizzleDb) {}
 
   keep(kept: KeptSlackMessage, at: Date): boolean {
-    const { raw: _raw, ...message } = kept.message;
+    const { raw: _raw, ...said } = kept.message;
+    // A message deleted since is not kept again when Slack retries its event,
+    // and one edited since is kept as edited.
+    const changed = this.changeOf(this.db, kept.teamId, kept.channelId, kept.ts);
+    if (changed && changed.text === null) return false;
+    const text = changed?.text ?? kept.text;
+    const message = changed ? { ...said, text } : said;
     const written = this.db
       .insert(slackAppMessages)
       .values({
@@ -110,7 +137,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         ts: kept.ts,
         threadTs: kept.threadTs ?? null,
         userId: kept.userId,
-        text: kept.text,
+        text,
         saidAt: message.timestamp,
         message,
         receivedAt: at,
@@ -162,7 +189,6 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
   }
 
   keepRun(teamId: string, channelId: string, run: TimelineRun): void {
-    const { messages } = run;
     const where = (ts: string) =>
       and(
         eq(slackAppTimeline.teamId, teamId),
@@ -170,6 +196,16 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         eq(slackAppTimeline.ts, ts),
       );
     this.db.transaction((tx) => {
+      // A page read before a change, or a message heard again, is taken as
+      // Slack shows it since: a deleted message is not there, and an edited
+      // one reads as edited.
+      const messages = run.messages.flatMap((m) => {
+        const changed = this.changeOf(tx, teamId, channelId, m.ts);
+        if (!changed) return [m];
+        return changed.text === null
+          ? []
+          : [{ ...m, message: { ...m.message, text: changed.text } }];
+      });
       // A row the copy holds between the run's oldest message and the one it
       // says comes before shows that link wrong, as a page Slack answered
       // before a late event does.
@@ -240,61 +276,82 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     });
   }
 
-  edit(teamId: string, channelId: string, ts: string, text: string): void {
-    this.db.transaction((tx) => {
-      tx.update(slackAppMessages)
-        .set({ text, message: sql`json_set(${slackAppMessages.message}, '$.text', ${text})` })
-        .where(
-          and(
-            eq(slackAppMessages.teamId, teamId),
-            eq(slackAppMessages.channelId, channelId),
-            eq(slackAppMessages.ts, ts),
-          ),
-        )
+  change(
+    teamId: string,
+    channelId: string,
+    ts: string,
+    { changedTs, text }: { changedTs: string; text: string | null },
+  ): boolean {
+    return this.db.transaction((tx) => {
+      const held = this.changeOf(tx, teamId, channelId, ts);
+      if (held && compareTs(held.changedTs, changedTs) >= 0) return false;
+      tx.insert(slackAppChanges)
+        .values({ teamId, channelId, ts, changedTs, text })
+        .onConflictDoUpdate({
+          target: [slackAppChanges.teamId, slackAppChanges.channelId, slackAppChanges.ts],
+          set: { changedTs, text },
+        })
         .run();
-      tx.update(slackAppTimeline)
-        .set({ message: sql`json_set(${slackAppTimeline.message}, '$.text', ${text})` })
-        .where(
-          and(
-            eq(slackAppTimeline.teamId, teamId),
-            eq(slackAppTimeline.channelId, channelId),
-            eq(slackAppTimeline.ts, ts),
-          ),
-        )
-        .run();
-    });
-  }
-
-  remove(teamId: string, channelId: string, ts: string): void {
-    const inChat = and(
-      eq(slackAppTimeline.teamId, teamId),
-      eq(slackAppTimeline.channelId, channelId),
-    );
-    this.db.transaction((tx) => {
+      const heard = and(
+        eq(slackAppMessages.teamId, teamId),
+        eq(slackAppMessages.channelId, channelId),
+        eq(slackAppMessages.ts, ts),
+      );
+      const inChat = and(
+        eq(slackAppTimeline.teamId, teamId),
+        eq(slackAppTimeline.channelId, channelId),
+      );
+      const timeline = and(inChat, eq(slackAppTimeline.ts, ts));
+      if (text !== null) {
+        tx.update(slackAppMessages)
+          .set({ text, message: sql`json_set(${slackAppMessages.message}, '$.text', ${text})` })
+          .where(heard)
+          .run();
+        tx.update(slackAppTimeline)
+          .set({ message: sql`json_set(${slackAppTimeline.message}, '$.text', ${text})` })
+          .where(timeline)
+          .run();
+        return true;
+      }
       const row = tx
         .select({ prevTs: slackAppTimeline.prevTs })
         .from(slackAppTimeline)
-        .where(and(inChat, eq(slackAppTimeline.ts, ts)))
+        .where(timeline)
         .get();
       if (row) {
         tx.update(slackAppTimeline)
           .set({ prevTs: row.prevTs })
           .where(and(inChat, eq(slackAppTimeline.prevTs, ts)))
           .run();
-        tx.delete(slackAppTimeline)
-          .where(and(inChat, eq(slackAppTimeline.ts, ts)))
-          .run();
+        tx.delete(slackAppTimeline).where(timeline).run();
       }
-      tx.delete(slackAppMessages)
-        .where(
-          and(
-            eq(slackAppMessages.teamId, teamId),
-            eq(slackAppMessages.channelId, channelId),
-            eq(slackAppMessages.ts, ts),
-          ),
-        )
-        .run();
+      tx.delete(slackAppMessages).where(heard).run();
+      return true;
     });
+  }
+
+  deleted(teamId: string, channelId: string, ts: string): boolean {
+    return this.changeOf(this.db, teamId, channelId, ts)?.text === null;
+  }
+
+  /** The newest change the copy took to message `ts`, if any. */
+  private changeOf(
+    db: Pick<DrizzleDb, "select">,
+    teamId: string,
+    channelId: string,
+    ts: string,
+  ): { changedTs: string; text: string | null } | undefined {
+    return db
+      .select({ changedTs: slackAppChanges.changedTs, text: slackAppChanges.text })
+      .from(slackAppChanges)
+      .where(
+        and(
+          eq(slackAppChanges.teamId, teamId),
+          eq(slackAppChanges.channelId, channelId),
+          eq(slackAppChanges.ts, ts),
+        ),
+      )
+      .get();
   }
 
   timelineRow(teamId: string, channelId: string, ts: string): TimelineRow | null {
@@ -404,6 +461,20 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
           and(
             eq(slackAppMessages.teamId, teamId),
             channelId === undefined ? undefined : eq(slackAppMessages.channelId, channelId),
+            // A message the timeline also holds is matched there, in the
+            // newest text Slack showed: a page read since may hold an edit.
+            notExists(
+              this.db
+                .select({ ts: slackAppTimeline.ts })
+                .from(slackAppTimeline)
+                .where(
+                  and(
+                    eq(slackAppTimeline.teamId, slackAppMessages.teamId),
+                    eq(slackAppTimeline.channelId, slackAppMessages.channelId),
+                    eq(slackAppTimeline.ts, slackAppMessages.ts),
+                  ),
+                ),
+            ),
           ),
         )
         .orderBy(desc(slackAppMessages.saidAt), desc(slackAppMessages.ts)),

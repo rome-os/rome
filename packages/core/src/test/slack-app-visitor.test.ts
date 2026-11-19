@@ -112,8 +112,8 @@ describe("Slack app members who did not sign in (R12)", () => {
         timelineAfter: () => null,
         holdsNewer: () => false,
         unlinkAcross: () => {},
-        edit: () => {},
-        remove: () => {},
+        change: () => true,
+        deleted: () => false,
         search: () => [],
       },
     });

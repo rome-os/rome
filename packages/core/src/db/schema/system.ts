@@ -388,6 +388,26 @@ export const slackAppTimeline = sqliteTable(
   ],
 );
 
+// The newest edit or deletion Slack sent the Slack app for each message, so a
+// retried or late event, or a history page read before the change, never
+// brings back what was deleted or an earlier text. Only
+// connections/kinds/slack-app reads or writes it, through its repository there.
+export const slackAppChanges = sqliteTable(
+  "slack_app_changes",
+  {
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    // The changed message's ts.
+    ts: text("ts").notNull(),
+    // The ts of the event that made the change: a later change replaces an
+    // earlier one, and an earlier one arriving late changes nothing.
+    changedTs: text("changed_ts").notNull(),
+    // The text as Rome reads it after the change, or null when it was deleted.
+    text: text("text"),
+  },
+  (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
+);
+
 // One row per LinkedIn account seen in a thread's participant list. Person-level
 // facts live here rather than on the membership row so a name or headline is
 // stored once, not once per thread the person appears in.

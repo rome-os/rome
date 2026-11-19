@@ -129,6 +129,8 @@ type SlackChangeEvent = SlackEvent & {
   message?: SlackWireMessage;
   /** The deleted message's ts. */
   deleted_ts?: string;
+  /** When Slack made the change. */
+  event_ts?: string;
 };
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
@@ -477,9 +479,15 @@ export class SlackAppAdapter {
       event.subtype === "message_changed" && event.message
         ? slackMessage(this.context(channelId), { ...event.message, ts })
         : null;
+    // Slack stamps each change with its own ts: a retried or late change
+    // older than one the copy took changes nothing.
+    const changedTs = event.event_ts ?? event.ts;
+    if (!changedTs) return { status: 200 };
     try {
-      if (edited) this.config.copy.edit(this.config.teamId, channelId, ts, edited.text);
-      else this.config.copy.remove(this.config.teamId, channelId, ts);
+      this.config.copy.change(this.config.teamId, channelId, ts, {
+        changedTs,
+        text: edited ? edited.text : null,
+      });
     } catch (error) {
       log.error("slack app could not take an edit into its copy", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
@@ -619,6 +627,9 @@ export class SlackAppAdapter {
     const message = said ?? slackMessage(this.context(channelId), wire);
     if (!message) return;
     try {
+      // A message deleted since, heard again because Slack retried it, is
+      // not in Slack's history: the drain links across it.
+      if (this.config.copy.deleted(this.config.teamId, channelId, wire.ts)) return;
       const { raw: _raw, addressing: _addressing, ...kept } = message;
       noteInDrain(this.timeline(), channelId, wire.ts, kept);
     } catch (error) {

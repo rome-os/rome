@@ -1065,6 +1065,13 @@
       "when": 1795121937921,
       "tag": "0152_slack_app_search_order",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "6",
+      "when": 1795124145746,
+      "tag": "0153_slack_app_changes",
+      "breakpoints": true
     }
   ]
 }

@@ -1666,4 +1666,89 @@ describe("Slack app takes edits and deletions into its copy", () => {
     expect(texts(read)).toEqual(["message 3", "message 1"]);
     expect(slack.calls).toHaveLength(calls);
   });
+  /** A change event in the direct message: `message` edited as `text`, or
+   *  deleted when `text` is null, at `changedTs`. */
+  const changeFrame = (i: number, message: number, text: string | null, changedTs: string) =>
+    frame({
+      ...dmEvent(i),
+      event: {
+        type: "message",
+        channel_type: "im",
+        channel: "D_GUARDIAN",
+        ts: changedTs,
+        event_ts: changedTs,
+        ...(text === null
+          ? {
+              subtype: "message_deleted",
+              deleted_ts: `1700000000.${String(message).padStart(6, "0")}`,
+            }
+          : {
+              subtype: "message_changed",
+              message: {
+                ts: `1700000000.${String(message).padStart(6, "0")}`,
+                user: "U_GUARDIAN",
+                text,
+              },
+            }),
+      },
+    });
+
+  it("keeps a deleted message gone when Slack retries the event that said it", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    slack.said.splice(0, 1);
+    await mailbox.deposit(changeFrame(9, 1, null, "1700000001.000000"));
+    // Slack retries the message's own event, after the deletion.
+    await mailbox.deposit(frame(dmEvent(1)));
+
+    expect(delivered).toHaveLength(1);
+    expect((await a.search({ text: "message", limit: 10 })).messages).toEqual([]);
+    expect(await a.readHistory("D_GUARDIAN" as never, { limit: 5 })).toEqual([]);
+  });
+
+  it("takes only the newest edit, whatever order Slack delivers edits in", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    // Edit A, then edit B, then a retry of edit A.
+    await mailbox.deposit(
+      changeFrame(10, 1, "edit A", "1700000001.000000"),
+      changeFrame(11, 1, "edit B", "1700000002.000000"),
+      changeFrame(10, 1, "edit A", "1700000001.000000"),
+    );
+    slack.said[0].text = "edit B";
+
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    expect(await search("edit")).toEqual(["edit B"]);
+    expect(texts(await a.readHistory("D_GUARDIAN" as never, { limit: 1 }))).toEqual(["edit B"]);
+  });
+
+  it("searches a message in the text a page read since shows, not the text it heard", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    // Heard as said, then edited in Slack with no edit event the app hears,
+    // as in a group, and read from Slack's history since.
+    slack.say(1).text = "Launch Friday";
+    await mailbox.deposit(
+      frame({ ...dmEvent(1), event: { ...dmEvent(1).event, text: "Launch Friday" } }),
+    );
+    slack.said[0].text = "Launch Monday";
+    await a.stop();
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    expect(await search("Launch")).toEqual(["Launch Monday"]);
+    expect(await search("Friday")).toEqual([]);
+  });
 });
