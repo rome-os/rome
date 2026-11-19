@@ -305,14 +305,18 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           };
           const directory: TalkDirectory = {
             async listConversations(input) {
+              // Before the gateway logs in it names no chats, which is no
+              // listing of them.
+              if (!adapter.isReady()) {
+                throw new Error("Discord is not connected yet; list its chats again shortly");
+              }
               const query = input.query?.toLocaleLowerCase();
               const active = adapter.listGuildChannels();
-              // Archived threads are read from Discord; the gateway names only
-              // active ones. A thread both name is listed once, as active.
+              const named = new Set(active.map((channel) => channel.id));
+              // Archived threads are read from Discord; the gateway names the
+              // ones it has seen. A thread both name is listed once.
               const archived = input.includeArchived
-                ? (await adapter.listArchivedThreads()).filter(
-                    (thread) => !active.some((channel) => channel.id === thread.id),
-                  )
+                ? (await adapter.listArchivedThreads()).filter((thread) => !named.has(thread.id))
                 : [];
               const threads = input.includeTopics || input.includeArchived;
               const page = directoryPage(

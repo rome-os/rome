@@ -28,6 +28,15 @@ type FakeConfig = {
   } | null>;
   onGatewayFault?: (f: { kind: "credential" | "transport"; cause: unknown }) => void;
 };
+type FakeChat = {
+  id: string;
+  name: string;
+  guildId: string;
+  guildName: string;
+  type: "text" | "news" | "thread" | "forum";
+  parentId?: string;
+  archived?: boolean;
+};
 const fakeState: {
   lastConfig?: FakeConfig;
   startError: unknown;
@@ -37,14 +46,9 @@ const fakeState: {
   apiRequests: ConnectionApiRequest[];
   apiResult: ConnectionApiResult;
   stopCalls: number;
-  channels: Array<{
-    id: string;
-    name: string;
-    guildId: string;
-    guildName: string;
-    type: "text" | "news" | "thread" | "forum";
-    parentId?: string;
-  }>;
+  channels: FakeChat[];
+  archivedThreads: FakeChat[];
+  ready: boolean;
 } = {
   startError: null,
   sent: [],
@@ -52,6 +56,8 @@ const fakeState: {
   apiResult: { response: { status: 200, headers: {}, body: { ok: true } } },
   stopCalls: 0,
   channels: [],
+  archivedThreads: [],
+  ready: true,
 };
 
 rs.mock("../kinds/discord/discord.js", () => ({
@@ -81,8 +87,14 @@ rs.mock("../kinds/discord/discord.js", () => ({
     async notifyTyping(threadId: string): Promise<void> {
       fakeState.typedThread = threadId;
     }
+    isReady() {
+      return fakeState.ready;
+    }
     listGuildChannels() {
       return fakeState.channels;
+    }
+    async listArchivedThreads() {
+      return fakeState.archivedThreads;
     }
     async executeApiRequest(request: ConnectionApiRequest) {
       fakeState.apiRequests.push(request);
@@ -149,6 +161,8 @@ beforeEach(() => {
   fakeState.apiResult = { response: { status: 200, headers: {}, body: { ok: true } } };
   fakeState.stopCalls = 0;
   fakeState.channels = [];
+  fakeState.archivedThreads = [];
+  fakeState.ready = true;
 });
 
 describe("isDiscordAuthError", () => {
@@ -326,6 +340,37 @@ describe("discord descriptor shape", () => {
         kind: "topic",
         parent: { connectionId: "discord-test", chatId: "text-1" },
       }),
+    );
+  });
+
+  it("lists archived threads once each, flagged archived, and refuses before the gateway is ready", async () => {
+    const chat = { name: "general", guildId: "guild-1", guildName: "Rome" };
+    fakeState.channels = [
+      { ...chat, id: "text-1", type: "text" },
+      { ...chat, id: "thread-1", name: "open", type: "thread", parentId: "text-1" },
+      // Archived while the bot was online: the gateway still names it.
+      { ...chat, id: "thread-2", name: "seen", type: "thread", parentId: "text-1", archived: true },
+    ];
+    fakeState.archivedThreads = [
+      { ...chat, id: "thread-2", name: "seen", type: "thread", parentId: "text-1", archived: true },
+      { ...chat, id: "thread-3", name: "old", type: "thread", parentId: "text-1", archived: true },
+    ];
+    const directory = buildTalker().talker.directory;
+
+    const listed = await directory?.listConversations({ limit: 10, includeArchived: true });
+
+    expect(
+      listed?.conversations.map(({ ref, archived }) => [ref.chatId, archived ?? false]),
+    ).toEqual([
+      ["text-1", false],
+      ["thread-3", true],
+      ["thread-1", false],
+      ["thread-2", true],
+    ]);
+
+    fakeState.ready = false;
+    await expect(directory?.listConversations({ limit: 10 })).rejects.toThrow(
+      "Discord is not connected yet",
     );
   });
 

@@ -84,8 +84,14 @@ export async function archivedDiscordThreads(
   const found = new Map<string, ArchivedThread>();
   const queue = [...chats];
   const worker = async () => {
-    for (let chat = queue.shift(); chat; chat = queue.shift()) {
-      for (const thread of await archivedIn(get, chat)) found.set(thread.id, thread);
+    try {
+      for (let chat = queue.shift(); chat; chat = queue.shift()) {
+        for (const thread of await archivedIn(get, chat)) found.set(thread.id, thread);
+      }
+    } catch (err) {
+      // The listing has failed: the other workers read no further chats.
+      queue.length = 0;
+      throw err;
     }
   };
   await Promise.all(Array.from({ length: CONCURRENT_CHATS }, worker));

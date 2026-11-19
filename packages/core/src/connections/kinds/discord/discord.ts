@@ -282,6 +282,8 @@ export interface GuildChannelInfo {
  * hand-written structural cast silently rot.
  */
 export interface DiscordAdapterLike {
+  /** Whether the gateway has logged in, so the chats it names are all of them. */
+  isReady(): boolean;
   listGuildChannels(): GuildChannelInfo[];
   listArchivedThreads(): Promise<GuildChannelInfo[]>;
   executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
@@ -428,6 +430,12 @@ export class DiscordAdapter {
    * voice/category channels are filtered out. Quiet on uninitialized clients —
    * returns an empty array so the caller can surface a clean "no guilds" UX.
    */
+  /** Whether the gateway has logged in, so `listGuildChannels` names every
+   *  chat the bot sees rather than none. */
+  isReady(): boolean {
+    return this.client.isReady();
+  }
+
   listGuildChannels(): GuildChannelInfo[] {
     if (!this.client.isReady()) return [];
     const out: GuildChannelInfo[] = [];
@@ -449,6 +457,8 @@ export class DiscordAdapter {
             "parentId" in channel && typeof channel.parentId === "string"
               ? channel.parentId
               : undefined,
+          // The gateway keeps a thread it saw archived in its cache.
+          ...(channel.isThread() && channel.archived ? { archived: true } : {}),
         });
       }
     }
