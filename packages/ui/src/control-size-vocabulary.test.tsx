@@ -30,12 +30,8 @@ const SHARED_STEPS = ["sm", "md"] as const;
 
 /**
  * `lg` (44px) and `xs` (24px) are the Button family's, not the vocabulary's. A
- * field or a switcher never appears in the rows they serve — `lg` is a 44px hit
- * area for a square icon control, `xs` a chip beside body text — so neither
- * ever exercises the cross-component agreement the shared steps exist for.
- *
- * Only the square members carry `lg`: IconButton and Button's `icon-lg`. A
- * labelled Button has no `lg`, so there is no non-square case to assert.
+ * field or a switcher never appears in the rows they serve. A large button
+ * stands alone, and the extra-small size sits beside body text.
  */
 const BUTTON_FAMILY_STEPS = ["lg"] as const;
 
