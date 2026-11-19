@@ -1834,8 +1834,7 @@ export interface ChannelMessage {
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
  *  none is required: a query naming nothing asks for the channel's newest
- *  messages. A channel read live through its Connection reaches back a bounded
- *  default (the last day) when no `since` is named. */
+ *  messages, as far back as `limit` reaches. */
 export interface ChannelMessageQuery {
   /** One chat, by the platform's own id for it. Absent for every chat the
    *  channel can read. */

@@ -423,9 +423,8 @@ describe("messages port", () => {
     await expect(messages!.query({})).rejects.toThrow("reads one chat at a time");
   });
 
-  it("reads after a cursor as older than its message, and the last day when unbounded", async () => {
+  it("reads after a cursor as older than its message, and unbounded back to the limit", async () => {
     const { messages, asked } = portsFor(true);
-    const before = Date.now();
 
     await messages!.query({
       chatId,
@@ -437,12 +436,12 @@ describe("messages port", () => {
         body: null,
       },
     });
-    await messages!.query({ chatId });
+    await messages!.query({ chatId, limit: 20 });
 
-    expect(asked[0]).toEqual({ chatId, olderThan: "42", limit: 100 });
-    const since = (asked[1] as { since: Date }).since.getTime();
-    expect(since).toBeGreaterThanOrEqual(before - 24 * HOUR);
-    expect(since).toBeLessThanOrEqual(Date.now() - 24 * HOUR);
+    expect(asked).toEqual([
+      { chatId, olderThan: "42", limit: 100 },
+      { chatId, limit: 20 },
+    ]);
   });
 
   it("says so while talk is locked", async () => {

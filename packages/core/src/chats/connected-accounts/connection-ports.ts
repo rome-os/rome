@@ -179,14 +179,11 @@ function connectionDirectory(backing: Backing): AccountChats {
   };
 }
 
-/** How far back a live read reaches when nothing bounds it. */
-const DEFAULT_LIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 /**
  * A chat's history read live from the platform through the Connection that
  * backs the channel now, one chat at a time. A cursor from an earlier page
  * (`after`) names the message the page ended on, so it reads as `olderThan`
- * that message. With no bound at all, it reaches back the last day.
+ * that message. With no bound, it reads back as far as `limit` reaches.
  */
 function connectionMessages(backing: Backing): Messages {
   const { channel } = backing;
@@ -203,9 +200,7 @@ function connectionMessages(backing: Backing): Messages {
         throw new Error(`Channel "${channel}" reads no messages while its connection is locked`);
       }
       const cursorId = after ? messageIdOf(after.ref) : undefined;
-      const unbounded = !since && !until && !cursorId && !olderThan && !newerThan;
       const read: TalkHistoryRead = {
-        ...(unbounded ? { since: new Date(Date.now() - DEFAULT_LIVE_WINDOW_MS) } : {}),
         // A live read keeps the platform's own precision, so `since` is not rounded.
         ...(since ? { since } : {}),
         ...(until ? { until } : {}),

@@ -260,8 +260,8 @@ export function createAction(
       try {
         const page = await channels.query(addressOf(target), {
           ...(threadId ? { chatId: threadId as ChatId } : {}),
-          // With no bound, the epoch: a channel defaults a missing `since` to
-          // the last day.
+          // With no bound, the epoch: the page reaches as far back as its
+          // limit.
           since: since ?? new Date(0),
           ...(cursor ? { after: cursor } : {}),
           ...(olderThan ? { olderThan } : {}),
