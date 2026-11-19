@@ -58,16 +58,18 @@ The previous release is the highest stable version below this one on Docker Hub,
 
 A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
 
-The release also carries `release-notes.json`, the same changes for instances to read. It holds the version, the previous release's version, the publish date, the release URL, and the Breaking changes, New and Fixes entries. Each entry has the commit's scope, its subject without the pull request suffix, and the pull request number. Internal changes and Other changes are a count only. A published release's file never changes.
+The release also carries `release-notes.json`, the same changes for instances to read. It holds the version, the previous release's version, the publish date, the release URL, and the Breaking changes, New and Fixes entries. Each entry has the commit's scope, its subject without the pull request suffix, and the pull request number. Internal changes and Other changes are a count only. A published release's file never changes, except when a backfill replaces it.
 
-To attach the file to releases that predate it, write the files and print the upload commands:
+The file also holds `highlights`: up to five user-facing lines in English and Chinese, which the web upgrade dialog shows instead of the entries. [`release-highlights.mjs`](../scripts/docker/release-highlights.mjs) asks DeepSeek (`deepseek-chat`, with the `DEEPSEEK_API_KEY` secret) to write them from the entries and their pull requests. The prompt leaves out internal work, anything behind a feature gate, and the details of security fixes. A highlight must cite one of the release's own pull requests, or it is dropped. When the key is missing or the call or its answer fails, the highlights are empty and the release goes on.
+
+To attach the file to releases that predate it, or to rewrite it, write the files and print the upload commands:
 
 ```bash
 git fetch --tags
-IMAGE_NAME=yunfanye/rome GITHUB_REPOSITORY=rome-os/rome node scripts/docker/release-notes.mjs backfill /tmp/rome-release-notes v1.1.200 v1.1.201
+DEEPSEEK_API_KEY=… IMAGE_NAME=yunfanye/rome GITHUB_REPOSITORY=rome-os/rome node scripts/docker/release-notes.mjs backfill /tmp/rome-release-notes v1.1.200 v1.1.201
 ```
 
-Check the files, then run the printed `gh release upload` commands.
+Check the files, then run the printed `gh release upload … --clobber` commands.
 
 A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
 

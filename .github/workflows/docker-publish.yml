@@ -286,6 +286,10 @@ jobs:
           persist-credentials: false
 
       - name: Write release notes
+        env:
+          # Writes the highlights the upgrade dialog shows. Without it, or
+          # when the model fails, release-notes.json has none.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
 
