@@ -2,10 +2,10 @@ import type { ChatId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/a
 
 const MAX_DIRECTORY_OFFSET = 10_000;
 
-/** The offset a directory cursor names. A cursor past the deepest offset a
- *  directory pages to throws, since starting over would list the same chats
- *  again. */
-export function directoryCursorOffset(cursor?: string): number {
+/** The offset a directory cursor names. A cursor past `max`, the deepest
+ *  offset a directory fetches to, throws, since starting over would list the
+ *  same chats again. */
+export function directoryCursorOffset(cursor?: string, max = MAX_DIRECTORY_OFFSET): number {
   if (!cursor) return 0;
   let offset: number;
   try {
@@ -14,19 +14,20 @@ export function directoryCursorOffset(cursor?: string): number {
     return 0;
   }
   if (!Number.isInteger(offset) || offset < 0) return 0;
-  if (offset > MAX_DIRECTORY_OFFSET) {
-    throw new Error(`A directory lists at most ${MAX_DIRECTORY_OFFSET} conversations by paging`);
+  if (offset > max) {
+    throw new Error(`A directory lists at most ${max} conversations by paging`);
   }
   return offset;
 }
 
 /** Provider-local bounded pagination for integrations whose SDK exposes an
- * in-memory directory rather than a native cursor. */
+ * in-memory directory rather than a native cursor. The directory is already
+ * in memory, so every cursor it hands out pages on, however deep. */
 export function directoryPage<T>(
   items: readonly T[],
   input: { cursor?: string; limit: number },
 ): { items: T[]; nextCursor?: string } {
-  const offset = directoryCursorOffset(input.cursor);
+  const offset = directoryCursorOffset(input.cursor, Number.MAX_SAFE_INTEGER);
   const limit = Math.max(1, Math.min(input.limit, 10_000));
   const page = items.slice(offset, offset + limit);
   return {
