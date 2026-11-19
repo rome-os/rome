@@ -452,6 +452,7 @@ export const containerNodeInstallations = sqliteTable("container_node_installati
     .references(() => guardianAuth.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   grantHash: text("grant_hash"),
+  deployment: text("deployment", { mode: "json" }).$type<{ origin: string; nonce: string }>(),
   expiresAt: integer("expires_at"),
   verifierHash: text("verifier_hash"),
   redeemedAt: integer("redeemed_at"),

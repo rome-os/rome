@@ -46,11 +46,12 @@ export function NavLink({
   );
 }
 
-const statusDot: Record<NodeDeviceStatus, string> = {
+const statusDot: Record<NodeDeviceStatus | "waiting", string> = {
   connected: "bg-success",
   not_connected: "bg-muted-foreground/50",
   unknown: "bg-warning",
   revoked: "border border-muted-foreground/50 bg-surface",
+  waiting: "border border-muted-foreground/50 bg-surface",
 };
 
 /** The device's kind as an icon in a tile, with its status as a dot on the corner. */
@@ -60,7 +61,7 @@ export function DeviceIcon({
   className,
 }: {
   platform?: string | null;
-  status?: NodeDeviceStatus;
+  status?: NodeDeviceStatus | "waiting";
   className?: string;
 }) {
   const { kind } = platformOf(platform);

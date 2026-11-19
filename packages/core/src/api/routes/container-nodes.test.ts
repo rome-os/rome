@@ -149,6 +149,32 @@ describe("container node device settings", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
+  it("reads and renames a pending installation through the scoped Cloud routes", async () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    upstream = (url, init) => {
+      if (init?.method === "GET") {
+        expect(url).toBe(`${cloudPath}/${id}/compose`);
+        return Response.json({ instanceId, id, installToken, expiresAt });
+      }
+      expect(init?.method).toBe("PATCH");
+      expect(url).toBe(`${cloudPath}/${id}`);
+      expect(JSON.parse(String(init?.body))).toEqual({ name: "Renamed NAS" });
+      return new Response(null, { status: 204 });
+    };
+    const saved = await app.request(`${path}/${id}/compose`, { headers: guard() });
+    expect(saved.headers.get("cache-control")).toBe("no-store");
+    expect(await saved.json()).toEqual({
+      id,
+      installToken,
+      expiresAt,
+      origin: "https://cloud.example",
+    });
+    expect(
+      (await app.request(`${path}/${id}`, { ...post({ name: "Renamed NAS" }), method: "PATCH" }))
+        .status,
+    ).toBe(204);
+  });
+
   it("combines grant and Gateway status without treating unavailable probes as offline", async () => {
     upstream = () =>
       Response.json({

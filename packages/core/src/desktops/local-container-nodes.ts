@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
+import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import {
   containerNodeNameSchema,
@@ -7,13 +8,18 @@ import {
   type ContainerNode,
 } from "@rome/api-types/devices";
 import { isRecord, parseResponse } from "@rome-os/node-core";
-import { CONTAINER_NODE_SOCKET_PATH } from "@rome-os/node-core/container-node-address";
+import {
+  containerNodeOrigin,
+  CONTAINER_NODE_SOCKET_PATH,
+} from "@rome-os/node-core/container-node-address";
+import { createFileCredentialStore } from "@rome-os/node-core/host";
 import { isLoopbackHostname } from "@rome-os/libs/net";
 import { v5 as uuidv5 } from "uuid";
 import { WebSocket, WebSocketServer } from "ws";
 import type { ContainerNodesRepository } from "../db/repositories/container-nodes.js";
 import { deriveInstanceOrigin } from "../instance/instance-env.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
+import { getProfileDir } from "../paths.js";
 import {
   ContainerNodeError,
   shellySwitchStatus,
@@ -39,10 +45,34 @@ interface Connection {
   pending: Map<string, (result: DeviceRunResult) => void>;
 }
 
-export function createLocalContainerNodes(repo: ContainerNodesRepository, env = process.env) {
+function createComposeKeyLoader() {
+  const store = createFileCredentialStore<string>(
+    join(getProfileDir(), "container-node", "install-key.json"),
+  );
+  let key: Promise<Buffer> | undefined;
+  return () =>
+    (key ??= (async () => {
+      const stored = await store.load();
+      if (typeof stored === "string" && /^[A-Za-z0-9_-]{43}$/.test(stored))
+        return Buffer.from(stored, "base64url");
+      const created = randomBytes(32);
+      await store.save(created.toString("base64url"));
+      return created;
+    })().catch((error) => {
+      key = undefined;
+      throw error;
+    }));
+}
+
+export function createLocalContainerNodes(
+  repo: ContainerNodesRepository,
+  env = process.env,
+  composeKey?: () => Promise<Buffer>,
+) {
   // Adoption can assign a slug at runtime. The hosting domain stays fixed.
   const hostedOrigin = URL.parse(deriveInstanceOrigin("probe", env) ?? "");
   if (hostedOrigin && !isLoopbackHostname(hostedOrigin.hostname)) return;
+  const loadComposeKey = composeKey ?? createComposeKeyLoader();
 
   const connections = new Map<string, Connection>();
   const findByBearer = (header?: string) => {
@@ -199,10 +229,32 @@ export function createLocalContainerNodes(repo: ContainerNodesRepository, env = 
       };
     },
     async pair(guardianId, input) {
-      const result = repo.issue(guardianId, input);
+      let origin: string | null = null;
+      if (input.origin !== undefined) {
+        try {
+          origin = containerNodeOrigin(input.origin.trim());
+        } catch {
+          throw new ContainerNodeError("invalid_origin");
+        }
+      }
+      const result = repo.issue(
+        guardianId,
+        input,
+        Date.now(),
+        origin ? { origin, key: await loadComposeKey() } : undefined,
+      );
       if (result.outcome !== "issued") throw new ContainerNodeError(result.outcome);
       const { id, installToken, expiresAt } = result;
-      return { id, installToken, expiresAt, origin: null };
+      return { id, installToken, expiresAt, origin };
+    },
+    async getCompose(guardianId, id) {
+      const result = repo.compose(guardianId, id, await loadComposeKey());
+      if (result.outcome !== "available") throw new ContainerNodeError(result.outcome);
+      return result.grant;
+    },
+    async renameInstallation(guardianId, id, name) {
+      if (!repo.renameInstallation(guardianId, id, name))
+        throw new ContainerNodeError("node_not_found");
     },
     async removeInstallation(guardianId, id) {
       const outcome = repo.removeInstallation(guardianId, id);
@@ -237,11 +289,12 @@ export function createLocalContainerNodes(repo: ContainerNodesRepository, env = 
       };
     },
     deviceStatuses(): DevicesStatus["devices"] {
-      return repo.devices().flatMap(({ deviceId, name }) =>
+      return repo.devices().flatMap(({ installationId, deviceId, name }) =>
         deviceId
           ? [
               {
                 id: deviceId,
+                installationId,
                 name,
                 platform: "linux",
                 status: online(deviceId) ? "connected" : "not_connected",

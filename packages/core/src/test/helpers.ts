@@ -876,6 +876,12 @@ export async function buildTestDeps(
       pair: async () => {
         throw new ContainerNodeError("not_configured");
       },
+      getCompose: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
+      renameInstallation: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
       removeInstallation: async () => {
         throw new ContainerNodeError("not_configured");
       },

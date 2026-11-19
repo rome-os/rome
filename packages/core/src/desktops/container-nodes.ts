@@ -39,6 +39,8 @@ export class ContainerNodeError extends Error {
       | "unavailable"
       | "node_not_found"
       | "already_paired"
+      | "compose_unavailable"
+      | "invalid_origin"
       | "offline"
       | "needs_pairing"
       | "invalid_switch_address"
@@ -51,6 +53,23 @@ export class ContainerNodeError extends Error {
 }
 
 const realCloud = { origin: getRomeCloudOrigin, bearer: cloudBearer, prove: proveIdentity };
+
+type PairingInput = ({ name: string } | { id: string }) & { origin?: string };
+
+function readGrant(result: { data: unknown; origin: string; instanceId: string }, id?: string) {
+  const grant = grantSchema.safeParse(result.data).data;
+  if (!grant || grant.instanceId !== result.instanceId || (id && grant.id !== id))
+    throw new ContainerNodeError("unavailable");
+  const lifetime = Date.parse(grant.expiresAt) - Date.now();
+  if (lifetime <= 0 || lifetime > maxCloudGrantLifetime)
+    throw new ContainerNodeError("unavailable");
+  return {
+    id: grant.id,
+    installToken: grant.installToken,
+    expiresAt: grant.expiresAt,
+    origin: result.origin,
+  };
+}
 
 export function shellySwitchStatus(result: DeviceRunResult) {
   if (!result.ok) {
@@ -92,7 +111,7 @@ export function createContainerNodesService(
     path: string,
     signal: AbortSignal,
     options?:
-      | { method: "POST"; body: { name: string } | Record<string, never> }
+      | { method: "POST" | "PATCH"; body: { name: string } | Record<string, never> }
       | { method: "DELETE" },
   ) {
     const url = URL.parse(cloud.origin() ?? "");
@@ -106,7 +125,7 @@ export function createContainerNodesService(
     if (proof.status !== "ok") throw new ContainerNodeError("unavailable");
     if (proof.identity.accountId !== accountId) throw new ContainerNodeError("sign_in_required");
 
-    const body = options?.method === "POST" ? options.body : undefined;
+    const body = options && "body" in options ? options.body : undefined;
     const response = await withTracingSuppressed(() =>
       fetch(new URL(path, origin), {
         method: options?.method ?? "GET",
@@ -127,7 +146,7 @@ export function createContainerNodesService(
     const error = z.object({ error: z.string() }).safeParse(data).data?.error;
     if (response.status === 404)
       throw new ContainerNodeError(
-        error === "node_not_found" ? "node_not_found" : "cloud_unsupported",
+        error === "node_not_found" || error === "compose_unavailable" ? error : "cloud_unsupported",
       );
     if (response.status === 409 && error === "already_paired")
       throw new ContainerNodeError("already_paired");
@@ -165,7 +184,7 @@ export function createContainerNodesService(
     },
     async pair(
       accountId: string,
-      input: { name: string } | { id: string },
+      input: PairingInput,
       signal: AbortSignal,
     ): Promise<ContainerNodeGrant> {
       const replacing = "id" in input;
@@ -173,16 +192,15 @@ export function createContainerNodesService(
         accountId,
         replacing ? `${root}/${input.id}/pairing` : root,
         signal,
-        { method: "POST", body: replacing ? {} : input },
+        { method: "POST", body: replacing ? {} : { name: input.name } },
       );
-      const grant = grantSchema.safeParse(result.data).data;
-      if (!grant || grant.instanceId !== result.instanceId || (replacing && grant.id !== input.id))
-        throw new ContainerNodeError("unavailable");
-      const lifetime = Date.parse(grant.expiresAt) - Date.now();
-      if (lifetime <= 0 || lifetime > maxCloudGrantLifetime)
-        throw new ContainerNodeError("unavailable");
-      const { id, installToken, expiresAt } = grant;
-      return { id, installToken, expiresAt, origin: result.origin };
+      return readGrant(result, replacing ? input.id : undefined);
+    },
+    async getCompose(accountId: string, id: string, signal: AbortSignal) {
+      return readGrant(await request(accountId, `${root}/${id}/compose`, signal), id);
+    },
+    async renameInstallation(accountId: string, id: string, name: string, signal: AbortSignal) {
+      await request(accountId, `${root}/${id}`, signal, { method: "PATCH", body: { name } });
     },
     async removeInstallation(accountId: string, id: string, signal: AbortSignal) {
       await request(accountId, `${root}/${id}`, signal, { method: "DELETE" });

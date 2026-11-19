@@ -1,6 +1,8 @@
 import {
   type ContainerNode,
   type ContainerNodeGrant,
+  type DevicesStatus,
+  containerNodeComposeGrantSchema,
   containerNodeGrantSchema,
   containerNodeListSchema,
 } from "@rome/api-types/devices";
@@ -8,13 +10,12 @@ import {
   containerNodeOrigin,
   isContainerNodeLoopback,
 } from "@rome-os/node-core/container-node-address";
-import { Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
+import { DeviceRenameDialog, messagesFor, type NodeDevicePairing } from "@rome-os/node-ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogBody,
@@ -22,23 +23,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel, FormError } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
-import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
 import romeNodeImage from "@/lib/rome-node-image.json";
 
 const path = "/api/devices/container-nodes";
 
+const deviceStatus = {
+  online: "connected",
+  offline: "not_connected",
+  unknown: "unknown",
+} as const;
+
 function containerNodeCompose({ id, expiresAt, installToken }: ContainerNodeGrant, origin: string) {
   const projectName = `rome-node-${id.toLowerCase().replaceAll("-", "").slice(0, 20)}`;
-  const { hostname } = new URL(origin);
-  const networkMode = isContainerNodeLoopback(hostname) ? "\n    network_mode: host" : "";
-  // Keep the name used by the browser so the host's reverse proxy can route the request.
-  const loopbackAlias = hostname.endsWith(".localhost")
-    ? `\n    extra_hosts:\n      ${JSON.stringify(hostname)}: "127.0.0.1"`
-    : "";
   return {
     id,
     projectName,
@@ -50,7 +50,7 @@ function containerNodeCompose({ id, expiresAt, installToken }: ContainerNodeGran
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]${networkMode}${loopbackAlias}
+    security_opt: ["no-new-privileges:true"]
     environment:
       ROME_NODE_CLOUD_URL: ${JSON.stringify(origin.replaceAll("$", () => "$$"))}
       ROME_NODE_INSTALLATION_ID: "${id}"
@@ -109,64 +109,124 @@ export function ContainerNodeSetup() {
   );
 }
 
-export function ContainerNodeInstallations() {
-  const { t } = useContainerNodeText();
+export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
+  const { t, i18n } = useContainerNodeText();
   const query = useContainerNodes();
-  const [pairing, setPairing] = useState<ContainerNode | null>(null);
+  const client = useQueryClient();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<ContainerNode | null>(null);
   const [removing, setRemoving] = useState<ContainerNode | null>(null);
-  const installations = query.data?.nodes.filter((node) => !node.deviceId) ?? [];
-  if (!installations.length && !pairing && !removing) return null;
-  return (
-    <Section aria-labelledby="container-node-installations-title">
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle id="container-node-installations-title">{t("list")}</SectionTitle>
-        </SectionHeading>
-      </SectionHeader>
-      <Card>
-        <CardContent>
-          <ul className="divide-y divide-border">
-            {installations.map((node) => (
-              <li
-                key={node.id}
-                className="flex flex-wrap items-center justify-between gap-3 not-first:pt-3 not-last:pb-3"
-              >
-                <div className="min-w-0">
-                  <p className="break-words text-ui">{node.name}</p>
-                  <StatusIndicator
-                    status={{
-                      label: t(`status.${node.status}`),
-                      tone: node.status === "needs_pairing" ? "attention" : "muted",
-                    }}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPairing(node)}>
-                    {t(node.status === "waiting" ? "newCompose" : "repair")}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setRemoving(node)}>
-                    {t("remove")}
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-      {pairing && (
-        <Dialog open onClose={() => setPairing(null)}>
-          <DialogHeader onClose={() => setPairing(null)} closeLabel={t("close")}>
-            <DialogTitle>{t(pairing.status === "waiting" ? "newCompose" : "repair")}</DialogTitle>
-            <DialogDescription>{pairing.name}</DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            <PairContainerNode node={pairing} direct={query.data?.transport === "direct"} />
-          </DialogBody>
-        </Dialog>
-      )}
-      {removing && <RemoveContainerNode node={removing} onClose={() => setRemoving(null)} />}
-    </Section>
-  );
+  const pairingTrigger = useRef<HTMLButtonElement>(null);
+  const nodes = query.data?.nodes ?? [];
+  const waiting = nodes.filter((node) => node.status === "waiting" && !node.deviceId);
+  const pairing = waiting.find((node) => node.id === selected);
+  useEffect(() => {
+    if (selected && !pairing) setSelected(null);
+  }, [selected, pairing]);
+  const pairings = waiting.map<NodeDevicePairing>((node) => ({
+    id: node.id,
+    name: node.name,
+    waitingLabel: t("status.waiting"),
+    onOpen: (event) => {
+      pairingTrigger.current = event.currentTarget;
+      setSelected(node.id);
+    },
+    onRename: () => setRenaming(node),
+    onRemove: () => setRemoving(node),
+  }));
+
+  const direct = query.data?.transport === "direct";
+  const replacedIds = new Set<string>();
+  const linked: DevicesStatus["devices"] = [];
+  for (const { deviceId, name, status } of nodes) {
+    if (!deviceId) continue;
+    if (direct || status === "needs_pairing") replacedIds.add(deviceId);
+    // Direct cards come from the installation list so a device poll cannot show an older state.
+    if (direct && status !== "waiting" && status !== "needs_pairing") {
+      linked.push({ id: deviceId, name, platform: "linux", status: deviceStatus[status] });
+    }
+  }
+  const closePairing = () => setSelected(null);
+  return {
+    devices: [
+      ...devices.filter(
+        (device) => !replacedIds.has(device.id) && !(direct && device.installationId),
+      ),
+      ...linked,
+    ],
+    pairings,
+    dialogs: (
+      <>
+        {pairing && (
+          <Dialog
+            open
+            onClose={closePairing}
+            className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] flex-col"
+            {...{
+              onCloseAutoFocus: (event: Event) => {
+                event.preventDefault();
+                pairingTrigger.current?.focus();
+              },
+            }}
+          >
+            <DialogHeader onClose={closePairing} closeLabel={t("close")}>
+              <DialogTitle>{pairing.name}</DialogTitle>
+              <DialogDescription>{t("status.waiting")}</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="min-h-0 space-y-4">
+              <SavedCompose id={pairing.id} />
+            </DialogBody>
+          </Dialog>
+        )}
+        {renaming && (
+          <DeviceRenameDialog
+            currentName={renaming.name}
+            rename={async (name) => {
+              try {
+                await fetchJson<void>(`${path}/${renaming.id}`, {
+                  method: "PATCH",
+                  json: { name },
+                  fallback: "unavailable",
+                });
+                void client.invalidateQueries({ queryKey: ["container-nodes"] });
+                return null;
+              } catch (error) {
+                if (error instanceof Error && error.message === "invalid_device_name")
+                  return "invalid_device_name";
+                if (error instanceof Error && error.message === "node_not_found")
+                  return "device_not_found";
+                return "unavailable";
+              }
+            }}
+            m={messagesFor(i18n.language)}
+            onClose={() => setRenaming(null)}
+          />
+        )}
+        {removing && <RemoveContainerNode node={removing} onClose={() => setRemoving(null)} />}
+      </>
+    ),
+  };
+}
+
+function SavedCompose({ id }: { id: string }) {
+  const { t } = useContainerNodeText();
+  const query = useQuery({
+    queryKey: ["container-node-compose", id],
+    gcTime: 0,
+    retry: false,
+    queryFn: async ({ signal }) =>
+      containerNodeComposeGrantSchema.parse(
+        await fetchJson<unknown>(`${path}/${id}/compose`, { signal, fallback: "unavailable" }),
+      ),
+  });
+  if (query.error) return <ContainerNodeError error={query.error} />;
+  if (!query.data)
+    return (
+      <p role="status" className="text-ui text-muted-foreground">
+        {t("loadingCompose")}
+      </p>
+    );
+  return <ComposeInstructions grant={containerNodeCompose(query.data, query.data.origin)} />;
 }
 
 function deploymentOrigin(address: string): string | null {
@@ -178,7 +238,7 @@ function deploymentOrigin(address: string): string | null {
 }
 
 function RemoveContainerNode({ node, onClose }: { node: ContainerNode; onClose: () => void }) {
-  const { t } = useContainerNodeText();
+  const { t } = useTranslation("settings");
   const client = useQueryClient();
   const remove = useMutation({
     mutationFn: () =>
@@ -193,9 +253,9 @@ function RemoveContainerNode({ node, onClose }: { node: ContainerNode; onClose: 
     <RomeConfirmDialog
       open
       destructive
-      title={t("removeTitle", { name: node.name })}
-      description={t("removeDescription")}
-      confirmLabel={t("remove")}
+      title={t("devices.containerNodes.removeTitle", { name: node.name })}
+      description={t("devices.containerNodes.removeDescription")}
+      confirmLabel={t("common.remove")}
       confirmDisabled={remove.isPending}
       onCancel={onClose}
       onConfirm={() => remove.mutate()}
@@ -205,14 +265,17 @@ function RemoveContainerNode({ node, onClose }: { node: ContainerNode; onClose: 
   );
 }
 
-function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boolean }) {
+function PairContainerNode({ direct }: { direct: boolean }) {
   const { t } = useContainerNodeText();
   const nameId = useId();
   const addressId = useId();
+  const addressHintId = `${addressId}-hint`;
   const client = useQueryClient();
-  const [name, setName] = useState(node?.name ?? t("defaultName"));
-  const [address, setAddress] = useState(() => window.location.origin);
-  const [installationId, setInstallationId] = useState(node?.id);
+  const [name, setName] = useState(t("defaultName"));
+  const [editedAddress, setEditedAddress] = useState<string>();
+  const [addressRejected, setAddressRejected] = useState(false);
+  const address = editedAddress ?? window.location.origin;
+  const [installationId, setInstallationId] = useState<string>();
   const issue = useMutation({
     gcTime: 0,
     retry: false,
@@ -220,7 +283,7 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
       const grant = containerNodeGrantSchema.parse(
         await fetchJson<unknown>(id ? `${path}/${id}/pairing` : path, {
           method: "POST",
-          json: id ? {} : { name: name.trim() },
+          json: { ...(id ? {} : { name: name.trim() }), ...(direct && origin ? { origin } : {}) },
           fallback: "unavailable",
         }),
       );
@@ -234,6 +297,13 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
   });
   const origin = issue.data?.origin ?? (direct ? deploymentOrigin(address) : null);
   const originUnavailable = direct && !origin;
+  const addressInvalid = originUnavailable && addressRejected;
+  const loopback = origin && isContainerNodeLoopback(new URL(origin).hostname.replace(/\.$/, ""));
+  const addressHint = originUnavailable
+    ? t("originUnavailable")
+    : loopback
+      ? t("loopbackHint")
+      : null;
   const configuration = issue.data && origin ? containerNodeCompose(issue.data, origin) : null;
   return (
     <form
@@ -241,8 +311,12 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
       onSubmit={(event) => {
         event.preventDefault();
         const needsGrant = !issue.data || Date.parse(issue.data.expiresAt) <= Date.now();
-        if (needsGrant && !originUnavailable && !issue.isPending && name.trim())
-          issue.mutate(installationId);
+        if (!needsGrant || issue.isPending || !name.trim()) return;
+        if (originUnavailable) {
+          setAddressRejected(true);
+          return;
+        }
+        issue.mutate(installationId);
       }}
     >
       {!installationId && (
@@ -263,11 +337,20 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
             id={addressId}
             type="url"
             value={address}
-            aria-invalid={originUnavailable || undefined}
+            aria-invalid={addressInvalid || undefined}
+            aria-describedby={addressHint ? addressHintId : undefined}
             disabled={issue.isPending}
-            onChange={(event) => setAddress(event.target.value)}
+            onChange={(event) => {
+              setEditedAddress(event.target.value);
+              setAddressRejected(false);
+            }}
           />
-          {originUnavailable && <FormError>{t("originUnavailable")}</FormError>}
+          {addressHint &&
+            (addressInvalid ? (
+              <FieldError id={addressHintId} errors={[addressHint]} />
+            ) : (
+              <FieldDescription id={addressHintId}>{addressHint}</FieldDescription>
+            ))}
         </Field>
       )}
       {issue.error && <ContainerNodeError error={issue.error} />}
@@ -276,19 +359,11 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
           key={configuration.expiresAt}
           grant={configuration}
           replacing={Boolean(issue.variables)}
-          onDone={
-            node
-              ? undefined
-              : () => {
-                  issue.reset();
-                  setInstallationId(undefined);
-                  setName(t("defaultName"));
-                }
-          }
+          canRegenerate
         />
       )}
       {!issue.data && (
-        <Button type="submit" disabled={originUnavailable || issue.isPending || !name.trim()}>
+        <Button type="submit" disabled={issue.isPending || !name.trim()}>
           {t(issue.isPending ? "generating" : "generate")}
         </Button>
       )}
@@ -298,12 +373,12 @@ function PairContainerNode({ node, direct }: { node?: ContainerNode; direct: boo
 
 function ComposeInstructions({
   grant,
-  replacing,
-  onDone,
+  replacing = false,
+  canRegenerate = false,
 }: {
   grant: ReturnType<typeof containerNodeCompose>;
-  replacing: boolean;
-  onDone?: () => void;
+  replacing?: boolean;
+  canRegenerate?: boolean;
 }) {
   const { t, i18n } = useContainerNodeText();
   const { copy, copiedText } = useCopyFeedback();
@@ -353,7 +428,7 @@ function ComposeInstructions({
       </pre>
       <div className="flex flex-wrap gap-2">
         {expired ? (
-          <Button type="submit">{t("newCompose")}</Button>
+          canRegenerate && <Button type="submit">{t("newCompose")}</Button>
         ) : (
           <>
             <Button type="button" variant="outline" onClick={download}>
@@ -368,11 +443,6 @@ function ComposeInstructions({
               </Button>
             )}
           </>
-        )}
-        {onDone && (
-          <Button type="button" variant="ghost" onClick={onDone}>
-            {t("addAnother")}
-          </Button>
         )}
       </div>
     </>

@@ -21,9 +21,12 @@ export const containerNodeGrantSchema = z.object({
   id: z.uuid(),
   installToken: z.string().regex(/^romeinstall_[A-Za-z0-9_-]{43}$/),
   expiresAt: z.iso.datetime(),
-  origin: z.url({ protocol: /^https$/ }).nullable(),
+  origin: z.url({ protocol: /^https?$/ }).nullable(),
 });
 export type ContainerNodeGrant = z.infer<typeof containerNodeGrantSchema>;
+export const containerNodeComposeGrantSchema = containerNodeGrantSchema.extend({
+  origin: containerNodeGrantSchema.shape.origin.unwrap(),
+});
 
 export const shellySwitchAddressSchema = z.object({ address: z.ipv4() }).strict();
 export const shellySwitchStatusSchema = z.object({ on: z.boolean() });
@@ -48,6 +51,7 @@ export const devicesStatusSchema = z.object({
       name: z.string(),
       platform: z.string().nullable(),
       status: z.enum(["connected", "not_connected", "unknown", "revoked"]),
+      installationId: z.uuid().optional(),
       /** The device's own audit log. While unavailable, the device refuses remote actions. */
       audit: z
         .object({

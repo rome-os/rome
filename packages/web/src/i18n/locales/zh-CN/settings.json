@@ -1010,18 +1010,16 @@
     "startFailed": "设备服务启动失败",
     "containerNodes": {
       "loading": "正在检查容器节点是否可用…",
-      "list": "待配对的容器节点",
+      "loadingCompose": "正在加载 Compose 配置…",
       "description": "生成用于部署 Rome Node 的 Docker Compose 配置。",
-      "addAnother": "添加另一个节点",
       "newCompose": "获取新的 Compose 配置",
-      "repair": "重新配对",
-      "remove": "移除节点",
       "removeTitle": "移除 {{name}}？",
       "removeDescription": "这会使该节点的 Compose 配置失效。如果之后还要使用，请重新添加节点。",
       "name": "节点名称",
       "defaultName": "容器节点",
       "address": "Rome 地址",
-      "originUnavailable": "请输入 HTTPS 地址或私网 HTTP 地址。",
+      "originUnavailable": "请输入 Docker 主机能够访问的 Rome HTTPS 或私网 HTTP 地址。",
+      "loopbackHint": "在 Docker 的默认网络中，localhost 指向容器自身。部署时请用容器能访问的 Rome 地址。",
       "generate": "生成 Compose 配置",
       "generating": "正在生成…",
       "projectName": "请使用此项目名称",
@@ -1035,11 +1033,7 @@
       "copyFailed": "无法访问剪贴板，请下载 Compose 文件。",
       "close": "关闭",
       "status": {
-        "waiting": "等待部署",
-        "online": "在线",
-        "offline": "离线",
-        "needs_pairing": "需要重新配对",
-        "unknown": "无法确认状态"
+        "waiting": "等待部署"
       },
       "errors": {
         "sign_in_required": "请以当前 Rome 实例的所有者身份登录后管理容器节点。",
@@ -1049,6 +1043,8 @@
         "invalid_device_name": "请输入节点名称。",
         "node_not_found": "此实例无法访问该容器节点。",
         "already_paired": "此节点已配对。请先移除对应的设备。",
+        "compose_unavailable": "无法取回原 Compose 配置。请使用已下载的文件或重新关联一个容器节点。",
+        "invalid_origin": "请输入 Rome 的 HTTPS 或私网 HTTP 地址。",
         "needs_pairing": "请重新配对这个节点后再查询。"
       }
     },

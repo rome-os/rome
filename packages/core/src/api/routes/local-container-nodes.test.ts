@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { afterEach, expect, it } from "@rstest/core";
 import { WebSocket } from "ws";
@@ -25,6 +25,7 @@ const path = "/api/devices/container-nodes";
 const guardianId = randomUUID();
 const userId = "local-guardian";
 const verifier = "v".repeat(43);
+const composeKey = randomBytes(32);
 
 const headersFor = (user: string) => ({ Cookie: `${COOKIE_NAME}=${createSession(user)}` });
 const authorization = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -57,9 +58,11 @@ async function database() {
 }
 
 async function server(db: Awaited<ReturnType<typeof database>>) {
-  const local = createLocalContainerNodes(new ContainerNodesRepository(db), {
-    PANTHEON_DOMAIN: "localhost",
-  });
+  const local = createLocalContainerNodes(
+    new ContainerNodesRepository(db),
+    { PANTHEON_DOMAIN: "localhost" },
+    async () => composeKey,
+  );
   if (!local) throw new Error("Expected the direct transport");
   const cloud = createNodeDevicesService(() => ({
     getDevicesStatus: async () => null,
@@ -111,6 +114,59 @@ it("keeps the Cloud transport when a warm instance gains a slug", async () => {
   expect(createLocalContainerNodes(repo, { ...pool, PANTHEON_SLUG: "tenant" })).toBeUndefined();
 });
 
+it("reads the original pending Compose after a restart and revokes it on removal", async () => {
+  const db = await database();
+  const first = await server(db);
+  const deploymentOrigin = "http://rome.home.arpa:9443";
+  const response = await fetch(
+    first.origin + path,
+    json({ name: "NAS", origin: deploymentOrigin }, first.owner),
+  );
+  expect(response.status).toBe(201);
+  const grant = await response.json();
+  expect(grant).toMatchObject({
+    origin: deploymentOrigin,
+    installToken: expect.stringMatching(/^romeinstall_/),
+  });
+
+  apis.splice(apis.indexOf(first.api), 1);
+  await first.api.close();
+  const restarted = await server(db);
+  const url = restarted.origin + path;
+  const installation = `${url}/${grant.id}`;
+  const compose = `${installation}/compose`;
+  expect((await fetch(compose, { headers: headersFor("other-owner") })).status).toBe(403);
+  expect((await fetch(compose, { headers: authorization(grant.installToken) })).status).toBe(403);
+  const saved = await fetch(compose, { headers: restarted.owner });
+  expect(saved.headers.get("cache-control")).toBe("no-store");
+  expect(await saved.json()).toEqual(grant);
+
+  expect(
+    (
+      await fetch(installation, {
+        ...json({ name: "Renamed NAS" }, restarted.owner),
+        method: "PATCH",
+      })
+    ).status,
+  ).toBe(204);
+  expect(await fetch(url, { headers: restarted.owner }).then((r) => r.json())).toMatchObject({
+    nodes: [{ id: grant.id, name: "Renamed NAS", status: "waiting" }],
+  });
+  expect(await fetch(compose, { headers: restarted.owner }).then((r) => r.json())).toEqual(grant);
+  expect((await fetch(installation, { method: "DELETE", headers: restarted.owner })).status).toBe(
+    204,
+  );
+  expect((await fetch(compose, { headers: restarted.owner })).status).toBe(404);
+  expect(
+    (
+      await fetch(
+        `${url}/redeem`,
+        json({ installation_id: grant.id, verifier }, authorization(grant.installToken)),
+      )
+    ).status,
+  ).toBe(401);
+});
+
 it("pairs a local guardian's Node through the normal API and revokes it through device management", async () => {
   const db = await database();
   const { api, owner, origin } = await server(db);
@@ -140,6 +196,11 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
   expect(grant).toMatchObject({
     origin: null,
     installToken: expect.stringMatching(/^romeinstall_/),
+  });
+  expect(
+    await fetch(`${url}/${grant.id}/compose`, { headers: owner }).then((r) => r.json()),
+  ).toEqual({
+    error: "compose_unavailable",
   });
   const { installToken } = grant;
   const claim = (proof: string) =>
@@ -236,7 +297,7 @@ it("pairs a local guardian's Node through the normal API and revokes it through 
     headers: restarted.owner,
   }).then((r) => r.json());
   expect(afterRestart.devices).toMatchObject([
-    { id: session.device_id, name: "NAS", status: "connected" },
+    { id: session.device_id, installationId: grant.id, name: "NAS", status: "connected" },
   ]);
   expect((await restarted.devices.runAction(session.device_id, "exec", {})).ok).toBe(false);
   const onClose = once(resumed, "close");

@@ -6,7 +6,7 @@ import { Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/u
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { ContainerNodeInstallations } from "@/components/container-node-setup";
+import { useContainerNodeCards } from "@/components/container-node-setup";
 import { DeviceConnectionCards, LinkDeviceMenu } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,12 +65,12 @@ export function DevicesSection() {
   const unavailable = data
     ? ["unavailable", "incompatible", "not_configured", "not_running"].includes(connection)
     : query.isError;
-  const devices = data?.devices ?? [];
   const thisDevice = useThisDevice(() => void query.refetch());
   const manage = useDeviceManage();
+  const { devices, pairings, dialogs: pairingDialogs } = useContainerNodeCards(data?.devices ?? []);
 
   // A direct container can be connected even when the shared device service is stopped.
-  const showList = !unavailable || devices.length > 0;
+  const showList = !unavailable || devices.length > 0 || pairings.length > 0;
 
   return (
     <div className="space-y-6">
@@ -78,13 +78,14 @@ export function DevicesSection() {
         <NodeDevices
           url={nodeConsoleUrl()}
           devices={devices}
+          pairings={pairings}
           navigation={navigation}
           locale={i18n.language}
           thisDevice={thisDevice ?? undefined}
           manage={manage}
           setup={{ action: <LinkDeviceMenu />, empty: <DeviceConnectionCards /> }}
           // The order is set when the cards first draw, so they wait to learn which is this computer.
-          loading={!data || thisDevice === undefined}
+          loading={query.isPending || thisDevice === undefined}
         />
       )}
       {!showList && thisDevice && (
@@ -144,7 +145,7 @@ export function DevicesSection() {
         </Section>
       )}
       {!showList && <DeviceConnectionCards />}
-      <ContainerNodeInstallations />
+      {pairingDialogs}
     </div>
   );
 }

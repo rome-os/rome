@@ -96,19 +96,18 @@ Devices**. The node opens outbound HTTP and WebSocket connections.
 2. Generate the Compose file, then review, copy, or download it. Deploy before
    the deadline shown in Settings.
 3. Create the project under the name Rome shows and deploy the supplied configuration.
-4. In **Devices**, find the node under **Container nodes to pair** while it waits
-   for deployment. It appears in the device list once connected.
+4. **Devices** shows **Waiting for deployment** while the installation credential is
+   valid. Open the card to copy or download the original Compose file. If the
+   credential expires, the card disappears.
 
 Keep the named state volume when restarting or updating the project. It stores
-the device credential and preserves the device ID. Remove the device from
-the device list to revoke the credential. To use that project again, choose
-**Pair again** and redeploy it with the new Compose file and the same volume.
-Pairing again gives the Node a new device ID. If the first Compose file expires
-or is lost before deployment, use **Get a new Compose file** to replace it.
+the device credential and preserves the device ID. Choose **Rename** from the
+card menu to update the device name while it waits for deployment.
 
-Choose **Remove node** on an unpaired entry to remove its installation record
-and invalidate any outstanding Compose file. For a paired node, remove its
-device before removing the installation.
+Choose **Remove** from the unpaired node's card menu to delete its installation
+record and invalidate its Compose file. Removing a paired node revokes its
+device credential and removes its card. Start again from **Devices** after
+expiration or revocation to generate a new deployment configuration.
 
 The Node handles `system.info` and a read-only Shelly switch query. The latter
 reads relay 0 via `GET /rpc/Switch.GetStatus?id=0` on a known private IPv4 address
@@ -144,14 +143,16 @@ that use `latest`.
 
 ### Connect directly to a self-hosted instance
 
-Compose fills in the address from the dashboard and lets you edit it. If you
-use a loopback address, the project uses [Docker host networking](https://docs.docker.com/engine/network/drivers/host/)
-to reach Rome on the same Docker host. For a container on another machine,
-open the dashboard at an address that machine can reach. Direct connections
-support HTTP on private addresses and local hostnames. Public addresses
-require HTTPS.
+The node uses the Compose project's default network and connects outbound to
+Rome. The setup form starts with the dashboard's address, including localhost.
+On the default network, localhost points to the container itself. Use a Rome
+address the container can reach when deploying. Direct connections support HTTP
+on private addresses and local hostnames. Public addresses require HTTPS.
 
 Core issues a two-hour installation token and stores device credentials as hashes.
+While the installation is pending, the guardian can retrieve the original grant
+using an instance key kept in a private file. The device credential is issued
+only when the Node redeems the installation token.
 The Node authenticates to `/v1/gateway/config`, gets
 `{ gatewayPath: "/ws/container-node" }`, and connects on the same host and port
 using WS for local HTTP or WSS for HTTPS. A signed-in local guardian can pair a
@@ -175,6 +176,8 @@ following API in the private [Rome Cloud repository](https://github.com/amantru/
 | `GET /api/instance/container-nodes` | Returns `{ instanceId, nodes }` for the authenticated instance. Each node has `id`, `name`, and `state`. A `pending` node includes `expiresAt` as a UTC ISO timestamp. A `paired` node includes `deviceId`. A removed or revoked device leaves a `needs_pairing` node. |
 | `POST /api/instance/container-nodes` | `{ name }` creates a pending node and returns `{ instanceId, id, installToken, expiresAt }`. |
 | `POST /api/instance/container-nodes/{id}/pairing` | An empty JSON object replaces the grant for an existing pending or unpaired node. The response has the same fields as creation. Return 404 with `node_not_found` for nodes outside the instance and 409 with `already_paired` while a device is still authorized. |
+| `GET /api/instance/container-nodes/{id}/compose` | Returns the same grant as creation while the installation is pending and the grant is valid. Return 404 with `compose_unavailable` if the original grant cannot be retrieved. |
+| `PATCH /api/instance/container-nodes/{id}` | `{ name }` renames the pending node and returns 204. The installation ID, token, and expiry stay the same. |
 | `DELETE /api/instance/container-nodes/{id}` | Removes an unpaired installation and invalidates its grant. Return 204 on removal, 404 with `node_not_found` for nodes outside the instance, or 409 with `already_paired` while a device is still authorized. |
 | `POST /api/devices/container-nodes/redeem` | Accepts the install token as a Bearer and `{ installation_id, verifier }` as JSON. Returns `{ installation_id, access_token, token_type: "Bearer", device_id, caller_id }`. |
 

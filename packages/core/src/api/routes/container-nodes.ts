@@ -6,6 +6,8 @@ import { ContainerNodeError } from "../../desktops/container-nodes.js";
 import type { ApiDeps } from "../deps.js";
 
 const nameBody = z.object({ name: containerNodeNameSchema }).strict();
+const pairingBody = z.object({ origin: z.string().max(2048).optional() }).strict();
+const issueBody = nameBody.extend(pairingBody.shape);
 const idSchema = z.uuid();
 
 const errors = {
@@ -15,6 +17,8 @@ const errors = {
   unavailable: 503,
   node_not_found: 404,
   already_paired: 409,
+  compose_unavailable: 404,
+  invalid_origin: 400,
   offline: 503,
   needs_pairing: 409,
   invalid_switch_address: 400,
@@ -48,17 +52,41 @@ export function containerNodesRoutes({
     }),
   );
   app.post("/", async (c) => {
-    const input = nameBody.safeParse(await c.req.json().catch(() => null));
+    const input = issueBody.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_device_name" }, 400);
     return c.json(await containerNodes.pair(c.get("accountId"), input.data, c.req.raw.signal), 201);
   });
   app.post("/:id/pairing", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return c.json({ error: "node_not_found" }, 404);
+    const input = pairingBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!input.success) return c.json({ error: "invalid_origin" }, 400);
     return c.json(
-      await containerNodes.pair(c.get("accountId"), { id: id.data }, c.req.raw.signal),
+      await containerNodes.pair(
+        c.get("accountId"),
+        { id: id.data, ...input.data },
+        c.req.raw.signal,
+      ),
       201,
     );
+  });
+  app.get("/:id/compose", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return c.json({ error: "node_not_found" }, 404);
+    return c.json(await containerNodes.getCompose(c.get("accountId"), id.data, c.req.raw.signal));
+  });
+  app.patch("/:id", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return c.json({ error: "node_not_found" }, 404);
+    const input = nameBody.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({ error: "invalid_device_name" }, 400);
+    await containerNodes.renameInstallation(
+      c.get("accountId"),
+      id.data,
+      input.data.name,
+      c.req.raw.signal,
+    );
+    return c.body(null, 204);
   });
   app.delete("/:id", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
