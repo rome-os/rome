@@ -1945,6 +1945,29 @@ describe("ActionEngine", () => {
       expect((payload.replayJournal as unknown[]).length).toBeGreaterThan(0);
     });
 
+    it("keeps the asking turn in the approval payload, so the replay reads as that turn", async () => {
+      await setup({
+        actions: [
+          buildAction("needs_approval", { requiresApproval: true }),
+          buildAction("parent", {
+            execute: async () => {
+              await callAction("needs_approval", { target: "prod" });
+              return { status: "ok" };
+            },
+          }),
+        ],
+      });
+
+      // A summoned agent's call: a turn, but no chat.
+      const result = await rome.actionEngine.run("parent", {}, { turnId: "turn-3" });
+
+      if (result.status !== "pending_approval") {
+        throw new Error(`expected pending_approval, got ${result.status}`);
+      }
+      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      expect(row!.payload).toMatchObject({ turnId: "turn-3" });
+    });
+
     it("fires onApprovalCreated with preview for a nested requiresApproval action", async () => {
       const needsApproval: Action = {
         ...buildAction("needs_approval", { requiresApproval: true }),
