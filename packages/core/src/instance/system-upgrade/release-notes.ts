@@ -5,6 +5,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  RELEASE_VERSION,
   type ReleaseNotesFile,
   type ReleaseNotesRange,
   type ReleaseNotesRangeEntry,
@@ -13,10 +14,6 @@ import {
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("release-notes");
-
-/** A release version as the image is tagged: `major.minor.patch`, with an optional prerelease. */
-export const RELEASE_VERSION =
-  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$/;
 
 /** Releases one range walks at most. Older ones are left out and the range is partial. */
 export const MAX_RANGE_RELEASES = 30;
@@ -131,31 +128,35 @@ export class ReleaseNotes {
     status: ReleaseNotesRange["status"],
     found: ReleaseNotesFile[],
   ): ReleaseNotesRange {
-    // Newest release first, so a pull request listed again by a later
-    // release keeps its newest entry, and a breaking change wins over the
-    // same pull request listed as new or fixed.
+    // One entry per pull request: the newest release's, whatever its
+    // section there. Within one release a breaking entry wins over new, and
+    // new over fixes. `found` is newest first, so each section keeps that order.
     const seen = new Set<number>();
-    const take = (section: "breaking" | "new" | "fixes"): ReleaseNotesRangeEntry[] =>
-      found
-        .flatMap((notes) => notes[section].map((entry) => ({ ...entry, version: notes.version })))
-        .filter((entry) => {
-          if (entry.pr === null) return true;
-          if (seen.has(entry.pr)) return false;
-          seen.add(entry.pr);
-          return true;
-        });
-    const breaking = take("breaking");
-    const added = take("new");
-    const fixes = take("fixes");
+    const merged: Record<"breaking" | "new" | "fixes", ReleaseNotesRangeEntry[]> = {
+      breaking: [],
+      new: [],
+      fixes: [],
+    };
+    for (const notes of found) {
+      for (const section of ["breaking", "new", "fixes"] as const) {
+        for (const entry of notes[section]) {
+          if (entry.pr !== null) {
+            if (seen.has(entry.pr)) continue;
+            seen.add(entry.pr);
+          }
+          merged[section].push({ ...entry, version: notes.version });
+        }
+      }
+    }
     return {
       status,
       from,
       to,
       releases: found.map(({ version, date, url }) => ({ version, date, url })),
       coveredFrom: found.at(-1)?.previousVersion ?? null,
-      breaking,
-      new: added,
-      fixes,
+      breaking: merged.breaking,
+      new: merged.new,
+      fixes: merged.fixes,
       internal: found.reduce((sum, notes) => sum + notes.internal, 0),
       releaseUrl: `https://github.com/${this.repository}/releases/tag/v${to}`,
       compareUrl: from ? `https://github.com/${this.repository}/compare/v${from}...v${to}` : null,

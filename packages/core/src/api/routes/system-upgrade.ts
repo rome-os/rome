@@ -3,11 +3,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { getBuildInfo } from "../../build-info.js";
 import { cloudBearer } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
-import {
-  compareVersions,
-  RELEASE_VERSION,
-  type ReleaseNotes,
-} from "../../instance/system-upgrade/release-notes.js";
+import { RELEASE_VERSION } from "@rome/api-types/release-notes";
+import { compareVersions, type ReleaseNotes } from "../../instance/system-upgrade/release-notes.js";
 import type { SystemUpgradeService } from "../../instance/system-upgrade/service.js";
 
 export interface SystemUpgradeRoutesDeps {

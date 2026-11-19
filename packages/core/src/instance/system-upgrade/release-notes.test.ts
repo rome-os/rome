@@ -98,6 +98,28 @@ describe("ReleaseNotes.range", () => {
     expect(range.compareUrl).toBe("https://github.com/rome-os/rome/compare/v1.1.208...v1.1.210");
   });
 
+  it("keeps a pull request's entry from the newest release that lists it, in any section", async () => {
+    const { fetch } = github({
+      "1.0.3": notes("1.0.3", "1.0.2", { fixes: [{ scope: "web", text: "newest", pr: 7 }] }),
+      "1.0.2": notes("1.0.2", "1.0.1", {
+        new: [
+          { scope: "web", text: "older", pr: 7 },
+          { scope: "web", text: "both", pr: 8 },
+        ],
+        breaking: [{ scope: "web", text: "both, breaking", pr: 8 }],
+      }),
+    });
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
+
+    const range = await store.range("1.0.1", "1.0.3");
+
+    expect(range.fixes).toEqual([{ scope: "web", text: "newest", pr: 7, version: "1.0.3" }]);
+    expect(range.new).toEqual([]);
+    expect(range.breaking).toEqual([
+      { scope: "web", text: "both, breaking", pr: 8, version: "1.0.2" },
+    ]);
+  });
+
   it("without a start reads the target's release alone", async () => {
     const { fetch, requested } = github({ "1.1.210": notes("1.1.210", "1.1.209") });
     const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: null, fetch });
@@ -149,6 +171,7 @@ describe("ReleaseNotes.range", () => {
       new TypeError("fetch failed"),
       500,
       { ...notes("1.0.1", "1.0.0"), schema: 2 },
+      { ...notes("1.0.1", "v1.0.0") },
       notes("1.0.2", "1.0.0"),
     ];
     for (const asset of cases) {
@@ -185,6 +208,22 @@ describe("ReleaseNotes.range", () => {
     const restarted = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch: offline.fetch });
     expect((await restarted.range("1.0.0", "1.0.1")).status).toBe("complete");
     expect(offline.requested).toHaveLength(0);
+  });
+
+  it("is partial, not an error, when an older release names a malformed previous version", async () => {
+    const { fetch } = github({
+      "1.0.3": notes("1.0.3", "1.0.2"),
+      "1.0.2": notes("1.0.2", "v1.0.1"),
+    });
+    const dir = cacheDir();
+    const store = new ReleaseNotes({ baseUrl: BASE, cacheDir: dir, fetch });
+
+    const range = await store.range("1.0.0", "1.0.3");
+
+    expect(range.status).toBe("partial");
+    expect(range.coveredFrom).toBe("1.0.2");
+    // The unreadable file is not kept.
+    expect(() => readFileSync(join(dir, "1.0.2.json"))).toThrow();
   });
 
   it("ignores a cached file it cannot read and downloads again", async () => {

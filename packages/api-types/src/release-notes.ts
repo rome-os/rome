@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** A release version as the image is tagged: `major.minor.patch`, with an optional prerelease. */
+export const RELEASE_VERSION =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$/;
+
 /** The release-notes.json format version this reader understands. */
 export const RELEASE_NOTES_SCHEMA = 1;
 
@@ -20,8 +24,8 @@ export const releaseNoteEntrySchema = z.object({
  */
 export const releaseNotesFileSchema = z.object({
   schema: z.literal(RELEASE_NOTES_SCHEMA),
-  version: z.string(),
-  previousVersion: z.string().nullable(),
+  version: z.string().regex(RELEASE_VERSION),
+  previousVersion: z.string().regex(RELEASE_VERSION).nullable(),
   date: z.string(),
   url: z.string().startsWith("https://"),
   breaking: z.array(releaseNoteEntrySchema),
