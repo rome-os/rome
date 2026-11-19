@@ -39,8 +39,9 @@ const CONTROL_SLOTS = [
  * one in-tree case: its day and navigation buttons take the 28px `--cell-size`
  * grid measure rather than the step their size name would give, which is a
  * known divergence rather than a drift this sweep should keep re-reporting.
+ * Compact buttons have their own hit-target test below.
  */
-const OVERRIDDEN_BY_COMPOSITE = '[data-slot="calendar"]';
+const OVERRIDDEN_BY_COMPOSITE = '[data-slot="calendar"], [data-slot="button"][data-compact]';
 
 test("a size name means one height across every Control member", async ({ page }) => {
   await page.goto("/dev/gallery");
@@ -144,4 +145,39 @@ test("the square members agree with the ladder they name", async ({ page }) => {
       `IconButton ${step} (${iconButton.height}px) and Button icon-${step} (${button.height}px) disagree`,
     ).toBe(button.height);
   }
+});
+
+test.describe("compact Button on touch", () => {
+  test.use({ viewport: { width: 320, height: 800 }, hasTouch: true });
+
+  test("draws each size while reserving a 44px hit target", async ({ page }) => {
+    await page.goto("/dev/gallery");
+    await expect(page.locator("html")).toHaveAttribute("data-ui-scale", "large");
+    const preview = page.locator("[data-compact-button-preview]");
+
+    for (const [size, height] of [
+      ["xs", 24],
+      ["sm", 28],
+      ["md", 32],
+      ["lg", 44],
+    ] as const) {
+      const button = preview.locator(`button[data-size="${size}"]`);
+      await expect(button).toHaveCSS("height", `${height}px`);
+      await button.evaluate((element) => element.scrollIntoView({ block: "center" }));
+      expect(
+        await button.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          return (
+            rect.width >= 44 &&
+            [centerY - 21.5, centerY + 21.5].every(
+              (y) => document.elementFromPoint(centerX, y) === element,
+            )
+          );
+        }),
+        `the ${size} hit target`,
+      ).toBe(true);
+    }
+  });
 });

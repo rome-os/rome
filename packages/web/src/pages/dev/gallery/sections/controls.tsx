@@ -43,7 +43,7 @@ const BUTTON_VARIANTS = [
   "link",
 ] as const;
 
-const BUTTON_SIZES = ["xs", "sm", "md"] as const;
+const BUTTON_SIZES = ["xs", "sm", "md", "lg"] as const;
 
 const ICON_SIZES = ["icon-xs", "icon-sm", "icon-md", "icon-lg"] as const;
 
@@ -102,7 +102,7 @@ export function ControlsSection() {
 
         <Specimen
           label="Button — sizes"
-          note="sm / md / lg are the 28 / 32 / 44px scale steps, and mean the same height on every control. xs sits deliberately below the scale, for dense toolbars."
+          note="xs, sm, md, and lg measure 24, 28, 32, and 44px at the medium platform scale."
         >
           <Row className="items-end">
             {BUTTON_SIZES.map((size) => (
@@ -111,6 +111,23 @@ export function ControlsSection() {
               </Item>
             ))}
           </Row>
+        </Specimen>
+
+        <Specimen
+          label="Button — compact sizes"
+          note="The visible size follows the selected step. Touch targets have a 44px floor."
+        >
+          <div data-compact-button-preview data-ui-typography="inline-card">
+            <Row className="items-end">
+              {BUTTON_SIZES.map((size) => (
+                <Item key={size} label={size}>
+                  <Button size={size} compact>
+                    Continue
+                  </Button>
+                </Item>
+              ))}
+            </Row>
+          </div>
         </Specimen>
 
         <Specimen

@@ -133,7 +133,7 @@ Controls set an explicit height and pad horizontally only. Height is specified, 
 
 **`lg` (44px) and `xs` (24px) belong to the Button family, not the shared vocabulary.** `Button` and `IconButton` carry them. `Input`, `SelectTrigger`, and `SegmentedControl` do not, on purpose.
 
-They are prominence steps. Every `lg` in the tree is a standalone call to action: a `w-full` login button, a dialog footer, a page-header action. Every `xs` is a chip beside body text. Neither ever shares a row with a field, so neither needs the cross-component agreement `sm` and `md` carry. Reach for `lg` when the button *is* the screen's commitment, not to make a row taller.
+Use `lg` for a standalone call to action, such as a dialog or page-header action. Use `xs` for a compact action beside body text. On a dense action surface, `<Button size="sm" compact>` paints a 28px face and reserves the 44px touch target.
 
 **Two ladders offer a square icon button at every step, and the overlap is deliberate.** `IconButton`'s steps and `Button`'s `icon-*` variants are value-identical, with the same height and the same radius. Reach for `IconButton` by default, because its required `label` prop makes an icon-only control accessible by construction rather than by reviewer vigilance. Reach for `Button size="icon-sm"` and friends in two cases. The first is a control needing a `Button` variant the icon primitive has no equivalent for, such as `ghost`'s `aria-expanded` paint or `destructive`. The second is a control sitting in a `ButtonGroup`.
 

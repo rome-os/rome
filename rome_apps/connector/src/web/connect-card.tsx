@@ -383,12 +383,19 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
         <span className="text-ui font-medium text-foreground">Connect {name}</span>
         {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            compact
+            onClick={() => ctx.host.dismiss()}
+          >
             Dismiss
           </Button>
           <Button
             type="button"
             size="sm"
+            compact
             onClick={() => navigateRome({ path: "settings", tab: "connections" })}
           >
             Open Settings
@@ -415,17 +422,24 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
           {phase === "authorizing" ? "Waiting for you to authorize in the opened tab…" : ""}
         </span>
         <div className="ml-auto flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            compact
+            onClick={() => ctx.host.dismiss()}
+          >
             Dismiss
           </Button>
           {phase === "authorizing" ? (
-            <Button type="button" size="sm" onClick={checkNow}>
+            <Button type="button" size="sm" compact onClick={checkNow}>
               I've authorized
             </Button>
           ) : (
             <Button
               type="button"
               size="sm"
+              compact
               onClick={connect}
               disabled={phase === "starting" || !toolkit}
             >

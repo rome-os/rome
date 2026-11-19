@@ -89,21 +89,34 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
                   type="button"
                   variant="outline"
                   size="sm"
+                  compact
                   onClick={() => window.open(loginUrl, "_blank", "noopener,noreferrer")}
                 >
                   Reopen tab
                 </Button>
               ) : null}
-              <Button type="button" variant="outline" size="sm" onClick={cancel}>
+              <Button type="button" variant="outline" size="sm" compact onClick={cancel}>
                 Cancel
               </Button>
             </>
           ) : (
             <>
-              <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                compact
+                onClick={() => ctx.host.dismiss()}
+              >
                 Dismiss
               </Button>
-              <Button type="button" size="sm" onClick={start} disabled={phase === "starting"}>
+              <Button
+                type="button"
+                size="sm"
+                compact
+                onClick={start}
+                disabled={phase === "starting"}
+              >
                 {phase === "starting" ? (
                   <Loader2 size={14} data-icon="inline-start" className="animate-spin" />
                 ) : (

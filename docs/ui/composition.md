@@ -23,7 +23,7 @@ A component occupies its declared height.
 
 | Component | Steps |
 |---|---|
-| Control, inline | 28 (`sm`), 32 (`md`). Button family also 24 (`xs`), and 44 (`lg`) on its square members only |
+| Control, inline | 28 (`sm`), 32 (`md`). Button family also 24 (`xs`) and 44 (`lg`) |
 | Badge | 22 |
 | Avatar | 24, 32, 40 |
 | Icon glyph | 14, 16, 20, 24 |

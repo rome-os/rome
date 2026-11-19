@@ -44,11 +44,31 @@ describe("Button press feedback", () => {
   });
 });
 
+describe("Button sizes", () => {
+  it.each(["xs", "sm", "md", "lg"] as const)("renders compact labeled size %s", (size) => {
+    render(
+      <Button size={size} compact>
+        Save
+      </Button>,
+    );
+    const control = screen.getByRole("button", { name: "Save" });
+    expect(control.getAttribute("data-size")).toBe(size);
+    expect(control.hasAttribute("data-compact")).toBe(true);
+    expect(control.className).toContain(`h-[var(--control-h-${size})]`);
+  });
+
+  it("uses the platform presentation by default", () => {
+    render(<Button size="sm">Save</Button>);
+    expect(screen.getByRole("button").hasAttribute("data-compact")).toBe(false);
+  });
+});
+
 describe("Button glyph inset", () => {
   it.each([
     ["sm", "sm"],
     ["md", "md"],
     ["default", "md"],
+    ["lg", "lg"],
   ] as const)("trims each marked side at size %s", (size, step) => {
     render(
       <Button size={size}>

@@ -5,7 +5,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
 import { canonicalControlSize } from "./control-size.js";
 
-// The 36px step, held in a const because two names resolve to it: `md`, the
+// The 32px medium step, held in a const because two names resolve to it: `md`, the
 // shared control vocabulary's name for the step, and `default`, the shadcn
 // spelling that predates it. Same for the square variant below. Both spellings
 // stay declared so existing callers and `buttonVariants` consumers keep
@@ -64,6 +64,7 @@ const buttonVariants = cva(
         xs: "h-[var(--control-h-xs)] gap-1 rounded-[var(--control-r-sm)] px-[var(--control-px-center-xs)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-[var(--control-h-sm)] gap-[var(--control-gap)] rounded-[var(--control-r-sm)] px-[var(--control-px-center-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         md: SIZE_MD,
+        lg: "h-[var(--control-h-lg)] gap-[var(--control-gap)] rounded-[var(--control-r-lg)] px-[var(--control-px-center-lg)]",
         /** @deprecated Spelling of `md` that predates the shared vocabulary. */
         default: SIZE_MD,
         "icon-xs":
@@ -148,6 +149,13 @@ const buttonVariants = cva(
         className:
           "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
+      {
+        align: "center",
+        size: "lg",
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-lg)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-lg)]",
+      },
+      { align: ["start", "between"], size: "lg", className: "px-[var(--control-px-start-lg)]" },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
       { align: "between", size: "sm", className: "px-[var(--control-px-start-sm)]" },
@@ -170,17 +178,21 @@ function Button({
   shape = "square",
   align = "center",
   press = "scale",
+  compact = false,
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
+    /** Keep smaller labeled buttons visually compact within the platform's touch target. */
+    compact?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";
 
   return (
     <Comp
       data-slot="button"
+      data-compact={compact || undefined}
       data-variant={variant}
       data-size={canonicalControlSize(size)}
       data-shape={shape}
