@@ -210,7 +210,7 @@ function MoreMenu({
             role="group"
             data-chat-header-menu-section
             className={cn(
-              "flex flex-col gap-0.5",
+              "flex flex-col gap-1",
               index > 0 && "mt-1 border-t border-border-subtle pt-1",
             )}
           >
