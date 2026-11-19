@@ -340,7 +340,15 @@ export const slackAppMessages = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.teamId, table.eventId] }),
-    index("idx_slack_app_messages_chat_said").on(table.teamId, table.channelId, table.saidAt),
+    // A chat's messages, and a search of them, newest first.
+    index("idx_slack_app_messages_chat_said").on(
+      table.teamId,
+      table.channelId,
+      table.saidAt,
+      table.ts,
+    ),
+    // A search of the workspace, newest first.
+    index("idx_slack_app_messages_said").on(table.teamId, table.saidAt, table.ts),
     index("idx_slack_app_messages_unhanded").on(table.teamId, table.handedOverAt),
   ],
 );
@@ -367,7 +375,17 @@ export const slackAppTimeline = sqliteTable(
     // The message as a read answers it, without Slack's raw payload.
     message: text("message", { mode: "json" }).notNull(),
   },
-  (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.channelId, table.ts] }),
+    // A search of a chat, and of the workspace, newest first.
+    index("idx_slack_app_timeline_chat_said").on(
+      table.teamId,
+      table.channelId,
+      table.saidAt,
+      table.ts,
+    ),
+    index("idx_slack_app_timeline_said").on(table.teamId, table.saidAt, table.ts),
+  ],
 );
 
 // One row per LinkedIn account seen in a thread's participant list. Person-level
