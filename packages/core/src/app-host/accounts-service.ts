@@ -153,8 +153,9 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     }));
   }
 
-  /** The chats the Connection behind `target` can see, read from it whole.
-   *  Rejects when it lists none, or while its talk is locked. */
+  /** The chats the Connection behind `target` can see, paged to the end of
+   *  what its directory lists. Rejects when it has no directory, or while its
+   *  talk is locked. */
   async function chats(
     target: Account | string,
     read: ChatListQuery = {},
