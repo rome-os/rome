@@ -381,11 +381,12 @@ write_rome_env() {
       echo "CHIEF_OF_STAFF_UNSAFE_TEST_SWITCHES=1"
       [ -z "${ANTHROPIC_API_KEY:-}" ] || echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
       [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
-      # When a session is renewed with a handoff; set to renew it sooner than a real Rome would.
+      # When Rome, or the chief of staff, renews a session; set to renew it sooner than a real Rome would.
       # A value given once stays for the copy's later resets.
       local name value
       for name in SESSION_HANDOFF_CONTEXT_TOKENS SESSION_HANDOFF_HARD_CONTEXT_TOKENS \
-        SESSION_HANDOFF_TIMEOUT_SECONDS SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS; do
+        SESSION_HANDOFF_TIMEOUT_SECONDS SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS \
+        CHIEF_OF_STAFF_SESSION_CONTEXT_TOKENS; do
         value="${!name:-$(kept "$name")}"
         [ -z "$value" ] || echo "$name=$value"
       done
