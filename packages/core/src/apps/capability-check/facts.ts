@@ -37,6 +37,8 @@ export interface RouteFacts {
   runs: string[];
   /** Calls through which the route writes app data itself, not through an action. */
   writes: string[];
+  /** `path[0] === "x"` with no length test also matches every path below `x`. */
+  openEnded?: boolean;
   /** Every path the route's test accepts, when it accepts several (`a || b`). */
   alternatives?: string[];
   /** Why the reader could not tell which path the route matches, when it could not. */

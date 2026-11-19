@@ -601,6 +601,43 @@ declare const extra: unknown;
       ]);
     });
 
+    it("does not exempt the paths below an indexed machine path", async () => {
+      const files = withRoute(
+        'if (request.method === "POST" && request.path[0] === "webhook") return createNotesRepository(null).insert("x");',
+        'import { createNotesRepository } from "../db/notes.js";\n',
+      );
+      const manifest = (noAuth: string) =>
+        (files["app.yaml"] as string).replace(
+          "  entry: api/index\n",
+          `  entry: api/index\n  noAuth:\n    - ${noAuth}\n`,
+        );
+      const exact = await gapsOf({ ...files, "app.yaml": manifest("/webhook") });
+      expect(exact.map((g) => g.rule)).toEqual(["I3", "I1"]);
+      expect(await gapsOf({ ...files, "app.yaml": manifest("/webhook/*") })).toEqual([]);
+    });
+
+    it("does not count a function the route only defines", async () => {
+      const gaps = await gapsOf(
+        withRoute(
+          'if (request.method === "POST" && route === "later") {\n      const add = () => this.ctx.runAction("add_note", {});\n      return "done";\n    }',
+        ),
+      );
+      expect(gaps.map((g) => g.message)).toEqual([
+        "`POST /later` runs no action, so no agent can do what it does.",
+      ]);
+    });
+
+    it("takes the schema the exported factory builds, not any in the file", async () => {
+      const body = `const sample = { inputSchema: { type: "object", properties: {} } };
+export function createAction(config: unknown) {
+  return { config, execute: async () => ({ status: "ok" }) };
+}
+`;
+      const gaps = await gapsOf({ ...COMPLIANT, ...ACTION("add_note", body) });
+      // Without a schema the action leaves the agent catalog, so its route runs nothing agents can call.
+      expect(gaps.map((g) => g.rule)).toEqual(["D2", "I1"]);
+    });
+
     it("finds a request the page makes through a shared helper", async () => {
       const gaps = await gapsOf({
         ...COMPLIANT,

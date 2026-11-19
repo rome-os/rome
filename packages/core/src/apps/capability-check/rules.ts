@@ -254,7 +254,9 @@ function pathMatches(route: RouteFacts, called: string): boolean {
       if (call === undefined) return false;
       if (segment !== ":id" && call !== ":id" && segment !== call) return false;
     }
-    return callSegments.length === routeSegments.length;
+    return route.openEnded
+      ? callSegments.length >= routeSegments.length
+      : callSegments.length === routeSegments.length;
   });
 }
 

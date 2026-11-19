@@ -89,8 +89,11 @@ export async function readApp(dir: string): Promise<AppFacts> {
       found.length === 0
         ? null
         : found.map((route) => {
+            // An open-ended route is a machine route only if the paths below it are too.
             const machine = (path: string) =>
-              isAppApiPathNoAuth(noAuth as boolean | string[], `/${path}`);
+              isAppApiPathNoAuth(noAuth as boolean | string[], `/${path}`) &&
+              (!route.openEnded ||
+                isAppApiPathNoAuth(noAuth as boolean | string[], `/${path}/any`));
             const paths = route.alternatives ?? [route.path];
             const machinePaths = paths.filter(machine).length;
             // `route === "webhook" || route === "erase"` is a machine route for one path only.
@@ -390,12 +393,60 @@ class SourceReader {
   inputSchema(entryFile: string): TS.Expression | undefined {
     const entry = this.program.getSourceFile(entryFile);
     if (!entry) return undefined;
+    // The schema is the one the exported factory builds, not any `inputSchema`
+    // that happens to sit in the file.
+    const factory = this.actionFactory(entry);
+    if (factory) return this.schemaReachedFrom(factory);
     const inEntry = findInputSchema(entry);
     if (inEntry) return inEntry;
     for (const imp of this.importsOf(entry)) {
       const source = this.program.getSourceFile(imp);
       const found = source && findInputSchema(source);
       if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** The body of the `createAction` (or default) export an action entry hands Rome. */
+  private actionFactory(entry: TS.SourceFile): TS.Node | undefined {
+    const module = this.checker.getSymbolAtLocation(entry);
+    if (!module) return undefined;
+    for (const name of ["createAction", "default"]) {
+      let symbol = this.checker.getExportsOfModule(module).find((e) => e.escapedName === name);
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias)
+        symbol = this.checker.getAliasedSymbol(symbol);
+      const declaration = symbol?.declarations?.[0];
+      const body = declaration && functionBody(declaration);
+      if (body) return body;
+    }
+    return undefined;
+  }
+
+  /**
+   * The input schema found in `root` or in what it reaches: the functions it
+   * calls and the values it names, among the app's own files.
+   */
+  private schemaReachedFrom(root: TS.Node): TS.Expression | undefined {
+    const seen = new Set<TS.Node>();
+    const queue: TS.Node[] = [root];
+    while (queue.length > 0 && seen.size < 50) {
+      const node = queue.shift() as TS.Node;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      const found = findInputSchema(node);
+      if (found) return found;
+      const visit = (child: TS.Node) => {
+        if (ts.isIdentifier(child)) {
+          for (const declaration of this.declarationOf(child)) {
+            const next =
+              functionBody(declaration) ??
+              (ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined);
+            if (next && !seen.has(next)) queue.push(next);
+          }
+        }
+        ts.forEachChild(child, visit);
+      };
+      visit(node);
     }
     return undefined;
   }
@@ -646,6 +697,20 @@ class SourceReader {
     const seen = new Set<TS.Node>();
     const walk = (current: TS.Node, depth: number) => {
       if (skip.has(current)) return;
+      // A function defined here runs only when called: a call to it is
+      // followed through its declaration below. A callback handed to a call
+      // is taken to run.
+      if (
+        current !== node &&
+        ts.isFunctionLike(current) &&
+        !(
+          current.parent &&
+          (ts.isCallExpression(current.parent) || ts.isNewExpression(current.parent)) &&
+          current.parent.arguments?.includes(current as unknown as TS.Expression)
+        )
+      ) {
+        return;
+      }
       if (ts.isCallExpression(current)) {
         const callee = current.expression;
         const calleeName = ts.isPropertyAccessExpression(callee)
@@ -742,7 +807,7 @@ class SourceReader {
   }
 }
 
-function findInputSchema(source: TS.SourceFile): TS.Expression | undefined {
+function findInputSchema(source: TS.Node): TS.Expression | undefined {
   let found: TS.Expression | undefined;
   const visit = (node: TS.Node) => {
     if (found) return;
@@ -992,7 +1057,7 @@ function isDispatchSubject(text: string): boolean {
 function describeRoute(
   conditions: TS.Expression[],
   literal: LiteralOf,
-): Pick<RouteFacts, "method" | "path" | "unreadable" | "alternatives"> {
+): Pick<RouteFacts, "method" | "path" | "unreadable" | "alternatives" | "openEnded"> {
   const reads = conditions.map((condition) => readCondition(condition, literal));
   const methods = new Set(reads.flatMap((read) => read.methods));
   const depth = Math.max(0, ...reads.map((read) => read.depth ?? 0));
@@ -1043,7 +1108,11 @@ function describeRoute(
           return chosen.root ? "" : chosen.path;
         });
   const method = methods.size === 0 ? "ANY" : [...methods].join("|");
-  const extra = alternatives ? { alternatives } : {};
+  // Indexed tests name a prefix; without a length test, deeper paths match too.
+  const openEnded =
+    reads.some((read) => read.segments.some((segment) => segment.index !== undefined)) &&
+    reads.every((read) => read.depth === undefined);
+  const extra = { ...(alternatives ? { alternatives } : {}), ...(openEnded ? { openEnded } : {}) };
   // `path === "" || path === "status"` serves the root among its paths.
   if (root) return { method, path: "", ...extra };
   if (path === "") {
