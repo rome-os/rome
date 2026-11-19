@@ -11,9 +11,9 @@ import {
 } from "./concierge-task-status.js";
 
 /**
- * The groups, in the order the view shows them. The Tasks tab shows the task
- * chats in `needs_you`, `active`, `later` and `ended`; the Running on its own
- * tab shows `on_its_own`.
+ * The groups, in the order the view shows them. The Tasks view shows the task
+ * chats in `needs_you`, `active`, `later` and `ended`; the Routines view shows
+ * `on_its_own`, a key the iOS app reads and so keeps.
  */
 export const TASK_LIST_GROUPS = ["needs_you", "active", "later", "on_its_own", "ended"] as const;
 export type TaskListGroupKey = (typeof TASK_LIST_GROUPS)[number];
@@ -200,7 +200,7 @@ const laterOf = (item: TaskListItem): number | null => {
   return null;
 };
 
-/** When a row of the Running on its own tab runs next. */
+/** When a row of the Routines view runs next. */
 const nextOf = (item: TaskListItem): number | null => {
   if (item.kind === "follow") return item.nextAt ?? null;
   if (item.kind === "routine") return item.nextRunAt;

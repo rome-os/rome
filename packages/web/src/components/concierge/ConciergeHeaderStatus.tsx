@@ -82,6 +82,7 @@ export function ConciergeHeaderStatus({
   badge = true,
   avatar,
   menu,
+  tools,
   showsActivity = true,
 }: {
   name: ReactNode;
@@ -92,6 +93,8 @@ export function ConciergeHeaderStatus({
   /** What the badge holds; the Concierge's mascot when not given. */
   avatar?: ReactNode;
   menu?: HeaderMenu;
+  /** Buttons beside the badge, to its right: what opens in the side pane. */
+  tools?: ReactNode;
   /**
    * Whether the activity capsule shows under the name: the Concierge's. An
    * ordinary chat's header has none, and its name tag may run longer.
@@ -176,6 +179,14 @@ export function ConciergeHeaderStatus({
         ) : (
           badgeEl(null)
         )
+      ) : null}
+      {badge && tools ? (
+        <div
+          data-concierge-header-tools
+          className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-start"
+        >
+          {tools}
+        </div>
       ) : null}
       {!badge && menu ? (
         <QuickMenu menu={menu} anchor={anchor}>

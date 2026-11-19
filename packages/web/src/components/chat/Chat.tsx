@@ -27,6 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  CalendarClock,
   Cpu,
   FileOutput,
   FolderOpen,
@@ -2405,9 +2406,9 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The agent's logo in the header opens the chat's task list: what runs for it.
+  // The header's Tasks and Routines buttons open the chat's lists: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
-  // A dot on the menu's Tasks entry says a task chat needs its owner.
+  // A dot on the Tasks button says a task chat needs its owner.
   const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
   // On a narrow screen the task list's sheet covers the composer.
   useEffect(() => {
@@ -2479,27 +2480,21 @@ export function Chat({
     workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
     workspaceStore?.set("followTargetPath", logical);
   };
-  // The badge's menu: what opens in the side pane, and the model that answered
-  // last at its foot. No counts or marks.
+  // The badge's menu: the project, and the model that answered last at its
+  // foot. No counts or marks. A Concierge chat's Tasks, Routines and Outputs
+  // are buttons beside the badge instead; any other chat keeps Outputs here.
   const menuItems: HeaderMenuItem[] = mainSessionId
     ? [
         ...(concierge
-          ? [
+          ? []
+          : [
               {
-                key: "tasks",
-                icon: <ListChecks />,
-                label: t("concierge.menu.tasks"),
-                dot: tasksNeedYou,
-                run: taskList.open,
+                key: "outputs",
+                icon: <FileOutput />,
+                label: t("concierge.menu.outputs"),
+                run: () => outputsPane.open(),
               },
-            ]
-          : []),
-        {
-          key: "outputs",
-          icon: <FileOutput />,
-          label: t("concierge.menu.outputs"),
-          run: () => outputsPane.open(),
-        },
+            ]),
         ...(chosenProject
           ? [
               {
@@ -2515,7 +2510,7 @@ export function Chat({
       ]
     : [];
   const headerMenu: HeaderMenu | undefined =
-    menuItems.length > 0
+    menuItems.length > 0 || (mainSessionId && model)
       ? {
           items: menuItems,
           caption: model ? (
@@ -2529,6 +2524,45 @@ export function Chat({
           ) : undefined,
         }
       : undefined;
+  // The Concierge chat's side-pane views, beside its badge. Tasks carries the
+  // dot while a task chat needs its owner.
+  const toolButton = (key: string, label: string, icon: ReactNode, run: () => void) => (
+    <IconButton
+      key={key}
+      size={floating ? "md" : "sm"}
+      label={label}
+      icon={icon}
+      onClick={run}
+      className={actionBadge}
+    />
+  );
+  const headerTools =
+    concierge && mainSessionId
+      ? [
+          toolButton(
+            "tasks",
+            t("concierge.menu.tasks"),
+            <span className="relative">
+              <ListChecks />
+              {tasksNeedYou ? (
+                <span
+                  role="img"
+                  aria-label={t("concierge.menu.needsYouDot")}
+                  data-tasks-needs-you
+                  className="absolute -right-1 -top-1 size-1.5 rounded-full bg-primary"
+                />
+              ) : null}
+            </span>,
+            () => taskList.open("tasks"),
+          ),
+          toolButton("routines", t("concierge.menu.routines"), <CalendarClock />, () =>
+            taskList.open("routines"),
+          ),
+          toolButton("outputs", t("concierge.menu.outputs"), <FileOutput />, () =>
+            outputsPane.open(),
+          ),
+        ]
+      : null;
   const headerBadge = concierge ? (
     blankTopicChat ? null : (
       <ConciergeHeaderStatus
@@ -2539,6 +2573,7 @@ export function Chat({
         // A chat with no messages yet draws its own large mascot.
         badge={!conciergeEmpty}
         menu={headerMenu}
+        tools={headerTools}
       />
     )
   ) : (

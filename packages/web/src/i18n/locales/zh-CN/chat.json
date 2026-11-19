@@ -120,7 +120,7 @@
         "needs_you": "需要你",
         "active": "进行中",
         "later": "稍后",
-        "on_its_own": "自动运行",
+        "on_its_own": "定时任务",
         "ended": "已结束"
       },
       "empty": "还没有任务。",
@@ -170,15 +170,13 @@
         "stop": "停止任务失败"
       },
       "endedAt": "结束于 {{when}}",
-      "tabs": {
-        "tasks": "任务",
-        "auto": "自动运行"
-      },
+      "routines": "定时任务",
       "needsYouDot": "有任务需要你",
-      "emptyAuto": "没有自动运行的事。"
+      "emptyRoutines": "还没有定时任务。"
     },
     "menu": {
       "tasks": "任务",
+      "routines": "定时任务",
       "outputs": "产出",
       "needsYouDot": "有任务需要你"
     }

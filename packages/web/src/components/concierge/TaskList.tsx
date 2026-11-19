@@ -19,7 +19,6 @@ import {
 import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -43,10 +42,10 @@ const changedSchema = z.object({ chatId: z.string(), follows: z.literal(true).op
 /** How many ended rows show at first, and how many more each "Show more" adds. */
 export const ENDED_PAGE = TASK_LIST_ENDED_PAGE;
 
-/** The Tasks view's two tabs: the task chats, and what runs on its own. */
-type TaskListTab = "tasks" | "auto";
+/** What a list shows: the task chats, or the routines, follows and reminders that run on their own. */
+export type TaskListView = "tasks" | "routines";
 
-/** The groups the Tasks tab lists, in order. The rest run on their own. */
+/** The groups the Tasks view lists, in order. The rest are routines. */
 const TASK_GROUPS: readonly TaskListGroupKey[] = ["needs_you", "active", "later", "ended"];
 
 type Translate = ReturnType<typeof useTranslation<"chat">>["t"];
@@ -57,8 +56,8 @@ const stateLine = (...parts: Array<string | null | undefined | false>) =>
 
 /**
  * A Concierge chat's Tasks view, read now and whenever the server says
- * something in it changed. The header's menu reads it too, for the dot on its
- * Tasks entry.
+ * something in it changed. The header reads it too, for the dot on its Tasks
+ * button.
  */
 export function useChatTaskList(chatId: string | null) {
   const { t } = useTranslation("chat");
@@ -422,23 +421,29 @@ function LoadingRows() {
 }
 
 /**
- * A Concierge chat's Tasks view, with two tabs. Tasks lists its task chats,
+ * A Concierge chat's Tasks or Routines view. Tasks lists its task chats,
  * grouped as Needs you, Active, Later and Ended, each a titled card of rows;
- * Ended starts folded and shows the newest rows first. Running on its own
- * lists what is no task chat, such as routines, follows and one-off reminders,
- * in one list by the time each runs next. A dot on the Tasks tab says a task
- * chat needs its owner. It reads again whenever the server says something in
- * it changed.
+ * Ended starts folded and shows the newest rows first. Routines lists what is
+ * no task chat, such as routines, follows and one-off reminders, in one list
+ * by the time each runs next. It reads again whenever the server says
+ * something in it changed.
  */
-export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: () => void }) {
+export function TaskList({
+  chatId,
+  view = "tasks",
+  onNavigate,
+}: {
+  chatId: string;
+  view?: TaskListView;
+  onNavigate?: () => void;
+}) {
   const { t } = useTranslation("chat");
-  const [tab, setTab] = useState<TaskListTab>("tasks");
   const [endedOpen, setEndedOpen] = useState(false);
   // Older ended rows "Show more" read, past the first page, and the next page's cursor.
   const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
-  const { data, isError, reread, needsYou } = useChatTaskList(chatId);
+  const { data, isError, reread } = useChatTaskList(chatId);
   // A re-read that changes the first page of ended rows may move rows across
   // the pages read before it: they go, and Show more reads on from the new
   // first page. A re-read with the same ended rows in the same order keeps them.
@@ -491,36 +496,6 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
       toast.error(error.message);
     });
   };
-
-  const tabs = (
-    <div className="px-4 pt-4">
-      <SegmentedControl<TaskListTab>
-        size="sm"
-        aria-label={t("concierge.taskList.title")}
-        value={tab}
-        onValueChange={setTab}
-        options={[
-          {
-            value: "tasks",
-            label: (
-              <span className="relative">
-                {t("concierge.taskList.tabs.tasks")}
-                {needsYou ? (
-                  <span
-                    role="img"
-                    aria-label={t("concierge.taskList.needsYouDot")}
-                    data-tasks-needs-you
-                    className="absolute -right-2 -top-0.5 size-1.5 rounded-full bg-primary"
-                  />
-                ) : null}
-              </span>
-            ),
-          },
-          { value: "auto", label: t("concierge.taskList.tabs.auto") },
-        ]}
-      />
-    </div>
-  );
 
   if (isError) {
     return (
@@ -576,15 +551,14 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const taskGroups = data.groups.filter((group) => TASK_GROUPS.includes(group.key));
   return (
     <TooltipProvider delayDuration={500}>
-      {tabs}
-      {tab === "auto" ? (
+      {view === "routines" ? (
         onItsOwn.length === 0 ? (
           <p className="px-4 py-6 text-center text-ui text-muted-foreground">
-            {t("concierge.taskList.emptyAuto")}
+            {t("concierge.taskList.emptyRoutines")}
           </p>
         ) : (
           <section
-            aria-label={t("concierge.taskList.tabs.auto")}
+            aria-label={t("concierge.taskList.routines")}
             data-task-list-group="on_its_own"
             className="px-4 pb-6 pt-4"
           >

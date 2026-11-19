@@ -10,7 +10,7 @@ import i18n from "@/i18n";
 import { keyboardFocus } from "@/test/keyboard-focus";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
-import { ENDED_PAGE, TaskList } from "./TaskList";
+import { ENDED_PAGE, TaskList, type TaskListView, useChatTaskList } from "./TaskList";
 
 const NOW = Date.now();
 const HOUR = 60 * 60 * 1000;
@@ -136,17 +136,13 @@ function Where() {
   return <output aria-label="Location">{useLocation().pathname}</output>;
 }
 
-/** The Running on its own tab. */
-const openAuto = async () =>
-  fireEvent.click(await screen.findByRole("radio", { name: "Running on its own" }));
-
-function renderList() {
+function renderList(view: TaskListView = "tasks") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <MemoryRouter>
-          <TaskList chatId="concierge" />
+          <TaskList chatId="concierge" view={view} />
           <Where />
         </MemoryRouter>
       </LiveEventsClientContext.Provider>
@@ -188,8 +184,7 @@ describe("TaskList", () => {
         },
       },
     ];
-    renderList();
-    await openAuto();
+    renderList("routines");
 
     await waitFor(() => expect(within(rowOf("acme/down")).getByText(/Not available/)).toBeTruthy());
     expect(within(rowOf("acme/up")).queryByText(/Not available/)).toBeNull();
@@ -220,8 +215,7 @@ describe("TaskList", () => {
         capabilities: { watch: { state: "unlocked", follows: [] } },
       },
     ];
-    renderList();
-    await openAuto();
+    renderList("routines");
     await screen.findByText("acme/up");
     const connectorReads = () =>
       requests.filter((r) => r.url === "/api/concierge/connectors").length;
@@ -255,7 +249,7 @@ describe("TaskList", () => {
     expect(screen.queryByRole("status", { name: "Loading tasks" })).toBeNull();
   });
 
-  it("lists only the task chats on the Tasks tab, by status, and the rest on Running on its own", async () => {
+  it("lists only the task chats in Tasks, by status, and the rest in Routines", async () => {
     parts.checks = [
       {
         kind: "check",
@@ -270,18 +264,19 @@ describe("TaskList", () => {
     ];
     renderList();
     await screen.findByRole("region", { name: "Later" });
-    // The default tab: task chats grouped by status, and nothing that is no task chat.
-    expect(screen.getByRole("radio", { name: /^Tasks/ }).getAttribute("aria-checked")).toBe("true");
+    // Task chats grouped by status, and nothing that is no task chat, with no tabs.
+    expect(screen.queryByRole("radio")).toBeNull();
     for (const group of ["Needs you", "Active", "Later"]) {
       expect(screen.getByRole("region", { name: group })).toBeTruthy();
     }
     expect(screen.getByText("Pick a hotel")).toBeTruthy();
     expect(screen.queryByText("Daily summary")).toBeNull();
     expect(screen.queryByText("Remind me at 3")).toBeNull();
-    expect(screen.queryByRole("region", { name: "Running on its own" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Routines" })).toBeNull();
 
-    await openAuto();
-    const own = await screen.findByRole("region", { name: "Running on its own" });
+    cleanup();
+    renderList("routines");
+    const own = await screen.findByRole("region", { name: "Routines" });
     // Routines and one-off reminders in one list, with no groups, and no task chat.
     expect(within(own).getByText("Daily summary")).toBeTruthy();
     expect(within(own).getByText("Summarize Rome releases")).toBeTruthy();
@@ -296,19 +291,27 @@ describe("TaskList", () => {
     ).toEqual(["Remind me at 3", "Summarize Rome releases", "Daily summary"]);
   });
 
-  it("puts a dot on the Tasks tab while a task chat needs its owner, and none otherwise", async () => {
-    renderList();
-    await screen.findByRole("region", { name: "Needs you" });
-    expect(screen.getByRole("img", { name: "A task needs you" })).toBeTruthy();
-    // The dot stays when the other tab shows.
-    await openAuto();
-    expect(screen.getByRole("img", { name: "A task needs you" })).toBeTruthy();
+  it("says a task chat needs its owner for the header's Tasks dot, and not otherwise", async () => {
+    const Dot = () => (
+      <output aria-label="Needs you">{String(useChatTaskList("concierge").needsYou)}</output>
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = () => (
+      <QueryClientProvider client={client}>
+        <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+          <Dot />
+        </LiveEventsClientContext.Provider>
+      </QueryClientProvider>
+    );
+    render(view());
+    await waitFor(() => expect(screen.getByLabelText("Needs you").textContent).toBe("true"));
     cleanup();
 
     parts.tasks = parts.tasks.filter((item) => item.task.status !== "needs_you");
-    renderList();
-    await screen.findByRole("region", { name: "Active" });
-    expect(screen.queryByRole("img", { name: "A task needs you" })).toBeNull();
+    client.clear();
+    render(view());
+    await waitFor(() => expect(requests.length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByLabelText("Needs you").textContent).toBe("false"));
   });
 
   it("gives every task row its name and one line of state and time, with Stop only on the right", async () => {
@@ -338,8 +341,10 @@ describe("TaskList", () => {
     }).parentElement as HTMLElement;
     expect(buttons.className).toContain("opacity-0");
     expect(buttons.className).toContain("group-hover/row:opacity-100");
-    // The tab with no groups has none, whichever the row.
-    await openAuto();
+    // The Routines list has no groups, and no buttons on its rows.
+    cleanup();
+    renderList("routines");
+    await screen.findByText("Daily summary");
     expect(within(rowOf("Daily summary")).getByText(/Paused · Last run failed/)).toBeTruthy();
     expect(within(rowOf("Daily summary")).queryAllByRole("button")).toEqual([]);
     expect(
@@ -517,12 +522,13 @@ describe("TaskList", () => {
     expect(within(ended).getByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
   });
 
-  it("says so when the chat has no task chat and nothing running on its own", async () => {
+  it("says so when the chat has no task chat and no routines", async () => {
     parts = { tasks: [], checks: [], follows: [], routines: [] };
     renderList();
     expect(await screen.findByText("No tasks yet.")).toBeTruthy();
-    await openAuto();
-    expect(await screen.findByText("Nothing runs on its own.")).toBeTruthy();
+    cleanup();
+    renderList("routines");
+    expect(await screen.findByText("No routines yet.")).toBeTruthy();
   });
 
   it("reads the list again when the server says it changed", async () => {

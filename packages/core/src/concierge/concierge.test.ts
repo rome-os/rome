@@ -5910,7 +5910,7 @@ describe("Concierge tasks started for a guardian message", () => {
       await s.settle();
       expect(await statusOf(s, "g1")).toBe("working");
       // The task asks the guardian: the message no longer works. Its task link and
-      // the Tasks entry show that it needs them, whether or not any card was shown.
+      // the Tasks button show that it needs them, whether or not any card was shown.
       const repo = s.deps.webchatRepo as unknown as {
         openWaitsOf: (ids: readonly string[]) => Promise<Map<string, unknown>>;
       };

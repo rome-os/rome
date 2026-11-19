@@ -1,17 +1,16 @@
 import SwiftUI
 
-/// The Agent page's Tasks tab: what runs for one Concierge chat, in two tabs.
+/// The Agent page's Tasks and Routines tabs: what runs for one Concierge chat.
 /// Tasks lists its task chats, grouped as Needs you, Active, Later and Ended;
-/// Running on its own lists what is no task chat, in one list by the time each
-/// runs next. A task chat's row is its name and one line of state and time,
-/// opens the chat when tapped, and has Stop in its long-press menu. A dot on
-/// the Tasks tab says one needs its owner (docs/domains/chats.md#task-list).
+/// Routines lists what is no task chat, in one list by the time each runs
+/// next. A task chat's row is its name and one line of state and time, opens
+/// the chat when tapped, and has Stop in its long-press menu
+/// (docs/domains/chats.md#task-list).
 struct TaskListView: View {
+    enum Mode { case tasks, routines }
     let store: TaskListStore?
+    let mode: Mode
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
-
-    private enum Tab { case tasks, auto }
-    @State private var tab = Tab.tasks
     @State private var endedOpen = false
 
     var body: some View {
@@ -54,14 +53,13 @@ struct TaskListView: View {
             let tasks = store.groups.filter { $0.key != .onItsOwn }
             let onItsOwn = store.groups.first { $0.key == .onItsOwn }?.items ?? []
             VStack(spacing: 0) {
-                tabs(needsYou: store.groups.contains { $0.key == .needsYou })
                 ScrollView {
                     // Leading: a folded group, its header alone, keeps to the left
                     // edge instead of centering on its own line.
                     VStack(alignment: .leading, spacing: 18) {
-                        if tab == .auto {
+                        if mode == .routines {
                             if onItsOwn.isEmpty {
-                                emptyLine("Nothing runs on its own.")
+                                emptyLine("No routines yet")
                             } else {
                                 VStack(spacing: 0) {
                                     ForEach(Array(onItsOwn.enumerated()), id: \.element.id) { index, item in
@@ -91,41 +89,6 @@ struct TaskListView: View {
         } else {
             empty
         }
-    }
-
-    /// The two tabs, a segmented control; a dot on Tasks while a task chat needs its owner.
-    private func tabs(needsYou: Bool) -> some View {
-        HStack(spacing: 2) {
-            tabButton(.tasks, title: "Tasks", dot: needsYou)
-            tabButton(.auto, title: "Running on its own", dot: false)
-        }
-        .padding(2)
-        .background(Palette.fill, in: Capsule())
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-    }
-
-    private func tabButton(_ value: Tab, title: LocalizedStringKey, dot: Bool) -> some View {
-        Button { tab = value } label: {
-            Text(title)
-                .romeFont(14, tab == value ? .semibold : .regular)
-                .foregroundStyle(tab == value ? Palette.fg : Palette.sub)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 32)
-                .background { if tab == value { Capsule().fill(Palette.elevated) } }
-                .overlay(alignment: .topTrailing) {
-                    if dot {
-                        Circle().fill(Palette.primaryText).frame(width: 6, height: 6)
-                            .padding(.top, 6).padding(.trailing, 6)
-                            .accessibilityLabel(Text("A task needs you"))
-                    }
-                }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(tab == value ? [.isSelected] : [])
     }
 
     private func emptyLine(_ text: LocalizedStringKey) -> some View {
@@ -163,7 +126,7 @@ struct TaskListView: View {
         case .needsYou: return "Needs you"
         case .active: return "Active"
         case .later: return "Later"
-        case .onItsOwn: return "Running on its own"
+        case .onItsOwn: return "Routines"
         case .ended: return "Ended"
         }
     }
