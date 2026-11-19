@@ -48,6 +48,7 @@ const fakeState: {
   stopCalls: number;
   channels: FakeChat[];
   archivedThreads: FakeChat[];
+  archiveReads: number;
   ready: boolean;
   hidden: string[];
 } = {
@@ -58,6 +59,7 @@ const fakeState: {
   stopCalls: 0,
   channels: [],
   archivedThreads: [],
+  archiveReads: 0,
   ready: true,
   hidden: [],
 };
@@ -99,6 +101,7 @@ rs.mock("../kinds/discord/discord.js", () => ({
       return fakeState.channels;
     }
     async listArchivedThreads() {
+      fakeState.archiveReads++;
       return fakeState.archivedThreads;
     }
     async executeApiRequest(request: ConnectionApiRequest) {
@@ -167,6 +170,7 @@ beforeEach(() => {
   fakeState.stopCalls = 0;
   fakeState.channels = [];
   fakeState.archivedThreads = [];
+  fakeState.archiveReads = 0;
   fakeState.ready = true;
   fakeState.hidden = [];
 });
@@ -389,6 +393,42 @@ describe("discord descriptor shape", () => {
     await expect(directory?.listConversations({ limit: 10 })).rejects.toThrow(
       "Discord is not connected yet",
     );
+  });
+
+  it("pages a listing of archived threads from one read of the archives", async () => {
+    const chat = { name: "general", guildId: "guild-1", guildName: "Rome" };
+    fakeState.channels = [{ ...chat, id: "text-1", type: "text" }];
+    const old = (id: string, name: string) => ({
+      ...chat,
+      id,
+      name,
+      type: "thread" as const,
+      parentId: "text-1",
+      archived: true,
+    });
+    fakeState.archivedThreads = [old("thread-1", "a"), old("thread-2", "b")];
+    const directory = buildTalker().talker.directory;
+
+    const first = await directory?.listConversations({ limit: 2, includeArchived: true });
+    // A rename between pages would shift a fresh read's offsets.
+    fakeState.archivedThreads = [old("thread-1", "a"), old("thread-2", "z")];
+    const second = await directory?.listConversations({
+      limit: 2,
+      includeArchived: true,
+      cursor: first?.nextCursor,
+    });
+
+    expect(
+      [...(first?.conversations ?? []), ...(second?.conversations ?? [])].map(
+        ({ ref }) => ref.chatId,
+      ),
+    ).toEqual(["thread-1", "thread-2", "text-1"]);
+    expect(second?.nextCursor).toBeUndefined();
+    expect(fakeState.archiveReads).toBe(1);
+    // The snapshot ends with its last page.
+    await expect(
+      directory?.listConversations({ limit: 2, includeArchived: true, cursor: first?.nextCursor }),
+    ).rejects.toThrow("This Discord listing has expired");
   });
 
   it("exposes Discord REST through Act", async () => {
