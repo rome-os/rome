@@ -5,7 +5,7 @@
 
 import type { KindMount } from "../../kind-mount.js";
 import { createWechatUserDescriptor } from "./descriptor.js";
-import { wechatAppRoutes } from "./http/wechat-app.js";
+import { type WechatAppRoutesDeps, wechatAppRoutes } from "./http/wechat-app.js";
 import { WechatApp } from "./wechat-app.js";
 import type { WechatUserRuntime } from "./wechat-user.js";
 
@@ -23,6 +23,8 @@ export interface WechatUserDeps {
   /** The client runtime, present only when config `wechatUserEnabled` is on.
    *  The channel list reads the account through the same one. */
   runtime?: WechatUserRuntime;
+  /** Guards the WeChat app routes, so only the guardian drives the client. */
+  guardianOnly: WechatAppRoutesDeps["guardianOnly"];
 }
 
 /**
@@ -37,6 +39,6 @@ export function wechatUser(deps: WechatUserDeps): KindMount {
   const wechatApp = deps.runtime ? new WechatApp(deps.runtime) : null;
   return {
     descriptor: deps.runtime ? createWechatUserDescriptor({ runtime: deps.runtime }) : null,
-    routes: wechatAppRoutes({ wechatApp }),
+    routes: wechatAppRoutes({ wechatApp, guardianOnly: deps.guardianOnly }),
   };
 }

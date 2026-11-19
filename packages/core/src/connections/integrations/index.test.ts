@@ -5,9 +5,31 @@ import {
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
+import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
+import { wechatUser } from "../kinds/wechat-user/index.js";
+import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
+
+/**
+ * Registers what boot registers: the built-in kinds, then each kind the wiring
+ * mounts on its own. A kind that moves to connections/kinds/ joins the list
+ * here too, so the checks over every kind keep covering it.
+ */
+function registerEveryKind(registry: ConnectionRegistry): void {
+  registerBuiltinConnections(registry, {
+    listAgents: () => [],
+  } as unknown as BuiltinConnectionDeps);
+  const mounted = [
+    feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
+    linkedin({} as unknown as LinkedInDescriptorDeps),
+    wechatUser({ runtime: {} as WechatUserRuntime, guardianOnly: (_c, next) => next() }),
+  ];
+  for (const kind of mounted) {
+    if (kind.descriptor) registry.register(kind.descriptor);
+  }
+}
 
 describe("registerBuiltinConnections", () => {
   it("renews through Rome Cloud only for providers Rome Cloud can refresh", async () => {
@@ -42,13 +64,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      listAgents: () => [],
-    } as unknown as BuiltinConnectionDeps);
-    // The kinds the wiring mounts on their own, beside the built-in ones.
-    registry.register(
-      feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps).descriptor!,
-    );
+    registerEveryKind(registry);
 
     const links = Object.fromEntries(
       [...registered.values()]
@@ -88,9 +104,7 @@ describe("registerBuiltinConnections", () => {
         registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
-    registerBuiltinConnections(registry, {
-      listAgents: () => [],
-    } as unknown as BuiltinConnectionDeps);
+    registerEveryKind(registry);
 
     const unnamed = [...registered.values()]
       .filter((descriptor) => !descriptor.accountIdOf)

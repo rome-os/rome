@@ -1,7 +1,10 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { MiddlewareHandler } from "hono";
 import type { RuntimeKit } from "../../types.js";
 import { WECHAT_USER_KIND, wechatUser } from "./index.js";
 import type { WechatUserRuntime } from "./wechat-user.js";
+
+const letIn: MiddlewareHandler = (_c, next) => next();
 
 describe("wechatUser", () => {
   it("gives WeChat personal the client runtime boot shares with the channel list", async () => {
@@ -16,7 +19,7 @@ describe("wechatUser", () => {
     ]);
     const runtime = { bridgeCommand } as unknown as WechatUserRuntime;
 
-    const { descriptor } = wechatUser({ runtime });
+    const { descriptor } = wechatUser({ runtime, guardianOnly: letIn });
 
     const kit = {
       connectionId: "conn-wechat-user",
@@ -35,7 +38,7 @@ describe("wechatUser", () => {
   });
 
   it("offers no WeChat personal connection without a runtime, but still answers the app routes", async () => {
-    const mount = wechatUser({});
+    const mount = wechatUser({ guardianOnly: letIn });
 
     expect(mount.descriptor).toBeNull();
     expect(mount.routes).toBeDefined();

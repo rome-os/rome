@@ -207,7 +207,7 @@ export interface ApiDeps {
   computerUse: Pick<ComputerUseService, "getStatus">;
   /** The kinds of connection the wiring mounts. A kind left out of the list
    *  is left out of Rome. */
-  connectionKinds?: readonly KindMount[];
+  connectionKinds: readonly KindMount[];
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:

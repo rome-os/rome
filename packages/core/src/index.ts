@@ -371,6 +371,7 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import type { KindMount } from "./connections/kind-mount.js";
+import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
@@ -1930,7 +1931,7 @@ async function main() {
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     }),
     // Offers the connection only when config `wechatUserEnabled` is on.
-    wechatUser(wechatUserRuntime ? { runtime: wechatUserRuntime } : {}),
+    wechatUser({ ...(wechatUserRuntime ? { runtime: wechatUserRuntime } : {}), guardianOnly }),
   ];
   for (const kind of connectionKinds) {
     if (kind.descriptor) connectionRegistry.register(kind.descriptor);

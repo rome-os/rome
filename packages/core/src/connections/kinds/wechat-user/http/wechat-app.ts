@@ -5,22 +5,21 @@
 //   POST /api/wechat/app/install  — download the client, then open it
 //   POST /api/wechat/app/start    — open the downloaded client
 
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { type WechatApp, WechatAppNotInstalled } from "../wechat-app.js";
 import { isSameOriginMutationRequest } from "../../../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../../../access/session-actor.js";
 
-/** The WeChat app the routes drive, or null when personal WeChat is off. */
 export interface WechatAppRoutesDeps {
+  /** The WeChat app the routes drive, or null when personal WeChat is off. */
   wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
+  /** Runs before every route, and lets only the guardian through. */
+  guardianOnly: MiddlewareHandler;
 }
 
 export function wechatAppRoutes(deps: WechatAppRoutesDeps): Hono {
   const app = new Hono();
 
-  app.use("/wechat/app/*", async (c, next) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
-      return c.json({ error: "Guardian authentication required" }, 403);
+  app.use("/wechat/app/*", deps.guardianOnly, async (c, next) => {
     if (c.req.method !== "GET" && !isSameOriginMutationRequest(c.req.raw))
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
     await next();

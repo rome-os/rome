@@ -872,6 +872,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
+    connectionKinds: [],
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },

@@ -163,7 +163,7 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  for (const kind of deps.connectionKinds ?? []) {
+  for (const kind of deps.connectionKinds) {
     if (kind.routes) api.route("/", kind.routes);
   }
   api.route("/", feedbackRoutes(deps));
