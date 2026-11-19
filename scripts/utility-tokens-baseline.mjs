@@ -80,12 +80,10 @@ export const BASELINE = {
   },
   "packages/web/src/pages/dev/ConnectionGalleryPage.tsx": { "ring-black/5": 1 },
   "packages/web/src/pages/dev/TypographyPage.tsx": { "md:text-[3.35rem]": 1, "text-[2.65rem]": 1 },
-  "rome_apps/connector/src/web/connect-card.tsx": { "py-1.5": 5, "text-sm": 10, "text-xs": 4 },
+  "rome_apps/connector/src/web/connect-card.tsx": { "text-sm": 3, "text-xs": 4 },
   "rome_apps/connector/src/web/login-card.tsx": {
-    "gap-1.5": 1,
     "mt-0.5": 1,
-    "py-1.5": 4,
-    "text-sm": 7,
+    "text-sm": 2,
     "text-xs": 3,
   },
   "rome_apps/showcases/src/web/components/PresetCard.tsx": {
