@@ -11,12 +11,15 @@ const run = promisify(execFile);
 const git = async (dir, ...args) =>
   (await run("git", ["-C", dir, ...args], { maxBuffer: 64 << 20 })).stdout;
 
-// What Rome Cloud may hold, judged by what each column is. R11's rule: Rome
-// Cloud knows only which workspace goes to which instance. Allowed: the
-// binding, the means of delivering to that instance, and short-lived sign-in
-// attempt state. A Slack token is allowed only in attempt state that is
-// removed once redeemed or swept. Message content and Slack member data are
-// never allowed. A column that fits none of these is not judged.
+// What Rome Cloud may hold. R11's rule: Rome Cloud knows only which workspace
+// goes to which instance. Allowed: the binding, the means of delivering to
+// that instance, and sign-in attempt state. Message content and Slack member
+// data are never allowed, in any table. An attempt table (one with an expiry
+// and attempt state such as `state` or `code_challenge`) is judged by its
+// lifetime, not its column names: every other column in it passes as an
+// attempt field, as long as the product's code clears the sign-in outcome on
+// redemption and deletes expired attempts. Outside attempt tables a Slack
+// token fails, and a column that fits no kind is not judged.
 const KINDS = [
   {
     kind: "message content",
@@ -68,10 +71,18 @@ export async function r11(ctx) {
     const judged = stored.columns.map((c) => judge(c, stored));
     evidence.romeCloudStores = { files: stored.files, columns: judged };
     const bad = judged.filter((c) => c.allowed === false);
-    if (bad.length)
+    // An attempt table whose lifetime fails is named once, not per column.
+    const lifetimes = [
+      ...new Set(
+        bad.filter((c) => c.lifetime).map((c) => `sign-in attempts in ${c.table}: ${c.why}`),
+      ),
+    ];
+    const columns = bad.filter((c) => !c.lifetime).map((c) => `${c.name} (${c.why})`);
+    if (columns.length)
       problems.push(
-        `Rome Cloud stores more than the workspace to instance binding: ${bad.map((c) => `${c.name} (${c.why})`).join(", ")}`,
+        `Rome Cloud stores more than the workspace to instance binding: ${columns.join(", ")}`,
       );
+    problems.push(...lifetimes);
     const unknown = judged.filter((c) => c.allowed === null);
     if (unknown.length)
       unchecked.push(
@@ -193,53 +204,87 @@ async function storedColumns(dir, base) {
   return { files, columns, tables, allAdded };
 }
 
+// A column that may hold the sign-in's outcome: the token, or Slack's answer
+// that carries it.
+const OUTCOME = /token|result|outcome|grant|install|credential/i;
+
+const camel = (name) => name.replace(/_(\w)/g, (_m, c) => c.toUpperCase());
+
 /**
- * Judges one stored column by what it is. A Slack token passes only in a
- * table that also holds sign-in attempt state with an expiry, and that the
- * product's code removes (a delete of its rows, or the token set to null).
+ * How long an attempt table's rows live, from the product's added code: for
+ * each outcome column, whether something clears it (set to null, or the row
+ * deleted outside an expiry sweep), and whether something deletes expired
+ * rows. Null when `table` is no attempt table.
  */
-function judge(column, { columns, tables, allAdded }) {
+function lifetimeOf(table, { columns, tables, allAdded }) {
+  if (!table) return null;
+  const own = columns.filter((c) => c.table === table);
+  const expiry = own.find((c) => /^(expires|expiry)/i.test(c.name));
+  const attempt = own.some((c) => kindOf(c.name).kind === "sign-in attempt" && c !== expiry);
+  if (!expiry || !attempt) return null;
+  const variable = tables.find((x) => x.table === table && x.variable)?.variable;
+  // Each delete of the table's rows, with the text that follows it, so a
+  // sweep (its condition names the expiry) can be told from a redemption.
+  const deletes = [
+    ...allAdded.matchAll(new RegExp(`DELETE\\s+FROM\\s+[\`"]?${table}\\b`, "gi")),
+    ...(variable ? [...allAdded.matchAll(new RegExp(`\\.delete\\(\\s*${variable}\\b`, "g"))] : []),
+  ].map((m) => allAdded.slice(m.index, m.index + 300));
+  const sweeps = deletes.some((d) => /expir/i.test(d));
+  const redeemDeletes = deletes.some((d) => !/expir/i.test(d));
+  const cleared = (name) =>
+    redeemDeletes ||
+    new RegExp(`\\b${name}\\b["'\`]?\\s*(=|:)\\s*null\\b`, "i").test(allAdded) ||
+    new RegExp(`\\b${camel(name)}\\s*:\\s*null\\b`).test(allAdded);
+  const outcomes = own
+    .filter((c) => c !== expiry && OUTCOME.test(c.name))
+    .map((c) => ({ name: c.name, clearedOnRedeem: cleared(c.name) }));
+  return { table, expiry: expiry.name, sweepsExpired: sweeps, outcomes };
+}
+
+/**
+ * Judges one stored column. Message content and member data fail anywhere.
+ * In an attempt table every other column passes when the table's lifetime
+ * holds: its outcome is cleared on redemption and expired rows are deleted.
+ */
+function judge(column, stored) {
   const k = kindOf(column.name);
   const out = { file: column.file, table: column.table, name: column.name, kind: k.kind };
-  if (k.allowed !== "token")
+  if (k.allowed === false) return { ...out, allowed: false, why: k.kind };
+  const life = lifetimeOf(column.table, stored);
+  if (life) {
+    const kept = life.outcomes.filter((o) => !o.clearedOnRedeem).map((o) => o.name);
+    const lifetime = { sweepsExpired: life.sweepsExpired, outcomes: life.outcomes };
+    if (kept.length || !life.sweepsExpired)
+      return {
+        ...out,
+        kind: "sign-in attempt",
+        allowed: false,
+        why: [
+          kept.length &&
+            `the sign-in outcome (${kept.join(", ")}) can remain after redemption: no code clears it`,
+          !life.sweepsExpired && `no code deletes expired ${column.table} rows`,
+        ]
+          .filter(Boolean)
+          .join("; "),
+        lifetime,
+      };
     return {
       ...out,
-      allowed: k.allowed,
-      why: k.allowed === false ? k.kind : undefined,
+      kind: "sign-in attempt",
+      allowed: true,
+      why: "attempt field, held until redeemed or expired",
+      lifetime,
     };
-  const t = column.table;
-  const sameTable = columns.filter((c) => t && c.table === t);
-  const expires = sameTable.some((c) => /^(expires|expiry)/i.test(c.name));
-  const attempt = sameTable.some((c) => kindOf(c.name).kind === "sign-in attempt");
-  const variable = tables.find((x) => x.table === t && x.variable)?.variable;
-  const removals = t
-    ? [
-        new RegExp(`DELETE\\s+FROM\\s+[\`"]?${t}\\b`, "i"),
-        ...(variable ? [new RegExp(`\\.delete\\(\\s*${variable}\\b`)] : []),
-        new RegExp(`\\b${column.name}\\b["'\`]?\\s*(=|:)\\s*null\\b`, "i"),
-        ...(variable
-          ? [
-              new RegExp(
-                `\\b${column.name.replace(/_(\w)/g, (_m, c) => c.toUpperCase())}\\s*:\\s*null\\b`,
-              ),
-            ]
-          : []),
-      ]
-    : [];
-  const removed = removals.some((r) => r.test(allAdded));
-  const held = { attemptState: attempt, expires, removedByCode: removed };
-  if (attempt && expires && removed)
-    return { ...out, allowed: true, why: "held only until redeemed or swept", ...held };
-  return {
-    ...out,
-    allowed: false,
-    why: !t
-      ? "a Slack token in a table the check cannot name"
-      : !attempt || !expires
+  }
+  if (k.allowed === "token")
+    return {
+      ...out,
+      allowed: false,
+      why: column.table
         ? "a Slack token outside expiring sign-in attempt state"
-        : "a Slack token no code removes after redemption",
-    ...held,
-  };
+        : "a Slack token in a table the check cannot name",
+    };
+  return { ...out, allowed: k.allowed };
 }
 
 /** The table and the text inside the outer parentheses of each `CREATE TABLE` in `sql`. */

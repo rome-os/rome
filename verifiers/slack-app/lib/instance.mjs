@@ -39,6 +39,27 @@ export function instance(inst, slackOrigin) {
     }
   }
 
+  /**
+   * The channel connection `connection` backs, from its public view. Rome
+   * names a chat on a channel `channel:<that channel>:<address>`.
+   */
+  async function channelOf(connection) {
+    if (typeof connection !== "string")
+      throw new Error(
+        `the setup on ${inst.name} named no connection id, so the chat Rome recorded cannot be found`,
+      );
+    const path = `/connections/${encodeURIComponent(connection)}`;
+    const res = await call(path);
+    if (!res.ok)
+      throw new Error(`GET ${path} on ${inst.name}: ${res.status} ${JSON.stringify(res.data)}`);
+    const channel = res.data?.connection?.channel;
+    if (!channel)
+      throw new Error(
+        `GET ${path} on ${inst.name} names no channel, so the chat Rome recorded cannot be found`,
+      );
+    return channel;
+  }
+
   return {
     name: inst.name,
     call,
@@ -156,12 +177,14 @@ export function instance(inst, slackOrigin) {
 
     /**
      * The messages Rome recorded as coming in through the Slack direct message
-     * `dm` (its D... id): the content of each inbound entry in the bot chat's
-     * session (role notification or user), oldest first. A 404 throws unless `noneIfMissing`, where it
-     * means this instance never recorded that direct message.
+     * `dm` (its D... id) on `connection`: the content of each inbound entry
+     * in that chat's session (role notification or user), oldest first. The
+     * session is found from the connection's channel, not from `dm` alone. A
+     * 404 throws unless `noneIfMissing`, where it means this instance never
+     * recorded that direct message.
      */
-    async recordedIn(dm, { noneIfMissing = false } = {}) {
-      const session = encodeURIComponent(`channel:${SLACK_KIND}:${dm}`);
+    async recordedIn(dm, { connection, noneIfMissing = false } = {}) {
+      const session = encodeURIComponent(`channel:${await channelOf(connection)}:${dm}`);
       const res = await call(`/sessions/${session}/messages`);
       if (res.status === 404 && noneIfMissing) return [];
       if (!res.ok)

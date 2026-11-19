@@ -5,6 +5,7 @@
 //
 // Usage: node prove.mjs [git ref of the environment, default
 // origin/slack-official-app/environment]. Writes out/proof/summary.md.
+// PROVE_CASES names a subset of cases to run.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -132,6 +133,13 @@ const CASES = [
     what: "every forged event is dropped on the way to Rome Cloud",
   },
   {
+    name: "R7-name",
+    breaks: "R7-name",
+    rule: "R7",
+    result: "not checked",
+    what: "the chat is recorded under a name the connection's view does not lead to",
+  },
+  {
     name: "R7-gateway",
     breaks: "R7-gateway",
     rule: "R7",
@@ -179,7 +187,13 @@ const CASES = [
     name: "R11-token-kept",
     breaks: "R11-token-kept",
     rule: "R11",
-    what: "the sign-in attempt's bot token is never removed after redemption",
+    what: "the sign-in attempt's outcome is never cleared on redemption",
+  },
+  {
+    name: "R11-no-sweep",
+    breaks: "R11-no-sweep",
+    rule: "R11",
+    what: "nothing deletes expired sign-in attempts",
   },
   {
     name: "R11-import",
@@ -210,7 +224,9 @@ const CASES = [
 
 const rows = [];
 let ok = true;
-for (const c of CASES) {
+// PROVE_CASES=good,R7-name runs only the named cases, for a quick re-check.
+const only = (process.env.PROVE_CASES ?? "").split(",").filter(Boolean);
+for (const c of CASES.filter((x) => !only.length || only.includes(x.name))) {
   const work = join(out, c.name);
   const world = spawn(
     process.execPath,

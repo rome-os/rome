@@ -173,22 +173,29 @@ write(
     'ALTER TABLE "slack_bindings" ADD COLUMN "account_instance_id" text;\n',
 );
 // Allowed beside the binding: the means of delivery, and a sign-in attempt
-// that holds the bot token until redeemed and is swept when it expires.
+// like Rome Cloud's: fields that say where to return the browser, and the
+// encrypted outcome, cleared on redemption. Expired attempts are deleted.
+// Broken R11-token-kept never clears the outcome; R11-no-sweep never deletes
+// expired attempts.
 write(
   romeCloud,
   "packages/pantheon/src/db/slack-sign-in.ts",
   "export const slackDelivery = pgTable('slack_delivery', {\n  teamId: text('team_id'),\n  mailboxId: text('mailbox_id'),\n  forwardSecretHash: text('forward_secret_hash'),\n});\n" +
-    "export const slackSignIns = pgTable('slack_sign_ins', {\n  state: text('state'),\n  redirectUri: text('redirect_uri'),\n  codeChallenge: text('code_challenge'),\n  handoff: text('handoff'),\n  botTokenEnc: text('bot_token_enc'),\n  expiresAt: timestamp('expires_at'),\n" +
+    "export const slackSignIns = pgTable('slack_sign_ins', {\n  state: text('state'),\n  instanceState: text('instance_state'),\n  callbackOrigin: text('callback_origin'),\n  redirectUri: text('redirect_uri'),\n  codeChallenge: text('code_challenge'),\n  handoffHash: text('handoff_hash'),\n  result: text('result'),\n  expiresAt: timestamp('expires_at'),\n  consumedAt: timestamp('consumed_at'),\n" +
     (breaks.has("R11-message") ? "  messageText: text('message_text'),\n" : "") +
     (breaks.has("R11-member") ? "  email: text('email'),\n" : "") +
     "});\n",
 );
-if (!breaks.has("R11-token-kept"))
-  write(
-    romeCloud,
-    "packages/pantheon/src/slack/redeem.ts",
-    "export const redeem = (db, id) => db.delete(slackSignIns).where(eq(slackSignIns.handoff, id));\n",
-  );
+write(
+  romeCloud,
+  "packages/pantheon/src/slack/redeem.ts",
+  "export const redeem = (db, hash, now) =>\n  db.update(slackSignIns).set({ consumedAt: now" +
+    (breaks.has("R11-token-kept") ? "" : ", result: null") +
+    " }).where(eq(slackSignIns.handoffHash, hash));\n" +
+    (breaks.has("R11-no-sweep")
+      ? ""
+      : "export const sweep = (db, now) =>\n  db.delete(slackSignIns).where(lt(slackSignIns.expiresAt, now));\n"),
+);
 if (breaks.has("R11-sql"))
   write(
     romeCloud,

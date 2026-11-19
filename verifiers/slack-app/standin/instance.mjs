@@ -7,7 +7,7 @@
 //
 // Env: NAME, PORT, CLOUD, SLACK, SECRET, STATE_FILE, BREAK (comma list).
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { frameSignature } from "./cloud.mjs";
 import { readBody, send, serve } from "./serve.mjs";
@@ -94,7 +94,12 @@ const server = await serve(async (req, res, url) => {
     }
     const grant = await got.json();
     const connectionId = `conn_${rand()}`;
-    db.connections.push({ id: connectionId, team: grant.team, botToken: grant.botToken });
+    db.connections.push({
+      id: connectionId,
+      channel: randomUUID(),
+      team: grant.team,
+      botToken: grant.botToken,
+    });
     db.accounts.push({
       account: { platform: "slack", id: `${grant.team}:${grant.botUserId}` },
       name: `Rome in ${grant.team}`,
@@ -108,10 +113,23 @@ const server = await serve(async (req, res, url) => {
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
   // Like Rome, a Slack direct message with the bot is one session, and its
   // inbound messages are recorded with role "user" once they start a turn.
+  // Its session is named after the connection's channel, which the
+  // connection's view gives. Broken R7-name names it after the connection
+  // kind instead, so the name the view leads to finds nothing.
+  const view = p.match(/^\/api\/connections\/([^/]+)$/);
+  if (view && req.method === "GET") {
+    const conn = db.connections.find((c) => c.id === decodeURIComponent(view[1]));
+    if (!conn) return send(res, 404, { error: "Unknown connection." });
+    return send(res, 200, { connection: { id: conn.id, channel: conn.channel } });
+  }
   const session = p.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (session && req.method === "GET") {
-    const dm = decodeURIComponent(session[1]).match(/^channel:slack_app:(\w+)$/)?.[1];
-    const held = db.messages.filter((m) => m.channel === dm);
+    const [, channel, dm] = decodeURIComponent(session[1]).match(/^channel:([^:]+):(\w+)$/) ?? [];
+    const named = (m) =>
+      breaks.has("R7-name")
+        ? channel === "slack_app"
+        : db.connections.some((c) => c.team === m.team && c.channel === channel);
+    const held = db.messages.filter((m) => m.channel === dm && named(m));
     if (!held.length) return send(res, 404, { error: "Unknown session." });
     return send(
       res,

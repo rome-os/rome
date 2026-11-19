@@ -19,7 +19,7 @@ Every seeded message asks the Concierge something harmless and carries a tag uni
 | R4 | 20 direct messages from the guardian, one at a time, each after the previous one's reply. Each must be answered within `replySeconds`, before the next is sent, and get exactly one reply in the same direct message, no reply may match no message, and the bot may post nowhere else in the workspace. |
 | R7 | 10 direct messages with a bad signature, then one good message to show the path was open. No forged one may get a reply or be recorded in the direct message's session (which must show the good message, or the read proves nothing and R7 is not checked), and nothing but the good message's one reply may follow them anywhere in the workspace; each forged event is sent up to 3 times until Rome Cloud answers it with a status below 500, and R7 is not checked if one never is; the report keeps every delivery status. Then R4's 20 messages from workspace A: the instance bound to workspace B may not record them, post anything in workspace B, observe an account of workspace A, or make any Slack call naming their codes, workspace A, its guardian or the direct message. |
 | R6 | Stops the first instance, sends 20 direct messages, holds the stop for `stopSeconds`, starts it, and wants exactly 20 replies in that direct message after the restart, none while stopped and none anywhere else. |
-| R11 | `git diff <romeCloudBase> -- webhook-relay` in rome-cloud is empty. Each column added under `packages/pantheon` schemas and migrations is judged by what it holds: the binding (team, instance, timestamps), the means of delivery (mailbox id, forward secret) and short-lived sign-in attempt state (state, redirect URI, code challenge, handoff, expiry) pass; message content and Slack member data fail; a Slack token passes only in sign-in attempt state with an expiry that the product's code removes (a delete of its rows, or the token set to null), and fails otherwise; a column it cannot judge leaves R11 not checked. `pnpm lint:imports` passes in rome. No import from `rome_apps` is added under `packages/core/src/connections` against `romeBase` (default `origin/main`); every current one is listed. |
+| R11 | `git diff <romeCloudBase> -- webhook-relay` in rome-cloud is empty. Each column added under `packages/pantheon` schemas and migrations is judged by what it holds. Message content and Slack member data fail in any table. The binding (team, instance, timestamps) and the means of delivery (mailbox id, forward secret) pass. A sign-in attempt table (one with an expiry and attempt state such as `state` or `code_challenge`) is judged by its lifetime, not its column names: all its other columns pass as attempt fields when the product's code clears the sign-in outcome (a column such as `result` or a token) on redemption, by setting it to null or deleting the row, and deletes expired attempts. Otherwise they fail. Outside an attempt table a Slack token fails, and a column it cannot judge leaves R11 not checked. `pnpm lint:imports` passes in rome. No import from `rome_apps` is added under `packages/core/src/connections` against `romeBase` (default `origin/main`); every current one is listed. |
 
 Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, R6. A rule whose setup failed earlier reports "not checked" with the reason.
 
@@ -45,6 +45,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `refuse` | Not a break: the Concierge declines what it was asked, in one reply to each message. Every rule must still pass. |
 | `silent` | The Concierge never replies. |
 | `R7-transport` | Rome Cloud drops every forged event's connection unanswered. R7 must report "not checked", not pass. |
+| `R7-name` | The chat is recorded under a name the connection's view does not lead to. R7 must report "not checked" with the read error. |
 | `R7-gateway` | A gateway answers 502 to every forged event. R7 must report "not checked". |
 | `R7-blind` (with `R7-route`) | The wrong instance answers workspace A's events in its own workspace with a reply naming nothing of A, and records nothing. |
 | `R6-drop5` | 5 of the 20 messages waiting at restart are lost. |
@@ -58,7 +59,8 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `R11-store` | Rome Cloud stores the bot token in the binding. |
 | `R11-message` | Rome Cloud stores message content. |
 | `R11-member` | Rome Cloud stores a Slack member's email. |
-| `R11-token-kept` | The sign-in attempt's bot token is never removed after redemption. |
+| `R11-token-kept` | The sign-in attempt's outcome (it carries the bot token) is never cleared on redemption. |
+| `R11-no-sweep` | Nothing deletes expired sign-in attempts. |
 | `R11-import` | The product adds an import from an app in core's connections. |
 
 ```bash

@@ -107,7 +107,7 @@ export async function r7(ctx) {
     (p) => p.seq <= control.since,
   );
   // The bot chat's own session: the People timeline leaves agent chats out.
-  const recorded = control.channel ? await readable(() => ctx.a.recordedIn(control.channel)) : null;
+  const recorded = control.channel ? await readable(() => ctx.a.recordedIn(control.channel, { connection: ctx.bound.a })) : null;
   // The good message must show in the same read, or an empty read proves
   // nothing about the forged ones.
   const sawGood = recorded?.some((b) => b.includes(code("R7C", 0)));
@@ -161,7 +161,7 @@ export async function r7(ctx) {
     const fromAOnB = accountsB?.filter((id) => id.startsWith(`${ws.id}/`));
     // B has no session for A's direct message unless an event of A reached it.
     const recordedB = await readable(() =>
-      ctx.b.recordedIn(ctx.fromA.channel, { noneIfMissing: true }),
+      ctx.b.recordedIn(ctx.fromA.channel, { connection: ctx.bound.b, noneIfMissing: true }),
     );
     const reachedB =
       recordedB && ctx.fromA.codes.filter((k) => recordedB.some((b) => b.includes(k)));
