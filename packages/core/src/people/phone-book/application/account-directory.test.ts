@@ -1,4 +1,4 @@
-import { chatAddresses, chatMessages, romeSessions } from "../../db/schema.js";
+import { chatAddresses, chatMessages, romeSessions } from "../../../db/schema.js";
 // What the account read asks the triage record for.
 //
 // The triage record is the only source that says an account exists on a channel
@@ -9,10 +9,10 @@ import { chatAddresses, chatMessages, romeSessions } from "../../db/schema.js";
 import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { sentinelLog } from "../../db/schema.js";
-import { SentinelLogRepository } from "../../db/repositories/sentinel-log.js";
-import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
-import { seedBaseline } from "../../test/seeds.js";
+import { sentinelLog } from "../../../db/schema.js";
+import { SentinelLogRepository } from "../../../db/repositories/sentinel-log.js";
+import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
 
 /** A Telegram sender the triage record is the only record of: no address book

@@ -7,7 +7,7 @@
 
 import { type PersonResource, type UpdatePersonRequest } from "@rome/api-types/people";
 import { protectedPersonReason } from "@rome/api-types/persons";
-import type { PeopleRepository } from "../model/people-repository.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
 import { findPerson, readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleUpdateDeps extends PeopleReadDeps {

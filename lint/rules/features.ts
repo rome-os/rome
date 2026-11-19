@@ -49,6 +49,13 @@ function placeOf(path: string): Place | null {
   return { domain, feature: next, index: /^index\.tsx?$/.test(after) };
 }
 
+/** Which folder of a feature a path sits in: application/, http/, actions/, or another. */
+function adapterSide(path: string): { feature: string; side: string } | null {
+  const place = placeOf(path);
+  if (place?.feature == null) return null;
+  return { feature: `${place.domain}/${place.feature}`, side: path.split("/")[2] };
+}
+
 export function isTest(path: string): boolean {
   return /\.test\.tsx?$/.test(path);
 }
@@ -112,6 +119,20 @@ export const featureRules: ImportRule[] = [
     },
   },
   {
+    name: "adapters-import-inward",
+    description:
+      "A feature's use cases in application/ serve apps through http/ and agents through actions/, so application/ imports neither adapter, and neither adapter imports the other.",
+    rejects: (imp) => {
+      if (imp.kind !== "file") return false;
+      const from = adapterSide(imp.from);
+      const to = adapterSide(imp.to);
+      if (from === null || to === null || from.feature !== to.feature) return false;
+      const sides = ["application", "http", "actions"];
+      if (!sides.includes(from.side) || (to.side !== "http" && to.side !== "actions")) return false;
+      return from.side !== to.side;
+    },
+  },
+  {
     name: "hono-stays-in-http",
     description:
       "A feature serves apps through http/ and agents through actions/, both over the same use cases, so in a featured domain only a file in an http/ folder imports hono. Tests may, to mount routes.",
@@ -128,7 +149,7 @@ export const featureRules: ImportRule[] = [
 export const featureCrossings: ListedCrossing[] = [
   {
     rule: "features-import-no-sibling",
-    from: "people/phone-book/resource.ts",
+    from: "people/phone-book/application/resource.ts",
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
     why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",

@@ -44,6 +44,15 @@ function staysWithin(imp: Import, layer: Layer, allowed: Layer[]): boolean | nul
   return to !== null && to.context === from.context && allowed.includes(to.layer);
 }
 
+/** Whether a feature's file imports its featured domain's root or model/, which is the feature's model too. */
+function readsDomainModel(imp: Import): boolean {
+  if (imp.kind !== "file") return false;
+  const from = placeOf(imp.from);
+  const to = placeOf(imp.to);
+  if (from === null || to === null || !from.context.includes("/")) return false;
+  return to.context === from.context.split("/")[0] && to.layer !== "infrastructure";
+}
+
 export const layerRules: ImportRule[] = [
   {
     name: "domain-imports-domain",
@@ -54,8 +63,11 @@ export const layerRules: ImportRule[] = [
   {
     name: "application-imports-inward",
     description:
-      "Use cases depend only on the model. A file in application/ imports only its own context's domain/, application/ and packages.",
-    rejects: (imp) => staysWithin(imp, "application", ["domain", "application"]) === false,
+      "Use cases depend only on the model. A file in application/ imports only its own context's domain/, application/ and packages. A feature's model is also its domain's root and model/, short of infrastructure/. Tests may reach further, to seed and read.",
+    rejects: (imp) =>
+      !isTest(imp.from) &&
+      staysWithin(imp, "application", ["domain", "application"]) === false &&
+      !readsDomainModel(imp),
   },
   {
     name: "infrastructure-imports-inward",
@@ -104,5 +116,82 @@ export const listedCrossings: ListedCrossing[] = [
     to: "drizzle-orm",
     ticket: "ZHA-212",
     why: "The guardian profile renames and creates the guardian's person with its own queries, until it goes through the People repository.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/account-directory.ts",
+    to: "chats/accounts/account-names.ts",
+    ticket: "ZHA-214",
+    why: "The phone book names each account in the directory, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/account-directory.ts",
+    to: "chats/accounts/account-fold.ts",
+    ticket: "ZHA-214",
+    why: "The phone book folds an account's many connections into one entry, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/account-directory.ts",
+    to: "chats/connected-accounts/connected-account.ts",
+    ticket: "ZHA-214",
+    why: "The phone book tells Rome's own accounts apart from other people's, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/account-directory.ts",
+    to: "db/repositories/sentinel-log.ts",
+    ticket: "ZHA-214",
+    why: "The phone book lists the senders the sentinel logged as accounts, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "profile-memory.ts",
+    ticket: "ZHA-214",
+    why: "The phone book points a person at their notes, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "chats/accounts/account-names.ts",
+    ticket: "ZHA-214",
+    why: "The phone book names each linked account, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "chats/connected-accounts/connected-account.ts",
+    ticket: "ZHA-214",
+    why: "The phone book tells Rome's own accounts apart from other people's, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "chats/history/messages.ts",
+    ticket: "ZHA-214",
+    why: "The phone book dates each account by its last message, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "db/index.ts",
+    ticket: "ZHA-214",
+    why: "The phone book reads the message history with the database handle, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "db/repositories/channel-records.ts",
+    ticket: "ZHA-214",
+    why: "The phone book names the sender Rome speaks as on each account, until it reads that through a port.",
+  },
+  {
+    rule: "application-imports-inward",
+    from: "people/phone-book/application/resource.ts",
+    to: "people/person-history/index.ts",
+    ticket: "ZHA-213",
+    why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
   },
 ];

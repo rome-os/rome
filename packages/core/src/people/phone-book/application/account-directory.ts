@@ -19,15 +19,15 @@ import {
   type DirectoryAccount,
 } from "@rome/api-types/people";
 import type { Account } from "@rome-os/app-runtime";
-import type { AccountNames } from "../../chats/accounts/account-names.js";
-import { foldAccounts } from "../../chats/accounts/account-fold.js";
+import type { AccountNames } from "../../../chats/accounts/account-names.js";
+import { foldAccounts } from "../../../chats/accounts/account-fold.js";
 import {
   addressBooks,
   type Channels,
   type PlatformOfChannel,
-} from "../../chats/connected-accounts/connected-account.js";
-import type { PeopleRepository } from "../model/people-repository.js";
-import type { SentinelLogRepository } from "../../db/repositories/sentinel-log.js";
+} from "../../../chats/connected-accounts/connected-account.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import type { SentinelLogRepository } from "../../../db/repositories/sentinel-log.js";
 
 export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds. */

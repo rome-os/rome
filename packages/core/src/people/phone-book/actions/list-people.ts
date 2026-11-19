@@ -4,8 +4,8 @@
 import type { Action } from "@rome-os/app-runtime";
 import { PERSON_BOND_LEVELS, parsePersonFilterLevel } from "@rome/api-types/people";
 import { type OwnerOfChat, runsForGuardian } from "../../actions/guardian-only.js";
-import { listPeople } from "../list.js";
-import type { PeopleReadDeps } from "../resource.js";
+import { listPeople } from "../application/list.js";
+import type { PeopleReadDeps } from "../application/resource.js";
 
 export const LIST_PEOPLE_ACTION = "core:list_people";
 

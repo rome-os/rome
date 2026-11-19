@@ -11,7 +11,7 @@ import type { PhoneBookDeps } from "./deps.js";
 import { phoneBookRoutes } from "./http/index.js";
 
 export type { PhoneBookDeps } from "./deps.js";
-export { readAccountDirectory } from "./account-directory.js";
+export { readAccountDirectory } from "./application/account-directory.js";
 /** The routes alone, for a test that mounts them beside another feature's. */
 export { phoneBookRoutes } from "./http/index.js";
 

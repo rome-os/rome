@@ -2,11 +2,11 @@
 // actions alike. The wiring fills it in.
 
 import type { PeopleRepository } from "../model/people-repository.js";
-import type { AccountDecisionDeps } from "./account-decisions.js";
-import type { PeopleWriteDeps } from "./create.js";
-import type { PeopleDeleteDeps } from "./delete.js";
-import type { PeopleMergeDeps } from "./merge.js";
-import type { PeopleUpdateDeps } from "./update.js";
+import type { AccountDecisionDeps } from "./application/account-decisions.js";
+import type { PeopleWriteDeps } from "./application/create.js";
+import type { PeopleDeleteDeps } from "./application/delete.js";
+import type { PeopleMergeDeps } from "./application/merge.js";
+import type { PeopleUpdateDeps } from "./application/update.js";
 
 export type PhoneBookDeps = PeopleWriteDeps &
   PeopleUpdateDeps &

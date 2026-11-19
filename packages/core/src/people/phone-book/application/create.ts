@@ -11,10 +11,10 @@ import {
   type NewPerson,
   type PersonResource,
 } from "@rome/api-types/people";
-import type { PeopleRepository } from "../model/people-repository.js";
-import { AccountHeldError } from "../model/person.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import { AccountHeldError } from "../../model/person.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
-import { accountOfWire, wireOf } from "../model/wire.js";
+import { accountOfWire, wireOf } from "../../model/wire.js";
 
 export interface PeopleWriteDeps extends PeopleReadDeps {
   peopleRepo: PeopleReadDeps["peopleRepo"] & Pick<PeopleRepository, "create">;

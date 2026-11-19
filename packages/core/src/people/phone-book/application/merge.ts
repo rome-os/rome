@@ -16,8 +16,8 @@
 // for the guardian or the agent to fold in as prose.
 
 import { type PersonResource } from "@rome/api-types/people";
-import type { PeopleRepository } from "../model/people-repository.js";
-import type { MergeRefusal } from "../model/person.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import type { MergeRefusal } from "../../model/person.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleMergeDeps extends PeopleReadDeps {

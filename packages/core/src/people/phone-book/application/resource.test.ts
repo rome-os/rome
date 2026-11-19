@@ -2,20 +2,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import * as pathsModule from "../../paths.js" with { rstest: "importActual" };
+import * as pathsModule from "../../../paths.js" with { rstest: "importActual" };
 
 // The profile dir the memory tree hangs off, redirected at a temp dir so a
 // profile written here is this test's and not the machine's.
 const mockPaths = rs.hoisted(() => ({ profileDir: "/tmp/rome-test-profile" }));
 
-rs.mock("../../paths.js", () => ({
+rs.mock("../../../paths.js", () => ({
   ...pathsModule,
   getProfileDir: rs.fn(() => mockPaths.profileDir),
 }));
 
 import { readPeople } from "./resource.js";
-import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
-import { seedBaseline } from "../../test/seeds.js";
+import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
 
 // What `PersonResource.memoryPath` answers: the profile Rome wrote about
 // someone, addressed the way the memory file browser addresses it. The rest of

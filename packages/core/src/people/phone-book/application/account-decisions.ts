@@ -20,8 +20,8 @@ import {
   type LinkConflict,
 } from "@rome/api-types/people";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
-import type { PeopleRepository } from "../model/people-repository.js";
-import { accountOfWire, type WireAccount } from "../model/wire.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import { accountOfWire, type WireAccount } from "../../model/wire.js";
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
   peopleRepo: AccountDirectoryDeps["peopleRepo"] & Pick<PeopleRepository, "dismiss" | "restore">;

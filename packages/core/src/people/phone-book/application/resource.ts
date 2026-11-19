@@ -9,16 +9,20 @@ import { readdir } from "node:fs/promises";
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
-import { getRelationshipDir, personProfilePath, RELATIONSHIP_DIR } from "../../profile-memory.js";
-import type { AccountNames } from "../../chats/accounts/account-names.js";
+import {
+  getRelationshipDir,
+  personProfilePath,
+  RELATIONSHIP_DIR,
+} from "../../../profile-memory.js";
+import type { AccountNames } from "../../../chats/accounts/account-names.js";
 import type {
   Channels,
   PlatformOfChannel,
-} from "../../chats/connected-accounts/connected-account.js";
-import type { MessageAccount } from "../../chats/history/messages.js";
-import type { DrizzleDb } from "../../db/index.js";
-import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
-import type { PeopleRepository } from "../model/people-repository.js";
+} from "../../../chats/connected-accounts/connected-account.js";
+import type { MessageAccount } from "../../../chats/history/messages.js";
+import type { DrizzleDb } from "../../../db/index.js";
+import type { ChannelRecordsRepository } from "../../../db/repositories/channel-records.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
 import {
   asGuardian,
   assignAccountHeads,
@@ -28,7 +32,7 @@ import {
   type SendDeps,
   sendersOf,
   timelineAccounts,
-} from "../person-history/index.js";
+} from "../../person-history/index.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;

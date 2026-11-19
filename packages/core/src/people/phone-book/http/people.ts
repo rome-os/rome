@@ -8,12 +8,12 @@ import {
   parseUpdatePersonRequest,
   type PeopleList,
 } from "@rome/api-types/people";
-import { createPerson } from "../create.js";
-import { deletePerson } from "../delete.js";
-import { listPeople } from "../list.js";
-import { mergePeople } from "../merge.js";
-import { findPerson, readPerson } from "../resource.js";
-import { updatePerson } from "../update.js";
+import { createPerson } from "../application/create.js";
+import { deletePerson } from "../application/delete.js";
+import { listPeople } from "../application/list.js";
+import { mergePeople } from "../application/merge.js";
+import { findPerson, readPerson } from "../application/resource.js";
+import { updatePerson } from "../application/update.js";
 import { accountOfWire, wireOf } from "../../model/wire.js";
 import type { PhoneBookDeps } from "../deps.js";
 
