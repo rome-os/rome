@@ -197,7 +197,10 @@ fi
 
 # ------------------------------------------------------------ Rome Cloud
 log "starting Rome Cloud, the relay, the fake Slack and the model proxy"
-compose up -d postgres fake-slack relay pantheon-net pantheon model-proxy
+compose up -d postgres pantheon-net
+# Recreated on every start: their code lives in the scratch worktree, which a
+# new rome-cloud commit replaces under them.
+compose up -d --force-recreate fake-slack relay pantheon model-proxy
 
 wait_for() { # <what> <seconds> <command...>
   local what="$1" limit="$2"
