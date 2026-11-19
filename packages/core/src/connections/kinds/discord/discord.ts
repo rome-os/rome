@@ -507,6 +507,8 @@ export class DiscordAdapter {
         chats.map((chat) => ({ id: chat.id, holdsPrivateThreads: chat.type === "text" })),
       );
     } finally {
+      // A failed listing leaves the other readers mid-chat: they stop too.
+      controller.abort();
       this.activeApiRequestControllers.delete(controller);
     }
     return threads.flatMap((thread) => {

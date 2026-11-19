@@ -248,4 +248,27 @@ describe("DiscordAdapter REST broker capability", () => {
     // One request from each of the four readers, and none after the stop.
     expect(routes).toHaveLength(4);
   });
+
+  it("stops the other readers of an archive scan when one chat's read fails", async () => {
+    const signals: AbortSignal[] = [];
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        if (request.signal) signals.push(request.signal);
+        if (request.fullRoute.startsWith("/channels/1/")) {
+          throw Object.assign(new Error("Internal Server Error"), { status: 500 });
+        }
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = { name: "general", guildId: "9", guildName: "Rome", type: "text" as const };
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { ...chat, id: "1" },
+      { ...chat, id: "2" },
+    ]);
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow("Discord chat 1");
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
 });
