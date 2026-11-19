@@ -172,6 +172,11 @@ export async function currentSessionActor(): Promise<SessionActor | undefined> {
   return sessionActorContext.getStore()?.get();
 }
 
+/** Whether the request being served is the guardian's own session. */
+export async function isGuardianSession(): Promise<boolean> {
+  return (await currentSessionActor())?.kind === "guardian";
+}
+
 /**
  * Run `fn` outside any ambient session-actor scope. Async resources capture
  * the ALS context they are *created* in, so a timer registered while handling
