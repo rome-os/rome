@@ -31,6 +31,31 @@
           "id": "CA0000GENRL",
           "name": "general",
           "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"]
+        },
+        {
+          "id": "CA0000NEWS1",
+          "name": "news",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"],
+          "seed_messages": [
+            {
+              "ts": "1700000000.000100",
+              "user": "UA0000BOB01",
+              "text": "The tangerine kiosk opens on Fridays."
+            }
+          ]
+        },
+        {
+          "id": "CA0000QUIET",
+          "name": "quiet",
+          "bot_member": false,
+          "members": ["UA0000BOB01", "UA0000CARA1"],
+          "seed_messages": [
+            {
+              "ts": "1700000000.000200",
+              "user": "UA0000CARA1",
+              "text": "The marmalade vault code stays here."
+            }
+          ]
         }
       ]
     },

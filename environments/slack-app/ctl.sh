@@ -5,6 +5,7 @@
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
+#   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
 #   environments/slack-app/ctl.sh logs <service>
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
@@ -24,7 +25,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | token-file) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -40,7 +41,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,14p' "$0"
+    sed -n '2,15p' "$0"
     exit 2
     ;;
 esac
@@ -74,6 +75,22 @@ case "$action" in
     ;;
   logs)
     compose logs --no-color --tail 500 "$svc"
+    ;;
+  token-file)
+    # Whether the instance holds the Slack token file the connector reads, and
+    # the last 6 characters of each token in it. The tokens stay inside.
+    compose exec -T "$svc" node -e '
+      const fs = require("fs");
+      const path = process.env.ROME_SLACK_TOKEN_FILE?.trim() || "/run/rome/slack-oauth-token";
+      const tail = (t) => (typeof t === "string" && t ? t.slice(-6) : null);
+      let out = { instance: process.argv[1], path, exists: false };
+      try {
+        const j = JSON.parse(fs.readFileSync(path, "utf8"));
+        out = { ...out, exists: true, bot_token_tail: tail(j.botToken), user_token_tail: tail(j.userToken), team_id: j.teamId ?? null };
+      } catch (e) {
+        if (e.code !== "ENOENT") out = { ...out, exists: true, error: String(e.message) };
+      }
+      console.log(JSON.stringify(out));' "$svc"
     ;;
   wipe-chat)
     conversation="${3:-}"

@@ -39,7 +39,13 @@ const instance = (name, port, guardian) => ({
     // Append a Slack conversation id. Stops the instance, wipes Rome's copy of
     // that chat, starts it again; exit 0 when no copy is left.
     wipe_chat: [ctl, "wipe-chat", name],
+    // Whether /run/rome/slack-oauth-token exists in the instance, and the last
+    // 6 characters of the bot and user tokens it holds.
+    token_file: [ctl, "token-file", name],
   },
+  // The instance's own listing of recent action executions (name, status),
+  // newest first; the guardian's cookies sign it. ?actionName=&limit=
+  action_executions: `http://127.0.0.1:${port}/api/action-executions`,
 });
 
 const fakeSlack = `http://127.0.0.1:${e.FAKE_SLACK_PORT}`;
@@ -96,6 +102,20 @@ console.log(
             ]),
           ),
           groups: (w.channels ?? []).map((c) => c.id),
+          // Groups the bot is not in, and what was said in each group before
+          // the app arrived.
+          groups_without_bot: (w.channels ?? [])
+            .filter((c) => c.bot_member === false)
+            .map((c) => c.id),
+          seeded_messages: (w.channels ?? []).flatMap((c) =>
+            (c.seed_messages ?? []).map((m) => ({
+              channel: c.id,
+              bot_member: c.bot_member !== false,
+              ts: m.ts,
+              user: m.user,
+              text: m.text,
+            })),
+          ),
         })),
       },
       rome_cloud: {

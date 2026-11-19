@@ -514,3 +514,42 @@ test("the connector's Web API methods check scope and token type, and every call
   assert.equal(refused.needed, "users:read");
   await ctl("/config", { history_limit: true });
 });
+
+test("a group the bot is not in: no reads, posts or search hits from outside it", async () => {
+  await ctl("/config", { history_limit: false });
+  const granted = await install(
+    A,
+    GUARDIAN,
+    `${APP_SCOPES},channels:read,channels:history`,
+    "search:read",
+  );
+  const bot = granted.access_token;
+  const user = granted.authed_user.access_token;
+  assert.equal(
+    (await api("conversations.history", { channel: "CA0000QUIET" }, bot)).error,
+    "not_in_channel",
+  );
+  assert.equal(
+    (await api("chat.postMessage", { channel: "CA0000QUIET", text: "hi" }, bot)).error,
+    "not_in_channel",
+  );
+  const news = await api("conversations.history", { channel: "CA0000NEWS1" }, bot);
+  assert.deepEqual(
+    news.messages.map((m) => m.text),
+    ["The tangerine kiosk opens on Fridays."],
+  );
+  const listed = await api("conversations.list", {}, bot);
+  const member = Object.fromEntries(listed.channels.map((c) => [c.id, c.is_member]));
+  assert.equal(member.CA0000QUIET, false);
+  assert.equal(member.CA0000NEWS1, true);
+  // The guardian is not in the group either, so their search never finds it.
+  assert.equal((await api("search.messages", { query: "marmalade" }, user)).messages.total, 0);
+  assert.equal((await api("search.messages", { query: "tangerine" }, user)).messages.total, 1);
+  // chat:write.public lets a bot post in a public group it is not in.
+  const wider = await install(A, GUARDIAN, `${APP_SCOPES},chat:write.public`);
+  assert.equal(
+    (await api("chat.postMessage", { channel: "CA0000QUIET", text: "hi" }, wider.access_token)).ok,
+    true,
+  );
+  await ctl("/config", { history_limit: true });
+});

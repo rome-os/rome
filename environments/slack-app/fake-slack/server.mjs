@@ -102,6 +102,7 @@ export class FakeSlack {
     if (config.stateFile && existsSync(config.stateFile)) {
       this.state = { ...emptyState(), ...JSON.parse(readFileSync(config.stateFile, "utf8")) };
     }
+    this.seedHistory();
     this.saveTimer = null;
     this.rateLimited = new Map(); // "teamId method" -> time of the last call let through
   }
@@ -315,6 +316,33 @@ export class FakeSlack {
     return kept;
   }
 
+  /** Puts each group's `seed_messages` from the workspaces file in its
+   *  history, once: what was said there before the app arrived. */
+  seedHistory() {
+    for (const w of this.workspaces.values()) {
+      for (const c of w.channels ?? []) {
+        for (const m of c.seed_messages ?? []) {
+          const list = (this.state.history[`${w.id}/${c.id}`] ??= []);
+          if (list.some((x) => x.ts === m.ts)) continue;
+          list.push({ type: "message", user: m.user, text: m.text, ts: m.ts, team: w.id });
+          list.sort((x, y) => Number(x.ts) - Number(y.ts));
+        }
+      }
+    }
+  }
+
+  /** Whether the bot is in a group. A direct message with the bot always has it. */
+  botInConversation(teamId, channel) {
+    if (channel.startsWith("D")) return true;
+    return this.group(teamId, channel)?.bot_member !== false;
+  }
+
+  /** Slack's refusal when a bot token acts in a group the bot is not in. */
+  notInChannel(info, channel) {
+    if (info.kind !== "bot" || this.botInConversation(info.teamId, channel)) return null;
+    return { ok: false, error: "not_in_channel" };
+  }
+
   historyOf(teamId, channel) {
     return this.state.history[`${teamId}/${channel}`] ?? [];
   }
@@ -382,7 +410,7 @@ export class FakeSlack {
           is_im: false,
           is_private: isPrivate,
           is_archived: false,
-          is_member: info.kind === "bot" || members.includes(info.userId),
+          is_member: info.kind === "bot" ? c.bot_member !== false : members.includes(info.userId),
           num_members: members.length,
         },
       };
@@ -782,7 +810,17 @@ const API_METHODS = {
     } else if (!this.group(info.teamId, channel)) {
       return { ok: false, error: "channel_not_found" };
     } else {
-      channel = this.group(info.teamId, channel).id;
+      const group = this.group(info.teamId, channel);
+      channel = group.id;
+      // A bot posts where it is not a member only to a public group, and
+      // only with chat:write.public.
+      const isPublic = !group.is_private && !group.id.startsWith("G");
+      if (
+        this.notInChannel(info, channel) &&
+        !(isPublic && granted(this, info).includes("chat:write.public"))
+      ) {
+        return { ok: false, error: "not_in_channel" };
+      }
     }
     const install = this.state.installs[info.teamId];
     const ts = this.nextTs();
@@ -854,6 +892,8 @@ const API_METHODS = {
     if (!channel) return { ok: false, error: "channel_not_found" };
     const denied = missingScope(this, info, this.historyScope(info.teamId, channel));
     if (denied) return denied;
+    const outside = this.notInChannel(info, channel);
+    if (outside) return outside;
     const window = timeWindow(args);
     const top = this.historyOf(info.teamId, channel)
       .filter((m) => !m.thread_ts || m.thread_ts === m.ts)
@@ -867,6 +907,8 @@ const API_METHODS = {
     if (!channel) return { ok: false, error: "channel_not_found" };
     const denied = missingScope(this, info, this.historyScope(info.teamId, channel));
     if (denied) return denied;
+    const outside = this.notInChannel(info, channel);
+    if (outside) return outside;
     if (!args.ts) return { ok: false, error: "invalid_arguments" };
     const all = this.historyOf(info.teamId, channel);
     const parent = all.find((m) => m.ts === args.ts);
@@ -943,6 +985,8 @@ const API_METHODS = {
     const channel = this.resolveConversation(info.teamId, args.channel);
     if (!channel) return { ok: false, error: "channel_not_found" };
     if (!args.name) return { ok: false, error: "invalid_name" };
+    const outside = this.notInChannel(info, channel);
+    if (outside) return outside;
     const message = this.historyOf(info.teamId, channel).find((m) => m.ts === args.timestamp);
     if (!message) return { ok: false, error: "message_not_found" };
     const name = String(args.name).replace(/^:|:$/g, "");
@@ -965,6 +1009,8 @@ const API_METHODS = {
     const w = this.workspace(info.teamId);
     const matches = [];
     for (const c of this.conversationsOf(info)) {
+      // Slack searches only what the searching user can see.
+      if (c.type !== "im" && !c.channel.is_member) continue;
       for (const m of this.historyOf(info.teamId, c.channel.id)) {
         const text = String(m.text ?? "").toLowerCase();
         if (!words.every((word) => text.includes(word))) continue;
@@ -1456,6 +1502,7 @@ async function control(slack, method, url, body) {
         // Kept, so a message after a reset never takes an earlier one's ts.
         tsCounter: slack.state.tsCounter,
       };
+      slack.seedHistory();
       slack.rateLimited.clear();
       slack.save();
       return { ok: true, seq: slack.state.seq };
