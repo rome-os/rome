@@ -77,6 +77,9 @@ export interface SlackMessageCopy {
   timelineAfter(teamId: string, channelId: string, ts: string): TimelineRow | null;
   /** Whether the copy holds a timeline message of the chat newer than `ts`. */
   holdsNewer(teamId: string, channelId: string, ts: string): boolean;
+  /** Forget any link across `ts`: a timeline message the connection did not
+   *  keep sits there, so the messages either side of it are not adjacent. */
+  unlinkAcross(teamId: string, channelId: string, ts: string): void;
   /** Take message `ts` of chat `channelId` as edited to `text`. */
   edit(teamId: string, channelId: string, ts: string, text: string): void;
   /** Forget message `ts` of chat `channelId`, which was deleted. The timeline
@@ -339,6 +342,27 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       )
       .get();
     return row ? timelineRowOf(row) : null;
+  }
+
+  unlinkAcross(teamId: string, channelId: string, ts: string): void {
+    const inChat = and(
+      eq(slackAppTimeline.teamId, teamId),
+      eq(slackAppTimeline.channelId, channelId),
+    );
+    this.db.transaction((tx) => {
+      const across = tx
+        .select({ ts: slackAppTimeline.ts, prevTs: slackAppTimeline.prevTs })
+        .from(slackAppTimeline)
+        .where(and(inChat, gt(slackAppTimeline.ts, ts), isNotNull(slackAppTimeline.prevTs)))
+        .all()
+        .filter((row) => compareTs(row.ts, ts) > 0 && compareTs(row.prevTs as string, ts) < 0);
+      for (const row of across) {
+        tx.update(slackAppTimeline)
+          .set({ prevTs: null })
+          .where(and(inChat, eq(slackAppTimeline.ts, row.ts)))
+          .run();
+      }
+    });
   }
 
   holdsNewer(teamId: string, channelId: string, ts: string): boolean {
