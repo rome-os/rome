@@ -2,7 +2,11 @@
 // packages/core/src. The domain root, meaning the files directly in it plus
 // model/ and infrastructure/, is the service the domain provides. Each feature
 // is a subfolder with an index.ts, and leaving a feature out is skipping its
-// route mount. rules/layers.ts holds a feature to entering through index.ts. The layout: DEVELOPMENT.md, "Established patterns".
+// route mount. Connections lays out each kind of connection the same way under
+// connections/kinds/, so the rules here judge a kind as they judge a feature. A
+// kind is not a feature of Connections, but leaving it out is likewise skipping
+// its mount. rules/layers.ts holds a feature or kind to entering through
+// index.ts. The layout: DEVELOPMENT.md, "Established patterns".
 
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
@@ -10,6 +14,38 @@ import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
   people: ["guardian-profile", "link-code", "person-history", "phone-book"],
 };
+
+/** Kinds of connection laid out as mountable parts under connections/kinds/. A kind joins this list when it moves to the layout. */
+export const CONNECTION_KINDS: readonly string[] = [];
+
+/**
+ * Every domain with mountable parts, mapped to each part's folder under the
+ * domain: a feature such as `phone-book`, or a kind of connection such as
+ * `kinds/discord`.
+ */
+export const MOUNTED_PARTS: Record<string, readonly string[]> = {
+  ...FEATURED_DOMAINS,
+  connections: CONNECTION_KINDS.map((kind) => `kinds/${kind}`),
+};
+
+/**
+ * The domain and part of a src-relative path, with the path's remaining
+ * segments, or null outside every domain in MOUNTED_PARTS. `part` is null for
+ * the domain root. partOf("connections/kinds/discord/http/x.ts") returns
+ * { domain: "connections", part: "kinds/discord", rest: ["http", "x.ts"] }
+ * once discord is listed.
+ */
+export function partOf(
+  path: string,
+  mounted: Record<string, readonly string[]> = MOUNTED_PARTS,
+): { domain: string; part: string | null; rest: string[] } | null {
+  const [domain, ...below] = path.split("/");
+  const parts = mounted[domain];
+  if (parts === undefined) return null;
+  const inside = below.join("/");
+  const part = parts.find((p) => inside.startsWith(`${p}/`)) ?? null;
+  return { domain, part, rest: part === null ? below : below.slice(part.split("/").length) };
+}
 
 /**
  * Files outside a domain that may use one of its features, by feature, each
@@ -39,21 +75,23 @@ type Place =
   | { domain: string; feature: string; index: boolean }
   | { domain: string; feature: null; index: false };
 
-/** Where a src-relative path sits in a featured domain, or null outside every one. */
+/** Where a src-relative path sits in a domain with mountable parts, or null outside every one. */
 function placeOf(path: string): Place | null {
-  const [domain, next, after] = path.split("/");
-  const features = FEATURED_DOMAINS[domain];
-  if (features === undefined || next === undefined) return null;
-  if (!features.includes(next) || after === undefined)
-    return { domain, feature: null, index: false };
-  return { domain, feature: next, index: /^index\.tsx?$/.test(after) };
+  const found = partOf(path);
+  if (found === null || found.rest.length === 0) return null;
+  if (found.part === null) return { domain: found.domain, feature: null, index: false };
+  return {
+    domain: found.domain,
+    feature: found.part,
+    index: found.rest.length === 1 && /^index\.tsx?$/.test(found.rest[0]),
+  };
 }
 
 /** Which folder of a feature a path sits in: application/, http/, actions/, or another. */
 function adapterSide(path: string): { feature: string; side: string } | null {
-  const place = placeOf(path);
-  if (place?.feature == null) return null;
-  return { feature: `${place.domain}/${place.feature}`, side: path.split("/")[2] };
+  const found = partOf(path);
+  if (found?.part == null) return null;
+  return { feature: `${found.domain}/${found.part}`, side: found.rest[0] };
 }
 
 export function isTest(path: string): boolean {
@@ -135,11 +173,11 @@ export const featureRules: ImportRule[] = [
   {
     name: "hono-stays-in-http",
     description:
-      "A feature serves apps through http/ and agents through actions/, both over the same use cases, so in a featured domain only a file in an http/ folder imports hono. Tests may, to mount routes.",
+      "A feature or kind of connection serves apps through http/ and agents through actions/, both over the same use cases, so in a featured domain or Connections only a file in an http/ folder imports hono. Tests may, to mount routes.",
     rejects: (imp) =>
       imp.kind === "package" &&
       (imp.specifier === "hono" || imp.specifier.startsWith("hono/")) &&
-      FEATURED_DOMAINS[imp.from.split("/")[0]] !== undefined &&
+      MOUNTED_PARTS[imp.from.split("/")[0]] !== undefined &&
       !imp.from.split("/").includes("http") &&
       !isTest(imp.from),
   },
@@ -153,5 +191,47 @@ export const featureCrossings: ListedCrossing[] = [
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
     why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/app-connection-access.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "What an app may do through a connection is read from the database, until that goes through a repository in connections/infrastructure/.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/chat-addresses.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "The adapters' address store reads and writes chat addresses, until it moves into connections/infrastructure/.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/chat-ids.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "The chat and message ids each platform keeps are read from the database, until that goes through a repository in connections/infrastructure/.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/device/repository.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "The device connections repository reads and writes its tables, until it moves into connections/infrastructure/.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/oauth/rome-cloud-oauth.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "A Rome Cloud sign-in keeps its pending attempts in the database, until that goes through a repository in connections/infrastructure/.",
+  },
+  {
+    rule: "drizzle-stays-in-infrastructure",
+    from: "connections/repository-db.ts",
+    to: "drizzle-orm",
+    ticket: "ZHA-217",
+    why: "The connections repository keeps connections and their grants in the database, until it moves into connections/infrastructure/.",
   },
 ];

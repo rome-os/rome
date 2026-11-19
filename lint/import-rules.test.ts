@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
 import { contextRules } from "./rules/contexts.js";
-import { featureRules } from "./rules/features.js";
+import { featureRules, partOf } from "./rules/features.js";
 import { layerRules } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 
@@ -219,5 +219,32 @@ describe("checkImports with the feature rules", () => {
       "people/phone-book/list.ts:1 → hono [hono-stays-in-http]",
       "people/read.ts:1 → ./phone-book/index.js (people/phone-book/index.ts) [domain-root-imports-no-feature]",
     ]);
+  });
+});
+
+describe("partOf", () => {
+  const mounted = { people: ["phone-book"], connections: ["kinds/discord"] };
+
+  it("places a file of a kind of connection one folder down, and the rest of Connections at its root", () => {
+    expect(partOf("connections/kinds/discord/http/routes.ts", mounted)).toEqual({
+      domain: "connections",
+      part: "kinds/discord",
+      rest: ["http", "routes.ts"],
+    });
+    expect(partOf("connections/kinds/slack/slack.ts", mounted)).toEqual({
+      domain: "connections",
+      part: null,
+      rest: ["kinds", "slack", "slack.ts"],
+    });
+    expect(partOf("connections/registry.ts", mounted)?.part).toBeNull();
+  });
+
+  it("places a feature directly under its domain, and nothing outside a listed domain", () => {
+    expect(partOf("people/phone-book/index.ts", mounted)).toEqual({
+      domain: "people",
+      part: "phone-book",
+      rest: ["index.ts"],
+    });
+    expect(partOf("chats/send.ts", mounted)).toBeNull();
   });
 });

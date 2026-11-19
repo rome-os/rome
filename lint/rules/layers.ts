@@ -1,11 +1,13 @@
 // Import rules for bounded contexts laid out as `<context>/<layer>` under
 // packages/core/src. In a domain laid out as `<domain>/<feature>`
 // (rules/features.ts), each feature and the domain root take the layers one
-// level down: `<domain>/<feature>/<layer>` and `<domain>/<layer>`. The layout:
-// DEVELOPMENT.md, "Established patterns".
+// level down: `<domain>/<feature>/<layer>` and `<domain>/<layer>`. A kind of
+// connection takes them inside its own folder,
+// `connections/kinds/<kind>/<layer>`. The layout: DEVELOPMENT.md, "Established
+// patterns".
 
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
-import { FEATURED_DOMAINS, isTest } from "./features.js";
+import { isTest, partOf } from "./features.js";
 
 /** Folders directly under src/ laid out as `<context>/<layer>`. A context adopting the layout joins this list. */
 export const LAYERED_CONTEXTS = ["agent"];
@@ -19,11 +21,10 @@ type Layer = "domain" | "application" | "infrastructure" | "index" | "other";
  */
 function placeOf(path: string): { context: string; layer: Layer } | null {
   const parts = path.split("/");
-  const features = FEATURED_DOMAINS[parts[0]];
-  const depth = features?.includes(parts[1]) ? 2 : 1;
-  if (!LAYERED_CONTEXTS.includes(parts[0]) && features === undefined) return null;
-  const context = parts.slice(0, depth).join("/");
-  const next = parts[depth];
+  const mounted = partOf(path);
+  if (!LAYERED_CONTEXTS.includes(parts[0]) && mounted === null) return null;
+  const context = mounted?.part != null ? `${mounted.domain}/${mounted.part}` : parts[0];
+  const next = parts[context.split("/").length];
   if (next === undefined) return null;
   if (next === "domain" || next === "application" || next === "infrastructure")
     return { context, layer: next };
@@ -95,7 +96,7 @@ export const layerRules: ImportRule[] = [
   {
     name: "drizzle-stays-in-infrastructure",
     description:
-      "Only a repository talks to the database. In a layered context or a featured domain, a file outside an infrastructure/ folder never imports drizzle-orm. Tests may, to seed and read tables.",
+      "Only a repository talks to the database. In a layered context, a featured domain or Connections, a file outside an infrastructure/ folder never imports drizzle-orm. Tests may, to seed and read tables.",
     rejects: (imp) =>
       imp.kind === "package" &&
       (imp.specifier === "drizzle-orm" || imp.specifier.startsWith("drizzle-orm/")) &&
