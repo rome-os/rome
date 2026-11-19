@@ -217,4 +217,35 @@ describe("DiscordAdapter REST broker capability", () => {
       },
     });
   });
+
+  it("stops an archive scan, and sends it no further requests, when the credential epoch stops", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const routes: string[] = [];
+    let signal: AbortSignal | undefined;
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        routes.push(request.fullRoute);
+        signal = request.signal;
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = { name: "general", guildId: "9", guildName: "Rome", type: "text" as const };
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { ...chat, id: "1" },
+      { ...chat, id: "2" },
+      { ...chat, id: "3" },
+      { ...chat, id: "4" },
+      { ...chat, id: "5" },
+    ]);
+
+    const scan = adapter.listArchivedThreads();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await adapter.stop();
+
+    await expect(scan).rejects.toThrow("Discord connection stopped during the listing");
+    expect(signal?.aborted).toBe(true);
+    // One request from each of the four readers, and none after the stop.
+    expect(routes).toHaveLength(4);
+  });
 });
