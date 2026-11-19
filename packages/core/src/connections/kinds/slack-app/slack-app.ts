@@ -50,6 +50,8 @@ const RENEW_RETRY_MS = HOUR_MS;
 const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
 /** How long a history read waits for its authors' names. */
 const NAME_WAIT_MS = 3_000;
+/** How long after a removal event the token it outlived is looked at again. */
+const REMOVAL_RECHECK_MS = 30_000;
 
 /** Slack's allowance for conversations.history: one request a minute in a
  *  workspace, of at most 15 messages. */
@@ -131,6 +133,8 @@ export class SlackAppAdapter {
   private appId: string | undefined;
   private mailbox: SlackAppMailbox;
   private renewTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A second look at the token after a removal event it outlived. */
+  private recheckTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly readGate: SlackReadGate;
   /** The newest message heard in each direct message since the drain opened. */
   private readonly heads = new Map<string, string>();
@@ -271,6 +275,7 @@ export class SlackAppAdapter {
   async stop(): Promise<void> {
     this.abort.abort(new Error("Slack app adapter stopped."));
     this.clearRenewal();
+    this.clearRecheck();
     const drain = this.drain;
     this.drain = null;
     await drain?.stop();
@@ -446,15 +451,39 @@ export class SlackAppAdapter {
       event.type === "app_uninstalled" ||
       (event.type === "tokens_revoked" && !!event.tokens?.bot?.includes(this.config.botUserId));
     if (!removed) return;
+    if (await this.tokenRefused()) return;
+    log.info("slack app's token outlived a removal event", { event: event.type });
+    // Slack may take back the token a moment after it reports the removal,
+    // so the token is looked at once more. One that still works is a token
+    // minted since, by connecting again, which the event came before.
+    if (this.recheckTimer) return;
+    const signal = this.abort.signal;
+    this.recheckTimer = setTimeout(() => {
+      this.recheckTimer = null;
+      if (!signal.aborted) void this.tokenRefused();
+    }, REMOVAL_RECHECK_MS);
+    this.recheckTimer.unref?.();
+  }
+
+  /** Whether Slack refuses the token now, reported as the connection's fault. */
+  private async tokenRefused(): Promise<boolean> {
+    const signal = this.abort.signal;
     try {
-      await this.config.api.authTest(this.config.botToken, this.abort.signal);
-      log.info("slack app's token outlived a removal event", { event: event.type });
+      await this.config.api.authTest(this.config.botToken, signal);
+      return false;
     } catch (error) {
+      if (signal.aborted) return true;
       this.config.onFault?.({
         kind: isSlackCredentialError(error) ? "credential" : "transport",
         cause: error,
       });
+      return true;
     }
+  }
+
+  private clearRecheck(): void {
+    if (this.recheckTimer) clearTimeout(this.recheckTimer);
+    this.recheckTimer = null;
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {

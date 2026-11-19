@@ -1,5 +1,5 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   FORWARD_SIGNATURE_HEADER,
   FORWARD_TEAM_HEADER,
@@ -210,6 +210,57 @@ describe("Slack app direct messages (R4)", () => {
     });
     await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
     expect(faults).toEqual(["credential"]);
+  });
+
+  describe("looks at the token again 30 s after a removal event it outlived", () => {
+    beforeEach(() => {
+      rs.useFakeTimers();
+    });
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    it("reports the removal once Slack refuses the token", async () => {
+      const mailbox = fakeMailbox();
+      const api = fakeApi();
+      const { adapter: a, faults } = adapter(mailbox, api);
+      await a.start();
+      // Slack reports the removal before it takes back the token.
+      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
+      expect(faults).toEqual([]);
+      api.authTest = rs.fn(async () => {
+        throw new SlackApiError("token_revoked");
+      });
+      await rs.advanceTimersByTimeAsync(30_000);
+      expect(faults).toEqual(["credential"]);
+    });
+
+    it("stays working while the token does", async () => {
+      const mailbox = fakeMailbox();
+      const api = fakeApi();
+      const { adapter: a, faults } = adapter(mailbox, api);
+      await a.start();
+      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
+      const checks = (api.authTest as ReturnType<typeof rs.fn>).mock.calls.length;
+      await rs.advanceTimersByTimeAsync(30_000);
+      expect((api.authTest as ReturnType<typeof rs.fn>).mock.calls.length).toBe(checks + 1);
+      expect(faults).toEqual([]);
+    });
+
+    it("looks no more once the connection stops", async () => {
+      const mailbox = fakeMailbox();
+      const api = fakeApi();
+      const { adapter: a, faults } = adapter(mailbox, api);
+      await a.start();
+      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
+      await a.stop();
+      api.authTest = rs.fn(async () => {
+        throw new SlackApiError("token_revoked");
+      });
+      await rs.advanceTimersByTimeAsync(30_000);
+      expect(api.authTest).not.toHaveBeenCalled();
+      expect(faults).toEqual([]);
+    });
   });
 
   it("keeps a connection whose new token outlived a removal that waited in the mailbox, and hears what follows", async () => {
