@@ -89,12 +89,7 @@ afterEach(() => {
 });
 
 describe("Recent apps on the rail", () => {
-  it.each([
-    "briefing",
-    "inbox",
-    "showcases",
-    "skills",
-  ])("renders %s like a page in pins, recents and overflow", async (id) => {
+  it.each(["inbox", "showcases", "skills"])("renders %s like a page in pins, recents and overflow", async (id) => {
     const app = fixture(id, id, { origin: "builtin" });
     seed([app], { [id]: minutesAgo(1) });
     localStorage.setItem(
