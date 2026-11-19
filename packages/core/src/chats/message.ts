@@ -3,6 +3,7 @@
 // in chats/storage/; this is the shape the concierge's task chat reads.
 
 import type { Account, Attachment } from "@rome-os/app-runtime";
+import type { AgentCardPart } from "./agent-card.js";
 import type { Place } from "./place.js";
 
 /** Every message goes one way: to Rome, or from Rome. */
@@ -53,4 +54,7 @@ export interface SaidMessage {
   /** The chat thread the message is in (docs/domains/chats.md#chat-thread):
    *  the key of its root, its own key when it replies to nothing. */
   readonly chatThread?: string;
+  /** The agent card the message holds (docs/domains/chats.md#agent-card).
+   *  Its plain-text line is the body's text. */
+  readonly card?: AgentCardPart;
 }

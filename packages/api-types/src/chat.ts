@@ -47,6 +47,13 @@ export type WebchatTextPart = Extract<MessagePart, { type: "text" }> & {
   forwardedFrom?: ForwardedFrom;
 };
 
+/** A widget part as WebChat stores it. `forwardedFrom` is set only on an
+ * agent card forwarded as it is from a task chat, the card that chat's final
+ * answer showed (docs/domains/chats.md#agent-card). */
+export type WebchatWidgetPart = Extract<MessagePart, { type: "widget" }> & {
+  forwardedFrom?: ForwardedFrom;
+};
+
 /** A card for a chat that another agent's tool started on the guardian's
  * behalf. The chat's live status is read from the chat itself. */
 export interface TaskChatPart {
@@ -202,8 +209,9 @@ export interface QuotaSwitchPart {
 
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
-  | Exclude<MessagePart, { type: "text" }>
+  | Exclude<MessagePart, { type: "text" | "widget" }>
   | WebchatTextPart
+  | WebchatWidgetPart
   | StoredErrorPart
   | TaskChatPart
   | ConnectCardPart

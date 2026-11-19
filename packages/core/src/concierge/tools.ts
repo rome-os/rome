@@ -17,6 +17,7 @@ import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/ap
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import {
+  type AgentCardPart,
   agentCardPart,
   SHOW_CARD_INPUT_SCHEMA,
   SHOW_CARD_TOOL,
@@ -45,11 +46,12 @@ import {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import { finalAnswer, hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 import {
   CONCLUSION_MAX_CHARS,
   NOTHING_TO_REPORT,
   conclusionOf,
+  hasNothingToReport,
   withoutMarkers,
 } from "./conclusion.js";
 import { automatedSource } from "../webchat/automated-source.js";
@@ -785,6 +787,41 @@ export async function buildConciergeTools(
     return id;
   };
 
+  // The card a task chat's final answer showed, forwarded as it is: a message
+  // of its own, as every card is, replying to the task's start message with
+  // no quote. Rome issues it again here, checked as `show_card` checks one,
+  // so it never rests on the task chat's stored part. An intro goes before it
+  // as a message of its own.
+  const forwardCard = async (card: AgentCardPart, from: ForwardedFrom, intro?: string) => {
+    const { chatId, turnId } = currentTurn();
+    const issued = agentCardPart(card.ui, card.text, `forward-${randomUUID()}`);
+    if ("problems" in issued) {
+      throw new Error(
+        `The task chat's card cannot be shown: ${issued.problems.join("; ")}. Nothing was sent. Forward without the card: report the outcome yourself with say, replying to the task's start message.`,
+      );
+    }
+    const task = await tasks.repo.findBySession(from.chatId);
+    const start = await startMessageOf(task?.id);
+    if (intro) await addMessage([{ type: "text", content: intro }], start);
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [{ ...issued.part, forwardedFrom: from }],
+      start ? { replyTo: start.id } : {},
+    );
+    if (task) {
+      service.noteSaid(task.id);
+      await writeStatus("settle", () => tasks.resultSaid(task.id));
+    }
+    await settleAnswered(undefined, task?.id);
+    said(
+      chatId,
+      turnId,
+      intro ?? (task?.title ? `${task.title}: ${pushBody(issued.part.text)}` : issued.part.text),
+    );
+    return id;
+  };
+
   // How `chat_card` shows task chat `chatId`: its question or approval while
   // the task waits on the guardian; else its task card. An expired question
   // takes no answer, so it is the task card's then.
@@ -1511,6 +1548,7 @@ export async function buildConciergeTools(
       name: "chat_forward",
       description:
         "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. " +
+        "When that answer showed a card (a `card:` line in its task event), the card itself goes, as it is, or its text where this chat cannot show cards. " +
         `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in a few sentences with the key specifics. ` +
         "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
         "The task chat must be one started from this Concierge chat. The message replies to the task's start message, and the task's row then points to it.",
@@ -1531,16 +1569,30 @@ export async function buildConciergeTools(
         runTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireOwnTaskChat(chatId);
-          const [latest] = await latestSaid(
-            messages,
-            taskChatPlace(chatId),
-            1,
-            (message) => message.direction === "fromRome" && hasText(message),
-          );
-          const answer = latest?.body.text ?? null;
+          const final = await finalAnswer(messages, taskChatPlace(chatId));
+          const answer = final?.answer.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           currentTurn();
           const full = args.full === true;
+          const from = { chatId, title: chat.name };
+          // A card the final answer showed goes as it is, where this chat
+          // draws cards, and as its plain-text line where it cannot. Only a
+          // conclusion with no news holds it back.
+          const card = full ? undefined : final?.card;
+          if (card && !hasNothingToReport(answer)) {
+            const intro = optionalString(args, "intro");
+            const messageId =
+              context.widgets === "card"
+                ? await forwardCard(card, from, intro)
+                : await forward(card.text, from, intro);
+            const task = await pointTaskTo(chatId, messageId);
+            return {
+              forwarded: context.widgets === "card" ? "card" : "card_text",
+              forwardedChars: card.text.length,
+              messageId,
+              ...(task ? { taskAnchored: task.id } : {}),
+            };
+          }
           // Everything that can refuse comes before anything is said.
           if (full && !(await guardianStartedTurn())) {
             throw new Error(
@@ -1563,11 +1615,7 @@ export async function buildConciergeTools(
             );
           }
           const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);
-          const messageId = await forward(
-            text,
-            { chatId, title: chat.name },
-            optionalString(args, "intro"),
-          );
+          const messageId = await forward(text, from, optionalString(args, "intro"));
           const task = await pointTaskTo(chatId, messageId);
           return {
             forwarded: full ? "full" : "conclusion",

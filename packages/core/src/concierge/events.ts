@@ -15,7 +15,7 @@ import {
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
+import { finalAnswer, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
 import { stopHolds, type TaskStatusView } from "./tasks.js";
@@ -230,12 +230,10 @@ export async function renderTaskEvents(
     }
     const wantsReply = caughtUp || changes.some((kind) => kind.startsWith("turn_end"));
     if (row.sessionId && wantsReply) {
-      const [latest] = await latestSaid(
-        messages,
-        taskChatPlace(row.sessionId),
-        1,
-        (message) => message.direction === "fromRome" && hasText(message),
-      );
+      const final = await finalAnswer(messages, taskChatPlace(row.sessionId));
+      const latest = final?.answer;
+      // A card the answer showed is what `chat_forward` sends, as it is.
+      if (final?.card) lines.push(`card: ${final.card.text.replace(/\s+/g, " ")}`);
       if (latest) {
         // The task's own conclusion comes whole, so the Concierge can tell
         // whether the task waits on the guardian. The rest keeps its excerpt.

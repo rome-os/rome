@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessagePage } from "../chats/message-repository.js";
+import { agentCardIn } from "../chats/agent-card.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
@@ -123,13 +124,18 @@ const textOf = (content: string): string => {
 /** The rows of a chat as a read of its place pages them, newest back. */
 function pageOf(rows: Row[], place: Place, end: number, limit: number): MessagePage {
   const start = Math.max(0, end - limit);
-  const messages: SaidMessage[] = rows.slice(start, end).map((row, index) => ({
-    id: row.id ?? `row-${start + index}`,
-    direction: row.role === "assistant" ? "fromRome" : "toRome",
-    place,
-    body: { text: textOf(row.content) },
-    at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
-  }));
+  const messages: SaidMessage[] = rows.slice(start, end).map((row, index) => {
+    // As Chats reads it: a card's plain-text line is its message's text.
+    const card = agentCardIn(JSON.parse(row.content) as unknown[]);
+    return {
+      id: row.id ?? `row-${start + index}`,
+      direction: row.role === "assistant" ? "fromRome" : "toRome",
+      place,
+      body: { text: card ? card.text : textOf(row.content) },
+      at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
+      ...(card ? { card } : {}),
+    };
+  });
   return {
     messages,
     older: start > 0 ? { at: messages[0].at, id: String(start) } : null,
@@ -2054,6 +2060,157 @@ describe("Concierge tools", () => {
       expect(result).toMatchObject({ forwarded: "full", forwardedChars: DETAILS.length });
     });
 
+    describe("a card the final answer showed", () => {
+      const HEALTH = {
+        components: [
+          { id: "root", component: "Row", children: ["sleep", "hr"] },
+          {
+            id: "sleep",
+            component: "Stat",
+            label: "Sleep",
+            value: 6.1,
+            unit: "h",
+            range: { low: 7, high: 9 },
+          },
+          {
+            id: "hr",
+            component: "Stat",
+            label: "Resting HR",
+            value: 58,
+            unit: "bpm",
+            range: { low: 50, high: 65 },
+          },
+        ],
+      };
+      const LINE = "Sleep 6.1 h (usual 7–9), resting HR 58 bpm (usual 50–65).";
+      const cardRow = (ui: unknown = HEALTH) => ({
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "widget", toolUseId: "task-call-1", appId: "core", text: LINE, ui },
+        ]),
+      });
+      /** A task chat whose final answer showed the card, then wrote `answer`. */
+      const withCard = async (answer = concluded("Your daily health summary.")) => {
+        const s = setup();
+        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+        s.messages.get("task-1")?.push(cardRow(), {
+          role: "assistant",
+          content: JSON.stringify([{ type: "text", content: answer }]),
+        });
+        return s;
+      };
+
+      it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
+        const s = await withCard();
+        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+        expect(result).toMatchObject({ forwarded: "card", forwardedChars: LINE.length });
+        const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
+        const [part, ...rest] = JSON.parse(row?.content ?? "[]");
+        expect(rest).toEqual([]);
+        expect(part).toMatchObject({
+          type: "widget",
+          appId: "core",
+          text: LINE,
+          ui: HEALTH,
+          forwardedFrom: { chatId: "task-1", title: "Health" },
+        });
+        expect(part.toolUseId).not.toBe("task-call-1");
+        expect(row?.replyTo).toBe("ack-1");
+        expect(
+          await s.taskRepo.getWithChat(result.taskAnchored)?.then((r) => r?.sourceMessageId),
+        ).toBe(result.messageId);
+      });
+
+      it("finds the card when it came after the answer in the same turn", async () => {
+        const s = setup();
+        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+        s.messages.get("task-1")?.push(
+          {
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: concluded("Summary.") }]),
+          },
+          cardRow(),
+        );
+        expect(text(await s.tool("chat_forward", { chatId: "task-1" })).forwarded).toBe("card");
+      });
+
+      it("sends an intro as a message of its own before the card", async () => {
+        const s = await withCard();
+        await s.tool("chat_forward", { chatId: "task-1", intro: "Today's numbers" });
+        expect(
+          stored(s)
+            .slice(-2)
+            .map((parts) => parts.map((part: { type: string }) => part.type)),
+        ).toEqual([["reply_to", "text"], ["widget"]]);
+      });
+
+      it("forwards the card's text where this chat cannot show cards", async () => {
+        const s = await withCard();
+        s.drawWidgets("plain_text");
+        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+        expect(result.forwarded).toBe("card_text");
+        expect(stored(s).at(-1)).toEqual([
+          ACK_QUOTE,
+          {
+            type: "text",
+            content: LINE,
+            format: "long",
+            forwardedFrom: { chatId: "task-1", title: "Health" },
+          },
+        ]);
+      });
+
+      it("never forwards a card an earlier turn showed", async () => {
+        const s = await withCard();
+        s.messages.get("task-1")?.push(
+          {
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: "And the steps?" }]),
+          },
+          {
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: concluded("8,000 steps.") }]),
+          },
+        );
+        const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+        expect(result.forwarded).toBe("conclusion");
+        expect(stored(s).at(-1).at(-1).content).toBe("8,000 steps.");
+      });
+
+      it("holds the card back when the conclusion has nothing to report", async () => {
+        const s = await withCard(concluded(NOTHING_TO_REPORT));
+        const result = await s.tool("chat_forward", { chatId: "task-1" });
+        expect(result.isError).toBe(true);
+        expect(
+          stored(s)
+            .flat()
+            .some((part: { type: string }) => part.type === "widget"),
+        ).toBe(false);
+      });
+
+      it("refuses a card that no longer passes the check, and sends nothing", async () => {
+        const s = setup();
+        await s.tool("chat_start", { title: "Health", brief: "Daily health summary" });
+        s.messages
+          .get("task-1")
+          ?.push(cardRow({ components: [{ id: "root", component: "Button", label: "Go" }] }), {
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: concluded("Summary.") }]),
+          });
+        const before = stored(s).length;
+        const result = await s.tool("chat_forward", { chatId: "task-1" });
+        expect(result.isError).toBe(true);
+        expect(stored(s)).toHaveLength(before);
+      });
+
+      it("sends the whole answer, not the card, when full is set", async () => {
+        const s = await withCard();
+        guardianAsked(s);
+        const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
+        expect(result.forwarded).toBe("full");
+      });
+    });
+
     it("describes itself as conclusion-first, with an explicit full flag", async () => {
       const s = setup();
       const tools = await buildConciergeTools(s.service, s.context());
@@ -3081,6 +3238,30 @@ describe("Concierge events", () => {
     expect(prompt).toContain(`\nconclusion: ${question}\n`);
     expect(prompt).toContain(`\nreply: ${"y".repeat(400)}${leftOut(1_300)}${"y".repeat(300)}\n`);
     expect(prompt).not.toContain("rome:conclusion");
+  });
+
+  it("tells the Concierge the answer showed a card, by the card's plain-text line", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s, concluded("Your daily health summary."));
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([
+        {
+          type: "widget",
+          toolUseId: "c1",
+          appId: "core",
+          text: "Sleep 6.1 h\n(usual 7–9)",
+          ui: { components: [{ id: "root", component: "Text", text: "Sleep" }] },
+        },
+      ]),
+    });
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    rs.useRealTimers();
+    const prompt = s.backendTurns[0].prompt;
+    expect(prompt).toContain("\ncard: Sleep 6.1 h (usual 7–9)\n");
+    expect(prompt).toContain("\nconclusion: Your daily health summary.\n");
   });
 
   it("gives only the conclusion when it is all the answer holds", async () => {

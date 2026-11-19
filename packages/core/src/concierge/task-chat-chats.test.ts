@@ -3,7 +3,13 @@ import type { ChatRef } from "../chats/storage/place.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
-import { chatsTaskChatMessages, hasText, latestSaid, taskChatPlace } from "./task-chat.js";
+import {
+  chatsTaskChatMessages,
+  finalAnswer,
+  hasText,
+  latestSaid,
+  taskChatPlace,
+} from "./task-chat.js";
 
 // A task chat read from Chats, the way Concierge reads it: chat_read's latest
 // messages, and the latest answer chat_forward and the task events quote.
@@ -89,6 +95,52 @@ describe("chatsTaskChatMessages", () => {
       ["follow-up", "toRome"],
     ]);
     expect((await latestAnswer())?.body.text).toBe("3 options");
+  });
+
+  describe("finalAnswer", () => {
+    const agentCard = (text: string) => ({
+      type: "widget",
+      toolUseId: `call-${text}`,
+      appId: "core",
+      text,
+      ui: { components: [{ id: "root", component: "Text", text }] },
+    });
+    const final = () => finalAnswer(messages(), taskChatPlace("task-1"));
+
+    it("gives the answer with the card its turn showed, which is never the answer itself", async () => {
+      say("q", 1, false, [text("Daily summary")]);
+      say("card", 2, true, [agentCard("Sleep 6.1 h")]);
+      say("a", 3, true, [text("Your summary.")]);
+
+      const found = await final();
+      expect(found?.answer.id).toBe("a");
+      expect(found?.card).toMatchObject({ appId: "core", text: "Sleep 6.1 h" });
+    });
+
+    it("takes a card said after the answer in the same turn, but no other turn's", async () => {
+      say("q", 1, false, [text("Daily summary")]);
+      say("old-card", 2, true, [agentCard("Yesterday")]);
+      say("old", 3, true, [text("Yesterday's summary.")]);
+      say("q2", 4, false, [text("Again")]);
+      say("a", 5, true, [text("Today's summary.")]);
+      say("card", 6, true, [agentCard("Today")]);
+      say("q3", 7, false, [text("And tomorrow?")]);
+      say("running", 8, true, [agentCard("Not yet")]);
+
+      const found = await final();
+      expect(found?.answer.id).toBe("a");
+      expect(found?.card?.text).toBe("Today");
+    });
+
+    it("gives no card for an answer that showed none, nor for an app's card", async () => {
+      say("q", 1, false, [text("Weather")]);
+      say("w", 2, true, [{ ...agentCard("Sunny"), appId: "weather" }]);
+      say("a", 3, true, [text("Sunny.")]);
+
+      const found = await final();
+      expect(found?.answer.id).toBe("a");
+      expect(found?.card).toBeUndefined();
+    });
   });
 
   it("reads nothing for a chat Chats does not hold", async () => {
