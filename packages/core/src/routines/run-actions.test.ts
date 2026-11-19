@@ -115,6 +115,13 @@ describe("core:routine_runs_list", () => {
       error: 'No routine found with id "nope". Use system:search_routine to find the right id.',
     });
   });
+
+  it("names the field to pass when the id comes under another name", async () => {
+    expect(await list({ id: "a-routine" })).toEqual({
+      status: "error",
+      error: "Pass the routine's id as routineId. Find it with system:search_routine.",
+    });
+  });
 });
 
 describe("core:routine_run_read", () => {
