@@ -224,7 +224,7 @@ describe("createChannelsService", () => {
 
     expect(chats.map((chat) => chat.displayName)).toEqual(["a", "b"]);
     expect(listConversations).toHaveBeenLastCalledWith({
-      limit: 1000,
+      limit: 10_000,
       cursor: "next",
       includeTopics: true,
       includeArchived: true,

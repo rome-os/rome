@@ -104,8 +104,10 @@ export class AccountNotHeld extends Error {
   }
 }
 
-/** How many chats one page of a listing asks a Connection for. */
-const CHAT_PAGE = 1_000;
+/** How many chats one page of a listing asks a Connection for: as many as
+ *  a directory answers at once, so a listing that reads a platform's archive
+ *  reads it once, not once per page. */
+const CHAT_PAGE = 10_000;
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
