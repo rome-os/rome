@@ -375,3 +375,49 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     expect(syncGithubShellIntegrationForProvider).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /oauth/:provider/start — a kind Rome no longer offers", () => {
+  const startRedirect = async () =>
+    (await import("../../connections/oauth/rome-cloud-oauth.js"))
+      .createRomeCloudOAuthStartRedirect as unknown as ReturnType<typeof rs.fn>;
+
+  beforeEach(async () => {
+    (await startRedirect()).mockResolvedValue("https://rome-cloud.example/authorize");
+    resolveGuardianSession.mockResolvedValue({ userId: "guardian-1", via: "cookie" });
+  });
+  afterEach(() => {
+    resolveGuardianSession.mockReset();
+    resolveGuardianSession.mockResolvedValue(null);
+  });
+
+  const start = (registry: ConnectionRegistry, query = "") =>
+    new Hono().route("/", oauthRoutes(makeDeps(registry))).request(`/oauth/slack/start${query}`);
+
+  it("sends no one to Slack for a new connection, and names where to connect instead", async () => {
+    const res = await start(makeRegistry());
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain(
+      "Connect Slack in Settings › Connections, under Slack",
+    );
+    expect(await startRedirect()).not.toHaveBeenCalled();
+  });
+
+  it("refuses a signed-out start that did not ask to sign in", async () => {
+    resolveGuardianSession.mockResolvedValue(null);
+    expect((await start(makeRegistry())).status).toBe(409);
+  });
+
+  it("starts a fix of the connection Rome holds, and a start asked for as a sign-in", async () => {
+    const ledger = makeLedger();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({ ...SLACK_REDEEMED, intent: "connect" });
+    expect((await postRedeem(makeDeps(makeRegistry(ledger, { offerSlack: true })))).status).toBe(
+      200,
+    );
+    const holding = makeRegistry(ledger);
+    await holding.load();
+
+    expect((await start(holding)).status).toBe(303);
+    expect((await start(makeRegistry(), "?intent=sign-in")).status).toBe(303);
+  });
+});
