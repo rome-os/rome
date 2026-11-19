@@ -118,6 +118,7 @@ const CASES = [
     what: "the Concierge never attempts any Slack operation",
   },
   { name: "R10-two-entries", breaks: "R10-two-entries", rule: "R10", what: "Connect offers Slack bot beside Slack" },
+  { name: "R10-page-twice", breaks: "R10-page-twice", rule: "R10", what: "the Connections page shows the official Slack entry twice" },
   { name: "R10-bot-connects", breaks: "R10-bot-connects", rule: "R10", what: "a new slack_bot setup can still start" },
   { name: "R10-oauth-connects", breaks: "R10-oauth-connects", rule: "R10", what: "the old OAuth start still sends the guardian to Slack" },
   { name: "R10-restart-loses", breaks: "R10-restart-loses", rule: "R10", what: "the old connections stop working after a restart" },

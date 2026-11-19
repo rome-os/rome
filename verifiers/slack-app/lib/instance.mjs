@@ -12,6 +12,8 @@ const SLACK_KIND = "slack_app";
 
 /** Wraps instance `inst` from env.json. */
 export function instance(inst, slackOrigin) {
+  // The dashboard's Concierge chat; replaced by a made one if it is missing.
+  let conciergeChat = "concierge";
   const api = inst.api.replace(/\/$/, "");
   const origin = new URL(api).origin;
   // Rome refuses a mutation that does not come from its own origin, as the
@@ -136,6 +138,57 @@ export function instance(inst, slackOrigin) {
       });
       const last = stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
       return JSON.parse(last);
+    },
+
+    /**
+     * Asks the Concierge in the dashboard's own chat, as the guardian
+     * (`POST /chat/sessions/concierge/turns`), and returns the text of its
+     * replies once they stop changing, with {chat, turnId, at}. Reads the
+     * chat through `GET /chat/sessions/{id}/messages`.
+     */
+    async askDashboard(text, { timeoutMs = 180_000, settleMs = 5_000 } = {}) {
+      let chat = conciergeChat;
+      let sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
+      if (sent.status === 404) {
+        const made = await call("/chat/sessions", { method: "POST", body: { agentName: "core:concierge" } });
+        chat = conciergeChat = made.data?.id ?? made.data?.session?.id ?? chat;
+        sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
+      }
+      const at = Date.now();
+      if (!sent.ok) return { chat, at, error: `POST /chat/sessions/${chat}/turns: ${sent.status} ${JSON.stringify(sent.data)}`, reply: "" };
+      const turnId = sent.data?.turnId ?? null;
+      const textOf = (m) => {
+        const c = m?.content;
+        if (typeof c === "string") return c;
+        if (Array.isArray(c)) {
+          const parts = c.filter((p) => p?.type === "text" || typeof p === "string");
+          if (parts.length) return parts.map((p) => (typeof p === "string" ? p : (p.text ?? p.content ?? ""))).join("\n");
+        }
+        return typeof m?.text === "string" ? m.text : JSON.stringify(c ?? "");
+      };
+      const replies = async () => {
+        const res = await call(`/chat/sessions/${chat}/messages`);
+        const list = Array.isArray(res.data) ? res.data : (res.data?.messages ?? []);
+        // Ours is the last user message carrying the text; replies follow it.
+        let mine = -1;
+        list.forEach((m, i) => {
+          if (m.role === "user" && (textOf(m).includes(text) || (turnId && m.turnId === turnId))) mine = i;
+        });
+        if (mine < 0) return [];
+        return list.slice(mine + 1).filter((m) => m.role === "assistant").map(textOf);
+      };
+      let last = "";
+      let stableSince = null;
+      while (Date.now() - at < timeoutMs) {
+        await sleep(1000);
+        const now = (await replies()).join("\n");
+        if (!now) continue;
+        if (now !== last) {
+          last = now;
+          stableSince = Date.now();
+        } else if (Date.now() - stableSince >= settleMs) break;
+      }
+      return { chat, at, turnId, reply: last };
     },
 
     /** Whether the environment can wipe Rome's copy of one chat. */

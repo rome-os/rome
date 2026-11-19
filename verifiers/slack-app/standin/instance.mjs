@@ -150,8 +150,9 @@ const server = await serve(async (req, res, url) => {
   // R10: the Connect picker, one Slack entry among placeholders (id null).
   // Broken R10-two-entries also offers slack_bot.
   if (p === "/api/connections" && req.method === "GET") {
+    // The official kind shows once: connected, else as its placeholder.
     const placeholders = [
-      { id: null, connectionKind: "slack_app", label: "Slack" },
+      ...(db.connections.length ? [] : [{ id: null, connectionKind: "slack_app", label: "Slack" }]),
       { id: null, connectionKind: "discord", label: "Discord" },
       ...(breaks.has("R10-two-entries") ? [{ id: null, connectionKind: "slack_bot", label: "Slack bot" }] : []),
     ];
@@ -162,20 +163,37 @@ const server = await serve(async (req, res, url) => {
     return send(res, 200, { connections: [...held, ...placeholders] });
   }
   if (p === "/settings/connections") {
+    // Each entry's label on its own line, as the dashboard's list shows it.
     const entries = [
       "Slack",
+      ...(db.old ?? []).map((c) => (c.kind === "slack_bot" ? "Slack bot (Socket Mode)" : "Slack (OAuth)")),
       "Discord",
       ...(breaks.has("R10-two-entries") ? ["Slack bot"] : []),
+      ...(breaks.has("R10-page-twice") ? ["Slack"] : []),
     ];
     return send(
       res,
       200,
       `<!doctype html><html><body><h1>Connections</h1><ul>${entries
-        .map((e) => `<li><button>Connect ${e}</button></li>`)
+        .map((e) => `<li><div>${e}</div><button>Open</button></li>`)
         .join("")}</ul></body></html>`,
       "text/html",
     );
   }
+  // The dashboard's chat with the Concierge, where its actions run.
+  if (p === "/api/chat/sessions/concierge/turns" && req.method === "POST") {
+    const { text } = JSON.parse(await readBody(req));
+    const conn = db.connections[0];
+    const reply = (conn && (await act(conn, text ?? "", null))) ?? "Sure, happy to help with that.";
+    db.webchat = [
+      ...(db.webchat ?? []),
+      { id: rand(), role: "user", content: text },
+      { id: rand(), role: "assistant", content: reply },
+    ];
+    save();
+    return send(res, 200, { turnId: rand(), disposition: "started", sessionId: "concierge" });
+  }
+  if (p === "/api/chat/sessions/concierge/messages") return send(res, 200, db.webchat ?? []);
   // The old kinds cannot be newly connected. Broken R10-bot-connects lets a
   // slack_bot setup start; R10-oauth-connects sends the OAuth start on to
   // Slack; R10-reconnect allows both once one was disconnected.

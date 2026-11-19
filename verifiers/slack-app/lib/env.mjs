@@ -93,6 +93,11 @@ function fromEnvironment(raw) {
       romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },
+    // R9's existing tests run in the environment's image of the product
+    // commit, the file paths appended.
+    r9: raw.product_tests ? { testCommand: raw.product_tests, appendFiles: true } : undefined,
+    // R10's browser: a Playwright server, and the client folder to load.
+    browser: raw.browser,
     romeCloud: { query: raw.rome_cloud?.query },
     instances: (raw.instances ?? []).map((i) => ({
       name: i.name,

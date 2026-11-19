@@ -60,13 +60,24 @@ export async function existingTests(env) {
   evidence.changedAssertions = removed;
   evidence.deletedFiles = deleted;
 
-  const argv = env.r9?.testCommand ?? [
-    "bash",
-    "-c",
-    `cd packages/core && ../../scripts/test-env.sh rstest ${CONNECTOR_SLACK_TESTS.map((f) => `../../${f}`).join(" ")}`,
-  ];
+  // The environment's command, with the files appended, else rstest through
+  // packages/core.
+  const argv = env.r9?.testCommand
+    ? [...env.r9.testCommand, ...(env.r9.appendFiles ? CONNECTOR_SLACK_TESTS : [])]
+    : [
+        "bash",
+        "-c",
+        `cd packages/core && ../../scripts/test-env.sh rstest ${CONNECTOR_SLACK_TESTS.map((f) => `../../${f}`).join(" ")}`,
+      ];
   const run = await runCommand(argv, dir, 15 * 60_000);
   evidence.run = { argv, exit: run.code, tail: run.output.split("\n").slice(-30) };
+  // A runner that could not start ran no test: not checked, never a fail.
+  if (run.code === 127 || run.code === 126 || run.code === -1 || /command not found|ENOENT/.test(run.output.slice(-2000)) && !/Tests\s+\d+/.test(run.output))
+    return {
+      ok: null,
+      reason: `the tests did not run (exit ${run.code}: ${run.output.trim().split("\n").at(-1)?.slice(0, 160) ?? ""}), an environment fault`,
+      evidence,
+    };
   const counts = run.output.match(/Tests\s+(\d+)\s+passed(?:\s*\|\s*(\d+)\s+failed)?/i);
   evidence.run.passed = counts ? Number(counts[1]) : null;
   evidence.run.failed = counts?.[2] ? Number(counts[2]) : run.code === 0 ? 0 : null;
@@ -189,8 +200,8 @@ const NAMED_SEARCH_ASKS = [
 ];
 
 // Reads scored on the guardian's direct message, which the app as built may
-// read: each value is put in the chat's Slack history only, so the
-// Concierge has to read Slack to find it (Rome's copy is left in place).
+// read: the app hears each value there, and the guardian asks for it on the
+// dashboard. One more is asked after Rome's copy of the chat is wiped.
 const DM_READS = [
   { text: "Note to self: the spare umbrella is in the Harrowgate cupboard.", thing: "the spare umbrella", mark: "Harrowgate" },
   { text: "Note to self: the bicycle pump is in the Ashcombe shed.", thing: "the bicycle pump", mark: "Ashcombe" },
@@ -201,6 +212,13 @@ const DM_READ_ASKS = [
   (t, dm) => `Look back through our Slack direct message ${dm}: where did I say ${t} is?`,
   (t, dm) => `Check the history of this Slack conversation (${dm}) and tell me where ${t} is, as I wrote it.`,
 ];
+
+// The read after a wipe of Rome's copy of the direct message.
+const DM_WIPED_READ = {
+  text: "Note to self: the winter blankets are in the Thornaby chest.",
+  thing: "the winter blankets",
+  mark: "Thornaby",
+};
 
 // The search after a wipe, scored on the direct message: Rome heard the
 // value there, then its copy of the chat is wiped.
@@ -239,20 +257,33 @@ function groupSummary(observations) {
     .join("; ");
 }
 
-/** The guardian's direct message; the reply text, all of it, after `settle`. */
-async function askConcierge(ctx, ws, text) {
+/**
+ * Asks the Concierge as the guardian in the dashboard's own chat on `inst`
+ * (in a Slack direct message its actions are withheld), and returns its reply
+ * there with the fake's seq read just before. Slack is where results are judged.
+ */
+async function askConcierge(ctx, inst, text) {
   const since = await ctx.slack.seq();
-  const at = Date.now();
+  const asked = await inst.askDashboard(text, {
+    timeoutMs: ctx.env.timeouts.replySeconds * 3000,
+    settleMs: ctx.env.timeouts.settleSeconds * 1000,
+  });
+  // R9 scans every dashboard reply for #quiet values, as it scans Slack posts.
+  ctx.dashboardReplies?.push({ asked: text, reply: asked.reply ?? "" });
+  return { since, at: asked.at, channel: null, reply: asked.reply ?? "", error: asked.error ?? null };
+}
+
+/** A direct message the app hears from the guardian, once its Slack reply came. */
+async function heardDm(ctx, ws, text) {
+  const before = await ctx.slack.seq();
   const sent = await ctx.slack.dm(ws.id, ws.guardian, text);
   await replyAfter(ctx.slack, {
     team: ws.id,
     channel: sent.channel,
-    since,
+    since: before,
     timeoutMs: ctx.env.timeouts.replySeconds * 1000,
   });
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
-  const posts = await ctx.slack.posts({ team: ws.id, channel: sent.channel, since });
-  return { since, at, channel: sent.channel, reply: posts.map((p) => p.text).join("\n") };
 }
 
 /** Executions after `at` that touch Slack, by name or by what they were given. */
@@ -287,10 +318,10 @@ function coverageOf(groups) {
  * Asks one operation up to 3 times. `judge(asked)` says whether it went
  * right. Returns {result: pass|fail|not checked, asks, why}.
  */
-async function operate(ctx, ws, { asks, judge, methods, ids }) {
+async function operate(ctx, ws, { asks, judge, methods, ids, inst = ctx.a }) {
   const tries = [];
   for (const text of asks) {
-    const asked = await askConcierge(ctx, ws, text);
+    const asked = await askConcierge(ctx, inst, text);
     const right = await judge(asked);
     // The Concierge's own reply in the direct message is not an attempt.
     const calls = (await ctx.slack.calls({ team: ws.id, since: asked.since })).filter(
@@ -298,11 +329,12 @@ async function operate(ctx, ws, { asks, judge, methods, ids }) {
         (!methods || methods.includes(c.method)) &&
         !(c.method === "chat.postMessage" && c.args?.channel === asked.channel),
     );
-    const execs = slackExecutions(await ctx.a.executions(asked.at), ids);
+    const execs = slackExecutions(await inst.executions(asked.at), ids);
     tries.push({
       asked: text,
       right,
-      coverage: coverageOf(await ctx.a.executions(asked.at)),
+      coverage: coverageOf(await inst.executions(asked.at)),
+      ...(asked.error ? { error: asked.error } : {}),
       reply: asked.reply.slice(0, 300),
       calls: calls.map((c) => ({ method: c.method, ok: c.ok, error: c.error ?? null, tokenKind: c.tokenKind })),
       executions: execs,
@@ -343,6 +375,7 @@ export async function liveCheck(ctx) {
   await ctx.slack.config({ history_limit: false });
   const ops = [];
   const observations = {};
+  ctx.dashboardReplies = [];
   const scoreGroups = ctx.env.r9?.groups === true;
   try {
     const g = { general, news, quiet };
@@ -379,19 +412,10 @@ export async function liveCheck(ctx) {
         (await ctx.slack.posts({ team: ws.id, channel: news, since: a.since })).some((p) => holds(p.text, BY_NAME.mark)),
     });
     const dm = w.members?.find((m) => m.id === ws.guardian)?.im_channel;
-    for (const [i, r] of DM_READS.entries()) {
-      const seeded = await ctx.slack.dmHistoryOnly(ws.id, ws.guardian, r.text);
-      if (seeded.eventSent) {
-        // Rome heard it, so its copy answers and no read is needed.
-        ops.push({
-          op: `read ${i + 1} (direct message)`,
-          result: "not checked",
-          why: "the fake cannot put a direct message in Slack's history without sending its event",
-          tries: [],
-        });
-        await sleep(ctx.env.timeouts.settleSeconds * 1000);
-        continue;
-      }
+    // Reads of the direct message: values the app heard there, asked for on
+    // the dashboard, with Rome's copy in place.
+    for (const r of DM_READS) await heardDm(ctx, ws, r.text);
+    for (const [i, r] of DM_READS.entries())
       ops.push({
         op: `read ${i + 1} (direct message)`,
         ...(await operate(ctx, ws, {
@@ -401,7 +425,6 @@ export async function liveCheck(ctx) {
           judge: async (a) => holds(a.reply, r.mark),
         })),
       });
-    }
     for (const [i, r] of READS.entries()) {
       await ctx.slack.groupMessage(ws.id, inNews, r.text, news);
       await groupCheck(`read ${i + 1} (#news)`, {
@@ -439,22 +462,32 @@ export async function liveCheck(ctx) {
         return { ok: false, error: err.message };
       }
     };
+    const afterWipe = ["read after wipe (direct message)", "search after wipe (direct message)"];
     if (!ctx.a.canWipe()) {
-      ops.push({ op: "search after wipe (direct message)", result: "not checked", why: "the environment cannot wipe a chat", tries: [] });
+      for (const op of afterWipe) ops.push({ op, result: "not checked", why: "the environment cannot wipe a chat", tries: [] });
     } else {
-      const before = await ctx.slack.seq();
-      await ctx.slack.dm(ws.id, ws.guardian, DM_WIPED.text);
-      await replyAfter(ctx.slack, { team: ws.id, channel: dm, since: before, timeoutMs: ctx.env.timeouts.replySeconds * 1000 });
-      await sleep(ctx.env.timeouts.settleSeconds * 1000);
-      const wipedDm = await wipe(dm, [DM_WIPED.text, DM_WIPED.found.mark]);
+      await heardDm(ctx, ws, DM_WIPED_READ.text);
+      await heardDm(ctx, ws, DM_WIPED.text);
+      const wipedDm = await wipe(dm, [DM_WIPED_READ.text, DM_WIPED_READ.mark, DM_WIPED.text, DM_WIPED.found.mark]);
       evidence.wipeDirectMessage = wipedDm;
       if (wipedDm?.ok === false)
-        ops.push({ op: "search after wipe (direct message)", result: "not checked", why: `the wipe failed: ${wipedDm.error ?? JSON.stringify(wipedDm)}`, tries: [] });
-      else
+        for (const op of afterWipe)
+          ops.push({ op, result: "not checked", why: `the wipe failed: ${wipedDm.error ?? JSON.stringify(wipedDm)}`, tries: [] });
+      else {
         ops.push({
-          op: "search after wipe (direct message)",
+          op: afterWipe[0],
+          ...(await operate(ctx, ws, {
+            asks: DM_READ_ASKS.map((f) => f(DM_WIPED_READ.thing, dm)),
+            methods: ["conversations.history", "conversations.replies"],
+            ids: [dm],
+            judge: async (a) => holds(a.reply, DM_WIPED_READ.mark),
+          })),
+        });
+        ops.push({
+          op: afterWipe[1],
           ...(await operate(ctx, ws, searchOpts(DM_WIPED, DM_SEARCH_ASKS.map((f) => f(DM_WIPED.word, dm))))),
         });
+      }
 
       await seed(WIPED);
       const wiped = await wipe(news, [WIPED.found.text, WIPED.found.mark]);
@@ -462,7 +495,7 @@ export async function liveCheck(ctx) {
       if (wiped?.ok === false) observations["search after wipe (#news)"] = { notChecked: wiped.error ?? wiped };
       else {
         await groupCheck("search after wipe (#news)", searchOpts(WIPED, NAMED_SEARCH_ASKS.map((f) => f(WIPED.word, g))));
-        const a = await askConcierge(ctx, ws, SEARCH_ASKS[0](WIPED.word));
+        const a = await askConcierge(ctx, ctx.a, SEARCH_ASKS[0](WIPED.word));
         observations.unnamedSearchAfterWipe = { found: holds(a.reply, WIPED.found.mark), reply: a.reply.slice(0, 300) };
       }
     }
@@ -477,7 +510,7 @@ export async function liveCheck(ctx) {
         })),
       });
       const before = await ctx.slack.seq();
-      const asked = await askConcierge(ctx, ws, QUIET_ASK(g));
+      const asked = await askConcierge(ctx, ctx.a, QUIET_ASK(g));
       const readOk = (await ctx.slack.calls({ team: ws.id, since: before })).filter(
         (c) => ["conversations.history", "conversations.replies"].includes(c.method) && c.args?.channel === quiet && c.ok,
       );
@@ -491,7 +524,7 @@ export async function liveCheck(ctx) {
     }
     for (const [i, f] of REFUSALS.entries()) {
       const text = f(g);
-      const asked = await askConcierge(ctx, ws, text);
+      const asked = await askConcierge(ctx, ctx.a, text);
       const reactions = await ctx.slack.calls({ team: ws.id, method: "reactions.add", since: asked.since });
       ops.push({
         op: `refusal ${i + 1}`,
@@ -524,10 +557,14 @@ export async function liveCheck(ctx) {
   const reactionCalls = calls.filter((c) => c.method === "reactions.add");
   const posts = await ctx.slack.posts({ team: ws.id, since: startSeq });
   const outsideMarks = [...SEARCHES.map((q) => q.outside.mark), "marmalade"];
-  const leaks = posts.filter((p) => outsideMarks.some((m) => holds(p.text, m)));
+  const leaks = [
+    ...posts.map((p) => ({ where: p.channel, text: p.text })),
+    ...ctx.dashboardReplies.map((r) => ({ where: "dashboard chat", text: r.reply })),
+  ].filter((l) => outsideMarks.some((m) => holds(l.text, m)));
+  ctx.dashboardReplies = undefined;
   evidence.userTokenCalls = userCalls.map((c) => ({ seq: c.seq, method: c.method, teamId: c.teamId }));
   evidence.reactionCalls = reactionCalls.length;
-  evidence.leaks = leaks.map((p) => ({ channel: p.channel, text: p.text.slice(0, 200) }));
+  evidence.leaks = leaks.map((l) => ({ where: l.where, text: l.text.slice(0, 200) }));
 
   // No token file for the new kind on the instance.
   let tokenFile;
@@ -554,7 +591,7 @@ export async function liveCheck(ctx) {
   for (const o of ops.filter((x) => x.result === "fail")) problems.push(`${o.op} failed`);
   if (userCalls.length) problems.push(`${userCalls.length} Slack call(s) carried a user token`);
   if (reactionCalls.length) problems.push("reactions.add reached Slack");
-  if (leaks.length) problems.push(`${leaks.length} post(s) showed a message from #quiet, which the app is not in`);
+  if (leaks.length) problems.push(`${leaks.length} post(s) or dashboard repl(ies) showed a message from #quiet, which the app is not in`);
   if (tokenFileVerdict.ok === false) problems.push(`the token file ${tokenFileVerdict.said}`);
   if (Array.isArray(observations.coverage) && observations.coverage.includes(false))
     problems.push("a search's result carries no coverage statement");
@@ -582,7 +619,11 @@ export async function r9(ctx) {
   const live = await liveCheck(ctx);
   const evidence = { tests: tests.evidence, live: live.evidence ?? null };
   if (tests.ok === false)
-    return { result: "fail", reason: `Provisional reading. Existing tests: ${tests.reason}.`, evidence };
+    return {
+      result: "fail",
+      reason: `Provisional reading. Existing tests: ${tests.reason}. Live: ${live.reason}.`,
+      evidence,
+    };
   if (tests.ok === null || live.ok === null)
     return {
       result: "not checked",
@@ -606,28 +647,44 @@ export async function r9(ctx) {
 
 const SLACK = /slack/i;
 
-/** The Connect picker's Slack entries: placeholders (id null) of a Slack kind. */
-async function pickerSlack(inst) {
+const OLD_KINDS = ["slack_bot", "slack"];
+
+/**
+ * The Slack entries Connect shows (`GET /connections`), connected or not:
+ * `official` counts the official kind's, `oldOffered` the old kinds still
+ * offered for a new connection (a placeholder, id null).
+ */
+async function pickerSlack(inst, officialKind) {
   const res = await inst.call("/connections");
   if (!res.ok) return { error: `GET /connections: ${res.status}` };
   const list = Array.isArray(res.data) ? res.data : (res.data?.connections ?? []);
   const entries = list
-    .filter((c) => c.id === null && (SLACK.test(c.connectionKind ?? "") || SLACK.test(c.label ?? "")))
-    .map((c) => ({ kind: c.connectionKind, label: c.label }));
-  return { entries };
+    .filter((c) => SLACK.test(c.connectionKind ?? "") || SLACK.test(c.label ?? ""))
+    .map((c) => ({ id: c.id ?? null, kind: c.connectionKind, label: c.label }));
+  const official = entries.filter((e) => e.kind === officialKind);
+  const oldOffered = entries.filter((e) => e.id === null && OLD_KINDS.includes(e.kind));
+  return { entries, official: official.length, officialLabel: official[0]?.label ?? null, oldOffered: oldOffered.length };
 }
 
-/** The Slack entries a browser sees on the dashboard's Connections page. */
-async function pickerPage(inst) {
+/** How many times the dashboard's Connections page shows the official entry's label. */
+async function pickerPage(ctx, inst, label) {
   let chromium;
+  const remote = ctx.env.browser?.ws_endpoint;
   try {
-    const { createRequire } = await import("node:module");
-    ({ chromium } = createRequire(import.meta.url)("playwright"));
-  } catch {
-    return { error: "playwright is not installed" };
+    if (remote) {
+      const { pathToFileURL } = await import("node:url");
+      const from = ctx.env.browser.import ?? `${ctx.env.browser.client}/node_modules/playwright-core/index.mjs`;
+      ({ chromium } = await import(from.startsWith("/") ? pathToFileURL(from).href : from));
+    } else {
+      const { createRequire } = await import("node:module");
+      ({ chromium } = createRequire(import.meta.url)("playwright"));
+    }
+  } catch (err) {
+    return { error: `no browser: ${err.message}` };
   }
-  const browser = await chromium.launch();
+  let browser;
   try {
+    browser = remote ? await chromium.connect(remote) : await chromium.launch();
     const context = await browser.newContext();
     const cookie = inst.headers?.cookie;
     if (cookie)
@@ -639,21 +696,22 @@ async function pickerPage(inst) {
       );
     const page = await context.newPage();
     const url = `${inst.origin}/settings/connections`;
-    const res = await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
-    const names = await page.$$eval(
-      'button, a, [role="button"], [role="option"], [role="menuitem"], [role="listitem"]',
-      (els) => els.map((e) => (e.getAttribute("aria-label") || e.innerText || "").trim()),
-    );
-    const slack = [
-      ...new Set(
-        names.filter((n) => /slack/i.test(n) && !/disconnect|reconnect|repair|manage|remove|settings/i.test(n)),
-      ),
-    ];
-    return { url, status: res?.status() ?? null, entries: slack };
+    const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    // The list renders after its fetch: wait for it, not for the network.
+    await page.waitForFunction((l) => document.body.innerText.includes(l), label ?? "Slack", { timeout: 30_000 });
+    await page.waitForTimeout(1000);
+    const lines = (await page.evaluate(() => document.body.innerText)).split("\n").map((x) => x.trim());
+    return {
+      url,
+      status: res?.status() ?? null,
+      label,
+      official: lines.filter((x) => x === label).length,
+      slackLines: lines.filter((x) => /slack/i.test(x)).slice(0, 20),
+    };
   } catch (err) {
     return { error: err.message };
   } finally {
-    await browser.close();
+    await browser?.close();
   }
 }
 
@@ -716,7 +774,7 @@ async function oauthSends(ctx, ws, oauth, sentence, markWord) {
   const general = w?.groups?.find((g) => g.name === "general")?.id;
   const tries = [];
   for (const f of SEND_ASKS) {
-    const asked = await askConcierge(ctx, ws, f(sentence, { general }));
+    const asked = await askConcierge(ctx, ctx.b, f(sentence, { general }));
     const posts = (await ctx.slack.posts({ team: ws.id, channel: general, since: asked.since })).filter((p) =>
       holds(p.text, markWord),
     );
@@ -736,10 +794,15 @@ export async function r10(ctx) {
   const unchecked = [];
 
   // The picker, before the old kinds exist.
-  const before = await pickerSlack(inst);
+  const officialKind = ctx.env.instances[1]?.connect?.kind ?? "slack_app";
+  const pickerProblems = (p, when) => {
+    if (p.error) return unchecked.push(`picker ${when}: ${p.error}`);
+    if (p.official !== 1) problems.push(`Connect shows ${p.official} entries of the official kind ${when}, not 1`);
+    if (p.oldOffered) problems.push(`Connect offers ${p.oldOffered} old Slack kind(s) for a new connection ${when}`);
+  };
+  const before = await pickerSlack(inst, officialKind);
   evidence.pickerBefore = before;
-  if (before.error) unchecked.push(`picker: ${before.error}`);
-  else if (before.entries.length !== 1) problems.push(`Connect lists ${before.entries.length} Slack entries before the upgrade, not 1`);
+  pickerProblems(before, "before the upgrade");
 
   // Neither old kind can be newly connected, even before any exists.
   for (const kind of ["slack_bot", "slack"]) {
@@ -764,15 +827,14 @@ export async function r10(ctx) {
   if (!bot?.connection_id || !oauth?.connection_id)
     return { result: "not checked", reason: "the seed named no slack_bot or slack connection", evidence };
 
-  const after = await pickerSlack(inst);
+  const after = await pickerSlack(inst, officialKind);
   evidence.pickerAfter = after;
-  if (!after.error && after.entries.length !== 1)
-    problems.push(`Connect lists ${after.entries.length} Slack entries with the old connections present, not 1`);
-  const page = await pickerPage(inst);
+  pickerProblems(after, "with the old connections present");
+  const page = await pickerPage(ctx, inst, after.officialLabel ?? before.officialLabel);
   evidence.pickerPage = page;
   if (page.error) unchecked.push(`the page in a browser: ${page.error}`);
-  else if (page.entries.length === 0) unchecked.push("the page in a browser showed no Slack entry to count");
-  else if (page.entries.length !== 1) problems.push(`the Connections page shows ${page.entries.length} Slack entries: ${page.entries.join(", ")}`);
+  else if (page.official !== 1)
+    problems.push(`the Connections page shows the official entry "${page.label}" ${page.official} times, not once`);
 
   // Each old kind still sends, before and after a restart.
   const sends = {};
@@ -810,14 +872,13 @@ export async function r10(ctx) {
     evidence[`reconnect_${kind}`] = r;
     if (!r.refused) problems.push(`after the disconnect, ${kind} could be connected again (${r.route} answered ${r.status})`);
   }
-  const final = await pickerSlack(inst);
+  const final = await pickerSlack(inst, officialKind);
   evidence.pickerFinal = final;
-  if (!final.error && final.entries.length !== 1)
-    problems.push(`Connect lists ${final.entries.length} Slack entries after the disconnects, not 1`);
+  pickerProblems(final, "after the disconnects");
 
   const said = (o) => (o.ok ? "yes" : o.ok === false ? "no" : "not seen");
   const summary =
-    `Picker Slack entries: API ${before.entries?.length ?? "?"} before, ${after.entries?.length ?? "?"} after the upgrade, ${final.entries?.length ?? "?"} at the end; page ${page.entries?.length ?? "not read"}. ` +
+    `Official Slack entries in Connect: ${before.official ?? "?"} before, ${after.official ?? "?"} after the upgrade, ${final.official ?? "?"} at the end; on the page ${page.official ?? "not read"}; old kinds offered: ${before.oldOffered ?? "?"}/${after.oldOffered ?? "?"}/${final.oldOffered ?? "?"}. ` +
     `New slack_bot and slack refused: ${evidence.newConnect_slack_bot.refused && evidence.newConnect_slack.refused ? "yes" : "no"}. ` +
     `slack_bot answered before/after restart: ${said(sends["before restart"].slack_bot)}/${said(sends["after restart"].slack_bot)}; ` +
     `old slack sent before/after restart: ${said(sends["before restart"].slack)}/${said(sends["after restart"].slack)}. ` +
