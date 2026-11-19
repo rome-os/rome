@@ -1,13 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { Hono } from "hono";
-import { WechatAppNotInstalled } from "../../connections/kinds/wechat-user/wechat-app.js";
-import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
-import type { ApiDeps } from "../deps.js";
-import { wechatAppRoutes } from "./wechat-app.js";
+import { Hono, type MiddlewareHandler } from "hono";
+import { WechatAppNotInstalled } from "../wechat-app.js";
+import { type WechatAppRoutesDeps, wechatAppRoutes } from "./wechat-app.js";
 
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" };
 
-function stubApp(): NonNullable<ApiDeps["wechatApp"]> {
+function stubApp(): NonNullable<WechatAppRoutesDeps["wechatApp"]> {
   return {
     status: rs.fn(async () => ({ state: "absent" as const })),
     install: rs.fn(async () => ({ state: "installing" as const })),
@@ -15,13 +13,11 @@ function stubApp(): NonNullable<ApiDeps["wechatApp"]> {
   };
 }
 
-function build(
-  wechatApp: ApiDeps["wechatApp"],
-  actor: SessionActor = { kind: "guardian", userId: "owner", via: "cookie" },
-): Hono {
+const letIn: MiddlewareHandler = (_c, next) => next();
+
+function build(wechatApp: WechatAppRoutesDeps["wechatApp"], guardianOnly = letIn): Hono {
   const app = new Hono();
-  app.use("*", (_c, next) => runWithSessionActor(actor, next));
-  app.route("/", wechatAppRoutes({ wechatApp }));
+  app.route("/", wechatAppRoutes({ wechatApp, guardianOnly }));
   return app;
 }
 
@@ -84,19 +80,13 @@ describe("WeChat app API", () => {
     expect(wechat.install).not.toHaveBeenCalled();
   });
 
-  it("refuses anyone but the guardian", async () => {
+  it("asks the guard before every route", async () => {
     const wechat = stubApp();
-    for (const actor of [
-      { kind: "anonymous" } as const,
-      { kind: "visitor", accountId: "guest", email: "guest@example.com" } as const,
-    ]) {
-      const app = build(wechat, actor);
-      expect((await app.request("/wechat/app")).status).toBe(403);
-      for (const path of ["/wechat/app/install", "/wechat/app/start"]) {
-        expect((await app.request(path, { method: "POST", headers: SAME_ORIGIN })).status).toBe(
-          403,
-        );
-      }
+    const refuse: MiddlewareHandler = (c) => Promise.resolve(c.json({ error: "no" }, 403));
+    const app = build(wechat, refuse);
+    expect((await app.request("/wechat/app")).status).toBe(403);
+    for (const path of ["/wechat/app/install", "/wechat/app/start"]) {
+      expect((await app.request(path, { method: "POST", headers: SAME_ORIGIN })).status).toBe(403);
     }
     expect(wechat.status).not.toHaveBeenCalled();
     expect(wechat.install).not.toHaveBeenCalled();

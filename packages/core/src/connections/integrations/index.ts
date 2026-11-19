@@ -4,7 +4,6 @@ import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../oauth/oauth-providers.js";
@@ -25,14 +24,12 @@ import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
-import { createWechatUserDescriptor } from "./wechat-user.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
-export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -73,11 +70,6 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
-  /** The personal WeChat client runtime, present only when config
-   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
-   *  the channel list's reader shares it, so the account is read through one
-   *  client. */
-  wechatUserRuntime?: WechatUserRuntime;
 }
 
 /**
@@ -104,14 +96,6 @@ export function registerBuiltinConnections(
   registry.register(makeTelegramUserDescriptor());
   registry.register(makeSlackBotDescriptor());
   registry.register(createWechatDescriptor());
-  // The personal WeChat connection is opt-in: boot passes its runtime only when
-  // config `wechatUserEnabled` is on.
-  // It runs the client in this container and recovers its store key with a
-  // local debugger, so it needs no host execution — only the container's own
-  // capability to ptrace the client it launches.
-  if (deps.wechatUserRuntime) {
-    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
-  }
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,

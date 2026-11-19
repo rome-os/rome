@@ -162,8 +162,8 @@ import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
   WechatUserReader,
   WechatUserRuntime,
-} from "./connections/kinds/wechat-user/wechat-user.js";
-import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
+  wechatUser,
+} from "./connections/kinds/wechat-user/index.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -371,6 +371,7 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import type { KindMount } from "./connections/kind-mount.js";
+import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
@@ -490,9 +491,6 @@ async function main() {
   // The channel list and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
-  // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
-  // the same client, and needs no connection.
-  const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -1908,10 +1906,6 @@ async function main() {
     // The Rome Cloud-OAuth grant setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
-    // The personal WeChat connection is opt-in: its runtime exists only when
-    // config `wechatUserEnabled` is on, and its presence registers the
-    // connection. Its key recovery runs a local debugger in this container.
-    ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
   // The kinds of connection laid out under connections/kinds/. Leaving a kind
   // out is deleting its line.
@@ -1936,8 +1930,12 @@ async function main() {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     }),
+    // Offers the connection only when config `wechatUserEnabled` is on.
+    wechatUser({ ...(wechatUserRuntime ? { runtime: wechatUserRuntime } : {}), guardianOnly }),
   ];
-  for (const kind of connectionKinds) connectionRegistry.register(kind.descriptor);
+  for (const kind of connectionKinds) {
+    if (kind.descriptor) connectionRegistry.register(kind.descriptor);
+  }
   // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
   const channels = channelList({
@@ -2372,7 +2370,7 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
-      wechatApp,
+      connectionKinds,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
