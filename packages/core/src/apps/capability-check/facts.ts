@@ -33,7 +33,7 @@ export interface RouteFacts {
   path: string;
   /** `file:line`, relative to the app directory. */
   at: string;
-  /** The actions the route runs through `runAction`, by the name it passes. */
+  /** The actions the route runs through `runAction` or `invokeAction`, by the name it passes. */
   runs: string[];
   /** Calls through which the route writes app data itself, not through an action. */
   writes: string[];
@@ -41,6 +41,8 @@ export interface RouteFacts {
   unreadable?: string;
   /** The route is declared `api.noAuth`: a machine endpoint, such as a webhook. */
   noAuth: boolean;
+  /** The route is unreadable and the app declares `api.noAuth` paths, so it may be one. */
+  mayBeNoAuth: boolean;
 }
 
 /** One import between two source files of the app, both relative to its source root. */

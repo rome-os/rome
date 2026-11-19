@@ -228,7 +228,7 @@ declare function defineAction(spec: unknown): unknown;
   });
 
   describe("never passes what it cannot read", () => {
-    const withRoute = (route: string, imports = "") => ({
+    const withRoute = (route: string, imports = ""): Record<string, string> => ({
       ...COMPLIANT,
       "src/api/index.ts": `${imports}${COMPLIANT["src/api/index.ts"] as string}`.replace(
         'return "not found";',
@@ -322,8 +322,93 @@ declare function defineAction(spec: unknown): unknown;
           'import { createNotesRepository } from "../db/notes.js";\n',
         ),
       );
-      expect(verdict.gaps).toEqual([]);
+      expect(verdict.gaps.map((g) => g.rule)).toEqual(["I3"]);
       expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+    });
+
+    it("judges code outside every route test it recognizes", async () => {
+      const write = 'import { createNotesRepository } from "../db/notes.js";\n';
+      for (const route of [
+        'if (is(request, "DELETE", "notes")) return createNotesRepository(null).insert("x");',
+        'const parts = request.path;\n    if (parts[0] === "items") return createNotesRepository(null).insert("x");',
+        'createNotesRepository(null).insert("audit");',
+      ]) {
+        const verdict = await verdictOf(
+          withRoute(route, `${write}declare function is(...args: unknown[]): boolean;\n`),
+        );
+        expect(verdict.gaps.map((g) => g.rule)).toEqual(["I3"]);
+        expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+      }
+    });
+
+    it("reads a ternary route", async () => {
+      const gaps = await gapsOf(
+        withRoute(
+          'return request.method === "DELETE" && route === "notes" ? createNotesRepository(null).insert("x") : "none";',
+          'import { createNotesRepository } from "../db/notes.js";\n',
+        ),
+      );
+      expect(gaps.map((g) => [g.rule, g.message.slice(0, 22)])).toEqual([
+        ["I3", "`DELETE /notes` writes"],
+        ["I1", "`DELETE /notes` runs n"],
+      ]);
+    });
+
+    it("leaves a route that hands off to another dispatcher to a person", async () => {
+      const verdict = await verdictOf({
+        ...withRoute(
+          'if (route.startsWith("items")) return handleItems(this.ctx, request);',
+          'import { handleItems } from "./items.js";\n',
+        ),
+        "src/api/items.ts": `export function handleItems(ctx: { runAction(n: string, i: unknown): unknown }, request: { method: string }) {
+  if (request.method === "POST") return ctx.runAction("add_note", {});
+  if (request.method === "GET") return "items";
+  return "none";
+}
+`,
+      });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["I1", expect.stringContaining("hands off to `handleItems`")],
+      ]);
+    });
+
+    it("leaves code that answers after a narrower route test to a person", async () => {
+      const verdict = await verdictOf(
+        withRoute(
+          'if (route === "items") {\n      if (request.method === "POST") return this.add();\n      return "items";\n    }',
+        ),
+      );
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["I1", expect.stringContaining("answers after its narrower route tests")],
+      ]);
+    });
+
+    it("leaves a JSON Schema composed of others to a person", async () => {
+      const composed = SCHEMA_ACTION.replace(
+        'type: "object",',
+        'type: "object",\n      allOf: [{ properties: { tag: { type: "string" } } }],',
+      );
+      const verdict = await verdictOf({ ...COMPLIANT, ...ACTION("add_note", composed) });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.rule)).toEqual(["D3"]);
+    });
+
+    it("leaves a write from an unreadable route to a person when the app has machine routes", async () => {
+      const files = withRoute(
+        'if (/^erase$/.test(route)) return createNotesRepository(null).insert("x");',
+        'import { createNotesRepository } from "../db/notes.js";\n',
+      );
+      const verdict = await verdictOf({
+        ...files,
+        "app.yaml": (files["app.yaml"] as string).replace(
+          "  entry: api/index\n",
+          "  entry: api/index\n  noAuth:\n    - /webhook\n",
+        ),
+      });
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1", "I3"]);
     });
 
     it("does not take a zod meta without a description as one", async () => {
@@ -369,6 +454,30 @@ declare const extra: unknown;
     expect(gaps.map((g) => [g.rule, g.message])).toEqual([
       ["I3", expect.stringContaining("(`ctx.db.connection.delete`)")],
     ]);
+  });
+
+  it("I3: finds raw SQL writes, and writes in the root route", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace('return "ok";', "return this.db.connection.run(sql`DELETE FROM notes`);")
+      .replace(
+        "return this.ctx.runAction",
+        "await this.db.connection.run(sql`SELECT 1`);\n    return this.ctx.runAction",
+      )
+      .replace(
+        "export class Handler {",
+        "declare const sql: (s: TemplateStringsArray) => string;\nexport class Handler {\n  db = { connection: { run: (s: string) => s } };",
+      );
+    const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api });
+    expect(gaps.map((g) => [g.rule, g.message.slice(0, 27)])).toEqual([
+      ["I3", "`GET /` writes app data its"],
+    ]);
+  });
+
+  it("I1: counts a route that runs an action through invokeAction", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace("this.ctx.runAction(", "this.ctx.invokeAction(")
+      .replace("runAction(name: string", "invokeAction(name: string");
+    expect(await gapsOf({ ...COMPLIANT, "src/api/index.ts": api })).toEqual([]);
   });
 
   it("I2: does not count a machine route as a person's way to run an action", async () => {

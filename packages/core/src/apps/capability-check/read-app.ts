@@ -26,6 +26,9 @@ const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts"];
 const ROUTE_SUBJECT = /(^|\.)(route|path|subPath|pathname|head|id|segment|resource)(\[\d+\])?$/;
 const DRIZZLE_WRITES = new Set(["insert", "update", "delete"]);
+/** Drizzle calls that run raw SQL, which writes unless it reads as a query. */
+const RAW_SQL = new Set(["run", "execute", "exec"]);
+const DB_RECEIVER = /(^|\.)(db|tx|connection)$/;
 /** Data-layer functions named like this change app data. */
 const WRITE_NAME =
   /^(insert|update|delete|upsert|remove|set|save|create|clear|put|add|mark|record|replace|patch|append|bump|increment|reset|toggle|move|rename|archive|restore)/i;
@@ -41,6 +44,16 @@ const DIRECT_REQUESTS = new Set([
   "axios.get",
   "axios.post",
 ]);
+const JSON_SCHEMA_COMPOSES = [
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "$ref",
+  "not",
+  "if",
+  "patternProperties",
+  "dependentSchemas",
+];
 const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
@@ -86,6 +99,9 @@ export async function readApp(dir: string): Promise<AppFacts> {
             noAuth:
               route.unreadable === undefined &&
               isAppApiPathNoAuth(noAuth as boolean | string[], `/${route.path}`),
+            mayBeNoAuth:
+              route.unreadable !== undefined &&
+              (noAuth === true || (Array.isArray(noAuth) && noAuth.length > 0)),
           }));
   }
 
@@ -322,6 +338,8 @@ class SourceReader {
 
   private jsonSchemaArguments(schema: TS.ObjectLiteralExpression): ArgumentDescriptions {
     if (schema.properties.some((p) => ts.isSpreadAssignment(p))) return { kind: "unknown" };
+    // Arguments can also come from composed or referenced schemas.
+    if (JSON_SCHEMA_COMPOSES.some((key) => propertyValue(schema, key))) return { kind: "unknown" };
     const properties = propertyValue(schema, "properties");
     if (!properties) return { kind: "described" };
     const literal = this.followIdentifier(properties);
@@ -373,29 +391,34 @@ class SourceReader {
   }
 
   /** The routes an app API entry file dispatches, with the actions each runs. */
-  routes(entryFile: string): Omit<RouteFacts, "noAuth">[] {
+  routes(entryFile: string): Omit<RouteFacts, "noAuth" | "mayBeNoAuth">[] {
     const entry = this.program.getSourceFile(entryFile);
     if (!entry) return [];
     const literal: LiteralOf = (node) => this.stringLiteral(node);
-    const routeIfs: TS.IfStatement[] = [];
-    const visit = (node: TS.Node) => {
-      if (ts.isIfStatement(node) && isRouteCondition(node.expression, literal)) routeIfs.push(node);
-      ts.forEachChild(node, visit);
-    };
-    visit(entry);
-    const nested = (outer: TS.IfStatement) =>
-      routeIfs.filter((other) => other !== outer && contains(outer.thenStatement, other));
-    const routes: Omit<RouteFacts, "noAuth">[] = [];
-    for (const routeIf of routeIfs) {
-      const inner = nested(routeIf);
+    const branches = routeBranches(entry, literal);
+    const thens = new Set(branches.map((branch) => branch.then));
+    const routes: Omit<RouteFacts, "noAuth" | "mayBeNoAuth">[] = [];
+    for (const branch of branches) {
+      const inner = branches.filter(
+        (other) => other !== branch && contains(branch.then, other.node),
+      );
+      const innerThens = new Set(inner.map((other) => other.then));
       // A route test with narrower tests inside it is a route only for the
       // code that runs outside them, such as a write after a method check.
-      const effects = this.effects(routeIf.thenStatement, new Set(inner));
-      if (inner.length > 0 && effects.runs.length === 0 && effects.writes.length === 0) continue;
-      const conditions = [routeIf.expression, ...enclosingRouteConditions(routeIf, literal)];
+      const { handsOff, ...effects } = this.effects(branch.then, innerThens);
+      let unreadable = handsOff && `it hands off to ${handsOff}, which the reader cannot split`;
+      if (inner.length > 0 && !unreadable && effects.runs.length + effects.writes.length === 0) {
+        // Code that answers after the narrower tests may be a route that runs
+        // nothing, or only a "not allowed" reply; the reader cannot tell which.
+        if (!hasExit(branch.then, innerThens)) continue;
+        unreadable = "code that answers after its narrower route tests";
+      }
+      const conditions = [branch.condition, ...enclosingRouteConditions(branch.node, literal)];
+      const described = describeRoute(conditions.reverse(), literal);
       routes.push({
-        ...describeRoute(conditions.reverse(), literal),
-        at: this.at(entryFile, routeIf),
+        ...described,
+        ...(unreadable ? { unreadable } : {}),
+        at: this.at(entryFile, branch.node),
         ...effects,
       });
     }
@@ -414,6 +437,24 @@ class SourceReader {
       ts.forEachChild(node, findSwitches);
     };
     findSwitches(entry);
+    // Code in a dispatching function outside every route test it recognizes,
+    // such as a helper predicate or a write after the last route, still runs
+    // for some request.
+    const holders = new Set(branches.map((branch) => enclosingFunction(branch.node)));
+    for (const holder of holders) {
+      if (!holder?.body) continue;
+      const { handsOff, ...rest } = this.effects(holder.body, thens);
+      if (rest.runs.length + rest.writes.length === 0 && !handsOff) continue;
+      routes.push({
+        method: "ANY",
+        path: "?",
+        at: this.at(entryFile, holder),
+        ...rest,
+        unreadable: handsOff
+          ? `code outside its route tests hands off to ${handsOff}`
+          : "code outside any route test the reader recognizes",
+      });
+    }
     return routes;
   }
 
@@ -424,8 +465,10 @@ class SourceReader {
   private effects(
     node: TS.Node,
     skip: ReadonlySet<TS.Node> = new Set(),
-  ): { runs: string[]; writes: string[] } {
+  ): { runs: string[]; writes: string[]; handsOff?: string } {
     const names = new Set<string>();
+    let handsOff: string | undefined;
+    const literal: LiteralOf = (expression) => this.stringLiteral(expression);
     const writes = new Set<string>();
     const seen = new Set<TS.Node>();
     const walk = (current: TS.Node, depth: number) => {
@@ -437,14 +480,18 @@ class SourceReader {
           : ts.isIdentifier(callee)
             ? callee.text
             : undefined;
-        if (calleeName === "runAction") {
+        if (ts.isElementAccessExpression(callee)) {
+          handsOff ??= `a call through \`${compact(callee.getText())}\``;
+        }
+        if (calleeName === "runAction" || calleeName === "invokeAction") {
           const first = current.arguments[0];
           names.add(first && ts.isStringLiteralLike(first) ? first.text : "<dynamic>");
         } else if (
           calleeName &&
           ts.isPropertyAccessExpression(callee) &&
-          DRIZZLE_WRITES.has(calleeName) &&
-          /(^|\.)(db|tx|connection)$/.test(compact(callee.expression.getText()))
+          DB_RECEIVER.test(compact(callee.expression.getText())) &&
+          (DRIZZLE_WRITES.has(calleeName) ||
+            (RAW_SQL.has(calleeName) && this.writesSql(current.arguments[0])))
         ) {
           writes.add(compact(callee.getText()));
         } else if (depth < MAX_CALL_DEPTH) {
@@ -463,6 +510,9 @@ class SourceReader {
             const body = functionBody(declaration);
             if (body && !seen.has(body)) {
               seen.add(body);
+              if (this.inApi(body.getSourceFile().fileName) && testsRoutes(body, literal)) {
+                handsOff ??= `\`${compact(callee.getText())}\``;
+              }
               walk(body, depth + 1);
             }
           }
@@ -471,7 +521,14 @@ class SourceReader {
       ts.forEachChild(current, (child) => walk(child, depth));
     };
     walk(node, 0);
-    return { runs: [...names], writes: [...writes] };
+    return { runs: [...names], writes: [...writes], ...(handsOff ? { handsOff } : {}) };
+  }
+
+  /** Whether a raw SQL statement writes, or may: true unless its text reads as a query. */
+  private writesSql(argument: TS.Expression | undefined): boolean {
+    const statement = argument && this.followIdentifier(argument);
+    if (!statement) return true;
+    return !/^\s*(sql)?\s*[`'"(]*\s*(select|with|pragma)\b/i.test(statement.getText());
   }
 
   /** The string `node` stands for: a literal, or a `const` initialized with one. */
@@ -489,6 +546,10 @@ class SourceReader {
       return declaration.initializer.text;
     }
     return undefined;
+  }
+
+  private inApi(file: string): boolean {
+    return this.fromSource(file).startsWith("api/");
   }
 
   private inDataLayer(file: string): boolean {
@@ -580,6 +641,70 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
   if (ts.isPropertyDeclaration(declaration) && declaration.initializer) {
     const init = declaration.initializer;
     if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) return init.body;
+  }
+  return undefined;
+}
+
+/** One branch on a route test: an `if`, or a ternary. */
+interface RouteBranch {
+  node: TS.IfStatement | TS.ConditionalExpression;
+  condition: TS.Expression;
+  then: TS.Node;
+}
+
+function routeBranches(root: TS.Node, literal: LiteralOf): RouteBranch[] {
+  const branches: RouteBranch[] = [];
+  const visit = (node: TS.Node) => {
+    if (ts.isIfStatement(node) && isRouteCondition(node.expression, literal)) {
+      branches.push({ node, condition: node.expression, then: node.thenStatement });
+    } else if (
+      ts.isConditionalExpression(node) &&
+      // A ternary on a path alone is more often a value than a route.
+      readCondition(node.condition, literal).methods.length > 0
+    ) {
+      branches.push({ node, condition: node.condition, then: node.whenTrue });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return branches;
+}
+
+/** Whether a function body dispatches routes of its own. */
+function testsRoutes(body: TS.Node, literal: LiteralOf): boolean {
+  if (routeBranches(body, literal).length > 0) return true;
+  let found = false;
+  const visit = (node: TS.Node) => {
+    if (found) return;
+    if (ts.isSwitchStatement(node) && isDispatchSubject(node.expression.getText())) found = true;
+    else ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return found;
+}
+
+/** Whether `node` returns or throws outside `skip`, in its own function. */
+function hasExit(node: TS.Node, skip: ReadonlySet<TS.Node>): boolean {
+  let found = false;
+  const visit = (current: TS.Node) => {
+    if (found || skip.has(current) || ts.isFunctionLike(current)) return;
+    if (ts.isReturnStatement(current) || ts.isThrowStatement(current)) found = true;
+    else ts.forEachChild(current, visit);
+  };
+  ts.forEachChild(node, visit);
+  return found;
+}
+
+function enclosingFunction(node: TS.Node): TS.FunctionLikeDeclaration | undefined {
+  for (let current = node.parent; current; current = current.parent) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isMethodDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current)
+    ) {
+      return current;
+    }
   }
   return undefined;
 }
@@ -753,6 +878,12 @@ function enclosingRouteConditions(node: TS.Node, literal: LiteralOf): TS.Express
       isRouteCondition(parent.expression, literal)
     ) {
       found.push(parent.expression);
+    } else if (
+      ts.isConditionalExpression(parent) &&
+      parent.whenTrue === child &&
+      isRouteCondition(parent.condition, literal)
+    ) {
+      found.push(parent.condition);
     }
     child = parent;
     parent = parent.parent;

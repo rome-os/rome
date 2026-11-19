@@ -194,24 +194,30 @@ function judgeRoute(
   cannotJudge: (rule: RuleId, at: string, message: string) => void,
 ): void {
   if (route.noAuth) return;
-  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) return;
   const label = `\`${route.method} /${route.path}\``;
-  // Without its path, the route may be an exempt one, so neither I1 nor I3 is judged.
   if (route.unreadable) {
     cannotJudge(
       "I1",
       route.at,
-      `Could not tell which path a \`${route.method}\` route matches (${route.unreadable}), so it and its exemptions were not judged.`,
+      `Could not place this route (${route.unreadable}), so whether an action stands behind it was not judged.`,
     );
-    return;
   }
-  if (route.writes.length > 0) {
+  // An unreadable route may be a machine route, which I3 spares, when the app declares any.
+  if (route.writes.length > 0 && !route.mayBeNoAuth) {
     gap(
       "I3",
       route.at,
-      `${label} writes app data itself (${route.writes.map((w) => `\`${w}\``).join(", ")}), so an agent cannot make the same change.`,
+      `${route.unreadable ? "Code the reader cannot place on a route" : label} writes app data itself (${route.writes.map((w) => `\`${w}\``).join(", ")}), so an agent cannot make the same change.`,
+    );
+  } else if (route.writes.length > 0) {
+    cannotJudge(
+      "I3",
+      route.at,
+      "Code the reader cannot place on a route writes app data itself, and may serve a machine route.",
     );
   }
+  if (route.unreadable) return;
+  if (route.path === "" && (route.method === "GET" || route.method === "ANY")) return;
   if (route.runs.length === 0) {
     gap("I1", route.at, `${label} runs no action, so no agent can do what it does.`);
     return;
