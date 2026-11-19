@@ -35,7 +35,9 @@ const KINDS = [
   {
     kind: "binding",
     allowed: true,
-    test: /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(created|updated|bound|unbound|deleted)_?at)$/i,
+    // `generation` counts a workspace's claims, so a late release cannot end
+    // a newer one: part of the binding (planner's ruling, rome-cloud 0070).
+    test: /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(claim_?)?generation|(created|updated|bound|unbound|deleted)_?at)$/i,
   },
   {
     kind: "delivery",
@@ -83,6 +85,19 @@ export async function r11(ctx) {
         `Rome Cloud stores more than the workspace to instance binding: ${columns.join(", ")}`,
       );
     problems.push(...lifetimes);
+    // A sequence is the binding's only when it numbers a workspace's claims
+    // (planner's ruling: rome-cloud 0071's generation sequence).
+    const sequences = [...new Map(stored.sequences.map((q) => [q.name, q])).values()].map((q) => ({
+      ...q,
+      kind: /generation/i.test(q.name) ? "binding" : "unknown",
+      allowed: /generation/i.test(q.name) ? true : null,
+    }));
+    evidence.romeCloudStores.sequences = sequences;
+    const unknownSequences = sequences.filter((q) => q.allowed === null);
+    if (unknownSequences.length)
+      unchecked.push(
+        `Rome Cloud adds sequence(s) the check cannot judge: ${unknownSequences.map((q) => q.name).join(", ")}`,
+      );
     const unknown = judged.filter((c) => c.allowed === null);
     if (unknown.length)
       unchecked.push(
@@ -156,6 +171,7 @@ async function storedColumns(dir, base) {
       .join("\n");
   const columns = [];
   const tables = [];
+  const sequences = [];
   const TYPE =
     "text|integer|varchar|timestamp|boolean|jsonb?|uuid|serial|bigint|real|blob|numeric|bytea";
   for (const file of files) {
@@ -192,6 +208,11 @@ async function storedColumns(dir, base) {
     ))
       if (!/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|INDEX|CHECK)$/i.test(m[2]))
         found.push({ name: m[2], table: m[1] });
+    // Sequences, SQL or Drizzle: judged like a column of no table.
+    for (const m of added.matchAll(
+      /CREATE\s+SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"]?\w+[`"]?\.)?[`"]?(\w+)[`"]?|pgSequence\(\s*["'](\w+)["']/gi,
+    ))
+      sequences.push({ file, name: m[1] ?? m[2] });
     // One entry per column: the one that names its table wins.
     const seen = new Map();
     for (const f of found) {
@@ -201,7 +222,7 @@ async function storedColumns(dir, base) {
     for (const f of seen.values()) columns.push({ file, ...f });
   }
   const allAdded = (await Promise.all(changed.map(addedOf))).join("\n");
-  return { files, columns, tables, allAdded };
+  return { files, columns, tables, sequences, allAdded };
 }
 
 // A column that may hold the sign-in's outcome: the token, or Slack's answer

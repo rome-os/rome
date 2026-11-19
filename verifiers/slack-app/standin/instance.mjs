@@ -294,56 +294,75 @@ async function groups(conn) {
 /**
  * R9: the agent acting in Slack through the connection, as send, read and
  * search, and nothing else. Answers `text` when it asks for one of those,
- * else returns null. Broken R9-lazy never acts; R9-blind reads but says
- * nothing it read; R9-react adds the reaction; R9-join also searches groups it is
- * not in, as a product with a wider reach would.
+ * else returns null. A group or direct message is named by its id in the
+ * text, else by #name through the listing. Search covers what this instance
+ * kept (direct messages and mentions), and refills a named chat from Slack.
+ * Broken R9-lazy never acts; R9-blind reads but says nothing it read;
+ * R9-react adds the reaction; R9-join also searches groups it is not in.
+ * Variant dm-only, as the app is built, may not read or list groups.
  */
-async function act(conn, text) {
-  const send = text.match(/(?:post|send a message to)\b.*?(?:#|the )(general|news)\b.*?:\s*"?(.+?)"?$/i);
-  const read =
-    !/search|find|look up/i.test(text) &&
-    /(?:last|latest|recently).*(?:#news|news group)|(?:#news|news group).*(?:said|messages)/i.test(text);
-  const search = text.match(/(?:mentions|about the|Look up)\s+"?([^"]+?)"?(?:\s+and\b|\s+in\b|\.|$)/i);
+async function act(conn, text, dmChannel) {
   const react = /\breact|reaction\b/i.test(text);
-  if (!send && !read && !search && !react) return null;
+  const send = text.match(/(?:post|send a message to)\b.*?(?:#|the )(\w+)\b.*?:\s*"?(.+?)"?$/i);
+  const list = /which .*channels|list the slack groups|channels can you see/i.test(text);
+  const search = /search|find|look up/i.test(text);
+  const read = /read|messages|history|look back|said/i.test(text);
+  if (!react && !send && !list && !search && !read) return null;
   if (breaks.has("R9-lazy")) return "Sure, I'll look into that.";
-  const all = await groups(conn);
-  const named = (n) => all.find((c) => c.name === n);
+  const id = text.match(/\b([CDG][A-Z0-9]{8,})\b/)?.[1];
+  const byName = async (n) => (await groups(conn)).find((c) => c.name === n)?.id;
   if (react) {
     if (!breaks.has("R9-react")) return "I can only send, read and search messages in Slack.";
-    const g = named(/news/i.test(text) ? "news" : "general");
-    const h = await api(conn.botToken, "conversations.history", { channel: g?.id, limit: 1 });
-    await api(conn.botToken, "reactions.add", { channel: g?.id, timestamp: h.messages?.[0]?.ts, name: "thumbsup" });
+    const channel = id ?? (await byName("general"));
+    const h = await api(conn.botToken, "conversations.history", { channel, limit: 1 });
+    await api(conn.botToken, "reactions.add", { channel, timestamp: h.messages?.[0]?.ts, name: "thumbsup" });
     return "Done.";
   }
   if (send) {
     // Like the connector, a Slack token file (an old OAuth slack connection)
     // wins over the new connection.
     const token = db.tokenFile?.botToken ?? conn.botToken;
-    const r = await api(token, "chat.postMessage", { channel: named(send[1])?.id, text: send[2] });
+    const channel = id ?? (await byName(send[1]));
+    if (!channel) return `I can't find #${send[1]}.`;
+    const r = await api(token, "chat.postMessage", { channel, text: send[2] });
     return r.ok ? `Posted it in #${send[1]}.` : `I could not post it: ${r.error}.`;
   }
-  if (read) {
-    const h = await api(conn.botToken, "conversations.history", { channel: named("news")?.id, limit: 5 });
-    if (!h.ok) return `I could not read #news: ${h.error}.`;
-    if (breaks.has("R9-blind")) return "I read #news, there is nothing much there.";
-    return `The latest in #news: ${h.messages.map((m) => m.text).join(" / ")}`;
+  if (list) {
+    const r = await api(conn.botToken, "conversations.list", { types: "public_channel" });
+    if (!r.ok) return `I can't list channels: ${r.error}.`;
+    return `I am in: ${r.channels.filter((c) => c.is_member).map((c) => `#${c.name}`).join(", ")}.`;
   }
-  // Search: the groups it is in, through their history. Broken R9-join
-  // searches the others too.
-  const word = search[1].toLowerCase();
-  const found = [];
-  for (const g of all) {
-    let h;
-    if (g.is_member)
-      h = await api(conn.botToken, "conversations.history", { channel: g.id, limit: 100 });
-    else if (breaks.has("R9-join"))
-      h = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${g.id}`)).json();
-    if (h?.ok) found.push(...h.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text));
+  const history = async (channel) => {
+    if (!channel) return { ok: false, error: "no channel" };
+    return api(conn.botToken, "conversations.history", { channel, limit: 15 });
+  };
+  if (search) {
+    const word = (
+      text.match(/(?:mentions|about(?: the)?|Look up)\s+"?([^"]+?)"?(?:\s+and\b|\s+in\b|\.|$)/i)?.[1] ?? ""
+    )
+      .replace(/^the\s+/i, "")
+      .toLowerCase();
+    const found = db.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text);
+    if (id) {
+      const h = await history(id);
+      if (h.ok) found.push(...h.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text));
+    }
+    if (breaks.has("R9-join"))
+      for (const g of await groups(conn))
+        if (!g.is_member) {
+          const h = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${g.id}`)).json();
+          if (h.ok) found.push(...h.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text));
+        }
+    const uniq = [...new Set(found)].filter((t) => !/search|find|look up/i.test(t));
+    return uniq.length
+      ? `I found: ${uniq.join(" / ")} (I searched what I have kept of our direct messages and mentions${id ? `, and ${id} in Slack` : ""})`
+      : `Nothing mentions ${word} in what I have kept.`;
   }
-  return found.length
-    ? `I found: ${found.join(" / ")} (searched the groups I am in)`
-    : `Nothing mentions ${word} in the groups I am in.`;
+  const channel = id ?? (text.match(/#(\w+)/) ? await byName(text.match(/#(\w+)/)[1]) : dmChannel);
+  const h = await history(channel);
+  if (!h.ok) return `I could not read it: ${h.error}.`;
+  if (breaks.has("R9-blind")) return "I read it, there is nothing much there.";
+  return `The latest messages: ${h.messages.map((m) => m.text).join(" / ")}`;
 }
 
 const slackState = async () => (await fetch(`${SLACK}/_control/state`)).json();
@@ -425,7 +444,7 @@ async function words(conn, event, team) {
   }
   const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
   if (event.user === guardian) {
-    const acted = await act(conn, text);
+    const acted = await act(conn, text, event.channel);
     if (acted) return acted;
   }
   const mine = text.match(/What (?:is|are) my (.+?)\?/i);
@@ -524,6 +543,9 @@ async function drainOnce() {
       continue;
     }
     if (ev?.type === "app_mention") {
+      // Rome keeps the mentions it heard.
+      db.messages.push({ team: payload.team_id, user: ev.user, channel: ev.channel, text: ev.text, ts: ev.ts });
+      save();
       if (conn && !breaks.has("silent")) await answerMention(conn, ev);
       continue;
     }

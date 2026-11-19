@@ -63,7 +63,8 @@ export async function startCloud({
       to.searchParams.set("client_id", clientId);
       to.searchParams.set(
         "scope",
-        `im:history,chat:write,app_mentions:read,channels:read,channels:history${breaks.has("R9-react") ? ",reactions:write" : ""}`,
+        // Variant dm-only, as the app is built, may not read or list groups.
+        `im:history,chat:write,app_mentions:read${breaks.has("dm-only") ? "" : ",channels:read,channels:history"}${breaks.has("R9-react") ? ",reactions:write" : ""}`,
       );
       to.searchParams.set("redirect_uri", `${self.url}/slack/callback`);
       to.searchParams.set("state", cloudState);

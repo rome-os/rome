@@ -82,6 +82,28 @@ const CASES = [
     rule: "R2",
     what: "Rome Cloud connects only the team's own workspaces (A and B)",
   },
+  {
+    name: "dm-only",
+    breaks: "dm-only",
+    rule: "R9",
+    result: "pass",
+    what: "the app as built cannot read or list groups; the group checks are reported unscored",
+  },
+  {
+    name: "R9-groups",
+    breaks: "",
+    env: { VERIFIER_R9_GROUPS: "1" },
+    rule: "R9",
+    result: "pass",
+    what: "with --r9-groups, an app that reads groups passes the group checks",
+  },
+  {
+    name: "R9-groups-dm-only",
+    breaks: "dm-only",
+    env: { VERIFIER_R9_GROUPS: "1" },
+    rule: "R9",
+    what: "with --r9-groups, the app as built fails the group checks",
+  },
   { name: "R9-tests-fail", breaks: "R9-tests-fail", rule: "R9", what: "one of the existing tests fails on the product" },
   { name: "R9-assert", breaks: "R9-assert", rule: "R9", what: "the product changed an assertion in the existing tests" },
   { name: "R9-blind", breaks: "R9-blind", rule: "R9", what: "reads call Slack but the reply holds nothing read" },
@@ -354,6 +376,7 @@ for (const c of CASES.filter((x) => !only.length || only.includes(x.name))) {
   await new Promise((r) => {
     spawn(process.execPath, [join(here, "verify.mjs"), envPath, join(work, "report"), commit], {
       stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, ...(c.env ?? {}) },
     }).on("exit", r);
   });
   world.kill("SIGTERM");

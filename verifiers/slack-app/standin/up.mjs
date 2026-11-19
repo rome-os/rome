@@ -240,7 +240,9 @@ write(
     'ALTER TABLE "slack_bindings" ADD CONSTRAINT "slack_bindings_instance_fk" FOREIGN KEY ("instance_id") REFERENCES "instances"("id");\n' +
     'ALTER TABLE "slack_bindings" ADD UNIQUE ("team_id");\n' +
     // Rome Cloud's own name for the instance a row belongs to.
-    'ALTER TABLE "slack_bindings" ADD COLUMN "account_instance_id" text;\n',
+    'ALTER TABLE "slack_bindings" ADD COLUMN "account_instance_id" text;\n' +
+    // A claim counter, so a late release cannot end a newer claim: binding.
+    'ALTER TABLE "slack_bindings" ADD COLUMN "generation" integer DEFAULT 1 NOT NULL;\n',
 );
 // Allowed beside the binding: the means of delivery, and a sign-in attempt
 // like Rome Cloud's: fields that say where to return the browser, and the

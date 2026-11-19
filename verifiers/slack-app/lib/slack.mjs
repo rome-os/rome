@@ -29,6 +29,14 @@ export function fakeSlack(base) {
     /** A member sends the bot a direct message, signed as Slack signs it. */
     dm: async (team, user, text) =>
       seeded(await call("/dm", { method: "POST", body: { team, user, text } })),
+    /**
+     * A direct message put in Slack's history only, with no event, so Rome
+     * never hears it. Answers whether an event went out anyway.
+     */
+    dmHistoryOnly: async (team, user, text) => {
+      const r = await call("/dm", { method: "POST", body: { team, user, text, send_event: false } });
+      return { channel: r.event?.channel, eventSent: r.event_sent !== false };
+    },
     /** The same direct message, with a signature Slack did not make. */
     forged: async (team, user, text) =>
       seeded(

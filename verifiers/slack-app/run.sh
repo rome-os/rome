@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Scores the official Slack app on rule set v1, phase 1.
-# Usage: verifiers/slack-app/run.sh [--r6-stop <seconds>] [--r12-allow-members] <env.json> [out dir]
+# Scores the official Slack app on rule set v2, phases 1 to 3.
+# Usage: verifiers/slack-app/run.sh [--r6-stop <seconds>] [--r12-allow-members] [--r9-groups] <env.json> [out dir]
 # Writes report.json and report.md to the out dir (default: out/<time> here).
 # --r6-stop sets how long R6 holds the instance stopped (also
 # VERIFIER_R6_STOP_SECONDS). Default: env.json's, else 120. The rule's is 3600.
 # --r12-allow-members (or VERIFIER_R12_ALLOW_MEMBERS=1) has R12 turn replies to
 # other members on first (PUT /settings), as a guardian would; without it R12
 # scores the instance's default.
+# --r9-groups (or VERIFIER_R9_GROUPS=1) scores R9's group checks, for an app
+# that may read groups: reads and a search after a wipe in #news, a send to
+# #news by name alone, listing its groups, and a refused read in #quiet.
+# Without it they are reported unscored.
 set -euo pipefail
 
 while [ $# -gt 0 ]; do
@@ -17,12 +21,15 @@ while [ $# -gt 0 ]; do
     --r12-allow-members)
       export VERIFIER_R12_ALLOW_MEMBERS=1
       shift ;;
+    --r9-groups)
+      export VERIFIER_R9_GROUPS=1
+      shift ;;
     *) break ;;
   esac
 done
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-env_json="${1:?usage: run.sh [--r6-stop <seconds>] [--r12-allow-members] <env.json> [out dir]}"
+env_json="${1:?usage: run.sh [--r6-stop <seconds>] [--r12-allow-members] [--r9-groups] <env.json> [out dir]}"
 out="${2:-$here/out/$(date -u +%Y%m%dT%H%M%SZ)}"
 
 # A report names the verifier commit, so the code that ran must be that commit.

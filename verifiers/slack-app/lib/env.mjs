@@ -45,6 +45,12 @@ export function loadEnv(path) {
   const allow = process.env.VERIFIER_R12_ALLOW_MEMBERS;
   if (allow !== undefined && allow !== "") env.r12.allowMembers = /^(1|true|yes|on)$/i.test(allow);
   env.r12.allowMembers ??= false;
+  // R9's group checks: scored with VERIFIER_R9_GROUPS=1 (run.sh
+  // --r9-groups), else reported unscored.
+  env.r9 ??= {};
+  const groups = process.env.VERIFIER_R9_GROUPS;
+  if (groups !== undefined && groups !== "") env.r9.groups = /^(1|true|yes|on)$/i.test(groups);
+  env.r9.groups ??= false;
   env.timeouts ??= {};
   env.timeouts.replySeconds ??= 90;
   env.timeouts.settleSeconds ??= 10;
