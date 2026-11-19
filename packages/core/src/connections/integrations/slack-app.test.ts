@@ -351,6 +351,45 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
     expect(bound).toBe(2);
   });
 
+  it("releases a claim a cancelled fix's redeem made while the disconnect ran", async () => {
+    let bound: number | null = 1;
+    let land = () => {};
+    const c = cloud({
+      // The fix's redeem is at Rome Cloud when the guardian disconnects: it
+      // claims the workspace again only after the disconnect began.
+      redeem: () =>
+        new Promise((resolve) => {
+          land = () => {
+            bound = 2;
+            resolve({ ...INSTALL, generation: 2 });
+          };
+        }),
+      release: async (_teamId, _signal, generation) => {
+        if (generation === undefined || generation === bound) bound = null;
+      },
+    });
+    const { descriptor } = descriptorWith(async () => {}, c);
+    const fixing = new AbortController();
+    const setup = descriptor.auth.setup;
+    if (!setup) throw new Error("no setup");
+    const fix = setup(interaction({ handoff: "h", state: "s" }).interact, {
+      ...ctx,
+      signal: fixing.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixing.abort(new Error("cancelled by the disconnect"));
+
+    const disconnecting = descriptor.onDisconnect?.(
+      { material: { ...MATERIAL, generation: "1" }, profile: {} },
+      { signal: new AbortController().signal },
+    );
+    land();
+    await disconnecting;
+    await fix.catch(() => {});
+
+    expect(bound).toBeNull();
+  });
+
   it("releases with no generation a grant made before Rome Cloud counted claims", async () => {
     const release = rs.fn(async () => {});
     const { descriptor } = descriptorWith(async () => {}, cloud({ release }));

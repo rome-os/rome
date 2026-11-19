@@ -250,18 +250,49 @@ const RELEASE_LIMIT_MS = 60_000;
  * has ended. A release that outlasts that, or one Rome restarted under, is
  * fenced at Rome Cloud: it names the generation of the claim it ends, and a
  * later connect holds a newer one.
+ *
+ * A release also waits for every redeem already running, and names the newest
+ * claim of its workspace this Rome was given. A setup cancelled while its
+ * redeem ran, such as by the disconnect itself, has its claim made at Rome
+ * Cloud all the same, and a release naming the older claim would leave that
+ * one bound. This Rome holds one connection per workspace, so the newest claim
+ * of the workspace is that connection's.
  */
 export function fencedCloud(cloud: SlackAppCloud): SlackAppCloud {
   const releasing = new Set<Promise<void>>();
+  const redeeming = new Set<Promise<void>>();
+  const newest = new Map<string, number>();
   return {
     start: (input) => cloud.start(input),
     refreshMailbox: (teamId) => cloud.refreshMailbox(teamId),
     async redeem(input) {
       await Promise.allSettled([...releasing]);
-      return cloud.redeem(input);
+      const run = cloud.redeem(input).then((install) => {
+        const generation = install.generation;
+        if (generation !== undefined && generation > (newest.get(install.teamId) ?? 0)) {
+          newest.set(install.teamId, generation);
+        }
+        return install;
+      });
+      const tracked: Promise<void> = run.then(
+        () => {},
+        () => {},
+      );
+      redeeming.add(tracked);
+      void tracked.finally(() => redeeming.delete(tracked));
+      return run;
     },
     release(teamId, signal, generation) {
-      const run = cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS), generation);
+      const pending = [...redeeming];
+      const run = (async () => {
+        await Promise.allSettled(pending);
+        const claimed = newest.get(teamId);
+        const named =
+          generation !== undefined && claimed !== undefined && claimed > generation
+            ? claimed
+            : generation;
+        await cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS), named);
+      })();
       const tracked: Promise<void> = run.catch(() => {}).finally(() => releasing.delete(tracked));
       releasing.add(tracked);
       if (!signal) return run;
