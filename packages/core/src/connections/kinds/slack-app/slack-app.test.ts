@@ -1220,6 +1220,30 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 26", "message 25"]);
   });
 
+  it("reads on from a broadcast reply's id, which names its thread too", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = Array.from({ length: 5 }, (_, i) => slack.say(i + 1));
+    Object.assign(said[2], { subtype: "thread_broadcast", thread_ts: said[0].ts });
+
+    const all = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    const broadcast = all.find((message) => message.text === "message 3");
+    expect(broadcast?.messageId).toBe(`${said[0].ts}:${said[2].ts}`);
+
+    const older = await a.readHistory("D_GUARDIAN" as never, {
+      olderThan: broadcast?.messageId,
+      limit: 10,
+    });
+    expect(texts(older)).toEqual(["message 2", "message 1"]);
+    const newer = await a.readHistory("D_GUARDIAN" as never, {
+      newerThan: broadcast?.messageId,
+      limit: 10,
+    });
+    expect(texts(newer)).toEqual(["message 5", "message 4"]);
+  });
+
   it("reads below its own upper bound when the newest message it holds is past it", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();

@@ -614,16 +614,25 @@ export class SlackAppAdapter {
    * app may not read it.
    */
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
-    for (const [field, id] of [
-      ["olderThan", read.olderThan],
-      ["newerThan", read.newerThan],
-    ] as const) {
-      if (id !== undefined && !/^\d+\.\d+$/.test(id)) {
+    // A broadcast reply's id names its thread too, as `<thread ts>:<ts>`; its
+    // place in the timeline is its own ts.
+    const bound = (field: "olderThan" | "newerThan", id: string | undefined) => {
+      if (id === undefined) return undefined;
+      const match = /^(?:\d+\.\d+:)?(\d+\.\d+)$/.exec(id);
+      if (!match) {
         throw new Error(
           `${field} "${id}" is no Slack message id here: one looks like 1700000000.000100`,
         );
       }
-    }
+      return match[1];
+    };
+    const olderThan = bound("olderThan", read.olderThan);
+    const newerThan = bound("newerThan", read.newerThan);
+    read = {
+      ...read,
+      ...(olderThan ? { olderThan } : {}),
+      ...(newerThan ? { newerThan } : {}),
+    };
     const { channelId, threadTs } = parseSlackChatId(chatId);
     if (threadTs)
       throw new Error(`Slack chat ${chatId} is a thread, and a read takes its conversation's id`);
