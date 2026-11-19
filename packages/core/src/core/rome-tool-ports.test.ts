@@ -322,6 +322,23 @@ describe("romeToolPorts actions carry the turn's audience", () => {
     expect(audienceOfRun(run)).toBe("shared");
   });
 
+  it("hands a turn with no chat of its own on with the audience it took from its starter", async () => {
+    const { actions, run } = ports();
+    // A summoned agent: its turn's audience is the summoning turn's.
+    await actions.run(
+      turn({ audience: () => "private", threadContext: () => undefined }),
+      "send_message",
+      {},
+    );
+    expect(audienceOfRun(run)).toBe("private");
+    await actions.run(
+      turn({ audience: () => "shared", threadContext: () => undefined }),
+      "send_message",
+      {},
+    );
+    expect(audienceOfRun(run)).toBe("shared");
+  });
+
   it("never widens a shared turn", async () => {
     const { actions, run } = ports();
     await actions.run(turn({ audience: () => "shared" }), "send_message", {});

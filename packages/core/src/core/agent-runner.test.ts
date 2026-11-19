@@ -1935,6 +1935,30 @@ describe("AgentRunner", () => {
       expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
     });
 
+    it("takes a withheld action away from a wildcard grant too", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: () => ({ withoutActions: ["demo_action"] }),
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["*"];
+      try {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: "telegram:wild-1",
+            threadContext: { channel: "telegram", threadId: "wild-1" },
+          }),
+        );
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).not.toContain("demo_action");
+    });
+
     it("withholds defer where the session's place says so, and only there", async () => {
       const provider = new MockModelProvider([
         [{ type: "result", content: "Done" }],

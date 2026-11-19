@@ -2227,6 +2227,11 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
+        // The replay reads as the turn that asked: without them a chatless
+        // turn's replay reads as outside any turn (app-host chat-calls). A
+        // nested call's own context names no turn, so the caller's is read.
+        turnId: context?.turnId ?? actionExecutionContext.getStore()?.turnId,
+        audience: context?.audience ?? actionExecutionContext.getStore()?.audience,
         preview,
       },
     });
