@@ -308,7 +308,7 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
   });
 
   it("names its connect's claim, so a release landing after a reconnect ends nothing", async () => {
-    // Rome Cloud's rule: each connect takes the next generation, and a release
+    // Rome Cloud's rule: each connect takes a higher generation than the last, and a release
     // naming one ends that claim only.
     let bound: number | null = null;
     let claims = 0;
