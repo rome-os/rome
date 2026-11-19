@@ -49,8 +49,6 @@
     "conciergeUnreadBadge_one": "{{label}} 条未读消息",
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
     "newTopic": "新话题",
-    "sectionTasks": "任务",
-    "tasksRunning": "任务，{{count}} 个运行中",
     "modeSwitch": "对话列表模式",
     "modeChat": "对话",
     "modeConcierge": "Agent",

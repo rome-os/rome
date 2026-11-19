@@ -3305,6 +3305,26 @@
         }
       }
     },
+    "Nothing runs on its own." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有自动运行的事。"
+          }
+        }
+      }
+    },
+    "A task needs you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有任务需要你"
+          }
+        }
+      }
+    },
     "Not started · Created %@" : {
       "localizations" : {
         "zh-Hans" : {

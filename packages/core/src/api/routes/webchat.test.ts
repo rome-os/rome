@@ -46,9 +46,9 @@ import { ModelResolutionError } from "../../agent/index.js";
 import {
   chatMessages,
   conciergeMessageTurns,
-  conciergeTasks,
   guardianAuth,
   romeSessions,
+  taskChats,
   webchatProjects,
 } from "../../db/schema.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
@@ -8081,11 +8081,10 @@ describe("Webchat API", () => {
 
     describe("a task chat's row", () => {
       let repo: ConciergeTasksRepository;
-      let deleted: string[];
       let upserts: Array<{ id: string; archivedAt: number | null }>;
       let app: ReturnType<typeof createWebchatRuntime>["routes"];
 
-      /** A chat the Concierge of `ownerKey` started, linked to a row of its own. */
+      /** A chat the Concierge of `ownerKey` started, with the task it is. */
       const taskChat = async (id: string, ownerKey = "guardian") => {
         await deps.webchatRepo.createSession(
           id,
@@ -8103,9 +8102,7 @@ describe("Webchat API", () => {
           triggerKind: TASK_CHAT_TRIGGER_KIND,
           triggerName: "Fix flaky test",
         });
-        const [row] = await repo.upsertMany([
-          { title: `Task of ${id}`, state: "doing", sessionId: id },
-        ]);
+        const row = await repo.create(id);
         // Let the row's own change notice land before the test starts listening.
         await new Promise((resolve) => setTimeout(resolve, 0));
         return row;
@@ -8136,8 +8133,6 @@ describe("Webchat API", () => {
           webchatRepo: deps.webchatRepo,
           tasks,
         } as unknown as ConciergeDeps);
-        deleted = [];
-        service.chatDeleted = (taskId: string) => void deleted.push(taskId);
         deps.concierge = service;
         upserts = [];
         repo.onChange(({ row }) => {
@@ -8148,49 +8143,36 @@ describe("Webchat API", () => {
 
       it("stops the task and takes it off the task list when its chat is archived, and lists it again unarchived", async () => {
         const row = await taskChat("task-chat");
-        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(await panel()).toEqual(["Fix flaky test"]);
         upserts = [];
 
         expect((await archive("task-chat")).status).toBe(200);
         expect(await panel()).toEqual([]);
         expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
-        expect(await repo.get(row.id)).toMatchObject({ stopReason: "archived" });
+        expect(await repo.get(row.id)).toMatchObject({ stoppedAt: expect.any(Date) });
         // A repeated archive changes nothing, so the row still comes back.
         expect((await archive("task-chat")).status).toBe(200);
 
         expect((await archive("task-chat", false)).status).toBe(200);
-        expect(await panel()).toEqual(["Task of task-chat"]);
-        expect(upserts.at(-1)).toEqual({ id: row.id, archivedAt: null });
+        expect(await panel()).toEqual(["Fix flaky test"]);
         // Back on the list, the task stays stopped.
         expect(await repo.get(row.id)).toMatchObject({
+          archivedAt: null,
           stoppedAt: expect.any(Date),
-          stopReason: "archived",
         });
       });
 
-      it("keeps a row the Concierge archived before its chat was archived", async () => {
-        const row = await taskChat("task-chat");
-        await repo.upsertMany([{ id: row.id, archived: true }]);
-        expect((await archive("task-chat")).status).toBe(200);
-        expect((await archive("task-chat", false)).status).toBe(200);
-        expect((await repo.get(row.id))?.archivedAt).not.toBeNull();
-      });
-
-      it("leaves the task list for good when the chat is deleted, and tells the Concierge", async () => {
+      it("takes the task with its chat when the chat is deleted", async () => {
         const row = await taskChat("task-chat");
         upserts = [];
         expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
           200,
         );
         expect(await panel()).toEqual([]);
-        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
-        expect(deleted).toEqual([row.id]);
-        expect(await repo.get(row.id)).toMatchObject({
-          sessionId: null,
-          stopReason: "deleted",
-          stoppedAt: expect.any(Date),
-          archivedAt: expect.any(Date),
-        });
+        // The Tasks view is told once, and the task is gone.
+        expect(upserts).toHaveLength(1);
+        expect(await repo.get(row.id)).toBeNull();
+        expect(testDb.db.select().from(taskChats).all()).toEqual([]);
       });
 
       it("leaves the rows alone when a common chat is archived or deleted", async () => {
@@ -8202,21 +8184,20 @@ describe("Webchat API", () => {
         expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
           200,
         );
-        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(await panel()).toEqual(["Fix flaky test"]);
         expect(upserts).toEqual([]);
-        expect(deleted).toEqual([]);
       });
 
-      it("never archives a row of another owner that links the chat", async () => {
-        const row = await taskChat("task-chat");
-        // A row that links the chat but is another owner's, as no write makes it.
-        testDb.db
-          .update(conciergeTasks)
-          .set({ ownerKey: "visitor:a" })
-          .where(eq(conciergeTasks.id, row.id))
-          .run();
-        expect((await archive("task-chat")).status).toBe(200);
-        expect(await repo.get(row.id)).toMatchObject({ archivedAt: null, stoppedAt: null });
+      it("names the Concierge chat a task chat reports to when it is read", async () => {
+        await taskChat("task-chat");
+        const read = await app.request("/chat/sessions/task-chat");
+        expect(await read.json()).toMatchObject({
+          taskOf: { conciergeChatId: expect.any(String), main: true },
+        });
+        await deps.webchatRepo.createSession("plain-chat", "Plain");
+        expect(await (await app.request("/chat/sessions/plain-chat")).json()).not.toHaveProperty(
+          "taskOf",
+        );
       });
     });
 

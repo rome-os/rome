@@ -272,7 +272,7 @@ async function taskPathOf(
 ): Promise<TaskPath | null> {
   const [tasks] = stack.query<{ session_id: string }>([
     {
-      sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL ORDER BY created_at",
+      sql: "SELECT t.session_id FROM task_chats t JOIN rome_sessions s ON s.id = t.session_id WHERE t.concierge_chat_id = ? ORDER BY s.created_at",
       params: [chatId],
     },
   ]);

@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
-import { type ConciergeTaskOutcome, taskStatus } from "@rome/api-types/concierge-task-status";
+import type { ConciergeTaskOutcome } from "@rome/api-types/concierge-task-status";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
 const TAG = "0130_concierge_task_status";
@@ -156,31 +156,13 @@ describe("the Concierge task status migration", () => {
         "SELECT id, due_at, linked_at, session_id, last_outcome, ended_at FROM concierge_tasks ORDER BY id",
       )
       .all() as Row[];
-    // The facts Rome reads off each row (ConciergeTasks.factsOf).
-    const statusOf = (row: Row) =>
-      taskStatus(
-        {
-          stoppedAt: null,
-          waitingSince: null,
-          running: false,
-          reportPending: false,
-          laterAt: row.due_at !== null && row.due_at > now ? row.due_at : null,
-          lastOutcome: row.last_outcome,
-          started: row.linked_at !== null || row.session_id !== null || row.last_outcome !== null,
-        },
-        now,
-      );
-    expect(rows.map((row) => [row.id, statusOf(row), row.ended_at])).toEqual([
-      ["missed", { status: "ended", endReason: "done" }, now - 60_000],
-      ["planned", { status: "later", endReason: null }, null],
-      ["stale", { status: "ended", endReason: "done" }, 500],
+    // A row ends when it has nothing to wait for: the planned one, whose time is
+    // still ahead, stays open (a later migration removes rows with no chat).
+    expect(rows.map((row) => [row.id, row.ended_at])).toEqual([
+      ["missed", now - 60_000],
+      ["planned", null],
+      ["stale", 500],
     ]);
-    // Once its time passes, the planned row ends done too.
-    const planned = rows.find((row) => row.id === "planned")!;
-    expect(statusOf({ ...planned, due_at: now - 1 })).toEqual({
-      status: "ended",
-      endReason: "done",
-    });
     sqlite.close();
   });
 

@@ -547,6 +547,19 @@ final class Workspace {
         return store
     }
 
+    /// Each Concierge chat's task links once read, kept so a chip shows at once
+    /// the next time and reads again behind.
+    @ObservationIgnored private var taskLinkStores: [String: TaskLinkStore] = [:]
+
+    /// The task links of Concierge chat `id`; nil for a blank topic chat.
+    func taskLinks(forChat id: String) -> TaskLinkStore? {
+        guard let chatId = serverChatId(id) else { return nil }
+        if let held = taskLinkStores[chatId] { return held }
+        let store = TaskLinkStore(chatId: chatId, backend: backend)
+        taskLinkStores[chatId] = store
+        return store
+    }
+
     /// Each chat's outputs once listed, kept so the Outputs tab shows them at
     /// once the next time and reads them again behind.
     @ObservationIgnored private var outputLists: [String: ChatOutputsStore] = [:]

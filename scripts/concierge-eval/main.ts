@@ -153,7 +153,7 @@ function readChat(chatId: string): ChatRows {
       params: [chatId],
     },
     {
-      sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL",
+      sql: "SELECT session_id FROM task_chats WHERE concierge_chat_id = ?",
       params: [chatId],
     },
   ]);
@@ -197,15 +197,15 @@ const chatOf = (rows: ChatRows) => rows.chatId;
 function schedulesOf(chatId: string): { scheduled: number; taskChatRoutines: string[] } {
   const [scheduled, own] = stack.query<{ name: string }>([
     {
-      sql: `SELECT r.name FROM routines r JOIN concierge_tasks t
-              ON r.key = 'concierge-task-schedule:' || t.id
-            WHERE t.chat_id = ?`,
+      sql: `SELECT r.name FROM routines r JOIN task_chats t
+              ON r.key = 'concierge-task-schedule:' || t.session_id
+            WHERE t.concierge_chat_id = ?`,
       params: [chatId],
     },
     {
       sql: `SELECT r.name || ' (' || r.action_name || ')' AS name FROM routines r
-            JOIN concierge_tasks t ON r.chat_id = t.session_id
-            WHERE t.chat_id = ? AND r.action_name != 'resume_session'`,
+            JOIN task_chats t ON r.chat_id = t.session_id
+            WHERE t.concierge_chat_id = ? AND r.action_name != 'resume_session'`,
       params: [chatId],
     },
   ]);

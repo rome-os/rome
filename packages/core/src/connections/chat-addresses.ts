@@ -224,7 +224,7 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
     WHERE root_message_id IN (SELECT from_id FROM joined_chat_messages)
   `);
   tx.run(sql`
-    UPDATE concierge_tasks
+    UPDATE task_chats
     SET source_message_id = (
       SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = source_message_id)
     WHERE source_message_id IN (SELECT from_id FROM joined_chat_messages)

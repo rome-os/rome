@@ -49,10 +49,10 @@ export interface RomeToolPortsDeps {
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
-   * Whose task `taskId` is, or null when there is none, so a check names only
-   * a task of its own chat's owner. When absent, no check names a task.
+   * Whose task chat `chatId` is, or null when it is none, so a check names
+   * only a task chat of its own chat's owner. When absent, no check names one.
    */
-  taskOwner?: (taskId: string) => Promise<string | null>;
+  taskOwner?: (chatId: string) => Promise<string | null>;
   /** The device kinds `connect_account` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
@@ -145,11 +145,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
       turn.inTurn(() =>
         asTurnActor(turn, async () => {
           const ownerKey = await dashboardChatOwner(deps.webchatRepo, turn.threadContext());
-          // A check names only a task of the owner whose chat schedules it.
-          if (wakeUp.taskId) {
-            const owner = (await deps.taskOwner?.(wakeUp.taskId)) ?? null;
+          // A check names only a task chat of the owner whose chat schedules it.
+          if (wakeUp.chatId) {
+            const owner = (await deps.taskOwner?.(wakeUp.chatId)) ?? null;
             if (owner === null || owner !== (ownerKey ?? "guardian")) {
-              throw new Error(`No task ${wakeUp.taskId}. Use task_list to find it.`);
+              throw new Error(`No task chat ${wakeUp.chatId}. Use chat_list to find it.`);
             }
           }
           return runDefer(wakeUp, {

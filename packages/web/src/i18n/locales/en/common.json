@@ -49,8 +49,6 @@
     "conciergeUnreadBadge_one": "{{label}} unread message",
     "conciergeUnreadBadge_other": "{{label}} unread messages",
     "newTopic": "New topic",
-    "sectionTasks": "Tasks",
-    "tasksRunning": "Tasks, {{count}} running",
     "modeSwitch": "Chat list mode",
     "modeChat": "Chat",
     "modeConcierge": "Agent",
