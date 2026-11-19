@@ -65,6 +65,7 @@ import { preserveMentionOnlyText } from "../../../participation/mention-only.js"
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
 import type { TalkHistoryRead } from "../../types.js";
 import { type DiscordGet, readDiscordHistory } from "./discord-history.js";
+import { botReadsHistory } from "./discord-permissions.js";
 import { discordAttachment } from "./discord-attachment.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
@@ -1450,7 +1451,7 @@ Use \`/channel agent clear\` to undo.`,
       return Promise.race([request, aborted]);
     };
     try {
-      return await this.readHistoryWith(get, chatId, read, aborted);
+      return await this.readHistoryWith(get, chatId, read);
     } finally {
       // Whatever ended the read, nothing it started sends on.
       controller.abort();
@@ -1462,7 +1463,6 @@ Use \`/channel agent clear\` to undo.`,
     get: DiscordGet,
     chatId: ChatId,
     read: TalkHistoryRead,
-    aborted: Promise<never>,
   ): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
     const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
@@ -1484,9 +1484,7 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        // The permission fetches go through discord.js managers, which take
-        // no signal: a stop ends the read without waiting on them.
-        readsHistoryIn: (channelId) => Promise.race([this.readsHistoryIn(channelId), aborted]),
+        readsHistoryIn: (channelId) => this.readsHistoryIn(get, channelId, botId),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
@@ -1496,31 +1494,20 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   /** Whether the bot holds Read Message History in a guild chat or thread,
-   *  or null where that cannot be told, such as before the gateway is ready.
-   *  Discord answers a read it refuses with no messages, so the answer is
-   *  read from Discord now, not from what the gateway last heard: the chat
-   *  (and a thread's parent), the guild's roles, and the bot's own member. */
-  private async readsHistoryIn(channelId: string): Promise<boolean | null> {
-    const user = this.client.user;
-    if (!user) return null;
+   *  read from Discord now through the read's own `get`, so the read's
+   *  cancellation covers it (discord-permissions.ts). Discord refusing the
+   *  chat answers no; a failure that says nothing about access answers null. */
+  private async readsHistoryIn(
+    get: DiscordGet,
+    channelId: string,
+    botId: string,
+  ): Promise<boolean | null> {
     try {
-      const channel = await this.client.channels.fetch(channelId, { force: true });
-      if (!channel || !("permissionsFor" in channel) || !("guild" in channel)) return null;
-      if (channel.isThread() && channel.parentId) {
-        await this.client.channels.fetch(channel.parentId, { force: true });
-      }
-      await Promise.all([
-        channel.guild.roles.fetch(undefined, { force: true }),
-        channel.guild.members.fetchMe({ force: true }),
-      ]);
-      const permissions = channel.permissionsFor(user);
-      if (!permissions) return null;
-      const flags = discordJs().PermissionFlagsBits;
-      return permissions.has([flags.ViewChannel, flags.ReadMessageHistory]);
+      return await botReadsHistory(get, channelId, botId);
     } catch (err) {
-      if (this.reportRejectedCredential(err)) throw err;
-      // Discord refusing the chat itself is an answer.
       const status = (err as { status?: unknown } | null)?.status;
+      // A 401 is already reported by `get`; it ends the read.
+      if (status === 401) throw err;
       if (status === 403 || status === 404) return false;
       return null;
     }

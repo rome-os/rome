@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  ChannelManager,
   Client,
   REST,
   RESTEvents,
@@ -244,76 +243,27 @@ describe("DiscordAdapter REST broker capability", () => {
     expect(routes).toHaveLength(1);
   });
 
-  describe("whether the bot may read a chat's history", () => {
-    /** The adapter over a chat Discord answers through `fetched`, with the
-     *  gateway's own view of it allowing the read. */
-    function adapterOver(fetched: () => Promise<{ allows: boolean }>) {
-      const adapter = new DiscordAdapter({ botToken: "not-exposed" });
-      const client = (adapter as unknown as { client: { user: unknown } }).client;
-      Object.defineProperty(client, "user", { value: { id: "1" }, configurable: true });
-      // The gateway's cache says yes until Discord is asked.
-      let allows = true;
-      const guild = {
-        roles: { fetch: rs.fn(async () => undefined) },
-        members: { fetchMe: rs.fn(async () => undefined) },
-      };
-      const channel = {
-        guild,
-        isThread: () => false,
-        permissionsFor: () => ({ has: () => allows }),
-      };
-      const fetch = rs.spyOn(ChannelManager.prototype, "fetch").mockImplementation((async (
-        _id: string,
-        options?: { force?: boolean },
-      ) => {
-        if (options?.force) allows = (await fetched()).allows;
-        return channel;
-      }) as never);
-      const readsHistoryIn = (id: string) =>
-        (
-          adapter as unknown as { readsHistoryIn(id: string): Promise<boolean | null> }
-        ).readsHistoryIn(id);
-      return { readsHistoryIn, fetch, guild };
-    }
-
-    it("asks Discord, not the gateway's cache", async () => {
-      const { readsHistoryIn, fetch, guild } = adapterOver(async () => ({ allows: false }));
-
-      await expect(readsHistoryIn("3")).resolves.toBe(false);
-      expect(fetch).toHaveBeenCalledWith("3", { force: true });
-      expect(guild.roles.fetch).toHaveBeenCalledWith(undefined, { force: true });
-      expect(guild.members.fetchMe).toHaveBeenCalledWith({ force: true });
-    });
-
-    it("answers no where Discord refuses the chat, and cannot tell where it fails", async () => {
-      const refused = adapterOver(async () => {
-        throw Object.assign(new Error("Missing Access"), { status: 403 });
-      });
-      await expect(refused.readsHistoryIn("3")).resolves.toBe(false);
-      rs.restoreAllMocks();
-
-      const failing = adapterOver(async () => {
-        throw Object.assign(new Error("Internal Server Error"), { status: 500 });
-      });
-      await expect(failing.readsHistoryIn("3")).resolves.toBeNull();
-    });
-  });
-
   it("ends a history read when the epoch stops during its permission check", async () => {
     rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
-    rs.spyOn(REST.prototype, "get").mockResolvedValue({ id: "3", type: 0, name: "general" });
-    rs.spyOn(ChannelManager.prototype, "fetch").mockImplementation(
-      (() => new Promise(() => undefined)) as never,
-    );
+    const routes: string[] = [];
+    rs.spyOn(REST.prototype, "get").mockImplementation((async (route: string) => {
+      routes.push(route);
+      // The chat answers once; the permission check's requests then hang.
+      if (routes.length === 1) return { id: "3", type: 0, guild_id: "9" };
+      return new Promise(() => undefined);
+    }) as never);
     const adapter = new DiscordAdapter({ botToken: "not-exposed" });
     const client = (adapter as unknown as { client: { user: unknown } }).client;
     Object.defineProperty(client, "user", { value: { id: "1" }, configurable: true });
 
     const read = adapter.readHistory("3" as never, { limit: 5 });
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const sent = routes.length;
     await adapter.stop();
 
     await expect(read).rejects.toThrow("Discord connection stopped during the read");
+    expect(sent).toBe(2);
+    expect(routes).toHaveLength(sent);
   });
 
   it("reports a 401 on a history read as a rejected credential", async () => {
