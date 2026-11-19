@@ -60,13 +60,13 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
   }
 
   return (
-    <div className="rounded-12 border border-border bg-surface p-4">
+    <div className="connector-inline-card rounded-12 border border-border bg-surface p-4">
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
           <PlugZap size={18} strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <span className="text-sm font-medium text-foreground">Sign in to Composio</span>
+          <span className="text-ui font-medium text-foreground">Sign in to Composio</span>
           <p className="mt-0.5 text-xs text-muted-foreground">
             One sign-in lets Rome connect apps on your behalf.
           </p>

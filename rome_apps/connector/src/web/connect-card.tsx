@@ -376,8 +376,8 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
   // provider): connecting inline is impossible, so offer the Settings fallback.
   if (phase === "unavailable") {
     return (
-      <div className="rounded-12 border border-border bg-surface p-4">
-        <span className="text-sm font-medium text-foreground">Connect {name}</span>
+      <div className="connector-inline-card rounded-12 border border-border bg-surface p-4">
+        <span className="text-ui font-medium text-foreground">Connect {name}</span>
         {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
@@ -396,9 +396,9 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
   }
 
   return (
-    <div className="rounded-12 border border-border bg-surface p-4">
+    <div className="connector-inline-card rounded-12 border border-border bg-surface p-4">
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-foreground">Connect {name}</span>
+        <span className="text-ui font-medium text-foreground">Connect {name}</span>
         {scope ? <span className="text-xs text-muted-foreground">{scope}</span> : null}
       </div>
 
