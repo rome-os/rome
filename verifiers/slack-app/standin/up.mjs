@@ -69,6 +69,7 @@ const instanceSecrets = { a: rand(), b: rand() };
 const cloud = await startCloud({
   slackUrl,
   clientId: slack.config.clientId,
+  ownTeams: slack.config.workspaces.slice(0, 2).map((w) => w.id),
   ...secrets,
   instanceSecrets,
   breaks,

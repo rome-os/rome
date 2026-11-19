@@ -55,6 +55,10 @@ export function fakeSlack(base) {
       const r = await call("/auth-test", { method: "POST", body: { team } });
       return { ...(r.auth_test ?? r), tokenState: r.token_state ?? null };
     },
+    /** Turns the app's public distribution on or off; off, only its home workspace can install it. */
+    setDistributed: (on) => call("/config", { method: "POST", body: { distributed: on } }),
+    /** Every answer on the approve screen after `since`: teamId, userId, outcome, error. */
+    approvals: async (since) => (await call(`/approvals?${query({ since })}`)).approvals,
     /** The current seq, to read only what comes after it. */
     seq: async () => (await call("/posts?since=999999999")).seq,
     /** What the bot posted, oldest first, after `since`. */

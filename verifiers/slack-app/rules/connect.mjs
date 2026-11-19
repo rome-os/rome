@@ -56,13 +56,24 @@ export async function connectAs(ctx, inst, ws) {
 const yn = (b) => (b ? "yes" : "no");
 
 export async function r1(ctx) {
-  const ws = ctx.wsA;
-  const walk = await connectAs(ctx, ctx.a, ws);
+  const { bound, ...scored } = await signInCheck(ctx, ctx.a, ctx.wsA, "R1");
+  if (bound) ctx.bound.a = bound;
+  return scored;
+}
+
+/**
+ * R1's whole check: `inst` connects workspace `ws` in one sign-in with
+ * nothing pasted, and its guardian's first direct message is answered by the
+ * Concierge. `rule` tags the message. Returns the result plus `bound`, the
+ * new connection's id (true when Rome names none), or null.
+ */
+async function signInCheck(ctx, inst, ws, rule) {
+  const walk = await connectAs(ctx, inst, ws);
   const romeFields = walk.approveScreens.filter((s) => !s.bySlack).flatMap((s) => s.fields);
   const slackScreens = walk.approveScreens.filter((s) => s.bySlack).length;
   const evidence = {
     workspace: ws.id,
-    instance: ctx.a.name,
+    instance: inst.name,
     outcome: walk.outcome,
     setupFields: walk.setupFields,
     fieldsOnRomeScreens: romeFields,
@@ -77,18 +88,19 @@ export async function r1(ctx) {
       result: "fail",
       reason: `Connected: no. Connect did not finish: ${walk.reason}`,
       evidence,
+      bound: null,
     };
   }
-  ctx.bound.a = walk.connectionId ?? true;
+  const bound = walk.connectionId ?? true;
 
-  const accounts = await ctx.a.accounts();
+  const accounts = await inst.accounts();
   const account = walk.connectionId
     ? accounts.find((x) => x.connection === walk.connectionId)
     : accounts.find((x) => x.account.platform === "slack" && x.connection);
   evidence.connectionId = walk.connectionId;
   evidence.account = account ?? null;
 
-  const reply = await oneReply(ctx, ws, "R1");
+  const reply = await oneReply(ctx, ws, rule);
   evidence.firstMessage = {
     eventId: reply.eventId,
     replies: reply.replies,
@@ -130,13 +142,105 @@ export async function r1(ctx) {
         result: "fail",
         reason: `Connected: ${evidence.parts.connected}; replied: ${evidence.parts.replied}. ${problems.join("; ")}`,
         evidence,
+        bound,
       }
     : {
         result: "pass",
         reason:
           "Connected in one sign-in with 0 fields from Rome; the Concierge answers as the account with no link step.",
         evidence,
+        bound,
       };
+}
+
+/**
+ * R2: R1's whole check from a workspace that is not the app's home one and
+ * that no instance is bound to. First the negative, so the pass means
+ * something: with the app's distribution off in the fake, the same sign-in
+ * is refused by Slack and nothing connects. Runs after R8, on the first
+ * instance, whose workspace R8 disconnected.
+ */
+export async function r2(ctx) {
+  const ws = ctx.wsC;
+  if (!ws)
+    return {
+      result: "not checked",
+      reason: "the environment has no workspace that is neither the home one nor bound",
+    };
+  const inst = ctx.a;
+  const evidence = { workspace: ws.id, home: ctx.homeTeam ?? null, instance: inst.name };
+
+  // Whatever Slack connection the instance still holds goes first, so the
+  // check does not hang on how many workspaces one instance can hold.
+  const left = (await inst.accounts()).filter((x) => x.account?.platform === "slack" && x.connection);
+  evidence.disconnectedFirst = [];
+  for (const x of left) {
+    await inst.disconnect(x.connection);
+    evidence.disconnectedFirst.push(x.connection);
+  }
+
+  let off;
+  try {
+    off = await ctx.slack.setDistributed(false);
+  } catch (err) {
+    return { result: "not checked", reason: `the fake's distribution switch failed: ${err.message}`, evidence };
+  }
+  if (off.distributed !== false)
+    return {
+      result: "not checked",
+      reason: "the fake did not turn its distribution off, so a refusal cannot be shown",
+      evidence,
+    };
+  let negative;
+  try {
+    const since = await ctx.slack.seq();
+    const before = (await inst.accounts()).filter((x) => x.connection).length;
+    const walk = await connectAs(ctx, inst, ws).catch((e) => ({ outcome: "stuck", reason: e.message }));
+    const after = (await inst.accounts()).filter((x) => x.connection).length;
+    const answers = (await ctx.slack.approvals(since)).filter((a) => a.teamId === ws.id);
+    negative = {
+      outcome: walk.outcome,
+      reason: walk.reason ?? null,
+      approvals: answers,
+      connectedAccounts: { before, after },
+      refusedBySlack: answers.some((a) => a.outcome === "refused"),
+    };
+  } finally {
+    await ctx.slack.setDistributed(true);
+  }
+  evidence.distributionOff = negative;
+  if (negative.outcome === "connected" || negative.connectedAccounts.after !== negative.connectedAccounts.before)
+    return {
+      result: "fail",
+      reason: `with the app's distribution off, ${ws.id} still connected, so Connect does not go through Slack's approval`,
+      evidence,
+    };
+  if (!negative.refusedBySlack)
+    return {
+      result: "not checked",
+      reason: `with distribution off, Slack never refused ${ws.id} (the sign-in ended ${negative.outcome}: ${negative.reason}), so a pass would mean nothing`,
+      evidence,
+    };
+
+  const since = await ctx.slack.seq();
+  const r = await signInCheck(ctx, inst, ws, "R2");
+  const answers = (await ctx.slack.approvals(since)).filter((a) => a.teamId === ws.id);
+  evidence.distributionOn = { ...r.evidence, approvals: answers };
+  const approvedThere = answers.some((a) => a.outcome === "approved");
+  if (r.result === "pass" && !approvedThere)
+    return {
+      result: "fail",
+      reason: `connected, but Slack recorded no approval from ${ws.id}`,
+      evidence,
+    };
+  const neg = `With distribution off, Slack refused ${ws.id} and nothing connected.`;
+  return r.result === "pass"
+    ? {
+        result: "pass",
+        reason: `${ws.id} is not the home workspace and no instance was bound to it. ${neg} With it on: ${r.reason}`,
+        evidence,
+      }
+    : { result: r.result, reason: `From ${ws.id}, not the home workspace: ${r.reason} ${neg}`, evidence };
 }
 
 export async function r3(ctx) {

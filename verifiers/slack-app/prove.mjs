@@ -1,5 +1,5 @@
 // Proves the verifier before the product exists: runs it against the good
-// stand-in, where every phase 1 and 2 rule must pass, and against each broken
+// stand-in, where every scored rule must pass, and against each broken
 // stand-in, where the rule it breaks must fail (or, where the case says,
 // report "not checked" or still pass).
 //
@@ -35,9 +35,9 @@ const dirty = execFileSync("git", ["-C", here, "status", "--porcelain", "--", ".
 const commit = `${execFileSync("git", ["-C", here, "rev-parse", "HEAD"]).toString().trim()}${dirty ? "+uncommitted" : ""}`;
 
 const PHASE1 = ["R1", "R3", "R4", "R6", "R7", "R11"];
-const SCORED = [...PHASE1, "R5", "R8", "R12", "R13"];
+const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2"];
 const CASES = [
-  { name: "good", breaks: "", expect: "every phase 1 and phase 2 rule passes" },
+  { name: "good", breaks: "", expect: "every scored rule passes" },
   {
     name: "R1-fields",
     breaks: "R1-fields",
@@ -75,6 +75,12 @@ const CASES = [
     breaks: "R1-kept",
     rule: "R1",
     what: "Rome Cloud keeps the sign-in's outcome after the instance redeemed it",
+  },
+  {
+    name: "R2-own-only",
+    breaks: "R2-own-only",
+    rule: "R2",
+    what: "Rome Cloud connects only the team's own workspaces (A and B)",
   },
   { name: "R5-top", breaks: "R5-top", rule: "R5", what: "mentions are answered at the top of the group" },
   { name: "R5-twice", breaks: "R5-twice", rule: "R5", what: "each mention gets two replies in its thread" },

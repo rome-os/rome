@@ -1,4 +1,4 @@
-// Scores the official Slack app against rule set v2, phases 1 and 2, in one
+// Scores the official Slack app against rule set v2, phases 1 to 3, in one
 // environment. Usage: node verify.mjs <env.json> <out dir> <verifier commit>.
 // run.sh is the entry point: it refuses uncommitted verifier code first.
 
@@ -8,13 +8,13 @@ import { loadEnv } from "./lib/env.mjs";
 import { instance } from "./lib/instance.mjs";
 import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
-import { connectAs, r1, r3 } from "./rules/connect.mjs";
+import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
 import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
 import { r11 } from "./rules/structure.mjs";
 
 const RULES = [
   { id: "R1", phase: 1, title: "One sign-in, nothing pasted", check: r1 },
-  { id: "R2", phase: 3, title: "Any workspace can add it" },
+  { id: "R2", phase: 3, title: "Any workspace can add it", check: r2 },
   { id: "R3", phase: 1, title: "One workspace binds to one instance", check: r3 },
   { id: "R4", phase: 1, title: "Direct messages work", check: r4 },
   { id: "R5", phase: 2, title: "Mentions in a group work", check: r5 },
@@ -40,18 +40,22 @@ const RULES = [
 
 // Order matters: R3 and the second binding need R1's connection; R7 reads
 // R4's messages; R6 stops the instance; R8 removes the app and disconnects,
-// so it runs last.
-const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R6", "R8"];
+// so it runs after the rest; R2 then signs the first instance in to a third
+// workspace.
+const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R6", "R8", "R2"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
 const slack = fakeSlack(env.slack.control.replace(/\/$/, ""));
 // Workspace A binds to the first instance and B to the second. Each
 // workspace's guardian is its owner.
-const workspaces = (await slack.state()).workspaces.map((w) => ({
+// R2's workspace is any other one that is not the app's home workspace.
+const fakeState = await slack.state();
+const workspaces = fakeState.workspaces.map((w) => ({
   id: w.id,
   guardian: (w.members.find((m) => m.guardian || m.is_owner) ?? w.members[0]).id,
 }));
+const homeTeam = fakeState.distribution?.home_team ?? null;
 const ctx = {
   env,
   slack,
@@ -59,6 +63,8 @@ const ctx = {
   b: instance(env.instances[1], slack.origin),
   wsA: workspaces[0],
   wsB: workspaces[1],
+  wsC: workspaces.slice(2).find((w) => homeTeam && w.id !== homeTeam) ?? null,
+  homeTeam,
   bound: { a: null, b: null },
 };
 
@@ -99,7 +105,7 @@ for (const step of ORDER) {
 
 const report = {
   ruleSet: "v2",
-  phases: [1, 2],
+  phases: [1, 2, 3],
   startedAt,
   finishedAt: new Date().toISOString(),
   commits: {
@@ -117,7 +123,7 @@ const report = {
     phase: r.phase,
     ...(r.check
       ? results[r.id]
-      : { result: "not checked", reason: `Phase ${r.phase} rule; this verifier scores phases 1 and 2.` }),
+      : { result: "not checked", reason: `Phase ${r.phase} rule; this verifier does not score it yet.` }),
   })),
 };
 mkdirSync(outDir, { recursive: true });
@@ -140,7 +146,7 @@ function markdown(r) {
     .filter((x) => x.evidence)
     .map((x) => `### ${x.id}\n\n\`\`\`json\n${JSON.stringify(x.evidence, null, 2)}\n\`\`\``);
   return [
-    `# Slack app verifier report, rule set ${r.ruleSet}, phases ${r.phases.join(" and ")}`,
+    `# Slack app verifier report, rule set ${r.ruleSet}, phases ${r.phases.join(", ")}`,
     "",
     `- rome: \`${r.commits.rome}\``,
     `- rome-cloud: \`${r.commits.romeCloud}\``,

@@ -18,6 +18,7 @@ const sameHex = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a
 export async function startCloud({
   slackUrl,
   clientId,
+  ownTeams,
   clientSecret,
   signingSecret,
   instanceSecrets,
@@ -100,6 +101,10 @@ export async function startCloud({
       if (!exchange.ok) {
         back.searchParams.set("error", "slack_refused");
         back.searchParams.set("message", `Slack refused the sign-in: ${exchange.error}`);
+      } else if (breaks.has("R2-own-only") && !ownTeams.includes(exchange.team.id)) {
+        // Broken R2-own-only: Rome Cloud takes only the team's own workspaces.
+        back.searchParams.set("error", "not_ours");
+        back.searchParams.set("message", "This Rome only connects the team's own workspaces.");
       } else {
         const team = exchange.team.id;
         const bound = bindings.get(team);
