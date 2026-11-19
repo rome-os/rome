@@ -217,9 +217,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
             : req.key.channelThreadKey;
           const stated = await this.openingFor(openedKey ?? "", sessionInit.threadContext);
-          // The session reads no more privately than the caller main read,
-          // so its shell agrees with its turns. A session already live keeps
-          // the reading it opened with.
+          // The session reads no more privately than the caller main read.
+          // A session with no chat opens shared, so its shell stays shared
+          // even when its turns take a private caller's audience. A session
+          // already live keeps the reading it opened with.
           const audience = narrowerAudience(
             stated.audience,
             ctx.callerActionContext?.audience ?? "shared",
