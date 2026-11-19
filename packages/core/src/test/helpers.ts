@@ -68,6 +68,7 @@ import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.j
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
+import { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
@@ -896,6 +897,7 @@ export async function buildTestDeps(
     // Inert in tests: checkAndOffer is never invoked here, and the Rome Cloud
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
+    releaseNotes: new ReleaseNotes({ baseUrl: "https://release-notes.invalid", cacheDir: null }),
     isCloudAuthEnabled: async () => false,
     loginUsage: { recordLogin: () => {} },
     transports,

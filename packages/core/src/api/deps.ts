@@ -64,6 +64,7 @@ import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import type { RelayDrainer } from "../relay/drainer.js";
 import type { BootVersionReport } from "../instance/boot-version-report.js";
+import type { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
@@ -265,6 +266,8 @@ export interface ApiDeps {
    * `GET /api/system/upgrade/status/snapshot` and the `/now` `/defer` verbs,
    * and runs the nightly probe + Rome Cloud-relayed cutover. */
   systemUpgradeService: SystemUpgradeService;
+  /** Reads what an upgrade changes, behind `GET /api/system/release-notes`. */
+  releaseNotes: ReleaseNotes;
   /** Live cloud-auth decision, re-evaluated per call via `resolveCloudAuthEnabled`
    * (the `rome_cloud_auth` Statsig rollout gate). The login-flow
    * routes call this on each sign-in entry — the bootstrap phase

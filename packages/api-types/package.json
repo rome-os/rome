@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
+    "./release-notes": "./src/release-notes.ts",
     "./task-list": "./src/task-list.ts",
     "./chat-outputs": "./src/chat-outputs.ts",
     "./concierge": "./src/concierge.ts",
