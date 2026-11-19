@@ -1450,6 +1450,8 @@ Use \`/channel agent clear\` to undo.`,
     try {
       return await this.readHistoryWith(get, chatId, read, () => controller.signal.aborted);
     } finally {
+      // Whatever ended the read, nothing it started sends on.
+      controller.abort();
       this.activeApiRequestControllers.delete(controller);
     }
   }
