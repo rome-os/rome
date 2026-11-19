@@ -98,6 +98,17 @@ export function noteInDrain(
   if (heads) deps.heads.set(channelId, ts);
 }
 
+/** The chat's newest message, as the drain knows it, or undefined when the
+ *  drain does not hear every message there. A head the copy holds newer
+ *  messages than is not trusted: a page read below a later message can keep
+ *  messages newer than one heard late, and the chat's newest is then unknown. */
+function headOf(deps: SlackTimelineDeps, channelId: string): string | undefined {
+  if (!deps.hearsEvery(channelId)) return undefined;
+  const head = deps.heads.get(channelId);
+  if (head === undefined || deps.copy.holdsNewer(deps.teamId, channelId, head)) return undefined;
+  return head;
+}
+
 /** The messages of `chatId` within `read`'s bounds, newest first, at most
  *  `read.limit`, and fewer where Slack's page ran out first. */
 export async function readTimeline(
@@ -126,7 +137,7 @@ export async function readTimeline(
   } else {
     // With no upper bound, the newest message heard in this drain is the
     // chat's newest, while the drain hears every message there.
-    next = deps.hearsEvery(channelId) ? (deps.heads.get(channelId) ?? null) : null;
+    next = headOf(deps, channelId) ?? null;
   }
   while (found.length < read.limit) {
     if (next === "") return found;
@@ -185,7 +196,7 @@ async function readForward(
   const until = read.until ? tsAt(read.until) : undefined;
   const since = read.since ? tsAt(read.since) : undefined;
   const found: TimelineRow[] = [];
-  const head = deps.hearsEvery(channelId) ? deps.heads.get(channelId) : undefined;
+  const head = headOf(deps, channelId);
   let current = from;
   let known = deps.copy.timelineRow(deps.teamId, channelId, from) !== null;
   // Whether the copy reached the chat's newest message or the read's bound.
