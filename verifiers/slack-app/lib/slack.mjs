@@ -1,0 +1,49 @@
+// Client for the environment's fake Slack control API
+// (environments/slack-app/README.md, "Control API").
+
+import { json } from "./http.mjs";
+
+/** Wraps the control API at `base` (ending in /_control). Every call throws on a non-2xx answer. */
+export function fakeSlack(base) {
+  const call = async (path, opts) => {
+    const res = await json(`${base}${path}`, opts);
+    if (!res.ok) throw new Error(`fake Slack ${path}: ${res.status} ${JSON.stringify(res.data)}`);
+    return res.data;
+  };
+  const query = (q) =>
+    new URLSearchParams(
+      Object.entries(q).filter(([, v]) => v !== undefined && v !== null),
+    ).toString();
+  const seeded = (r) => ({
+    eventId: r.event_id,
+    channel: r.event?.channel,
+    ts: r.event?.ts,
+    delivery: r.delivery,
+  });
+  return {
+    origin: new URL(base).origin,
+    /** Workspaces with their members, direct message ids and installs. */
+    state: () => call("/state"),
+    /** Picks who the approve screen signs in as. */
+    signIn: (team, user) => call("/sign-in", { method: "POST", body: { team, user } }),
+    /** A member sends the bot a direct message, signed as Slack signs it. */
+    dm: async (team, user, text) =>
+      seeded(await call("/dm", { method: "POST", body: { team, user, text } })),
+    /** The same direct message, with a signature Slack did not make. */
+    forged: async (team, user, text) =>
+      seeded(
+        await call("/forged", {
+          method: "POST",
+          body: { team, user, text, mode: "bad_signature" },
+        }),
+      ),
+    /** The current seq, to read only what comes after it. */
+    seq: async () => (await call("/posts?since=999999999")).seq,
+    /** What the bot posted, oldest first, after `since`. */
+    posts: async ({ team, channel, since }) =>
+      (await call(`/posts?${query({ team, channel, since })}`)).posts,
+    /** Every Web API call after `since`, oldest first. */
+    calls: async ({ team, method, since } = {}) =>
+      (await call(`/calls?${query({ team, method, since })}`)).calls,
+  };
+}
