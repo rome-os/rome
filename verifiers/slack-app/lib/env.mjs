@@ -42,6 +42,7 @@ export function loadEnv(path) {
   env.repos.rome ??= process.env.VERIFIER_ROME_DIR;
   env.repos.romeCloud ??= process.env.VERIFIER_ROME_CLOUD_DIR;
   env.repos.romeCloudBase ??= process.env.VERIFIER_ROME_CLOUD_BASE ?? "origin/main";
+  env.repos.romeBase ??= process.env.VERIFIER_ROME_BASE ?? "origin/main";
   return env;
 }
 
@@ -69,6 +70,7 @@ function fromEnvironment(raw) {
       romeCloud: raw.repos.romeCloud ?? raw.repos.rome_cloud,
       romeCloudBase:
         raw.repos.romeCloudBase ?? raw.repos.rome_cloud_base_ref ?? raw.repos.rome_cloud_base,
+      romeBase: raw.repos.romeBase ?? raw.repos.rome_base_ref,
       romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },

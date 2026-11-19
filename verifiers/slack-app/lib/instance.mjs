@@ -58,10 +58,13 @@ export function instance(inst, slackOrigin) {
         signIns: 0,
       };
       const { kind, grant } = inst.connect;
-      const started = await call(`/connections/${kind}/grants/${grant}/setup`, {
-        method: "POST",
-        body: { another: true },
-      });
+      // An instance holds one Slack workspace in phase 1, so Connect takes no
+      // `another`. A setup still live from an earlier walk is reattached; this
+      // walk starts its own, with `force`.
+      const path = `/connections/${kind}/grants/${grant}/setup`;
+      let started = await call(path, { method: "POST", body: {} });
+      if (started.ok && started.data?.reattached)
+        started = await call(path, { method: "POST", body: { force: true } });
       if (!started.ok) {
         return {
           ...walk,

@@ -1,40 +1,55 @@
-// Waits for the bot's replies to seeded messages and matches them by code.
+// Counts the bot's replies to seeded messages by where and when the fake Slack
+// recorded them: a reply belongs to the last message sent before it in the
+// same chat. Messages are sent one at a time, each after the previous one's
+// reply, so that order is sound.
 
-import { match } from "./codes.mjs";
-import { sleep, waitFor } from "./http.mjs";
+import { waitFor } from "./http.mjs";
+
+/** Waits up to `timeoutMs` for any post in `channel` after `since`. True if one came. */
+export async function replyAfter(slack, { team, channel, since, timeoutMs }) {
+  return Boolean(
+    await waitFor(async () => (await slack.posts({ team, channel, since })).length > 0, {
+      timeoutMs,
+    }),
+  );
+}
+
+const brief = (p) => ({ channel: p.channel, seq: p.seq, text: p.text?.slice(0, 120) });
 
 /**
- * Waits until every one of `codes` has a reply in `channel`, or until
- * `timeoutMs` passes, then waits `settleMs` more so a second reply to any of
- * them has time to arrive. Returns the match over every post in the workspace
- * after `since`, and the posts that went anywhere but `channel`.
+ * Counts `posts` (every post in the workspace after the first message) against
+ * `sent`, the messages in send order, each `{tag, since}` with the seq read
+ * just before it was sent. A post in `channel` counts for the last message
+ * whose `since` it follows. Posts anywhere else are listed apart.
  */
-export async function awaitReplies(slack, { team, channel, since, codes, timeoutMs, settleMs }) {
-  await waitFor(
-    async () => {
-      const { counts } = match(await slack.posts({ team, since }), codes);
-      return codes.every((c) => counts[c] > 0);
-    },
-    { timeoutMs },
-  );
-  await sleep(settleMs);
-  const posts = await slack.posts({ team, since });
-  const elsewhere = posts
-    .filter((p) => p.channel !== channel)
-    .map((p) => ({ channel: p.channel, ts: p.ts, text: p.text?.slice(0, 120) }));
-  return { posts: posts.length, elsewhere, ...match(posts, codes) };
-}
-
-/** Sums up a match: how many codes got 0, 1 and more than 1 reply. */
-export function tally({ counts, unmatched, posts, elsewhere }) {
-  const values = Object.values(counts);
+export function tally(posts, { channel, sent }) {
+  const inChat = posts.filter((p) => p.channel === channel);
+  const counts = sent.map((m, i) => {
+    const next = sent[i + 1]?.since ?? Number.POSITIVE_INFINITY;
+    return {
+      tag: m.tag,
+      replies: inChat.filter((p) => p.seq > m.since && p.seq <= next).length,
+    };
+  });
   return {
-    sent: values.length,
-    answeredOnce: values.filter((n) => n === 1).length,
-    unanswered: Object.keys(counts).filter((c) => counts[c] === 0),
-    answeredMoreThanOnce: Object.keys(counts).filter((c) => counts[c] > 1),
-    repliesWithNoCode: unmatched,
-    replies: posts,
-    postsElsewhere: elsewhere,
+    sent: sent.length,
+    answeredOnce: counts.filter((c) => c.replies === 1).length,
+    unanswered: counts.filter((c) => c.replies === 0).map((c) => c.tag),
+    answeredMoreThanOnce: counts.filter((c) => c.replies > 1).map((c) => c.tag),
+    repliesInChat: inChat.length,
+    postsElsewhere: posts.filter((p) => p.channel !== channel).map(brief),
+    perMessage: counts,
   };
 }
+
+/** True when every message got exactly one reply and nothing went elsewhere. */
+export const allOnce = (t) =>
+  t.answeredOnce === t.sent && t.repliesInChat === t.sent && t.postsElsewhere.length === 0;
+
+/** The counts in words: what was posted, and how it matched the messages. */
+export const summary = (t) =>
+  `${t.sent} message(s): ${t.answeredOnce} got exactly one reply` +
+  (t.answeredMoreThanOnce.length ? `, ${t.answeredMoreThanOnce.length} got more than one` : "") +
+  (t.unanswered.length ? `, ${t.unanswered.length} got none` : "") +
+  `; ${t.repliesInChat} repl${t.repliesInChat === 1 ? "y" : "ies"} posted in the direct message` +
+  (t.postsElsewhere.length ? `; ${t.postsElsewhere.length} posted in other conversations` : "");

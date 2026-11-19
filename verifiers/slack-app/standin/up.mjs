@@ -172,6 +172,23 @@ write(
     // Rome Cloud's own name for the instance a row belongs to.
     'ALTER TABLE "slack_bindings" ADD COLUMN "account_instance_id" text;\n',
 );
+// Allowed beside the binding: the means of delivery, and a sign-in attempt
+// that holds the bot token until redeemed and is swept when it expires.
+write(
+  romeCloud,
+  "packages/pantheon/src/db/slack-sign-in.ts",
+  "export const slackDelivery = pgTable('slack_delivery', {\n  teamId: text('team_id'),\n  mailboxId: text('mailbox_id'),\n  forwardSecretHash: text('forward_secret_hash'),\n});\n" +
+    "export const slackSignIns = pgTable('slack_sign_ins', {\n  state: text('state'),\n  redirectUri: text('redirect_uri'),\n  codeChallenge: text('code_challenge'),\n  handoff: text('handoff'),\n  botTokenEnc: text('bot_token_enc'),\n  expiresAt: timestamp('expires_at'),\n" +
+    (breaks.has("R11-message") ? "  messageText: text('message_text'),\n" : "") +
+    (breaks.has("R11-member") ? "  email: text('email'),\n" : "") +
+    "});\n",
+);
+if (!breaks.has("R11-token-kept"))
+  write(
+    romeCloud,
+    "packages/pantheon/src/slack/redeem.ts",
+    "export const redeem = (db, id) => db.delete(slackSignIns).where(eq(slackSignIns.handoff, id));\n",
+  );
 if (breaks.has("R11-sql"))
   write(
     romeCloud,
@@ -208,7 +225,22 @@ write(
   "package.json",
   `${JSON.stringify({ name: "rome-stand-in", private: true, scripts: { "lint:imports": "node -e 0" } })}\n`,
 );
-write(rome, "packages/core/src/connections/slack-app.ts", "import { send } from './send.js';\n");
+// An import from an app that main already has is not this product's.
+write(
+  rome,
+  "packages/core/src/connections/legacy.ts",
+  "import { old } from '../../../../rome_apps/legacy/index.js';\n",
+);
+commitAll(rome, "main");
+git(rome, "checkout", "-q", "-b", "product");
+write(
+  rome,
+  "packages/core/src/connections/slack-app.ts",
+  "import { send } from './send.js';\n" +
+    (breaks.has("R11-import")
+      ? "import { app } from '../../../../rome_apps/slack/index.js';\n"
+      : ""),
+);
 commitAll(rome, "product");
 
 const env = {
@@ -222,7 +254,7 @@ const env = {
   differences: { product: "stand-in", stopSeconds: 2, breaks: [...breaks] },
   stopSeconds: 2,
   timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10 },
-  repos: { rome, romeCloud, romeCloudBase: "main" },
+  repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
   slack: { url: slackUrl, control: `${slackUrl}/_control` },
   romeCloud: { url: cloud.url },
   instances: ["a", "b"].map((name) => ({

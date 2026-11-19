@@ -11,9 +11,42 @@ const run = promisify(execFile);
 const git = async (dir, ...args) =>
   (await run("git", ["-C", dir, ...args], { maxBuffer: 64 << 20 })).stdout;
 
-/** Columns a workspace to instance binding may hold. Anything else is a finding. */
-const BINDING_COLUMN =
-  /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|created_?at|updated_?at|bound_?at)$/i;
+// What Rome Cloud may hold, judged by what each column is. R11's rule: Rome
+// Cloud knows only which workspace goes to which instance. Allowed: the
+// binding, the means of delivering to that instance, and short-lived sign-in
+// attempt state. A Slack token is allowed only in attempt state that is
+// removed once redeemed or swept. Message content and Slack member data are
+// never allowed. A column that fits none of these is not judged.
+const KINDS = [
+  {
+    kind: "message content",
+    allowed: false,
+    test: /^(text|body|content|message|message_?(text|body|content)|blocks|attachments|files?)$/i,
+  },
+  {
+    kind: "Slack member data",
+    allowed: false,
+    test: /(^|_)(user_?name|real_?name|display_?name|email|avatar|profile|image|title|phone|tz|members?)($|_)|^(user_?id|slack_?user_?id|member_?id)$/i,
+  },
+  { kind: "Slack token", allowed: "token", test: /token/i },
+  {
+    kind: "binding",
+    allowed: true,
+    test: /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(created|updated|bound|unbound|deleted)_?at)$/i,
+  },
+  {
+    kind: "delivery",
+    allowed: true,
+    test: /^(mailbox_?id|mailbox|forward_?(secret|key)(_?(hash|enc(rypted)?))?|relay_?(secret|key)|delivery_?(secret|url))$/i,
+  },
+  {
+    kind: "sign-in attempt",
+    allowed: true,
+    test: /^(state|oauth_?state|redirect_?uri|return_?(url|to)|code_?challenge(_?method)?|code_?verifier|nonce|handoff(_?(id|code|hash))?|code|(expires|redeemed|consumed|used)_?at)$/i,
+  },
+];
+
+const kindOf = (name) => KINDS.find((k) => k.test.test(name)) ?? { kind: "unknown", allowed: null };
 
 export async function r11(ctx) {
   const { rome, romeCloud, romeCloudBase } = ctx.env.repos;
@@ -32,11 +65,17 @@ export async function r11(ctx) {
       );
 
     const stored = await storedColumns(romeCloud, romeCloudBase);
-    evidence.romeCloudStores = stored;
-    const extra = stored.columns.filter((c) => !BINDING_COLUMN.test(c.name));
-    if (extra.length)
+    const judged = stored.columns.map((c) => judge(c, stored));
+    evidence.romeCloudStores = { files: stored.files, columns: judged };
+    const bad = judged.filter((c) => c.allowed === false);
+    if (bad.length)
       problems.push(
-        `Rome Cloud stores more than the workspace to instance binding: ${extra.map((c) => c.name).join(", ")}`,
+        `Rome Cloud stores more than the workspace to instance binding: ${bad.map((c) => `${c.name} (${c.why})`).join(", ")}`,
+      );
+    const unknown = judged.filter((c) => c.allowed === null);
+    if (unknown.length)
+      unchecked.push(
+        `Rome Cloud adds column(s) the check cannot judge: ${unknown.map((c) => c.name).join(", ")}`,
       );
   } else {
     unchecked.push("no rome-cloud checkout (repos.romeCloud)");
@@ -60,11 +99,16 @@ export async function r11(ctx) {
         problems.push("rome's import rules fail");
       }
     }
+    // Only imports the product adds count: ones already on its base are not
+    // this product's. Every current one is listed either way.
     const appImports = importsOfApps(rome);
-    evidence.connectionsImportingApps = appImports;
-    if (appImports.length)
+    const romeBase = ctx.env.repos.romeBase ?? "origin/main";
+    const added = await addedAppImports(rome, romeBase, appImports);
+    evidence.connectionsImportingApps = { base: romeBase, all: appImports, added };
+    if (added === null) unchecked.push(`no base ${romeBase} in the rome checkout to diff against`);
+    else if (added.length)
       problems.push(
-        `${appImports.length} import(s) from rome_apps in packages/core/src/connections`,
+        `${added.length} import(s) from rome_apps added in packages/core/src/connections`,
       );
   } else {
     unchecked.push("no rome checkout (repos.rome)");
@@ -82,56 +126,128 @@ export async function r11(ctx) {
 
 /**
  * Columns added under packages/pantheon in files that define stored data
- * (schemas and migrations), against `base`. Reads Drizzle column calls, SQL
- * column lines and `ALTER TABLE ... ADD COLUMN` from the added lines of the diff.
+ * (schemas and migrations), against `base`, each with its table when the
+ * check can tell. Also returns every added line under packages/pantheon, for
+ * finding where a table's rows are removed.
  */
 async function storedColumns(dir, base) {
-  const files = (await git(dir, "diff", "--name-only", base, "--", "packages/pantheon"))
+  const changed = (await git(dir, "diff", "--name-only", base, "--", "packages/pantheon"))
     .split("\n")
-    .filter(
-      (f) => /(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) && !/\.(md|json|snap)$/.test(f),
-    );
-  const columns = [];
-  const TYPE = "text|integer|varchar|timestamp|boolean|jsonb?|uuid|serial|bigint|real|blob|numeric";
-  for (const file of files) {
-    const diff = await git(dir, "diff", "-U0", base, "--", file);
-    const added = diff
+    .filter(Boolean);
+  const files = changed.filter(
+    (f) => /(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) && !/\.(md|json|snap)$/.test(f),
+  );
+  const addedOf = async (file) =>
+    (await git(dir, "diff", "-U0", base, "--", file))
       .split("\n")
       .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
       .map((l) => l.slice(1))
       .join("\n");
-    const names = new Set();
+  const columns = [];
+  const tables = [];
+  const TYPE =
+    "text|integer|varchar|timestamp|boolean|jsonb?|uuid|serial|bigint|real|blob|numeric|bytea";
+  for (const file of files) {
+    const added = await addedOf(file);
+    const found = [];
+    // Drizzle tables: `export const slackSignIns = pgTable("slack_sign_ins", {`.
+    const starts = [
+      ...added.matchAll(/(?:const\s+(\w+)\s*=\s*)?(?:\w+\.)?\w*[tT]able\(\s*["'](\w+)["']/g),
+    ].map((m) => ({ at: m.index, table: m[2], variable: m[1] }));
+    for (const t of starts) tables.push(t);
+    const tableAt = (i) => starts.filter((t) => t.at < i).at(-1)?.table ?? null;
     // Drizzle: `teamId: text("team_id")`, or `pg.text(...)` from a namespace
     // import, anywhere on a line.
     for (const m of added.matchAll(
       new RegExp(`(\\w+)\\s*:\\s*(?:\\w+\\.)?(?:${TYPE})\\(\\s*(?:["'](\\w+)["'])?`, "g"),
     ))
-      names.add(m[2] ?? m[1]);
+      found.push({ name: m[2] ?? m[1], table: tableAt(m.index) });
     // SQL: every column of a CREATE TABLE, one line or many, ended by `;`
     // or by the end of the file.
-    for (const list of createTableLists(added))
+    for (const { table, list } of createTableLists(added)) {
+      tables.push({ table });
       for (const part of splitTop(list)) {
         const id = part.trim().match(/^[`"]?(\w+)[`"]?/)?.[1];
-        if (id && !/^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK|KEY|INDEX)$/i.test(id)) names.add(id);
+        if (id && !/^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK|KEY|INDEX)$/i.test(id))
+          found.push({ name: id, table });
       }
+    }
     // SQL: a column line added inside an existing CREATE TABLE.
     for (const m of added.matchAll(new RegExp(`^\\s*[\`"]?(\\w+)[\`"]?\\s+(?:${TYPE})\\b`, "gim")))
-      names.add(m[1]);
-    // SQL: ALTER TABLE ... ADD [COLUMN] [IF NOT EXISTS] name.
+      found.push({ name: m[1], table: null });
+    // SQL: ALTER TABLE t ADD [COLUMN] [IF NOT EXISTS] name.
     for (const m of added.matchAll(
-      /\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?/gi,
+      /ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?[`"]?(\w+)[`"]?\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?/gi,
     ))
-      if (!/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|INDEX|CHECK)$/i.test(m[1])) names.add(m[1]);
-    for (const name of names) columns.push({ file, name });
+      if (!/^(CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|INDEX|CHECK)$/i.test(m[2]))
+        found.push({ name: m[2], table: m[1] });
+    // One entry per column: the one that names its table wins.
+    const seen = new Map();
+    for (const f of found) {
+      const prior = seen.get(f.name);
+      if (!prior || (!prior.table && f.table)) seen.set(f.name, f);
+    }
+    for (const f of seen.values()) columns.push({ file, ...f });
   }
-  return { files, columns };
+  const allAdded = (await Promise.all(changed.map(addedOf))).join("\n");
+  return { files, columns, tables, allAdded };
 }
 
-/** Splits a column list on the commas outside parentheses. */
-/** The text inside the outer parentheses of each `CREATE TABLE` in `sql`. */
+/**
+ * Judges one stored column by what it is. A Slack token passes only in a
+ * table that also holds sign-in attempt state with an expiry, and that the
+ * product's code removes (a delete of its rows, or the token set to null).
+ */
+function judge(column, { columns, tables, allAdded }) {
+  const k = kindOf(column.name);
+  const out = { file: column.file, table: column.table, name: column.name, kind: k.kind };
+  if (k.allowed !== "token")
+    return {
+      ...out,
+      allowed: k.allowed,
+      why: k.allowed === false ? k.kind : undefined,
+    };
+  const t = column.table;
+  const sameTable = columns.filter((c) => t && c.table === t);
+  const expires = sameTable.some((c) => /^(expires|expiry)/i.test(c.name));
+  const attempt = sameTable.some((c) => kindOf(c.name).kind === "sign-in attempt");
+  const variable = tables.find((x) => x.table === t && x.variable)?.variable;
+  const removals = t
+    ? [
+        new RegExp(`DELETE\\s+FROM\\s+[\`"]?${t}\\b`, "i"),
+        ...(variable ? [new RegExp(`\\.delete\\(\\s*${variable}\\b`)] : []),
+        new RegExp(`\\b${column.name}\\b["'\`]?\\s*(=|:)\\s*null\\b`, "i"),
+        ...(variable
+          ? [
+              new RegExp(
+                `\\b${column.name.replace(/_(\w)/g, (_m, c) => c.toUpperCase())}\\s*:\\s*null\\b`,
+              ),
+            ]
+          : []),
+      ]
+    : [];
+  const removed = removals.some((r) => r.test(allAdded));
+  const held = { attemptState: attempt, expires, removedByCode: removed };
+  if (attempt && expires && removed)
+    return { ...out, allowed: true, why: "held only until redeemed or swept", ...held };
+  return {
+    ...out,
+    allowed: false,
+    why: !t
+      ? "a Slack token in a table the check cannot name"
+      : !attempt || !expires
+        ? "a Slack token outside expiring sign-in attempt state"
+        : "a Slack token no code removes after redemption",
+    ...held,
+  };
+}
+
+/** The table and the text inside the outer parentheses of each `CREATE TABLE` in `sql`. */
 function createTableLists(sql) {
   const lists = [];
-  for (const m of sql.matchAll(/CREATE\s+TABLE[^(;]*\(/gi)) {
+  for (const m of sql.matchAll(
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"]?\w+[`"]?\.)?[`"]?(\w+)[`"]?[^(;]*\(/gi,
+  )) {
     const from = m.index + m[0].length;
     let depth = 1;
     let i = from;
@@ -139,11 +255,12 @@ function createTableLists(sql) {
       if (sql[i] === "(") depth++;
       else if (sql[i] === ")") depth--;
     }
-    lists.push(sql.slice(from, depth === 0 ? i - 1 : i));
+    lists.push({ table: m[1], list: sql.slice(from, depth === 0 ? i - 1 : i) });
   }
   return lists;
 }
 
+/** Splits a column list on the commas outside parentheses. */
 function splitTop(list) {
   const parts = [];
   let depth = 0;
@@ -191,4 +308,26 @@ function importsOfApps(rome) {
   };
   if (existsSync(root)) walk(root);
   return hits;
+}
+
+/**
+ * Of `current` (imports from apps now in packages/core/src/connections), the
+ * ones the product adds against `base`: their import line is an added line
+ * in that file's diff. Null when `base` is not in the checkout.
+ */
+async function addedAppImports(rome, base, current) {
+  try {
+    await git(rome, "rev-parse", "--verify", "--quiet", `${base}^{commit}`);
+  } catch {
+    return null;
+  }
+  const added = [];
+  for (const file of new Set(current.map((c) => c.file))) {
+    const lines = (await git(rome, "diff", "-U0", base, "--", file))
+      .split("\n")
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+    for (const c of current.filter((x) => x.file === file))
+      if (lines.some((l) => l.includes(c.import))) added.push(c);
+  }
+  return added;
 }

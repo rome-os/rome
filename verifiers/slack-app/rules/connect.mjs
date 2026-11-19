@@ -2,7 +2,8 @@
 // instance). Rule text: rule set v1 in the planner's rules.md.
 
 import { ask, code } from "../lib/codes.mjs";
-import { awaitReplies, tally } from "../lib/replies.mjs";
+import { sleep } from "../lib/http.mjs";
+import { allOnce, replyAfter, summary, tally } from "../lib/replies.mjs";
 
 const CONCIERGE = "core:concierge";
 
@@ -10,33 +11,33 @@ const CONCIERGE = "core:concierge";
 // to another Rome.
 const TOLD_WHY = /already (connected|bound)|another Rome|workspace_bound/i;
 
-const SEEDED = /\bR\d+[A-Z]?-\d\d-[0-9a-f]{4}\b/;
-
 /**
  * Seeds one direct message from the workspace's guardian and reports whether
- * it got exactly one reply.
+ * it got exactly one reply, in any words, and nothing anywhere else.
  */
 export async function oneReply(ctx, ws, rule) {
-  const c = code(rule, 0);
+  const tag = code(rule, 0);
   const since = await ctx.slack.seq();
-  const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(c));
-  const t = tally(
-    await awaitReplies(ctx.slack, {
-      team: ws.id,
-      channel: sent.channel,
-      since,
-      codes: [c],
-      timeoutMs: ctx.env.timeouts.replySeconds * 1000,
-      settleMs: ctx.env.timeouts.settleSeconds * 1000,
-    }),
-  );
-  // A reply carrying another seeded code answers another message, so only
-  // replies with no code at all count against this one.
-  const stray = t.repliesWithNoCode.filter((p) => !SEEDED.test(p.text ?? ""));
+  const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(tag));
+  await replyAfter(ctx.slack, {
+    team: ws.id,
+    channel: sent.channel,
+    since,
+    timeoutMs: ctx.env.timeouts.replySeconds * 1000,
+  });
+  await sleep(ctx.env.timeouts.settleSeconds * 1000);
+  const t = tally(await ctx.slack.posts({ team: ws.id, since }), {
+    channel: sent.channel,
+    sent: [{ tag, since }],
+  });
   return {
-    ok: t.answeredOnce === 1 && stray.length === 0 && t.postsElsewhere.length === 0,
+    ok: allOnce(t),
+    tag,
+    since,
     eventId: sent.eventId,
     channel: sent.channel,
+    replies: t.repliesInChat,
+    said: summary(t),
     ...t,
   };
 }
@@ -46,6 +47,8 @@ export async function connectAs(ctx, inst, ws) {
   await ctx.slack.signIn(ws.id, ws.guardian);
   return inst.connect();
 }
+
+const yn = (b) => (b ? "yes" : "no");
 
 export async function r1(ctx) {
   const ws = ctx.wsA;
@@ -64,7 +67,12 @@ export async function r1(ctx) {
     agentLinkCalls: 0,
   };
   if (walk.outcome !== "connected") {
-    return { result: "fail", reason: `Connect did not finish: ${walk.reason}`, evidence };
+    evidence.parts = { connected: "no", replied: "not tried" };
+    return {
+      result: "fail",
+      reason: `Connected: no. Connect did not finish: ${walk.reason}`,
+      evidence,
+    };
   }
   ctx.bound.a = walk.connectionId ?? true;
 
@@ -79,8 +87,10 @@ export async function r1(ctx) {
   evidence.firstMessage = {
     eventId: reply.eventId,
     replies: reply.replies,
-    noCode: reply.repliesWithNoCode,
+    postsElsewhere: reply.postsElsewhere,
   };
+  // Kept apart so a silent agent is not read as a failed connect.
+  evidence.parts = { connected: yn(Boolean(account)), replied: yn(reply.ok) };
 
   const problems = [];
   if (walk.setupFields.length) problems.push(`setup asked for ${walk.setupFields.length} field(s)`);
@@ -92,10 +102,14 @@ export async function r1(ctx) {
   else if (account.agent !== CONCIERGE)
     problems.push(`the connected account's agent is ${account.agent ?? "none"}, not the Concierge`);
   if (!reply.ok)
-    problems.push(`the first direct message got ${reply.replies} replies, not exactly 1`);
+    problems.push(`the first direct message did not get exactly one reply (${reply.said})`);
 
   return problems.length
-    ? { result: "fail", reason: problems.join("; "), evidence }
+    ? {
+        result: "fail",
+        reason: `Connected: ${evidence.parts.connected}; replied: ${evidence.parts.replied}. ${problems.join("; ")}`,
+        evidence,
+      }
     : {
         result: "pass",
         reason:
@@ -118,6 +132,11 @@ export async function r3(ctx) {
     toldWhy: walk.reason ?? null,
     connectedAccountsOnSecond: { before, after },
     firstStillWorks: { eventId: first.eventId, replies: first.replies },
+    // Kept apart so a silent agent is not read as a failed refusal.
+    parts: {
+      secondRefused: yn(walk.outcome === "refused" && after === before),
+      firstReplied: yn(first.ok),
+    },
   };
   const problems = [];
   if (walk.outcome === "connected")
@@ -127,9 +146,14 @@ export async function r3(ctx) {
       `the second connect ended ${walk.outcome} without saying the workspace is already connected (${walk.reason ?? "no reason"})`,
     );
   if (after !== before) problems.push("the second instance gained a connected account");
-  if (!first.ok) problems.push(`a direct message to the first got ${first.replies} replies, not 1`);
+  if (!first.ok)
+    problems.push(`a direct message to the first did not get exactly one reply (${first.said})`);
   return problems.length
-    ? { result: "fail", reason: problems.join("; "), evidence }
+    ? {
+        result: "fail",
+        reason: `Second refused: ${evidence.parts.secondRefused}; first replied: ${evidence.parts.firstReplied}. ${problems.join("; ")}`,
+        evidence,
+      }
     : {
         result: "pass",
         reason: `Refused and told why: "${walk.reason}". The first still answers.`,

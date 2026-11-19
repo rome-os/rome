@@ -3,22 +3,8 @@
 
 import { ask, code } from "../lib/codes.mjs";
 import { sleep, waitFor } from "../lib/http.mjs";
-import { awaitReplies, tally } from "../lib/replies.mjs";
+import { allOnce, replyAfter, summary, tally } from "../lib/replies.mjs";
 import { oneReply } from "./connect.mjs";
-
-const summary = (t) =>
-  `${t.answeredOnce} of ${t.sent} answered exactly once` +
-  (t.unanswered.length ? `; ${t.unanswered.length} unanswered` : "") +
-  (t.answeredMoreThanOnce.length
-    ? `; ${t.answeredMoreThanOnce.length} answered more than once`
-    : "") +
-  (t.repliesWithNoCode.length ? `; ${t.repliesWithNoCode.length} replies matched no message` : "") +
-  (t.postsElsewhere.length
-    ? `; ${t.postsElsewhere.length} posts went to another conversation`
-    : "");
-
-const allOnce = (t) =>
-  t.answeredOnce === t.sent && t.repliesWithNoCode.length === 0 && t.postsElsewhere.length === 0;
 
 export async function r4(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
@@ -26,34 +12,30 @@ export async function r4(ctx) {
   const since = await ctx.slack.seq();
   const codes = [];
   const eventIds = [];
+  const sentList = [];
   const unansweredInTime = [];
   let channel;
   for (let i = 1; i <= 20; i++) {
-    const c = code("R4", i);
-    const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(c));
+    const tag = code("R4", i);
+    const before = await ctx.slack.seq();
+    const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(tag));
     channel = sent.channel;
-    codes.push(c);
+    codes.push(tag);
     eventIds.push(sent.eventId);
+    sentList.push({ tag, since: before });
     // One message at a time, as a person would write: wait for its reply. A
     // reply that comes only after the next message is a failure, even if
     // the final count adds up.
-    const answered = await waitFor(
-      async () =>
-        (await ctx.slack.posts({ team: ws.id, channel, since })).some((p) => p.text?.includes(c)),
-      { timeoutMs: ctx.env.timeouts.replySeconds * 1000 },
-    );
-    if (!answered) unansweredInTime.push(c);
-  }
-  const t = tally(
-    await awaitReplies(ctx.slack, {
+    const answered = await replyAfter(ctx.slack, {
       team: ws.id,
       channel,
-      since,
-      codes,
-      timeoutMs: 0,
-      settleMs: ctx.env.timeouts.settleSeconds * 1000,
-    }),
-  );
+      since: before,
+      timeoutMs: ctx.env.timeouts.replySeconds * 1000,
+    });
+    if (!answered) unansweredInTime.push(tag);
+  }
+  await sleep(ctx.env.timeouts.settleSeconds * 1000);
+  const t = tally(await ctx.slack.posts({ team: ws.id, since }), { channel, sent: sentList });
   ctx.fromA = { codes, eventIds, since, channel };
   const evidence = { workspace: ws.id, channel, eventIds, unansweredInTime, ...t };
   const late = unansweredInTime.length
@@ -112,14 +94,14 @@ export async function r7(ctx) {
   const undelivered = forged.filter((f) => !conclusive(f.status));
   if (undelivered.length)
     partial ??= `${undelivered.length} of 10 forged events got no answer or only a 5xx after 3 tries, so the signature check was not exercised`;
+  // A post anywhere in the workspace before the good message is sent answers
+  // a forged event, whatever it says. One that comes later shows up as more
+  // than the good message's one reply.
+  await sleep(ctx.env.timeouts.settleSeconds * 1000);
   const control = await oneReply(ctx, ws, "R7C");
-  // Every post in the workspace since before the forged events, wherever it
-  // went: a reply to a forged event in another conversation still answers it.
-  const posts = await ctx.slack.posts({ team: ws.id, since });
-  const replied = forged.filter((f) => posts.some((p) => p.text?.includes(f.code)));
-  // Only the good message's one reply may follow the forged events. A reply
-  // that repeats no code still answers one of them.
-  const others = posts.filter((p) => !p.text?.includes(code("R7C", 0)));
+  const others = (await ctx.slack.posts({ team: ws.id, since })).filter(
+    (p) => p.seq <= control.since,
+  );
   // The bot chat's own session: the People timeline leaves agent chats out.
   const recorded = control.channel ? await readable(() => ctx.a.recordedIn(control.channel)) : null;
   // The good message must show in the same read, or an empty read proves
@@ -132,18 +114,22 @@ export async function r7(ctx) {
   evidence.forged = {
     sent: forged.flatMap((f) => f.tries.map((t) => t.eventId)),
     deliveryStatuses: forged.map((f) => f.tries.map((t) => t.status)),
-    replied: replied.map((f) => f.eventId),
-    otherPosts: others.map((p) => ({ channel: p.channel, ts: p.ts, text: p.text?.slice(0, 120) })),
+    postsBeforeGoodMessage: others.map((p) => ({
+      channel: p.channel,
+      ts: p.ts,
+      text: p.text?.slice(0, 120),
+    })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
     goodMessageVisibleInRecord: Boolean(sawGood),
-    goodMessageAfter: { eventId: control.eventId, replies: control.replies },
+    goodMessageAfter: { eventId: control.eventId, replies: control.replies, said: control.said },
   };
   if (!control.ok)
-    problems.push("the good message after the forged ones did not get exactly one reply");
-  if (replied.length) problems.push(`${replied.length} of 10 forged events got a reply`);
-  else if (others.length)
     problems.push(
-      `${others.length} posts besides the good message's reply followed the forged events`,
+      `the good message after the forged ones did not get exactly one reply (${control.said})`,
+    );
+  if (others.length)
+    problems.push(
+      `${others.length} post(s) answered the forged events before the good message was sent`,
     );
   if (recordedForged?.length)
     problems.push(`${recordedForged.length} of 10 forged events were recorded`);
@@ -263,16 +249,24 @@ export async function r6(ctx) {
   if (!up)
     return { result: "fail", reason: "The instance did not come back after start.", evidence };
 
-  const t = tally(
-    await awaitReplies(ctx.slack, {
-      team: ws.id,
-      channel,
-      since,
-      codes,
-      timeoutMs: env.timeouts.replySeconds * 1000 * 5,
-      settleMs: env.timeouts.settleSeconds * 1000,
-    }),
+  // All 20 waited in the same chat, so their replies cannot be told apart
+  // by order: after the restart that chat must get exactly 20, and nothing
+  // may go anywhere else.
+  const restartedAt = await ctx.slack.seq();
+  await waitFor(
+    async () => (await ctx.slack.posts({ team: ws.id, channel, since: restartedAt })).length >= 20,
+    { timeoutMs: env.timeouts.replySeconds * 1000 * 5 },
   );
+  await sleep(env.timeouts.settleSeconds * 1000);
+  const posts = await ctx.slack.posts({ team: ws.id, since });
+  const inChat = posts.filter((p) => p.channel === channel).length;
+  const t = {
+    sent: 20,
+    repliesInChat: inChat,
+    postsElsewhere: posts
+      .filter((p) => p.channel !== channel)
+      .map((p) => ({ channel: p.channel, seq: p.seq, text: p.text?.slice(0, 120) })),
+  };
   Object.assign(evidence, t);
   if (whileStopped)
     return {
@@ -280,11 +274,20 @@ export async function r6(ctx) {
       reason: `${whileStopped} replies came while the instance was stopped`,
       evidence,
     };
-  return allOnce(t)
+  const ok = inChat === 20 && t.postsElsewhere.length === 0;
+  return ok
     ? {
         result: "pass",
-        reason: `20 of 20 messages sent during a ${env.stopSeconds}s stop were answered exactly once after restart.`,
+        reason: `20 messages sent during a ${env.stopSeconds}s stop got 20 replies after restart, in their direct message and nowhere else.`,
         evidence,
       }
-    : { result: "fail", reason: summary(t), evidence };
+    : {
+        result: "fail",
+        reason:
+          `${inChat} repl${inChat === 1 ? "y" : "ies"} posted in the direct message for 20 messages sent while stopped, not 20` +
+          (t.postsElsewhere.length
+            ? `; ${t.postsElsewhere.length} posted in other conversations`
+            : ""),
+        evidence,
+      };
 }

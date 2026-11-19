@@ -33,6 +33,10 @@ const server = await serve(async (req, res, url) => {
     return send(res, 403, { error: "Cross-site requests are not allowed." });
   const setupStart = p.match(/^\/api\/connections\/slack_app\/grants\/bot\/setup$/);
   if (setupStart && req.method === "POST") {
+    // Like Rome at 49a5cff: one Slack workspace per instance, so no `another`.
+    const asked = JSON.parse((await readBody(req)) || "{}");
+    if (asked.another)
+      return send(res, 400, { error: '"slack_app" does not offer another account.' });
     const cid = rand();
     const state = rand();
     const setup = { cid, oauthState: state, state: null };
@@ -54,7 +58,7 @@ const server = await serve(async (req, res, url) => {
       setup.state = { status: "awaiting-redirect", url: to.toString() };
     }
     setups.set(cid, setup);
-    return send(res, 200, { cid, state: setup.state });
+    return send(res, 200, { cid, state: setup.state, reattached: false });
   }
   const poll = p.match(/^\/api\/setups\/(\w+)$/);
   if (poll && req.method === "GET") {
@@ -146,7 +150,7 @@ async function otherDirectMessage(team, channel) {
     ?.im_channel;
 }
 
-// "The Concierge": repeats the code a seeded message carries.
+// "The Concierge": answers each message once, in words of its own.
 // Broken R4-pairs holds each odd R4 message until the next one comes.
 let held = null;
 
@@ -161,11 +165,12 @@ async function answer(event, team, { now = false } = {}) {
     await answer(held, team, { now: true });
     held = null;
   }
-  // Broken R7-quiet answers R7's forged events without repeating their code.
-  const asked =
-    breaks.has("R7-quiet") && /R7F-/.test(event.text)
-      ? "Sure, done."
-      : (event.text.match(/code and nothing else: (\S+)/)?.[1] ?? "hello");
+  // Broken silent never answers. Variant refuse declines what it was asked,
+  // once, as the plain-text Concierge does on a connected account.
+  if (breaks.has("silent")) return;
+  const asked = breaks.has("refuse")
+    ? "I can't repeat codes or other secrets here."
+    : "Sure, happy to help with that.";
   // Broken R7-elsewhere answers R7's forged events in another member's direct message.
   if (breaks.has("R7-elsewhere") && /R7F-/.test(event.text)) {
     const other = await otherDirectMessage(team, event.channel);

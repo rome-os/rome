@@ -1,28 +1,27 @@
-// Seeded messages carry a code the Concierge is asked to repeat, so each
-// reply in a direct message can be matched to the message it answers. Slack
-// gives a direct message reply no link to the message it answers.
+// Seeded messages ask the Concierge something harmless. A reply is matched to
+// its message by where and when the fake Slack records it, never by what it
+// says: Slack links a direct message reply to nothing, and the Concierge may
+// answer in any words. Each message carries a tag unique to it and the run,
+// so Rome's records and Slack calls about it can be found. No reply needs to
+// repeat the tag.
 
 import { randomBytes } from "node:crypto";
 
 const run = randomBytes(2).toString("hex");
 
-/** A code unique to this run, such as `R4-07-3fa2`. */
+/** A tag unique to this run, such as `R4-07-3fa2`. */
 export const code = (rule, i) => `${rule}-${String(i).padStart(2, "0")}-${run}`;
 
-/** The text of a seeded message that carries `c`. */
-export const ask = (c) => `Please reply with only this code and nothing else: ${c}`;
+const QUESTIONS = [
+  "What day comes after Monday?",
+  "How many legs does a cat have?",
+  "What colour is a clear sky at noon?",
+  "Which is bigger, ten or three?",
+  "What do bees make?",
+];
 
-/**
- * Matches `posts` to `codes`. Returns how many posts carry each code, and the
- * posts that carry none of them.
- */
-export function match(posts, codes) {
-  const counts = Object.fromEntries(codes.map((c) => [c, 0]));
-  const unmatched = [];
-  for (const p of posts) {
-    const hits = codes.filter((c) => p.text?.includes(c));
-    for (const c of hits) counts[c]++;
-    if (hits.length === 0) unmatched.push({ ts: p.ts, text: p.text?.slice(0, 120) });
-  }
-  return { counts, unmatched };
-}
+/** The text of a seeded message tagged `tag`: a harmless question. */
+export const ask = (tag) => {
+  const n = Number(tag.split("-")[1] ?? 0);
+  return `${QUESTIONS[n % QUESTIONS.length]} (message ${tag})`;
+};

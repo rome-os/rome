@@ -50,6 +50,18 @@ const CASES = [
     what: "Connect shows a Continue screen of Rome's own, a GET form with nothing to fill",
   },
   {
+    name: "refuse",
+    breaks: "refuse",
+    expect:
+      "every phase 1 rule passes when the Concierge declines what it was asked, once per message",
+  },
+  {
+    name: "silent",
+    breaks: "silent",
+    rule: "R1",
+    what: "the Concierge never replies",
+  },
+  {
     name: "R1-twice",
     breaks: "R1-twice",
     rule: "R1",
@@ -144,6 +156,30 @@ const CASES = [
     breaks: "R11-namespace",
     rule: "R11",
     what: "a Drizzle schema from a namespace import (`pg.text`) stores the bot token",
+  },
+  {
+    name: "R11-message",
+    breaks: "R11-message",
+    rule: "R11",
+    what: "Rome Cloud stores message content",
+  },
+  {
+    name: "R11-member",
+    breaks: "R11-member",
+    rule: "R11",
+    what: "Rome Cloud stores Slack member data",
+  },
+  {
+    name: "R11-token-kept",
+    breaks: "R11-token-kept",
+    rule: "R11",
+    what: "the sign-in attempt's bot token is never removed after redemption",
+  },
+  {
+    name: "R11-import",
+    breaks: "R11-import",
+    rule: "R11",
+    what: "the product adds an import from an app in core's connections",
   },
   {
     name: "R11-eof",

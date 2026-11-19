@@ -29,7 +29,7 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
 }
 ```
 
-The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, and `rome_dependencies`: when it is `failed`, the import-rule check reports not checked). Without `repos`, R11 takes the checkouts from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
+The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, `rome_base_ref` (default `origin/main`), and `rome_dependencies`: when it is `failed`, the import-rule check reports not checked). Without `repos`, R11 takes the checkouts from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
 
 ## Fake Slack control
 
@@ -41,7 +41,7 @@ The routes the dashboard uses today, relative to `api`. Every call sends the ins
 
 | Route | Used for |
 |---|---|
-| `POST /connections/{kind}/grants/{grant}/setup {another: true}` | Starts Connect. Answers `{cid, state}`. |
+| `POST /connections/{kind}/grants/{grant}/setup {}` | Starts Connect. Answers `{cid, state, reattached}`. An instance holds one Slack workspace in phase 1, so the body takes no `another` (Rome answers 400 to it). When `reattached` is true a setup was already live, and the verifier posts again with `{force: true}` to start its own. |
 | `GET /setups/{cid}` | Polls the setup's state: `awaiting-input` (a form, which R1 counts and does not fill), `awaiting-redirect` (a URL the verifier walks as a browser), `presenting`, `done`, `failed`. |
 | `POST /setups/return {state, handoff?, error?, message?}` | Hands back the query of the URL the sign-in returned the browser to, the way the dashboard's callback page does. The verifier stops the browser at the first URL on the instance's origin that carries `state`. |
 | `GET /connected-accounts` | Each connected account with its `agent` and `connection`. R1 wants `agent` to be `core:concierge`. |
