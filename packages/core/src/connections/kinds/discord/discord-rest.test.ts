@@ -306,4 +306,35 @@ describe("DiscordAdapter REST broker capability", () => {
     manages = true;
     expect(adapter.sees(thread("2"))).toBe(true);
   });
+
+  it("lists a media chat as a forum, so a listing reads its archived posts", () => {
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = (id: string, type: ChannelType) => ({
+      id,
+      name: `chat ${id}`,
+      type,
+      parentId: null,
+      isThread: () => false,
+    });
+    const guild = {
+      id: "9",
+      name: "Rome",
+      channels: {
+        cache: new Map([
+          ["1", chat("1", ChannelType.GuildForum)],
+          ["2", chat("2", ChannelType.GuildMedia)],
+          ["3", chat("3", ChannelType.GuildVoice)],
+        ]),
+      },
+    };
+    (adapter as unknown as { client: unknown }).client = {
+      isReady: () => true,
+      guilds: { cache: new Map([["9", guild]]) },
+    };
+
+    expect(adapter.listGuildChannels().map((each) => [each.id, each.type])).toEqual([
+      ["1", "forum"],
+      ["2", "forum"],
+    ]);
+  });
 });

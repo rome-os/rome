@@ -446,7 +446,12 @@ export class DiscordAdapter {
         let kind: "text" | "news" | "thread" | "forum" | null = null;
         if (channel.type === discordJs().ChannelType.GuildText) kind = "text";
         else if (channel.type === discordJs().ChannelType.GuildAnnouncement) kind = "news";
-        else if (channel.type === discordJs().ChannelType.GuildForum) kind = "forum";
+        // A media chat holds posts as a forum does, so it lists as one.
+        else if (
+          channel.type === discordJs().ChannelType.GuildForum ||
+          channel.type === discordJs().ChannelType.GuildMedia
+        )
+          kind = "forum";
         else if (isThreadType(channel.type)) kind = "thread";
         if (!kind) continue;
         out.push({
