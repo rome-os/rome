@@ -8,7 +8,7 @@ import type {
   SentMessage,
   TimelinePage,
 } from "@rome/api-types/people";
-import { peopleRoutes } from "./people.js";
+import { peopleRoutes } from "./phone-book/people.js";
 import {
   createTestConnections,
   createTestDb,
@@ -17,11 +17,11 @@ import {
   testChannels,
   type TestDb,
   type TestDeps,
-} from "../../test/helpers.js";
-import { seedBaseline } from "../../test/seeds.js";
-import { sayOnChannel } from "../../test/speakers.js";
-import { channels as channelRows, chatMessages, connectionGrants } from "../../db/schema.js";
-import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
+} from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
+import { sayOnChannel } from "../../../test/speakers.js";
+import { channels as channelRows, chatMessages, connectionGrants } from "../../../db/schema.js";
+import { channelList } from "../../../chats/connected-accounts/connected-account-list.js";
 
 // Sending to a person.
 //

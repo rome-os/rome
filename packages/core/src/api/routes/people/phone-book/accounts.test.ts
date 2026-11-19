@@ -2,8 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { accountRef, type AccountDirectory, type DirectoryAccount } from "@rome/api-types/people";
 import { accountsRoutes } from "./accounts.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
-import { seedBaseline } from "../../test/seeds.js";
+import {
+  createTestDb,
+  buildTestDeps,
+  type TestDb,
+  type TestDeps,
+} from "../../../../test/helpers.js";
+import { seedBaseline } from "../../../../test/seeds.js";
 
 // The account read over its sources — the links, the sentinel log and the
 // channel mirrors. GET /accounts is the contacts list: every account Rome has

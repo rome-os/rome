@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import type { LinkCodeResponse } from "@rome/api-types/people";
-import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
-import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
-import { peopleRoutes } from "./people.js";
+import { runWithSessionActor, type SessionActor } from "../../../access/session-actor.js";
+import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../../test/helpers.js";
+import { peopleRoutes } from "./phone-book/people.js";
 
 // POST /people/link-code: a redeemed code makes its sender the guardian, so the
 // route hands one only to the guardian, on the dashboard's own origin.

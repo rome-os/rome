@@ -17,25 +17,25 @@ import {
   type SendRefusal,
   type LinkCodeResponse,
 } from "@rome/api-types/people";
-import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../access/session-actor.js";
+import { isSameOriginMutationRequest } from "../../../../lib/mutation-origin.js";
+import { currentSessionActor } from "../../../../access/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { platformOf } from "@rome/api-types/platform";
-import { createPerson } from "../../people/phone-book/index.js";
-import { deletePerson } from "../../people/phone-book/index.js";
-import { mergePeople } from "../../people/phone-book/index.js";
-import { findPerson, readPeople, readPerson } from "../../people/phone-book/index.js";
-import { updatePerson } from "../../people/phone-book/index.js";
-import { send, type SendResult } from "../../chats/send.js";
-import { asGuardian, directPlace } from "../../people/person-history/index.js";
-import { readAccountTimeline } from "../../people/person-history/index.js";
+import { createPerson } from "../../../../people/phone-book/index.js";
+import { deletePerson } from "../../../../people/phone-book/index.js";
+import { mergePeople } from "../../../../people/phone-book/index.js";
+import { findPerson, readPeople, readPerson } from "../../../../people/phone-book/index.js";
+import { updatePerson } from "../../../../people/phone-book/index.js";
+import { send, type SendResult } from "../../../../chats/send.js";
+import { asGuardian, directPlace } from "../../../../people/person-history/index.js";
+import { readAccountTimeline } from "../../../../people/person-history/index.js";
 import {
   guardianChannels,
   personMessageStores,
   timelineAccounts,
-} from "../../people/person-history/index.js";
-import { accountOfWire, wireOf } from "../../people/model/wire.js";
-import type { ApiDeps } from "../deps.js";
+} from "../../../../people/person-history/index.js";
+import { accountOfWire, wireOf } from "../../../../people/model/wire.js";
+import type { ApiDeps } from "../../../deps.js";
 
 // The People surface. What a person and their accounts are, how the listing
 // orders and counts, what a valid create is, when a link may be taken and what

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { PersonResource, TimelinePage } from "@rome/api-types/people";
-import { createLinkedInDescriptor } from "../../connections/integrations/linkedin.js";
-import type { Credential, RuntimeKit } from "../../connections/types.js";
-import type { OpencliResult } from "../../connections/kinds/linkedin/linkedin-cli.js";
+import { createLinkedInDescriptor } from "../../../connections/integrations/linkedin.js";
+import type { Credential, RuntimeKit } from "../../../connections/types.js";
+import type { OpencliResult } from "../../../connections/kinds/linkedin/linkedin-cli.js";
 import {
   buildTestDeps,
   createTestConnections,
@@ -13,9 +13,9 @@ import {
   testChannels,
   type TestDb,
   type TestDeps,
-} from "../../test/helpers.js";
-import { seedBaseline } from "../../test/seeds.js";
-import { peopleRoutes } from "./people.js";
+} from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
+import { peopleRoutes } from "./phone-book/people.js";
 
 const MEMBER = "ACoAARecipient";
 const SELF = "ACoAAOwner";
