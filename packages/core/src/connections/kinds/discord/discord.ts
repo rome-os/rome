@@ -62,7 +62,7 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
-import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { TalkHistoryRead } from "../../types.js";
 import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
 import { botReadsHistory } from "./discord-permissions.js";

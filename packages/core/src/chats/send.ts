@@ -4,7 +4,7 @@
 // (`@rome/api-types/people`).
 //
 // A send names a place, never an account. Reaching an account directly is
-// finding the place first, which `people/send.ts` does for the People and
+// finding the place first, which `people/person-history/send.ts` does for the People and
 // assistants surfaces.
 //
 // Chats owns the answer and which side says the message; it says nothing

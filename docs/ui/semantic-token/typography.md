@@ -46,6 +46,8 @@ Every role resolves to the same primitives in light and dark. Other tokens in th
 
 Letter spacing is 0 in every role.
 
+Compact inline chat cards opt in with `data-ui-typography="inline-card"`. The kit maps UI Item text in that scope to 14px on a 20px line box so card headings and action labels share a size. The platform scale supplies control height and insets.
+
 ## Constraints
 
 - A description sits at the same size as the control it explains, and leads by ink. A section's description, a card's description, and a dialog's description are all `text-ui text-muted-foreground`. A field's helper and error are `text-aux`, one step down, because they annotate a single control rather than introduce a group. A description never takes a heading role, which would give its container two headings. `[human]`
