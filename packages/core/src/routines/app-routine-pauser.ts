@@ -1,6 +1,7 @@
 // Which routines stop when an app goes away. A routine that fires one of an
 // app's actions cannot run once the app is disabled, uninstalled or removed at
-// boot, so Routines pauses it.
+// boot, so Routines pauses it. Once the app is uninstalled, the routines it
+// managed are deleted.
 
 import { resolveArtifactId, type LegacyArtifactBindings } from "../apps/artifact-id.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -39,4 +40,26 @@ export function appRoutinePauser(deps: AppRoutinePauserDeps): (appId: string) =>
       await deps.engine.deactivate(routine.id);
     }
   };
+}
+
+export interface RemovedAppRoutinesDeps {
+  repository: Pick<RoutinesRepository, "managingAppIds" | "deleteManagedRoutines">;
+  /** The app's lockfile entry, the authoritative record that it is installed. */
+  readLockfileEntry: (appId: string) => Promise<unknown>;
+}
+
+/**
+ * Deletes the routines of every managing app with no lockfile entry, and
+ * returns those apps. The lockfile is read rather than the catalog, which is
+ * incomplete when app boot fails, because a deleted routine can't be restored.
+ */
+export async function deleteRoutinesOfRemovedApps(
+  deps: RemovedAppRoutinesDeps,
+): Promise<{ apps: string[]; deleted: number; kept: number }> {
+  const apps: string[] = [];
+  for (const appId of await deps.repository.managingAppIds()) {
+    if ((await deps.readLockfileEntry(appId)) == null) apps.push(appId);
+  }
+  const { deleted, kept } = await deps.repository.deleteManagedRoutines(apps);
+  return { apps, deleted: deleted.length, kept };
 }
