@@ -7,8 +7,9 @@ import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
 import { ConciergeTranscript } from "./ConciergeTranscript";
-import { buildRows } from "./chat-view";
+import { buildChatView, buildRows } from "./chat-view";
 import { buildConciergeItems } from "./concierge-groups";
 import type { BlockActions, LivePreview } from "./MessageList";
 import { replyDrawings, type ReplyDrawing } from "./reply/reply-drawing";
@@ -345,5 +346,99 @@ describe("the source label in the transcript", () => {
   it("shows nothing for an agent's input the Concierge did not answer", () => {
     renderTranscript([trace("t-x", 10, { type: "agent", name: "Flint" })]);
     expect(screen.queryByText(/Flint/)).toBeNull();
+  });
+});
+
+describe("turns whose messages interleave, as the server pages them", () => {
+  /** A message of turn `turnId`, as the server sends it: in `turnId` whichever page it is on. */
+  const inTurn = (message: ChatMessage, turnId: string): ChatMessage => ({ ...message, turnId });
+  const identity = { name: "Rome", iconUrl: null };
+  /** What the chat draws once the pages are in, through the pipeline the chat uses. */
+  const shownOf = (...pages: ChatMessage[][]) =>
+    buildChatView(
+      new Map([
+        [
+          "concierge",
+          pages.reduce<ChatMessage[]>((all, page) => mergeFetchedChatMessages(all, page), []),
+        ],
+      ]),
+      "concierge",
+      identity,
+    ).displayMessages;
+  const anchors = () =>
+    [...document.querySelectorAll("[data-timeline-anchor]")].map((el) =>
+      el.getAttribute("data-timeline-anchor"),
+    );
+
+  it("draws owner-A, owner-B, answer-A, answer-B in that order after both pages load, each answer quoting its question", () => {
+    const traceA = {
+      id: "trace-a",
+      sessionId: "concierge",
+      turnId: "turn-a",
+      role: "trace",
+      content: "[]",
+      createdAt: at(2),
+    } as ChatMessage;
+    const ownerA = inTurn(asks("owner-a", "First question", 0), "turn-a");
+    const ownerB = inTurn(asks("owner-b", "Second question", 1), "turn-b");
+    const answerA = inTurn(
+      say("answer-a", "assistant", "First answer", 3, quoteOf("owner-a", "First question")),
+      "turn-a",
+    );
+    const answerB = inTurn(
+      say("answer-b", "assistant", "Second answer", 4, quoteOf("owner-b", "Second question")),
+      "turn-b",
+    );
+    // The newest page holds the two answers, and the trace of A's turn comes along.
+    const newest = [traceA, answerA, answerB];
+    // The next page holds the two questions, and A's trace again.
+    const older = [ownerA, ownerB, traceA];
+
+    // The newest page alone leaves out the two questions.
+    expect(shownOf(newest).map((m) => m.id)).toEqual(["trace-a", "answer-a", "answer-b"]);
+
+    const shown = shownOf(newest, older);
+    expect(shown.map((m) => m.id)).toEqual([
+      "owner-a",
+      "owner-b",
+      "trace-a",
+      "answer-a",
+      "answer-b",
+    ]);
+    renderTranscript(shown);
+    expect(anchors()).toEqual(["owner-a", "owner-b", "answer-a", "answer-b"]);
+    // Neither answer sits under its question, so each carries a quote of it.
+    expect(quotes().map((quote) => quote.dataset.replyQuote)).toEqual(["owner-a", "owner-b"]);
+    expect(within(quoteIn("answer-a")!).getByText("First question")).toBeTruthy();
+    expect(within(quoteIn("answer-b")!).getByText("Second question")).toBeTruthy();
+  });
+
+  it("keeps the source label of a turn whose trace is older than the messages of its page", () => {
+    const routineTrace = {
+      id: "trace-r",
+      sessionId: "concierge",
+      turnId: "turn-r",
+      role: "trace",
+      content: "[]",
+      createdAt: at(1),
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    } as ChatMessage;
+    // A routine's turn starts while the guardian's turn is open, and answers after it.
+    const shown = shownOf([
+      routineTrace,
+      inTurn(
+        say("answer-g", "assistant", "Guardian answer", 2, quoteOf("owner-g", "Question")),
+        "turn-g",
+      ),
+      inTurn(say("answer-r", "assistant", "Routine report", 3), "turn-r"),
+    ]);
+    renderTranscript(shown);
+    expect(anchors()).toEqual(["answer-g", "answer-r"]);
+    expect(screen.getByText("Routine · Daily summary")).toBeTruthy();
   });
 });

@@ -212,10 +212,10 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   return jsonOrThrow<ChatMessage[]>(res);
 }
 
-/** One page of a session's history: whole turns, oldest first within the page. */
+/** One page of a session's history: messages in the order they were said, with the trace rows of their turns. */
 export interface ChatMessagePage {
   messages: ChatMessage[];
-  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  /** Pass as `before` for the page of older messages; null when this page reaches the start. */
   nextCursor: string | null;
   /**
    * The session's saved workspace layout, as `GET /layout` returns it. Sent on
@@ -226,8 +226,8 @@ export interface ChatMessagePage {
 }
 
 /**
- * The newest `limit` turns of a session, or the `limit` turns before `before`.
- * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ * The newest `limit` messages of a session, or the `limit` messages before
+ * `before`, with the trace rows of their turns. `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  */
 export async function listSessionMessagePage(
   sessionId: string,
@@ -479,20 +479,6 @@ export async function markSessionRead(
   return jsonOrThrow<{ sessionId: string; lastSeenActivityAt: string | null; unread: boolean }>(
     res,
   );
-}
-
-/** Tells the server the owner has seen the messages `ids` of chat `sessionId`. */
-export async function markMessagesRead(
-  sessionId: string,
-  ids: readonly string[],
-): Promise<{ marked: number }> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/messages/read`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  return jsonOrThrow<{ marked: number }>(res);
 }
 
 export async function createProject(name: string): Promise<ProjectOption> {

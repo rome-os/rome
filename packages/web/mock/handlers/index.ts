@@ -1546,17 +1546,19 @@ export const handlers = [
     const query = new URL(request.url).searchParams;
     const limit = Number(query.get("limit"));
     if (!limit) return HttpResponse.json(messages);
-    // Pages by turn like the server; the cursor is the index of the page's first turn.
-    const turns = new Map<string, typeof messages>();
-    for (const message of messages) {
-      const key = message.turnId ?? message.id;
-      turns.set(key, [...(turns.get(key) ?? []), message]);
-    }
-    const groups = [...turns.values()];
-    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    // Pages by message like the server: the cursor is the index of the page's first
+    // message, and the traces of the page's turns ride along.
+    const said = messages.filter((message) => message.role !== "trace");
+    const end = query.has("before") ? Number(query.get("before")) : said.length;
     const start = Math.max(0, end - limit);
+    const page = said.slice(start, end);
+    const turns = new Set(page.flatMap((message) => (message.turnId ? [message.turnId] : [])));
+    const traces = messages.filter(
+      (message) => message.role === "trace" && message.turnId && turns.has(message.turnId),
+    );
+    const shown = new Set([...page, ...traces]);
     return HttpResponse.json({
-      messages: groups.slice(start, end).flat(),
+      messages: messages.filter((message) => shown.has(message)),
       nextCursor: start > 0 ? String(start) : null,
     });
   }),
@@ -1617,20 +1619,6 @@ export const handlers = [
       lastSeenActivityAt: found.lastSeenActivityAt,
       unread: found.unread,
     });
-  }),
-  // The messages the owner has seen, as the server marks them read.
-  http.post("/api/chat/sessions/:sessionId/messages/read", async ({ params, request }) => {
-    const messages = transcripts[String(params.sessionId)];
-    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
-    const { ids } = (await request.json()) as { ids: string[] };
-    let marked = 0;
-    for (const message of messages) {
-      if (ids.includes(message.id) && message.read === false) {
-        message.read = true;
-        marked += 1;
-      }
-    }
-    return HttpResponse.json({ marked });
   }),
   // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
   // into the Pinned section and stays there until the page reloads.

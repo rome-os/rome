@@ -251,7 +251,6 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
-      expect(await status(visitor, `/chat/sessions/${id}/messages/read`, post)).toBe(404);
     }
     // Nor the guardian the visitor's.
     expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
@@ -2140,49 +2139,6 @@ describe("Webchat API", () => {
     expect(afterRead.find((session) => session.id === created.id)).toMatchObject({
       unread: false,
     });
-  });
-
-  it("marks the messages it is given read, one chat's only, and reads each message's mark", async () => {
-    const app = createWebchatRuntime(deps).routes;
-    await deps.webchatRepo.createSession("read-chat", "Reads");
-    await deps.webchatRepo.recordUserInput("m1", "read-chat", "[]");
-    const reply = (
-      await deps.webchatRepo.addBackendMessage(
-        "read-chat",
-        "turn-1",
-        [{ type: "text", content: "Sunny" }],
-        { replyTo: "m1" },
-      )
-    ).id;
-    const mark = (id: string, body: unknown) =>
-      app.request(`/chat/sessions/${id}/messages/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    const readOf = async () =>
-      new Map(
-        (
-          (await (await app.request("/chat/sessions/read-chat/messages")).json()) as {
-            id: string;
-            read?: boolean;
-          }[]
-        ).map((message) => [message.id, message.read]),
-      );
-    expect(await readOf()).toEqual(
-      new Map([
-        ["m1", true],
-        [reply, false],
-      ]),
-    );
-
-    expect((await mark("read-chat", { ids: "nope" })).status).toBe(400);
-    expect((await mark("read-chat", { ids: [1] })).status).toBe(400);
-    expect((await mark("missing-chat", { ids: [reply] })).status).toBe(404);
-    const res = await mark("read-chat", { ids: [reply, "m1", "unknown"] });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ marked: 1 });
-    expect((await readOf()).get(reply)).toBe(true);
   });
 
   it("emits a content-free OTLP event after a chat session is created", async () => {
@@ -6382,15 +6338,61 @@ describe("Webchat API", () => {
       expect([cardOf("tu-3").replyTo, cardOf("tu-3").root]).toEqual([null, null]);
     });
 
-    it("answers a request to page a chat as a Concierge chat with not_concierge, which clients read as: page by turns", async () => {
+    it("answers a request to page a chat as a Concierge chat with not_concierge, which clients read as: page the way any chat is paged", async () => {
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
       const res = await app.request(`/chat/sessions/${sessionId}/messages?type=concierge&limit=40`);
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ code: "not_concierge" });
-      // The same chat pages by turns.
-      const turns = await app.request(`/chat/sessions/${sessionId}/messages?limit=20`);
-      expect(turns.status).toBe(200);
+      // The same chat pages by message.
+      const page = await app.request(`/chat/sessions/${sessionId}/messages?limit=20`);
+      expect(page.status).toBe(200);
+    });
+
+    it("pages a chat by message in the order they were said, with the traces of its turns, when two turns interleave", async () => {
+      await deps.webchatRepo.createSession("paged", "Paged");
+      rs.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const say = async (
+          seconds: number,
+          id: string,
+          role: "user" | "assistant" | "trace",
+          turn: string,
+        ) => {
+          rs.setSystemTime(new Date(1_800_000_000_000 + seconds * 1_000));
+          const parts = JSON.stringify([{ type: "text", content: id }]);
+          await deps.webchatRepo.addMessage(
+            id,
+            "paged",
+            role,
+            role === "trace" ? "[]" : parts,
+            turn,
+          );
+        };
+        // Owner-A, owner-B queued behind A's turn, then A's answer and B's.
+        await say(0, "owner-a", "user", "turn-a");
+        await say(1, "owner-b", "user", "turn-b");
+        await say(2, "trace-a", "trace", "turn-a");
+        await say(3, "answer-a", "assistant", "turn-a");
+        await say(4, "answer-b", "assistant", "turn-b");
+      } finally {
+        rs.useRealTimers();
+      }
+      const app = createWebchatRuntime(deps).routes;
+      type Page = { messages: { id: string }[]; nextCursor: string | null };
+      const read = async (query: string) =>
+        (await (await app.request(`/chat/sessions/paged/messages?${query}`)).json()) as Page;
+      const ids = (page: Page) => page.messages.map((message) => message.id);
+
+      const newest = await read("limit=2");
+      expect(ids(newest)).toEqual(["trace-a", "answer-a", "answer-b"]);
+      expect(newest.nextCursor).toEqual(expect.any(String));
+      const older = await read(`limit=2&before=${newest.nextCursor}`);
+      expect(ids(older)).toEqual(["owner-a", "owner-b", "trace-a"]);
+      expect(older.nextCursor).toBeNull();
+      expect((await app.request("/chat/sessions/paged/messages?limit=2&before=abc")).status).toBe(
+        400,
+      );
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {

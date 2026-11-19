@@ -417,8 +417,8 @@ async function persistRoutineDraftCard(
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
 //
-// A Concierge chat's card replies as its messages do: to the message the
-// `ask_question` call named, else to the turn's default.
+// A Concierge chat's card replies to the message the `ask_question` call
+// named, and to nothing when it names none.
 async function persistCard(
   webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
@@ -1832,19 +1832,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  // `limit` and `before` page the list by turn, newest first, and wrap it as
-  // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session. `through` names a message the page must reach, so one
-  // read lands on an old message, such as the card a task's Respond opens.
+  // `limit` and `before` page the list by message, newest first, and wrap it
+  // as `{ messages, nextCursor }`; a request with neither keeps the bare array
+  // of the whole session. The trace rows of the turns a page's messages belong
+  // to ride along, uncounted. `through` names a message the page must reach, so
+  // one read lands on an old message, such as the card a task's Respond opens.
   const encodeMessageCursor = (cursor: MessagePageCursor): string =>
-    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
+    Buffer.from(JSON.stringify([cursor.at, cursor.seq])).toString("base64url");
   const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
     try {
       const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
       if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-      const [startedAt, key] = parsed;
-      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
-      return { startedAt: Number(startedAt), key };
+      const [at, seq] = parsed;
+      if (!Number.isFinite(at) || !Number.isFinite(seq)) return null;
+      return { at: Number(at), seq: Number(seq) };
     } catch {
       return null;
     }
@@ -1858,7 +1859,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
     // Builds that page a Concierge chat with `type=concierge` take this answer
-    // as "page by turns", as they do for a chat that is not a Concierge chat.
+    // as "page the way any chat is paged".
     if (c.req.query("type") === "concierge") {
       return c.json({ error: "Not a Concierge chat", code: "not_concierge" }, 400);
     }
@@ -3175,20 +3176,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
-  // The owner has seen these messages, such as the ones of a thread they
-  // opened (docs/domains/chats.md#chat-thread). Answers how many were unread.
-  app.post("/chat/sessions/:id/messages/read", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getStoredWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const body = await c.req.json<unknown>().catch(() => undefined);
-    const ids = typeof body === "object" && body !== null ? (body as { ids?: unknown }).ids : null;
-    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
-      return c.json({ error: "ids must be an array of message ids" }, 400);
-    }
-    return c.json({ marked: await deps.webchatRepo.markMessagesRead(sessionId, ids) });
-  });
-
   app.get("/chat/sessions/:id", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getContinuableSession(c, sessionId);
@@ -4348,7 +4335,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         sessionId,
         messageId: repliedTo,
         // A selection quotes only what the owner picked on the Reply button.
-        quote: repliedTo === undefined || body.replyQuote === "" ? undefined : body.replyQuote,
+        quote: body.replyQuote === "" ? undefined : body.replyQuote,
         // An agent whose text is private speaks one message per tool call, so
         // each of its rows is a message of its own.
         ownRowOnly:
@@ -4601,7 +4588,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     // A card's answer from a Reply is no reply.
-    const replyTo = resolution && repliedTo !== undefined ? undefined : repliedTo;
+    const replyTo = resolution ? undefined : repliedTo;
     if (said.taskInput) assertTaskInputCurrent(said.taskInput);
     if (
       !(await deps.webchatRepo.recordUserInput(

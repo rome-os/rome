@@ -861,7 +861,7 @@ export async function buildConciergeTools(
         "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
-        required: ["text", "replyTo"],
+        required: ["text"],
         properties: {
           text: { type: "string", description: "The message, in Markdown." },
           format: {
@@ -1430,9 +1430,6 @@ export async function buildConciergeTools(
                 ? { cardId: message.id }
                 : {}),
               at: message.at.toISOString(),
-              ...(message.chatThread && message.chatThread !== message.id
-                ? { root: message.chatThread }
-                : {}),
             })),
           };
         }),

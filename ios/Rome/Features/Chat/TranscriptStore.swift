@@ -110,11 +110,13 @@ final class TranscriptStore {
     @ObservationIgnored private var openMark: Int?
     /// The rows hold what the chat held at open: the first fetch since is in.
     @ObservationIgnored private var openFetched = false
-    /// Messages that arrived live during the open: never unread.
-    @ObservationIgnored private var openLive: Set<String> = []
-    /// The agent messages that were unread at open, fixed once both of the
-    /// above are known; older pages add theirs.
-    @ObservationIgnored private var openUnread: Set<String>?
+    /// When the newest message the rows held at open was made, in whole
+    /// seconds; `Int.min` when they held none. Set with `openFetched`: a
+    /// message made after it arrived live, and is never unread.
+    @ObservationIgnored private var openedThrough = Int.min
+    /// What was unread at open, fixed once the read mark and the rows held at
+    /// open are both known.
+    @ObservationIgnored private var openUnread: UnreadAtOpen.Snapshot?
     /// The longest a read waits for the read mark.
     @ObservationIgnored var readMarkWait: Duration = .seconds(2)
     /// `start()` ran and no fetch has worked since.
@@ -339,6 +341,7 @@ final class TranscriptStore {
             needsFetch = false
             if openRead != nil, !openFetched {
                 openFetched = true
+                openedThrough = UnreadAtOpen.newest(in: page.messages)
                 settleUnread()
             }
             await refreshRunning()
@@ -385,12 +388,7 @@ final class TranscriptStore {
         merge(page.messages)
         self.cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
-        // An older page was never live: its unread messages count.
-        if var unread = openUnread, let openMark {
-            unread.formUnion(UnreadAtOpen.unread(page.messages.filter { !openLive.contains($0.id) }, mark: openMark))
-            openUnread = unread
-            summarizeUnread()
-        }
+        summarizeUnread()
     }
 
     func markRead() {
@@ -404,18 +402,7 @@ final class TranscriptStore {
                 guard openRead == waiting else { return }
             }
             await backend.markRead(sessionId: sessionId)
-            await markSeenMessages()
         }
-    }
-
-    /// The newest message the guardian has seen, which the instance marks read
-    /// with every message before it (docs/domains/chats.md#chat-thread).
-    @ObservationIgnored private var markedThrough: String?
-
-    private func markSeenMessages() async {
-        guard kind == .concierge, let newest = messages.last(where: { !$0.isTrace })?.id, newest != markedThrough else { return }
-        markedThrough = newest
-        if await !backend.markMessagesRead(sessionId: sessionId, ids: [newest]) { markedThrough = nil }
     }
 
     /// Whether the guardian sees this chat now. The main Chat stays mounted,
@@ -440,6 +427,7 @@ final class TranscriptStore {
         // A store that runs and fetched since it started is current; else
         // what it holds waits for the next fetch.
         openFetched = loaded && !needsFetch && !tokens.isEmpty
+        openedThrough = openFetched ? UnreadAtOpen.newest(in: messages) : .min
         let backend = backend
         let sessionId = sessionId
         let wait = readMarkWait
@@ -472,7 +460,7 @@ final class TranscriptStore {
         openRead = nil
         openMark = nil
         openFetched = false
-        openLive = []
+        openedThrough = .min
         openUnread = nil
         unread = nil
         unreadPill.reset()
@@ -482,12 +470,12 @@ final class TranscriptStore {
     /// at open are both known.
     private func settleUnread() {
         guard openUnread == nil, openFetched, let openMark else { return }
-        openUnread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
+        openUnread = UnreadAtOpen.Snapshot(mark: openMark, through: openedThrough)
         summarizeUnread()
     }
 
     private func summarizeUnread() {
-        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder) }
+        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, at: $0, hasOlder: hasOlder) }
         // No line drawn yet, the run going on into an older page: the pill
         // shows as for a line above the screen.
         if let unread, unread.firstId == nil { unreadPill.dividerAbove(true) }
@@ -524,19 +512,19 @@ final class TranscriptStore {
         if onScreen { markRead() }
     }
 
-    /// Keeps the server's order: a turn's rows stay together, turns ordered by
-    /// when they started, rows in a turn by time. Times are whole seconds, so
-    /// rows and turns that tie within a second keep the order they first
-    /// arrived in; the order never changes when the same rows arrive again.
+    /// Keeps the server's order: messages by when they were said, whichever
+    /// turn they belong to. Times are whole seconds, so messages that tie
+    /// within a second keep the order they first arrived in; the order never
+    /// changes when the same messages arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         rowsHeld = true
         defer {
             rowsHeld = false
             rebuildRows()
         }
-        // A copy of a message already held, with the same turn and time,
-        // keeps its place: every key the order goes by is unchanged, so it
-        // replaces the held one where it stands, with no sort. Streaming and
+        // A copy of a message already held, with the same time, keeps its
+        // place: every key the order goes by is unchanged, so it replaces the
+        // held one where it stands, with no sort. Streaming and
         // live edits of a message take this path.
         if !incoming.isEmpty, let placed = placedInPlace(incoming) {
             if placed != messages { messages = placed }
@@ -557,53 +545,29 @@ final class TranscriptStore {
     }
 
     /// `incoming` put in place of the messages it updates, or nil when one
-    /// of them is new or moved to another turn or time and the order must be
-    /// worked out again.
+    /// of them is new or moved to another time and the order must be worked
+    /// out again.
     private func placedInPlace(_ incoming: [ChatMessage]) -> [ChatMessage]? {
         var placed = messages
         for message in incoming {
             guard let index = placed.firstIndex(where: { $0.id == message.id }),
-                  placed[index].turnId == message.turnId, placed[index].createdAt == message.createdAt
+                  placed[index].createdAt == message.createdAt
             else { return nil }
             placed[index] = message
         }
         return placed
     }
 
-    /// The server's order: turns by when they started, then by when they
-    /// first arrived; in a turn, rows by time, then by arrival. Each
-    /// message's keys are worked out once, not on every comparison.
+    /// The server's order: by when each message was said, then by when it
+    /// first arrived. Each message's keys are worked out once, not on every
+    /// comparison.
     static func ordered(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
-        struct Keys {
-            let turn: String
-            let date: Date
-            let arrival: Int
-        }
-        let keys = all.map { Keys(turn: $0.turnId ?? $0.id, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
-        var turnStart: [String: Date] = [:]
-        var turnArrival: [String: Int] = [:]
-        for key in keys {
-            turnStart[key.turn] = min(turnStart[key.turn] ?? key.date, key.date)
-            turnArrival[key.turn] = min(turnArrival[key.turn] ?? Int.max, key.arrival)
-        }
-        struct Sorted {
-            let index: Int
-            let start: Date
-            let turnArrival: Int
-            let turn: String
-            let date: Date
-            let arrival: Int
-        }
-        let sorted = keys.enumerated().map { index, key in
-            Sorted(index: index, start: turnStart[key.turn]!, turnArrival: turnArrival[key.turn]!, turn: key.turn, date: key.date, arrival: key.arrival)
-        }.sorted { a, b in
-            if a.start != b.start { return a.start < b.start }
-            // Ids are random, so comparing them would decide a tie by chance.
-            if a.turn != b.turn { return a.turnArrival < b.turnArrival }
-            if a.date != b.date { return a.date < b.date }
-            return a.arrival < b.arrival
-        }
-        return sorted.map { all[$0.index] }
+        all.map { (message: $0, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
+            .sorted { a, b in
+                if a.date != b.date { return a.date < b.date }
+                return a.arrival < b.arrival
+            }
+            .map(\.message)
     }
 
     // MARK: Live events
@@ -620,7 +584,6 @@ final class TranscriptStore {
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
             if isNew { hold(message, after: newest) }
-            if isNew, openRead != nil { openLive.insert(message.id) }
             merge([message])
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
@@ -1289,22 +1252,32 @@ final class TranscriptStore {
 enum UnreadAtOpen {
     static func second(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded(.down)) }
 
-    /// The agent messages of `messages` made after `mark`.
-    static func unread(_ messages: [ChatMessage], mark: Int) -> Set<String> {
-        Set(messages.filter { $0.role == "assistant" && second($0.date) > mark }.map(\.id))
+    /// The read mark at open, and when the newest message the chat held then
+    /// was made: a message made after it arrived live, and is never unread.
+    struct Snapshot: Equatable {
+        let mark: Int
+        let through: Int
     }
 
-    /// The unread messages of `messages` the chat draws: how many, and the
-    /// first in the chat's order; nil when none is drawn. A page holds whole
-    /// turns, so while older pages remain and the oldest loaded turn has an
-    /// unread message, the run may start on an older page: no first until it
-    /// loads, and the count is a lower bound.
-    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> UnreadSummary? {
-        guard !unread.isEmpty, let oldest = messages.first else { return nil }
-        let drawn = messages.filter { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
+    /// When the newest message of `messages` was made, `Int.min` for none.
+    /// A trace is no message: it comes with the page of its turn.
+    static func newest(in messages: [ChatMessage]) -> Int {
+        messages.filter { !$0.isTrace }.map { second($0.date) }.max() ?? .min
+    }
+
+    /// The unread messages of `messages`, which are in time order, the chat
+    /// draws: how many, and the first; nil when none is drawn. While older
+    /// pages remain and the oldest loaded message is unread, the run may
+    /// start on an older page: no first until it loads, and the count is a
+    /// lower bound.
+    static func summary(in messages: [ChatMessage], at open: Snapshot, hasOlder: Bool) -> UnreadSummary? {
+        let drawn = messages.filter {
+            let at = second($0.date)
+            return $0.role == "assistant" && at > open.mark && at <= open.through
+                && TranscriptBuilder.isReply($0, parts: $0.parts)
+        }
         guard let first = drawn.first else { return nil }
-        let oldestTurn = oldest.turnId ?? oldest.id
-        let more = hasOlder && messages.contains { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }
+        let more = hasOlder && messages.first { !$0.isTrace }.map { second($0.date) > open.mark } == true
         return UnreadSummary(firstId: more ? nil : first.id, count: drawn.count, more: more)
     }
 }

@@ -26,9 +26,17 @@ final class FakeBackend: RomeBackend {
     /// Set, every message read fails with it.
     var messagesError: APIError?
 
+    /// Set, the page each read answers, by the cursor it passes (nil for the
+    /// newest), as the server hands them out; a page missing fails.
+    var servedPages: [String?: MessagePage] = [:]
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         pageLimits.append(limit)
         if let messagesError { throw messagesError }
+        if !servedPages.isEmpty {
+            guard let page = servedPages[before] else { throw APIError.notFound }
+            return page
+        }
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
@@ -209,14 +217,6 @@ final class FakeBackend: RomeBackend {
 
     /// The reply each send named, in order.
     var sentReplies: [ReplyTarget?] = []
-    /// The ids each read mark of messages named, in order.
-    var markedMessages: [[String]] = []
-
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
-        markedMessages.append(ids)
-        return true
-    }
-
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
         sentReplies.append(reply)
         return try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
@@ -548,18 +548,19 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
             ChatMessage(id: id, sessionId: "task", turnId: turn, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
         }
         let backend = FakeBackend()
-        // Server order: a turn's rows together, the turn's late reply before
-        // the next turn, two rows in the same second in the order written.
+        // Server order: by when each was said, whichever turn it is in: the
+        // turn's late reply after the next turn's prompt, two rows in the same
+        // second in the order written.
         backend.stored = [
             row("u1", turn: "t1", second: 0, role: "user"),
             row("a1", turn: "t1", second: 20),
-            row("a2", turn: "t1", second: 50),
-            row("a3", turn: "t1", second: 50),
             row("u2", turn: "t2", second: 30, role: "user"),
+            row("a3", turn: "t1", second: 50),
+            row("a2", turn: "t1", second: 50),
         ]
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
-        let expected = ["u1", "a1", "a2", "a3", "u2"]
+        let expected = ["u1", "a1", "u2", "a3", "a2"]
         #expect(store.messages.map(\.id) == expected)
 
         await store.reload()

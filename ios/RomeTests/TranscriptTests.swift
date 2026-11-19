@@ -296,10 +296,8 @@ private func replying(to original: String) -> [String: Any] { ["type": "reply_to
         UnreadAtOpen.second(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
     }
 
-    private func turn(_ message: ChatMessage, _ id: String) -> ChatMessage {
-        var message = message
-        message.turnId = id
-        return message
+    private func opened(_ messages: [ChatMessage], mark markSeconds: TimeInterval) -> UnreadAtOpen.Snapshot {
+        UnreadAtOpen.Snapshot(mark: mark(markSeconds), through: UnreadAtOpen.newest(in: messages))
     }
 
     @Test func onlyAgentMessagesAfterTheMarksSecondAreUnread() {
@@ -308,7 +306,8 @@ private func replying(to original: String) -> [String: Any] { ["type": "reply_to
             message("same", [text("read")], at: 10.4),
             message("later", [text("new")], at: 11),
         ]
-        #expect(UnreadAtOpen.unread(messages, mark: mark(10)) == ["later"])
+        let summary = UnreadAtOpen.summary(in: messages, at: opened(messages, mark: 10), hasOlder: false)
+        #expect(summary == UnreadSummary(firstId: "later", count: 1, more: false))
     }
 
     @Test func theLineGoesAboveTheFirstUnreadMessageThatDrawsSomething() {
@@ -317,24 +316,44 @@ private func replying(to original: String) -> [String: Any] { ["type": "reply_to
             message("blank", [text("  ")], at: 20),
             message("a2", [text("new")], at: 21),
         ]
-        let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
-        #expect(UnreadAtOpen.summary(in: messages, unread: [], hasOlder: false) == nil)
-        #expect(UnreadAtOpen.summary(in: messages, unread: ["blank"], hasOlder: false) == nil)
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
+        // Nothing was unread when the chat held nothing newer than the mark.
+        #expect(UnreadAtOpen.summary(in: messages, at: opened([], mark: 10), hasOlder: false) == nil)
     }
 
     @Test func anUnreadRunThatMayStartOnAnOlderPageWaitsForIt() {
         let messages = [
-            turn(message("q", role: "user", [text("go")], at: 0), "t1"),
-            turn(message("r1", [text("new")], at: 30), "t1"),
-            turn(message("r2", [text("new too")], at: 40), "t2"),
+            message("q", role: "user", [text("go")], at: 20),
+            message("r1", [text("new")], at: 30),
+            message("r2", [text("new too")], at: 40),
         ]
-        let unread = UnreadAtOpen.unread(messages, mark: mark(10))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
-        #expect(UnreadAtOpen.summary(in: messages, unread: unread, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
-        // The oldest loaded turn has nothing unread: the run starts here.
-        let read = [turn(message("old", [text("read")], at: 5), "t0")] + messages.dropFirst()
-        #expect(UnreadAtOpen.summary(in: Array(read), unread: unread, hasOlder: true)?.firstId == "r1")
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
+        // The oldest loaded message is read: the run starts here.
+        let read = [message("old", [text("read")], at: 5)] + messages
+        #expect(UnreadAtOpen.summary(in: read, at: open, hasOlder: true)?.firstId == "r1")
+    }
+
+    /// A trace comes with the page of its turn and may be older than every
+    /// message on it: it does not end the search for the first unread one.
+    @Test func aTraceOlderThanTheLoadedMessagesDoesNotEndTheRun() {
+        var trace = message("trace", [text("[]")], at: 0)
+        trace.role = "trace"
+        let messages = [trace, message("r1", [text("new")], at: 30), message("r2", [text("new too")], at: 40)]
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.newest(in: messages) == mark(40))
+        #expect(UnreadAtOpen.newest(in: []) == Int.min)
+    }
+
+    /// A message made after the newest one the chat opened with arrived live.
+    @Test func aMessageMadeAfterTheOpeningHistoryIsNeverUnread() {
+        let opening = [message("r1", [text("new")], at: 30)]
+        let open = opened(opening, mark: 10)
+        let later = opening + [message("live", [text("just now")], at: 50)]
+        #expect(UnreadAtOpen.summary(in: later, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 1, more: false))
     }
 
     @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {

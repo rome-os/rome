@@ -79,7 +79,7 @@ function Harness({
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const stick = useStickToBottom({ initialStuck });
   const older = useOlderMessages("s1", {
-    pageTurns: 7,
+    pageSize: 7,
     scroller,
     pinned: stick.isAtBottom,
     setMessages,
@@ -302,26 +302,5 @@ describe("useOlderMessages", () => {
       { limit: 7, before: "cursor-2", through: "m1" },
     ]);
     expect(shownIds()).toEqual(["m1", "m2", "m3"]);
-  });
-});
-
-describe("useOlderMessages onOlderPage", () => {
-  it("reports the messages of each older page that loads, and no other", async () => {
-    const page = [message("m1", 1), message("m2", 2)];
-    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({ messages: page, nextCursor: null });
-    const onOlderPage = rs.fn();
-    const { result } = renderHook(() =>
-      useOlderMessages("s1", {
-        pageTurns: 7,
-        scroller: null,
-        pinned: true,
-        setMessages: () => {},
-        onOlderPage,
-      }),
-    );
-    act(() => result.current.setCursor("s1", "cursor-1"));
-    expect(onOlderPage).not.toHaveBeenCalled();
-    await act(() => result.current.loadOlder("s1"));
-    expect(onOlderPage).toHaveBeenCalledExactlyOnceWith("s1", page);
   });
 });

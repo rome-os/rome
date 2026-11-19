@@ -42,7 +42,6 @@ import {
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
-  markMessagesRead,
   markSessionRead,
   openTurnStream,
   postSessionTurn,
@@ -505,7 +504,6 @@ rs.mock("@/lib/chat-api", () => {
       lastSeenActivityAt: null,
       unread: false,
     }),
-    markMessagesRead: rs.fn().mockResolvedValue({ marked: 0 }),
     openTurnStream: rs.fn((_turnId: string, signal?: AbortSignal) => {
       const body = new ReadableStream({
         start(controller) {
@@ -781,75 +779,6 @@ describe("Chat read marking", () => {
         ),
       ),
     ).toEqual([]);
-  });
-
-  describe("the messages the owner has seen", () => {
-    const agentMessage = (id: string, minute: number, read: boolean) => ({
-      id,
-      sessionId: "session-1",
-      turnId: `turn-${id}`,
-      role: "assistant" as const,
-      content: JSON.stringify([{ type: "text", content: id }]),
-      createdAt: `2026-10-27T12:0${minute}:00.000Z`,
-      read,
-    });
-    const unreadTranscript = () => [
-      agentMessage("a1", 0, true),
-      agentMessage("a2", 1, false),
-      agentMessage("a3", 2, false),
-    ];
-
-    it("marks through the newest message once a Concierge chat is open at the bottom, and no other", async () => {
-      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-        messages: unreadTranscript(),
-        nextCursor: null,
-      });
-      renderChat(<Chat sessionId="session-1" variant="concierge" />);
-
-      await waitFor(() => expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["a3"]));
-      expect(markMessagesRead).toHaveBeenCalledTimes(1);
-    });
-
-    it("marks nothing in a chat that is not a Concierge chat, nor one the reader has scrolled away from", async () => {
-      rs.mocked(listSessionMessagePage)
-        .mockResolvedValueOnce({ messages: unreadTranscript(), nextCursor: null })
-        .mockResolvedValueOnce({ messages: unreadTranscript(), nextCursor: null });
-      renderChat(<Chat sessionId="session-1" />);
-      await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
-      expect(markMessagesRead).not.toHaveBeenCalled();
-      cleanup();
-
-      stickToBottom.isAtBottom = false;
-      renderChat(<Chat sessionId="session-1" variant="concierge" />);
-      await waitFor(() => expect(markSessionRead).toHaveBeenCalledTimes(2));
-      expect(markMessagesRead).not.toHaveBeenCalled();
-    });
-
-    it("waits for a hidden tab, and marks when the owner is back", async () => {
-      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-        messages: unreadTranscript(),
-        nextCursor: null,
-      });
-      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
-      try {
-        renderChat(<Chat sessionId="session-1" variant="concierge" />);
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        });
-        expect(markMessagesRead).not.toHaveBeenCalled();
-
-        Object.defineProperty(document, "visibilityState", {
-          configurable: true,
-          value: "visible",
-        });
-        act(() => {
-          document.dispatchEvent(new Event("visibilitychange"));
-        });
-        await waitFor(() => expect(markMessagesRead).toHaveBeenCalledWith("session-1", ["a3"]));
-      } finally {
-        delete (document as { visibilityState?: unknown }).visibilityState;
-      }
-    });
   });
 
   it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {

@@ -19,6 +19,7 @@ import {
   gt,
   gte,
   inArray,
+  ne,
   notInArray,
   isNotNull,
   isNull,
@@ -96,9 +97,6 @@ export interface StoredWebchatMessage {
   chatThreadId?: string | null;
   /** The emoji the message was reacted to with (docs/domains/chats.md#reaction), when it has one. */
   reaction?: string | null;
-  /** Whether the chat's owner has seen the message
-   *  (docs/domains/chats.md#chat-thread). Absent for a line kept outside Chats. */
-  read?: boolean;
   createdAt: Date;
 }
 
@@ -306,29 +304,33 @@ interface TraceReadOptions {
   messageIds?: readonly string[];
 }
 
-/** Where a message page ends: the oldest turn group (or lone message) it holds. */
+/**
+ * Where a message page ends: the oldest message it holds, by the position the
+ * transcript draws it at, which is when it was said, then the order it was
+ * recorded in.
+ */
 export interface MessagePageCursor {
-  /** `created_at` (epoch seconds) of the group's earliest row. */
-  startedAt: number;
-  /** The group's `turn_id`, or the row id for a message without a turn. */
-  key: string;
+  /** `created_at` of the message, in epoch seconds. */
+  at: number;
+  /** The order the message was recorded in. */
+  seq: number;
 }
 
 export interface MessagePageOptions {
-  /** Turn groups per page. Rows without a turn each count as one group. */
+  /** Messages per page. A turn's trace rows ride along and are not counted. */
   limit: number;
-  /** Return only groups strictly older than this cursor. */
+  /** Return only messages strictly older than this cursor. */
   before?: MessagePageCursor | null;
   /**
-   * A message the page must reach: the page holds every group down to the one
-   * with this message, and a few older ones, so one read lands on it however
-   * far back it is. A message the chat does not hold changes nothing.
+   * A message the page must reach: the page holds every message down to it,
+   * and a few older ones, so one read lands on it however far back it is. A
+   * message the chat does not hold changes nothing.
    */
   through?: string;
 }
 
-/** How many groups older than a `through` message a page holds, so it opens with some context. */
-export const THROUGH_CONTEXT_GROUPS = 2;
+/** How many messages older than a `through` message a page holds, so it opens with some context. */
+export const THROUGH_CONTEXT_MESSAGES = 5;
 
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
@@ -881,15 +883,6 @@ export class WebChatRepository {
     _reaction: string | null,
   ): Promise<boolean> {
     return false;
-  }
-
-  /**
-   * Mark the messages of chat `sessionId` keyed `keys` read, and answer how
-   * many were unread. A chat outside Chats keeps no read marks, so it
-   * marks none.
-   */
-  async markMessagesRead(_sessionId: string, _keys: readonly string[]): Promise<number> {
-    return 0;
   }
 
   /** Told when a session is renamed, from the dashboard or by its channel. */
@@ -2459,81 +2452,78 @@ export class WebChatRepository {
   }
 
   /**
-   * The newest `limit` turn groups of a session, in the order `getMessages`
-   * returns them, plus the cursor for the page of older groups (null when none
-   * remain). A group is every row of a turn, so a page never splits a turn's
-   * user, assistant, and trace rows. Groups order by (earliest `created_at`,
-   * key) and the cursor is a position in that order, so pages stay disjoint
-   * while rows arrive.
+   * The newest `limit` messages of a session, before `options.before`, in the
+   * order `getMessages` returns them, plus the cursor for the older ones (null
+   * when none remain). The trace rows of the turns those messages belong to
+   * come with them and do not count toward the limit, so a turn's trace shows
+   * on every page that holds one of its messages. Pages are disjoint while
+   * messages arrive, because the cursor is a position in the order they are
+   * said in.
    */
   async getMessagesPage(sessionId: string, options: MessagePageOptions) {
     const before = options.before;
     const limit = options.through
-      ? Math.max(options.limit, await this.groupsThrough(sessionId, before, options.through))
+      ? Math.max(options.limit, await this.messagesThrough(sessionId, before, options.through))
       : options.limit;
-    const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
-      SELECT key, startedAt FROM (
-        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
-               MIN(${romeAgentMessages.createdAt}) AS startedAt
-        FROM ${romeAgentMessages}
-        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
-        GROUP BY key
-      )
-      ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
-      ORDER BY startedAt DESC, key DESC
+    const position = sql`(${romeAgentMessages.createdAt}, rowid)`;
+    const found = await this.db.all<{ at: number; seq: number; turn_id: string | null }>(sql`
+      SELECT created_at AS at, rowid AS seq, turn_id
+      FROM ${romeAgentMessages}
+      WHERE session_id = ${sessionId} AND role != 'trace'
+      ${before ? sql`AND ${position} < (${before.at}, ${before.seq})` : sql``}
+      ORDER BY created_at DESC, rowid DESC
       LIMIT ${limit + 1}
     `);
-    const pageGroups = groups.slice(0, limit);
-    if (pageGroups.length === 0) return { rows: [], nextCursor: null };
-    const keys = pageGroups.map((group) => group.key);
+    const page = found.slice(0, limit);
+    const oldest = page[page.length - 1];
+    if (!oldest) return { rows: [], nextCursor: null };
+    const turnIds = [
+      ...new Set(page.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
+    ];
     const rows = await this.selectMessages(
       and(
         eq(romeAgentMessages.sessionId, sessionId),
-        or(inArray(romeAgentMessages.turnId, keys), inArray(romeAgentMessages.id, keys)),
+        or(
+          and(
+            ne(romeAgentMessages.role, "trace"),
+            sql`${position} >= (${oldest.at}, ${oldest.seq})`,
+            before ? sql`${position} < (${before.at}, ${before.seq})` : undefined,
+          ),
+          turnIds.length > 0
+            ? and(eq(romeAgentMessages.role, "trace"), inArray(romeAgentMessages.turnId, turnIds))
+            : undefined,
+        ),
       ),
     );
-    const oldest = pageGroups[pageGroups.length - 1];
     return {
       rows,
       nextCursor:
-        groups.length > limit && oldest
-          ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
+        found.length > limit
+          ? ({ at: oldest.at, seq: oldest.seq } satisfies MessagePageCursor)
           : null,
     };
   }
 
   /**
-   * How many groups a page from `before` must hold to reach the group of
-   * message `through`, with {@link THROUGH_CONTEXT_GROUPS} older ones. Zero
-   * when the chat does not hold that message, or it is not older than `before`.
+   * How many messages a page from `before` must hold to reach message
+   * `through`, with {@link THROUGH_CONTEXT_MESSAGES} older ones. Zero when the
+   * chat does not hold that message, or it is not older than `before`.
    */
-  protected async groupsThrough(
+  protected async messagesThrough(
     sessionId: string,
     before: MessagePageCursor | null | undefined,
     through: string,
   ): Promise<number> {
     const [row] = await this.db.all<{ n: number }>(sql`
-      WITH g AS (
-        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
-               MIN(${romeAgentMessages.createdAt}) AS startedAt
-        FROM ${romeAgentMessages}
-        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
-        GROUP BY key
-      ),
-      t AS (
-        SELECT g.key, g.startedAt FROM g
-        WHERE g.key = (
-          SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
-          FROM ${romeAgentMessages}
-          WHERE ${romeAgentMessages.sessionId} = ${sessionId} AND ${romeAgentMessages.id} = ${through}
-        )
-      )
-      SELECT count(*) AS n FROM g, t
-      WHERE (g.startedAt, g.key) >= (t.startedAt, t.key)
-      ${before ? sql`AND (g.startedAt, g.key) < (${before.startedAt}, ${before.key})` : sql``}
+      SELECT count(*) AS n FROM rome_agent_messages m,
+        (SELECT created_at, rowid AS seq FROM rome_agent_messages
+          WHERE session_id = ${sessionId} AND id = ${through} AND role != 'trace') t
+      WHERE m.session_id = ${sessionId} AND m.role != 'trace'
+        AND (m.created_at, m.rowid) >= (t.created_at, t.seq)
+        ${before ? sql`AND (m.created_at, m.rowid) < (${before.at}, ${before.seq})` : sql``}
     `);
     const n = row?.n ?? 0;
-    return n === 0 ? 0 : n + THROUGH_CONTEXT_GROUPS;
+    return n === 0 ? 0 : n + THROUGH_CONTEXT_MESSAGES;
   }
 
   /**
@@ -2545,14 +2535,6 @@ export class WebChatRepository {
     sessionId: string,
     since?: Date,
   ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
-    // A turn starts where its first row does, its user and trace rows
-    // included: the start is read over all of them, not only the cards kept,
-    // so two turns whose cards share a second keep the transcript's order.
-    const turnStart = sql`(
-      SELECT MIN(t.created_at) FROM rome_agent_messages t
-      WHERE t.session_id = ${romeAgentMessages.sessionId}
-        AND COALESCE(t.turn_id, t.id) = COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})
-    )`;
     return this.db
       .select({
         id: romeAgentMessages.id,
@@ -2568,14 +2550,11 @@ export class WebChatRepository {
           since ? gte(romeAgentMessages.createdAt, since) : undefined,
         ),
       )
-      .orderBy(turnStart, asc(romeAgentMessages.turnId), asc(romeAgentMessages.createdAt));
+      .orderBy(asc(romeAgentMessages.createdAt), sql`rowid`);
   }
 
   private selectMessages(where: SQL | undefined) {
-    // Partitioning by turn (not raw createdAt) keeps a turn's user/assistant/
-    // trace rows contiguous even when a later turn's user row is inserted
-    // before an earlier turn's reply; within a group, user sorts before
-    // assistant/trace because handleChatSend inserts it first.
+    // In the order the rows were said, whichever turn they belong to.
     return this.db
       .select({
         id: romeAgentMessages.id,
@@ -2591,11 +2570,7 @@ export class WebChatRepository {
       })
       .from(romeAgentMessages)
       .where(where)
-      .orderBy(
-        sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
-        asc(romeAgentMessages.turnId),
-        asc(romeAgentMessages.createdAt),
-      );
+      .orderBy(asc(romeAgentMessages.createdAt), sql`rowid`);
   }
 
   async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {

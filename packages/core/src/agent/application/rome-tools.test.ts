@@ -92,7 +92,7 @@ describe("ask_question", () => {
     expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
   });
 
-  it("requires the reply of a card that names one, and lets it be null", () => {
+  it("offers the reply of a card that names one, and lets it be left out or null", () => {
     const schema = (overrides: Partial<RomeToolsOptions>) =>
       tools(overrides)
         .listTools("ask_user")
@@ -101,7 +101,7 @@ describe("ask_question", () => {
         properties: { replyTo?: { type: unknown } };
       };
     expect(schema({}).required).toEqual(["questions"]);
-    expect(schema({ repliesTo: true }).required).toEqual(["questions", "replyTo"]);
+    expect(schema({ repliesTo: true }).required).toEqual(["questions"]);
     expect(schema({ repliesTo: true }).properties.replyTo?.type).toEqual(["string", "null"]);
   });
 

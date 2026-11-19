@@ -190,7 +190,7 @@ export function askUserTools(input: {
         "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {
         type: "object",
-        required: repliesTo ? ["questions", "replyTo"] : ["questions"],
+        required: ["questions"],
         properties: {
           questions: {
             type: "array",

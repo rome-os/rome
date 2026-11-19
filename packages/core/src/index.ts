@@ -1384,9 +1384,9 @@ async function main() {
         ),
         fallbackTimeoutMs: config.sessionHandoffFallbackTimeoutSeconds * 1_000,
         modelResolver,
-        page: async (chatId, turns, before) => {
+        page: async (chatId, limit, before) => {
           const page = await webchatRepo.getMessagesPage(chatId, {
-            limit: turns,
+            limit,
             before: before as MessagePageCursor | undefined,
           });
           return { rows: page.rows, next: page.nextCursor };

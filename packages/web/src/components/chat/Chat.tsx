@@ -94,8 +94,8 @@ import { useStableMap } from "@/hooks/use-stable-map";
 import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
-  CHAT_PAGE_TURNS,
-  CONCIERGE_PAGE_TURNS,
+  CHAT_PAGE_SIZE,
+  CONCIERGE_PAGE_SIZE,
   useOlderMessages,
 } from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
@@ -194,7 +194,6 @@ import {
   listChatAgents,
   listSessionMessagePage,
   listSessionTurns,
-  markMessagesRead as apiMarkMessagesRead,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
   plainErrorText,
@@ -281,7 +280,6 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
-  read: z.boolean().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -499,7 +497,7 @@ export function Chat({
   conciergeName,
 }: ChatProps) {
   const concierge = variant === "concierge";
-  const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
+  const pageSize = concierge ? CONCIERGE_PAGE_SIZE : CHAT_PAGE_SIZE;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -715,18 +713,10 @@ export function Chat({
   const {
     unread: unreadAtOpen,
     noteOpened,
-    noteOlder,
-    noteLive,
     pendingMark,
   } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
-  const onOlderPage = useCallback(
-    (id: string, page: ChatMessage[]) => {
-      if (id === mainSessionIdRef.current) noteOlder(page);
-    },
-    [noteOlder],
-  );
 
-  // The main session loads its newest turns first and pages older ones in as
+  // The main session loads its newest messages first and pages older ones in as
   // the transcript scrolls toward the top.
   const {
     setCursor: setOlderCursor,
@@ -734,11 +724,10 @@ export function Chat({
     sentinelRef: olderSentinelRef,
     loadOlder,
   } = useOlderMessages(mainSessionId || null, {
-    pageTurns,
+    pageSize,
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
-    onOlderPage,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -958,34 +947,6 @@ export function Chat({
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  // The owner has seen up to the newest message while the view is at the
-  // bottom of a visible tab: every message the chat holds unread is read at
-  // once, and the server is told of the newest, which reads all before it
-  // (docs/domains/chats.md#chat-thread). The server failing to take it changes
-  // nothing here: the next open reads them again.
-  const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
-  useEffect(() => {
-    const onChange = () => setTabVisible(document.visibilityState !== "hidden");
-    document.addEventListener("visibilitychange", onChange);
-    return () => document.removeEventListener("visibilitychange", onChange);
-  }, []);
-  useEffect(() => {
-    if (!concierge || shareMode || !tabVisible || !isAtBottom) return;
-    const session = mainSessionIdRef.current;
-    const unseen = displayMessages.filter((message) => message.read === false);
-    const newest = unseen.at(-1);
-    if (!session || !newest) return;
-    const seen = new Set(unseen.map((message) => message.id));
-    setMessages((prev) => {
-      const list = prev.get(session);
-      if (!list) return prev;
-      return new Map(prev).set(
-        session,
-        list.map((message) => (seen.has(message.id) ? { ...message, read: true } : message)),
-      );
-    });
-    void apiMarkMessagesRead(session, [newest.id]).catch(() => {});
-  }, [concierge, shareMode, tabVisible, isAtBottom, displayMessages]);
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
@@ -1271,7 +1232,7 @@ export function Chat({
         ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
         : undefined;
       try {
-        const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
+        const fetchPage = () => listSessionMessagePage(id, { limit: pageSize });
         let page = await fetchPage();
         if (page === null && (await recoverMissingSessionRef.current?.(id)))
           page = await fetchPage();
@@ -1336,15 +1297,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [
-      shareMode,
-      isReadVisibleSession,
-      markSessionRead,
-      noteOpened,
-      onOlderPage,
-      pageTurns,
-      setOlderCursor,
-    ],
+    [shareMode, isReadVisibleSession, markSessionRead, noteOpened, pageSize, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -1368,7 +1321,6 @@ export function Chat({
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
-      noteLive(message.id);
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];
@@ -1379,7 +1331,7 @@ export function Chat({
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead, noteLive, refreshArchivedSession],
+    [markSessionRead, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {

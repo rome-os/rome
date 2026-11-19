@@ -26,7 +26,7 @@ import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { SaidMessage } from "../chats/storage/message.js";
-import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
@@ -68,25 +68,10 @@ export interface TurnTrace extends TurnRef {
   createdAt: Date;
 }
 
-/** Where a page ends, handed back to read the page before it. Opaque: a
- *  message position for a chat, a turn position for a session. */
-export interface TranscriptCursor {
-  at: number;
-  id: string;
-}
-
-export interface TranscriptPage {
-  /** Messages per page of a chat, turns per page of a session. */
-  limit: number;
-  before?: TranscriptCursor | null;
-}
-
-/** Lines oldest first, the trace of each turn they show, and the cursor for
- *  the page before (null when none remain, and always without a page). */
+/** Lines oldest first, and the trace of each turn they show. */
 export interface Transcript {
   lines: TranscriptLine[];
   traces: TurnTrace[];
-  nextCursor: TranscriptCursor | null;
 }
 
 export interface ChatSearchHit {
@@ -203,13 +188,13 @@ const SNIPPET_LENGTH = 160;
 const LIKE_ESCAPE = "\\";
 
 export class ChatReadModel {
-  private readonly messages: Pick<MessageRepository, "read" | "idOf" | "byIds">;
+  private readonly messages: Pick<MessageRepository, "read">;
   private readonly links: Pick<TurnLinks, "turnsOf">;
 
   constructor(
     private readonly db: DrizzleDb,
     deps: {
-      messages?: Pick<MessageRepository, "read" | "idOf" | "byIds">;
+      messages?: Pick<MessageRepository, "read">;
       links?: Pick<TurnLinks, "turnsOf">;
     } = {},
   ) {
@@ -219,110 +204,29 @@ export class ChatReadModel {
 
   /**
    * The chat the session stands in, as the dashboard draws it, oldest first:
-   * every message said in the place, each with the turn it prompted or
-   * answered, or with a page the newest `page.limit` turns before
-   * `page.before`. A message two of Rome's agents both took a turn on is
-   * drawn under the first link, so it is never drawn twice. A message outside
-   * any turn counts as a turn of its own. A turn is placed by its newest
-   * line and shown whole, with all its lines, even where other turns' lines
-   * fall between them, so pages never split or repeat a turn. Every message
-   * recorded in the place is drawn, so where each of Rome's accounts holds
-   * its own copy of one (#1670), each copy is. Null when the session stands
-   * in no chat.
+   * every message said in the place, in the order it was said, each with the
+   * turn it prompted or answered. A message two of Rome's agents both took a
+   * turn on is drawn under the first link, so it is never drawn twice. Every
+   * message recorded in the place is drawn, so where each of Rome's accounts
+   * holds its own copy of one (#1670), each copy is. Null when the session
+   * stands in no chat.
    */
-  async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
+  async chatTranscript(sessionId: string): Promise<Transcript | null> {
     const speaker = await this.speakerOf(sessionId);
     if (!speaker) return null;
     const { place, since } = speaker;
     // A speaker sees what was said where it stands from when it joined: a line
     // said in a group before Rome's account was there never reached it.
-    const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
-    if (!page) {
-      const read = await this.messages.read(place);
-      return this.transcriptOf(sessionId, seen(read.messages), null);
-    }
-    // A cursor names the newest line of the oldest turn already shown, by
-    // its key, as every line goes out. This page holds turns whose newest
-    // line is older.
-    const from = page.before ? this.messages.idOf(place.chat, page.before.id) : null;
-    const cursor: MessageCursor | null =
-      page.before && from !== null ? { at: new Date(page.before.at * 1000), id: from } : null;
-    const older = (message: SaidMessage) => cursor === null || before(message, cursor);
-    const kept = new Map<string, readonly SaidMessage[]>();
-    const passed = new Set<string>();
-    let more = false;
-    let next: SaidMessage | null = null;
-    // Chats reads by message, newest first: walk back in batches, meeting
-    // each turn first at its newest line.
-    let batch: MessageCursor | null = cursor;
-    scan: for (;;) {
-      const read = await this.messages.read(place, { before: batch, limit: page.limit * 4 });
-      const shown = seen(read.messages);
-      const links = this.links.turnsOf(shown.map((message) => message.id));
-      for (const message of [...shown].reverse()) {
-        const key = turnKey(message, links);
-        if (kept.has(key) || passed.has(key)) continue;
-        // The turn is placed by the newest line it draws.
-        const lines = seen(await this.linesOfTurn(place, message, links.get(message.id)));
-        const newest = lines.at(-1) ?? message;
-        // A turn whose newest line is newer than the cursor was shown before.
-        if (!older(newest)) {
-          passed.add(key);
-          continue;
-        }
-        if (kept.size === page.limit) {
-          more = true;
-          break scan;
-        }
-        kept.set(key, lines);
-        next = newest;
-      }
-      if (!read.older || shown.length < read.messages.length) break;
-      batch = read.older;
-    }
-    const lines = [...new Map([...kept.values()].flat().map((m) => [m.id, m])).values()].sort(
-      (a, b) => (before(a, b) ? -1 : before(b, a) ? 1 : 0),
-    );
+    const read = await this.messages.read(place);
     return this.transcriptOf(
       sessionId,
-      lines,
-      more && next ? { at: next.at.getTime() / 1000, id: next.key } : null,
+      read.messages.filter((message) => message.at >= since),
     );
-  }
-
-  /** Every line drawn under the turn `link` names, `message` among them,
-   *  oldest first: the turn's prompts and answers in `place` whose first link
-   *  is this turn's. A message no turn took is a turn of its own. */
-  private async linesOfTurn(
-    place: Place,
-    message: SaidMessage,
-    link: TurnLink | undefined,
-  ): Promise<SaidMessage[]> {
-    if (!link?.turnId) return [message];
-    const ids = (
-      await this.db.all<{ message_id: number }>(sql`
-        SELECT message_id FROM agent_turn_messages
-        WHERE session_id = ${link.sessionId} AND turn_id = ${link.turnId}
-          AND role IN ('prompt', 'answer')
-      `)
-    ).map((row) => row.message_id);
-    const drawn = this.links.turnsOf(ids);
-    return this.messages
-      .byIds(
-        ids.filter((id) => {
-          const first = drawn.get(id);
-          return first?.sessionId === link.sessionId && first.turnId === link.turnId;
-        }),
-      )
-      .filter(
-        (line) => line.place.chat.id === place.chat.id && line.place.threadId === place.threadId,
-      );
   }
 
   private async transcriptOf(
     sessionId: string,
     messages: readonly SaidMessage[],
-    nextCursor: TranscriptCursor | null,
   ): Promise<Transcript> {
     const ids = messages.map((message) => message.id);
     const links = this.links.turnsOf(ids);
@@ -330,7 +234,7 @@ export class ChatReadModel {
     // Every turn a shown line prompted or answered has its trace shown, also
     // one whose lines are drawn under another agent's turn.
     const turns = await this.turnsAt(ids);
-    return { lines, traces: await this.tracesOf(turns), nextCursor };
+    return { lines, traces: await this.tracesOf(turns) };
   }
 
   /** Every turn that prompted on or answered with one of `messageIds`. */
@@ -346,14 +250,11 @@ export class ChatReadModel {
   }
 
   /**
-   * The turns of a session that stands in no chat (a subagent, a fork, a
-   * handoff), from the prompts, answers and traces it keeps itself: the
-   * newest `page.limit` before `page.before` (every turn without a page),
-   * whole, oldest first. A turn stands where its first line was said, and a
-   * line outside any turn is a turn of its own.
+   * The lines of a session that stands in no chat (a subagent, a fork, a
+   * handoff), from the prompts, answers and traces it keeps itself, oldest
+   * first, in the order they were said.
    */
-  async sessionTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript> {
-    const before = page?.before ?? null;
+  async sessionTranscript(sessionId: string): Promise<Transcript> {
     const rows = await this.db.all<{
       id: string;
       turn_id: string | null;
@@ -362,35 +263,17 @@ export class ChatReadModel {
       content: string;
       sender_name: string | null;
       at: number;
-      turn: string;
-      turn_at: number;
     }>(sql`
-      WITH line AS (
+      SELECT id, turn_id, input_state, role,
         -- A trace's blocks load only when the guardian opens it.
-        SELECT id, turn_id, input_state, role,
-          CASE WHEN role = 'trace' THEN '[]' ELSE content END AS content,
-          json_extract(actor, '$.email') AS sender_name,
-          created_at AS at, rowid AS seq, coalesce(turn_id, id) AS turn
-        FROM rome_agent_messages WHERE session_id = ${sessionId}
-      ),
-      turn AS (
-        SELECT turn, min(at) AS turn_at, min(seq) AS turn_seq FROM line GROUP BY turn
-      ),
-      shown AS (
-        SELECT * FROM turn
-        WHERE ${before === null ? 1 : 0} OR turn_at < ${before?.at ?? 0} OR (turn_at = ${before?.at ?? 0}
-          AND turn_seq < (SELECT turn_seq FROM turn WHERE turn = ${before?.id ?? ""}))
-        ORDER BY turn_at DESC, turn_seq DESC
-        -- One turn past the page tells whether more remain.
-        LIMIT ${page ? page.limit + 1 : -1}
-      )
-      SELECT line.*, shown.turn_at FROM line JOIN shown USING (turn)
-      ORDER BY shown.turn_at, shown.turn_seq, line.at, line.seq`);
-    const more = page !== undefined && new Set(rows.map((row) => row.turn)).size > page.limit;
-    const shown = more ? rows.filter((row) => row.turn !== rows[0]?.turn) : rows;
+        CASE WHEN role = 'trace' THEN '[]' ELSE content END AS content,
+        json_extract(actor, '$.email') AS sender_name,
+        created_at AS at
+      FROM rome_agent_messages WHERE session_id = ${sessionId}
+      ORDER BY created_at, rowid`);
     const lines: TranscriptLine[] = [];
     const traces: TurnTrace[] = [];
-    for (const row of shown) {
+    for (const row of rows) {
       const createdAt = new Date(row.at * 1000);
       if (row.role !== "trace") {
         lines.push({
@@ -408,12 +291,7 @@ export class ChatReadModel {
         traces.push({ id: row.id, sessionId, turnId: row.turn_id, createdAt });
       }
     }
-    const oldest = shown[0];
-    return {
-      lines,
-      traces,
-      nextCursor: more && oldest ? { at: oldest.turn_at, id: oldest.turn } : null,
-    };
+    return { lines, traces };
   }
 
   /** The place the session stands in, its chat and its thread, and when the
@@ -567,19 +445,6 @@ export class ChatReadModel {
     `);
     return Number(row?.count ?? 0);
   }
-}
-
-/** The turn a message is drawn under: its link's turn, or itself. */
-function turnKey(message: SaidMessage, links: ReadonlyMap<number, TurnLink>): string {
-  const link = links.get(message.id);
-  return link?.turnId ? `turn:${link.sessionId}\0${link.turnId}` : `line:${message.id}`;
-}
-
-/** Whether `message` was said before the position `cursor` names. */
-function before(message: SaidMessage, cursor: { at: Date; id: number }): boolean {
-  const at = Math.floor(message.at.getTime() / 1000);
-  const bound = Math.floor(cursor.at.getTime() / 1000);
-  return at < bound || (at === bound && message.id < cursor.id);
 }
 
 function chatLine(

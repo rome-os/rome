@@ -36,7 +36,14 @@ const guardian = (id: string, createdAt: string, turnId?: string) =>
 /** The state a chat holds when it opens on `page`, with the read mark at `mark`. */
 function opened(page: ChatMessage[], mark = MARK): { messages: ChatMessage[]; open: UnreadAtOpen } {
   const messages = orderChatMessages(page);
-  return { messages, open: { watermark: mark, memberIds: new Set(messages.map((m) => m.id)) } };
+  const said = messages.filter((m) => m.role !== "trace");
+  return {
+    messages,
+    open: {
+      watermark: mark,
+      openedThrough: Math.max(...said.map((m) => Math.floor(Date.parse(m.createdAt) / 1000))),
+    },
+  };
 }
 
 // a1 and a2 were read, a3 and a4 were not.
@@ -125,122 +132,68 @@ describe("summarizeUnread", () => {
     expect(summarizeUnread(messages, open, false)).toBeNull();
   });
 
-  describe("with older pages", () => {
-    // The server pages whole turns, newest first by each turn's earliest message.
-    const turnPages = (all: ChatMessage[], limit: number) => {
-      const turns = new Map<string, ChatMessage[]>();
-      for (const m of all) turns.set(m.turnId ?? m.id, [...(turns.get(m.turnId ?? m.id) ?? []), m]);
-      const start = (turn: ChatMessage[]) => Math.min(...turn.map((m) => Date.parse(m.createdAt)));
-      const newestFirst = [...turns.values()].sort((a, b) => start(b) - start(a));
-      const pages: ChatMessage[][] = [];
-      for (let i = 0; i < newestFirst.length; i += limit)
-        pages.push(newestFirst.slice(i, i + limit).flat());
-      return pages;
-    };
-    const THREE_TURNS = () => [
-      // Turn A began first and replies after the mark.
+  it("judges each message by when it was said, whichever turn it belongs to", () => {
+    // Turn A's reply came after the mark, B's before it, though B's prompt was said after A's.
+    const { messages, open } = opened([
       guardian("uA", "2026-10-27T12:00:00.000Z", "turn-a"),
-      agent("aA1", "2026-10-27T12:11:00.000Z", { turnId: "turn-a" }),
       guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
-      agent("aB1", "2026-10-27T12:06:00.000Z", { turnId: "turn-b" }),
-      guardian("uC", "2026-10-27T12:12:00.000Z", "turn-c"),
-      agent("aC1", "2026-10-27T12:13:00.000Z", { turnId: "turn-c" }),
-    ];
-    const ids = (messages: ChatMessage[]) => new Set(messages.map((m) => m.id));
-
-    it("counts an unread reply of a turn that began before the opening page, once its page loads", () => {
-      const [first, older] = turnPages(THREE_TURNS(), 2);
-      const opening = orderChatMessages(first);
-      const open: UnreadAtOpen = { watermark: MARK, memberIds: ids(opening) };
-      // The opening page starts at 12:05 and its oldest turn is read: the run ends there.
-      expect(summarizeUnread(opening, open, true)).toEqual({
-        firstId: "aC1",
-        count: 1,
-        more: false,
-      });
-
-      const loaded = mergeFetchedChatMessages(opening, older);
-      const member: UnreadAtOpen = {
-        watermark: MARK,
-        memberIds: new Set([...open.memberIds, ...ids(older)]),
-      };
-      expect(loaded.map((m) => m.id)).toEqual(["uA", "aA1", "uB", "aB1", "uC", "aC1"]);
-      expect(summarizeUnread(loaded, member, false)).toEqual({
-        firstId: "aA1",
-        count: 2,
-        more: false,
-      });
+      agent("aB", "2026-10-27T12:06:00.000Z", { turnId: "turn-b" }),
+      agent("aA", "2026-10-27T12:12:00.000Z", { turnId: "turn-a" }),
+    ]);
+    expect(messages.map((m) => m.id)).toEqual(["uA", "uB", "aB", "aA"]);
+    expect(summarizeUnread(messages, open, false)).toEqual({
+      firstId: "aA",
+      count: 1,
+      more: false,
     });
+  });
 
-    it("keeps looking while the oldest loaded turn has an unread reply, whatever read messages follow it", () => {
-      const turns = [
-        guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
-        agent("aB1", "2026-10-27T12:11:00.000Z", { turnId: "turn-b" }),
-        guardian("uD", "2026-10-27T12:06:00.000Z", "turn-d"),
-        agent("aD1", "2026-10-27T12:07:00.000Z", { turnId: "turn-d" }),
-        guardian("uC", "2026-10-27T12:12:00.000Z", "turn-c"),
-        agent("aC1", "2026-10-27T12:13:00.000Z", { turnId: "turn-c" }),
-      ];
-      const { messages, open } = opened(turns);
-      expect(messages.map((m) => m.id)).toEqual(["uB", "aB1", "uD", "aD1", "uC", "aC1"]);
+  describe("with older pages", () => {
+    const ids = (messages: ChatMessage[]) => messages.map((m) => m.id);
+
+    it("keeps looking while the oldest loaded message is unread, and names the first once no page remains", () => {
+      const { messages, open } = opened([
+        agent("a3", "2026-10-27T12:11:00.000Z"),
+        guardian("g2", "2026-10-27T12:12:00.000Z"),
+        agent("a4", "2026-10-27T12:13:00.000Z"),
+      ]);
       expect(summarizeUnread(messages, open, true)).toEqual({
         firstId: null,
         count: 2,
         more: true,
       });
-      expect(summarizeUnread(messages, open, false)).toEqual({
-        firstId: "aB1",
-        count: 2,
-        more: false,
-      });
-    });
-
-    it("has the first message once the page that holds a read oldest turn loads", () => {
-      const all = [
-        guardian("u0", "2026-10-27T11:00:00.000Z", "turn-0"),
-        agent("a0", "2026-10-27T11:01:00.000Z", { turnId: "turn-0" }),
-        guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
-        agent("aB1", "2026-10-27T12:11:00.000Z", { turnId: "turn-b" }),
-        guardian("uC", "2026-10-27T12:12:00.000Z", "turn-c"),
-        agent("aC1", "2026-10-27T12:13:00.000Z", { turnId: "turn-c" }),
-      ];
-      const [first, older] = turnPages(all, 2);
-      const opening = orderChatMessages(first);
-      const open: UnreadAtOpen = { watermark: MARK, memberIds: ids(opening) };
-      expect(summarizeUnread(opening, open, true)).toEqual({ firstId: null, count: 2, more: true });
-      const loaded = mergeFetchedChatMessages(opening, older);
-      const member: UnreadAtOpen = {
-        watermark: MARK,
-        memberIds: new Set([...open.memberIds, ...ids(older)]),
-      };
-      expect(summarizeUnread(loaded, member, false)).toEqual({
-        firstId: "aB1",
-        count: 2,
-        more: false,
-      });
-    });
-
-    it("takes the oldest loaded message as the first when no older page exists", () => {
-      const { messages, open } = opened([
-        agent("a3", "2026-10-27T12:11:00.000Z"),
-        agent("a4", "2026-10-27T12:13:00.000Z"),
+      const loaded = mergeFetchedChatMessages(messages, [
+        agent("a1", "2026-10-27T12:00:00.000Z"),
+        agent("a2", "2026-10-27T12:10:30.000Z"),
       ]);
-      expect(summarizeUnread(messages, open, false)).toEqual({
+      expect(ids(loaded)).toEqual(["a1", "a2", "a3", "g2", "a4"]);
+      expect(summarizeUnread(loaded, open, false)).toEqual({
+        firstId: "a2",
+        count: 3,
+        more: false,
+      });
+    });
+
+    it("has the first message when the oldest loaded one is at or before the mark", () => {
+      const { messages, open } = opened(history());
+      expect(summarizeUnread(messages, open, true)).toEqual({
         firstId: "a3",
         count: 2,
         more: false,
       });
     });
 
-    it("ignores a live reply to an older turn, which an older page never brought", () => {
-      const [first] = turnPages(THREE_TURNS(), 2);
-      const opening = orderChatMessages(first);
-      const open: UnreadAtOpen = { watermark: MARK, memberIds: ids(opening) };
-      const live = mergeChatMessage(
-        opening,
-        agent("aB2", "2026-10-27T12:14:00.000Z", { turnId: "turn-b" }),
-      );
-      expect(summarizeUnread(live, open, true)).toEqual({ firstId: "aC1", count: 1, more: false });
+    it("looks past a trace that comes with its turn and is older than every message loaded", () => {
+      const { messages, open } = opened([
+        message("trace-a", "trace", "2026-10-27T12:00:00.000Z", { turnId: "turn-a" }),
+        agent("a3", "2026-10-27T12:11:00.000Z", { turnId: "turn-a" }),
+        agent("a4", "2026-10-27T12:13:00.000Z"),
+      ]);
+      expect(summarizeUnread(messages, open, true)).toEqual({
+        firstId: null,
+        count: 2,
+        more: true,
+      });
     });
   });
 
@@ -261,9 +214,7 @@ describe("summarizeUnread", () => {
       expect(summarizeUnread(later, open, false)).toBeNull();
     });
 
-    it("ignores a live message that sorts before the opening tail, in a turn still running", () => {
-      // Turn A is running: a1 is read. The guardian's message g1 belongs to no turn. A's next
-      // message sorts by its turn's start, which is before g1.
+    it("ignores the live reply of a turn that was running when the chat opened", () => {
       const { messages, open } = opened(
         [
           guardian("u1", "2026-10-27T12:00:00.000Z", "turn-a"),
@@ -278,42 +229,8 @@ describe("summarizeUnread", () => {
         messages,
         agent("a2", "2026-10-27T12:06:00.000Z", { turnId: "turn-a" }),
       );
-      expect(later.map((m) => m.id)).toEqual(["u1", "a1", "a2", "g1"]);
+      expect(later.map((m) => m.id)).toEqual(["u1", "a1", "g1", "a2"]);
       expect(summarizeUnread(later, open, false)).toBeNull();
-    });
-
-    it("keeps the divider on the opening messages when one arrives before the opening tail", () => {
-      const { messages, open } = opened(
-        [
-          guardian("u1", "2026-10-27T12:00:00.000Z", "turn-a"),
-          agent("a1", "2026-10-27T12:09:00.000Z", { turnId: "turn-a" }),
-          agent("a2", "2026-10-27T12:11:00.000Z", { turnId: "turn-a" }),
-          guardian("g1", "2026-10-27T12:12:00.000Z"),
-        ],
-        "2026-10-27T12:10:00.000Z",
-      );
-      const later = mergeChatMessage(
-        messages,
-        agent("a3", "2026-10-27T12:13:00.000Z", { turnId: "turn-a" }),
-      );
-      expect(later.map((m) => m.id)).toEqual(["u1", "a1", "a2", "a3", "g1"]);
-      expect(summarizeUnread(later, open, false)).toEqual({ firstId: "a2", count: 1, more: false });
-    });
-  });
-
-  it("does not count a read message that the turn order puts after an unread one", () => {
-    // Turn A starts first and has an unread message. Turn B starts later and is read.
-    const { messages, open } = opened([
-      guardian("uA", "2026-10-27T12:00:00.000Z", "turn-a"),
-      guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
-      agent("aB", "2026-10-27T12:06:00.000Z", { turnId: "turn-b" }),
-      agent("aA", "2026-10-27T12:12:00.000Z", { turnId: "turn-a" }),
-    ]);
-    expect(messages.map((m) => m.id)).toEqual(["uA", "aA", "uB", "aB"]);
-    expect(summarizeUnread(messages, open, false)).toEqual({
-      firstId: "aA",
-      count: 1,
-      more: false,
     });
   });
 });
@@ -321,34 +238,29 @@ describe("summarizeUnread", () => {
 describe("useUnreadAtOpen", () => {
   const read = () => Promise.resolve("2026-10-27T12:10:00.000Z");
 
-  it("holds the opening ids and the older pages, and never a live message", async () => {
+  it("holds the read mark and how far the opening history reached, once", async () => {
     const { result } = renderHook(() => useUnreadAtOpen({ chatId: "c", loadReadMark: read }));
     await act(async () => {});
     act(() => result.current.noteOpened([agent("a3", "2026-10-27T12:11:00.000Z")]));
     act(() => result.current.noteOpened([agent("later", "2026-10-27T12:20:00.000Z")]));
-    act(() => result.current.noteOlder([agent("a1", "2026-10-27T12:00:00.000Z")]));
-    expect([...result.current.unread!.memberIds].sort()).toEqual(["a1", "a3"]);
+    expect(result.current.unread).toEqual({
+      watermark: "2026-10-27T12:10:00.000Z",
+      openedThrough: Math.floor(Date.parse("2026-10-27T12:11:00.000Z") / 1000),
+    });
   });
 
-  it("keeps a live reply out of an older page that holds its turn", async () => {
+  it("leaves a trace out of how far the opening history reached", async () => {
     const { result } = renderHook(() => useUnreadAtOpen({ chatId: "c", loadReadMark: read }));
     await act(async () => {});
-    // All read at open. Turn A is on an older page and still running.
-    const opening = [
-      guardian("uB", "2026-10-27T12:05:00.000Z", "turn-b"),
-      agent("aB1", "2026-10-27T12:06:00.000Z", { turnId: "turn-b" }),
-    ];
-    act(() => result.current.noteOpened(opening));
-    const live = agent("aA2", "2026-10-27T12:12:00.000Z", { turnId: "turn-a" });
-    act(() => result.current.noteLive(live.id));
-    const loaded = mergeFetchedChatMessages(mergeChatMessage(opening, live), [
-      guardian("uA", "2026-10-27T12:00:00.000Z", "turn-a"),
-      agent("aA1", "2026-10-27T12:01:00.000Z", { turnId: "turn-a" }),
-      live,
-    ]);
-    act(() => result.current.noteOlder([loaded[0], loaded[1], live]));
-    expect([...result.current.unread!.memberIds].sort()).toEqual(["aA1", "aB1", "uA", "uB"]);
-    expect(summarizeUnread(loaded, result.current.unread!, false)).toBeNull();
+    act(() =>
+      result.current.noteOpened([
+        agent("a3", "2026-10-27T12:11:00.000Z"),
+        message("trace", "trace", "2026-10-27T12:30:00.000Z"),
+      ]),
+    );
+    expect(result.current.unread?.openedThrough).toBe(
+      Math.floor(Date.parse("2026-10-27T12:11:00.000Z") / 1000),
+    );
   });
 
   it("has no unread state for a chat with no read mark or no opening history", async () => {

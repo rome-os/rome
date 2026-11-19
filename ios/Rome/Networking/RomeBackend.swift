@@ -64,13 +64,6 @@ protocol RomeBackend: AnyObject, Sendable {
     /// and the question card by answering the agent.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
-    /// The owner has seen these messages of the chat, and every message said
-    /// before the latest of them (`POST /chat/sessions/:id/messages/read`). It
-    /// never throws: it says whether the instance took the mark. An instance
-    /// before the route (a 404) or a network that fails leaves the messages as
-    /// they were: the next time they are seen they are marked again.
-    @discardableResult
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool
     /// The chat's read mark, `lastSeenActivityAt`: an ISO time, or nil when
     /// the chat has none or it cannot be read.
     func readMark(sessionId: String) async -> String?
@@ -255,12 +248,6 @@ final class LiveBackend: RomeBackend {
 
     func markRead(sessionId: String) async {
         _ = try? await client.post("/chat/sessions/\(escape(sessionId))/read")
-    }
-
-    @discardableResult
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
-        guard !ids.isEmpty else { return true }
-        return (try? await client.post("/chat/sessions/\(escape(sessionId))/messages/read", json: .object(["ids": .array(ids.map { .string($0) })]))) != nil
     }
 
     func readMark(sessionId: String) async -> String? {
@@ -515,8 +502,6 @@ extension RomeBackend {
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}
-    /// Demo data and test doubles keep no read marks of messages.
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool { true }
     /// Demo data and test doubles have no read mark: no unread line.
     func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.

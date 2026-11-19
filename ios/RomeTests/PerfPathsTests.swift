@@ -21,27 +21,16 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     /// The order as the store worked it out before its keys were computed
     /// once: the reference the faster sort must match.
     private func reference(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
-        var turnStart: [String: Date] = [:]
-        var turnArrival: [String: Int] = [:]
-        for message in all {
-            let key = message.turnId ?? message.id
-            turnStart[key] = min(turnStart[key] ?? message.date, message.date)
-            turnArrival[key] = min(turnArrival[key] ?? Int.max, seen[message.id]!)
-        }
-        return all.sorted { a, b in
-            let keyA = a.turnId ?? a.id, keyB = b.turnId ?? b.id
-            let startA = turnStart[keyA]!, startB = turnStart[keyB]!
-            if startA != startB { return startA < startB }
-            if keyA != keyB { return turnArrival[keyA]! < turnArrival[keyB]! }
+        all.sorted { a, b in
             if a.date != b.date { return a.date < b.date }
             return seen[a.id]! < seen[b.id]!
         }
     }
 
-    @Test func theOrderIsTheServersWhateverTheTies() {
+    @Test func theOrderIsWhenTheyWereSaidWhateverTheTies() {
         var generator = SystemRandomNumberGenerator()
         for _ in 0..<50 {
-            // Few distinct seconds and turns, so turns and rows tie often.
+            // Few distinct seconds and turns, so messages tie often.
             let all = (0..<40).map { index in
                 message("m\(index)", turn: Bool.random(using: &generator) ? "t\(Int.random(in: 0..<6, using: &generator))" : nil, at: Double(Int.random(in: 0..<8, using: &generator)))
             }.shuffled(using: &generator)

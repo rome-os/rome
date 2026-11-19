@@ -24,22 +24,32 @@ function message(
 }
 
 describe("chat message ordering", () => {
-  it("keeps late turn inserts grouped with their original turn", () => {
+  it("puts every message where it was said, whichever turn it belongs to", () => {
     const ordered = orderChatMessages([
       message("a-user", "turn-a", "2026-01-01T00:00:00.000Z", "user"),
-      message("a-assistant", "turn-a", "2026-01-01T00:00:01.000Z"),
-      message("b-user", "turn-b", "2026-01-01T00:00:02.000Z", "user"),
+      message("b-user", "turn-b", "2026-01-01T00:00:01.000Z", "user"),
+      message("a-assistant", "turn-a", "2026-01-01T00:00:02.000Z"),
       message("b-assistant", "turn-b", "2026-01-01T00:00:03.000Z"),
       message("a-recap", "turn-a", "2026-01-01T00:00:04.000Z"),
     ]);
 
     expect(ordered.map((item) => item.id)).toEqual([
       "a-user",
-      "a-assistant",
-      "a-recap",
       "b-user",
+      "a-assistant",
       "b-assistant",
+      "a-recap",
     ]);
+  });
+
+  it("keeps the given order for messages said in the same second", () => {
+    const ordered = orderChatMessages([
+      message("second", null, "2026-01-01T00:00:01.000Z"),
+      message("first", null, "2026-01-01T00:00:00.000Z"),
+      message("tie-1", null, "2026-01-01T00:00:01.000Z"),
+    ]);
+
+    expect(ordered.map((item) => item.id)).toEqual(["first", "second", "tie-1"]);
   });
 
   it("merges fetched messages without clobbering a live insert that arrived later", () => {
@@ -102,12 +112,23 @@ describe("refetching the newest page of a paged chat", () => {
     expect(startsNewHistory(older, { messages: newest, hasOlder: false })).toBe(false);
   });
 
-  it("starts over when turns between the loaded history and the page were never fetched", () => {
+  it("starts over when messages between the loaded history and the page were never fetched", () => {
     expect(startsNewHistory(older, { messages: newest, hasOlder: true })).toBe(true);
 
     const merged = mergeLatestMessagePage(older, newest, { restart: true });
 
     expect(merged.map((item) => item.id)).toEqual(["n-user", "n-assistant"]);
+  });
+
+  it("starts over at the oldest message of the page, not at a trace that came with it", () => {
+    const trace = message("n-trace", "turn-n", "2026-01-01T00:30:00.000Z", "trace");
+    const between = message("between", "turn-x", "2026-01-01T00:45:00.000Z");
+
+    const merged = mergeLatestMessagePage([...older, between], [trace, ...newest], {
+      restart: true,
+    });
+
+    expect(merged.map((item) => item.id)).toEqual(["n-trace", "n-user", "n-assistant"]);
   });
 
   it("keeps a local message newer than the page when it starts over", () => {

@@ -20,13 +20,13 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 
 /**
  * The parameter that names the one earlier message a Concierge message replies
- * to: `say`'s, and `ask_question`'s card. Required, and null for a message
- * that answers nothing (docs/domains/chats.md#chat-thread).
+ * to: `say`'s, and `ask_question`'s card. Optional: left out or null, a message
+ * answers nothing (docs/domains/chats.md#chat-thread).
  */
 export const REPLY_TO_PARAMETER = {
   type: ["string", "null"],
   description:
-    "Always set it. The id of the one earlier message this answers: the message_id of the guardian message you are answering, from its <chat_thread> line, or a task's start_message_id for its result. Null for a message that answers nothing, such as one you start yourself. The guardian sees what you answer as a quote, unless your message sits right under it.",
+    "The id of the one earlier message this answers: the message_id of the guardian message you are answering, from its <chat_thread> line, or a task's start_message_id for its result. Leave it out, or null, for a message that answers nothing, such as one you start yourself. The guardian sees what you answer as a quote, unless your message sits right under it.",
 };
 
 const ASK_QUESTION_PARK_DIRECTIVE =

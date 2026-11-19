@@ -111,10 +111,10 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     ]);
   });
 
-  it("returns the newest turns whole and a cursor for the older ones", async () => {
+  it("returns the newest messages with the traces of their turns and a cursor for the older ones", async () => {
     for (let i = 0; i < 5; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
 
-    const page = await getPage("?limit=2");
+    const page = await getPage("?limit=4");
 
     expect(page.messages.map((m) => m.id)).toEqual(["u-3", "t-3", "a-3", "u-4", "t-4", "a-4"]);
     expect(page.nextCursor).toEqual(expect.any(String));
@@ -142,7 +142,7 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     expect(page.layout).toBeNull();
   });
 
-  it("walks back through every turn exactly once and ends with a null cursor", async () => {
+  it("walks back through every message exactly once and ends with a null cursor", async () => {
     for (let i = 0; i < 7; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
     const full = (await (
       await createWebchatRuntime(deps).routes.request(`/chat/sessions/${SESSION_ID}/messages`)
@@ -152,7 +152,7 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     let cursor: string | null = null;
     do {
       const page: WirePage = await getPage(
-        `?limit=3${cursor ? `&before=${encodeURIComponent(cursor)}` : ""}`,
+        `?limit=6${cursor ? `&before=${encodeURIComponent(cursor)}` : ""}`,
       );
       pages.unshift(page.messages);
       cursor = page.nextCursor;
@@ -162,21 +162,32 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     expect(pages.flat().map((m) => m.id)).toEqual(full.map((m) => m.id));
   });
 
-  it("keeps a group intact when its rows span several seconds", async () => {
+  it("gives a reply that lands after the next turn started the place it was said", async () => {
     await seedTurn(0, BASE_SECONDS);
     await seedTurn(1, BASE_SECONDS + 10);
-    // The earlier turn's reply lands after the later turn started.
+    // The earlier turn's reply lands after the later turn's.
     await setCreatedAt("a-0", BASE_SECONDS + 15);
 
-    const page = await getPage("?limit=1");
+    const page = await getPage("?limit=2");
 
-    expect(page.messages.map((m) => m.id)).toEqual(["u-1", "t-1", "a-1"]);
-    const older = await getPage(`?limit=1&before=${encodeURIComponent(page.nextCursor ?? "")}`);
-    expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0", "a-0"]);
+    // Both replies, and the traces of both turns, in the order they were said.
+    expect(page.messages.map((m) => m.id)).toEqual(["t-0", "t-1", "a-1", "a-0"]);
+    const older = await getPage(`?limit=2&before=${encodeURIComponent(page.nextCursor ?? "")}`);
+    expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0", "u-1", "t-1"]);
     expect(older.nextCursor).toBeNull();
   });
 
-  it("counts a row without a turn as its own group", async () => {
+  it("brings a turn's trace with every page that holds one of its messages, and counts it toward no limit", async () => {
+    await seedTurn(0, BASE_SECONDS);
+
+    const newest = await getPage("?limit=1");
+    expect(newest.messages.map((m) => m.id)).toEqual(["t-0", "a-0"]);
+    const older = await getPage(`?limit=1&before=${encodeURIComponent(newest.nextCursor ?? "")}`);
+    expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("counts a row without a turn as a message of its own", async () => {
     await seedTurn(0, BASE_SECONDS);
     await deps.webchatRepo.addMessage("note-1", SESSION_ID, "assistant", "[]");
     await deps.webchatRepo.addMessage("note-2", SESSION_ID, "assistant", "[]");
@@ -184,10 +195,10 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     await setCreatedAt("note-2", BASE_SECONDS + 30);
     await seedTurn(1, BASE_SECONDS + 40);
 
-    const first = await getPage("?limit=2");
+    const first = await getPage("?limit=3");
     expect(first.messages.map((m) => m.id)).toEqual(["note-2", "u-1", "t-1", "a-1"]);
 
-    const second = await getPage(`?limit=2&before=${encodeURIComponent(first.nextCursor ?? "")}`);
+    const second = await getPage(`?limit=3&before=${encodeURIComponent(first.nextCursor ?? "")}`);
     expect(second.messages.map((m) => m.id)).toEqual(["u-0", "t-0", "a-0", "note-1"]);
     expect(second.nextCursor).toBeNull();
   });
@@ -225,7 +236,7 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     for (let i = 0; i < 6; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
     const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
 
-    await getPage("?limit=2");
+    await getPage("?limit=4");
 
     expect(traceReads).toHaveBeenCalledTimes(1);
     expect(traceReads.mock.calls[0]?.[1]?.messageIds).toEqual(["t-4", "t-5"]);

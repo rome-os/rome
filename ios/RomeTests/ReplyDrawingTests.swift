@@ -258,6 +258,41 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.jumps == 1)
     }
 
+    /// The guardian wrote twice before either answer came. The server pages the
+    /// chat by message, in the order they were said, and the turns' traces ride
+    /// along: the rows keep that order, and an answer that is not under its
+    /// question carries a quote of it.
+    @Test func interleavedTurnsStayInTheOrderTheyWereSaid() async {
+        func inTurn(_ message: ChatMessage, _ turn: String) -> ChatMessage {
+            var message = message
+            message.turnId = turn
+            return message
+        }
+        func answer(_ id: String, to original: String, at seconds: TimeInterval, turn: String) -> ChatMessage {
+            inTurn(message(id, at: seconds, parts: [
+                ["type": "reply_to", "messageId": original, "author": "guardian", "text": original],
+                ["type": "text", "content": "said \(id)"],
+            ]), turn)
+        }
+        let ownerA = inTurn(message("owner-a", role: "user", "First question", at: 0), "turn-a")
+        let ownerB = inTurn(message("owner-b", role: "user", "Second question", at: 1), "turn-b")
+        let traceA = inTurn(message("trace-a", role: "trace", "[]", at: 2), "turn-a")
+        let answerA = answer("answer-a", to: "owner-a", at: 3, turn: "turn-a")
+        let answerB = answer("answer-b", to: "owner-b", at: 4, turn: "turn-b")
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [traceA, answerA, answerB], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [ownerA, ownerB, traceA], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.map(\.id) == ["trace-a", "answer-a", "answer-b"])
+
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "trace-a", "answer-a", "answer-b"])
+        #expect(store.rowInfo["answer-a:1"]?.quote?.messageId == "owner-a")
+        #expect(store.rowInfo["answer-b:1"]?.quote?.messageId == "owner-b")
+    }
+
     /// A draft keeps its reply, and a relaunch brings it back.
     @Test func aDraftsReplyComesBack() async throws {
         let target = ReplyTarget(messageId: "a")
@@ -268,20 +303,6 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.quote == target)
         store.cancelQuote()
         #expect(store.quote == nil)
-    }
-
-    /// The guardian has seen the newest message once the chat is on screen:
-    /// the instance marks it read, and every message before it.
-    @Test func theNewestMessageIsMarkedReadWhenSeen() async {
-        let backend = FakeBackend()
-        let store = await chat([message("q", role: "user", at: 0), message("a", "sunny", at: 10), message("b", at: 20)], backend: backend)
-        store.onScreen = true
-        for _ in 0..<100 where backend.markedMessages.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.markedMessages == [["b"]])
-        // Seeing the same newest message again marks nothing more.
-        store.markRead()
-        try? await Task.sleep(for: .milliseconds(100))
-        #expect(backend.markedMessages == [["b"]])
     }
 }
 

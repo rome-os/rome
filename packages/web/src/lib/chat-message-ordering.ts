@@ -5,29 +5,15 @@ function messageTimestamp(msg: ChatMessage): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * The messages in the order they were said: by time, and where two were said in
+ * the same second, in the order given. Whichever turn a message belongs to, it
+ * stands where it was said.
+ */
 export function orderChatMessages(messages: ChatMessage[]): ChatMessage[] {
-  const groupStartedAt = new Map<string, number>();
-  for (let i = 0; i < messages.length; i += 1) {
-    const msg = messages[i];
-    const groupKey = msg.turnId ?? msg.id;
-    const startedAt = messageTimestamp(msg) || i;
-    const current = groupStartedAt.get(groupKey);
-    if (current === undefined || startedAt < current) {
-      groupStartedAt.set(groupKey, startedAt);
-    }
-  }
-
   return messages
     .map((msg, index) => ({ msg, index }))
-    .sort((a, b) => {
-      const aGroup = groupStartedAt.get(a.msg.turnId ?? a.msg.id) ?? messageTimestamp(a.msg);
-      const bGroup = groupStartedAt.get(b.msg.turnId ?? b.msg.id) ?? messageTimestamp(b.msg);
-      if (aGroup !== bGroup) return aGroup - bGroup;
-      const aTime = messageTimestamp(a.msg);
-      const bTime = messageTimestamp(b.msg);
-      if (aTime !== bTime) return aTime - bTime;
-      return a.index - b.index;
-    })
+    .sort((a, b) => messageTimestamp(a.msg) - messageTimestamp(b.msg) || a.index - b.index)
     .map(({ msg }) => msg);
 }
 
@@ -52,8 +38,8 @@ export function mergeFetchedChatMessages(
 /**
  * Whether a refetched newest page starts the loaded history over. That is the
  * case when the page reaches back to none of the loaded messages and older
- * turns remain: the turns in between were never fetched, so keeping the loaded
- * history would leave a hole mid-transcript.
+ * messages remain: the ones in between were never fetched, so keeping the
+ * loaded history would leave a hole mid-transcript.
  */
 export function startsNewHistory(
   currentMessages: ChatMessage[],
@@ -77,7 +63,11 @@ export function mergeLatestMessagePage(
   if (!options.restart || fetchedMessages.length === 0) {
     return mergeFetchedChatMessages(currentMessages, fetchedMessages, options);
   }
-  const oldestFetched = Math.min(...fetchedMessages.map(messageTimestamp));
+  // A page carries the traces of its turns, which may be older than every message on it.
+  const said = fetchedMessages.filter((message) => message.role !== "trace");
+  const oldestFetched = Math.min(
+    ...(said.length > 0 ? said : fetchedMessages).map(messageTimestamp),
+  );
   const history = currentMessages
     .filter((message) => messageTimestamp(message) < oldestFetched)
     .map((message) => message.id);

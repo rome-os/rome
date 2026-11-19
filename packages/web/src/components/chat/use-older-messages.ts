@@ -12,15 +12,15 @@ import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
 import type { ChatMessage } from "@/lib/chat-types";
 
 /**
- * Turns per page. A page is what the transcript renders at once, so it is
- * sized to fill a few screens and no more: a regular chat's turns carry long
- * answers and cost the most to render, a Concierge turn is a few short
- * bubbles.
+ * Messages per page. A page is what the transcript renders at once, so it is
+ * sized to fill a few screens and no more: a regular chat's messages carry
+ * long answers and cost the most to render, a Concierge message is a short
+ * bubble.
  */
-export const CHAT_PAGE_TURNS = 10;
-export const CONCIERGE_PAGE_TURNS = 30;
+export const CHAT_PAGE_SIZE = 20;
+export const CONCIERGE_PAGE_SIZE = 60;
 
-/** How far above the viewport the sentinel counts as reached, so older turns arrive before the top does. */
+/** How far above the viewport the sentinel counts as reached, so older messages arrive before the top does. */
 const LOAD_AHEAD_PX = 800;
 
 /** Wait after a failed page before the sentinel tries again. */
@@ -43,26 +43,24 @@ export function scrollTopAfterPrepend(
 }
 
 interface UseOlderMessagesOptions {
-  /** Turns per page; see {@link CHAT_PAGE_TURNS}. */
-  pageTurns: number;
+  /** Messages per page; see {@link CHAT_PAGE_SIZE}. */
+  pageSize: number;
   /** The element that scrolls the transcript. */
   scroller: HTMLElement | null;
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
-  /** Called with the messages of each older page that loads, once it is merged in. */
-  onOlderPage?: (sessionId: string, messages: ChatMessage[]) => void;
 }
 
 export interface OlderMessages {
   /** Remembers where a session's older history starts, from a newest-page response. */
   setCursor: (sessionId: string, cursor: string | null) => void;
-  /** Whether the session has older turns that are not loaded yet. */
+  /** Whether the session has older messages that are not loaded yet. */
   hasOlder: (sessionId: string) => boolean;
   /** Attach to an element placed at the top of the transcript. */
   sentinelRef: (node: HTMLElement | null) => void;
   /**
-   * Loads the page of turns before the oldest loaded one, keeping the viewport
+   * Loads the page of messages before the oldest loaded one, keeping the viewport
    * on what it shows. With `through`, the page reaches that message however
    * far back it is, in one read.
    */
@@ -75,7 +73,7 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages, onOlderPage }: UseOlderMessagesOptions,
+  { pageSize, scroller, pinned, setMessages }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
@@ -117,7 +115,7 @@ export function useOlderMessages(
       setLoading(true);
       try {
         const page = await listSessionMessagePage(id, {
-          limit: pageTurns,
+          limit: pageSize,
           before: cursor,
           ...(options.through ? { through: options.through } : {}),
         });
@@ -134,7 +132,6 @@ export function useOlderMessages(
           return next;
         });
         setCursor(id, page.nextCursor);
-        onOlderPage?.(id, page.messages);
       } catch {
         setRetryBlocked(true);
       } finally {
@@ -142,7 +139,7 @@ export function useOlderMessages(
         setLoading(false);
       }
     },
-    [pageTurns, setCursor, setMessages, onOlderPage],
+    [pageSize, setCursor, setMessages],
   );
 
   const loadOlder = useCallback(

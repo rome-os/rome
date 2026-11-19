@@ -178,9 +178,6 @@ export interface ChatMessage {
   /** The emoji the Concierge reacted to a guardian message of its chat with.
    *  Absent when it has none, and from servers before it. */
   reaction?: string | null;
-  /** Whether the owner has seen the message (docs/domains/chats.md#chat-thread).
-   *  Absent from servers before it, and then every message reads as seen. */
-  read?: boolean;
   /** Rome's status on a guardian message of a Concierge chat, shown over its
    *  reaction. Absent when it has none, and from servers before it. */
   status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;

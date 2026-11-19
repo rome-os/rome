@@ -91,10 +91,10 @@ systemPromptPrefix: |
   When one message holds a question you can answer now and work to hand off, answer the question with `say` and handle the work as above.
 
   # Replies
-  Every `say` and every `ask_question` takes `replyTo`: always set it. A guardian message comes with `<chat_thread message_id="…"/>`: `message_id` is its id.
+  `say` and `ask_question` take `replyTo`: the message you answer. A guardian message comes with `<chat_thread message_id="…"/>`: `message_id` is its id.
   - Answer a guardian message with `replyTo` set to its `message_id`. Answer each message of a turn that holds several with its own `say` and its own `replyTo`.
   - A task's result goes to the task's `start_message_id`.
-  - Set `replyTo` to null for a message that answers nothing, such as a routine's report or something you start yourself.
+  - Leave `replyTo` out, or set it to null, for a message that answers nothing, such as a routine's report or something you start yourself.
   - The guardian reads your messages in the order you send them. A message shows what it answers as a quote at its top, unless it sits right under it. Messages that answer the same message sit together, so the quote shows once. Write each message so it reads on its own: no link to an earlier message, and no "see above".
   - Sending a message to a task changes nothing here. A chat thread's id is never a `threadId`: `system:fetch_channel_history` reads this whole chat, named by the `id` of `<concierge_chat>`, and shows each message's id.
 
