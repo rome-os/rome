@@ -4399,6 +4399,22 @@ describe("AgentRunner", () => {
           expect(provider.calls.at(-1)?.prompt).toContain("Guardian: Friday at 7 then");
         });
 
+        it("renews with no handoff and no replay where the session's place turns handoffs off", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][1] = [{ type: "error", error: "thread gone" }];
+          const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
+          const runner = renewingRunner(provider, undefined, {
+            handoffs,
+            placeSetup: () => ({ handoffOnRenewal: false }),
+          });
+          await coldTurn(runner);
+          await resetDue();
+          await coldTurn(runner);
+
+          expect(asked.context).toBe(0);
+          expect(provider.calls.at(-1)?.prompt).not.toContain("Guardian: Friday at 7 then");
+        });
+
         /** Lets a turn end's background renewal run, as a guardian's pause would. */
         const settleRenewal = () => new Promise((resolve) => setTimeout(resolve, 100));
 

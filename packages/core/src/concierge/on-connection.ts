@@ -44,10 +44,13 @@ export const CONCIERGE_CHAT_ACTIONS = [
 /**
  * The Concierge's setup on a connection: its text is the reply, no action
  * needs a Concierge chat, and it schedules no later wake-up, since a reply a
- * wake-up sends skips the checks the message that asked for it passed.
+ * wake-up sends skips the checks the message that asked for it passed. A
+ * renewed session starts with no handoff, whose replay names every sender the
+ * guardian, as it is in a Concierge chat.
  */
 const ON_CONNECTION: PlaceSetup = {
   finalText: "deliver",
+  handoffOnRenewal: false,
   withoutActions: CONCIERGE_CHAT_ACTIONS,
   withoutDefer: true,
 };

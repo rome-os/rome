@@ -65,6 +65,8 @@ export function resolveAgentPolicy(agent: {
 export interface PlaceSetup {
   /** The agent's `finalText` in this place, in place of its own. */
   finalText?: AgentPolicy["finalText"];
+  /** The agent's `handoffOnRenewal` in this place, in place of its own. */
+  handoffOnRenewal?: boolean;
   /** Actions of the agent's own list it may not call in this place. */
   withoutActions?: readonly string[];
   /** True when a session here may not wake itself later with `defer`. */
@@ -73,5 +75,9 @@ export interface PlaceSetup {
 
 /** The agent's policy in a place: what the place sets wins over the agent's own. */
 export function policyInPlace(policy: AgentPolicy, place: PlaceSetup | null): AgentPolicy {
-  return place?.finalText ? { ...policy, finalText: place.finalText } : policy;
+  return {
+    ...policy,
+    ...(place?.finalText !== undefined ? { finalText: place.finalText } : {}),
+    ...(place?.handoffOnRenewal !== undefined ? { handoffOnRenewal: place.handoffOnRenewal } : {}),
+  };
 }

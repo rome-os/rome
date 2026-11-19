@@ -1367,6 +1367,11 @@ async function openSession(
   const { log } = deps;
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
+  // The agent's policy where this session opens: its place may override it.
+  const placedPolicy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    deps.placeSetup?.(agent.name, init.threadContext) ?? null,
+  );
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
   const sessionToolsFor = sessionToolsOf(
     deps,
@@ -1475,10 +1480,7 @@ async function openSession(
       });
       reason = undefined;
     }
-    const handsOff =
-      !!deps.handoffs &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal;
+    const handsOff = !!deps.handoffs && !config.codeBacked && placedPolicy.handoffOnRenewal;
     // A setup change hands off lightly, unless what the successor would read
     // is too large for its first turn.
     const light =
@@ -2082,10 +2084,7 @@ async function openSession(
     // open tasks and its messages, whether or not a handoff was written: all
     // its predecessor held after a setup change, else the recent ones.
     carriesMessages:
-      continuesChat &&
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      continuesChat && !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? session.handoff === LIGHT_HANDOFF
           ? "held"
           : "recent"
@@ -2105,9 +2104,7 @@ async function openSession(
     // Past this size a turn's end renews the session with a handoff
     // (docs/concepts/sessions.md#handoff).
     contextLimitTokens:
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? deps.handoffs?.contextLimitTokens
         : undefined,
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
