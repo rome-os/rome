@@ -36,6 +36,7 @@ export async function oneReply(ctx, ws, rule) {
   return {
     ok: t.answeredOnce === 1 && stray.length === 0 && t.postsElsewhere.length === 0,
     eventId: sent.eventId,
+    channel: sent.channel,
     ...t,
   };
 }

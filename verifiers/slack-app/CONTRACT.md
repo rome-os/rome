@@ -45,12 +45,12 @@ The routes the dashboard uses today, relative to `api`. Every call sends the ins
 | `GET /setups/{cid}` | Polls the setup's state: `awaiting-input` (a form, which R1 counts and does not fill), `awaiting-redirect` (a URL the verifier walks as a browser), `presenting`, `done`, `failed`. |
 | `POST /setups/return {state, handoff?, error?, message?}` | Hands back the query of the URL the sign-in returned the browser to, the way the dashboard's callback page does. The verifier stops the browser at the first URL on the instance's origin that carries `state`. |
 | `GET /connected-accounts` | Each connected account with its `agent` and `connection`. R1 wants `agent` to be `core:concierge`. |
-| `GET /people`, then `GET /people/{id}/messages?channel=slack_app&channelUserId={team}/{user}` | The messages Rome recorded from one Slack member, as `{entries: [{body}], nextCursor}`. The verifier tries each person until one holds that account. |
+| `GET /sessions/channel:slack_app:{direct message id}/messages` | The bot chat's session for one Slack direct message, as an array oldest first of `{id, role, content, ...}`. The verifier keeps entries with role `notification` (inbound) and searches their `content`. The People timeline is not used: it leaves agent chats out. |
 | `GET /accounts` | Every account the instance has observed, as `{accounts: [{channel, channelUserId}], nextCursor}`. The verifier reads every page and keeps channel `slack` (or `slack_app`), since the filter matches the platform name exactly. A dropped event adds none. |
 
 R3 expects a refused second connect to end the setup `failed` with a reason that says the workspace is already connected, in any words. The product refuses on redeem, after the browser returns with a handoff.
 
-R7 reads what Rome recorded through the People routes above: a forged event must leave nothing in the guardian's timeline, and the instance bound to workspace B must hold no account of workspace A and nothing from A's guardian. If a read fails, R7 reports "not checked" unless it already saw a failure.
+R7 reads what Rome recorded through the session route above: a forged event must leave nothing in the direct message's session, which must show the good message, and the instance bound to workspace B must hold no account of workspace A and no session for A's direct message (a 404 there means none). If a read fails, including a 403 or 404 on the first instance, R7 reports "not checked" unless it already saw a failure.
 
 ## Stop and start
 

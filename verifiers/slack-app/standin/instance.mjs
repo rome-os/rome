@@ -1,5 +1,6 @@
 // Stand-in for one Rome instance: the dashboard routes the verifier calls
-// (Connect through setups, connected accounts, recorded messages) and a loop
+// (Connect through setups, connected accounts, a session's recorded messages,
+// observed accounts) and a loop
 // that drains its relay mailbox and has "the Concierge" repeat each seeded
 // code. Runs as its own process so it can be stopped and started; its state
 // lives in STATE_FILE across restarts. Breaks: README.md, "Stand-in".
@@ -92,25 +93,22 @@ const server = await serve(async (req, res, url) => {
     return send(res, 200, { matched: true, state: setup.state });
   }
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
-  // The People routes the verifier reads what Rome recorded through: one
-  // person per Slack member, each with one account.
-  if (p === "/api/people") {
-    const ids = [...new Set(db.messages.map((m) => `${m.team}/${m.user}`))];
-    return send(res, 200, { people: ids.map((id) => ({ id: `p_${id.replace("/", "_")}` })) });
-  }
-  const timeline = p.match(/^\/api\/people\/([\w-]+)\/messages$/);
-  if (timeline) {
-    const who = url.searchParams.get("channelUserId");
-    if (
-      url.searchParams.get("channel") !== "slack_app" ||
-      timeline[1] !== `p_${who.replace("/", "_")}`
-    )
-      return send(res, 400, { error: "That account is not linked to this person" });
-    const entries = db.messages
-      .filter((m) => `${m.team}/${m.user}` === who)
-      .map((m) => ({ body: m.text, direction: "inbound" }))
-      .reverse();
-    return send(res, 200, { entries, nextCursor: null });
+  // Like Rome, a Slack direct message with the bot is one session, and its
+  // inbound messages are recorded with role "notification".
+  const session = p.match(/^\/api\/sessions\/([^/]+)\/messages$/);
+  if (session && req.method === "GET") {
+    const dm = decodeURIComponent(session[1]).match(/^channel:slack_app:(\w+)$/)?.[1];
+    const held = db.messages.filter((m) => m.channel === dm);
+    if (!held.length) return send(res, 404, { error: "Unknown session." });
+    return send(
+      res,
+      200,
+      held.map((m) => ({
+        id: m.eventId,
+        role: "notification",
+        content: JSON.stringify([{ type: "text", content: m.text }]),
+      })),
+    );
   }
   // Like Rome's directory, accounts are filed under the platform, and the
   // channel filter matches it exactly.

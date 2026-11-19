@@ -93,7 +93,8 @@ export async function r7(ctx) {
   // Only the good message's one reply may follow the forged events. A reply
   // that repeats no code still answers one of them.
   const others = posts.filter((p) => !p.text?.includes(code("R7C", 0)));
-  const recorded = await readable(() => ctx.a.recordedFrom(ws.id, ws.guardian));
+  // The bot chat's own session: the People timeline leaves agent chats out.
+  const recorded = control.channel ? await readable(() => ctx.a.recordedIn(control.channel)) : null;
   // The good message must show in the same read, or an empty read proves
   // nothing about the forged ones.
   const sawGood = recorded?.some((b) => b.includes(code("R7C", 0)));
@@ -138,7 +139,10 @@ export async function r7(ctx) {
     });
     const accountsB = await readable(() => ctx.b.slackAccounts());
     const fromAOnB = accountsB?.filter((id) => id.startsWith(`${ws.id}/`));
-    const recordedB = await readable(() => ctx.b.recordedFrom(ws.id, ws.guardian));
+    // B has no session for A's direct message unless an event of A reached it.
+    const recordedB = await readable(() =>
+      ctx.b.recordedIn(ctx.fromA.channel, { noneIfMissing: true }),
+    );
     const reachedB =
       recordedB && ctx.fromA.codes.filter((k) => recordedB.some((b) => b.includes(k)));
     evidence.misrouted = {

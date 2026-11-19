@@ -145,32 +145,20 @@ export function instance(inst, slackOrigin) {
     },
 
     /**
-     * The bodies of the messages Rome recorded from one Slack member, read
-     * from the timeline of the person linked to them. Empty when no person
-     * holds that account, since Rome then recorded nothing from it.
+     * The messages Rome recorded as coming in through the Slack direct message
+     * `dm` (its D... id): the content of each inbound entry in the bot chat's
+     * session, oldest first. A 404 throws unless `noneIfMissing`, where it
+     * means this instance never recorded that direct message.
      */
-    async recordedFrom(team, user) {
-      const people = await call("/people");
-      if (!people.ok) throw new Error(`people on ${inst.name}: ${people.status}`);
-      const channelUserId = `${team}/${user}`;
-      for (const person of people.data.people ?? []) {
-        const bodies = [];
-        let cursor = "";
-        for (let page = 0; page < 50; page++) {
-          const q = new URLSearchParams({ channel: SLACK_KIND, channelUserId, limit: "300" });
-          if (cursor) q.set("cursor", cursor);
-          const res = await call(`/people/${encodeURIComponent(person.id)}/messages?${q}`);
-          // 400 is Rome saying this person holds no such account. Anything
-          // else is a failed read, which must not pass for "nothing recorded".
-          if (res.status === 400) break;
-          if (!res.ok) throw new Error(`timeline on ${inst.name}: ${res.status}`);
-          bodies.push(...res.data.entries.map((m) => m.body ?? ""));
-          cursor = res.data.nextCursor;
-          if (!cursor) return bodies;
-        }
-        if (bodies.length) return bodies;
-      }
-      return [];
+    async recordedIn(dm, { noneIfMissing = false } = {}) {
+      const session = encodeURIComponent(`channel:${SLACK_KIND}:${dm}`);
+      const res = await call(`/sessions/${session}/messages`);
+      if (res.status === 404 && noneIfMissing) return [];
+      if (!res.ok) throw new Error(`session messages on ${inst.name}: ${res.status}`);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.messages ?? []);
+      return list
+        .filter((m) => m.role === "notification")
+        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
     },
 
     /**
