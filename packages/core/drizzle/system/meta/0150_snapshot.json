@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "748db320-0a44-49a1-b86d-6101a4dcfce4",
-  "prevId": "29620096-d0ee-44bd-88c5-a780781830cf",
+  "id": "cb409e4b-f155-464a-be45-95d17f28b845",
+  "prevId": "2f73a77f-37a7-4dcb-b5de-eeb1f92fae65",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -1997,115 +1997,6 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "container_node_installations": {
-      "name": "container_node_installations",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "guardian_id": {
-          "name": "guardian_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "grant_hash": {
-          "name": "grant_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "deployment": {
-          "name": "deployment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verifier_hash": {
-          "name": "verifier_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "redeemed_at": {
-          "name": "redeemed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "container_node_installations_device_id_unique": {
-          "name": "container_node_installations_device_id_unique",
-          "columns": [
-            "device_id"
-          ],
-          "isUnique": true
-        },
-        "container_node_installations_token_hash_unique": {
-          "name": "container_node_installations_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "container_node_installations_guardian_id_guardian_auth_id_fk": {
-          "name": "container_node_installations_guardian_id_guardian_auth_id_fk",
-          "tableFrom": "container_node_installations",
-          "tableTo": "guardian_auth",
-          "columnsFrom": [
-            "guardian_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
