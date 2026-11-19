@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2f73a77f-37a7-4dcb-b5de-eeb1f92fae65",
+  "id": "764a8425-0d2a-43ad-addf-6f9029382830",
   "prevId": "57db660b-8330-4a96-908b-6c182a48a6fd",
   "tables": {
     "account_profiles": {
@@ -1375,8 +1375,8 @@
     "concierge_message_tasks": {
       "name": "concierge_message_tasks",
       "columns": {
-        "task_id": {
-          "name": "task_id",
+        "task_chat_id": {
+          "name": "task_chat_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1423,28 +1423,28 @@
         }
       },
       "foreignKeys": {
-        "concierge_message_tasks_task_id_concierge_tasks_id_fk": {
-          "name": "concierge_message_tasks_task_id_concierge_tasks_id_fk",
+        "concierge_message_tasks_task_chat_id_task_chats_session_id_fk": {
+          "name": "concierge_message_tasks_task_chat_id_task_chats_session_id_fk",
           "tableFrom": "concierge_message_tasks",
-          "tableTo": "concierge_tasks",
+          "tableTo": "task_chats",
           "columnsFrom": [
-            "task_id"
+            "task_chat_id"
           ],
           "columnsTo": [
-            "id"
+            "session_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "concierge_message_tasks_task_id_chat_id_message_key_pk": {
+        "concierge_message_tasks_task_chat_id_chat_id_message_key_pk": {
           "columns": [
-            "task_id",
+            "task_chat_id",
             "chat_id",
             "message_key"
           ],
-          "name": "concierge_message_tasks_task_id_chat_id_message_key_pk"
+          "name": "concierge_message_tasks_task_chat_id_chat_id_message_key_pk"
         }
       },
       "uniqueConstraints": {},
@@ -1540,266 +1540,6 @@
           "name": "concierge_message_turns_chat_id_message_key_pk"
         }
       },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "concierge_tasks": {
-      "name": "concierge_tasks",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "waiting_on": {
-          "name": "waiting_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "due_at": {
-          "name": "due_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rank": {
-          "name": "rank",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "owner_key": {
-          "name": "owner_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'guardian'"
-        },
-        "source_message_id": {
-          "name": "source_message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "legacy_source_message_id": {
-          "name": "legacy_source_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "archived_with_chat": {
-          "name": "archived_with_chat",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "linked_at": {
-          "name": "linked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stopped_at": {
-          "name": "stopped_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stop_reason": {
-          "name": "stop_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_outcome": {
-          "name": "last_outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outcome_unsaid": {
-          "name": "outcome_unsaid",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "expired_wait_at": {
-          "name": "expired_wait_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "no_response_unlisted": {
-          "name": "no_response_unlisted",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "unstarted_listed_at": {
-          "name": "unstarted_listed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "report_given_up": {
-          "name": "report_given_up",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_concierge_tasks_session": {
-          "name": "idx_concierge_tasks_session",
-          "columns": [
-            "session_id"
-          ],
-          "isUnique": true,
-          "where": "\"concierge_tasks\".\"session_id\" is not null"
-        }
-      },
-      "foreignKeys": {
-        "concierge_tasks_session_id_rome_sessions_id_fk": {
-          "name": "concierge_tasks_session_id_rome_sessions_id_fk",
-          "tableFrom": "concierge_tasks",
-          "tableTo": "rome_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "concierge_tasks_chat_id_rome_sessions_id_fk": {
-          "name": "concierge_tasks_chat_id_rome_sessions_id_fk",
-          "tableFrom": "concierge_tasks",
-          "tableTo": "rome_sessions",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "concierge_tasks_source_message_id_chat_messages_id_fk": {
-          "name": "concierge_tasks_source_message_id_chat_messages_id_fk",
-          "tableFrom": "concierge_tasks",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "source_message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -4895,116 +4635,140 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "slack_app_messages": {
-      "name": "slack_app_messages",
+    "task_chats": {
+      "name": "task_chats",
       "columns": {
-        "team_id": {
-          "name": "team_id",
+        "session_id": {
+          "name": "session_id",
           "type": "text",
-          "primaryKey": false,
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_ts": {
-          "name": "thread_ts",
+        "concierge_chat_id": {
+          "name": "concierge_chat_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "said_at": {
-          "name": "said_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "handed_over_at": {
-          "name": "handed_over_at",
+        "source_message_id": {
+          "name": "source_message_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_slack_app_messages_chat_said": {
-          "name": "idx_slack_app_messages_chat_said",
-          "columns": [
-            "team_id",
-            "channel_id",
-            "said_at"
-          ],
-          "isUnique": false
         },
-        "idx_slack_app_messages_unhanded": {
-          "name": "idx_slack_app_messages_unhanded",
-          "columns": [
-            "team_id",
-            "handed_over_at"
-          ],
-          "isUnique": false
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_outcome": {
+          "name": "last_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outcome_unsaid": {
+          "name": "outcome_unsaid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "expired_wait_at": {
+          "name": "expired_wait_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_response_unlisted": {
+          "name": "no_response_unlisted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "report_given_up": {
+          "name": "report_given_up",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "slack_app_messages_team_id_event_id_pk": {
-          "columns": [
-            "team_id",
-            "event_id"
+      "indexes": {},
+      "foreignKeys": {
+        "task_chats_session_id_rome_sessions_id_fk": {
+          "name": "task_chats_session_id_rome_sessions_id_fk",
+          "tableFrom": "task_chats",
+          "tableTo": "rome_sessions",
+          "columnsFrom": [
+            "session_id"
           ],
-          "name": "slack_app_messages_team_id_event_id_pk"
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_chats_concierge_chat_id_rome_sessions_id_fk": {
+          "name": "task_chats_concierge_chat_id_rome_sessions_id_fk",
+          "tableFrom": "task_chats",
+          "tableTo": "rome_sessions",
+          "columnsFrom": [
+            "concierge_chat_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "task_chats_source_message_id_chat_messages_id_fk": {
+          "name": "task_chats_source_message_id_chat_messages_id_fk",
+          "tableFrom": "task_chats",
+          "tableTo": "chat_messages",
+          "columnsFrom": [
+            "source_message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

@@ -155,7 +155,7 @@ describe("TaskSchedules", () => {
     });
     // Only the task: its chats are read from its row.
     expect(routine?.args).toEqual({
-      taskId: "task-1",
+      chatId: "task-1",
       report: "when_it_matters",
       brief: "Sum up my week",
     });
@@ -355,7 +355,7 @@ describe("registerTaskRunAction", () => {
       name: CONCIERGE_TASK_RUN_ACTION,
       visibility: "explicit",
     });
-    expect(await action!.execute({ taskId: "task-1" }, {} as never)).toEqual({
+    expect(await action!.execute({ chatId: "task-1" }, {} as never)).toEqual({
       status: "ok",
       data: { run: "sent" },
     });
@@ -394,7 +394,7 @@ describe("a task's scheduled run on the action engine", () => {
       isFirstPartyAction: () => true,
     });
 
-    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { taskId: "task-1" })).resolves.toEqual({
+    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { chatId: "task-1" })).resolves.toEqual({
       status: "ok",
       data: { run: "sent" },
     });
