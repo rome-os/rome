@@ -390,7 +390,12 @@ export class SlackAppAdapter {
     // since the app's own posts are told apart by their user.
     if (!isSaid(event.subtype)) return { status: 200 };
     const author = event.user ?? (mention ? authorOf(event) : undefined);
-    if (!author || typeof event.text !== "string") return { status: 200 };
+    if (!author || typeof event.text !== "string") {
+      // Slack's history still shows a bot's post Rome does not hear, so the
+      // drain's timeline breaks there rather than linking across it.
+      if (direct) this.heads.delete(event.channel);
+      return { status: 200 };
+    }
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
 

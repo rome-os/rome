@@ -965,6 +965,25 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
+  it("links no message across a bot's post with no user, which Slack's history still shows", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = [1, 2, 3].map((i) => slack.say(i));
+    Object.assign(said[1], { subtype: "bot_message", bot_id: "B_OTHER", user: undefined });
+    const bot = dmEvent(2);
+    const { user: _user, ...botEvent } = bot.event as Record<string, unknown>;
+    await mailbox.deposit(
+      frame(dmEvent(1)),
+      frame({ ...bot, event: { ...botEvent, subtype: "bot_message", bot_id: "B_OTHER" } }),
+      frame(dmEvent(3)),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
   it("links no message across one from another workspace, which Slack's history still shows", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
