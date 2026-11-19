@@ -22,8 +22,8 @@ export interface Routine {
   key?: string;
   /** The app that owns and manages this routine (its appId). Set when an app
    * creates a routine it maintains (e.g. dream). A managed routine can't be
-   * deleted by a user — only by the managing app itself. Unset for routines a
-   * guardian or agent created directly. */
+   * deleted by a user — only by the managing app itself. Uninstalling that app
+   * deletes it. Unset for routines a guardian or agent created directly. */
   managedBy?: string;
   enabled: boolean;
 

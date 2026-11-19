@@ -211,6 +211,38 @@ export class RoutinesRepository {
     return rows.map(toRoutine);
   }
 
+  /** The apps that manage at least one routine. */
+  async managingAppIds(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ managedBy: routines.managedBy })
+      .from(routines)
+      .where(isNotNull(routines.managedBy));
+    return rows.flatMap((row) => (row.managedBy ? [row.managedBy] : []));
+  }
+
+  /**
+   * Deletes the routines these apps manage, with their run history. Nobody can
+   * maintain a routine once its app is gone. A routine with an active run is
+   * kept, and a later call deletes it once the run ends. Returns the ids of the
+   * deleted routines.
+   */
+  async deleteManagedRoutines(
+    appIds: readonly string[],
+  ): Promise<{ deleted: string[]; kept: number }> {
+    const result = { deleted: [] as string[], kept: 0 };
+    if (appIds.length === 0) return result;
+    const rows = await this.db
+      .select({ id: routines.id, managedBy: routines.managedBy })
+      .from(routines)
+      .where(inArray(routines.managedBy, [...appIds]));
+    for (const row of rows) {
+      const outcome = await this.deleteIfNoActiveRuns(row.id, row.managedBy ?? undefined);
+      if (outcome.status === "deleted") result.deleted.push(row.id);
+      else if (outcome.status === "active-runs") result.kept += 1;
+    }
+    return result;
+  }
+
   /** Delete a routine only if it has no in-flight runs. The active-run count
    * and the delete run in one transaction so a run can't start (or finish)
    * between check and delete — without it, a concurrent fire could be counted

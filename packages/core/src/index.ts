@@ -275,7 +275,7 @@ import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./app-host/routine-calls.js";
-import { appRoutinePauser } from "./routines/app-routine-pauser.js";
+import { appRoutinePauser, deleteRoutinesOfRemovedApps } from "./routines/app-routine-pauser.js";
 import { instanceWorkerCalls } from "./app-host/instance-calls.js";
 import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
@@ -799,6 +799,10 @@ async function main() {
         },
       },
     }),
+    deleteRoutines: async (appId) => {
+      const { deleted } = await routinesRepo.deleteManagedRoutines([appId]);
+      for (const id of deleted) await deactivateRoutine?.(id);
+    },
   });
   const appStore = createAppStoreService({ appCatalog });
 
@@ -912,6 +916,21 @@ async function main() {
     appCatalog,
     projectRoot: getProjectRoot(),
   });
+  // Uninstall deletes an app's managed routines. Apps removed before that rule
+  // existed, or routines kept for an active run, are deleted here.
+  try {
+    const removed = await deleteRoutinesOfRemovedApps({
+      repository: routinesRepo,
+      readLockfileEntry: (appId) => appManager.readLockfileEntry(appId),
+    });
+    if (removed.deleted + removed.kept > 0) {
+      appsLog.info("deleted routines of removed apps", removed);
+    }
+  } catch (err) {
+    appsLog.warn("could not delete routines of removed apps", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   const coreRequiredAppIds = await deriveCoreRequiredApps({ projectRoot: getProjectRoot() });
   assertCoreRequiredAppsPacked(coreRequiredAppIds, firstPartyBoot.firstPartyAppIds);
   appsLog.info("first-party apps converged at boot", {
