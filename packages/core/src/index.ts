@@ -258,7 +258,11 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
-import { chatInstructionsOf, conciergeOnConnection } from "./concierge/on-connection.js";
+import {
+  chatInstructionsOf,
+  conciergeOnConnection,
+  conciergePlaceSetup,
+} from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -1350,6 +1354,7 @@ async function main() {
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      placeSetup: conciergePlaceSetup,
       chatInstructions: chatInstructionsOf([
         taskChatInstructions({ webchatRepo }),
         conciergeOnConnection,
@@ -1483,11 +1488,11 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    // A private agent's text stays in its trace only on the dashboard. On a
-    // connection, such as the Concierge answering a Telegram bot, the text is
-    // the reply (docs/concepts/agents.md).
+    // The place can change the agent's policy: on a connection the
+    // Concierge's text is the reply (docs/architecture/concierge.md).
     isTextPrivate: (agentName, channel) => {
-      if (channel !== "webchat") return false;
+      const place = conciergePlaceSetup(agentName, { channel });
+      if (place?.finalText) return place.finalText === "private";
       const agent = agentLoader.find(agentName);
       return (
         agent !== undefined &&

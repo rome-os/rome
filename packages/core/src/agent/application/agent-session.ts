@@ -357,6 +357,14 @@ export interface Sessions {
   shutdown(): Promise<void>;
 }
 
+/** How one place changes an agent's setup for the sessions it serves there. */
+export interface PlaceSetup {
+  /** The agent's `finalText` in this place, in place of its own. */
+  finalText?: AgentPolicy["finalText"];
+  /** Actions of the agent's own list it may not call in this place. */
+  withoutActions?: readonly string[];
+}
+
 interface ManagerDeps {
   agentLoader: AgentCatalog;
   sessionRepository: SessionRepository;
@@ -404,6 +412,12 @@ interface ManagerDeps {
     thread: ThreadContext | undefined,
     agentName: string,
   ) => Promise<string | null>;
+  /**
+   * How the place a session serves changes its agent's setup there, or null
+   * when it changes nothing. Asked once when the session's setup is made.
+   * Absent, every place takes the agent's setup as it is.
+   */
+  placeSetup?: (agentName: string, thread: ThreadContext | undefined) => PlaceSetup | null;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -1068,7 +1082,12 @@ function sessionSetupOf(
 ): SessionSetupSource {
   const config = agent.definition;
   const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
-  const policy = resolveAgentPolicy({ name: agent.localName, policy: config.policy });
+  // The place can override the agent's policy and take actions away, never add them.
+  const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
+  const policy = {
+    ...resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    ...(place?.finalText ? { finalText: place.finalText } : {}),
+  };
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
   // agent for a human reply. That only works when (a) the channel's surface can
   // render it, and (b) this session will actually receive the next user turn.
@@ -1079,7 +1098,9 @@ function sessionSetupOf(
   // The answer feeds the cached system prompt, so the opener states it for
   // the session's life.
   const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
-  const allowList = config.actions ?? [];
+  const allowList = (config.actions ?? []).filter(
+    (action) => !place?.withoutActions?.includes(action),
+  );
   const subagents = subagentsOf(deps.agentLoader, config);
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
@@ -1616,8 +1637,11 @@ async function openSession(
     // in the same session. An agent whose definition omits its actions, or
     // that the catalog no longer holds, may call none: never the list it
     // had when the session opened.
+    // The session's place may withhold some of them, as its setup does.
     get actions() {
-      return deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+      const granted = deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+      const withheld = deps.placeSetup?.(key.agentName, refs.getThreadContext())?.withoutActions;
+      return withheld ? granted.filter((action) => !withheld.includes(action)) : granted;
     },
     widgets,
     turnId: refs.getTurnId,
