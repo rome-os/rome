@@ -138,4 +138,11 @@ describe("chatPromptFacts earlier messages", () => {
     });
     expect(earlier?.every((m) => m.id < 0)).toBe(true);
   });
+
+  it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
+    const { promptFacts, latest } = earlierFacts([message(1)]);
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 20));
+    await promptFacts.earlier?.(place, before);
+    expect(latest).toHaveBeenCalledWith(place, { limit: 16, until: before });
+  });
 });
