@@ -348,11 +348,13 @@ export class SlackAppAdapter {
     if (!direct && !mention) return { status: 200 };
     if (!event.channel || !event.ts) return { status: 200 };
     const wire: SlackWireMessage = { ...event, ts: event.ts };
-    const fromBot = Boolean(event.bot_id) || event.user === this.config.botUserId;
-    // In a direct message the app hears every message, its own too, so
-    // the drain shows what comes after what there.
-    if (direct && fromBot) {
-      this.noteHeard(event.channel, wire);
+    // Slack sends the app an event for each of its own posts. Those are
+    // matched on the bot's own user from the install, not on any bot id, so
+    // another bot that mentions the app is still heard. In a direct message
+    // the app hears every message, its own too, so its own post still shows
+    // the drain what comes after what there; it is never handed over.
+    if (event.user === this.config.botUserId) {
+      if (direct) this.noteHeard(event.channel, wire);
       return { status: 200 };
     }
     // Slack user ids are per workspace: an author from another workspace

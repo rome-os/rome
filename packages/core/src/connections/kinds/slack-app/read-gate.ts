@@ -51,7 +51,7 @@ export class SlackReadGate {
       const seconds = Math.ceil(wait / 1_000);
       return Promise.reject(
         new Error(
-          `Slack lets Rome read this workspace's history about once a minute, and other reads are waiting. Try again in ${seconds} seconds.`,
+          `Could not read these messages yet: Slack lets Rome read this workspace's history about once a minute, and other reads are waiting. Say that you could not read the earlier messages yet rather than answer as if you had. Try again in ${seconds} seconds.`,
         ),
       );
     }

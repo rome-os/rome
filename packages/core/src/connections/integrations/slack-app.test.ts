@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
+import { createSlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupForm, SetupInteraction } from "../setup/types.js";
 import { makeSlackAppDescriptor, makeSlackAppSetup, slackAppAccountId } from "./slack-app.js";
 
@@ -27,6 +28,7 @@ function cloud(overrides: Partial<SlackAppCloud> = {}): SlackAppCloud {
     start: rs.fn(async () => "https://fake-slack.test/oauth/v2/authorize?state=s"),
     redeem: rs.fn(async () => INSTALL),
     refreshMailbox: rs.fn(async () => INSTALL.mailbox),
+    release: rs.fn(async () => {}),
     ...overrides,
   };
 }
@@ -141,6 +143,7 @@ describe("the Slack app talker", () => {
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
+        revoke: async () => {},
       },
       cloud: cloud({
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: "fresh" }),
@@ -192,5 +195,83 @@ describe("the Slack app talker", () => {
       messageId: "3.0",
     });
     await talker?.stop();
+  });
+});
+
+describe("disconnecting the Slack app in Rome (R8)", () => {
+  const MATERIAL = {
+    teamId: "T_A",
+    botUserId: "U_BOT",
+    botToken: "xoxb-a",
+    forwardSecret: "secret",
+    connectUrl: "wss://relay.test/c/mbx",
+    drainKey: "k",
+  };
+  function descriptorWith(revoke: () => Promise<void>, c = cloud()) {
+    const steps: string[] = [];
+    const descriptor = makeSlackAppDescriptor({
+      api: {
+        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
+        postMessage: async () => ({ ts: "1.0" }),
+        openDirectMessage: async () => "D1",
+        userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
+        revoke: async (token) => {
+          steps.push(`revoke ${token}`);
+          await revoke();
+        },
+      },
+      cloud: {
+        ...c,
+        release: async (teamId) => {
+          steps.push(`release ${teamId}`);
+          await c.release(teamId);
+        },
+      },
+      openMailbox: () => ({ stop: () => {} }),
+      copy: {} as never,
+    });
+    return { descriptor, steps };
+  }
+
+  it("revokes the token at Slack, then releases the workspace at Rome Cloud", async () => {
+    const { descriptor, steps } = descriptorWith(async () => {});
+    await descriptor.onDisconnect?.({ material: MATERIAL, profile: {} });
+    expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
+  });
+
+  it("says Slack kept the token, and releases nothing, when the revoke fails", async () => {
+    const { descriptor, steps } = descriptorWith(async () => {
+      throw new Error("Slack API returned HTTP 503");
+    });
+    await expect(descriptor.onDisconnect?.({ material: MATERIAL, profile: {} })).rejects.toThrow(
+      "Slack did not revoke Rome's token (Slack API returned HTTP 503)",
+    );
+    expect(steps).toEqual(["revoke xoxb-a"]);
+  });
+
+  it("says Rome Cloud kept the workspace when the release fails", async () => {
+    const c = cloud({
+      release: rs.fn(async () => {
+        throw new SlackAppRefused("unavailable", "Rome Cloud is unreachable");
+      }),
+    });
+    const { descriptor } = descriptorWith(async () => {}, c);
+    await expect(descriptor.onDisconnect?.({ material: MATERIAL, profile: {} })).rejects.toThrow(
+      "Rome Cloud did not release the workspace",
+    );
+  });
+
+  it("counts a token Slack already refuses as revoked", async () => {
+    const answers = ["invalid_auth", "token_revoked"];
+    const api = createSlackAppWebApi("https://slack.test", async () =>
+      Response.json({ ok: false, error: answers.shift() }),
+    );
+    await api.revoke("xoxb-dead");
+    await api.revoke("xoxb-dead");
+    const refusing = createSlackAppWebApi("https://slack.test", async () =>
+      Response.json({ ok: false, error: "ratelimited" }),
+    );
+    await expect(refusing.revoke("xoxb-a")).rejects.toThrow();
   });
 });

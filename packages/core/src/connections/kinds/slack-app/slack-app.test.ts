@@ -31,6 +31,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     openDirectMessage: rs.fn(async () => "D_NEW"),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
+    revoke: rs.fn(async () => {}),
     ...overrides,
   };
 }
@@ -186,7 +187,6 @@ describe("Slack app direct messages (R4)", () => {
     const base = dmEvent(1);
     await mailbox.deposit(
       frame({ ...base, event_id: "E1", event: { ...base.event, user: BOT } }),
-      frame({ ...base, event_id: "E2", event: { ...base.event, bot_id: "B1" } }),
       frame({ ...base, event_id: "E3", event: { ...base.event, subtype: "message_changed" } }),
       frame({ ...base, event_id: "E4", event: { ...base.event, user_team: "T_OTHER" } }),
       frame({ ...base, event_id: "E5", event: { ...base.event, type: "app_mention" } }),
@@ -305,6 +305,40 @@ describe("Slack app mentions in a group (R5)", () => {
     const second = adapter(mailbox, fakeApi(), copy);
     await second.adapter.start();
     expect(second.delivered.map((m) => m.text)).toEqual(["question 4"]);
+  });
+});
+
+describe("Slack app events for its own posts", () => {
+  it("hands over no event for its own post in a direct message, sends nothing, and keeps it only in the chat's timeline", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered, api, copy } = adapter(mailbox);
+    await a.start();
+    const own = dmEvent(5, {});
+    await mailbox.deposit(
+      frame({ ...own, event: { ...own.event, user: BOT, bot_id: "B_ROME", text: "Rome's reply" } }),
+    );
+
+    expect(mailbox.statuses).toEqual([200]);
+    expect(delivered).toHaveLength(0);
+    expect(api.postMessage).not.toHaveBeenCalled();
+    // Not kept as a message to hand over: a restart hands over nothing.
+    expect(copy.mayNotHold(TEAM, Number.MAX_SAFE_INTEGER)).toEqual([]);
+    // Kept in the chat's timeline, as the post it is.
+    expect(copy.timelineRow(TEAM, "D_GUARDIAN", own.event.ts)?.message).toMatchObject({
+      direction: "outbound",
+      text: "Rome's reply",
+    });
+  });
+
+  it("drops its own post in a group, and still hears another bot that mentions it", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    await mailbox.deposit(
+      frame(mentionEvent(7, { user: BOT, bot_id: "B_ROME" })),
+      frame(mentionEvent(8, { user: "U_OTHER_BOT", bot_id: "B_OTHER" })),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_A/U_OTHER_BOT"]);
   });
 });
 

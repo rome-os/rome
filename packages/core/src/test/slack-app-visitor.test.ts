@@ -17,7 +17,6 @@ import {
   FORWARD_TIMESTAMP_HEADER,
   forwardSignature,
 } from "../connections/kinds/slack-app/forward.js";
-import { SlackMessageCopyRepository } from "../connections/kinds/slack-app/message-copy.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
 import { applyGuardianMappingWithinTx, planGuardianMapping } from "../people/guardian-mapping.js";
@@ -95,12 +94,23 @@ describe("Slack app members who did not sign in (R12)", () => {
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
+        revoke: async () => {},
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;
         return { stop: () => {} };
       },
-      copy: new SlackMessageCopyRepository(testDb.db),
+      // The connection's copy is its own business: this test reads only what
+      // it hands over.
+      copy: {
+        keep: () => true,
+        handedOver: () => {},
+        mayNotHold: () => [],
+        keepRun: () => {},
+        timelineRow: () => null,
+        timelineBefore: () => [],
+        timelineAfter: () => null,
+      },
     });
     const heard: ChannelMessage[] = [];
     adapter.onInbound((message) => heard.push(message));

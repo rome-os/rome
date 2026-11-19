@@ -8,6 +8,14 @@ import type { SlackWireMessage } from "./message.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
+/** Slack's answers for a token it no longer takes. */
+const ALREADY_REFUSED = new Set([
+  "invalid_auth",
+  "token_revoked",
+  "account_inactive",
+  "not_authed",
+  "app_uninstalled",
+]);
 
 export interface SlackAppWebApi {
   authTest(botToken: string, signal?: AbortSignal): Promise<SlackBotIdentity>;
@@ -18,6 +26,9 @@ export interface SlackAppWebApi {
   ): Promise<{ ts: string }>;
   openDirectMessage(botToken: string, userId: string, signal?: AbortSignal): Promise<string>;
   userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
+  /** Revoke the bot token, so Slack refuses it from then on. A token Slack
+   *  already refuses counts as revoked. */
+  revoke(botToken: string, signal?: AbortSignal): Promise<void>;
   /** One page of a conversation's history, newest first: at most `limit`
    *  messages before `latest` (exclusive), or the newest. */
   conversationHistory(
@@ -172,6 +183,14 @@ export function createSlackAppWebApi(
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
       };
+    },
+    async revoke(botToken, signal) {
+      try {
+        await call(botToken, "auth.revoke", undefined, signal);
+      } catch (error) {
+        if (error instanceof SlackApiError && ALREADY_REFUSED.has(error.code)) return;
+        throw error;
+      }
     },
     async conversationHistory(botToken, input, signal) {
       const body = await get(

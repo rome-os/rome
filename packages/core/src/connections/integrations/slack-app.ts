@@ -84,6 +84,10 @@ export function slackAppAccountId(record: ProfileRecord): string | null {
     : null;
 }
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function materialOf(material: unknown): SlackAppMaterial {
   const record = material as Partial<SlackAppMaterial> | null;
   if (
@@ -234,6 +238,25 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     link: "own_account",
     grant: "bot",
     auth: scheme,
+    // Revoke the token at Slack, then release the workspace at Rome Cloud.
+    // Removing the app in Slack does neither, so a fix through the same
+    // sign-in returns the same connection. If the instance stops between the
+    // two, the workspace stays bound with a dead token: the connection reads
+    // broken, and a second disconnect, which takes a refused token as
+    // revoked, finishes the release.
+    async onDisconnect({ material: record }) {
+      const material = materialOf(record);
+      try {
+        await deps.api.revoke(material.botToken);
+      } catch (error) {
+        throw new Error(`Slack did not revoke Rome's token (${describe(error)})`);
+      }
+      try {
+        await deps.cloud.release(material.teamId);
+      } catch (error) {
+        throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
+      }
+    },
     capabilities: {
       talker: {
         // The connection reads a chat from its own copy where that holds the

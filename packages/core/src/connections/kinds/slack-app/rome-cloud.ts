@@ -39,6 +39,9 @@ export interface SlackAppCloud {
   start(input: { callbackOrigin: string; state: string; codeChallenge: string }): Promise<string>;
   redeem(input: { handoff: string; codeVerifier: string }): Promise<SlackAppInstall>;
   refreshMailbox(teamId: string): Promise<SlackAppMailbox>;
+  /** Let go of the workspace, so its events go nowhere and any Rome may
+   *  connect it again. Releasing one no longer bound is not an error. */
+  release(teamId: string): Promise<void>;
 }
 
 async function post(path: string, body: unknown, fetchImpl: typeof fetch): Promise<unknown> {
@@ -117,6 +120,9 @@ export function romeCloudSlackApp(fetchImpl: typeof fetch = globalThis.fetch): S
         throw new SlackAppRefused("invalid_response", "Rome Cloud's answer was incomplete.");
       }
       return data.mailbox;
+    },
+    async release(teamId) {
+      await post("/api/slack/app/release", { teamId }, fetchImpl);
     },
   };
 }
