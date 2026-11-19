@@ -381,13 +381,12 @@ describe("/chats/:chatId/tasks", () => {
           name: "Book direct flights",
           status: "ended",
           endReason: "done",
-          from: "concierge",
         },
       ],
     });
-    // A task of another of the owner's Concierge chats draws too, with the chat it reports to.
+    // A task of another of the owner's Concierge chats draws too.
     expect((await links("concierge", [agenda.id])).tasks).toMatchObject([
-      { id: agenda.id, name: "Agenda", from: "calendar" },
+      { id: agenda.id, name: "Agenda" },
     ]);
     // Another owner's task chat reads as none.
     expect(

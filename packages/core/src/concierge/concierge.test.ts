@@ -1733,6 +1733,31 @@ describe("Concierge tools", () => {
     expect(await titles({ here: true })).toEqual(["Flights"]);
   });
 
+  it("chat_list with recentlyEnded adds the task chats that ended in the last day, with when", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
+    await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" });
+    await s.tool("chat_stop", { chatId: taskId });
+    const tasks = async () =>
+      JSON.parse((await s.tool("chat_list", { recentlyEnded: true })).content[0].text).filter(
+        (chat: { kind: string }) => chat.kind === "task chat",
+      );
+    const listed = await tasks();
+    expect(listed.map((chat: { title: string }) => chat.title)).toEqual(["Flights", "Hotels"]);
+    expect(listed[0]).toMatchObject({ status: "ended", endedAt: expect.any(String) });
+    expect(listed[1]).not.toHaveProperty("endedAt");
+    // A day later it is no longer recent.
+    const now = Date.now();
+    const later = rs.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);
+    try {
+      expect((await tasks()).map((chat: { title: string }) => chat.title)).toEqual(["Hotels"]);
+    } finally {
+      later.mockRestore();
+    }
+  });
+
   it("chat_list leaves out an ended task's chat unless asked", async () => {
     const s = setup();
     const { taskId } = JSON.parse(

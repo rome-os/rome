@@ -283,13 +283,10 @@ private let listJSON = #"""
     }
 
     @Test func readsTheLinksResponseLeniently() throws {
-        let json = #"{"tasks":[{"id":"c1","name":"Flights","status":"needs_you","endReason":null,"from":"calendar"},{"id":"c2","name":"Hotels","status":"ended","endReason":"stopped"}]}"#
+        let json = #"{"tasks":[{"id":"c1","name":"Flights","status":"needs_you","endReason":null},{"id":"c2","name":"Hotels","status":"ended","endReason":"stopped"}]}"#
         let response = try JSONDecoder().decode(TaskLinksResponse.self, from: Data(json.utf8))
         #expect(response.tasks.map(\.id) == ["c1", "c2"])
         #expect(response.tasks[1].endReason == "stopped")
-        // The chat a task reports to; an older server leaves it out.
-        #expect(response.tasks[0].from == "calendar")
-        #expect(response.tasks[1].from == nil)
         // An older server has no such route; a body with no tasks reads as none.
         #expect(try JSONDecoder().decode(TaskLinksResponse.self, from: Data("{}".utf8)).tasks.isEmpty)
     }

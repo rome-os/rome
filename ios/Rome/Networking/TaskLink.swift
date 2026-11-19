@@ -49,9 +49,6 @@ struct TaskLinkInfo: Decodable, Hashable, Sendable {
     var status: String
     /// Why an ended task ended: `done`, `failed`, `stopped` or `no_response`.
     var endReason: String?
-    /// The Concierge chat it reports to, whose `chat.tasks:` topic carries its
-    /// changes. Nil from an instance that answers only its own chat's tasks.
-    var from: String?
 
     /// The SF Symbol that stands for the status, the set the web's chip uses.
     var symbol: String {

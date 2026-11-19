@@ -1,9 +1,9 @@
 // What a Concierge chat's task links show: each task chat's live name and
 // status (docs/domains/chats.md#task-link). The links in a transcript register
 // the task chats they name, and one read answers for all of them. A task may
-// come from any of the owner's Concierge chats: the `tasks_changed` events of
-// the chat each one reports to read it again, so a chip moves as its task
-// chat runs.
+// come from any of the owner's Concierge chats. The chat's `tasks_changed`
+// events, which fire on any of its owner's tasks, read it again, so a chip
+// moves as its task chat runs.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -65,37 +65,17 @@ export function TaskLinksProvider({ chatId, children }: { chatId: string; childr
       };
     },
   });
-  const reread = useCallback(
-    () => void queryClient.invalidateQueries({ queryKey: taskLinksKey(chatId) }),
-    [queryClient, chatId],
-  );
-  // This chat, and every other chat a linked task reports to.
-  const sources = useMemo(
-    () => [...new Set([chatId, ...[...(data?.found.values() ?? [])].map((task) => task.from)])],
-    [chatId, data],
-  );
-  const value = useMemo(() => ({ register, read: data ?? null }), [register, data]);
-  return (
-    <TaskLinksContext.Provider value={value}>
-      {sources.map((source) => (
-        <TasksChangedListener key={source} chatId={source} onChange={reread} />
-      ))}
-      {children}
-    </TaskLinksContext.Provider>
-  );
-}
-
-/** Calls `onChange` whenever Concierge chat `chatId`'s tasks change. */
-function TasksChangedListener({ chatId, onChange }: { chatId: string; onChange: () => void }) {
+  const reread = () => queryClient.invalidateQueries({ queryKey: taskLinksKey(chatId) });
   useLiveEvents(
     {
       topic: chatTasksTopicName(chatId),
       sseUrl: `/api/chats/${encodeURIComponent(chatId)}/tasks/events`,
     },
-    { [TASK_LIST_CHANGED_EVENT]: { schema: changedSchema, fn: onChange } },
-    { onReconnect: onChange },
+    { [TASK_LIST_CHANGED_EVENT]: { schema: changedSchema, fn: () => void reread() } },
+    { onReconnect: () => void reread() },
   );
-  return null;
+  const value = useMemo(() => ({ register, read: data ?? null }), [register, data]);
+  return <TaskLinksContext.Provider value={value}>{children}</TaskLinksContext.Provider>;
 }
 
 /** What a task link shows: still reading, a task chat of this chat's owner, or none. */

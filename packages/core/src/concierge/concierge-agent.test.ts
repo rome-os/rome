@@ -257,7 +257,7 @@ describe("the Concierge agent", () => {
     const tasks = prompt.slice(prompt.indexOf("# Tasks\n"));
     expect(tasks).toContain("`chat_list` with `here: true`");
     // Ended tasks are in or out the same way for every chat.
-    expect(tasks).toContain("the tasks that have not ended and those that ended today");
+    expect(tasks).toContain("call `chat_list` with `recentlyEnded: true`");
     expect(tasks).toContain("every task, from every chat: `chat_list` without `here`");
     expect(tasks).toContain("Group them by the chat each came from (`from`)");
     expect(tasks).toContain("ONE `say` that is a Markdown bullet list, one task per line");

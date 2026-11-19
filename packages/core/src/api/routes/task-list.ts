@@ -142,15 +142,7 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
       tasks: found.flatMap((task) => {
         const of = status.get(task.row.id);
         return of
-          ? [
-              {
-                id: task.chat.id,
-                name: task.chat.name,
-                status: of.status,
-                endReason: of.endReason,
-                from: task.conciergeChat.id,
-              },
-            ]
+          ? [{ id: task.chat.id, name: task.chat.name, status: of.status, endReason: of.endReason }]
           : [];
       }),
     } satisfies TaskLinksResponse);

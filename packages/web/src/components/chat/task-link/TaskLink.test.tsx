@@ -103,7 +103,7 @@ describe("a task link in a Concierge message", () => {
     ["ended", "stopped", "Stopped", "lucide-circle-stop"],
     ["ended", "no_response", "No response", "lucide-circle"],
   ] as const)("marks a %s/%s task chat as %s", async (status, endReason, word, glyph) => {
-    known = [{ id: "chat-1", name: "Taxes", status, endReason, from: "concierge" }];
+    known = [{ id: "chat-1", name: "Taxes", status, endReason }];
     renderLinks(link("chat-1", "Taxes"));
     const chip = await screen.findByRole("link", { name: `Taxes, ${word}` });
     expect(chip.querySelector("svg")?.getAttribute("class")).toContain(glyph);
@@ -120,7 +120,7 @@ describe("a task link in a Concierge message", () => {
     cleanup();
 
     // A chat that is no Concierge chat has none to ask.
-    known = [{ id: "chat-1", name: "Taxes", status: "active", endReason: null, from: "concierge" }];
+    known = [{ id: "chat-1", name: "Taxes", status: "active", endReason: null }];
     asked = [];
     renderLinks(link("chat-1", "Taxes"), null);
     expect(screen.queryByRole("link")).toBeNull();
@@ -130,8 +130,8 @@ describe("a task link in a Concierge message", () => {
 
   it("asks once for every task chat a message names, and moves as the task chat runs", async () => {
     known = [
-      { id: "a", name: "First", status: "active", endReason: null, from: "concierge" },
-      { id: "b", name: "Second", status: "needs_you", endReason: null, from: "concierge" },
+      { id: "a", name: "First", status: "active", endReason: null },
+      { id: "b", name: "Second", status: "needs_you", endReason: null },
     ];
     renderLinks(
       <>
@@ -141,10 +141,7 @@ describe("a task link in a Concierge message", () => {
     await screen.findByRole("link", { name: "Second, Needs you" });
     expect(asked.at(-1)).toBe("a,b");
     // It finishes: the chip changes in place.
-    known = [
-      { id: "a", name: "First", status: "ended", endReason: "done", from: "concierge" },
-      known[1]!,
-    ];
+    known = [{ id: "a", name: "First", status: "ended", endReason: "done" }, known[1]!];
     act(() => {
       acceptLatestSocket().receive({
         type: "event",
@@ -156,23 +153,19 @@ describe("a task link in a Concierge message", () => {
     expect(await screen.findByRole("link", { name: "First, Done" })).toBeTruthy();
   });
 
-  it("draws a task of another of the owner's chats, and moves on that chat's changes", async () => {
-    known = [{ id: "agenda", name: "Agenda", status: "active", endReason: null, from: "calendar" }];
+  it("draws a task of another of the owner's chats, and moves on this chat's changes", async () => {
+    // Another chat's task: the server answers it, and this chat's topic carries
+    // every change of its owner's tasks.
+    known = [{ id: "agenda", name: "Agenda", status: "active", endReason: null }];
     renderLinks(link("agenda", "Agenda"));
     await screen.findByRole("link", { name: "Agenda, Active" });
     known = [{ ...known[0]!, status: "ended", endReason: "done" }];
-    // The change comes on the chat the task reports to, not this one.
-    const socket = acceptLatestSocket();
-    expect(socket.sent).toContainEqual({
-      type: "subscribe",
-      topic: chatTasksTopicName("calendar"),
-    });
     act(() => {
-      socket.receive({
+      acceptLatestSocket().receive({
         type: "event",
-        topic: chatTasksTopicName("calendar"),
+        topic: chatTasksTopicName("concierge"),
         event: "tasks_changed",
-        data: { chatId: "calendar" },
+        data: { chatId: "concierge" },
       });
     });
     expect(await screen.findByRole("link", { name: "Agenda, Done" })).toBeTruthy();

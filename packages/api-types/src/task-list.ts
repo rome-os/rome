@@ -169,12 +169,6 @@ export interface TaskLinkDto {
   name: string;
   status: ConciergeTaskStatus;
   endReason: ConciergeTaskEndReason | null;
-  /**
-   * The Concierge chat it reports to. Its status changes arrive on that
-   * chat's `chat.tasks:<from>` topic, so a chip of another chat's task
-   * listens there too.
-   */
-  from: string;
 }
 export interface TaskLinksResponse {
   tasks: TaskLinkDto[];
