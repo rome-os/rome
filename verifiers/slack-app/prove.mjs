@@ -57,6 +57,12 @@ const CASES = [
   },
   { name: "R4", breaks: "R4", rule: "R4", what: "the instance replies twice to each message" },
   {
+    name: "R4-pairs",
+    breaks: "R4-pairs",
+    rule: "R4",
+    what: "each odd message is answered only when the next one comes",
+  },
+  {
     name: "R4-elsewhere",
     breaks: "R4-elsewhere",
     rule: "R4",

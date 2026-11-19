@@ -16,7 +16,7 @@ Every seeded message asks the Concierge to repeat a code unique to the message a
 |---|---|
 | R1 | Signs in to Slack as workspace A's guardian and walks Connect on the first instance the way the dashboard and a browser would, pressing Allow and filling nothing. Fails on any field from Rome's setup or Rome's own screens (Slack's own approve screen is not counted), on more than one sign-in or Slack approval, on a connected account whose agent is not `core:concierge`, and when the first direct message does not get exactly one reply. The verifier never calls an agent link route. |
 | R3 | Walks Connect for workspace A on the second instance. Passes when the setup ends `failed` with a reason saying the workspace is already connected, the second instance gains no connected account, and one more direct message to the first gets exactly one reply. |
-| R4 | 20 direct messages from the guardian, one at a time, each after the previous one's reply. Each must get exactly one reply in the same direct message, no reply may match no message, and the bot may post nowhere else in the workspace. |
+| R4 | 20 direct messages from the guardian, one at a time, each after the previous one's reply. Each must be answered within `replySeconds`, before the next is sent, and get exactly one reply in the same direct message, no reply may match no message, and the bot may post nowhere else in the workspace. |
 | R7 | 10 direct messages with a bad signature, then one good message to show the path was open. No forged one may get a reply or be recorded in the direct message's session (which must show the good message, or the read proves nothing and R7 is not checked), and nothing but the good message's one reply may follow them anywhere in the workspace; each forged event is sent up to 3 times until Rome Cloud answers it with a status below 500, and R7 is not checked if one never is; the report keeps every delivery status. Then R4's 20 messages from workspace A: the instance bound to workspace B may not record them, post anything in workspace B, observe an account of workspace A, or make any Slack call naming their codes, workspace A, its guardian or the direct message. |
 | R6 | Stops the first instance, sends 20 direct messages, holds the stop for `stopSeconds`, starts it, and wants each message answered exactly once and no reply while stopped. |
 | R11 | `git diff <romeCloudBase> -- webhook-relay` in rome-cloud is empty. Columns added under `packages/pantheon` schemas and migrations hold only the workspace to instance binding (team, instance, timestamps). `pnpm lint:imports` passes in rome. No file under `packages/core/src/connections` imports from `rome_apps`. |
@@ -34,6 +34,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `R1-agent` | The connected account gets no agent. |
 | `R3` | Rome Cloud lets a second instance take a bound workspace. |
 | `R4` | The instance replies twice to each message. |
+| `R4-pairs` | Each odd message is answered only when the next one comes. |
 | `R4-elsewhere` | Each reply is also posted in another member's direct message. |
 | `R6` | The instance throws away its mailbox when it starts. |
 | `R7-signature` | Rome Cloud skips Slack's signature check. |

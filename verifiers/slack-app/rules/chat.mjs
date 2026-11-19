@@ -26,6 +26,7 @@ export async function r4(ctx) {
   const since = await ctx.slack.seq();
   const codes = [];
   const eventIds = [];
+  const unansweredInTime = [];
   let channel;
   for (let i = 1; i <= 20; i++) {
     const c = code("R4", i);
@@ -33,12 +34,15 @@ export async function r4(ctx) {
     channel = sent.channel;
     codes.push(c);
     eventIds.push(sent.eventId);
-    // One message at a time, as a person would write: wait for its reply.
-    await waitFor(
+    // One message at a time, as a person would write: wait for its reply. A
+    // reply that comes only after the next message is a failure, even if
+    // the final count adds up.
+    const answered = await waitFor(
       async () =>
         (await ctx.slack.posts({ team: ws.id, channel, since })).some((p) => p.text?.includes(c)),
       { timeoutMs: ctx.env.timeouts.replySeconds * 1000 },
     );
+    if (!answered) unansweredInTime.push(c);
   }
   const t = tally(
     await awaitReplies(ctx.slack, {
@@ -51,7 +55,16 @@ export async function r4(ctx) {
     }),
   );
   ctx.fromA = { codes, eventIds, since, channel };
-  const evidence = { workspace: ws.id, channel, eventIds, ...t };
+  const evidence = { workspace: ws.id, channel, eventIds, unansweredInTime, ...t };
+  const late = unansweredInTime.length
+    ? `${unansweredInTime.length} of 20 got no reply within ${ctx.env.timeouts.replySeconds}s, before the next message`
+    : null;
+  if (late)
+    return {
+      result: "fail",
+      reason: allOnce(t) ? late : `${late}; ${summary(t)}`,
+      evidence,
+    };
   return allOnce(t)
     ? {
         result: "pass",

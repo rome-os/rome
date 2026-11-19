@@ -147,9 +147,20 @@ async function otherDirectMessage(team, channel) {
 }
 
 // "The Concierge": repeats the code a seeded message carries.
-async function answer(event, team) {
+// Broken R4-pairs holds each odd R4 message until the next one comes.
+let held = null;
+
+async function answer(event, team, { now = false } = {}) {
   const conn = db.connections.find((c) => c.team === team) ?? db.connections[0];
   if (!conn) return;
+  if (breaks.has("R4-pairs") && !now && /R4-/.test(event.text)) {
+    if (!held) {
+      held = event;
+      return;
+    }
+    await answer(held, team, { now: true });
+    held = null;
+  }
   // Broken R7-quiet answers R7's forged events without repeating their code.
   const asked =
     breaks.has("R7-quiet") && /R7F-/.test(event.text)
