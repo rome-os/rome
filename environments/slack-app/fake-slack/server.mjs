@@ -40,6 +40,15 @@ export function loadConfig(overrides = {}) {
       overrides.deliveryTimeoutMs ?? env.FAKE_SLACK_DELIVERY_TIMEOUT_MS ?? 3000,
     ),
     stateFile: overrides.stateFile ?? env.FAKE_SLACK_STATE_FILE,
+    // Slack's limit on conversations.history and conversations.replies for an
+    // app outside the Marketplace: 1 request a minute per method and
+    // workspace, at most 15 messages a request. On unless switched off.
+    historyLimit: !/^(0|false|off)$/i.test(
+      String(overrides.historyLimit ?? env.FAKE_SLACK_HISTORY_LIMIT ?? "on"),
+    ),
+    historyWindowMs: Number(
+      overrides.historyWindowMs ?? env.FAKE_SLACK_HISTORY_WINDOW_MS ?? 60_000,
+    ),
     workspaces,
   };
 }
@@ -68,6 +77,7 @@ function emptyState() {
     events: [], // { seq, at, teamId, eventId, type, signature, body }
     deliveries: [], // { seq, at, eventId, attempt, status, error, ms }
     defaultSignIn: null, // { teamId, userId } preselected on the approve screen
+    history: {}, // "teamId/channel" -> messages as Slack holds them, oldest first
   };
 }
 
@@ -82,6 +92,7 @@ export class FakeSlack {
       this.state = { ...emptyState(), ...JSON.parse(readFileSync(config.stateFile, "utf8")) };
     }
     this.saveTimer = null;
+    this.rateLimited = new Map(); // "teamId method" -> time of the last call let through
   }
 
   save() {
@@ -188,10 +199,13 @@ export class FakeSlack {
         installedBy: userId,
         installedAt: new Date().toISOString(),
         active: true,
+        scopes: [],
       };
       this.state.installs[teamId] = install;
       this.state.tokens[botToken] = { teamId, kind: "bot", userId: botUserId, revoked: false };
     }
+    // A sign-in adds the scopes it asked for to the install's, as Slack does.
+    install.scopes = [...new Set([...(install.scopes ?? []), ...splitScopes(grant.scopes)])];
     const response = {
       ok: true,
       app_id: this.config.appId,
@@ -231,12 +245,72 @@ export class FakeSlack {
       tokenKind: tokenInfo?.kind ?? (token ? "unknown" : "none"),
       args: redact(args),
     };
-    const result = this.dispatch(method, args, token, tokenInfo);
+    const limited = this.rateLimit(method, tokenInfo);
+    const result = limited ?? this.dispatch(method, args, token, tokenInfo);
     record.ok = result.ok;
     if (!result.ok) record.error = result.error;
+    if (limited) record.retryAfter = limited.retryAfter;
     this.state.calls.push(record);
     this.save();
     return result;
+  }
+
+  /**
+   * Slack's limit for an app outside the Marketplace on the history methods:
+   * the first call in a window goes through, later ones get 429 with
+   * Retry-After. Returns the refusal, or null to let the call through.
+   */
+  rateLimit(method, tokenInfo) {
+    if (!this.config.historyLimit || !HISTORY_METHODS.has(method)) return null;
+    if (!tokenInfo || tokenInfo.revoked) return null;
+    const key = `${tokenInfo.teamId} ${method}`;
+    const now = Date.now();
+    const last = this.rateLimited.get(key);
+    if (last !== undefined && now - last < this.config.historyWindowMs) {
+      const retryAfter = Math.max(1, Math.ceil((last + this.config.historyWindowMs - now) / 1000));
+      return { ok: false, error: "ratelimited", httpStatus: 429, retryAfter };
+    }
+    this.rateLimited.set(key, now);
+    return null;
+  }
+
+  /** Keeps a message in a conversation's history, as Slack holds what was said. */
+  remember(teamId, channel, message) {
+    const key = `${teamId}/${channel}`;
+    const list = (this.state.history[key] ??= []);
+    const kept = { type: "message", ...message };
+    if (kept.thread_ts && kept.thread_ts !== kept.ts) {
+      const parent = list.find((m) => m.ts === kept.thread_ts);
+      if (parent) {
+        parent.thread_ts = parent.ts;
+        parent.reply_count = (parent.reply_count ?? 0) + 1;
+        parent.reply_users = [...new Set([...(parent.reply_users ?? []), kept.user])];
+        parent.reply_users_count = parent.reply_users.length;
+        parent.latest_reply = kept.ts;
+      }
+    }
+    list.push(kept);
+    this.save();
+    return kept;
+  }
+
+  historyOf(teamId, channel) {
+    return this.state.history[`${teamId}/${channel}`] ?? [];
+  }
+
+  /** The conversation a Web API `channel` argument names, or null. */
+  resolveConversation(teamId, channel) {
+    if (!channel) return null;
+    if (channel.startsWith("D")) return this.imOwner(teamId, channel) ? channel : null;
+    return this.group(teamId, channel)?.id ?? null;
+  }
+
+  /** The scope a history read of `channel` needs: a direct message, a public
+   *  group, or a private group (an id starting with G, or `is_private`). */
+  historyScope(teamId, channel) {
+    if (channel.startsWith("D")) return "im:history";
+    const group = this.group(teamId, channel);
+    return group?.is_private || channel.startsWith("G") ? "groups:history" : "channels:history";
   }
 
   dispatch(method, args, token, tokenInfo) {
@@ -253,6 +327,9 @@ export class FakeSlack {
     if (!token) return { ok: false, error: "not_authed" };
     if (!tokenInfo) return { ok: false, error: "invalid_auth" };
     if (tokenInfo.revoked) return { ok: false, error: "token_revoked" };
+    const needed = METHOD_SCOPES[method];
+    const denied = needed ? missingScope(this, tokenInfo, needed) : null;
+    if (denied) return denied;
     return API_METHODS[method].call(this, args, token, tokenInfo);
   }
 
@@ -294,6 +371,16 @@ export class FakeSlack {
     if (!this.config.eventsUrl) throw httpError(409, "no events address configured");
     if (requireInstall && signature === "valid" && !this.activeInstall(teamId)) {
       throw httpError(409, `the app is not installed in ${teamId}`);
+    }
+    // Slack sends a message event only to an app granted the scope behind it.
+    const eventScope =
+      EVENT_SCOPES[event.type === "message" ? `message:${event.channel_type}` : event.type];
+    const scopes = this.state.installs[teamId]?.scopes ?? [];
+    if (requireInstall && signature === "valid" && eventScope && !scopes.includes(eventScope)) {
+      throw httpError(
+        409,
+        `Slack sends no ${event.type} event: the install in ${teamId} lacks ${eventScope}`,
+      );
     }
     const envelope = this.envelope(teamId, event);
     const body = JSON.stringify(envelope);
@@ -368,7 +455,7 @@ export class FakeSlack {
   }
 
   /** A member's direct message to the bot, as Slack's message.im event. */
-  directMessage(teamId, userId, text) {
+  directMessage(teamId, userId, text, threadTs) {
     this.member(teamId, userId);
     const ts = this.nextTs();
     return {
@@ -377,6 +464,7 @@ export class FakeSlack {
       user: userId,
       text,
       ts,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
       team: teamId,
       client_msg_id: randomUUID(),
       channel_type: "im",
@@ -385,7 +473,7 @@ export class FakeSlack {
   }
 
   /** A member's mention of the bot in a group, as Slack's app_mention event. */
-  mention(teamId, userId, channel, text) {
+  mention(teamId, userId, channel, text, threadTs) {
     this.member(teamId, userId);
     const group = this.group(teamId, channel ?? "general");
     if (!group) throw httpError(404, `unknown group ${channel} in ${teamId}`);
@@ -398,9 +486,47 @@ export class FakeSlack {
       user: userId,
       text: full,
       ts,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
       team: teamId,
       client_msg_id: randomUUID(),
       blocks: richText(full),
+    };
+  }
+
+  /** A member's message in a group that does not mention the bot. */
+  groupMessage(teamId, userId, channel, text, threadTs) {
+    this.member(teamId, userId);
+    const group = this.group(teamId, channel ?? "general");
+    if (!group) throw httpError(404, `unknown group ${channel} in ${teamId}`);
+    return {
+      type: "message",
+      channel: group.id,
+      user: userId,
+      text,
+      ts: this.nextTs(),
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+      team: teamId,
+      client_msg_id: randomUUID(),
+      channel_type: "channel",
+      blocks: richText(text),
+    };
+  }
+
+  /** What a message event's message looks like in the conversation's history. */
+  rememberEvent(teamId, event) {
+    const { channel, channel_type: _type, event_ts: _eventTs, ...message } = event;
+    return this.remember(teamId, channel, message);
+  }
+
+  /** auth.test with the newest bot token issued in `teamId`, as Slack would answer it. */
+  authTestFor(teamId) {
+    this.workspace(teamId);
+    const install = this.state.installs[teamId];
+    if (!install) throw httpError(409, `the app was never installed in ${teamId}`);
+    const info = this.state.tokens[install.botToken];
+    return {
+      token_state: info?.revoked ? "revoked" : "active",
+      auth_test: this.dispatch("auth.test", {}, install.botToken, info),
     };
   }
 
@@ -462,11 +588,26 @@ export class FakeSlack {
           bot: this.botIds(w.id),
           installed: Boolean(install?.active),
           installed_by: install?.installedBy ?? null,
+          // Whether the newest bot token still works; the token itself stays out.
+          token: install
+            ? this.state.tokens[install.botToken]?.revoked
+              ? "revoked"
+              : "active"
+            : null,
+          scopes: install?.scopes ?? [],
           members: w.members.map((m) => ({ ...m, im_channel: this.imChannel(w.id, m.id) })),
-          groups: w.channels ?? [],
+          groups: (w.channels ?? []).map((c) => ({
+            ...c,
+            members: c.members ?? w.members.map((m) => m.id),
+          })),
         };
       }),
       default_sign_in: this.state.defaultSignIn,
+      history_limit: {
+        on: this.config.historyLimit,
+        window_ms: this.config.historyWindowMs,
+        max_messages: HISTORY_LIMITED_MAX,
+      },
     };
   }
 }
@@ -530,6 +671,15 @@ const API_METHODS = {
       tokenKind: info.kind,
     };
     this.state.posts.push(post);
+    this.remember(info.teamId, channel, {
+      user: info.userId,
+      ...(info.kind === "bot" ? { bot_id: install.botId, app_id: this.config.appId } : {}),
+      text: post.text,
+      ts,
+      ...(post.threadTs ? { thread_ts: post.threadTs } : {}),
+      team: info.teamId,
+      ...(blocks ? { blocks } : {}),
+    });
     return {
       ok: true,
       channel,
@@ -544,6 +694,36 @@ const API_METHODS = {
         team: info.teamId,
       },
     };
+  },
+
+  "conversations.history"(args, _token, info) {
+    const channel = this.resolveConversation(info.teamId, args.channel);
+    if (!channel) return { ok: false, error: "channel_not_found" };
+    const denied = missingScope(this, info, this.historyScope(info.teamId, channel));
+    if (denied) return denied;
+    const window = timeWindow(args);
+    const top = this.historyOf(info.teamId, channel)
+      .filter((m) => !m.thread_ts || m.thread_ts === m.ts)
+      .filter(window)
+      .reverse(); // newest first, as Slack answers
+    return page(this, top, args);
+  },
+
+  "conversations.replies"(args, _token, info) {
+    const channel = this.resolveConversation(info.teamId, args.channel);
+    if (!channel) return { ok: false, error: "channel_not_found" };
+    const denied = missingScope(this, info, this.historyScope(info.teamId, channel));
+    if (denied) return denied;
+    if (!args.ts) return { ok: false, error: "invalid_arguments" };
+    const all = this.historyOf(info.teamId, channel);
+    const parent = all.find((m) => m.ts === args.ts);
+    if (!parent) return { ok: false, error: "thread_not_found" };
+    const root = parent.thread_ts ?? parent.ts;
+    const window = timeWindow(args);
+    const thread = all
+      .filter((m) => m.ts === root || m.thread_ts === root)
+      .filter((m) => m.ts === root || window(m)); // oldest first, the parent at the top
+    return page(this, thread, args);
   },
 
   "conversations.open"(args, _token, info) {
@@ -609,6 +789,86 @@ const API_METHODS = {
     };
   },
 };
+
+const HISTORY_METHODS = new Set(["conversations.history", "conversations.replies"]);
+const HISTORY_LIMITED_MAX = 15;
+
+function splitScopes(scopes) {
+  return String(scopes ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** The bot scope each Web API method needs. The history methods need one by
+ *  the kind of conversation, checked in the method. */
+const METHOD_SCOPES = {
+  "chat.postMessage": "chat:write",
+  "conversations.open": "im:write",
+  "users.info": "users:read",
+};
+
+/** The bot scope Slack needs before it sends the app an event of this kind. */
+const EVENT_SCOPES = {
+  app_mention: "app_mentions:read",
+  "message:im": "im:history",
+  "message:channel": "channels:history",
+  "message:group": "groups:history",
+};
+
+/** Slack's refusal when a bot token lacks `needed`, or null. User tokens are
+ *  not checked (DIFFERENCES.md). */
+function missingScope(slack, info, needed) {
+  if (info.kind !== "bot") return null;
+  const provided = slack.state.installs[info.teamId]?.scopes ?? [];
+  if (provided.includes(needed)) return null;
+  return { ok: false, error: "missing_scope", needed, provided: provided.join(",") };
+}
+
+/** Slack's `oldest`, `latest` and `inclusive` as a filter on messages. */
+function timeWindow(args) {
+  const inclusive = args.inclusive === true || args.inclusive === "true" || args.inclusive === "1";
+  const oldest = args.oldest !== undefined && args.oldest !== "" ? Number(args.oldest) : null;
+  const latest = args.latest !== undefined && args.latest !== "" ? Number(args.latest) : null;
+  return (m) => {
+    const ts = Number(m.ts);
+    if (oldest !== null && (inclusive ? ts < oldest : ts <= oldest)) return false;
+    if (latest !== null && (inclusive ? ts > latest : ts >= latest)) return false;
+    return true;
+  };
+}
+
+/** One page of `messages` under Slack's `limit` and `cursor`. */
+function page(slack, messages, args) {
+  const max = slack.config.historyLimit ? HISTORY_LIMITED_MAX : 999;
+  const asked = args.limit !== undefined && args.limit !== "" ? Number(args.limit) : null;
+  const limit = Math.min(max, asked && asked > 0 ? asked : slack.config.historyLimit ? 15 : 100);
+  let offset = 0;
+  if (args.cursor) {
+    const decoded = Number(
+      Buffer.from(String(args.cursor), "base64url")
+        .toString("utf8")
+        .replace(/^offset:/, ""),
+    );
+    if (!Number.isInteger(decoded) || decoded < 0) return { ok: false, error: "invalid_cursor" };
+    offset = decoded;
+  }
+  const slice = messages.slice(offset, offset + limit).map(publicMessage);
+  const hasMore = offset + limit < messages.length;
+  return {
+    ok: true,
+    messages: slice,
+    has_more: hasMore,
+    pin_count: 0,
+    response_metadata: {
+      next_cursor: hasMore ? Buffer.from(`offset:${offset + limit}`).toString("base64url") : "",
+    },
+  };
+}
+
+function publicMessage(m) {
+  return structuredClone(m);
+}
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -767,7 +1027,17 @@ export function createHandler(slack) {
       if (url.pathname.startsWith("/api/")) {
         const method = url.pathname.slice(5);
         const args = parseArgs(req, url, raw);
-        return send(res, 200, slack.callApi(method, args, bearer(req, args)));
+        const { httpStatus, retryAfter, ...result } = slack.callApi(
+          method,
+          args,
+          bearer(req, args),
+        );
+        return send(
+          res,
+          httpStatus ?? 200,
+          result,
+          retryAfter ? { "retry-after": String(retryAfter) } : {},
+        );
       }
 
       // ----- Control API
@@ -798,13 +1068,36 @@ async function control(slack, method, url, body) {
       slack.save();
       return { ok: true };
     case "POST /dm": {
-      const event = slack.directMessage(body.team, body.user, body.text);
-      return { ok: true, ...(await slack.sendEvent(body.team, event)) };
+      const event = slack.directMessage(body.team, body.user, body.text, body.thread_ts);
+      return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
     case "POST /mention": {
-      const event = slack.mention(body.team, body.user, body.channel, body.text);
-      return { ok: true, ...(await slack.sendEvent(body.team, event)) };
+      const event = slack.mention(body.team, body.user, body.channel, body.text, body.thread_ts);
+      return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
+    case "POST /group-message": {
+      // A group message that does not mention the bot. The app subscribes to
+      // no group message events, so Slack sends it nothing; it is only in
+      // the group's history. `send_event: true` sends it as message.channels.
+      const event = slack.groupMessage(
+        body.team,
+        body.user,
+        body.channel,
+        body.text,
+        body.thread_ts,
+      );
+      if (body.send_event) return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
+      slack.rememberEvent(body.team, event);
+      return { ok: true, event_sent: false, event };
+    }
+    case "GET /history": {
+      const team = q.get("team");
+      const channel = slack.resolveConversation(team, q.get("channel"));
+      if (!channel) throw httpError(404, `unknown conversation ${q.get("channel")} in ${team}`);
+      return { ok: true, seq: slack.state.seq, channel, messages: slack.historyOf(team, channel) };
+    }
+    case "POST /auth-test":
+      return { ok: true, ...slack.authTestFor(body.team) };
     case "POST /forged": {
       // An event Slack did not sign: bad_signature (default), stale_timestamp or missing_signature.
       const event =
@@ -857,26 +1150,45 @@ async function control(slack, method, url, body) {
       // Lets a test point events elsewhere or change retry timing at run time.
       if (body.events_url !== undefined) slack.config.eventsUrl = body.events_url;
       if (body.retry_delays_ms !== undefined) slack.config.retryDelaysMs = body.retry_delays_ms;
+      if (body.history_limit !== undefined) {
+        slack.config.historyLimit = Boolean(body.history_limit);
+        slack.rateLimited.clear();
+      }
+      if (body.history_window_ms !== undefined)
+        slack.config.historyWindowMs = body.history_window_ms;
       return {
         ok: true,
         events_url: slack.config.eventsUrl,
         retry_delays_ms: slack.config.retryDelaysMs,
+        history_limit: slack.config.historyLimit,
+        history_window_ms: slack.config.historyWindowMs,
       };
     case "POST /reset": {
-      // Clears the records; keeps installs and tokens unless {"installs": true}.
+      // Clears the records. Keeps installs and tokens unless {"installs": true},
+      // and what was said unless {"history": true}.
       const keep = body.installs ? emptyState() : { ...slack.state };
       slack.state = {
         ...emptyState(),
         installs: keep.installs,
         tokens: keep.tokens,
+        history: body.history ? {} : slack.state.history,
         seq: slack.state.seq,
       };
+      slack.rateLimited.clear();
       slack.save();
       return { ok: true, seq: slack.state.seq };
     }
     default:
       throw httpError(404, `no control route ${route}`);
   }
+}
+
+/** Sends a member's message event, and keeps the message in Slack's history once
+ *  Slack accepted it (the app is installed). */
+async function sendAndRemember(slack, team, event) {
+  const sent = await slack.sendEvent(team, event);
+  slack.rememberEvent(team, event);
+  return sent;
 }
 
 export function start(config = loadConfig()) {

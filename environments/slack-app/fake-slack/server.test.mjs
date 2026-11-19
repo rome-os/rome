@@ -60,9 +60,12 @@ const ctl = async (path, body) =>
     })
   ).json();
 
-async function install(team, user) {
+// The bot scopes Rome Cloud's Slack app asks for.
+const APP_SCOPES = "app_mentions:read,chat:write,im:history,im:read,im:write,users:read";
+
+async function install(team, user, scopes = APP_SCOPES) {
   const page = await fetch(
-    `${base}/oauth/v2/authorize?client_id=111.222&scope=chat:write,im:history&redirect_uri=http://cloud.test/cb&state=s1&team=${team}`,
+    `${base}/oauth/v2/authorize?client_id=111.222&scope=${scopes}&redirect_uri=http://cloud.test/cb&state=s1&team=${team}`,
   );
   assert.equal(page.status, 200);
   assert.match(await page.text(), /requesting permission/);
@@ -72,7 +75,7 @@ async function install(team, user) {
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: "111.222",
-      scope: "chat:write,im:history",
+      scope: scopes,
       redirect_uri: "http://cloud.test/cb",
       state: "s1",
       team,

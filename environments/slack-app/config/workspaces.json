@@ -21,7 +21,13 @@
           "email": "cara@acme.test"
         }
       ],
-      "channels": [{ "id": "CA0000GENRL", "name": "general" }]
+      "channels": [
+        {
+          "id": "CA0000GENRL",
+          "name": "general",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"]
+        }
+      ]
     },
     {
       "id": "TB0000BBBB",
@@ -49,7 +55,13 @@
           "email": "finn@bayside.test"
         }
       ],
-      "channels": [{ "id": "CB0000GENRL", "name": "general" }]
+      "channels": [
+        {
+          "id": "CB0000GENRL",
+          "name": "general",
+          "members": ["UB0000GUARD", "UB0000ERIN1", "UB0000FINN1"]
+        }
+      ]
     }
   ]
 }

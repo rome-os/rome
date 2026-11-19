@@ -1,0 +1,331 @@
+// Wipes Rome's copy of one Slack conversation from a stopped instance, for R13:
+// everything Rome keeps of that chat's messages, the Slack app connection's own
+// copy included. The product offers no way to do this, so it works on the
+// database directly. It runs inside the instance's image with the instance
+// stopped (ctl.sh wipe-chat does both), and it uses only Node's built-in SQLite.
+//
+// What goes:
+// - the connection's copy: slack_app_messages of the conversation
+// - the chat's record of what was said: chat_messages (and agent_turn_messages)
+//   of the chats the conversation is, by key or by address
+// - the chat's conversations with Rome's agents: every rome_sessions row whose
+//   address is the conversation or whose chat is one of those chats, its
+//   sub-sessions, and the rows that are theirs (the session delete in
+//   webchat/repository.ts lists them)
+// - the agent provider sessions of those conversations and their transcripts on
+//   disk, so a new message starts a model thread that knows nothing of the old
+// What stays: the chat itself (its place and address), the connection, and
+// anything not kept per chat, such as memory.
+//
+// Afterwards every text column of every table is searched for the conversation
+// id and for the text of each wiped message. It exits 3 when a copy is still
+// found, 0 when none is.
+//
+// Usage: node wipe-chat.mjs --conversation D… [--member U…] [--db path]
+//          [--homes /home/rome,/home/user] [--dry-run]
+// Prints one JSON object.
+
+import { chownSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
+const args = parseArgs(process.argv.slice(2));
+const conversation = args.conversation;
+if (!conversation || !/^[A-Z0-9]+$/.test(conversation)) {
+  fail(2, "usage: wipe-chat.mjs --conversation <Slack conversation id> [--member U…] [--db path]");
+}
+const member = args.member && /^[A-Z0-9]+$/.test(args.member) ? args.member : null;
+const homes = (args.homes ?? "/home/rome,/home/user").split(",").filter(Boolean);
+const dryRun = Boolean(args["dry-run"]);
+const dbPath = args.db ?? findDatabase(homes);
+if (!dbPath) fail(2, "no rome.db found under ~/.rome in the instance's homes");
+
+const db = new DatabaseSync(dbPath);
+db.exec("PRAGMA foreign_keys = ON");
+db.exec("PRAGMA busy_timeout = 5000");
+const schema = readSchema(db);
+const has = (table, column) => schema.get(table)?.has(column) ?? false;
+const placeholders = (list) => list.map(() => "?").join(",");
+const all = (sql, ...params) => db.prepare(sql).all(...params);
+
+// ---- What is the chat's
+const chatIds = new Set();
+if (has("chats", "key")) {
+  for (const r of all("SELECT id FROM chats WHERE key = ?", conversation)) chatIds.add(r.id);
+  if (member) {
+    for (const r of all(
+      "SELECT id FROM chats WHERE platform LIKE 'slack%' AND key LIKE 'dm:%:' || ?",
+      member,
+    ))
+      chatIds.add(r.id);
+  }
+  if (has("chat_addresses", "address")) {
+    for (const r of all(
+      `SELECT c.id FROM chats c JOIN chat_addresses a
+         ON a.platform = c.platform AND a.chat_key = c.key WHERE a.address = ?`,
+      conversation,
+    ))
+      chatIds.add(r.id);
+  }
+}
+
+const sessionIds = new Set();
+if (has("rome_sessions", "id")) {
+  const like = `%:${conversation}`;
+  for (const r of all(
+    `SELECT id FROM rome_sessions
+      WHERE id LIKE 'channel:%:' || ? OR id LIKE 'channel:%:' || ? || ':%'
+         OR source_thread_id = ? OR source_thread_id LIKE ? || ':%' OR source_thread_id LIKE ?`,
+    conversation,
+    conversation,
+    conversation,
+    conversation,
+    like,
+  ))
+    sessionIds.add(r.id);
+  if (chatIds.size && has("rome_sessions", "chat_id")) {
+    const ids = [...chatIds];
+    for (const r of all(
+      `SELECT id FROM rome_sessions WHERE chat_id IN (${placeholders(ids)})`,
+      ...ids,
+    ))
+      sessionIds.add(r.id);
+  }
+  // Sub-sessions (subagents, forks) carry the chat's words too.
+  for (let grew = true; grew && has("rome_sessions", "parent_session_id"); ) {
+    grew = false;
+    const ids = [...sessionIds];
+    if (!ids.length) break;
+    for (const r of all(
+      `SELECT id FROM rome_sessions WHERE parent_session_id IN (${placeholders(ids)})`,
+      ...ids,
+    )) {
+      if (!sessionIds.has(r.id)) {
+        sessionIds.add(r.id);
+        grew = true;
+      }
+    }
+  }
+}
+
+const providerSessions = new Map(); // sessions.id -> provider thread id
+if (has("sessions", "id")) {
+  const ids = [...sessionIds];
+  const byChat =
+    ids.length && has("sessions", "chat_id")
+      ? all(
+          `SELECT id, provider_thread_id AS thread FROM sessions WHERE chat_id IN (${placeholders(ids)})`,
+          ...ids,
+        )
+      : [];
+  const byKey = has("sessions", "channel_thread_key")
+    ? all(
+        "SELECT id, provider_thread_id AS thread FROM sessions WHERE instr(channel_thread_key, ?) > 0",
+        conversation,
+      )
+    : [];
+  for (const r of [...byChat, ...byKey]) providerSessions.set(r.id, r.thread);
+}
+
+// The words being wiped, to look for copies of them anywhere else afterwards.
+const words = new Set();
+const collect = (sql, ...params) => {
+  for (const r of all(sql, ...params))
+    if (typeof r.t === "string" && r.t.length >= 8) words.add(r.t);
+};
+if (has("slack_app_messages", "text"))
+  collect("SELECT text AS t FROM slack_app_messages WHERE channel_id = ?", conversation);
+if (chatIds.size && has("chat_messages", "text")) {
+  const ids = [...chatIds];
+  collect(`SELECT text AS t FROM chat_messages WHERE chat_id IN (${placeholders(ids)})`, ...ids);
+}
+
+// ---- Delete
+const deleted = {};
+function remove(table, column, values) {
+  const list = [...values];
+  if (!list.length || !has(table, column)) return;
+  const sql = `DELETE FROM ${table} WHERE ${column} IN (${placeholders(list)})`;
+  const changes = dryRun
+    ? (all(
+        `SELECT count(*) AS n FROM ${table} WHERE ${column} IN (${placeholders(list)})`,
+        ...list,
+      )[0].n ?? 0)
+    : Number(db.prepare(sql).run(...list).changes);
+  if (changes) deleted[table] = (deleted[table] ?? 0) + changes;
+}
+
+db.exec("BEGIN IMMEDIATE");
+try {
+  remove("slack_app_messages", "channel_id", [conversation]);
+  if (chatIds.size && has("chat_messages", "id")) {
+    const ids = [...chatIds];
+    const messageIds = all(
+      `SELECT id FROM chat_messages WHERE chat_id IN (${placeholders(ids)})`,
+      ...ids,
+    ).map((r) => r.id);
+    remove("agent_turn_messages", "message_id", messageIds);
+    remove("chat_messages", "chat_id", ids);
+  }
+  // The rows of a session, as WebchatRepository.deleteSessionRows lists them,
+  // and the Concierge's per-message rows keyed by the session's chat id.
+  for (const [table, column] of [
+    ["agent_turn_messages", "session_id"],
+    ["rome_agent_trace_blocks", "session_id"],
+    ["rome_agent_messages", "session_id"],
+    ["rome_agent_message_platform_ids", "session_id"],
+    ["webchat_turn_feedback", "session_id"],
+    ["chat_outputs", "session_id"],
+    ["chat_output_backfills", "session_id"],
+    ["webchat_workspace_layouts", "session_id"],
+    ["shared_chats", "session_id"],
+    ["concierge_message_turns", "chat_id"],
+    ["concierge_message_tasks", "chat_id"],
+    ["rome_sessions", "id"],
+  ]) {
+    remove(table, column, sessionIds);
+  }
+  remove("session_turn_checkpoints", "session_id", providerSessions.keys());
+  remove("sessions", "id", providerSessions.keys());
+  db.exec(dryRun ? "ROLLBACK" : "COMMIT");
+} catch (error) {
+  db.exec("ROLLBACK");
+  fail(1, `wipe failed: ${error.message}`);
+}
+
+// ---- Provider transcripts
+const threads = new Set([...providerSessions.values()].filter(Boolean));
+const transcripts = [];
+for (const home of homes) walk(home, 0);
+function walk(dir, depth) {
+  if (depth > 7 || !existsSync(dir)) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.name === "node_modules" || e.name === ".git") continue;
+    const path = join(dir, e.name);
+    const stem = e.name.replace(/\.jsonl$/, "");
+    if (threads.has(stem) && (e.isDirectory() || e.name.endsWith(".jsonl"))) {
+      transcripts.push(path);
+      if (!dryRun) rmSync(path, { recursive: true, force: true });
+    } else if (e.isDirectory()) {
+      walk(path, depth + 1);
+    }
+  }
+}
+
+// ---- Look for anything left
+// A dry run changed nothing, so it has nothing to check.
+const remaining = {};
+for (const [table, columns] of dryRun ? [] : schema) {
+  for (const column of columns) {
+    if (!isTextColumn(table, column)) continue;
+    const needles = [conversation, ...words];
+    let n = 0;
+    for (const needle of needles) {
+      n += all(`SELECT count(*) AS n FROM ${table} WHERE instr("${column}", ?) > 0`, needle)[0].n;
+    }
+    if (n) (remaining[table] ??= {})[column] = n;
+  }
+}
+// The chat's own place and address name the conversation and hold no message.
+const PLACES = new Set(["chats", "chat_addresses"]);
+const copies = Object.fromEntries(Object.entries(remaining).filter(([t]) => !PLACES.has(t)));
+
+db.close();
+if (!dryRun) keepOwner(dbPath);
+
+const result = {
+  ok: Object.keys(copies).length === 0,
+  dry_run: dryRun,
+  db: dbPath,
+  conversation,
+  member,
+  chats: [...chatIds],
+  sessions: [...sessionIds],
+  provider_sessions: [...providerSessions.keys()],
+  deleted,
+  transcripts,
+  remaining,
+};
+console.log(JSON.stringify(result));
+process.exit(result.ok ? 0 : 3);
+
+// ---------------------------------------------------------------------------
+
+function readSchema(database) {
+  const tables = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all()
+    .map((r) => r.name)
+    .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
+  const map = new Map();
+  for (const table of tables) {
+    const columns = database.prepare(`PRAGMA table_info("${table}")`).all();
+    map.set(table, new Map(columns.map((c) => [c.name, String(c.type).toUpperCase()])));
+  }
+  // Callers use `.has(column)`; keep the type for the scan.
+  return new Map(
+    [...map].map(([table, columns]) => {
+      const set = new Set(columns.keys());
+      set.types = columns;
+      return [table, set];
+    }),
+  );
+}
+
+function isTextColumn(table, column) {
+  const type = schema.get(table).types.get(column) ?? "";
+  return /^[A-Za-z0-9_]+$/.test(column) && (type === "" || /TEXT|CHAR|CLOB|JSON/.test(type));
+}
+
+function findDatabase(roots) {
+  const found = [];
+  for (const root of roots) {
+    const dir = join(root, ".rome");
+    if (!existsSync(dir)) continue;
+    for (const profile of readdirSync(dir)) {
+      const path = join(dir, profile, "rome.db");
+      if (existsSync(path)) found.push({ path, at: statSync(path).mtimeMs });
+    }
+  }
+  found.sort((a, b) => b.at - a.at);
+  return found[0]?.path ?? null;
+}
+
+/** SQLite may leave -wal and -shm files behind; they must stay Rome's. */
+function keepOwner(path) {
+  const { uid, gid } = statSync(path);
+  for (const suffix of ["-wal", "-shm"]) {
+    try {
+      if (existsSync(path + suffix)) chownSync(path + suffix, uid, gid);
+    } catch {
+      // Not root: the files are already ours, which is Rome's.
+    }
+  }
+}
+
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) continue;
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (next === undefined || next.startsWith("--")) out[key] = true;
+    else {
+      out[key] = next;
+      i++;
+    }
+  }
+  return out;
+}
+
+function fail(code, message) {
+  console.log(JSON.stringify({ ok: false, error: message }));
+  process.exit(code);
+}

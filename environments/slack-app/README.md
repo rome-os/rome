@@ -7,6 +7,8 @@ Everything the official Slack app and its verifier need to run with no person pr
 ```bash
 environments/slack-app/up.sh --rome <ref> --rome-cloud <ref>   # default origin/main for both
 environments/slack-app/ctl.sh stop rome-a                       # and start, status; logs <service>
+environments/slack-app/ctl.sh wipe-chat rome-a DA000BOB01       # wipe Rome's copy of one chat
+echo 'select count(*) from users' | environments/slack-app/ctl.sh cloud-query
 environments/slack-app/down.sh                                  # removes containers, volumes and .state
 ```
 
@@ -14,7 +16,12 @@ environments/slack-app/down.sh                                  # removes contai
 
 It runs only committed code. It refuses to start when this folder has uncommitted changes, and it checks rome and rome-cloud out at the given commits into fresh worktrees under `.state/`, so nothing uncommitted in either checkout reaches the environment. The first start of a rome commit builds its production image, which takes several minutes.
 
-When it is ready it writes `.state/env.json` (gitignored): the scratch checkouts of rome (with its dependencies installed, so `pnpm lint:imports` runs there) and rome-cloud, the rome-cloud base ref to diff against, the commits of the environment, rome and rome-cloud, the agent model, the fake Slack's address and control API, Rome Cloud's address, and each instance's address, guardian, signed-in guardian session, and stop and start commands.
+When it is ready it writes `.state/env.json` (gitignored): the scratch checkouts of rome (with its dependencies installed, so `pnpm lint:imports` runs there) and rome-cloud, the rome-cloud base ref to diff against, the commits of the environment, rome and rome-cloud, the agent model, the fake Slack's address and control API, Rome Cloud's address, Rome Cloud's read-only query command, and each instance's address, guardian, signed-in guardian session, and its controls (stop, start, status, wipe_chat).
+
+## Controls
+
+- `ctl.sh wipe-chat <instance> <conversation id>` wipes Rome's copy of one Slack conversation, which the product offers no way to do. It stops the instance, runs `tools/wipe-chat.mjs` on its database in the instance's image, and starts the instance again if it was running. Gone afterwards: the Slack app connection's own copy (`slack_app_messages`), the chat's messages (`chat_messages`), the chat's conversations with Rome's agents (`rome_sessions` of the chat and their sub-sessions, with their messages, traces, outputs and per-message rows), and the agent provider sessions of those conversations with their transcripts on disk, so the next message starts a model thread that knows nothing of the old. The chat's place and address stay, and so do the connection and memory. It then searches every text column for the conversation id and for each wiped message's text, and prints JSON with what it deleted and what it found. It exits 0 when no copy is left, 3 when one is.
+- `ctl.sh cloud-query` reads one SELECT (or WITH) query on stdin and prints its rows as a JSON array. It runs as `slackenv_reader`, a role that can only read, inside a read-only transaction.
 
 ## What runs
 
@@ -32,15 +39,18 @@ Each instance and Rome Cloud run inside the network namespace of a small forward
 
 ## Fake Slack
 
-`fake-slack/server.mjs` stands in for `slack.com`. It has no dependencies and runs on Node 22 or later. Its tests, and those of the model proxy and the certificate maker, run with `node --test environments/slack-app/fake-slack/server.test.mjs environments/slack-app/tools/model-proxy.test.mjs environments/slack-app/tools/make-cert.test.mjs`.
+`fake-slack/server.mjs` stands in for `slack.com`. It has no dependencies and runs on Node 22 or later. Its tests, and those of the tools, run with `node --test environments/slack-app/fake-slack/*.test.mjs environments/slack-app/tools/*.test.mjs`. The wipe's test builds a database from Rome's migrations; `ROME_SRC=<rome checkout>` picks whose (by default this checkout's).
 
 It serves:
 
 - the approve screen, `GET /oauth/v2/authorize`, with the usual `client_id`, `scope`, `user_scope`, `redirect_uri` and `state`. Pressing Allow redirects to `redirect_uri` with `code` and `state`. Pressing Cancel redirects with `error=access_denied`. Optional `team` and `user` query parameters pick the workspace and the member signing in, and so does `POST /_control/sign-in`.
-- the Web API under `/api/{method}`: `oauth.v2.access`, `auth.test`, `auth.revoke`, `chat.postMessage`, `conversations.open`, `users.info`. Arguments come as a form, JSON or a query, and the token as `Authorization: Bearer` or `token`. Unknown methods answer `unknown_method`. Every call is recorded.
+- the Web API under `/api/{method}`: `oauth.v2.access`, `auth.test`, `auth.revoke`, `chat.postMessage`, `conversations.open`, `users.info`, `conversations.history` and `conversations.replies`. Arguments come as a form, JSON or a query, and the token as `Authorization: Bearer` or `token`. Unknown methods answer `unknown_method`. Every call is recorded, a refused one with its error.
+- scopes, as Slack checks them for a bot token: an install holds the scopes its sign-ins asked for, and a method the token lacks the scope for answers `missing_scope` with `needed` and `provided` (`chat.postMessage` needs `chat:write`, `conversations.open` `im:write`, `users.info` `users:read`, and a history read `im:history`, `channels:history` or `groups:history` by the kind of conversation). Slack sends no event the install lacks the scope for: `message.im` needs `im:history` and `app_mention` `app_mentions:read`, and the control call that would send it answers 409.
+- what was said. Every direct message, mention, group message and post is kept in its conversation, with threads: a reply carries `thread_ts`, and its parent `reply_count`, `reply_users` and `latest_reply`. `conversations.history` answers a conversation's top-level messages newest first, and `conversations.replies` a thread oldest first with the parent at the top. Both take `limit`, `cursor`, `oldest`, `latest` and `inclusive`, and answer `has_more` and `response_metadata.next_cursor`.
+- Slack's limit for an app outside the Marketplace on those two methods, on by default: one request a minute per method and workspace, at most 15 messages a request (also the default), and HTTP 429 `ratelimited` with `Retry-After` beyond that. `POST /_control/config {history_limit: false}` lifts it to Slack's ordinary page size (default 100, at most 999) with no rate limit.
 - events, posted to the configured events address and signed as Slack signs them: `X-Slack-Request-Timestamp` and `X-Slack-Signature: v0=` HMAC SHA256 of `v0:{timestamp}:{body}` with the signing secret. An event that gets no 2xx is retried with `X-Slack-Retry-Num` and `X-Slack-Retry-Reason`.
 
-The workspaces and their members are in `config/workspaces.json`: workspace A `TA0000AAAA` (Acme) and workspace B `TB0000BBBB` (Bayside), each with a guardian, two other members and a `#general` group. The bot user in a workspace is always `UBOT` plus the team id without its `T`, and a member's direct message with the bot is always the same conversation id, listed by `GET /_control/state`. The app is installed in a workspace once a sign-in there finishes, and one workspace has one bot token, as in Slack.
+The workspaces and their members are in `config/workspaces.json`: workspace A `TA0000AAAA` (Acme) and workspace B `TB0000BBBB` (Bayside), each with a guardian, two other members and a `#general` group that all three are in. Any member can send the bot a direct message, not only the one who signed in. The bot user in a workspace is always `UBOT` plus the team id without its `T`, and a member's direct message with the bot is always the same conversation id, listed by `GET /_control/state`. The app is installed in a workspace once a sign-in there finishes, and one workspace has one bot token, as in Slack. Removing the app (`/uninstall`) sends `tokens_revoked` and `app_uninstalled` and revokes the tokens. A sign-in after that installs it again with a new bot token and the same bot user, and what was said before stays in Slack.
 
 ### Control API
 
@@ -49,10 +59,13 @@ All under `/_control`, JSON in and out.
 | Call | What it does |
 |---|---|
 | `GET /health` | Answers `{ ok: true }`. |
-| `GET /state` | The app's ids, the events address, each workspace with its install, bot ids, members with their direct-message conversation ids, and groups. |
+| `GET /state` | The app's ids, the events address, the history limit, each workspace with its install, its bot token's state and scopes, bot ids, members with their direct-message conversation ids, and groups with their members. |
 | `POST /sign-in {team, user}` | Picks who the approve screen signs in as. |
-| `POST /dm {team, user, text}` | A member sends the bot a direct message. Sends a signed `message.im` event and returns `event_id`, the `event` (with `channel` and `ts`), and the first `delivery` (status, time taken). Refused with 409 if the app is not installed in that workspace. |
-| `POST /mention {team, user, channel?, text}` | A member mentions the bot in a group (default `general`). Sends a signed `app_mention` event. |
+| `POST /dm {team, user, text, thread_ts?}` | A member sends the bot a direct message. Sends a signed `message.im` event and returns `event_id`, the `event` (with `channel` and `ts`), and the first `delivery` (status, time taken). Refused with 409 if the app is not installed in that workspace, or lacks `im:history`. |
+| `POST /mention {team, user, channel?, text, thread_ts?}` | A member mentions the bot in a group (default `general`), or in a thread there. Sends a signed `app_mention` event. |
+| `POST /group-message {team, user, channel?, text, thread_ts?, send_event?}` | A member writes in a group without mentioning the bot. It goes into the group's history only, because the app subscribes to no group message event; `send_event: true` also sends it as `message.channels`. |
+| `GET /history?team&channel` | Everything kept in one conversation, oldest first, threads included, with no limit. |
+| `POST /auth-test {team}` | Runs `auth.test` with the newest bot token issued in the workspace, unrecorded, and answers `token_state` (`active` or `revoked`) and Slack's answer. |
 | `POST /forged {team, user, text, kind?, mode?}` | Sends a direct message (or, with `kind: "mention"`, a mention) that Slack did not sign. `mode` is `bad_signature` (default), `stale_timestamp` (signed, but 10 minutes old) or `missing_signature`. Forged events are not retried. |
 | `POST /event {team, event, signature?}` | Sends any event body, signed unless `signature` names a forgery. |
 | `POST /url-verification` | Sends Slack's `url_verification` challenge and returns what the address answered. |
@@ -60,7 +73,7 @@ All under `/_control`, JSON in and out.
 | `GET /posts?team&channel&thread_ts&since` | What was posted through `chat.postMessage`, oldest first, each with `seq`, `channel`, `ts`, `threadTs`, `text` and the token kind. |
 | `GET /calls?team&method&since` | Every Web API call received, with secrets redacted. |
 | `GET /events?since` and `GET /deliveries?event_id&since` | Every event sent, and every delivery attempt with its status. |
-| `POST /config {events_url?, retry_delays_ms?}` | Changes the events address or the retry delays while running. |
-| `POST /reset {installs?}` | Clears the records. Keeps installs and tokens unless `installs` is true. |
+| `POST /config {events_url?, retry_delays_ms?, history_limit?, history_window_ms?}` | Changes the events address, the retry delays, or the history limit while running. |
+| `POST /reset {installs?, history?}` | Clears the records. Keeps installs and tokens unless `installs` is true, and what was said unless `history` is true. |
 
 Every record carries a `seq` from one counter, and each list answers with the current `seq`, so a test reads "everything since" by passing the `seq` it saw before acting.

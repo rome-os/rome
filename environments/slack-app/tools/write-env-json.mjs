@@ -31,6 +31,14 @@ const instance = (name, port, guardian) => ({
   stop: [ctl, "stop", name],
   start: [ctl, "start", name],
   status: [ctl, "status", name],
+  control: {
+    stop: [ctl, "stop", name],
+    start: [ctl, "start", name],
+    status: [ctl, "status", name],
+    // Append a Slack conversation id. Stops the instance, wipes Rome's copy of
+    // that chat, starts it again; exit 0 when no copy is left.
+    wipe_chat: [ctl, "wipe-chat", name],
+  },
 });
 
 const fakeSlack = `http://127.0.0.1:${e.FAKE_SLACK_PORT}`;
@@ -63,6 +71,9 @@ console.log(
         client_id: e.SLACK_CLIENT_ID,
         events_url: e.FAKE_SLACK_EVENTS_URL,
         retry_delays_ms: e.FAKE_SLACK_RETRY_DELAYS_MS.split(",").map(Number),
+        // Slack's limit on conversations.history and .replies for an app
+        // outside the Marketplace; POST control/config {history_limit} changes it.
+        history_limit: { on: true, requests_per_minute: 1, max_messages: 15 },
         workspaces: workspaces.map((w) => ({
           id: w.id,
           name: w.name,
@@ -74,6 +85,8 @@ console.log(
       rome_cloud: {
         url: `http://127.0.0.1:${e.PANTHEON_PORT}`,
         dev_sign_in: `http://127.0.0.1:${e.PANTHEON_PORT}/api/auth/dev/start?email=`,
+        // SQL on stdin, a JSON array of rows on stdout, read only.
+        query: [ctl, "cloud-query"],
       },
       relay: { url_inside_network: "http://relay:8787" },
       instances: [
