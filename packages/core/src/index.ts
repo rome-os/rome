@@ -907,15 +907,23 @@ async function main() {
   });
   // Uninstall releases an app's managed routines. Apps removed before that
   // rule existed left routines nobody can maintain, so release those here.
-  const installedAppIds = new Set(appCatalog.list().map((view) => view.appId));
-  const orphanedManagers = (await routinesRepo.managingAppIds()).filter(
-    (appId) => !installedAppIds.has(appId),
-  );
-  const releasedRoutines = await routinesRepo.releaseManagedRoutines(orphanedManagers);
-  if (releasedRoutines > 0) {
-    appsLog.info("released routines of removed apps", {
-      apps: orphanedManagers,
-      routines: releasedRoutines,
+  // Read the lockfile, not the catalog: the catalog is incomplete when
+  // appManager.boot() failed, and a release can't be undone by the app.
+  try {
+    const orphanedManagers: string[] = [];
+    for (const appId of await routinesRepo.managingAppIds()) {
+      if ((await appManager.readLockfileEntry(appId)) == null) orphanedManagers.push(appId);
+    }
+    const releasedRoutines = await routinesRepo.releaseManagedRoutines(orphanedManagers);
+    if (releasedRoutines > 0) {
+      appsLog.info("released routines of removed apps", {
+        apps: orphanedManagers,
+        routines: releasedRoutines,
+      });
+    }
+  } catch (err) {
+    appsLog.warn("could not release routines of removed apps", {
+      error: err instanceof Error ? err.message : String(err),
     });
   }
   const coreRequiredAppIds = await deriveCoreRequiredApps({ projectRoot: getProjectRoot() });
