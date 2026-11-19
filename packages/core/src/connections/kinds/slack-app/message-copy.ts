@@ -74,6 +74,8 @@ export interface SlackMessageCopy {
   timelineBefore(teamId: string, channelId: string, ts: string, count: number): TimelineRow[];
   /** The timeline message linked as coming right after `ts`, if any. */
   timelineAfter(teamId: string, channelId: string, ts: string): TimelineRow | null;
+  /** Whether the copy holds a timeline message of the chat newer than `ts`. */
+  holdsNewer(teamId: string, channelId: string, ts: string): boolean;
 }
 
 /** The copy in Rome's database. */
@@ -266,6 +268,22 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       )
       .get();
     return row ? timelineRowOf(row) : null;
+  }
+
+  holdsNewer(teamId: string, channelId: string, ts: string): boolean {
+    const row = this.db
+      .select({ ts: slackAppTimeline.ts })
+      .from(slackAppTimeline)
+      .where(
+        and(
+          eq(slackAppTimeline.teamId, teamId),
+          eq(slackAppTimeline.channelId, channelId),
+          gt(slackAppTimeline.ts, ts),
+        ),
+      )
+      .limit(1)
+      .get();
+    return row !== undefined;
   }
 }
 

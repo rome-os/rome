@@ -110,6 +110,7 @@ describe("Slack app members who did not sign in (R12)", () => {
         timelineRow: () => null,
         timelineBefore: () => [],
         timelineAfter: () => null,
+        holdsNewer: () => false,
       },
     });
     const heard: ChannelMessage[] = [];

@@ -1110,6 +1110,25 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 3"]);
   });
 
+  it("takes no backlog message older than what the copy holds for the chat's newest", async () => {
+    const slack = fakeSlackHistory();
+    const said = Array.from({ length: 5 }, (_, i) => slack.say(i + 1));
+    const first = fakeMailbox();
+    const before = historyAdapter(first, slack);
+    await before.adapter.start();
+    await first.deposit(frame(dmEvent(4)), frame(dmEvent(5)));
+    await before.adapter.stop();
+
+    // After a restart the mailbox hands over message 1, which the copy never held.
+    const second = fakeMailbox();
+    const after = historyAdapter(second, slack, { db: before.db });
+    await after.adapter.start();
+    await second.deposit(frame({ ...dmEvent(1), event: { ...dmEvent(1).event, ts: said[0].ts } }));
+
+    const read = await after.adapter.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    expect(texts(read)).toEqual(["message 5"]);
+  });
+
   it("asks Slack again after a message heard out of order", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
