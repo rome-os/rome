@@ -222,9 +222,7 @@ import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerReadPersonAction } from "./people/read-person.js";
-import { registerRoutineRunActions } from "./routines/run-actions.js";
-import { registerRoutineEnabledActions } from "./routines/enabled-actions.js";
-import { registerRoutineRunNowActions } from "./routines/run-now-actions.js";
+import { routineControlService, routineOperations } from "./routines/control.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -1471,14 +1469,15 @@ async function main() {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  registerRoutineRunActions(actionRegistry, {
+  // What the system app's routine actions do beyond create, search and
+  // delete: in this process directly, from a worker over `routines.control`.
+  const routineOps = routineOperations({
     routines: routinesRepo,
+    engine: routineEngine,
     routineRuns: routineRunsRepo,
     actionExecutions: actionExecutionsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  registerRoutineEnabledActions(actionRegistry, { routines: routinesRepo, engine: routineEngine });
-  registerRoutineRunNowActions(actionRegistry, { routines: routinesRepo, engine: routineEngine });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
@@ -1600,6 +1599,7 @@ async function main() {
     policyEngine,
     routinesRepo,
     routineEngine,
+    routineControl: routineControlService(routineOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2158,7 +2158,12 @@ async function main() {
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
-      ...routineWorkerCalls({ routinesRepo, routineEngine, routineCreation }),
+      ...routineWorkerCalls({
+        routinesRepo,
+        routineEngine,
+        routineCreation,
+        routineOperations: routineOps,
+      }),
       ...connectionWorkerCalls({
         appConnections,
         appIdForAction: (actionName) => {

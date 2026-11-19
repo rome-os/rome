@@ -109,3 +109,45 @@ describe("routines.create", () => {
     expect(create).toHaveBeenCalledWith(input, { kind: "action", origin: { actor: null } });
   });
 });
+
+describe("routines.control", () => {
+  function controlCalls() {
+    const listRuns = rs.fn(async () => ({ status: "ok" as const, data: null }));
+    const calls = routineWorkerCalls({
+      routineOperations: { listRuns, readRun: rs.fn() },
+    } as unknown as RoutineWorkerCallsDeps);
+    return { calls, listRuns };
+  }
+
+  it("runs the operation for the turn of the worker's action, as the IPC boundary captured it", async () => {
+    const { calls, listRuns } = controlCalls();
+    const actor = { kind: "guardian" as const, userId: "g", via: "cookie" as const };
+    const channelContext = { channel: "webchat", threadId: "chat-1" };
+    const context = {
+      callerActionContext: { actor, audience: "private", channelContext },
+    } as IpcCallContext;
+
+    await calls["routines.control"]({ op: "listRuns", input: { routineId: "r-1" } }, context);
+
+    expect(listRuns).toHaveBeenCalledWith(
+      { routineId: "r-1" },
+      { actor, audience: "private", channelContext },
+    );
+  });
+
+  it("runs it for no one when the call carries no turn", async () => {
+    const { calls, listRuns } = controlCalls();
+
+    await calls["routines.control"]({ op: "listRuns", input: {} });
+
+    expect(listRuns).toHaveBeenCalledWith({}, {});
+  });
+
+  it("rejects an operation it does not know", async () => {
+    const { calls } = controlCalls();
+
+    await expect(calls["routines.control"]({ op: "dropTable", input: {} })).rejects.toThrow(
+      "routines.control: invalid params",
+    );
+  });
+});

@@ -20,6 +20,11 @@ import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { CreateRoutineResult, RoutineCreationService } from "../routines/create.js";
 import type {
+  RoutineControlOp,
+  RoutineControlResult,
+  RoutineControlService,
+} from "../routines/control.js";
+import type {
   AgentFeedback,
   FeedbackOutcome,
   FeedbackService,
@@ -171,6 +176,14 @@ export class RoutineCreationProxy implements RoutineCreationService {
         ...(context?.agentName ? { agentName: context.agentName } : {}),
       },
     });
+  }
+}
+
+/** Worker-side stand-in for core's routine operations: the main process runs
+ * them, for the turn of this worker's action. */
+export class RoutineControlProxy implements RoutineControlService {
+  call(op: RoutineControlOp, input: unknown): Promise<RoutineControlResult> {
+    return callMain<RoutineControlResult>("routines.control", { op, input });
   }
 }
 

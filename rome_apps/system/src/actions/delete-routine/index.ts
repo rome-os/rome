@@ -69,7 +69,7 @@ export async function deleteRoutine(
         error:
           `Routine "${input.routineId}" has ${result.activeRuns} active run(s) ` +
           "(running or awaiting approval) and was not deleted. Wait for them to " +
-          "finish, or stop a running one with core:routine_stop, then try again. " +
+          "finish, or stop a running one with system:stop_routine, then try again. " +
           "A run awaiting approval ends only when the guardian approves or rejects it.",
       };
     case "deleted":

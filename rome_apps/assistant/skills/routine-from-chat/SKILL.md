@@ -24,7 +24,7 @@ A routine fires one of three ways. Decide which the request is:
   at noon", "the 1st of each month", "every morning".
 - **Manual** — "save this so I can run it whenever": a playbook with **no**
   automatic trigger. The guardian runs it from the Routines page's "Run now"
-  button, or asks an agent, which runs it with `core:routine_run_now`.
+  button, or asks an agent, which runs it with `system:run_routine`.
 
 If it's ambiguous ("remind me about the standup"), ask one short question to
 disambiguate before going further. In particular, if it's unclear whether they

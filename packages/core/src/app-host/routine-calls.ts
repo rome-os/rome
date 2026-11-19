@@ -6,6 +6,11 @@ import { z } from "zod";
 import type { IpcCallContext } from "../apps/actions/ipc.js";
 import { toRoutine, type RoutinesRepository } from "../db/repositories/routines.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
+import {
+  ROUTINE_CONTROL_OPS,
+  type RoutineOperations,
+  type RoutineTurn,
+} from "../routines/control.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { RoutineCreationService } from "../routines/create.js";
 
@@ -17,6 +22,7 @@ const CreateParams = z.object({
   input: z.unknown(),
   caller: z.object({ callerAppId: z.string().optional(), agentName: z.string().optional() }),
 });
+const ControlParams = z.object({ op: z.enum(ROUTINE_CONTROL_OPS), input: z.unknown() });
 
 function routineIdOf(method: string, params: unknown): string {
   return parseWorkerCallParams(method, RoutineIdParams, params).routineId;
@@ -26,6 +32,7 @@ export interface RoutineWorkerCallsDeps {
   routinesRepo: Pick<RoutinesRepository, "findById">;
   routineEngine: Pick<RoutineEngine, "activate" | "deactivate">;
   routineCreation: RoutineCreationService;
+  routineOperations: RoutineOperations;
 }
 
 /** The routine calls an app's worker makes, keyed by method name. */
@@ -66,5 +73,21 @@ export function routineWorkerCalls(
       await deps.routineEngine.deactivate(routineId);
       return { ok: true };
     },
+    // A system app routine action, for the turn of the worker's action as the
+    // IPC boundary captured it. Without one, the turn shows no one and the
+    // operation refuses.
+    "routines.control": async (params, context) => {
+      const { op, input } = parseWorkerCallParams("routines.control", ControlParams, params);
+      return deps.routineOperations[op](input, turnOf(context));
+    },
+  };
+}
+
+function turnOf(context: IpcCallContext | undefined): RoutineTurn {
+  const from = context?.callerActionContext;
+  return {
+    ...(from?.actor ? { actor: from.actor } : {}),
+    ...(from?.audience ? { audience: from.audience } : {}),
+    ...(from?.channelContext ? { channelContext: from.channelContext } : {}),
   };
 }

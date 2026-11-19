@@ -1,28 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
+import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { systemClock } from "../lib/clock.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import {
-  registerRoutineRunNowActions,
-  ROUTINE_RUN_NOW_ACTION,
-  ROUTINE_STOP_ACTION,
-} from "./run-now-actions.js";
+  type RoutineOperations,
+  type RoutineTurn,
+  routineControlService,
+  routineOperations,
+} from "./control.js";
 import { RoutineEngine } from "./engine.js";
 
-const guardianAsked: ActionRunContext = {
+const guardianAsked: RoutineTurn = {
   actor: { kind: "guardian", userId: "guardian", via: "cookie" },
   audience: "private",
 };
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
-let engine: ActionEngine;
+let ops: RoutineOperations;
 let finishRun: () => void;
 const routineEngine = {
+  activate: rs.fn(async () => {}),
+  deactivate: rs.fn(async () => {}),
   runNow: rs.fn(
     (_id: string, _payload: Record<string, unknown>, onStarted?: (runId: string) => void) =>
       new Promise<{ runId: string; status: "success" }>((resolve) => {
@@ -39,15 +42,12 @@ beforeEach(() => {
   routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
-  const registry = new ActionRegistryImpl();
-  registerRoutineRunNowActions(registry, { routines, engine: routineEngine });
-  engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
-    processRole: "main",
-    workerWarmPoolSize: 0,
-    isFirstPartyAction: (name) => name === ROUTINE_RUN_NOW_ACTION || name === ROUTINE_STOP_ACTION,
-    actionWorkerFork: rs.fn(() => {
-      throw new Error("Running a routine now must run in main");
-    }),
+  ops = routineOperations({
+    routines,
+    engine: routineEngine,
+    routineRuns: new RoutineRunsRepository(testDb.db),
+    actionExecutions: new ActionExecutionsRepository(testDb.db),
+    ownerOfChat: async () => "guardian",
   });
 });
 
@@ -65,11 +65,11 @@ const createRoutine = () =>
     enabled: false,
   });
 
-describe("core:routine_run_now", () => {
+describe("running a routine now", () => {
   it("starts the run and answers with its id without waiting for it to finish", async () => {
     const id = await createRoutine();
 
-    const result = await engine.run(ROUTINE_RUN_NOW_ACTION, { routineId: id }, guardianAsked);
+    const result = await ops.runNow({ routineId: id }, guardianAsked);
 
     expect(result).toEqual({
       status: "ok",
@@ -81,11 +81,7 @@ describe("core:routine_run_now", () => {
   it("passes its input to the run as a trigger's payload", async () => {
     const id = await createRoutine();
 
-    await engine.run(
-      ROUTINE_RUN_NOW_ACTION,
-      { routineId: id, input: { repo: "acme/widgets" } },
-      guardianAsked,
-    );
+    await ops.runNow({ routineId: id, input: { repo: "acme/widgets" } }, guardianAsked);
 
     expect(routineEngine.runNow).toHaveBeenCalledWith(
       id,
@@ -95,7 +91,7 @@ describe("core:routine_run_now", () => {
   });
 
   it("names the action to find the right id when the routine does not exist", async () => {
-    const result = await engine.run(ROUTINE_RUN_NOW_ACTION, { routineId: "nope" }, guardianAsked);
+    const result = await ops.runNow({ routineId: "nope" }, guardianAsked);
     expect(result).toMatchObject({
       status: "error",
       error: expect.stringContaining("search_routine"),
@@ -104,7 +100,7 @@ describe("core:routine_run_now", () => {
   });
 
   it("names the field to pass when the id comes under another name", async () => {
-    const result = await engine.run(ROUTINE_RUN_NOW_ACTION, { id: "a-routine" }, guardianAsked);
+    const result = await ops.runNow({ id: "a-routine" }, guardianAsked);
     expect(result).toEqual({
       status: "error",
       error: "Pass the routine's id as routineId. Find it with system:search_routine.",
@@ -114,11 +110,7 @@ describe("core:routine_run_now", () => {
 
   it("refuses a turn the guardian's own message did not start, and runs nothing", async () => {
     const id = await createRoutine();
-    const result = await engine.run(
-      ROUTINE_RUN_NOW_ACTION,
-      { routineId: id },
-      { audience: "private" },
-    );
+    const result = await ops.runNow({ routineId: id }, { audience: "private" });
     expect((result as { error: string }).error).toMatch(/^routine_needs_guardian:/);
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
@@ -126,6 +118,15 @@ describe("core:routine_run_now", () => {
 
 describe("a routine's fire", () => {
   it("cannot run a routine, though the guardian made it in their private chat", async () => {
+    // The system action as it runs in the main process: the engine puts the
+    // fire's context in the action's store, and the action asks for its turn.
+    const engine = {
+      run: (_name: string, args: Record<string, unknown>, context: ActionRunContext) =>
+        actionExecutionContext.run(
+          { ...context, executionId: "fire", rootExecutionId: "fire", initiator: "routine" },
+          () => routineControlService(ops).call("runNow", args),
+        ),
+    } as unknown as ActionEngine;
     const id = await actionExecutionContext.run(
       {
         executionId: "e",
@@ -137,7 +138,7 @@ describe("a routine's fire", () => {
         routines.create({
           name: "Run myself again",
           trigger: { type: "manual" },
-          actionName: ROUTINE_RUN_NOW_ACTION,
+          actionName: "system:run_routine",
           args: {},
           chatId: "guardian-chat",
         }),
@@ -158,11 +159,11 @@ describe("a routine's fire", () => {
   });
 });
 
-describe("core:routine_stop", () => {
+describe("stopping a routine's run", () => {
   it("stops the routine's running run", async () => {
     const id = await createRoutine();
 
-    const result = await engine.run(ROUTINE_STOP_ACTION, { routineId: id }, guardianAsked);
+    const result = await ops.stop({ routineId: id }, guardianAsked);
 
     expect(result).toEqual({
       status: "ok",
@@ -173,11 +174,7 @@ describe("core:routine_stop", () => {
 
   it("refuses a chat that is not private with the guardian, and stops nothing", async () => {
     const id = await createRoutine();
-    const result = await engine.run(
-      ROUTINE_STOP_ACTION,
-      { routineId: id },
-      { ...guardianAsked, audience: "shared" },
-    );
+    const result = await ops.stop({ routineId: id }, { ...guardianAsked, audience: "shared" });
     expect((result as { error: string }).error).toMatch(/^routine_private_only:/);
     expect(routineEngine.cancelRun).not.toHaveBeenCalled();
   });

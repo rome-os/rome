@@ -262,6 +262,7 @@ export class IpcRpc {
         method === "notify.send" ||
         method === "session.continue" ||
         method === "routines.create" ||
+        method === "routines.control" ||
         method === "agent.session.runTurn"
       ) {
         request.callerActionContext = {
