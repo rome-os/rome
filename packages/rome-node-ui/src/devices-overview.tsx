@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type MouseEventHandler, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@rome-os/ui/badge";
 import { Button } from "@rome-os/ui/button";
 import { Card } from "@rome-os/ui/card";
@@ -19,7 +19,7 @@ import {
   SectionTitle,
 } from "@rome-os/ui/page";
 import { ChevronRight, Plus } from "lucide-react";
-import { DeviceActionsMenu, DeviceMenu } from "./device-manage.js";
+import { DeviceMenu } from "./device-manage.js";
 import { platformOf } from "./format.js";
 import { messagesFor, plural, type NodeUiMessages } from "./messages.js";
 import { DeviceIcon, NavLink, useNow } from "./parts.js";
@@ -30,15 +30,6 @@ import { useNodeSocket, useStats, type NodeSocket } from "./use-node-socket.js";
 
 const SETUP_GUIDE = "https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md";
 
-export interface NodeDevicePairing {
-  id: string;
-  name: string;
-  waitingLabel: string;
-  onOpen: MouseEventHandler<HTMLButtonElement>;
-  onRename(): void;
-  onRemove(): void;
-}
-
 export interface NodeDevicesProps {
   /**
    * WebSocket URL of a backend that forwards the daemon's observation methods unchanged, such as
@@ -47,8 +38,6 @@ export interface NodeDevicesProps {
   url: string;
   /** The devices linked to the account. Activity from a device not listed here is not shown. */
   devices: NodeDevice[];
-  /** Installations waiting for deployment. */
-  pairings?: NodeDevicePairing[];
   navigation: NodeNavigation;
   /** BCP 47 tag for text, dates, and numbers. Chinese for `zh*`, English otherwise. */
   locale?: string;
@@ -58,8 +47,6 @@ export interface NodeDevicesProps {
   manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
-  /** The host's link action and setup content when there are no devices or pairings. */
-  setup?: { action: ReactNode; empty: ReactNode };
 }
 
 /**
@@ -121,12 +108,10 @@ function Identity({
   device,
   self,
   m,
-  waitingLabel,
 }: {
-  device: Omit<NodeDevice, "id">;
-  self?: NodeThisDevice;
+  device: NodeDevice;
+  self: NodeThisDevice | undefined;
   m: NodeUiMessages;
-  waitingLabel?: string;
 }) {
   const platform = platformOf(device.platform).label;
   // The app that connects this computer knows its state before Rome Cloud does.
@@ -136,15 +121,14 @@ function Identity({
       : "not_connected"
     : device.status;
   const statusText =
-    waitingLabel ??
-    (self?.state === "connecting" || self?.state === "disabled"
+    self?.state === "connecting" || self?.state === "disabled"
       ? m.thisDevice[self.state]
       : status
         ? m.status[status]
-        : null);
+        : null;
   return (
     <span className="flex min-w-0 flex-1 items-center gap-3">
-      <DeviceIcon platform={device.platform} status={waitingLabel ? "waiting" : status} />
+      <DeviceIcon platform={device.platform} status={status} />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-ui font-medium text-foreground">{device.name}</span>
@@ -195,7 +179,7 @@ export function NodeDeviceCard({
   locale,
 }: NodeDeviceCardProps) {
   return (
-    <LinkedDeviceCard
+    <DeviceCard
       device={device}
       self={thisDevice}
       navigation={navigation}
@@ -205,7 +189,7 @@ export function NodeDeviceCard({
   );
 }
 
-function LinkedDeviceCard({
+function DeviceCard({
   device,
   self,
   navigation,
@@ -220,65 +204,35 @@ function LinkedDeviceCard({
   m: NodeUiMessages;
   chart?: ReactNode;
 }) {
-  return (
-    <DeviceCard
-      identity={<Identity device={device} self={self} m={m} />}
-      link={navigation && { to: navigation.href(device.id), navigation }}
-      chart={chart}
-      menu={(manage || self) && <DeviceMenu device={device} self={self} manage={manage} m={m} />}
-    />
-  );
-}
-
-function DeviceCard({
-  identity,
-  link,
-  onOpen,
-  menu,
-  chart,
-}: {
-  identity: ReactNode;
-  link?: { to: string; navigation: NodeNavigation };
-  onOpen?: MouseEventHandler<HTMLButtonElement>;
-  menu?: ReactNode;
-  chart?: ReactNode;
-}) {
-  const rowClass = "flex items-center p-3";
-  const interactiveClass = cn(
-    rowClass,
-    "outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50",
-  );
+  const menu = Boolean(manage || self);
   // The menu sits over the right edge, so the row leaves it room. A row too narrow for the
   // name and the curve drops the curve.
   const body = (
     <span className={cn("@container min-w-0 flex-1", menu && "pr-10")}>
       <span className="flex items-center gap-3">
-        {identity}
+        <Identity device={device} self={self} m={m} />
         {chart && <span className="hidden @2xs:contents">{chart}</span>}
       </span>
     </span>
   );
   return (
     <Card className="relative gap-0 overflow-hidden py-0">
-      {link ? (
-        <NavLink {...link} className={interactiveClass}>
-          {body}
-        </NavLink>
-      ) : onOpen ? (
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          className={cn(interactiveClass, "cursor-pointer text-start")}
-          onClick={onOpen}
+      {navigation ? (
+        <NavLink
+          to={navigation.href(device.id)}
+          navigation={navigation}
+          className="flex items-center p-3 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
         >
           {body}
-        </button>
+        </NavLink>
       ) : (
-        <div className={rowClass}>{body}</div>
+        <div className="flex items-center p-3">{body}</div>
       )}
       {menu && (
-        // Keep the menu beside the card's main control in the focus order.
-        <span className="absolute top-3 right-3 flex h-9 items-center">{menu}</span>
+        // Over the card's link at the identity row, because a control cannot nest inside a link.
+        <span className="absolute top-3 right-3 flex h-9 items-center">
+          <DeviceMenu device={device} self={self} manage={manage} m={m} />
+        </span>
       )}
     </Card>
   );
@@ -335,13 +289,11 @@ function useFirstOrder(
 export function NodeDevices({
   url,
   devices,
-  pairings = [],
   navigation,
   locale,
   thisDevice,
   manage,
   loading = false,
-  setup,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -381,8 +333,6 @@ export function NodeDevices({
           a.name.localeCompare(b.name, locale),
       ),
   );
-  const hasCards = current.length > 0 || pairings.length > 0;
-  const showSetup = setup && ready && !hasCards;
 
   return (
     <Section
@@ -390,7 +340,7 @@ export function NodeDevices({
       aria-busy={!(ready && settled) || undefined}
       className="@container gap-6"
     >
-      <SectionHeader className="flex-nowrap items-center">
+      <SectionHeader>
         <SectionHeading>
           {/* The host's tab already names the page, so the title is for screen readers. */}
           <SectionTitle id="node-devices-title" className="sr-only">
@@ -398,35 +348,27 @@ export function NodeDevices({
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />
         </SectionHeading>
-        {!showSetup && (
-          <SectionActions>
-            {setup ? (
-              setup.action
-            ) : (
-              <Button size="sm" onClick={() => setLinkOpen(true)}>
-                <Plus data-icon="inline-start" aria-hidden />
-                {m.linkDevice}
-              </Button>
-            )}
-          </SectionActions>
-        )}
+        <SectionActions>
+          <Button size="sm" onClick={() => setLinkOpen(true)}>
+            <Plus data-icon="inline-start" aria-hidden />
+            {m.linkDevice}
+          </Button>
+        </SectionActions>
       </SectionHeader>
 
-      {ready && !supported && (current.length > 0 || pairings.length === 0) && (
+      {ready && !supported && (
         <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
       )}
 
-      {showSetup
-        ? setup.empty
-        : ready &&
-          !hasCards &&
-          listed.length === 0 && <p className="text-ui text-muted-foreground">{m.noDevices}</p>}
+      {ready && listed.length === 0 && (
+        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
+      )}
 
-      {hasCards && (
+      {current.length > 0 && (
         <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
           {current.map((device) => (
             <li key={device.id} className="grid">
-              <LinkedDeviceCard
+              <DeviceCard
                 device={device}
                 self={selfOf(device)}
                 navigation={navigation}
@@ -434,27 +376,6 @@ export function NodeDevices({
                 m={m}
                 chart={
                   settled ? supported && chartOf(statsOf(device), since, m, locale) : CHART_SLOT
-                }
-              />
-            </li>
-          ))}
-          {pairings.map((pairing) => (
-            <li key={`pairing:${pairing.id}`} className="grid">
-              <DeviceCard
-                identity={
-                  <Identity
-                    device={{ name: pairing.name }}
-                    m={m}
-                    waitingLabel={pairing.waitingLabel}
-                  />
-                }
-                onOpen={pairing.onOpen}
-                menu={
-                  <DeviceActionsMenu
-                    m={m}
-                    onRename={pairing.onRename}
-                    onRemove={pairing.onRemove}
-                  />
                 }
               />
             </li>
@@ -494,7 +415,7 @@ export function NodeDevices({
         </section>
       )}
 
-      {!setup && <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />}
+      <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />
     </Section>
   );
 }

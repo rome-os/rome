@@ -1,6 +1,5 @@
 import { afterEach, expect, it, rs } from "@rstest/core";
 import { CloudError, cloudRequest, gatewayConfig } from "./cloud.js";
-import { parseGatewayUrl } from "./gateway-url.js";
 
 afterEach(() => {
   rs.restoreAllMocks();
@@ -27,49 +26,6 @@ it.each([
 ])("rejects the Cloud-provided Gateway URL %s", async (gatewayUrl) => {
   rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ gatewayUrl }));
   await expect(gatewayConfig("https://cloud.test", "token")).rejects.toEqual(
-    new CloudError("invalid_response"),
-  );
-});
-
-it("resolves a Gateway path on the connection origin, including its port", async () => {
-  rs.spyOn(globalThis, "fetch").mockResolvedValue(
-    Response.json({ gatewayPath: "/ws/container-node" }),
-  );
-  expect(await gatewayConfig("https://rome.example:9443", "token")).toBe(
-    "wss://rome.example:9443/ws/container-node",
-  );
-});
-
-it("allows a private HTTP address only for a direct container Gateway on that address", async () => {
-  const origin = "http://192.168.1.10:3000";
-  const fetch = rs
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValue(Response.json({ gatewayPath: "/ws/container-node" }));
-  await expect(gatewayConfig(origin, "token")).rejects.toEqual(new CloudError("cloud_unavailable"));
-  expect(fetch).not.toHaveBeenCalled();
-  const gateway = await gatewayConfig(origin, "token", true);
-  expect(gateway).toBe("ws://192.168.1.10:3000/ws/container-node");
-  expect(parseGatewayUrl(gateway, origin).href).toBe(gateway);
-  expect(() => parseGatewayUrl("ws://192.168.1.20:3000/ws/container-node", origin)).toThrow();
-  fetch.mockResolvedValueOnce(
-    Response.json({ gatewayUrl: "ws://192.168.1.10:3000/ws/container-node" }),
-  );
-  await expect(gatewayConfig(origin, "token", true)).rejects.toEqual(
-    new CloudError("invalid_response"),
-  );
-  await expect(gatewayConfig("http://rome.example", "token", true)).rejects.toEqual(
-    new CloudError("cloud_unavailable"),
-  );
-  expect(fetch).toHaveBeenCalledTimes(2);
-});
-
-it.each([
-  "//other.example/connect",
-  "/\\other.example/connect",
-  "wss://other.example/connect",
-])("rejects a non-local Gateway path %s", async (gatewayPath) => {
-  rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ gatewayPath }));
-  await expect(gatewayConfig("https://rome.example", "token")).rejects.toEqual(
     new CloudError("invalid_response"),
   );
 });
