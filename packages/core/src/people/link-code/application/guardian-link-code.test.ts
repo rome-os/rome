@@ -1,14 +1,14 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../../connections/registry.js";
-import { DrizzlePeopleRepository } from "../infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../model/people-repository.js";
-import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { MailProvider } from "../../connections/kinds/email/rome-cloud-mail.js";
-import { createTestDb, identityConnectionKindOf, type TestDb } from "../../test/db.js";
-import { persons } from "../../db/schema.js";
-import { EmailAdapter } from "../../connections/kinds/email/email.js";
+import type { ConnectionRegistry } from "../../../connections/registry.js";
+import { DrizzlePeopleRepository } from "../../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
+import type { SettingsRepository } from "../../../db/repositories/settings.js";
+import type { MailProvider } from "../../../connections/kinds/email/rome-cloud-mail.js";
+import { createTestDb, identityConnectionKindOf, type TestDb } from "../../../test/db.js";
+import { persons } from "../../../db/schema.js";
+import { EmailAdapter } from "../../../connections/kinds/email/email.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./guardian-link-code.js";
 
 function message(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
