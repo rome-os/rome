@@ -58,7 +58,7 @@ import {
  * vocabulary: docs/concepts/people.md.
  *
  * Mock mode's implementation of the same surface core serves
- * (`packages/core/src/api/routes/people.ts` and `.../accounts.ts`), typed
+ * (`packages/core/src/api/routes/people/phone-book/people.ts` and `.../accounts.ts`), typed
  * against the contract module like every other handler here, so the dashboard
  * cannot be built against a shape production does not answer with.
  *

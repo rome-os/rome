@@ -26,7 +26,7 @@ import type {
   LarkChannel,
   NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import {
   type CreateLarkChannel,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account } from "@rome-os/app-runtime";
-import type { Person } from "../db/repositories/people.js";
+import type { Person } from "../people/model/person.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 import { SenderLabels, whoIs, whoSaid } from "./sender-labels.js";
 

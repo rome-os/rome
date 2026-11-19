@@ -62,7 +62,7 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
-import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import { archivedDiscordThreads, type DiscordGet } from "./discord-threads.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.

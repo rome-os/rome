@@ -175,7 +175,7 @@ export function taskPath(
     ? tools.find(
         (t) =>
           t.trace === relay.trace &&
-          (t.tool === "say" || t.tool === "chat_forward") &&
+          (t.tool === "say" || t.tool === "card_forward") &&
           t.thread === conciergeKey,
       )
     : undefined;

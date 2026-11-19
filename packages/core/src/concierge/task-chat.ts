@@ -44,13 +44,22 @@ export async function latestSaid(
   }
 }
 
+/** An agent card a task chat showed, with the id of the message that holds
+ *  it. Each card is a message of its own, so the id names the card in its
+ *  chat. */
+export interface CardMessage {
+  readonly id: string;
+  readonly card: AgentCardPart;
+}
+
 /** A task chat's final answer, by the turn that said Rome's latest message
- *  with text or a card: that turn's latest text, and its latest agent card.
- *  A turn that showed only a card has no text, and the card is its answer. A
- *  message no turn is linked to, such as an older row, answers alone. */
+ *  with text or a card: that turn's latest text, and every agent card it
+ *  showed, oldest first. A turn that showed only cards has no text, and the
+ *  cards are its answer. A message no turn is linked to, such as an older
+ *  row, answers alone. */
 export interface FinalAnswer {
   readonly answer?: SaidMessage;
-  readonly card?: AgentCardPart;
+  readonly cards: readonly CardMessage[];
 }
 
 /** The final answer of a task chat, or null for none yet. Turns are told
@@ -63,29 +72,35 @@ export async function finalAnswer(
 ): Promise<FinalAnswer | null> {
   let turn: string | undefined;
   let answer: SaidMessage | undefined;
-  let card: AgentCardPart | undefined;
-  const found = (): FinalAnswer => ({
-    ...(answer ? { answer } : {}),
-    ...(card ? { card } : {}),
-  });
+  const cards: CardMessage[] = [];
+  const found = (): FinalAnswer => ({ ...(answer ? { answer } : {}), cards: [...cards].reverse() });
   let page = await messages.recent(place, MAX_READ_LIMIT, DASHBOARD);
   for (;;) {
     // Newest message first.
     for (const message of [...page.messages].reverse()) {
       if (message.direction !== "fromRome" || (!message.card && !hasText(message))) continue;
-      if (answer || card) {
+      if (answer || cards.length > 0) {
         // Only the latest answering turn counts.
         if (!turn || message.turnId !== turn) return found();
       } else {
         turn = message.turnId;
       }
-      if (message.card) card ??= message.card;
+      if (message.card) cards.push({ id: message.id, card: message.card });
       else answer ??= message;
       if (!turn) return found();
     }
-    if (!page.older) return answer || card ? found() : null;
+    if (!page.older) return answer || cards.length > 0 ? found() : null;
     page = await messages.before(place, page.older, MAX_READ_LIMIT, DASHBOARD);
   }
+}
+
+/** What Concierge reads of the chats it works in: their messages, and the
+ *  agent card a dashboard chat's message holds. */
+export interface TaskChatMessages extends Pick<MessageRepository, "recent" | "before"> {
+  /** The agent card in the message keyed `id` and the id of the dashboard chat
+   *  it is in, or null when no such message holds one. A key is unique only
+   *  in its chat, so a key two chats share answers the newest. */
+  cardIn(id: string): Promise<{ chatId: string; card: AgentCardPart } | null>;
 }
 
 /**
@@ -96,7 +111,7 @@ export async function finalAnswer(
  * Concierge reads it from the legacy table. The page cursor is opaque, and
  * names Chats' line. Vocabulary: docs/domains/chats.md.
  */
-export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "recent" | "before"> {
+export function chatsTaskChatMessages(db: DrizzleDb): TaskChatMessages {
   const lines = new ChatLines(db);
   const turns = new TurnLinks(db);
   const page = (
@@ -124,6 +139,17 @@ export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "r
   return {
     recent: async (place, limit) => page(place, limit),
     before: async (place, cursor, limit) => page(place, limit, cursor),
+    // By the message key's own index. Only a line Rome said holds a card.
+    cardIn: async (id) => {
+      const rows = db.all<{ chat: string; parts: string }>(sql`
+        SELECT c.key AS chat, m.parts AS parts FROM chat_messages m
+        JOIN chats c ON c.id = m.chat_id
+        WHERE m.key = ${id} AND c.platform = ${DASHBOARD_PLATFORM} AND m.sender_agent IS NOT NULL
+        ORDER BY m.id DESC LIMIT 1
+      `);
+      const card = rows[0] && agentCardOf(rows[0].parts);
+      return rows[0] && card ? { chatId: rows[0].chat, card } : null;
+    },
   };
 }
 

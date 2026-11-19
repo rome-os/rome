@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/db.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
-import { PeopleRepository } from "./people.js";
+import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -616,7 +617,7 @@ describe("LinkedInStoreRepository", () => {
         );
 
       beforeEach(async () => {
-        people = new PeopleRepository(testDb.db);
+        people = new DrizzlePeopleRepository(testDb.db);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });
