@@ -201,6 +201,15 @@ function judgeHumanInterface(
     (route) => !route.noAuth && route.runs.some((name) => localName(app.id, name) === action.name),
   );
   if (running.length === 0) {
+    // A route that runs an action whose name it computes may run this one.
+    if (app.routes?.some((route) => !route.noAuth && route.runs.includes("<dynamic>"))) {
+      cannotJudge(
+        "I2",
+        action.at,
+        `No route names \`${action.name}\`, but a route runs an action whose name is computed.`,
+      );
+      return;
+    }
     gap(
       "I2",
       action.at,
@@ -208,14 +217,17 @@ function judgeHumanInterface(
     );
     return;
   }
-  const called = running.some((route) =>
-    app.pageApiCalls.some(
-      (call) =>
-        call.path !== null &&
-        call.method !== null &&
-        pathMatches(route, call.path) &&
-        methodMatches(route, call.method),
-    ),
+  // Only a route the reader placed proves that the page reaches the action.
+  const called = running.some(
+    (route) =>
+      !route.unreadable &&
+      app.pageApiCalls.some(
+        (call) =>
+          call.path !== null &&
+          call.method !== null &&
+          pathMatches(route, call.path) &&
+          methodMatches(route, call.method),
+      ),
   );
   if (called) return;
   // A call whose method the reader cannot tell may be the one that reaches the route.

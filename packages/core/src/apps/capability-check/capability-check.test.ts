@@ -312,6 +312,126 @@ export const go = () => fetchAppApi("notes", options);
     expect(gaps.map((g) => g.rule)).toEqual(["I3", "I1"]);
   });
 
+  it("I1 and I2: reads an action name held in a constant", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return this.ctx.runAction("add_note", { text: "x" });',
+      'const name = "add_note";\n    return this.ctx.runAction(name, { text: "x" });',
+    );
+    expect(await gapsOf({ ...COMPLIANT, "src/api/index.ts": api })).toEqual([]);
+  });
+
+  it("I2: leaves an action a computed name may run to a person", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return this.ctx.runAction("add_note", { text: "x" });',
+      'return this.ctx.runAction(pick(), { text: "x" });',
+    );
+    const verdict = checkApp(
+      await readApp(
+        writeApp({
+          ...COMPLIANT,
+          "src/api/index.ts": `declare function pick(): string;\n${api}`,
+        }),
+      ),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I2"]);
+  });
+
+  it("I1: reads an action run inside a function called where it is written", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      "return this.add();",
+      "return (async () => this.add())();",
+    );
+    expect(await gapsOf({ ...COMPLIANT, "src/api/index.ts": api })).toEqual([]);
+  });
+
+  it("I3: reads a callback handed to a call by name or inside an object", async () => {
+    for (const hand of ["return withLock(wipe);", "return withLock({ run: wipe });"]) {
+      const api = (COMPLIANT["src/api/index.ts"] as string)
+        .replace(
+          'return "not found";',
+          `if (request.method === "DELETE" && route === "notes") {
+      const wipe = async () => { await this.ctx.db.delete({}); };
+      ${hand}
+    }
+    return "not found";`,
+        )
+        .replace("export class", "declare function withLock(f: unknown): unknown;\nexport class")
+        .replace("runAction(name: string, input: unknown): Promise<unknown>", "$& ; db: any");
+      const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api });
+      expect(gaps.map((g) => g.rule)).toEqual(["I3", "I1"]);
+    }
+  });
+
+  it("I3: reads writes in a dispatch done only by `switch`", async () => {
+    const api = `export class Handler {
+  constructor(private readonly ctx: { db: any; runAction(n: string, i: unknown): Promise<unknown> }) {}
+  async handle(request: { method: string; path: string[] }) {
+    const route = request.path.join("/");
+    switch (route) {
+      case "notes": return this.ctx.runAction("add_note", {});
+      case "wipe": return this.ctx.db.delete({});
+    }
+  }
+}
+`;
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+    expect(verdict.gaps.map((g) => g.rule)).toEqual(["I3"]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I2"]);
+  });
+
+  it("D2: takes the schema only from the action the factory returns", async () => {
+    const noSchema = `export function createAction(config: unknown) {
+  const sample = { inputSchema: { type: "object", properties: {} } };
+  console.log(sample);
+  return { config, execute: async () => ({}) };
+}
+`;
+    const gaps = await gapsOf({ ...COMPLIANT, ...ACTION("add_note", noSchema) });
+    expect(gaps.map((g) => g.rule)).toEqual(["D2", "I1"]);
+  });
+
+  it("I2: does not take a route it cannot read as proof that the page reaches the action", async () => {
+    const api = `import { notes } from "./notes.js";
+export class Handler {
+  constructor(private readonly ctx: { runAction(n: string, i: unknown): Promise<unknown> }) {}
+  async handle(request: { method: string; path: string[] }) {
+    const route = request.path.join("/");
+    if (route === "notes") return notes(this.ctx, request);
+    return "not found";
+  }
+}
+`;
+    const notes = `export function notes(ctx: { runAction(n: string, i: unknown): Promise<unknown> }, request: { method: string }) {
+  if (request.method === "POST") return ctx.runAction("add_note", {});
+  return "list";
+}
+`;
+    const page =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => fetchAppApi("notes");\n';
+    const verdict = checkApp(
+      await readApp(
+        writeApp({
+          ...COMPLIANT,
+          "src/api/index.ts": api,
+          "src/api/notes.ts": notes,
+          "src/web/App.tsx": page,
+        }),
+      ),
+    );
+    expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
+  });
+
+  it("I1: keeps a pattern path test beside the root exemption", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'if (request.method === "GET" && request.path.length === 0) return "ok";',
+      'if (request.method === "GET" && (request.path.length === 0 || /^private$/.test(route))) return "ok";',
+    );
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,

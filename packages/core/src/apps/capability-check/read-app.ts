@@ -438,7 +438,12 @@ class SourceReader {
     // The schema is the one the exported factory builds, not any `inputSchema`
     // that happens to sit in the file.
     const factory = this.actionFactory(entry);
-    if (factory) return this.schemaReachedFrom(factory);
+    if (factory) {
+      const returned = this.returnedSchema(factory, 0);
+      if (returned === "none") return undefined;
+      // A factory whose result the reader cannot trace: any schema it reaches.
+      return returned === "unknown" ? this.schemaReachedFrom(factory) : returned;
+    }
     const inEntry = findInputSchema(entry);
     if (inEntry) return inEntry;
     for (const imp of this.importsOf(entry)) {
@@ -462,6 +467,76 @@ class SourceReader {
       if (body) return body;
     }
     return undefined;
+  }
+
+  /**
+   * The schema on the action a function body returns: the `inputSchema` of
+   * the object it returns, or the `schema` it passes `defineAction`. "none"
+   * when every return is traced and none carries one.
+   */
+  private returnedSchema(body: TS.Node, depth: number): TS.Expression | "none" | "unknown" {
+    if (depth > 3) return "unknown";
+    const returned: TS.Expression[] = [];
+    if (!ts.isBlock(body)) returned.push(body as TS.Expression);
+    else {
+      const visit = (node: TS.Node) => {
+        if (ts.isFunctionLike(node)) return;
+        if (ts.isReturnStatement(node) && node.expression) returned.push(node.expression);
+        ts.forEachChild(node, visit);
+      };
+      ts.forEachChild(body, visit);
+    }
+    if (returned.length === 0) return "unknown";
+    let unknown = false;
+    for (const expression of returned) {
+      const found = this.schemaOfValue(expression, depth);
+      if (found === "unknown") unknown = true;
+      else if (found !== "none") return found;
+    }
+    return unknown ? "unknown" : "none";
+  }
+
+  /** The schema an action value carries; see `returnedSchema`. */
+  private schemaOfValue(
+    expression: TS.Expression,
+    depth: number,
+  ): TS.Expression | "none" | "unknown" {
+    let value = unwrap(expression);
+    if (ts.isAwaitExpression(value)) value = unwrap(value.expression);
+    const followed = this.followIdentifier(value);
+    if (!followed) return "unknown";
+    value = followed;
+    if (ts.isObjectLiteralExpression(value)) {
+      const own = propertyValue(value, "inputSchema");
+      if (own) return own;
+      const shorthand = value.properties.find(
+        (p) => ts.isShorthandPropertyAssignment(p) && p.name.text === "inputSchema",
+      );
+      if (shorthand && ts.isShorthandPropertyAssignment(shorthand)) return shorthand.name;
+      let unknown = false;
+      for (const property of value.properties) {
+        if (!ts.isSpreadAssignment(property)) continue;
+        const found = this.schemaOfValue(property.expression, depth + 1);
+        if (found === "unknown") unknown = true;
+        else if (found !== "none") return found;
+      }
+      return unknown ? "unknown" : "none";
+    }
+    if (ts.isCallExpression(value)) {
+      const first = value.arguments[0] && unwrap(value.arguments[0]);
+      const name = ts.isIdentifier(value.expression) ? value.expression.text : undefined;
+      if (name === "defineAction" && first && ts.isObjectLiteralExpression(first)) {
+        return propertyValue(first, "schema") ?? "none";
+      }
+      const target = ts.isPropertyAccessExpression(value.expression)
+        ? value.expression.name
+        : value.expression;
+      for (const declaration of this.declarationOf(target)) {
+        const body = functionBody(declaration);
+        if (body) return this.returnedSchema(body, depth + 1);
+      }
+    }
+    return "unknown";
   }
 
   /**
@@ -673,14 +748,21 @@ class SourceReader {
       });
     }
     // A switch on the method or path dispatches routes the reader cannot follow.
+    const switches = new Set<TS.Node>();
     const findSwitches = (node: TS.Node) => {
       if (ts.isSwitchStatement(node) && isDispatchSubject(node.expression.getText())) {
+        switches.add(node);
+        // Its cases still run what they run and write what they write, unless
+        // a route around it already counts them.
+        const counted = branches.some((branch) => contains(branch.then, node));
+        const { handsOff: _, ...effects } = counted
+          ? { runs: [], writes: [] }
+          : this.effects(node.caseBlock);
         routes.push({
           method: "ANY",
           path: "?",
           at: this.at(entryFile, node),
-          runs: [],
-          writes: [],
+          ...effects,
           unreadable: `a \`switch (${node.expression.getText()})\` dispatch`,
         });
       }
@@ -707,6 +789,7 @@ class SourceReader {
       }
       const placed = new Set<TS.Node>([
         ...thens,
+        ...switches,
         ...tests.map((test) => (ts.isIfStatement(test) ? test.thenStatement : test.whenTrue)),
       ]);
       const { handsOff, ...rest } = this.effects(holder.body, placed);
@@ -740,17 +823,10 @@ class SourceReader {
     const walk = (current: TS.Node, depth: number) => {
       if (skip.has(current)) return;
       // A function defined here runs only when called: a call to it is
-      // followed through its declaration below. A callback handed to a call
-      // is taken to run.
-      if (
-        current !== node &&
-        ts.isFunctionLike(current) &&
-        !(
-          current.parent &&
-          (ts.isCallExpression(current.parent) || ts.isNewExpression(current.parent)) &&
-          current.parent.arguments?.includes(current as unknown as TS.Expression)
-        )
-      ) {
+      // followed through its declaration below. A callback handed to a call,
+      // inline, by name or inside an object, is taken to run, and so is a
+      // function called where it is defined.
+      if (current !== node && ts.isFunctionLike(current) && !isCalledInPlace(current)) {
         return;
       }
       if (ts.isCallExpression(current)) {
@@ -765,7 +841,7 @@ class SourceReader {
         }
         if (calleeName === "runAction" || calleeName === "invokeAction") {
           const first = current.arguments[0];
-          names.add(first && ts.isStringLiteralLike(first) ? first.text : "<dynamic>");
+          names.add((first && this.stringLiteral(first)) ?? "<dynamic>");
         } else if (
           calleeName &&
           ts.isPropertyAccessExpression(callee) &&
@@ -775,6 +851,12 @@ class SourceReader {
         ) {
           writes.add(compact(callee.getText()));
         } else if (depth < MAX_CALL_DEPTH) {
+          for (const callback of this.namedCallbacks(current.arguments)) {
+            if (!seen.has(callback)) {
+              seen.add(callback);
+              walk(callback, depth + 1);
+            }
+          }
           const target = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
           const declarations = this.declarationOf(target);
           if (
@@ -808,6 +890,33 @@ class SourceReader {
     };
     walk(node, 0);
     return { runs: [...names], writes: [...writes], ...(handsOff ? { handsOff } : {}) };
+  }
+
+  /**
+   * The bodies of the app's own functions a call is handed by name, directly
+   * (`withLock(wipe)`) or as a value of an object (`queue({ run: wipe })`).
+   */
+  private namedCallbacks(args: readonly TS.Expression[]): TS.Node[] {
+    const names: TS.Expression[] = [];
+    for (const argument of args) {
+      const value = unwrap(argument);
+      if (ts.isIdentifier(value)) names.push(value);
+      if (ts.isObjectLiteralExpression(value)) {
+        for (const property of value.properties) {
+          if (ts.isPropertyAssignment(property) && ts.isIdentifier(unwrap(property.initializer))) {
+            names.push(unwrap(property.initializer));
+          } else if (ts.isShorthandPropertyAssignment(property)) {
+            names.push(property.name);
+          }
+        }
+      }
+    }
+    return names.flatMap((name) =>
+      this.declarationOf(name).flatMap((declaration) => {
+        const body = functionBody(declaration);
+        return body ? [body] : [];
+      }),
+    );
   }
 
   /** Whether a raw SQL statement writes, or may: true unless its text reads as a query. */
@@ -914,6 +1023,46 @@ function propertyValue(
     }
   }
   return undefined;
+}
+
+function unwrap(node: TS.Expression): TS.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * Whether a function runs where it is written: handed to a call, inline or
+ * as a value of an object literal handed to one, or called at once (an IIFE).
+ */
+function isCalledInPlace(fn: TS.SignatureDeclaration): boolean {
+  let child: TS.Node = fn;
+  let parent = fn.parent;
+  while (parent && ts.isParenthesizedExpression(parent)) {
+    child = parent;
+    parent = parent.parent;
+  }
+  if (!parent) return false;
+  if (ts.isCallExpression(parent) && parent.expression === child) return true;
+  if (ts.isPropertyAssignment(parent) && parent.initializer === child) {
+    child = parent.parent;
+    parent = child.parent;
+    while (parent && ts.isParenthesizedExpression(parent)) {
+      child = parent;
+      parent = parent.parent;
+    }
+    if (!parent) return false;
+  }
+  return (
+    (ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
+    (parent.arguments ?? []).some((argument) => argument === child)
+  );
 }
 
 function functionBody(declaration: TS.Declaration): TS.Node | undefined {
