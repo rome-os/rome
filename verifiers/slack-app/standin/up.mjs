@@ -22,6 +22,24 @@ const rand = () => randomBytes(12).toString("hex");
 rmSync(workDir, { recursive: true, force: true });
 mkdirSync(workDir, { recursive: true });
 
+// Waits until something answers HTTP at `url`, so the next server that asks
+// the system for a free port cannot be handed this one.
+async function listening(url) {
+  for (let i = 0; i < 200; i++) {
+    if (
+      await fetch(url).then(
+        () => true,
+        () => false,
+      )
+    )
+      return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`nothing answered at ${url}`);
+}
+
+// A port free now. Whatever takes it next must be listening before another
+// server is started, which `listening` waits for.
 const freePort = () =>
   new Promise((r) => {
     const s = createServer().listen(0, "127.0.0.1", () => {
@@ -43,6 +61,7 @@ const { slack } = fake.start(
   }),
 );
 const slackUrl = `http://127.0.0.1:${slackPort}`;
+await listening(`${slackUrl}/_control/state`);
 
 const instanceSecrets = { a: rand(), b: rand() };
 const cloud = await startCloud({
@@ -55,7 +74,7 @@ const cloud = await startCloud({
 slack.config.eventsUrl = `${cloud.url}/slack/events`;
 
 const children = {};
-const ports = { a: await freePort(), b: await freePort() };
+const ports = {};
 function startInstance(name) {
   if (children[name]) return;
   const child = spawn(process.execPath, [join(here, "instance.mjs")], {
@@ -82,9 +101,6 @@ const stopInstance = (name) =>
     child.on("exit", () => r());
     child.kill("SIGTERM");
   });
-startInstance("a");
-startInstance("b");
-
 const control = await serve(async (req, res, url) => {
   const m = url.pathname.match(/^\/instances\/(a|b)\/(stop|start)$/);
   if (!m || req.method !== "POST") return send(res, 404, { error: "not found" });
@@ -95,6 +111,15 @@ const control = await serve(async (req, res, url) => {
     return send(res, 500, { error: "stopped, then failed" });
   return send(res, 200, { ok: true });
 });
+
+// The instances take their ports only after every server here is listening,
+// and env.json is written only once both answer.
+ports.a = await freePort();
+startInstance("a");
+await listening(`http://127.0.0.1:${ports.a}/`);
+ports.b = await freePort();
+startInstance("b");
+await listening(`http://127.0.0.1:${ports.b}/`);
 
 // R11's checkouts: a rome-cloud with a binding table on top of main, and a
 // rome whose import rules pass. Broken R11 adds Slack code to the relay;
