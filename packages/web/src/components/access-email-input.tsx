@@ -67,12 +67,12 @@ export function AccessEmailInput({
   // fixed channel, so the current answer is never cut down to less than the
   // server returned.
   const suggestions = useMemo(() => {
-    if (!searchable || !search.data) return [];
+    if (!searchable || !search.data || people !== "shown") return [];
     const matching = search.data.accounts.filter((account) =>
       accountMatchesQuery(account, term, { matchChannel: false }),
     );
     return contactEmailSuggestions(matching, { exclude, limit: 6 });
-  }, [searchable, search.data, term, exclude]);
+  }, [searchable, search.data, people, term, exclude]);
 
   const open = !dismissed && !disabled && suggestions.length > 0;
   const active = open && highlight >= 0 && highlight < suggestions.length ? highlight : -1;

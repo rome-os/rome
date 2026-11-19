@@ -14,12 +14,12 @@ const PEOPLE_QUERY_KEY = ["people"] as const;
  * fetch is a menu with nothing in it, not a chatbox that will not mount.
  *
  * One cache, so several subscribers do not each fire their own mount-time
- * fetch. Nothing is read while People is hidden, since core serves no people
- * then.
+ * fetch. Nothing is read or offered while People is hidden, since core serves
+ * no people then.
  */
 export function usePeople() {
   const people = useFeatureState("people");
-  return useQuery<PersonResource[]>({
+  const query = useQuery<PersonResource[]>({
     queryKey: PEOPLE_QUERY_KEY,
     enabled: people === "shown",
     staleTime: 60_000,
@@ -28,4 +28,6 @@ export function usePeople() {
         .then((listing) => listing.people)
         .catch(() => []),
   });
+  // A listing read before People was hidden stays cached; it is not offered.
+  return people === "shown" ? query : { ...query, data: undefined };
 }

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { AppListResponse, InstalledAppCard, SpecSource } from "@rome/api-types/apps";
-import { APP_FEATURES } from "@rome/api-types/features";
+import { appFeature } from "@rome/api-types/features";
 import { useFeatureStates } from "@/hooks/use-features";
 import { fetchJson } from "@/lib/fetch-json";
 import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
@@ -52,7 +52,7 @@ export function useAppsList(options: { enabled?: boolean } = {}): AppsListResult
   const featureState = useFeatureStates();
   const allApps = list.data?.apps;
   const apps = useMemo(
-    () => allApps?.filter((app) => featureState(APP_FEATURES[app.id]) === "shown") ?? null,
+    () => allApps?.filter((app) => featureState(appFeature(app.id)) === "shown") ?? null,
     [allApps, featureState],
   );
 

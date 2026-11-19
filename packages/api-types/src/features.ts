@@ -11,6 +11,12 @@ export type GatedFeature = (typeof GATED_FEATURES)[number];
  *  out of every list of apps while its feature is hidden. */
 export const APP_FEATURES: Readonly<Record<string, GatedFeature>> = { inbox: "inbox" };
 
+/** The gated feature an app is, if any. Reads only the map's own keys, so an
+ *  app id such as `constructor` is no feature. */
+export function appFeature(appId: string): GatedFeature | undefined {
+  return Object.hasOwn(APP_FEATURES, appId) ? APP_FEATURES[appId] : undefined;
+}
+
 /** Whether each gated feature is shown. */
 export type FeatureVisibility = Record<GatedFeature, boolean>;
 
