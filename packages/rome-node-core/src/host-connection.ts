@@ -2,7 +2,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./actions.js";
 import { cloudOrigin, cloudRequest, CloudError, gatewayConfig } from "./cloud.js";
 import { connectGateway } from "./client.js";
-import { containerNodeOrigin } from "./container-node-address.js";
 import { createNodeSocket } from "./socket.js";
 import type { DeviceSession } from "./login.js";
 import type { CredentialStore } from "./storage.js";
@@ -64,13 +63,10 @@ export async function runHostConnection(
     sendFrame: (frame: Frame) => boolean,
     secrets: string[],
   ) => HostResponder,
-  directHttp = false,
 ): Promise<void> {
   const { name, signal, credentials } = options;
   if (signal.aborted) return;
-  const cloudUrl = directHttp
-    ? containerNodeOrigin(options.cloudUrl)
-    : cloudOrigin(options.cloudUrl);
+  const cloudUrl = cloudOrigin(options.cloudUrl);
   const stored = await credentials.load();
   let session: (DeviceSession & { name: string }) | null =
     isRecord(stored) &&
@@ -90,7 +86,7 @@ export async function runHostConnection(
       await credentials.save(session);
     }
     try {
-      gatewayUrl = await gatewayConfig(cloudUrl, session.token, directHttp);
+      gatewayUrl = await gatewayConfig(cloudUrl, session.token);
       break;
     } catch (error) {
       if (error instanceof CloudError && error.code === "invalid_device_session") {
@@ -105,9 +101,9 @@ export async function runHostConnection(
     }
   }
   if (signal.aborted || !session) return;
-  const devices = directHttp
-    ? null
-    : await cloudRequest(cloudUrl, "/api/account/devices", session.token).catch(() => null);
+  const devices = await cloudRequest(cloudUrl, "/api/account/devices", session.token).catch(
+    () => null,
+  );
   if (isRecord(devices) && Array.isArray(devices.items)) {
     const device = devices.items.find(
       (item: unknown) => isRecord(item) && item.id === session?.deviceId,
@@ -140,52 +136,49 @@ export async function runHostConnection(
       );
     };
     const abort = () => finish();
-    const connection = connectGateway(
-      {
-        gatewayUrl,
-        getToken: () => active.token,
-        createSocket: createNodeSocket,
-        beforeConnect: async () => {
-          try {
-            return await gatewayConfig(cloudUrl, active.token, directHttp);
-          } catch (error) {
-            if (error instanceof CloudError && error.code === "invalid_device_session") return null;
-            throw error;
-          }
-        },
-        onMessage: (message) => {
-          if ("from" in message) void executor.receive(message);
-        },
-        onFrame: (frame) => void executor.receiveFrame(frame),
-        onNotification: options.onNotification,
-        onStatus: (status) => {
-          options.audit?.host(
-            {
-              event: "connection",
-              status,
-              deviceId: active.deviceId,
-              name: active.name,
-              cloudOrigin: cloudUrl,
-            },
-            [active.token],
-          );
-          options.onEvent?.({ type: "connection", status });
-          if (status !== "online" && status !== "connecting") executor.disconnect();
-          if (status === "revoked" || status === "superseded") {
-            queueMicrotask(() =>
-              finish(
-                new Error(
-                  status === "revoked"
-                    ? "Authorization revoked. Explicit authorization is required."
-                    : "Another connection replaced this device. This process has stopped.",
-                ),
-              ),
-            );
-          }
-        },
+    const connection = connectGateway({
+      gatewayUrl,
+      getToken: () => active.token,
+      createSocket: createNodeSocket,
+      beforeConnect: async () => {
+        try {
+          return await gatewayConfig(cloudUrl, active.token);
+        } catch (error) {
+          if (error instanceof CloudError && error.code === "invalid_device_session") return null;
+          throw error;
+        }
       },
-      directHttp ? cloudUrl : undefined,
-    );
+      onMessage: (message) => {
+        if ("from" in message) void executor.receive(message);
+      },
+      onFrame: (frame) => void executor.receiveFrame(frame),
+      onNotification: options.onNotification,
+      onStatus: (status) => {
+        options.audit?.host(
+          {
+            event: "connection",
+            status,
+            deviceId: active.deviceId,
+            name: active.name,
+            cloudOrigin: cloudUrl,
+          },
+          [active.token],
+        );
+        options.onEvent?.({ type: "connection", status });
+        if (status !== "online" && status !== "connecting") executor.disconnect();
+        if (status === "revoked" || status === "superseded") {
+          queueMicrotask(() =>
+            finish(
+              new Error(
+                status === "revoked"
+                  ? "Authorization revoked. Explicit authorization is required."
+                  : "Another connection replaced this device. This process has stopped.",
+              ),
+            ),
+          );
+        }
+      },
+    });
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
   });

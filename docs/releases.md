@@ -1,8 +1,6 @@
 # Releases
 
-Rome ships the **runtime Docker image** (the product), the **Rome Node image**,
-the **Mac app**, and **npm SDK packages** (for app authors). Each has its own
-release pipeline.
+Rome ships three kinds of release artifacts: the **runtime Docker image** (the product), the **Mac app**, and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
 
 ## Rome runtime image (Docker Hub)
 
@@ -78,11 +76,6 @@ A prerelease tag gets a prerelease. The release never takes the **Latest** badge
 ### Rehearsing the pipeline
 
 `.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation, and creates no GitHub release. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
-
-## Rome Node image (GitHub Container Registry)
-
-[Release the Rome Node image](rome-node.md#release-the-image) from the
-Rome Node package workflow.
 
 ## Mac app
 

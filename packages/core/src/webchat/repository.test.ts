@@ -2275,25 +2275,22 @@ describe("WebChatRepository", () => {
     });
   });
 
-  it("groups messages by turnId so concurrent turns render in turn order", async () => {
-    // Reproduces the user-A / user-B / reply-A / reply-B insertion pattern
-    // that happens when two POSTs race on the same session. With turnId
-    // grouping, getMessages should return them as user-A / reply-A / user-B
-    // / reply-B (each turn's rows kept contiguous, group ordered by the
-    // user row's createdAt).
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  it.each([
+    ["2026-10-18T12:00:00Z", ["u1", "t1", "u2", "t2"]],
+    ["2026-10-18T12:00:01Z", ["u1", "u2", "t1", "t2"]],
+  ] as const)("orders interleaved traces at %s", async (traceAt, expected) => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-18T12:00:00Z"));
     await repo.createSession("sess-order", "Chat Order");
-
     await repo.addMessage("u1", "sess-order", "user", "[]", "turn-A");
-    await sleep(2);
     await repo.addMessage("u2", "sess-order", "user", "[]", "turn-B");
-    await sleep(2);
+
+    rs.setSystemTime(new Date(traceAt));
     await repo.addMessage("t1", "sess-order", "trace", "[]", "turn-A");
-    await sleep(2);
     await repo.addMessage("t2", "sess-order", "trace", "[]", "turn-B");
 
     const messages = await repo.getMessages("sess-order");
-    expect(messages.map((m) => m.id)).toEqual(["u1", "t1", "u2", "t2"]);
+    expect(messages.map((m) => m.id)).toEqual(expected);
   });
 
   it("stores a turn recap message where it was said, even when its turn is older", async () => {

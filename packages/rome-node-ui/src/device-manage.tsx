@@ -29,41 +29,6 @@ import type {
 
 type Open = "rename" | "disconnect" | "remove" | null;
 
-export function DeviceActionsMenu({
-  m,
-  onRename,
-  onRemove,
-  children,
-}: {
-  m: NodeUiMessages;
-  onRename?: () => void;
-  onRemove?: () => void;
-  children?: ReactNode;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <IconButton label={m.manage.menu} icon={<Ellipsis />} size="sm" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {onRename && (
-          <DropdownMenuItem onSelect={onRename}>
-            <Pencil className="size-4" aria-hidden />
-            {m.manage.rename}
-          </DropdownMenuItem>
-        )}
-        {children}
-        {onRemove && (
-          <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-            <Trash2 className="size-4" aria-hidden />
-            {m.manage.remove}
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /**
  * A device's actions menu, on its card and on its page.
  *
@@ -91,52 +56,61 @@ export function DeviceMenu({
   const close = () => setOpen(null);
   return (
     <>
-      <DeviceActionsMenu
-        m={m}
-        onRename={manage && !revoked ? () => setOpen("rename") : undefined}
-        onRemove={manage && !self ? () => setOpen("remove") : undefined}
-      >
-        {self && (
-          <>
-            {self.state === "disabled" ? (
-              <DropdownMenuItem disabled={self.busy} onSelect={() => self.onEnabledChange(true)}>
-                <Plug className="size-4" aria-hidden />
-                {m.manage.connect}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <IconButton label={m.manage.menu} icon={<Ellipsis />} size="sm" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {manage && !revoked && (
+            <DropdownMenuItem onSelect={() => setOpen("rename")}>
+              <Pencil className="size-4" aria-hidden />
+              {m.manage.rename}
+            </DropdownMenuItem>
+          )}
+          {self ? (
+            <>
+              {self.state === "disabled" ? (
+                <DropdownMenuItem disabled={self.busy} onSelect={() => self.onEnabledChange(true)}>
+                  <Plug className="size-4" aria-hidden />
+                  {m.manage.connect}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={self.busy}
+                  onSelect={() => setOpen("disconnect")}
+                >
+                  <Unplug className="size-4" aria-hidden />
+                  {m.manage.disconnect}
+                </DropdownMenuItem>
+              )}
+              {self.openAuditLog && (
+                <DropdownMenuItem onSelect={() => self.openAuditLog?.()}>
+                  <ScrollText className="size-4" aria-hidden />
+                  {m.manage.auditLog}
+                </DropdownMenuItem>
+              )}
+              {self.removeUrl && (
+                <DropdownMenuItem asChild className="text-primary [&_svg]:text-primary">
+                  <a href={self.removeUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="size-4" aria-hidden />
+                    {m.manage.removeOnCloud}
+                  </a>
+                </DropdownMenuItem>
+              )}
+            </>
+          ) : (
+            manage && (
+              <DropdownMenuItem variant="destructive" onSelect={() => setOpen("remove")}>
+                <Trash2 className="size-4" aria-hidden />
+                {m.manage.remove}
               </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={self.busy}
-                onSelect={() => setOpen("disconnect")}
-              >
-                <Unplug className="size-4" aria-hidden />
-                {m.manage.disconnect}
-              </DropdownMenuItem>
-            )}
-            {self.openAuditLog && (
-              <DropdownMenuItem onSelect={() => self.openAuditLog?.()}>
-                <ScrollText className="size-4" aria-hidden />
-                {m.manage.auditLog}
-              </DropdownMenuItem>
-            )}
-            {self.removeUrl && (
-              <DropdownMenuItem asChild className="text-primary [&_svg]:text-primary">
-                <a href={self.removeUrl} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="size-4" aria-hidden />
-                  {m.manage.removeOnCloud}
-                </a>
-              </DropdownMenuItem>
-            )}
-          </>
-        )}
-      </DeviceActionsMenu>
+            )
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {open === "rename" && manage && (
-        <DeviceRenameDialog
-          currentName={device.name}
-          rename={(name) => manage.rename(device.id, name)}
-          m={m}
-          onClose={close}
-        />
+        <RenameDialog device={device} manage={manage} m={m} onClose={close} />
       )}
       {open === "disconnect" && self && (
         <ConfirmDialog
@@ -185,24 +159,24 @@ function useSubmit(m: NodeUiMessages, request: () => Promise<NodeDeviceManageErr
   return { busy, error, submit };
 }
 
-export function DeviceRenameDialog({
-  currentName,
-  rename,
+function RenameDialog({
+  device,
+  manage,
   m,
   onClose,
 }: {
-  currentName: string;
-  rename(name: string): Promise<NodeDeviceManageError | null>;
+  device: NodeDevice;
+  manage: NodeDeviceManage;
   m: NodeUiMessages;
   onClose(): void;
 }) {
   const id = useId();
-  const [name, setName] = useState(currentName);
+  const [name, setName] = useState(device.name);
   const trimmed = name.trim();
-  const { busy, error, submit } = useSubmit(m, () => rename(trimmed));
+  const { busy, error, submit } = useSubmit(m, () => manage.rename(device.id, trimmed));
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (trimmed === currentName) return onClose();
+    if (trimmed === device.name) return onClose();
     if (await submit()) onClose();
   };
   return (
@@ -210,7 +184,7 @@ export function DeviceRenameDialog({
       <form onSubmit={(event) => void onSubmit(event)}>
         <DialogHeader>
           <DialogTitle>{m.manage.renameTitle}</DialogTitle>
-          <DialogDescription className="sr-only">{currentName}</DialogDescription>
+          <DialogDescription className="sr-only">{device.name}</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <Field>

@@ -1032,56 +1032,9 @@
     "start": "启动服务",
     "starting": "正在启动…",
     "startFailed": "设备服务启动失败",
-    "containerNodes": {
-      "loading": "正在检查容器节点是否可用…",
-      "loadingCompose": "正在加载 Compose 配置…",
-      "description": "生成用于部署 Rome Node 的 Docker Compose 配置。",
-      "newCompose": "获取新的 Compose 配置",
-      "removeTitle": "移除 {{name}}？",
-      "removeDescription": "这会使该节点的 Compose 配置失效。如果之后还要使用，请重新添加节点。",
-      "name": "节点名称",
-      "defaultName": "容器节点",
-      "address": "Rome 地址",
-      "originUnavailable": "请输入 Docker 主机能够访问的 Rome HTTPS 或私网 HTTP 地址。",
-      "loopbackHint": "在 Docker 的默认网络中，localhost 指向容器自身。部署时请用容器能访问的 Rome 地址。",
-      "generate": "生成 Compose 配置",
-      "generating": "正在生成…",
-      "projectName": "请使用此项目名称",
-      "replaceProject": "请用新配置重新部署这个项目，并保留原有状态卷",
-      "expires": "请在 {{time}} 前部署，并妥善保管这份一次性配置。",
-      "expired": "这份配置已过期，请重新生成。",
-      "configuration": "Compose 配置",
-      "copy": "复制 Compose",
-      "copied": "已复制",
-      "download": "下载 Compose",
-      "copyFailed": "无法访问剪贴板，请下载 Compose 文件。",
-      "close": "关闭",
-      "status": {
-        "waiting": "等待部署"
-      },
-      "errors": {
-        "sign_in_required": "请以当前 Rome 实例的所有者身份登录后管理容器节点。",
-        "not_configured": "此实例暂不支持部署容器节点。",
-        "cloud_unsupported": "当前 Rome Cloud 暂不支持部署容器节点。",
-        "unavailable": "无法连接容器节点服务，请重试。",
-        "invalid_device_name": "请输入节点名称。",
-        "node_not_found": "此实例无法访问该容器节点。",
-        "already_paired": "此节点已配对。请先移除对应的设备。",
-        "compose_unavailable": "无法取回原 Compose 配置。请使用已下载的文件或重新关联一个容器节点。",
-        "invalid_origin": "请输入 Rome 的 HTTPS 或私网 HTTP 地址。",
-        "needs_pairing": "请重新配对这个节点后再查询。"
-      }
-    },
     "setup": {
-      "title": "连接设备",
-      "linkDevice": "关联设备",
-      "methods": {
-        "desktop": "桌面端 / iOS 客户端",
-        "cli": "Rome Node CLI",
-        "container": "Rome Node 容器"
-      },
-      "desktopHelp": "在电脑或 iPhone 上打开 Rome 客户端，登录同一个 Rome Cloud 账户。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
-      "desktopDownload": "下载 Rome",
+      "title": "连接电脑",
+      "description": "每台电脑需要单独连接。",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

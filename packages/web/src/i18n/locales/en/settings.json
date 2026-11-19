@@ -1032,56 +1032,9 @@
     "start": "Start service",
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
-    "containerNodes": {
-      "loading": "Checking container node availability…",
-      "loadingCompose": "Loading Compose configuration…",
-      "description": "Generate a Compose file to deploy Rome Node with Docker.",
-      "newCompose": "Get a new Compose file",
-      "removeTitle": "Remove {{name}}?",
-      "removeDescription": "This invalidates any Compose file for this node. To use the node later, add it again.",
-      "name": "Node name",
-      "defaultName": "Container node",
-      "address": "Rome address",
-      "originUnavailable": "Enter a Rome HTTPS or private HTTP address reachable from the Docker host.",
-      "loopbackHint": "On Docker's default network, localhost points to the container itself. Use a Rome address the container can reach when deploying.",
-      "generate": "Generate Compose",
-      "generating": "Generating…",
-      "projectName": "Use this project name",
-      "replaceProject": "Redeploy this project with the new configuration and keep its state volume",
-      "expires": "Deploy before {{time}}. Keep this one-time configuration private.",
-      "expired": "This Compose file has expired.",
-      "configuration": "Compose configuration",
-      "copy": "Copy Compose",
-      "copied": "Copied",
-      "download": "Download Compose",
-      "copyFailed": "Clipboard access failed. Download the Compose file instead.",
-      "close": "Close",
-      "status": {
-        "waiting": "Waiting for deployment"
-      },
-      "errors": {
-        "sign_in_required": "Sign in as the owner of this Rome instance to manage container nodes.",
-        "not_configured": "Container node deployment is unavailable on this instance.",
-        "cloud_unsupported": "Container node deployment is unavailable on this Rome Cloud.",
-        "unavailable": "Could not reach container node services. Try again.",
-        "invalid_device_name": "Enter a node name.",
-        "node_not_found": "This container node is unavailable on this instance.",
-        "already_paired": "This node is paired. Remove its device first.",
-        "compose_unavailable": "The original Compose file is unavailable. Use the file you downloaded or link a new container node.",
-        "invalid_origin": "Enter a Rome HTTPS or private HTTP address.",
-        "needs_pairing": "Pair this container node again to check its status."
-      }
-    },
     "setup": {
-      "title": "Connect a device",
-      "linkDevice": "Link device",
-      "methods": {
-        "desktop": "Desktop/iOS client",
-        "cli": "Rome Node CLI",
-        "container": "Rome Node container"
-      },
-      "desktopHelp": "Sign in to the Rome app on your computer or iPhone with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
-      "desktopDownload": "Download Rome",
+      "title": "Connect a computer",
+      "description": "Connect each computer separately.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"

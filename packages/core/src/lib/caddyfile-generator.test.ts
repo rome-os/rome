@@ -112,7 +112,7 @@ describe("generateCaddyfile with a persisted legacy enableAccessControl flag", (
     // Login and the rest of /api/* go through the gate, not a canned 403.
     expect(caddyfile).toContain("@dynamic path /api /api/*");
     expect(caddyfile).not.toContain("not_public");
-    expect(caddyfile).not.toContain("gateway.html");
+    expect(caddyfile).not.toContain("gateway");
     expect(caddyfile).toContain("try_files {path} /index.html");
   });
 });

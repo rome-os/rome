@@ -481,21 +481,6 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const containerNodeInstallations = sqliteTable("container_node_installations", {
-  id: text("id").primaryKey(),
-  guardianId: text("guardian_id")
-    .notNull()
-    .references(() => guardianAuth.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  grantHash: text("grant_hash"),
-  deployment: text("deployment", { mode: "json" }).$type<{ origin: string; nonce: string }>(),
-  expiresAt: integer("expires_at"),
-  verifierHash: text("verifier_hash"),
-  redeemedAt: integer("redeemed_at"),
-  deviceId: text("device_id").unique(),
-  tokenHash: text("token_hash").unique(),
-});
-
 // The last Rome Cloud profile each visitor signed in with, kept so other
 // dashboard people see who sent a chat message. A visitor's own session holds
 // the same fields, but only in their cookie. Display only, never used for
