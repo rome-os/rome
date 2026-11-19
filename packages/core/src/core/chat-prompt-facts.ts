@@ -40,7 +40,9 @@ export interface ChatPromptFactsDeps {
 
 /**
  * The prompt facts, answering that a session catches up on nothing in a chat
- * whose channel already hands the agent every message, as web chat does.
+ * whose channel already hands the agent every message, as web chat does, and
+ * that a new session in a direct message reads that chat's latest messages
+ * from the platform.
  */
 export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
   const handsEveryMessage = (channel: string) =>
@@ -54,7 +56,15 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     read: async (messageIds) => deps.labels.read(deps.messages.byIds(messageIds).map(contextOf)),
     seen: (messageIds, chatId, turnId) => deps.facts.seen(messageIds, chatId, turnId),
     async earlier(place, before) {
-      if (!deps.latest || !place.threadId || handsEveryMessage(place.channel)) return null;
+      // Only a direct message: in a group, the platform also holds what was
+      // said before Rome joined, which no turn's catch-up shows.
+      if (
+        !deps.latest ||
+        !place.threadId ||
+        place.threadType !== "private" ||
+        handsEveryMessage(place.channel)
+      )
+        return null;
       const read = deps.latest(place, EARLIER_MESSAGES + 1);
       read.catch(() => {});
       const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);

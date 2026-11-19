@@ -6918,7 +6918,7 @@ describe("AgentRunner", () => {
             prompt,
             channelThreadKey: "slack_app:D_GUARDIAN",
             romeSessionId: conversation.id,
-            threadContext: { channel: "slack_app", threadId: "D_GUARDIAN" },
+            threadContext: { channel: "slack_app", threadId: "D_GUARDIAN", threadType: "private" },
           }),
         );
       }
@@ -6970,7 +6970,7 @@ describe("AgentRunner", () => {
             prompt: "hello",
             channelThreadKey: `slack_app:${threadId}`,
             romeSessionId: conversation.id,
-            threadContext: { channel: "slack_app", threadId },
+            threadContext: { channel: "slack_app", threadId, threadType: "private" },
           }),
         );
         expect(providerPrompts).toHaveLength(1);
