@@ -238,6 +238,9 @@ import { DEFAULT_LARGE_MODEL_SELECTION, DEFAULT_PROJECT_NAME } from "@/lib/chat-
 // floor, the header, and anything clickable or editable (a message is judged apart).
 const THREAD_FOCUS_KEEP =
   "[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
+// The boxes around a Concierge bubble (ConciergeBubble), which can be wider
+// than the bubble they hold.
+const BUBBLE_FRAME = "[data-concierge-bubble-part],[data-bubble-box]";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -3222,10 +3225,11 @@ export function Chat({
     // A click in a menu or popover opened from a message bubbles here through
     // its React parent, though it is not in the scroller.
     if (!target?.closest || !event.currentTarget.contains(target)) return;
-    // A message's own box spans the column, so only what is inside it is the
-    // message: the box itself, beside its bubble, is blank.
+    // A message's own box spans the column, and a bubble's two outer boxes
+    // take up to 90% of it, wider than a long bubble's own cap. So only what is
+    // inside the bubble is the message: each of these boxes, beside it, is blank.
     const entry = target.closest("[data-thread-entry]");
-    if (entry && entry !== target) return;
+    if (entry && entry !== target && !target.matches(BUBBLE_FRAME)) return;
     if (target.closest(THREAD_FOCUS_KEEP)) return;
     if (window.getSelection()?.toString()) return;
     void closeFocus();

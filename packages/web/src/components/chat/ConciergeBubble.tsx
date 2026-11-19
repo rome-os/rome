@@ -98,8 +98,9 @@ export const ConciergeBubble = memo(function ConciergeBubble({
 
   return (
     <div
-      // Every bubble, a message's later ones included: the thread view
-      // counts a press on one as on its content.
+      // Every bubble, a message's later ones included. A thread in focus
+      // counts a press on this box or the box inside it, beside the bubble, as
+      // blank (BUBBLE_FRAME in Chat.tsx): only what the bubble holds is content.
       data-concierge-bubble-part
       data-timeline-anchor={anchorId}
       data-message-part={partOf}

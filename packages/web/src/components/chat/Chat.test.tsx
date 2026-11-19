@@ -351,7 +351,13 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-on-behalf={row.message?.sender?.onBehalfOf?.kind}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
-            <span data-testid="user-text">{row.message?.content}</span>
+            {/* The two boxes ConciergeBubble draws around a bubble, which can
+              be wider than the bubble itself. */}
+            <div data-testid="bubble-part" data-concierge-bubble-part>
+              <div data-testid="bubble-box" data-bubble-box>
+                <span data-testid="user-text">{row.message?.content}</span>
+              </div>
+            </div>
             {/* A popover of the message, drawn outside the chat as the real ones are. */}
             {createPortal(<div data-testid="portal-pad" />, document.body)}
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
@@ -4021,6 +4027,17 @@ describe("Chat Concierge empty state", () => {
         await focused();
         fireEvent.click(screen.getAllByTestId("user-row")[0]!);
         await waitFor(() => expect(composer().dataset.thread).toBe(""));
+      });
+
+      // A long bubble is narrower than the two boxes around it.
+      it.each([
+        "bubble-part",
+        "bubble-box",
+      ])("goes back on a click on the %s beside a bubble", async (box) => {
+        await focused();
+        fireEvent.click(screen.getAllByTestId(box)[0]!);
+        await waitFor(() => expect(composer().dataset.thread).toBe(""));
+        expect(back()).toBeNull();
       });
 
       it("stays on a click in a popover drawn outside the thread", async () => {
