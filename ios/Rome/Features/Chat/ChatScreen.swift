@@ -29,7 +29,7 @@ struct ChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Under an open thread, VoiceOver reads the thread, not what it covers.
         .accessibilityHidden(store.thread != nil)
-        // The bar is clear: the transcript scrolls under its glass items.
+        // The transcript scrolls under the bar's glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
                 // The status, the access notice and the push prompt are read
@@ -41,6 +41,9 @@ struct ChatScreen: View {
                 }, onAgent: { [shell] in shell.openAgent.run(()) })
                 ChatBanners(workspace: workspace, store: store)
             }
+            // Rows fade out under the status bar and the header. The list is
+            // a UICollectionView, which no SwiftUI scroll edge effect reaches.
+            .modifier(ChatHeaderFade(workspace: workspace, store: store))
             .accessibilityHidden(store.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
@@ -209,6 +212,53 @@ private struct ChatHeaderBar: View {
     }
 }
 
+/// Behind the main Chat's header: rows show through it blurred under the
+/// status bar, lightly blurred at the header's buttons, and sharp below
+/// them, so the clock and the buttons stay legible over any row. It
+/// reaches past the status capsule while one hangs below the header row,
+/// and over the banners while they show. It reads the status itself, so a
+/// status change never redraws the transcript.
+///
+/// The list is a UICollectionView, and neither SwiftUI's scroll edge effect
+/// nor UIKit's `topEdgeEffect` with a `UIScrollEdgeElementContainerInteraction`
+/// band draws on it inside this hosting view.
+private struct ChatHeaderFade: ViewModifier {
+    let workspace: Workspace
+    let store: TranscriptStore
+    @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.pageBackground) private var page
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// How far below the header's frame the fade turns clear: negative ends
+    /// it at the buttons' lower edge, above the name tag.
+    private var reach: CGFloat {
+        if ChatBanners.shows(workspace: workspace, store: store, model: model) { return 0 }
+        // The row is 4 pt of padding, the identity's resting height with the
+        // 44 pt buttons centred on it, and 4 pt more.
+        let belowButtons = ChatIdentity.restingHeight(for: dynamicTypeSize) / 2 - 18
+        return ChatBanners.statusOverhang(workspace, dynamicTypeSize) - belowButtons
+    }
+
+    func body(content: Content) -> some View {
+        content.background(alignment: .top) {
+            ZStack {
+                HeaderBlur()
+                // A faint tint under the clock only, so it reads over any row.
+                // Dark has none: the black page would sink the blurred rows.
+                LinearGradient(stops: [
+                    .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3), location: 0),
+                    .init(color: page.opacity(0), location: 0.4),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .padding(.bottom, -reach)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
 /// What shows under the main Chat's header: the access notice, the store's
 /// banners and the push prompt. It reads their state itself, and the status
 /// the header's capsule hangs under it with.
@@ -219,14 +269,21 @@ private struct ChatBanners: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// How far the header's status capsule reaches below the header row.
-    private var statusOverhang: CGFloat {
-        workspace.mainChatActivity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
+    static func statusOverhang(_ workspace: Workspace, _ size: DynamicTypeSize) -> CGFloat {
+        workspace.mainChatActivity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: size)
     }
 
     /// Offered once Concierge is open, never while it loads or is off.
-    private var offersPush: Bool {
+    private static func offersPush(_ workspace: Workspace, _ model: AppModel) -> Bool {
         workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
     }
+
+    /// Something shows below the header row.
+    static func shows(workspace: Workspace, store: TranscriptStore, model: AppModel) -> Bool {
+        model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush(workspace, model)
+    }
+
+    private var offersPush: Bool { Self.offersPush(workspace, model) }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -249,7 +306,7 @@ private struct ChatBanners: View {
             }
         }
         // Below the header's status capsule, which hangs under the header row.
-        .padding(.top, model.accessNotice != nil || TranscriptBanners.shows(store) || offersPush ? 10 + statusOverhang : 0)
+        .padding(.top, Self.shows(workspace: workspace, store: store, model: model) ? 10 + Self.statusOverhang(workspace, dynamicTypeSize) : 0)
         .readableColumn()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
