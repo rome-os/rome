@@ -1,6 +1,6 @@
 import { sendRefusalMessage, type SendRefusal } from "@rome/api-types/people";
 import type { Context } from "hono";
-import type { SendResult } from "../../chats/send.js";
+import type { SendResult } from "../../../chats/send.js";
 
 /** The one answer every send route gives, so the dashboard reads one shape. */
 export function respondToSend(c: Context, result: SendResult) {

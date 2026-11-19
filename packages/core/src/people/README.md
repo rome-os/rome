@@ -10,6 +10,6 @@ Who is behind an account and how close they are to the guardian: people, their p
 | `phone-book/` | The guardian's edits to people and accounts, and the account directory. Its use cases are in `application/`; the dashboard reaches them through `http/` and agents through `actions/` (`core:list_people`). Only the wiring imports it, so it can be left out. |
 | `link-code/` | The code the guardian sends from an account to prove it is theirs. |
 | `guardian-profile/` | The guardian's name and background, and their agent's name. |
-| `person-history/` | A person's messages across their accounts, and sending to them. |
+| `person-history/` | A person's messages across their accounts, and sending to them. Its use cases are in `application/`; the dashboard reaches them through `http/`. |
 
 The import rules are in [`lint/rules/features.ts`](../../../../lint/rules/features.ts).
