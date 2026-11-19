@@ -115,6 +115,7 @@ function adapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   api = fakeApi(),
   copy: SlackMessageCopyRepository = testCopy(),
+  now?: () => Date,
 ) {
   const delivered: ChannelMessage[] = [];
   const faults: string[] = [];
@@ -129,6 +130,7 @@ function adapter(
     openMailbox: mailbox.open,
     onFault: ({ kind }) => faults.push(kind),
     copy,
+    ...(now ? { now } : {}),
   });
   a.onInbound((message) => delivered.push(message));
   return { adapter: a, delivered, faults, api, copy };
@@ -221,21 +223,26 @@ describe("Slack app while the instance is stopped (R6)", () => {
 });
 
 describe("Slack app's own copy of its direct messages", () => {
+  const at = (minute: number) => () => new Date(Date.UTC(2026, 10, 19, 12, minute));
+
   it("tells the mailbox a message arrived only once its copy holds it", async () => {
     const mailbox = fakeMailbox();
     const copy = testCopy();
     const keep = copy.keep.bind(copy);
     let failing = true;
-    copy.keep = (kept, at) => {
+    copy.keep = (kept, when) => {
       if (failing) throw new Error("disk full");
-      return keep(kept, at);
+      return keep(kept, when);
     };
-    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), copy);
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), copy);
     await a.start();
 
     await mailbox.deposit(frame(dmEvent(1)));
     expect(mailbox.statuses).toEqual([500]);
     expect(delivered).toHaveLength(0);
+    // The drain stops retrying a frame after a few tries, so the connection is
+    // reported down and starts again with a fresh drain.
+    expect(faults).toEqual(["transport"]);
 
     // The mailbox kept the frame and delivers it again.
     failing = false;
@@ -249,30 +256,50 @@ describe("Slack app's own copy of its direct messages", () => {
     // Kept, then stopped before noting it was handed over.
     const interrupted = new SlackMessageCopyRepository(db);
     interrupted.handedOver = () => {};
-    const first = adapter(fakeMailbox(), fakeApi(), interrupted);
+    const first = adapter(fakeMailbox(), fakeApi(), interrupted, at(0));
     await first.adapter.start();
     await first.adapter.handleFrame(frame(dmEvent(1)));
     await first.adapter.stop();
 
-    const restarted = adapter(fakeMailbox(), fakeApi(), new SlackMessageCopyRepository(db));
+    const copy = new SlackMessageCopyRepository(db);
+    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(30));
     await restarted.adapter.start();
     expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
     expect(restarted.delivered[0]?.timestamp).toEqual(first.delivered[0]?.timestamp);
 
-    const again = adapter(fakeMailbox(), fakeApi(), new SlackMessageCopyRepository(db));
+    const again = adapter(fakeMailbox(), fakeApi(), copy, at(50));
     await again.adapter.start();
     expect(again.delivered).toHaveLength(0);
+  });
+
+  it("hands Rome again on start what it handed over just before a stop", async () => {
+    const { db } = createTestDb();
+    const copy = new SlackMessageCopyRepository(db);
+    const first = adapter(fakeMailbox(), fakeApi(), copy, at(0));
+    await first.adapter.start();
+    await first.adapter.handleFrame(frame(dmEvent(1)));
+    await first.adapter.stop();
+
+    // A reload a minute later: Rome may not have recorded it yet.
+    const reloaded = adapter(fakeMailbox(), fakeApi(), copy, at(1));
+    await reloaded.adapter.start();
+    expect(reloaded.delivered.map((m) => m.text)).toEqual(["message 1"]);
+
+    // Long after, what was handed over is Rome's.
+    const later = adapter(fakeMailbox(), fakeApi(), copy, at(40));
+    await later.adapter.start();
+    expect(later.delivered).toHaveLength(0);
   });
 
   it("hands over a message Slack delivers again after a restart only once", async () => {
     const mailbox = fakeMailbox();
     const copy = testCopy();
-    const first = adapter(mailbox, fakeApi(), copy);
+    const first = adapter(mailbox, fakeApi(), copy, at(0));
     await first.adapter.start();
     await mailbox.deposit(frame(dmEvent(1)));
     await first.adapter.stop();
 
-    const restarted = adapter(mailbox, fakeApi(), copy);
+    const restarted = adapter(mailbox, fakeApi(), copy, at(30));
     await restarted.adapter.start();
     await mailbox.deposit(frame(dmEvent(1)));
     expect(first.delivered).toHaveLength(1);

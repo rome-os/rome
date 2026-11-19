@@ -7,7 +7,7 @@
 // outside the connection can tell whether the copy exists.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
 import { slackAppMessages } from "../../../db/schema.js";
 
@@ -33,9 +33,10 @@ export interface SlackMessageCopy {
   keep(kept: KeptSlackMessage, at: Date): boolean;
   /** Note that the message of event `eventId` was handed to Rome. */
   handedOver(teamId: string, eventId: string, at: Date): void;
-  /** The messages kept for workspace `teamId` but never handed to Rome,
-   *  oldest first. */
-  notHandedOver(teamId: string): Array<{ eventId: string; message: ChannelMessage }>;
+  /** The messages kept for workspace `teamId` that Rome may not hold, oldest
+   *  first: those never handed over, and those handed over at or after
+   *  `since`, which a stop may have cut off before Rome recorded them. */
+  mayNotHold(teamId: string, since: Date): Array<{ eventId: string; message: ChannelMessage }>;
 }
 
 /** The copy in Rome's database. */
@@ -72,11 +73,16 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .run();
   }
 
-  notHandedOver(teamId: string): Array<{ eventId: string; message: ChannelMessage }> {
+  mayNotHold(teamId: string, since: Date): Array<{ eventId: string; message: ChannelMessage }> {
     return this.db
       .select({ eventId: slackAppMessages.eventId, message: slackAppMessages.message })
       .from(slackAppMessages)
-      .where(and(eq(slackAppMessages.teamId, teamId), isNull(slackAppMessages.handedOverAt)))
+      .where(
+        and(
+          eq(slackAppMessages.teamId, teamId),
+          or(isNull(slackAppMessages.handedOverAt), gte(slackAppMessages.handedOverAt, since)),
+        ),
+      )
       .orderBy(asc(slackAppMessages.saidAt), asc(slackAppMessages.ts))
       .all()
       .map((row) => ({ eventId: row.eventId, message: revive(row.message) }));

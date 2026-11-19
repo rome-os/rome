@@ -148,7 +148,7 @@ describe("the Slack app talker", () => {
         opened.push(mailbox.drainKey);
         return { stop: () => {} };
       },
-      copy: { keep: () => true, handedOver: () => {}, notHandedOver: () => [] },
+      copy: { keep: () => true, handedOver: () => {}, mayNotHold: () => [] },
     });
     const talker = descriptor.capabilities.talker?.build(
       {

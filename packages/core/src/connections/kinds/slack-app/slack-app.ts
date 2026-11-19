@@ -43,6 +43,10 @@ const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
 const RENEW_RETRY_MS = HOUR_MS;
+/** A message handed to Rome this recently before a start is handed over
+ *  again: handing over does not wait for Rome to record it, so a stop may have
+ *  cut it off. Rome ignores a message it already holds. */
+const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
 const MAX_TIMER_MS = 24 * HOUR_MS;
 
@@ -269,11 +273,12 @@ export class SlackAppAdapter {
     return this.handleEvent(payload, payload.event_id);
   }
 
-  /** Hand Rome what the copy kept but never handed over, as a stop between
-   *  keeping a message and handing it over leaves it. Rome ignores a message
-   *  it already holds. */
+  /** Hand Rome again what it may not hold: what the copy kept but never
+   *  handed over, and what it handed over just before a stop. Rome ignores a
+   *  message it already holds. */
   private handOverKept(): void {
-    const kept = this.config.copy.notHandedOver(this.config.teamId);
+    const since = new Date(this.now().getTime() - HAND_OVER_AGAIN_MS);
+    const kept = this.config.copy.mayNotHold(this.config.teamId, since);
     if (kept.length > 0) {
       log.info("slack app handing over kept messages", { count: kept.length });
     }
@@ -339,7 +344,10 @@ export class SlackAppAdapter {
     };
     // The mailbox is told the message was received only once the copy holds
     // it: a write that fails answers 500, and the mailbox delivers it again.
-    // An event the copy holds already is a redelivery.
+    // The drain gives up on a frame after a few retries and waits to be
+    // resumed, so the failure also reports the connection down: the runtime
+    // starts it again after a backoff, with a fresh drain that retries the
+    // frame. An event the copy holds already is a redelivery.
     let fresh: boolean;
     try {
       fresh = this.config.copy.keep(
@@ -357,6 +365,7 @@ export class SlackAppAdapter {
       );
     } catch (error) {
       log.error("slack app could not keep a message", { error: describe(error) });
+      this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
     if (!fresh) return { status: 200 };
