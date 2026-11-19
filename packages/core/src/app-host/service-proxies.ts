@@ -97,6 +97,11 @@ const BACKEND_TURN_RPC_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
  * callMain's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+/** A channel query may read the platform live, and a platform that allows
+ * few reads a minute holds one for its turn: Rome's Slack app waits up to a
+ * minute, then up to 15s for Slack. 90s covers both, over callMain's 30s
+ * default. */
+const CHANNEL_QUERY_RPC_TIMEOUT_MS = 90 * 1000;
 
 export class AppConnectionsProxy implements AppConnectionBrokerPort, AppConnectionsContextFactory {
   forApp(appId: string) {
@@ -323,11 +328,15 @@ export class ChannelsServiceProxy implements ChannelsService {
     query: ChannelMessageQuery = {},
   ): Promise<ChannelMessage[]> {
     return fromWire(
-      await callMain<WireChannelMessage[]>("channels.query", {
-        channel,
-        ...query,
-        ...(query.since ? { since: query.since.toISOString() } : {}),
-      }),
+      await callMain<WireChannelMessage[]>(
+        "channels.query",
+        {
+          channel,
+          ...query,
+          ...(query.since ? { since: query.since.toISOString() } : {}),
+        },
+        { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
+      ),
     );
   }
 }
