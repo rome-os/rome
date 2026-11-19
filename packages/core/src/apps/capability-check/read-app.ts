@@ -285,13 +285,11 @@ class SourceReader {
       );
     for (const source of pageSources) {
       const visit = (node: TS.Node) => {
-        if (
-          ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) &&
-          APP_API_CALLS.has(node.expression.text)
-        ) {
+        const call = ts.isCallExpression(node) ? this.appApiCall(node) : undefined;
+        if (call && ts.isCallExpression(node)) {
+          const method = call === "appApiUrl" ? "GET" : this.callMethod(node.arguments[1]);
           for (const path of this.calledPaths(node.arguments[0], pageSources)) {
-            found.push({ at: this.at(source.fileName, node), path });
+            found.push({ at: this.at(source.fileName, node), path, method });
           }
         }
         ts.forEachChild(node, visit);
@@ -299,6 +297,35 @@ class SourceReader {
       visit(source);
     }
     return found;
+  }
+
+  /**
+   * Which SDK call reaches the app API here, if any: by the name it is
+   * imported under (`fetchAppApi as api`), or through the SDK's namespace.
+   */
+  private appApiCall(node: TS.CallExpression): string | undefined {
+    const callee = node.expression;
+    if (ts.isPropertyAccessExpression(callee)) {
+      return APP_API_CALLS.has(callee.name.text) ? callee.name.text : undefined;
+    }
+    if (!ts.isIdentifier(callee)) return undefined;
+    const declaration = this.checker.getSymbolAtLocation(callee)?.declarations?.[0];
+    if (declaration && ts.isImportSpecifier(declaration)) {
+      const imported = (declaration.propertyName ?? declaration.name).text;
+      return APP_API_CALLS.has(imported) ? imported : undefined;
+    }
+    return APP_API_CALLS.has(callee.text) ? callee.text : undefined;
+  }
+
+  /** The method a `RequestInit` names: `GET` without one, null when the reader cannot tell. */
+  private callMethod(init: TS.Expression | undefined): string | null {
+    if (!init) return "GET";
+    const literal = this.followIdentifier(init);
+    if (!literal || !ts.isObjectLiteralExpression(literal)) return null;
+    if (literal.properties.some((p) => ts.isSpreadAssignment(p))) return null;
+    const method = propertyValue(literal, "method");
+    if (!method) return "GET";
+    return this.stringLiteral(method)?.toUpperCase() ?? null;
   }
 
   /** The app API paths an argument can stand for; `[null]` when the reader cannot tell. */
@@ -313,7 +340,9 @@ class SourceReader {
     if (ts.isTemplateExpression(argument)) {
       let path = argument.head.text;
       for (const span of argument.templateSpans) path += `\u0000${span.literal.text}`;
-      return [normalizeCallPath(path)];
+      const normalized = normalizeCallPath(path);
+      // A path whose first segment is computed could be any route.
+      return [normalized === ":id" || normalized.startsWith(":id/") ? null : normalized];
     }
     // A path the enclosing function takes as a parameter: read each call site.
     const declaration = ts.isIdentifier(argument) ? this.declarationOf(argument)[0] : undefined;

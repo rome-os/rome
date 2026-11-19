@@ -209,6 +209,25 @@ declare function defineAction(spec: unknown): unknown;
     ]);
   });
 
+  it("I2: needs the page to call the route with a method it takes", async () => {
+    const reads =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => fetchAppApi("notes");\n';
+    expect((await gapsOf({ ...COMPLIANT, "src/web/App.tsx": reads })).map((g) => g.rule)).toEqual([
+      "I2",
+    ]);
+    const renamed =
+      'import { fetchAppApi as api } from "@rome-os/app-web-sdk";\nexport const save = () => api("notes", { method: "post" });\n';
+    expect(await gapsOf({ ...COMPLIANT, "src/web/App.tsx": renamed })).toEqual([]);
+  });
+
+  it("I2: leaves a call whose whole path is computed to a person", async () => {
+    const page =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\ndeclare const p: string;\nexport const save = () => fetchAppApi(`${p}`, { method: "POST" });\n';
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/web/App.tsx": page })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I2"]);
+  });
+
   it("I2: follows a path the page passes through its own helper", async () => {
     const page = `import { fetchAppApi } from "@rome-os/app-web-sdk";
 const call = (path: string) => fetchAppApi(path, { method: "POST" });

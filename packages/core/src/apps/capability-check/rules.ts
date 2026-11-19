@@ -209,7 +209,10 @@ function judgeHumanInterface(
     return;
   }
   const called = running.some((route) =>
-    app.pageApiCalls.some((call) => call.path !== null && pathMatches(route, call.path)),
+    app.pageApiCalls.some(
+      (call) =>
+        call.path !== null && pathMatches(route, call.path) && methodMatches(route, call.method),
+    ),
   );
   if (called) return;
   if (running.some((route) => route.unreadable) || app.pageApiCalls.some((c) => c.path === null)) {
@@ -231,6 +234,12 @@ function judgeHumanInterface(
 function isStatusRoute(path: string, method: string): boolean {
   if (path === "") return method === "GET" || method === "ANY";
   return path === "status" && method === "GET";
+}
+
+/** Whether a call with `method` (null: any) reaches `route`, which may take several. */
+function methodMatches(route: RouteFacts, method: string | null): boolean {
+  if (method === null || route.method === "ANY") return true;
+  return route.method.split("|").includes(method);
 }
 
 /** Whether a page's call to `called` reaches `route`; `:id` and `*` match any segment. */

@@ -72,6 +72,8 @@ export interface PageApiCallFacts {
   at: string;
   /** The path it calls, with `:id` for computed segments. Null when the reader cannot tell. */
   path: string | null;
+  /** The HTTP method it calls with, `GET` by default. Null when the reader cannot tell. */
+  method: string | null;
 }
 
 export interface AppFacts {
