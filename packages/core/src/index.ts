@@ -247,7 +247,7 @@ import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
-import { CONCIERGE_AGENT_ID, privateChildren, privateOwnerOf } from "./webchat/privacy.js";
+import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
@@ -259,6 +259,7 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import {
+  agentOnConnect,
   chatInstructionsOf,
   conciergeOnConnection,
   conciergePlaceSetup,
@@ -465,11 +466,10 @@ async function main() {
     linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
     accounts: connectedAccounts,
   };
-  // A newly connected account that takes an agent starts with the Concierge,
-  // the guardian's, so it answers from its first message. One Rome already
-  // has keeps its agent (docs/architecture/channels.md#an-accounts-agent).
-  const agentOnConnect = (kind: string) =>
-    accountAgents.linkOf(kind) === null ? null : CONCIERGE_AGENT_ID;
+  // A newly connected own account starts with the Concierge, the guardian's,
+  // so it answers from its first message. One Rome already has keeps its
+  // agent (docs/architecture/channels.md#an-accounts-agent).
+  const agentOnConnectOf = (kind: string) => agentOnConnect(accountAgents.linkOf(kind));
   // Rome listens to an account of a linkable connection kind only while it has an
   // agent: each inbound port reads this by connection, and a link tells it.
   const accountListening = new AccountListening(accountAgents);
@@ -674,7 +674,7 @@ async function main() {
           if (!talks(record.connectionKind)) return;
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
-          connectedAccounts.add(tx, record.id, agentOnConnect(record.connectionKind));
+          connectedAccounts.add(tx, record.id, agentOnConnectOf(record.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -690,7 +690,7 @@ async function main() {
         case "fixed":
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
-          connectedAccounts.add(tx, connection.id, agentOnConnect(connection.connectionKind));
+          connectedAccounts.add(tx, connection.id, agentOnConnectOf(connection.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
