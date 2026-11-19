@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import i18n from "@/i18n";
 import { useAppLifecycle } from "./use-app-lifecycle";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 // jsdom serves the page on localhost, which the dialog treats as unshareable.
 const origin = rs.hoisted(() => ({ value: "https://jessie.romeos.cc" as string | null }));
@@ -331,6 +332,7 @@ describe("contact autocomplete in the email list", () => {
       "fetch",
       rs.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url === FEATURES_URL) return allFeaturesShown();
         requested.push(url);
         if (url.startsWith("/api/accounts")) {
           return new Response(

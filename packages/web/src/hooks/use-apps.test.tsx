@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { InstalledAppCard } from "@rome/api-types/apps";
 import { useAppsList } from "./use-apps";
 import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
@@ -37,5 +38,39 @@ describe("useAppsList", () => {
     renderHook(() => useAppsList(), { wrapper });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(urls).toEqual(["/api/apps"]);
+  });
+
+  describe("while a feature is hidden", () => {
+    const installed = [{ id: "inbox" }, { id: "notes" }, { id: "briefing" }] as InstalledAppCard[];
+
+    function renderList(features: () => Promise<Response>) {
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async (input: RequestInfo | URL) =>
+          String(input) === FEATURES_URL ? features() : Response.json({ apps: installed }),
+        ),
+      );
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      );
+      return renderHook(() => useAppsList(), { wrapper });
+    }
+
+    it("leaves out the app of a hidden feature and keeps the rest", async () => {
+      const { result } = renderList(async () =>
+        Response.json({ features: { people: true, envoys: true, inbox: false } }),
+      );
+      await waitFor(() =>
+        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "briefing"]),
+      );
+    });
+
+    it("holds back only the gated app until core says which features are shown", async () => {
+      const { result } = renderList(() => new Promise<Response>(() => {}));
+      await waitFor(() =>
+        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "briefing"]),
+      );
+    });
   });
 });

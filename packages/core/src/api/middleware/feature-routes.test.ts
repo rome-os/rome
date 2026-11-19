@@ -24,7 +24,10 @@ describe("gatedFeatureOf", () => {
 
 function api(visibility: FeatureVisibility) {
   const inner = new Hono();
-  inner.use("*", hideGatedFeatureRoutes(async () => visibility));
+  inner.use(
+    "*",
+    hideGatedFeatureRoutes(async () => visibility),
+  );
   inner.get("/people", (c) => c.json({ people: [] }));
   inner.get("/connected-accounts", (c) => c.json([]));
   inner.get("/apps", (c) => c.json({ apps: [] }));

@@ -21,6 +21,7 @@ import {
 } from "./ChatComposer";
 import { ReplyDraftHarness } from "./reply/reply-draft-harness";
 import type { ReplyTarget } from "./reply/reply-draft";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 // The composer reads this once each time it renders.
 const composerRenders = rs.hoisted(() => ({ count: 0 }));
@@ -82,6 +83,7 @@ interface RenderComposerOptions {
 function mockComposerFetch(options: RenderComposerOptions = {}) {
   return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/settings") {
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
       return Response.json({ guardianName: "Ada", ...settings });
