@@ -202,50 +202,23 @@ private struct ChatHeaderBar: View {
     }
 }
 
-/// Behind the main Chat's header: rows show through it blurred under the
-/// status bar, lightly blurred at the header's buttons, and sharp below
-/// them, so the clock and the buttons stay legible over any row. It
+/// The header blur behind the main Chat's header (`ChatHeaderBlur`). It
 /// reaches past the status capsule while one hangs below the header row,
 /// and over the banners while they show. It reads the status itself, so a
 /// status change never redraws the transcript.
-///
-/// The list is a UICollectionView, and neither SwiftUI's scroll edge effect
-/// nor UIKit's `topEdgeEffect` with a `UIScrollEdgeElementContainerInteraction`
-/// band draws on it inside this hosting view.
 private struct ChatHeaderFade: ViewModifier {
     let workspace: Workspace
     let store: TranscriptStore
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.pageBackground) private var page
-    @Environment(\.colorScheme) private var colorScheme
 
-    /// How far below the header's frame the fade turns clear: negative ends
-    /// it at the buttons' lower edge, above the name tag.
     private var reach: CGFloat {
         if ChatBanners.shows(workspace: workspace, store: store, model: model) { return 0 }
-        // The row is 4 pt of padding, the identity's resting height with the
-        // 44 pt buttons centred on it, and 4 pt more.
-        let belowButtons = ChatIdentity.restingHeight(for: dynamicTypeSize) / 2 - 18
-        return ChatBanners.statusOverhang(workspace, dynamicTypeSize) - belowButtons
+        return ChatHeaderBlur.reach(statusShows: ChatBanners.statusOverhang(workspace, dynamicTypeSize) > 0, dynamicTypeSize)
     }
 
     func body(content: Content) -> some View {
-        content.background(alignment: .top) {
-            ZStack {
-                HeaderBlur()
-                // A faint tint under the clock only, so it reads over any row.
-                // Dark has none: the black page would sink the blurred rows.
-                LinearGradient(stops: [
-                    .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3), location: 0),
-                    .init(color: page.opacity(0), location: 0.4),
-                ], startPoint: .top, endPoint: .bottom)
-            }
-            .padding(.bottom, -reach)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
+        content.background(alignment: .top) { ChatHeaderBlur(reach: reach) }
     }
 }
 

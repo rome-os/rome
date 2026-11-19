@@ -1,6 +1,46 @@
 import SwiftUI
 import UIKit
 
+/// Behind a chat's header, the main Chat's and a topic chat's: rows show
+/// through it blurred under the status bar, lightly blurred at the header's
+/// buttons, and sharp below them, so the clock and the buttons stay legible
+/// over any row. The strip keeps the page's colour; only the rows blur.
+///
+/// The list is a UICollectionView, and neither SwiftUI's scroll edge effect
+/// nor UIKit's `topEdgeEffect` with a `UIScrollEdgeElementContainerInteraction`
+/// band draws on it inside this hosting view.
+struct ChatHeaderBlur: View {
+    /// How far below the header's frame the blur turns clear: negative ends
+    /// it at the buttons' lower edge, above the name tag.
+    let reach: CGFloat
+    @Environment(\.pageBackground) private var page
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The reach for a header whose status capsule hangs below its row or not.
+    static func reach(statusShows: Bool, _ dynamicTypeSize: DynamicTypeSize) -> CGFloat {
+        // The row is 4 pt of padding, the identity's resting height with the
+        // 44 pt buttons centred on it, and 4 pt more.
+        let belowButtons = ChatIdentity.restingHeight(for: dynamicTypeSize) / 2 - 18
+        return (statusShows ? ChatIdentity.statusHeight(for: dynamicTypeSize) : 0) - belowButtons
+    }
+
+    var body: some View {
+        ZStack {
+            HeaderBlur()
+            // A faint wash of the page under the clock only, so it reads over
+            // any row. Dark has none: the black page would sink the blurred rows.
+            LinearGradient(stops: [
+                .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3), location: 0),
+                .init(color: page.opacity(0), location: 0.4),
+            ], startPoint: .top, endPoint: .bottom)
+        }
+        .padding(.bottom, -reach)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// A blur that is strongest at its top edge and gone at its bottom edge,
 /// built from public API: blur bands of growing strength toward the top,
 /// each fading out downward, so their sum thins out smoothly. Rows show
@@ -100,6 +140,28 @@ final class HeaderBlurView: UIView {
             animator.pausesOnCompletion = true
             animator.fractionComplete = dark ? Self.darkStrengths[index] : band.strength
             animators.append(animator)
+            Self.keepBlurOnly(view)
+        }
+    }
+
+    /// Keeps the material's blur and drops the rest of its look: light's
+    /// regular blur lays a white wash over the rows, and dark's material maps
+    /// luminance, which lifted the black page to a grey. Each band held a
+    /// different share of that, so the strip read lighter than the page and
+    /// the bands' edges showed as a line. With the blur alone the strip is
+    /// the page's own colour and only the rows under it blur. The pieces are
+    /// matched by kind and filter name; a layout without them keeps its
+    /// look, as before.
+    private static func keepBlurOnly(_ view: UIVisualEffectView) {
+        for subview in view.subviews where subview !== view.contentView {
+            if let filters = subview.layer.filters, !filters.isEmpty {
+                // The backdrop: the blur, and the colour filters beside it.
+                let blur = filters.filter { String(describing: $0).contains("gaussianBlur") }
+                if !blur.isEmpty, blur.count < filters.count { subview.layer.filters = blur }
+            } else if !String(describing: type(of: subview)).contains("Backdrop") {
+                // The wash over the blur.
+                subview.isHidden = true
+            }
         }
     }
 

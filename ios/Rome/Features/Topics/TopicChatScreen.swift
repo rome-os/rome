@@ -310,15 +310,17 @@ private struct TopicChatHeader: View {
     /// Delete, with the chat's current title.
     let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        let activity = workspace.topics.activity(for: chatId)
         ChatHeader(
             // The Concierge's name, as in the main chat; the topic's own
             // title stays in the "…" menu.
             name: workspace.agentDisplayName,
             menuTitle: title,
-            activity: workspace.topics.activity(for: chatId),
+            activity: activity,
             announces: chatId != nil && model.visibleChat == chatId,
             onMenu: onMenu,
             onAgent: onAgent,
@@ -329,5 +331,10 @@ private struct TopicChatHeader: View {
             onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)
+        // Rows blur under the header as in the main Chat, past the status
+        // capsule while one hangs below the row.
+        .background(alignment: .top) {
+            ChatHeaderBlur(reach: ChatHeaderBlur.reach(statusShows: activity?.statusLine != nil, dynamicTypeSize))
+        }
     }
 }
