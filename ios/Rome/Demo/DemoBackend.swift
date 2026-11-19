@@ -242,6 +242,89 @@ final class DemoBackend: RomeBackend {
         return MessagePage(messages: Array(turned[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
     }
 
+    /// The Concierge chats of the demo: the main chat and the topic chats.
+    private func isConcierge(_ sessionId: String) -> Bool {
+        sessionId == conciergeChatID || topicChats.contains { $0.id == sessionId }
+    }
+
+    /// A page of a Concierge chat by its main-line messages, as an instance answers
+    /// `type=concierge`: each carries the summary of the thread it roots, the newest
+    /// page names the threads with unread replies whose root is older, and the trace
+    /// rows of the page's turns come with it. The cursor is `c:` and a key.
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
+        guard isConcierge(sessionId) else {
+            // Not a Concierge chat: it is read by turns.
+            if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
+            return try await messages(sessionId: sessionId, before: nil, limit: limit)
+        }
+        try await pause(0.3)
+        if unreadableChats.contains(sessionId) { throw APIError.server(status: 503, message: nil) }
+        let all = Self.withTurns(messages[sessionId] ?? []).map(Self.withThreads)
+        let main = all.filter { !$0.isTrace && ($0.chatThreadId == nil || $0.chatThreadId == $0.id) }
+        let end = before.flatMap { cursor in main.firstIndex { "c:\($0.id)" == cursor } } ?? main.count
+        var start = max(0, end - limit)
+        // `through` holds every main-line message down to the root of its thread, and two older ones.
+        if let through, let held = all.first(where: { $0.id == through }),
+           let rootAt = main.firstIndex(where: { $0.id == (held.chatThreadId ?? held.id) }), rootAt < start {
+            start = max(0, rootAt - 2)
+        }
+        let page = Array(main[start..<end])
+        var body: [ChatMessage] = []
+        var summaries: [String: ThreadSummary] = [:]
+        for message in page {
+            body.append(message)
+            let replies = all.filter { !$0.isTrace && $0.chatThreadId == message.id && $0.id != message.id }
+            if let summary = ThreadSummary.of(replies: replies) {
+                summaries[message.id] = summary
+                body.append(summary.latest)
+            }
+        }
+        var titles: [String: String] = [:]
+        var outside: [ChatMessage] = []
+        if before == nil {
+            let onPage = Set(page.map(\.id))
+            var waiting: [(root: String, summary: ThreadSummary)] = []
+            for root in Set(all.compactMap { $0.chatThreadId }) where !onPage.contains(root) {
+                let replies = all.filter { !$0.isTrace && $0.chatThreadId == root && $0.id != root }
+                guard let summary = ThreadSummary.of(replies: replies), summary.unreadCount > 0,
+                      let newest = replies.last(where: { ThreadStacks.counts($0) && $0.role != "user" && $0.read == false }) else { continue }
+                var entry = summary
+                entry.latest = newest
+                waiting.append((root, entry))
+            }
+            for (root, summary) in waiting.sorted(by: { $0.summary.unreadAt < $1.summary.unreadAt }) {
+                summaries[root] = summary
+                outside.append(summary.latest)
+                if let title = summary.latest.chatThreadTitle ?? threadTitles[root] { titles[root] = title }
+            }
+        }
+        let turns = Set((body + outside).compactMap(\.turnId))
+        let traces = all.filter { $0.isTrace && ($0.turnId.map(turns.contains) ?? false) }
+        var seen = Set<String>()
+        let flat = (body + outside + traces).filter { seen.insert($0.id).inserted }
+        let answer = ConciergeAnswer(body: body, oldestAt: page.map(\.date).min(), summaries: summaries, titles: titles, root: nil)
+        return MessagePage(messages: flat, nextCursor: start > 0 ? "c:\(main[start].id)" : nil, concierge: answer)
+    }
+
+    /// One thread whole, named by any message of it: its root with every reply, and the traces of their turns.
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
+        try await pause(0.25)
+        let all = Self.withTurns(messages[sessionId] ?? []).map(Self.withThreads)
+        guard let held = all.first(where: { $0.id == key }) else {
+            return MessagePage(messages: [], nextCursor: nil, concierge: ConciergeAnswer(body: [], oldestAt: nil, summaries: [:], titles: [:], root: nil))
+        }
+        let root = held.chatThreadId ?? held.id
+        let replies = all.filter { !$0.isTrace && $0.chatThreadId == root && $0.id != root }
+        let rootMessage = all.first { $0.id == root } ?? held
+        let body = [rootMessage] + replies
+        let turns = Set(body.compactMap(\.turnId))
+        let traces = all.filter { $0.isTrace && ($0.turnId.map(turns.contains) ?? false) }
+        var summaries: [String: ThreadSummary] = [:]
+        if let summary = ThreadSummary.of(replies: replies) { summaries[root] = summary }
+        let answer = ConciergeAnswer(body: body, oldestAt: rootMessage.date, summaries: summaries, titles: [:], root: root)
+        return MessagePage(messages: body + traces, nextCursor: nil, concierge: answer)
+    }
+
     /// Turns the way the server keeps them: each message the guardian writes
     /// starts one, and what follows answers it.
     private static func withTurns(_ messages: [ChatMessage]) -> [ChatMessage] {
@@ -273,11 +356,32 @@ final class DemoBackend: RomeBackend {
         for key in shares.keys { shares[key]?.removeAll { $0.id == id } }
     }
 
-    /// The demo is an instance with chat threads: every message says its thread.
+    /// The demo is an instance with chat threads and read marks: every message
+    /// says its thread, and is read unless the demo made it unread.
     private static func withThreads(_ message: ChatMessage) -> ChatMessage {
         var message = message
         message.knowsThreads = true
+        if message.read == nil { message.read = true }
         return message
+    }
+
+    /// The message as an instance records one the guardian has not seen yet.
+    private func unread(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.read = false
+        return message
+    }
+
+    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
+        let wanted = Set(ids)
+        guard let held = messages[sessionId] else { return false }
+        messages[sessionId] = held.map { message in
+            guard wanted.contains(message.id) else { return message }
+            var seen = message
+            seen.read = true
+            return seen
+        }
+        return true
     }
 
 
@@ -835,7 +939,10 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
+        var message = message
+        // What the agent says arrives unread; the guardian's own is read.
+        if message.role == "assistant", message.read == nil { message.read = false }
+        message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -1173,13 +1280,18 @@ final class DemoBackend: RomeBackend {
             threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)), "c-login"),
             threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
             threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
-            threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
-            threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
-            threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
+            // The threads show as stacks under their first message: the login
+            // task's replies are read, the site and price tasks' are not, so two
+            // pills wait; the research question stays read.
+            unread(threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site")),
+            unread(threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site")),
+            unread(threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site")),
             threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
             threaded(taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)), "c-research"),
             threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
-            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price"),
+            unread(threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price")),
+            // The Concierge points back to a thread with a link, drawn as a chip.
+            threaded(agent("官网文案那个任务在 [官网首页双语文案](#rome-thread=c-site)，改完会提醒你。", at: at(9, 41), id: "c-link"), "c-link"),
             // The Concierge asks and waits for an approval in the main chat too.
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),

@@ -167,6 +167,10 @@ enum SnapshotRunner {
                 workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
+            // A pill brought the transcript to a thread's stack, tinted for a moment.
+            await capture("04f-chat-stack-landed", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.concierge.showStack("c-site")
+            }
             // A task's thread view, opened from a label: the task's title,
             // "Open task chat", and the message it opened from tinted.
             await capture("04c-chat-thread-open", style: styleName, in: directory, wait: 1.5) {

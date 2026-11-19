@@ -139,6 +139,9 @@ enum TranscriptBuilder {
         var typing = false
         /// The message the unread line goes above; it ends the run before it.
         var unreadFrom: String? = nil
+        /// The replies of a chat thread that a stack under their root stands
+        /// for: counted in everything the turns say, drawn as no row.
+        var stacked: Set<String> = []
     }
 
     static func rows(
@@ -233,6 +236,7 @@ enum TranscriptBuilder {
             // rule, said on the owner's behalf or not, draws nothing. What the
             // Concierge answers it with shows as it always did.
             if options.showNotices, Self.isAutomated(message) { continue }
+            if options.stacked.contains(message.id) { continue }
             if message.isTrace {
                 var rows: [TranscriptRow] = []
                 if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
@@ -424,7 +428,9 @@ enum TranscriptBuilder {
         let named = Set(messages.compactMap { $0.chatThreadId == $0.id ? nil : $0.chatThreadId })
         var roots: [String: String] = [:]
         for message in messages {
-            guard let own = message.chatThreadId else { continue }
+            // A message that names no root of its own is its own: a root held
+            // from before its first reply says none, and the reply names it.
+            let own = message.chatThreadId ?? message.id
             if own != message.id || named.contains(message.id) { roots[message.id] = own }
         }
         return roots
@@ -434,14 +440,14 @@ enum TranscriptBuilder {
     /// of the newest task whose start message is in it, which any of its
     /// messages carries, else the start of the root's text when the root is
     /// loaded.
-    static func threadTitles(_ messages: [ChatMessage]) -> [String: String] {
+    static func threadTitles(_ messages: [ChatMessage], roots: [String: String]? = nil) -> [String: String] {
         var titles: [String: String] = [:]
         for message in messages {
             if let root = message.chatThreadId, let title = message.chatThreadTitle, !title.isEmpty {
                 titles[root] = title
             }
         }
-        let named = Set(threadRoots(messages).values)
+        let named = Set((roots ?? threadRoots(messages)).values)
         for message in messages where named.contains(message.id) && titles[message.id] == nil {
             if let name = startOfText(message) { titles[message.id] = name }
         }
@@ -460,34 +466,25 @@ enum TranscriptBuilder {
         return plain.count > 50 ? String(plain.prefix(49)) + "…" : plain
     }
 
-    /// How a reply that sits right under what it answers is joined to it
-    /// (docs/domains/chats.md#chat-thread).
-    enum ReplyJoin: Hashable, Sendable {
-        /// A hook up to the message above.
-        case hook
-        /// A line to the reply above, which answers the same message: the
-        /// same sender's, so the bubbles stand on one side.
-        case line
-    }
-
-    /// The adjacent replies of `messages`, by message id. A reply is adjacent
-    /// when the previous message that is drawn is its target, or answers the
-    /// same target; the latter, from the same sender, is a `line`. A trace
-    /// and a message with no words are not drawn, so they do not count.
-    static func replyJoins(_ messages: [ChatMessage]) -> [String: ReplyJoin] {
-        var joins: [String: ReplyJoin] = [:]
-        var previous: (id: String, target: String?, isUser: Bool)?
-        for message in messages where !message.isTrace {
+    /// The adjacent replies of `messages`, by message id
+    /// (docs/domains/chats.md#chat-thread). A reply is adjacent when the
+    /// previous message that is drawn is its target, or answers the same
+    /// target. An adjacent reply shows no quote and nothing in its place. A
+    /// trace and a message with no words are not drawn, so they do not count,
+    /// and neither does a message in `hidden`, such as a reply a stack stands for.
+    static func adjacentReplies(_ messages: [ChatMessage], hidden: Set<String> = []) -> Set<String> {
+        var adjacent: Set<String> = []
+        var previous: (id: String, target: String?)?
+        for message in messages where !message.isTrace && !hidden.contains(message.id) {
             let parts = message.parts
             guard parts.contains(where: { $0.textContent != nil }) || parts.contains(where: { $0.isVisible }) else { continue }
             let target = parts.lazy.compactMap(\.replyQuote).first?.messageId
             if let target, let previous, previous.id == target || previous.target == target {
-                let sibling = previous.id != target && previous.isUser == message.isUser
-                joins[message.id] = sibling ? .line : .hook
+                adjacent.insert(message.id)
             }
-            previous = (message.id, target, message.isUser)
+            previous = (message.id, target)
         }
-        return joins
+        return adjacent
     }
 
     /// The lines a turn's trace summary asks for: the session it renewed.

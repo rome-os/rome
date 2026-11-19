@@ -70,7 +70,11 @@ final class ShareLinkSource: NSObject, UIActivityItemSource {
 final class ChatShareFlow {
     /// The turns picked; nil outside share mode.
     private(set) var selection: Set<String>? {
-        didSet { if selection != oldValue { round += 1 } }
+        didSet {
+            if selection != oldValue { round += 1 }
+            // Share mode shows every message and no stacks: whole turns.
+            if (selection == nil) != (oldValue == nil) { chat?.shareModeChanged() }
+        }
     }
     /// Goes up with every change to share mode or its picks: a create that
     /// finds it moved on stops, so Cancel never leaves a link behind.

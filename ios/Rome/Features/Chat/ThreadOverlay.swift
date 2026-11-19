@@ -200,95 +200,20 @@ struct QuotedReply: View {
     }
 }
 
-/// The mark of a reply that sits right under what it answers, in place of a
-/// quote: a hook up to the message above, or a line across the gap to the reply
-/// above that answers the same message. It grows out of the bubble's outer top
-/// corner in the bubble's color, and both stems stand 20 pt in from the outer
-/// edge, on the straight part of the edge, so a run of replies reads as one
-/// rail. A tap leads where the quote would.
-struct ReplyRail: View {
-    enum Kind: Hashable, Sendable {
-        case hook
-        case line(gap: CGFloat)
-    }
-
-    let kind: Kind
-    /// The reply is the guardian's: its bubble is on the trailing side and ember.
-    let isUser: Bool
-    /// The quoted text, which the mark's name carries.
-    let label: String
-    let onTap: (() -> Void)?
-
-    private static let stem: CGFloat = 20
-    private static let hookHeight: CGFloat = 14
-
-    private var height: CGFloat {
-        switch kind {
-        case .hook: return Self.hookHeight
-        case .line(let gap): return gap
-        }
-    }
-
-    var body: some View {
-        let mark = RailShape(kind: kind, stem: Self.stem, trailing: isUser)
-            .stroke(isUser ? Palette.primary : Palette.replyRail, lineWidth: 1.5)
-            .frame(width: 2 * Self.stem + 4, height: height)
-        Group {
-            if let onTap {
-                Button(action: onTap) { mark.contentShape(Rectangle()) }.buttonStyle(.plain)
-            } else {
-                mark
-            }
-        }
-        .accessibilityLabel(Text(verbatim: label))
-        .accessibilityIdentifier("reply-quote")
-        // Above the bubble it grows from, taking no room.
-        .offset(y: -height)
-    }
-}
-
 extension View {
     /// What a reply that is a task card carries, as a text reply does: the quote
-    /// above the card, or, where it sits right under what it answers, the mark
-    /// growing out of the card's top corner.
+    /// above the card. A reply that sits right under what it answers has none
+    /// (`RowInfo.quote` is nil then).
     @ViewBuilder
-    func replyMark(quote: MessagePart.ReplyQuote?, rail: ReplyRail.Kind?, onTap: (() -> Void)?) -> some View {
+    func replyMark(quote: MessagePart.ReplyQuote?, onTap: (() -> Void)?) -> some View {
         if let quote {
             VStack(alignment: .leading, spacing: 6) {
-                if rail == nil { QuotedReply(quote: quote, tone: .received, onTap: onTap) }
+                QuotedReply(quote: quote, tone: .received, onTap: onTap)
                 self
-            }
-            .overlay(alignment: .topLeading) {
-                if let rail { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onTap) }
             }
         } else {
             self
         }
-    }
-}
-
-private struct RailShape: Shape {
-    let kind: ReplyRail.Kind
-    let stem: CGFloat
-    let trailing: Bool
-
-    func path(in rect: CGRect) -> Path {
-        // The stem, measured from the bubble's outer edge, and the way the hook turns.
-        let x = trailing ? rect.maxX - stem : stem
-        let turn: CGFloat = trailing ? -1 : 1
-        var path = Path()
-        switch kind {
-        case .line:
-            path.move(to: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: x, y: rect.maxY))
-        case .hook:
-            let radius: CGFloat = 8
-            path.move(to: CGPoint(x: x, y: rect.maxY))
-            path.addLine(to: CGPoint(x: x, y: rect.minY + radius))
-            path.addQuadCurve(to: CGPoint(x: x + turn * radius, y: rect.minY), control: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: x + turn * 14, y: rect.minY))
-        }
-        return path
     }
 }
 

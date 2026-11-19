@@ -111,27 +111,27 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(built.filter { $0.id.hasPrefix("label-") }.isEmpty)
     }
 
-    /// A reply that sits right under what it answers draws a rail and no quote
-    /// text; one that does not draws its quote. Both are on the first bubble only.
-    @Test func anAgentReplyShowsAQuoteOrARail() throws {
+    /// A reply that sits right under what it answers shows nothing of its
+    /// quote; one that does not shows it. Both are on the first bubble only.
+    @Test func anAgentReplyShowsAQuoteOrNothing() throws {
         let adjacent = [
             message("u", role: "user", "plan", at: 0, thread: "u"),
             message("a1", at: 1, thread: "u", parts: quote(of: "a1", "u") + [["type": "text", "content": "second bubble"]]),
         ]
         let infos = RowInfo.build(rows: rows(adjacent), messages: adjacent, pending: [], kind: .concierge)
-        let first = try #require(infos["a1:1"])
-        #expect(first.quote?.messageId == "u" && first.rail == .hook && first.quoteLeads)
-        #expect(infos["a1:2"]?.quote == nil && infos["a1:2"]?.rail == nil)
-        // With a message between, the reply shows its quote.
+        #expect(infos["a1:1"]?.quote == nil && infos["a1:2"]?.quote == nil)
+        // With a message between, the reply shows its quote, on the first bubble.
         let apart = [adjacent[0], message("x", at: 1, thread: "x"), adjacent[1]]
         let spaced = RowInfo.build(rows: rows(apart), messages: apart, pending: [], kind: .concierge)
-        #expect(spaced["a1:1"]?.quote?.author == "guardian" && spaced["a1:1"]?.rail == nil)
+        let first = try #require(spaced["a1:1"])
+        #expect(first.quote?.messageId == "u" && first.quote?.author == "guardian" && first.quoteLeads)
+        #expect(spaced["a1:2"]?.quote == nil)
     }
 
-    /// A reply that is only a task card carries its quote or rail as a text
-    /// reply does, and leads where it would: the card is the owner's way into
-    /// the thread.
-    @Test func aCardReplyShowsAQuoteOrARail() throws {
+    /// A reply that is only a task card carries its quote as a text reply
+    /// does, and leads where it would: the card is the owner's way into the
+    /// thread. Right under what it answers it shows nothing.
+    @Test func aCardReplyShowsAQuoteOrNothing() throws {
         let card: [[String: Any]] = [["type": "task_chat", "chatId": "t1", "title": "Flights", "show": "ask"]]
         let adjacent = [
             message("u", role: "user", "plan", at: 0, thread: "u"),
@@ -140,52 +140,37 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let row = try #require(rows(adjacent).first { if case .taskAsk = $0 { true } else { false } })
         #expect(row.ownMessageId == "c1")
         let infos = RowInfo.build(rows: rows(adjacent), messages: adjacent, pending: [], kind: .concierge)
-        let near = try #require(infos[row.id])
-        #expect(near.quote?.messageId == "u" && near.rail == .hook && near.quoteLeads)
+        #expect(infos[row.id]?.quote == nil)
         // With a message between, the card shows the quote's words.
         let apart = [adjacent[0], message("x", at: 1, thread: "x"), adjacent[1]]
         let spaced = RowInfo.build(rows: rows(apart), messages: apart, pending: [], kind: .concierge)
-        #expect(spaced[row.id]?.quote?.author == "guardian" && spaced[row.id]?.rail == nil)
+        #expect(spaced[row.id]?.quote?.author == "guardian" && spaced[row.id]?.quoteLeads == true)
     }
 
-    /// A reply is adjacent to the message right above it, or to a reply of the
-    /// same sender above it that answers the same message, which a line joins.
-    @Test func adjacentRepliesAreJoinedByAHookOrALine() {
+    /// A reply is adjacent to the message right above it, or to a reply above
+    /// it that answers the same message, whoever said it.
+    @Test func adjacentRepliesAreTheOnesRightUnderTheirTarget() {
         let q = message("q", role: "user", "plan", at: 0, thread: "q")
         let a = message("a", at: 1, thread: "q", parts: quote(of: "a", "q"))
         let b = message("b", at: 2, thread: "q", parts: quote(of: "b", "q"))
         let c = message("c", at: 3, thread: "q", parts: quote(of: "c", "q"))
-        #expect(TranscriptBuilder.replyJoins([q, a, b, c]) == ["a": .hook, "b": .line, "c": .line])
+        #expect(TranscriptBuilder.adjacentReplies([q, a, b, c]) == ["a", "b", "c"])
         // An owner reply to the agent's message above, and the agent's answer to that.
         let r = message("r", role: "user", "ok", at: 4, thread: "q", parts: quote(of: "r", "c"))
         let s = message("s", at: 5, thread: "q", parts: quote(of: "s", "r"))
-        #expect(TranscriptBuilder.replyJoins([q, a, b, c, r, s])["r"] == .hook)
-        #expect(TranscriptBuilder.replyJoins([q, a, b, c, r, s])["s"] == .hook)
-        // Another sender's reply to the same message sits on the other side, so it is a hook.
+        #expect(TranscriptBuilder.adjacentReplies([q, a, b, c, r, s]) == ["a", "b", "c", "r", "s"])
+        // Another sender's reply to the same message is adjacent too.
         let other = message("o", role: "user", "me too", at: 2, thread: "q", parts: quote(of: "o", "q"))
-        #expect(TranscriptBuilder.replyJoins([q, a, other])["o"] == .hook)
+        #expect(TranscriptBuilder.adjacentReplies([q, a, other]) == ["a", "o"])
         // A message between, a trace aside, breaks adjacency; a message that replies to nothing has none.
         var trace = message("t", at: 1)
         trace.role = "trace"
         trace.content = "[]"
-        #expect(TranscriptBuilder.replyJoins([q, trace, a])["a"] == .hook)
-        #expect(TranscriptBuilder.replyJoins([q, message("x", at: 1), a])["a"] == nil)
-        #expect(TranscriptBuilder.replyJoins([q, a])["q"] == nil)
-    }
-
-    /// A line spans the gap to the reply above only when that reply's row is
-    /// the row right above; a time line between makes it a hook.
-    @Test func aLineNeedsTheSiblingRightAbove() {
-        let q = message("q", role: "user", "plan", at: 0, thread: "q")
-        let a = message("a", at: 1, thread: "q", parts: quote(of: "a", "q"))
-        let b = message("b", at: 2, thread: "q", parts: quote(of: "b", "q"))
-        let close = [q, a, b]
-        let near = RowInfo.build(rows: rows(close), messages: close, pending: [], kind: .concierge)
-        #expect(near["a:1"]?.rail == .hook)
-        #expect(near["b:1"]?.rail == .line(gap: 3))
-        // An hour apart, the time line stands between them.
-        let far = [q, a, message("b", at: 4000, thread: "q", parts: quote(of: "b", "q"))]
-        #expect(RowInfo.build(rows: rows(far), messages: far, pending: [], kind: .concierge)["b:1"]?.rail == .hook)
+        #expect(TranscriptBuilder.adjacentReplies([q, trace, a]) == ["a"])
+        #expect(TranscriptBuilder.adjacentReplies([q, message("x", at: 1), a]).isEmpty)
+        #expect(!TranscriptBuilder.adjacentReplies([q, a]).contains("q"))
+        // A message a stack stands for is not the one above: only what the main line shows counts.
+        #expect(TranscriptBuilder.adjacentReplies([q, message("x", at: 1), a], hidden: ["x"]) == ["a"])
     }
 
     /// A quote shows the first line of the message it quotes, as plain text.
@@ -200,13 +185,13 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     /// A quote leads to the thread view of its reply, or to the original when
     /// the reply is alone, as one kept from before reply chains is.
     @Test func aQuoteLeadsToTheThreadOrTheOriginal() throws {
-        let reply = message("a1", at: 1, thread: "u", parts: quote(of: "a1", "u"))
-        let held = [message("u", role: "user", "plan", at: 0, thread: "u"), reply]
+        let reply = message("a1", at: 2, thread: "u", parts: quote(of: "a1", "u"))
+        let held = [message("u", role: "user", "plan", at: 0, thread: "u"), message("x", at: 1, thread: "x"), reply]
         #expect(RowInfo.build(rows: rows(held), messages: held, pending: [], kind: .concierge)["a1:1"]?.quoteLeads == true)
         // A quote kept from before: the reply is its own root, so it can only go to the original.
-        let legacy = message("a1", at: 1, thread: "a1", parts: quote(of: "a1", "u"))
+        let legacy = message("a1", at: 2, thread: "a1", parts: quote(of: "a1", "u"))
         let leads = { (messages: [ChatMessage]) in RowInfo.build(rows: self.rows(messages), messages: messages, pending: [], kind: .concierge)["a1:1"]?.quoteLeads }
-        #expect(leads([message("u", role: "user", "plan", at: 0, thread: "u"), legacy]) == true)
+        #expect(leads([message("u", role: "user", "plan", at: 0, thread: "u"), message("x", at: 1, thread: "x"), legacy]) == true)
         #expect(leads([legacy]) == false)
     }
 

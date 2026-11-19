@@ -26,10 +26,6 @@ enum Palette {
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
-    /// The rail that joins a Concierge reply to the message it answers: the
-    /// bubble's fill taken 26% of the way to the text color, since the fill
-    /// itself sits too close to the page. A guardian reply's rail is `primary`.
-    static let replyRail = dynamic(0xB5AEA5, 0x54524E)
     static let hair = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.08))
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
@@ -147,8 +143,10 @@ extension View {
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
     /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
     /// tinted message's tint goes on before the width, so it hugs the bubble.
-    func bubbleWidth(full: Bool = false) -> some View {
-        modifier(BubbleWidth(full: full))
+    func bubbleWidth(
+        full: Bool = false, stack: ThreadStack? = nil, onOpenStack: @escaping () -> Void = {}
+    ) -> some View {
+        modifier(BubbleWidth(full: full, stack: stack, onOpenStack: onOpenStack))
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -167,11 +165,15 @@ extension View {
 private struct BubbleWidth: ViewModifier {
     /// The chat's whole width, as an agent card takes it, rather than a bubble's.
     let full: Bool
+    let stack: ThreadStack?
+    let onOpenStack: () -> Void
     @Environment(\.rowTinted) private var tinted
 
     func body(content: Content) -> some View {
         content
             .tinted(tinted)
+            // The thread's stack hangs under the bubble itself, whatever the row's width.
+            .threadStack(stack, onOpen: onOpenStack)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, full ? 0 : Metrics.bubbleInset)
     }

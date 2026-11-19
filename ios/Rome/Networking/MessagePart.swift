@@ -101,7 +101,10 @@ enum MessagePart: Hashable, Sendable {
         /// The line a quote shows: the first line of the quoted message with
         /// words in it, as plain reading text. A fence line holds none, so the
         /// first line inside it counts. The rest of the message is not quoted.
-        var line: String {
+        var line: String { Self.firstLine(of: text) }
+
+        /// The first line of `text` with words in it, as plain reading text.
+        static func firstLine(of text: String) -> String {
             for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
                 let trimmed = raw.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { continue }

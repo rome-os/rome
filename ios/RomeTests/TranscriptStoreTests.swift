@@ -46,6 +46,42 @@ final class FakeBackend: RomeBackend {
         return page
     }
 
+    /// The messages each read by `through` asked to reach, in order.
+    var throughReads: [String] = []
+    func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
+        throughReads.append(through)
+        return try await messages(sessionId: sessionId, before: nil, limit: limit)
+    }
+
+    /// Answers a read by main-line messages (`type=concierge`); nil answers by turns, as an
+    /// instance before the mode does.
+    var conciergePage: ((_ before: String?, _ limit: Int, _ through: String?) -> MessagePage)?
+    /// What each such read asked for, in order.
+    var conciergeReads: [(before: String?, limit: Int, through: String?)] = []
+    /// Set, every such read fails with it.
+    var conciergeError: APIError?
+    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
+        conciergeReads.append((before, limit, through))
+        if let conciergeError { throw conciergeError }
+        if let conciergePage { return conciergePage(before, limit, through) }
+        if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
+        return try await messages(sessionId: sessionId, before: before, limit: limit)
+    }
+
+    /// One thread read whole, by the key asked for; a missing one fails.
+    var conciergeThreads: [String: MessagePage] = [:]
+    var conciergeThreadReads: [String] = []
+    var conciergeThreadError: APIError?
+    /// Runs inside a thread read by main-line paging, before it answers.
+    var duringConciergeThreadRead: (() async -> Void)?
+    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
+        conciergeThreadReads.append(key)
+        await duringConciergeThreadRead?()
+        if let conciergeThreadError { throw conciergeThreadError }
+        guard let page = conciergeThreads[key] else { throw APIError.notFound }
+        return page
+    }
+
     /// Set, the active turns cannot be read.
     var activeTurnsError: APIError?
 
@@ -263,6 +299,17 @@ final class FakeBackend: RomeBackend {
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
+    /// The messages told to the instance as seen, by chat, in order.
+    var markedRead: [(session: String, ids: [String])] = []
+    /// Off, the instance does not take a mark (a failed POST): every one is answered as not taken.
+    var markReadSucceeds = true
+    /// Runs inside a mark, before it answers.
+    var duringMarkRead: (() async -> Void)?
+    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
+        markedRead.append((sessionId, ids))
+        await duringMarkRead?()
+        return markReadSucceeds
+    }
     /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
     /// many reads had gone out each time it was asked for.
     var readMarkValue: String?

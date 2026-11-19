@@ -110,6 +110,8 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
+                // One pill for each thread with replies the guardian has not seen.
+                if let store { ThreadPills(store: store) }
                 if let store, store.showsQuoteBar {
                     QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -142,12 +144,24 @@ struct TopicChatScreen: View {
         }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
+        // The chat is seen only while it is the one on screen: a thread kept open under another
+        // page reads nothing, and is read when this one comes back.
+        .onChange(of: "\(store?.sessionId ?? "")|\(visibleChat ?? "")", initial: true) { updateOnScreen() }
         .onDisappear {
+            store?.viewed = false
             store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
         }
+    }
+
+    /// Tells the store whether the guardian sees the chat.
+    private func updateOnScreen() {
+        guard let store else { return }
+        // Only what is seen: this screen opens and reads the chat itself (`markRead`), so the
+        // store's own opening, which the main Chat relies on, is not asked twice.
+        store.viewed = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
     }
 
     /// Read only while it is the chat on screen: never under an instance
@@ -164,7 +178,7 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
@@ -241,7 +255,7 @@ struct TopicChatScreen: View {
             if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
                 draft = ""
                 _ = attachments.take()
-                store.closeThread()
+                store.composerSent()
             }
             return
         }

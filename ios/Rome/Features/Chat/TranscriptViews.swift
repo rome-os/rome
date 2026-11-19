@@ -98,14 +98,15 @@ struct UserBubble: View {
     var mark: MessageMark? = nil
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    /// The thread this message roots, as a stack under its bubble.
+    var stack: ThreadStack? = nil
+    var onOpenStack: () -> Void = {}
     @Environment(\.rowTinted) private var tinted
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
-    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil && rail == nil) }
+    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil) }
 
     /// Where the mark sits: on the text bubble when there is one, and on the
     /// photos' corner only for photos sent alone.
@@ -133,12 +134,13 @@ struct UserBubble: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !images.isEmpty {
                         UserImageGrid(images: images)
-                            // Only photos alone carry it.
+                            // Only photos alone carry it, and the stack hangs from them.
                             .markBadge(hasBubble ? nil : mark)
+                            .threadStack(hasBubble ? nil : stack, onOpen: onOpenStack)
                     }
                     if hasBubble {
                         VStack(alignment: .leading, spacing: 4) {
-                            if let quote, rail == nil {
+                            if let quote {
                                 QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
                             }
                             if !text.isEmpty {
@@ -148,15 +150,14 @@ struct UserBubble: View {
                                     .foregroundStyle(.white)
                             }
                         }
+                            .stackMinWidth(stack)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .overlay(alignment: .topTrailing) {
-                                if let rail, let quote { ReplyRail(kind: rail, isUser: true, label: quote.text, onTap: onQuote) }
-                            }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
                             .markBadge(mark)
+                            .threadStack(stack, onOpen: onOpenStack)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -364,10 +365,11 @@ struct AgentBubble: View {
     var menu = BubbleMenu()
     /// What the message replies to, quoted at the top of the bubble.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
     /// The quote's tap: the thread view, or the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
+    /// The thread this message roots, as a stack under its bubble.
+    var stack: ThreadStack? = nil
+    var onOpenStack: () -> Void = {}
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
     static var startsExpanded = false
@@ -422,7 +424,7 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let quote, rail == nil {
+            if let quote {
                 QuotedReply(quote: quote, tone: .received, onTap: onQuote)
             }
             MarkdownText(source: text)
@@ -438,15 +440,13 @@ struct AgentBubble: View {
             // Open, it sits right under the last line.
             if folds && expanded { expandButton.padding(.top, -6) }
         }
+        .stackMinWidth(stack)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
-        .overlay(alignment: .topLeading) {
-            if let rail, let quote { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onQuote) }
-        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
-        .bubbleWidth()
+        .bubbleWidth(stack: stack, onOpenStack: onOpenStack)
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into
@@ -536,6 +536,9 @@ struct TaskCard: View {
     let title: String
     /// How the task chat stands; nil keeps the bare "Task".
     var state: TaskCardState? = nil
+    /// The thread this message roots, as a stack under the card.
+    var stack: ThreadStack? = nil
+    var onOpenStack: () -> Void = {}
     let action: () -> Void
 
     /// The line above the title.
@@ -567,7 +570,7 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .bubbleWidth()
+        .bubbleWidth(stack: stack, onOpenStack: onOpenStack)
         .accessibilityLabel(Text(verbatim: "\(label), \(title)"))
         .accessibilityIdentifier("task-card")
     }
