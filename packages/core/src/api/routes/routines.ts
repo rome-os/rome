@@ -145,10 +145,10 @@ interface CreateRoutineBody {
 }
 
 const MAX_ROUTINE_KEY_LENGTH = 200;
-// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps key their
-// own managed routines (briefing uses `briefing-*`) through create_routine;
-// keeping this route to its own prefix stops a chat card from claiming, or
-// being answered with, one of those.
+// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps may key
+// their own managed routines through create_routine; keeping this route to its
+// own prefix stops a chat card from claiming, or being answered with, one of
+// those.
 
 interface UpdateRoutineBody {
   name?: string;

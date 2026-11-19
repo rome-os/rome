@@ -403,8 +403,8 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
-  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
-    const firstParty = ["briefing", "inbox", "showcases", "skills"];
+  it("uses page tiles for exactly three first-party apps and keeps other app images", async () => {
+    const firstParty = ["inbox", "showcases", "skills"];
     mockBackend({
       installed: [
         ...firstParty.map((id) =>
@@ -425,7 +425,7 @@ describe("AppsIndexPage reactivity", () => {
       ],
     });
     renderPage();
-    await screen.findByText("briefing");
+    await screen.findByText("inbox");
     const section = screen.getByRole("region", { name: "Built-in apps" });
     const memoryTile = within(section)
       .getByText("Memory")
