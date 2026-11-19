@@ -113,7 +113,7 @@ export class FakeSlack {
     this.saveTimer = null;
     this.socketTickets = new Map(); // ticket -> appId, one use each
     this.openSockets = new Set();
-    this.rateLimited = new Map(); // "teamId method" -> time of the last call let through
+    this.rateLimited = new Map(); // "teamId appId method" -> time of the last call let through
   }
 
   save() {
@@ -293,7 +293,8 @@ export class FakeSlack {
   rateLimit(method, tokenInfo) {
     if (!this.config.historyLimit || !HISTORY_METHODS.has(method)) return null;
     if (!tokenInfo || tokenInfo.revoked) return null;
-    const key = `${tokenInfo.teamId} ${method}`;
+    // Slack limits each method per workspace and per app.
+    const key = `${tokenInfo.teamId} ${tokenInfo.appId ?? this.config.appId} ${method}`;
     const now = Date.now();
     const last = this.rateLimited.get(key);
     if (last !== undefined && now - last < this.config.historyWindowMs) {

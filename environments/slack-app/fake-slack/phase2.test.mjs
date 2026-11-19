@@ -712,3 +712,15 @@ test("a user token reads only the private conversations its member is in", async
     await ctl("/config", { history_limit: true });
   }
 });
+
+test("the history limit holds per app: another app's read leaves Rome's quota alone", async () => {
+  const token = (await install(A, GUARDIAN, APP_SCOPES)).access_token;
+  const other = await ctl("/other-app", { team: A, kind: "socket_bot", name: "Quota Bot" });
+  const dm = (await ctl("/state")).workspaces[0].members.find((m) => m.id === BOB).im_channel;
+  await sleep(450);
+  const read = async (t) => (await api("conversations.history", { channel: dm }, t)).error ?? "ok";
+  assert.equal(await read(other.bot_token), "ok");
+  assert.equal(await read(token), "ok");
+  assert.equal(await read(other.bot_token), "ratelimited");
+  assert.equal(await read(token), "ratelimited");
+});

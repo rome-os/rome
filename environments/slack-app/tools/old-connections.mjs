@@ -12,7 +12,7 @@
 //   node old-connections.mjs link <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>
 //     Links the bot's account to the Concierge through the dashboard's own
 //     route, then checks that each connection came back: listed, the bot's
-//     Socket Mode connection open, the OAuth tokens in the connector's token
+//     Socket Mode connection open now, the OAuth tokens in the connector's token
 //     file (ctl.sh token-file's answer). Runs on the host.
 //
 // What each row holds, and where in rome it comes from, is in DIFFERENCES.md.
@@ -261,12 +261,14 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
   const listed = await fetch(`${instance}/api/connections`, { headers }).then((r) => r.json());
   const views = Array.isArray(listed) ? listed : (listed.connections ?? []);
   const view = (id) => views.find((v) => v.id === id) ?? null;
-  // The bot's Socket Mode connection said hello once Rome started it.
-  let hello = false;
-  for (let i = 0; i < 60 && !hello; i++) {
-    const { sockets } = await fetch(`${fake}/_control/sockets`).then((r) => r.json());
-    hello = sockets.some((s) => s.appId === bot.app_id && s.event === "hello");
-    if (!hello) await new Promise((r) => setTimeout(r, 1000));
+  // The bot's Socket Mode connection is open now: one from before the
+  // restart has closed, so the fake's history of hellos would not do.
+  let open = false;
+  const waitS = Number(process.env.OLD_CONNECTIONS_WAIT_S ?? 60);
+  for (let i = 0; i < waitS && !open; i++) {
+    const { open_sockets } = await fetch(`${fake}/_control/state`).then((r) => r.json());
+    open = open_sockets.some((x) => x.app_id === bot.app_id);
+    if (!open) await new Promise((r) => setTimeout(r, 1000));
   }
   // The fake shows each app's token tails, never the tokens.
   const { other_apps } = await fetch(`${fake}/_control/state`).then((r) => r.json());
@@ -275,7 +277,7 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
     bot_agent_linked: linked.ok,
     bot_agent: linkBody?.account?.agent ?? null,
     bot_listed: view(bot.connection_id) !== null,
-    bot_socket_hello: hello,
+    bot_socket_open: open,
     oauth_listed: view(written.slack.connection_id) !== null,
     oauth_token_file: tokens.exists === true && tokens.bot_token_tail === oauthTail,
   };

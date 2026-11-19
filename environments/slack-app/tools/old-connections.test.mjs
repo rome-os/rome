@@ -4,7 +4,8 @@
 // Run: node --test environments/slack-app/tools/old-connections.test.mjs
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -204,9 +205,96 @@ test("write reads each old app the way rome did, and leaves the rows an upgrade 
   assert.equal(new DatabaseSync(dbPath).prepare("SELECT count(*) n FROM connections").get().n, 2);
 });
 
-// write talks to the fake, which runs in this process, so it cannot block it.
-function runAsync(args) {
+test("link counts only a Socket Mode connection open now, not one that said hello and closed", async () => {
+  const bot = await tokensOf("socket_bot", "Rome Bot");
+  const cloud = await tokensOf("oauth", "Rome");
+  // A stand-in for the instance's two routes.
+  const instance = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.method === "PUT") {
+      return res.end(JSON.stringify({ account: { agent: "core:concierge" } }));
+    }
+    res.end(JSON.stringify({ connections: [{ id: "c-bot" }, { id: "c-cloud" }] }));
+  }).listen(0);
+  await new Promise((r) => instance.once("listening", r));
+  const dir = mkdtempSync(join(tmpdir(), "old-link-"));
+  const file = (name, value) => {
+    writeFileSync(join(dir, name), JSON.stringify(value));
+    return join(dir, name);
+  };
+  const args = [
+    "link",
+    `http://127.0.0.1:${instance.address().port}`,
+    file("cookies.json", { s: "1" }),
+    base,
+    file("written.json", {
+      slack_bot: {
+        connection_id: "c-bot",
+        account_id: `${B}/${bot.bot_user_id}`,
+        app_id: bot.app_id,
+      },
+      slack: { connection_id: "c-cloud", account_id: `${B}:${GUARDIAN}`, app_id: cloud.app_id },
+    }),
+    file("token-file.json", {
+      exists: true,
+      bot_token_tail: (await (await fetch(`${base}/_control/state`)).json()).other_apps.find(
+        (a) => a.app_id === cloud.app_id,
+      ).bot_token_tail,
+    }),
+  ];
+  const opened = await (
+    await fetch(`${base}/api/apps.connections.open`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bot.app}` },
+    })
+  ).json();
+  const url = new URL(opened.url);
+  const connect = async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${new URL(base).port}${url.pathname}${url.search}`);
+    await new Promise((r, j) => {
+      ws.onopen = r;
+      ws.onerror = j;
+    });
+    return ws;
+  };
+  try {
+    const ws = await connect();
+    for (let i = 0; i < 50; i++) {
+      const { sockets } = await (await fetch(`${base}/_control/sockets`)).json();
+      if (sockets.some((x) => x.appId === bot.app_id && x.event === "hello")) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    ws.close();
+    for (let i = 0; i < 50; i++) {
+      const { open_sockets } = await (await fetch(`${base}/_control/state`)).json();
+      if (!open_sockets.length) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // Shorten link's wait: the fake has no open connection, so link fails.
+    const failed = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
+    assert.equal(failed.code, 1);
+    assert.equal(JSON.parse(failed.stdout).checks.bot_socket_open, false);
+    const again = await (
+      await fetch(`${base}/api/apps.connections.open`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bot.app}` },
+      })
+    ).json();
+    url.search = new URL(again.url).search;
+    const live = await connect();
+    const passed = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
+    assert.equal(passed.checks.bot_socket_open, true);
+    live.close();
+  } finally {
+    instance.close();
+  }
+});
+
+// write and link talk to the fake, which runs in this process, so they cannot block it.
+function runAsync(args, env = {}) {
   return new Promise((resolve, reject) =>
-    execFile(process.execPath, [tool, ...args], (err, out) => (err ? reject(err) : resolve(out))),
+    execFile(process.execPath, [tool, ...args], { env: { ...process.env, ...env } }, (err, out) =>
+      err ? reject(Object.assign(err, { stdout: out })) : resolve(out),
+    ),
   );
 }
