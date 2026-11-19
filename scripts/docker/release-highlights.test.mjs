@@ -41,6 +41,14 @@ test("the prompt gives the model each cited entry with its merged description", 
   assert.equal(system.role, "system");
   assert.match(system.content, /feature gate/);
   assert.match(system.content, /Improved security/);
+  // Rules from reviewing real output: product names stay English in Chinese,
+  // no small visual polish, Chinese typography, and how to name admins.
+  assert.match(system.content, /Rome, Agent, Concierge/);
+  assert.match(system.content, /智能体/);
+  assert.match(system.content, /small visual polish/);
+  assert.match(system.content, /6 位 PIN 码/);
+  assert.match(system.content, /full-width punctuation/);
+  assert.match(system.content, /管理员/);
   const changes = JSON.parse(user.content);
   assert.deepEqual(
     changes.new.map((c) => c.pr),

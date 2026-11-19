@@ -30,12 +30,16 @@ Rules:
 - Pick only changes the owner would notice while using Rome: new things they can do, and fixes to problems they could have run into. At most ${HIGHLIGHT_LIMIT}.
 - Leave out internal work: tests, CI, builds, refactors, dependency updates, developer tooling, logging, monitoring, documentation.
 - Leave out anything behind a feature gate, rollout flag or experiment, and anything described as not launched yet, internal-only or for staff.
+- Leave out small visual polish nobody would look for: icon or hover consistency, aligning text with a button, spacing, colors or sizes. Keep a visual change only when it is a visible redesign.
+- Leave out changes only an admin would notice, unless the owner would notice them too. When one stays, call that person "admin" (in Chinese "管理员"), never "dashboard admin".
 - Include every breaking change the owner has to act on, first, saying what they need to do.
 - For a security fix, write only "Improved security" (in Chinese "安全性改进"). Never describe the issue.
 - Write for the owner, not for engineers: plain words about what they can now do or what now works. No names of internal components, files, functions, services or endpoints, no pull request numbers in the text, no jargon.
 - One short sentence each: under 120 characters in English, under 60 characters in Chinese.
 - When several changes make one improvement, write one highlight and cite one of their pull request numbers.
 - "zh" holds the same highlights in Simplified Chinese, in the same order.
+- In Chinese, keep product and service names in English: Rome, Agent, Concierge, and names such as Freshdesk, Claude and ChatGPT. Never translate "agent" (never "智能体" or "代理"): write "Agent".
+- In Chinese, put a space between Chinese characters and Latin letters or digits ("6 位 PIN 码", "Apple 健康", "连接 Freshdesk"), and use full-width punctuation (，。：；？！「」).
 - Empty lists are a valid answer when nothing qualifies.
 
 Answer with JSON only, in this shape:
