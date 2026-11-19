@@ -20,6 +20,7 @@ import {
   parseSlackChatId,
   replyThreadOf,
   SlackApiError,
+  type SlackEvent,
   type SlackEventCallback,
   slackMessageId,
   type SlackUserName,
@@ -121,6 +122,14 @@ export interface SlackAppAdapterConfig {
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
 }
+
+/** A `message_changed` or `message_deleted` event, in the fields read here. */
+type SlackChangeEvent = SlackEvent & {
+  /** The message as edited. */
+  message?: SlackWireMessage;
+  /** The deleted message's ts. */
+  deleted_ts?: string;
+};
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
   const event = payload.event;
@@ -373,6 +382,9 @@ export class SlackAppAdapter {
     }
     if (!direct && !mention) return { status: 200 };
     if (!event.channel || !event.ts) return { status: 200 };
+    if (direct && (event.subtype === "message_changed" || event.subtype === "message_deleted")) {
+      return this.handleChange(event as SlackChangeEvent, event.channel);
+    }
     const wire: SlackWireMessage = { ...event, ts: event.ts };
     // Slack sends the app an event for each of its own posts. Those are
     // matched on the bot's own user from the install, not on any bot id, so
@@ -449,6 +461,34 @@ export class SlackAppAdapter {
     if (!fresh) return { status: 200 };
     log.info("message received", { chatId: message.chatId });
     this.handOver(eventId, message);
+    return { status: 200 };
+  }
+
+  /**
+   * An edit or a deletion in a direct message, taken into the copy so a read
+   * or a search shows the message as Slack now does. A message edited into
+   * one nobody said, such as a deleted message whose thread keeps a tombstone,
+   * is gone as a deleted one is. In a group the app hears no edit, since Slack
+   * sends it only the messages that mention it. A write that fails answers
+   * 500, and the mailbox delivers the event again.
+   */
+  private handleChange(event: SlackChangeEvent, channelId: string): { status: number } {
+    const ts = event.subtype === "message_deleted" ? event.deleted_ts : event.message?.ts;
+    if (!ts) return { status: 200 };
+    const edited =
+      event.subtype === "message_changed" && event.message
+        ? slackMessage(this.context(channelId), { ...event.message, ts })
+        : null;
+    try {
+      if (edited) this.config.copy.edit(this.config.teamId, channelId, ts, edited.text);
+      else this.config.copy.remove(this.config.teamId, channelId, ts);
+    } catch (error) {
+      log.error("slack app could not take an edit into its copy", { error: describe(error) });
+      this.config.onFault?.({ kind: "transport", cause: error });
+      return { status: 500 };
+    }
+    // The chat's newest is unknown once it is gone, until a read asks Slack.
+    if (!edited && this.heads.get(channelId) === ts) this.heads.delete(channelId);
     return { status: 200 };
   }
 

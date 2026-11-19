@@ -206,6 +206,7 @@ export function createAction(
           const result = await slackAppProxyCall({
             channels,
             account,
+            method,
             path: url.pathname,
             body,
             query: { ...Object.fromEntries(url.searchParams), ...query },

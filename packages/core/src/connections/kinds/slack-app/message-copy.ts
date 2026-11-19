@@ -77,6 +77,12 @@ export interface SlackMessageCopy {
   timelineAfter(teamId: string, channelId: string, ts: string): TimelineRow | null;
   /** Whether the copy holds a timeline message of the chat newer than `ts`. */
   holdsNewer(teamId: string, channelId: string, ts: string): boolean;
+  /** Take message `ts` of chat `channelId` as edited to `text`. */
+  edit(teamId: string, channelId: string, ts: string, text: string): void;
+  /** Forget message `ts` of chat `channelId`, which was deleted. The timeline
+   *  message after it links to the one before it, as Slack's history now
+   *  shows them. */
+  remove(teamId: string, channelId: string, ts: string): void;
   /** Up to `limit` messages the copy holds for the workspace whose text holds
    *  `text`, ignoring case, in chat `channelId` when named, newest first. Both
    *  the messages heard and the timeline messages read count, each once. */
@@ -228,6 +234,63 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         );
         if (between) tx.update(slackAppTimeline).set({ prevTs: null }).where(where(row.ts)).run();
       }
+    });
+  }
+
+  edit(teamId: string, channelId: string, ts: string, text: string): void {
+    this.db.transaction((tx) => {
+      tx.update(slackAppMessages)
+        .set({ text, message: sql`json_set(${slackAppMessages.message}, '$.text', ${text})` })
+        .where(
+          and(
+            eq(slackAppMessages.teamId, teamId),
+            eq(slackAppMessages.channelId, channelId),
+            eq(slackAppMessages.ts, ts),
+          ),
+        )
+        .run();
+      tx.update(slackAppTimeline)
+        .set({ message: sql`json_set(${slackAppTimeline.message}, '$.text', ${text})` })
+        .where(
+          and(
+            eq(slackAppTimeline.teamId, teamId),
+            eq(slackAppTimeline.channelId, channelId),
+            eq(slackAppTimeline.ts, ts),
+          ),
+        )
+        .run();
+    });
+  }
+
+  remove(teamId: string, channelId: string, ts: string): void {
+    const inChat = and(
+      eq(slackAppTimeline.teamId, teamId),
+      eq(slackAppTimeline.channelId, channelId),
+    );
+    this.db.transaction((tx) => {
+      const row = tx
+        .select({ prevTs: slackAppTimeline.prevTs })
+        .from(slackAppTimeline)
+        .where(and(inChat, eq(slackAppTimeline.ts, ts)))
+        .get();
+      if (row) {
+        tx.update(slackAppTimeline)
+          .set({ prevTs: row.prevTs })
+          .where(and(inChat, eq(slackAppTimeline.prevTs, ts)))
+          .run();
+        tx.delete(slackAppTimeline)
+          .where(and(inChat, eq(slackAppTimeline.ts, ts)))
+          .run();
+      }
+      tx.delete(slackAppMessages)
+        .where(
+          and(
+            eq(slackAppMessages.teamId, teamId),
+            eq(slackAppMessages.channelId, channelId),
+            eq(slackAppMessages.ts, ts),
+          ),
+        )
+        .run();
     });
   }
 

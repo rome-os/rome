@@ -818,6 +818,7 @@ function fakeSlackHistory() {
   );
   return {
     calls,
+    said,
     conversationHistory,
     /** A message said in Slack, by the member or by Rome's bot. */
     say(i: number, by: "member" | "bot" = "member", ts?: string): SlackWireMessage {
@@ -1550,5 +1551,90 @@ describe("Slack app searches what it keeps (R9)", () => {
       "L'E\u0301quipe arrive",
       "Привет, Équipe",
     ]);
+  });
+});
+
+describe("Slack app takes edits and deletions into its copy", () => {
+  it("reads and searches a direct message as Slack shows it after an edit and a deletion", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    for (let i = 1; i <= 3; i++) {
+      slack.say(i);
+      await mailbox.deposit(frame(dmEvent(i)));
+    }
+    await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+
+    // Message 2 is edited and message 3 deleted in Slack, and Slack sends
+    // the app an event for each.
+    slack.said[1].text = "message 2, edited";
+    slack.said.splice(2, 1);
+    const changed = dmEvent(4);
+    await mailbox.deposit(
+      frame({
+        ...changed,
+        event: {
+          type: "message",
+          subtype: "message_changed",
+          channel_type: "im",
+          channel: "D_GUARDIAN",
+          ts: "1700000001.000000",
+          message: { ...slack.said[1], edited: { user: "U_GUARDIAN", ts: "1700000001.000000" } },
+        },
+      }),
+      frame({
+        ...dmEvent(5),
+        event: {
+          type: "message",
+          subtype: "message_deleted",
+          channel_type: "im",
+          channel: "D_GUARDIAN",
+          ts: "1700000002.000000",
+          deleted_ts: "1700000000.000003",
+        },
+      }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 2, edited", "message 1"]);
+    db.delete(slackAppTimeline).run();
+    expect(await a.readHistory("D_GUARDIAN" as never, { limit: 3 })).toEqual(read);
+
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    expect(await search("edited")).toEqual(["message 2, edited"]);
+    expect(await search("message 3")).toEqual([]);
+    expect(await search("message")).toEqual(["message 2, edited", "message 1"]);
+  });
+
+  it("forgets a deleted message's link, so the message after it follows the one before", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 4; i++) slack.say(i);
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 4 });
+
+    slack.said.splice(1, 1);
+    await mailbox.deposit(
+      frame({
+        ...dmEvent(5),
+        event: {
+          type: "message",
+          subtype: "message_deleted",
+          channel_type: "im",
+          channel: "D_GUARDIAN",
+          ts: "1700000002.000000",
+          deleted_ts: "1700000000.000002",
+        },
+      }),
+    );
+    const calls = slack.calls.length;
+    const read = await a.readHistory("D_GUARDIAN" as never, {
+      olderThan: "1700000000.000004",
+      limit: 3,
+    });
+    expect(texts(read)).toEqual(["message 3", "message 1"]);
+    expect(slack.calls).toHaveLength(calls);
   });
 });

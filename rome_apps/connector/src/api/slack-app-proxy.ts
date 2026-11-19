@@ -104,6 +104,14 @@ function wireOf(message: ChannelMessage) {
   };
 }
 
+/** The HTTP verbs each offered method takes, as Slack's own Web API takes
+ *  them: a send only by POST, a read or a search by GET or POST. */
+const VERBS: Record<string, readonly string[]> = {
+  "chat.postMessage": ["POST"],
+  "conversations.history": ["GET", "POST"],
+  "search.messages": ["GET", "POST"],
+};
+
 function ok(data: Record<string, unknown>): SlackAppProxyResult {
   return { status: "ok", data: { status: 200, data: { ok: true, ...data }, headers: {} } };
 }
@@ -119,6 +127,8 @@ function refused(error: string): SlackAppProxyResult {
 export async function slackAppProxyCall(params: {
   channels: ChannelsService;
   account: Account;
+  /** The HTTP verb the call names. Absent, the method's own verb. */
+  method?: string;
   path: string;
   body?: unknown;
   query?: Record<string, string | number | boolean>;
@@ -129,6 +139,13 @@ export async function slackAppProxyCall(params: {
     ...(params.body && typeof params.body === "object" ? (params.body as Args) : {}),
   };
   const { channels, account } = params;
+  const verbs = VERBS[method];
+  const verb = params.method?.toUpperCase();
+  if (verbs && verb !== undefined && !verbs.includes(verb)) {
+    return refused(
+      `Slack "${method}" takes ${verbs.join(" or ")}, not ${verb}. Nothing was sent or read.`,
+    );
+  }
   try {
     switch (method) {
       case "chat.postMessage": {

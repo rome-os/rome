@@ -86,6 +86,37 @@ describe("Slack's Web API through Rome's Slack app", () => {
     });
   });
 
+  it("sends nothing on a verb Slack's method does not take, and reads by GET or POST", async () => {
+    const service = channels();
+    const send = (method: string) =>
+      slackAppProxyCall({
+        channels: service,
+        account: APP,
+        method,
+        path: "/api/chat.postMessage",
+        query: { channel: "D1", text: "hi" },
+      });
+
+    for (const verb of ["HEAD", "GET", "DELETE"]) {
+      expect(await send(verb)).toEqual({
+        status: "error",
+        error: `Slack "chat.postMessage" takes POST, not ${verb}. Nothing was sent or read.`,
+      });
+    }
+    expect(service.send).not.toHaveBeenCalled();
+    expect((await send("post")).status).toBe("ok");
+    for (const verb of ["GET", "POST"]) {
+      const read = await slackAppProxyCall({
+        channels: service,
+        account: APP,
+        method: verb,
+        path: "/api/conversations.history",
+        query: { channel: "D1" },
+      });
+      expect(read.status).toBe("ok");
+    }
+  });
+
   it("reads conversations.history from the connection, newest first, paging back from latest", async () => {
     const service = channels();
 

@@ -447,9 +447,6 @@ export class ConnectionRegistry {
     );
   }
 
-  /** The Connection a placeholder grant fills: the connection kind's own, unless
-   *  that is an account a failed removal left behind, which a connecting
-   *  account must not inherit, so a fresh one is minted beside it. */
   /** Whether a grant of `connectionKind` that names no connection has
    *  somewhere to go: the kind is one Rome offers, or Rome holds a
    *  connection of it for the grant to fix. */
@@ -458,6 +455,9 @@ export class ConnectionRegistry {
     return (await this.placeholderTarget(connectionKind)) !== undefined;
   }
 
+  /** The Connection a placeholder grant fills: the connection kind's own, unless
+   *  that is an account a failed removal left behind, which a connecting
+   *  account must not inherit, so a fresh one is minted beside it. */
   private async placeholderTarget(connectionKind: string): Promise<ConnectionImpl | undefined> {
     const conn = this.find(connectionKind)[0] as ConnectionImpl | undefined;
     return conn && !(await isUnconnectedAccount(this, conn)) ? conn : undefined;
