@@ -1,7 +1,7 @@
+import { Switch } from "@rome-os/ui/switch";
 import { useState } from "react";
 import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { BriefBook } from "./BriefBook";
 import type { BriefDto, SettingsDto } from "../lib/types";
