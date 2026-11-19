@@ -1348,16 +1348,15 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
-        // A new session reads the chat's latest messages through its
-        // channel, from where the chat lives, as an action reading the
-        // chat's history would: a read of the chat the turn is in.
-        // The query here has no upper bound yet, so earlier() drops what
-        // came after `until` itself.
-        latest: (place, { limit }) =>
-          channelsService.query(place.channel, {
-            chatId: place.threadId as ChatId,
-            limit,
-          }),
+        // A new session reads the chat's latest messages from where the chat
+        // lives, and only from a platform that answers them live, bounded at
+        // `until`. A store a personal account syncs, such as WhatsApp's, also
+        // holds what the guardian said before Rome was connected. The query
+        // here has neither a live read nor an upper bound yet, so it reads
+        // nothing.
+        latest: async () => {
+          throw new Error("No channel here reads a chat live from its platform");
+        },
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>
