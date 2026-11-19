@@ -80,7 +80,12 @@ import {
   type SentHeaders,
   withoutRepeatedHeaders,
 } from "../domain/prompt.js";
-import { type AgentPolicy, resolveAgentPolicy } from "../domain/agent-policy.js";
+import {
+  type AgentPolicy,
+  type PlaceSetup,
+  policyInPlace,
+  resolveAgentPolicy,
+} from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
@@ -355,14 +360,6 @@ export interface Sessions {
    */
   turn(id: string): Turn | undefined;
   shutdown(): Promise<void>;
-}
-
-/** How one place changes an agent's setup for the sessions it serves there. */
-export interface PlaceSetup {
-  /** The agent's `finalText` in this place, in place of its own. */
-  finalText?: AgentPolicy["finalText"];
-  /** Actions of the agent's own list it may not call in this place. */
-  withoutActions?: readonly string[];
 }
 
 interface ManagerDeps {
@@ -1084,10 +1081,10 @@ function sessionSetupOf(
   const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
   // The place can override the agent's policy and take actions away, never add them.
   const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
-  const policy = {
-    ...resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
-    ...(place?.finalText ? { finalText: place.finalText } : {}),
-  };
+  const policy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    place,
+  );
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
   // agent for a human reply. That only works when (a) the channel's surface can
   // render it, and (b) this session will actually receive the next user turn.
