@@ -14,7 +14,6 @@ import {
   type MessageStatusEvent,
 } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
-import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
@@ -45,7 +44,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
-import { taskChatPlace } from "./task-chat.js";
+import { type TaskChatMessages, taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -254,7 +253,7 @@ export interface ConciergeDeps {
   /** Each task's repeating schedule. Absent, no task has one. */
   schedules?: TaskSchedules;
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
-  messages: Pick<MessageRepository, "recent" | "before">;
+  messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<Sessions, "find">;

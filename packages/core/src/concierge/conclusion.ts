@@ -2,12 +2,12 @@ import type { ThreadContext } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../webchat/repository.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 
-// A task chat's conclusion: the closing section of each final answer,
-// which the Concierge passes on instead of the whole answer. The marker is an
-// HTML comment pair, so the dashboard's Markdown hides it and the section
-// reads as a paragraph of its own (docs/architecture/concierge.md).
+// A task chat's conclusion: the closing section of each final answer, which
+// the Concierge tells the guardian from instead of the whole answer. The
+// marker is an HTML comment pair, so the dashboard's Markdown hides it and the
+// section reads as a paragraph of its own (docs/architecture/concierge.md).
 
-/** The longest conclusion the Concierge forwards, in characters. */
+/** The longest conclusion a task chat writes, in characters. A longer one reads as no conclusion. */
 export const CONCLUSION_MAX_CHARS = 1200;
 
 /** How a task chat's answer tells the Concierge the guardian wants its work to recur. */
@@ -69,8 +69,7 @@ export function hasNothingToReport(answer: string): boolean {
 /**
  * The answer with the conclusion's markers removed and everything else
  * untouched: a line the markers leave empty goes with them, and no other
- * whitespace changes, so a code block's blank lines and a full forward stay as
- * written.
+ * whitespace changes, so a code block's blank lines stay as written.
  */
 export function withoutMarkers(answer: string): string {
   return answer
@@ -108,13 +107,13 @@ export const CONCLUSION_INSTRUCTION = [
   "the conclusion",
   CONCLUSION_CLOSE,
   "",
-  `The conclusion is three to five sentences, at most ${CONCLUSION_MAX_CHARS} characters, that stand on their own: the outcome and the specifics the guardian needs from it, such as key numbers, names, dates, prices and links, plus anything they must decide or do, such as a question you need answered. Lead with the answer, then cover every point the request asked for and nothing it did not: for a comparison, give each option's figure on each point asked, one short line per option when sentences would get dense, and leave side notes out. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone: never send them elsewhere for details, with words such as "see the task chat", "details above" or "open the chat". Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
+  `The conclusion is three to five sentences, at most ${CONCLUSION_MAX_CHARS} characters, that stand on their own: the outcome and the specifics the guardian needs from it, such as key numbers, names, dates, prices and links, plus anything they must decide or do, such as a question you need answered. Lead with the answer, then cover every point the request asked for and nothing it did not: for a comparison, give each option's figure on each point asked, one short line per option when sentences would get dense, and leave side notes out. The Concierge tells the guardian from this section and nothing else of your answer, so it must make sense alone: never send them elsewhere for details, with words such as "see the task chat", "details above" or "open the chat". Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
   "",
   `The conclusion is news for the guardian, not a receipt. When your result only confirms or carries out what they just chose on a card or approved, such as saving the option they picked or writing the file they approved, they already know it: the conclusion is then exactly "${NOTHING_TO_REPORT}", word for word whatever their language, and the Concierge sends nothing. The same holds when they turned an approval down and you did nothing. Report a result, a finding, a failure, or a question for them.`,
   "",
   "A result that is a few key numbers against their usual ranges (a daily health or budget summary), three or more steps or an itinerary, or options compared side by side reads better as a card: show it with `show_card` in your final answer, with each number's `range`, and the Concierge forwards that card to the guardian as it is, or its `text` where cards cannot show. Never a card for a short answer, a single fact, or a result that needs the guardian to decide or answer something. The guardian receives only the card, so everything they need goes on it, a note such as a bill due tomorrow included, as its callout. With a card, still write the conclusion section, for the Concierge to judge the result by: restate the card's gist in a sentence or two, and add nothing the card does not hold.",
   "",
-  "Your answer here is how your result reaches the guardian: the Concierge forwards it. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does.",
+  "Your answer here is how your result reaches the guardian: the Concierge reads it and tells the guardian, or forwards your card. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does.",
   "",
   `When the guardian asks for recurring work for themselves ("every day at 10:00", "each Monday"), set up no routine or schedule yourself: the Concierge makes it a scheduled task of this chat. Do the work now if they asked for it now, and put one line before the conclusion, starting with "${RECURRING_PREFIX}" and saying when, such as "${RECURRING_PREFIX} every day at 10:00". Keep it out of the conclusion, which the guardian reads. Checks you defer while you work on the task are yours to keep.`,
 ].join("\n");

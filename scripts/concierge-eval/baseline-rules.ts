@@ -90,3 +90,65 @@ export function chineseStyle(said: string[]): string[] {
   }
   return notes;
 }
+
+/** The opening and closing markers of a task chat's conclusion section. */
+const CONCLUSION = /<!--\s*rome:conclusion\s*-->([\s\S]*?)(?:<!--\s*\/rome:conclusion\s*-->|$)/g;
+
+/** The conclusion of a task chat's answer: its last conclusion section, trimmed, or null. */
+export function conclusionIn(answer: string): string | null {
+  const last = [...answer.matchAll(CONCLUSION)].at(-1)?.[1]?.trim();
+  return last || null;
+}
+
+/** What the Concierge must keep exactly when it tells a conclusion in its own words. */
+const SPECIFICS: readonly RegExp[] = [
+  // A URL, without the punctuation that ends its sentence.
+  /https?:\/\/[^\s<>"'`)\]，。）]+/g,
+  // A UUID, then a hex id of seven or more digits that mixes letters and digits.
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+  /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi,
+  // A pull request or issue number.
+  /#\d+\b/g,
+  // A version: two or more dotted numbers, with a leading v or a suffix.
+  /\bv?\d+(?:\.\d+){2,}(?:[-+][0-9A-Za-z.-]+)?/g,
+  // A number with a decimal point or a thousands separator, or with a unit or a currency sign.
+  /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+/g,
+  /(?<=[$€£¥])\d[\d,]*/g,
+  /\d+(?:\.\d+)?(?=\s?(?:%|°|km|kg|ms|min|bpm|GB|MB|KB|TB|元|美元|公里|小时|分钟)(?![A-Za-z]))/g,
+];
+
+/** The URLs, versions, ids, PR numbers and measured numbers in `conclusion`, each once. A bare integer is no specific. */
+export function specificsOf(conclusion: string): string[] {
+  const found: string[] = [];
+  let rest = conclusion;
+  // A token is cut out once found, so a version inside a URL, or a decimal
+  // inside a version, is not a second token.
+  for (const pattern of SPECIFICS) {
+    for (const match of rest.matchAll(pattern)) {
+      found.push(match[0].replace(/[.,;:!?]+$/, ""));
+    }
+    rest = rest.replace(pattern, " ");
+  }
+  return [...new Set(found.filter(Boolean))];
+}
+
+/**
+ * A result the Concierge tells in its own words keeps the conclusion's
+ * specifics exactly: each URL, version, id, PR number and measured number of
+ * a task's conclusion appears verbatim in what the Concierge said. A result
+ * sent as a forwarded card is not told in words, so `cardForwarded` skips the
+ * check, and so does a conclusion with no news.
+ */
+export function exactSpecifics(
+  conclusions: string[],
+  said: string[],
+  cardForwarded: boolean,
+): string[] {
+  if (cardForwarded) return [];
+  const told = said.join("\n");
+  return conclusions
+    .filter((conclusion) => conclusion !== "Nothing to report.")
+    .flatMap(specificsOf)
+    .filter((token) => !told.includes(token))
+    .map((token) => `rule: result drops "${token.slice(0, 60)}" from the conclusion`);
+}
