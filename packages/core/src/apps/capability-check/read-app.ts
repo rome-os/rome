@@ -219,12 +219,7 @@ class SourceReader {
     return found;
   }
 
-  /**
-   * Requests the page makes past its app API, such as a bare `fetch`, in its
-   * own files and in the shared files it imports. Imports of the API, the
-   * actions or the data are I4 gaps of their own, so their files are not read.
-   */
-  /** The files the page is built from: web/, and the app's own files it imports. */
+  /** The files the page is built from: web/, and every app file it bundles. */
   pageFiles(imports: readonly ImportFacts[]): Set<string> {
     const pageFiles = new Set<string>();
     const queue = this.program
@@ -245,6 +240,7 @@ class SourceReader {
     return pageFiles;
   }
 
+  /** Requests the page makes past its app API, such as a bare `fetch`, in any file it bundles. */
   pageRequests(pageFiles: ReadonlySet<string>): PageRequestFacts[] {
     const found: PageRequestFacts[] = [];
     for (const source of this.program.getSourceFiles()) {
