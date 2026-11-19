@@ -13,6 +13,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -39,7 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
-import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
+import { fitTabs } from "./tool-tab-fit";
 import { TaskList, type TaskListView } from "@/components/concierge/TaskList";
 import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
@@ -60,6 +61,9 @@ export { COMPACT_WIDTH } from "./use-free-cells";
 const WIDTH_KEY = "rome:tool-chat-ratio";
 const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
+// The widest a tab's name runs before it is cut: the trigger's `max-w-48`
+// (192 px) less its left padding and border.
+const MAX_TAB_NAME_WIDTH = 182;
 const SEPARATOR_WIDTH = 1;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
@@ -85,8 +89,9 @@ interface ToolTabProps {
 }
 
 /**
- * One tab of the strip: its name and its close button, with no icon, so
- * several fit before the strip drops some into its menu. The menu keeps the
+ * One tab of the strip: its name and, right after it, its close button, with
+ * no icon. A tab is as wide as its name, up to `max-w-48` for the name, so
+ * several fit before the strip drops some into its menu, which keeps the
  * icons.
  */
 function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: ToolTabProps) {
@@ -94,15 +99,15 @@ function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: Tool
 
   return (
     <div
-      style={{ minWidth: MIN_TAB_WIDTH }}
-      className={`relative flex h-9 shrink items-center rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      data-tool-tab={id}
+      className={`relative flex h-9 min-w-0 shrink items-center rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
         value={id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="h-full min-w-0 max-w-48 flex-1 gap-1 px-2 after:hidden"
+        className="h-full min-w-0 max-w-48 gap-1 pr-0 pl-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
@@ -110,7 +115,9 @@ function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: Tool
           }
         }}
       >
-        <span className="truncate">{label}</span>
+        <span data-tool-tab-label className="truncate">
+          {label}
+        </span>
         {unread && (
           <span
             className="size-1.5 shrink-0 rounded-full bg-info"
@@ -129,7 +136,8 @@ function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: Tool
         icon={<X />}
         label={t("chat.closeTool", { name: label })}
         onClick={onClose}
-        className="text-subtle-foreground"
+        // Its glyph sits inside a 24 px box; pulled in, it follows the name closely.
+        className="-ml-1 text-subtle-foreground"
       />
     </div>
   );
@@ -372,6 +380,32 @@ export function ToolWorkspace({
     return () => observer.disconnect();
   }, [strip]);
 
+  // What each tab's name measures in the hidden row, and what a drawn tab adds
+  // around its name (padding, close button), read from one on screen.
+  const [tabWidths, setTabWidths] = useState<{ names: Record<string, number>; chrome: number }>({
+    names: {},
+    chrome: 0,
+  });
+  const [measure, setMeasure] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!measure) return;
+    const names: Record<string, number> = {};
+    for (const el of measure.querySelectorAll<HTMLElement>("[data-measure-tab]")) {
+      names[el.dataset.measureTab!] = Math.ceil(el.getBoundingClientRect().width);
+    }
+    const tab = strip?.querySelector<HTMLElement>("[data-tool-tab]");
+    const name = tab?.querySelector<HTMLElement>("[data-tool-tab-label]");
+    const chrome =
+      tab && name
+        ? Math.ceil(tab.getBoundingClientRect().width - name.getBoundingClientRect().width)
+        : 0;
+    setTabWidths((prev) =>
+      prev.chrome === chrome && JSON.stringify(prev.names) === JSON.stringify(names)
+        ? prev
+        : { names, chrome },
+    );
+  });
+
   // In the Mac app the tabs move up into the title bar, over this panel, so the
   // window has one row on top. The header there is as wide as the panel.
   const inTitlebar = useSlotOutlet(TITLEBAR_END_SLOT);
@@ -396,7 +430,25 @@ export function ToolWorkspace({
         ? OUTPUTS_TAB_ID
         : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
-  const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
+  // Each tab's name, which the measuring row below draws for every tab, the
+  // ones in the menu too, so the strip knows each tab's own width.
+  const tabLabels: Record<string, string> = {
+    ...(trace ? { [TRACE_TAB_ID]: tActivity("trace.drawer.title") } : {}),
+    ...(tasksOpen
+      ? {
+          [TASKS_TAB_ID]: tasksView === "routines" ? t("chat.routinesTab") : t("chat.tasksTab"),
+        }
+      : {}),
+    ...(outputsOpen ? { [OUTPUTS_TAB_ID]: tChat("outputs.title") } : {}),
+    ...Object.fromEntries(sorted.map((widget) => [widget.id, label(widget)])),
+  };
+  const shownIds = new Set(
+    fitTabs(tabIds, activeTabId, stripWidth, (id) =>
+      tabWidths.names[id]
+        ? Math.min(tabWidths.names[id], MAX_TAB_NAME_WIDTH) + tabWidths.chrome
+        : 0,
+    ),
+  );
   const hiddenCount = tabIds.length - shownIds.size;
   const allToolsLabel =
     hiddenCount > 0 ? t("chat.allToolsHidden", { count: hiddenCount }) : t("chat.allTools");
@@ -586,6 +638,18 @@ export function ToolWorkspace({
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
         style={{ "--rome-chat-col": open && !compact ? `${chatWidth}px` : "100%" } as CSSProperties}
       >
+        {/* Every tab's name at the strip's type, out of sight, for its width. */}
+        <div
+          ref={setMeasure}
+          aria-hidden
+          className="pointer-events-none invisible absolute top-0 left-0 flex"
+        >
+          {Object.entries(tabLabels).map(([id, name]) => (
+            <span key={id} data-measure-tab={id} className="text-ui whitespace-nowrap">
+              {name}
+            </span>
+          ))}
+        </div>
         <div
           className="relative flex min-h-0 min-w-0 flex-col"
           data-testid="workspace-chat"
