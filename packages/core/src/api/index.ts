@@ -55,7 +55,6 @@ import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { linkCodeRoutes } from "./routes/people/link-code.js";
 import { personHistoryRoutes } from "./routes/people/person-history.js";
-import { phoneBookRoutes } from "../people/phone-book/http/index.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -212,7 +211,7 @@ export function buildApp(
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", linkCodeRoutes(deps));
-  api.route("/", phoneBookRoutes(deps));
+  if (deps.phoneBook) api.route("/", deps.phoneBook.routes);
   api.route("/", personHistoryRoutes(deps));
   api.route("/", assistantsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));

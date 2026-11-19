@@ -100,6 +100,8 @@ write(
   ),
 );
 write("src/people/phone-book/edit.test.ts", 'import "drizzle-orm";\n');
+write("src/people/phone-book/list.ts", 'import "hono";\n');
+write("src/people/phone-book/http/people.ts", 'import "hono";\nimport "../list.js";\n');
 write("src/people/person-history/index.ts", "export const history = 1;\n");
 write("src/people/link-code/index.ts", "export const code = 1;\n");
 write(
@@ -203,6 +205,7 @@ describe("checkImports with the feature rules", () => {
       "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [enter-through-index]",
       "people/phone-book/edit.ts:2 → ../person-history/index.js (people/person-history/index.ts) [features-import-no-sibling]",
       "people/phone-book/edit.ts:3 → drizzle-orm [drizzle-stays-in-infrastructure]",
+      "people/phone-book/list.ts:1 → hono [hono-stays-in-http]",
       "people/read.ts:1 → ./phone-book/index.js (people/phone-book/index.ts) [domain-root-imports-no-feature]",
     ]);
   });

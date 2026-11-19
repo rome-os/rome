@@ -7,8 +7,8 @@ import {
   sliceAccountDirectory,
   type AccountState,
 } from "@rome/api-types/people";
-import { readAccountDirectory } from "../index.js";
-import type { ApiDeps } from "../../../api/deps.js";
+import { readAccountDirectory } from "../account-directory.js";
+import type { PhoneBookDeps } from "../deps.js";
 
 // The account read: every account Rome has observed, and what the guardian has
 // decided about each. What a page is, how it is ordered, how it resumes and
@@ -23,7 +23,7 @@ import type { ApiDeps } from "../../../api/deps.js";
 // It is a read. Placing an account is a write on the person's own route;
 // dismissing and restoring one are `./account-decisions.ts`.
 
-export function accountsRoutes(deps: ApiDeps): Hono {
+export function accountsRoutes(deps: PhoneBookDeps): Hono {
   const app = new Hono();
 
   /** The `?state=` the read narrows by, or the 400 a value that names no state

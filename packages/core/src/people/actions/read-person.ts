@@ -2,7 +2,7 @@
 // notes the guardian keeps on them. Vocabulary: docs/domains/people.md.
 
 import { readFile } from "node:fs/promises";
-import { actionExecutionContext } from "../../apps/actions/context.js";
+import { runsForGuardian } from "./guardian-only.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
 import type { PeopleRepository } from "../model/people-repository.js";
 import type { Person } from "../model/person.js";
@@ -53,23 +53,9 @@ export function registerReadPersonAction(
       additionalProperties: false,
     },
     execute: async (args) => {
-      // The notes are the guardian's own, so a visitor never reads them: not
-      // as the turn's actor, and not through a turn no one started in a chat
-      // the visitor owns, such as a task the Concierge runs for them. A turn
-      // with neither an actor nor a chat, such as an agent summoned from that
-      // task, cannot show it is the guardian's and is refused too. A chat on a
-      // connection has no owner and is the guardian's agent's.
-      const context = actionExecutionContext.getStore();
-      const refused = {
-        status: "error" as const,
-        error: "Only the guardian's agents can read a person's notes.",
-      };
-      if (context?.actor && context.actor.kind !== "guardian") return refused;
-      const thread = context?.channelContext;
-      if (!context?.actor && !thread) return refused;
-      if (thread?.channel === "webchat") {
-        const owner = thread.threadId ? await deps.ownerOfChat(thread.threadId) : null;
-        if (owner !== "guardian") return refused;
+      // The notes are the guardian's own, so a visitor never reads them.
+      if (!(await runsForGuardian(deps.ownerOfChat))) {
+        return { status: "error", error: "Only the guardian's agents can read a person's notes." };
       }
       const name = typeof args.name === "string" ? args.name.trim() : "";
       if (!name) return { status: "error", error: "Pass the person's name." };

@@ -221,6 +221,7 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
+import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -2370,6 +2371,13 @@ async function main() {
       connectionRegistry,
       setupManager,
     };
+    // The phone book serves both of its interfaces from one value: leaving it
+    // out is not building it.
+    apiDeps.phoneBook = phoneBook({
+      ...apiDeps,
+      ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+    });
+    for (const action of apiDeps.phoneBook.actions) actionRegistry.register(action);
     internalApi = await startApi(config.internalApi, apiDeps);
   } catch (err) {
     log.warn("Failed to start internal API", {

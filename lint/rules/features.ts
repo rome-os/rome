@@ -111,6 +111,17 @@ export const featureRules: ImportRule[] = [
       return !mayUse(imp.from, found.to.domain, found.to.feature);
     },
   },
+  {
+    name: "hono-stays-in-http",
+    description:
+      "A feature serves apps through http/ and agents through actions/, both over the same use cases, so in a featured domain only a file in an http/ folder imports hono. Tests may, to mount routes.",
+    rejects: (imp) =>
+      imp.kind === "package" &&
+      (imp.specifier === "hono" || imp.specifier.startsWith("hono/")) &&
+      FEATURED_DOMAINS[imp.from.split("/")[0]] !== undefined &&
+      !imp.from.split("/").includes("http") &&
+      !isTest(imp.from),
+  },
 ];
 
 /** Crossings that remain until their ticket lands. */

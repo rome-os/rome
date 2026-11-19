@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { dismissAccount, restoreAccount, type AccountDecision, type AccountRef } from "../index.js";
-import type { ApiDeps } from "../../../api/deps.js";
+import {
+  dismissAccount,
+  restoreAccount,
+  type AccountDecision,
+  type AccountRef,
+} from "../account-decisions.js";
+import type { PhoneBookDeps } from "../deps.js";
 
 // The account directory's two writes: dismiss an account, and restore one.
 // What either means, when either refuses, and what each answers are
@@ -21,12 +26,12 @@ import type { ApiDeps } from "../../../api/deps.js";
 // an account that exists rather than deciding it. The channel name stays one
 // segment, which `accountRef` already requires of it.
 
-export function accountDecisionRoutes(deps: ApiDeps): Hono {
+export function accountDecisionRoutes(deps: PhoneBookDeps): Hono {
   const app = new Hono();
 
   const answer = async (
     c: Context,
-    decide: (deps: ApiDeps, ref: AccountRef) => Promise<AccountDecision>,
+    decide: (deps: PhoneBookDeps, ref: AccountRef) => Promise<AccountDecision>,
   ) => {
     const result = await decide(deps, {
       channel: c.req.param("channel") ?? "",
