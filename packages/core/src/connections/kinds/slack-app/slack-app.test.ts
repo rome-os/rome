@@ -902,6 +902,25 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(older)).toEqual(["message 6", "message 5", "message 4"]);
   });
 
+  it("reads past a message heard late when a page already kept newer ones", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 4; i++) slack.say(i);
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    await mailbox.deposit(frame(dmEvent(1)));
+    // A page below message 4 keeps 3, 2 and 1; then message 2's event lands.
+    await a.readHistory("D_GUARDIAN" as never, { olderThan: "1700000000.000004", limit: 3 });
+    await mailbox.deposit(frame(dmEvent(2)));
+
+    const whole = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    db.delete(slackAppTimeline).run();
+    const wiped = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+
+    expect(texts(whole)).toEqual(["message 4"]);
+    expect(whole).toEqual(wiped);
+  });
+
   it("reads a message that reached Slack but never the instance", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
