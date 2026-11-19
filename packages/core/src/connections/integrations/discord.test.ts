@@ -49,6 +49,7 @@ const fakeState: {
   channels: FakeChat[];
   archivedThreads: FakeChat[];
   ready: boolean;
+  hidden: string[];
 } = {
   startError: null,
   sent: [],
@@ -58,6 +59,7 @@ const fakeState: {
   channels: [],
   archivedThreads: [],
   ready: true,
+  hidden: [],
 };
 
 rs.mock("../kinds/discord/discord.js", () => ({
@@ -89,6 +91,9 @@ rs.mock("../kinds/discord/discord.js", () => ({
     }
     isReady() {
       return fakeState.ready;
+    }
+    sees(chat: { id: string }) {
+      return !fakeState.hidden.includes(chat.id);
     }
     listGuildChannels() {
       return fakeState.channels;
@@ -163,6 +168,7 @@ beforeEach(() => {
   fakeState.channels = [];
   fakeState.archivedThreads = [];
   fakeState.ready = true;
+  fakeState.hidden = [];
 });
 
 describe("isDiscordAuthError", () => {
@@ -373,6 +379,11 @@ describe("discord descriptor shape", () => {
       "text-1",
       "thread-1",
     ]);
+
+    // A chat the bot may not see is not listed.
+    fakeState.hidden = ["thread-1"];
+    const seen = await directory?.listConversations({ limit: 10, includeTopics: true });
+    expect(seen?.conversations.map(({ ref }) => ref.chatId)).toEqual(["text-1"]);
 
     fakeState.ready = false;
     await expect(directory?.listConversations({ limit: 10 })).rejects.toThrow(

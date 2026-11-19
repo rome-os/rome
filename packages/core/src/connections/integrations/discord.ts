@@ -315,7 +315,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               // when archived threads are asked for.
               const active = adapter
                 .listGuildChannels()
-                .filter((channel) => input.includeArchived || !channel.archived);
+                .filter((channel) => input.includeArchived || !channel.archived)
+                // The gateway also names chats the bot may not see.
+                .filter((channel) => adapter.sees(channel));
               const named = new Set(active.map((channel) => channel.id));
               // Archived threads are read from Discord; the gateway names the
               // ones it has seen. A thread both name is listed once.

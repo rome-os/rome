@@ -284,6 +284,8 @@ export interface GuildChannelInfo {
 export interface DiscordAdapterLike {
   /** Whether the gateway has logged in, so the chats it names are all of them. */
   isReady(): boolean;
+  /** Whether the bot may see a chat the gateway names. */
+  sees(chat: GuildChannelInfo): boolean;
   listGuildChannels(): GuildChannelInfo[];
   listArchivedThreads(): Promise<GuildChannelInfo[]>;
   executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
@@ -528,14 +530,25 @@ export class DiscordAdapter {
     });
   }
 
+  /** Whether the gateway says the bot may see `chat`. The gateway names
+   *  chats the bot cannot see too. A chat it cannot tell about counts as seen. */
+  sees(chat: GuildChannelInfo): boolean {
+    return this.holds(chat, [discordJs().PermissionFlagsBits.ViewChannel]);
+  }
+
   /** Whether the gateway says the bot may read `chat`'s history. A chat it
    *  cannot tell about is asked, and a 403 then skips it. */
   private readsArchiveOf(chat: GuildChannelInfo): boolean {
-    const channel = this.client.guilds.cache.get(chat.guildId)?.channels.cache.get(chat.id);
-    const me = this.client.guilds.cache.get(chat.guildId)?.members.me;
-    if (!channel || !me) return true;
     const flags = discordJs().PermissionFlagsBits;
-    return me.permissionsIn(channel).has([flags.ViewChannel, flags.ReadMessageHistory]);
+    return this.holds(chat, [flags.ViewChannel, flags.ReadMessageHistory]);
+  }
+
+  private holds(chat: GuildChannelInfo, permissions: bigint[]): boolean {
+    const guild = this.client.guilds.cache.get(chat.guildId);
+    const channel = guild?.channels.cache.get(chat.id);
+    const me = guild?.members.me;
+    if (!channel || !me) return true;
+    return me.permissionsIn(channel).has(permissions);
   }
 
   /** Execute a provider-relative request through the epoch-owned discord.js
