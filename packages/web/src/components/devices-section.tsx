@@ -70,10 +70,10 @@ export function DevicesSection() {
   const {
     devices,
     pairings,
-    openPairing,
+    openIssuedPairing,
     dialogs: pairingDialogs,
   } = useContainerNodeCards(data?.devices ?? []);
-  const emptySetup = <DeviceConnectionCards onContainerIssued={openPairing} />;
+  const emptySetup = <DeviceConnectionCards onContainerIssued={openIssuedPairing} />;
 
   // A direct container can be connected even when the shared device service is stopped.
   const showList = !unavailable || devices.length > 0 || pairings.length > 0;

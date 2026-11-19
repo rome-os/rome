@@ -1,3 +1,4 @@
+import type { ContainerNodeGrant } from "@rome/api-types/devices";
 import { Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
 import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
@@ -21,7 +22,7 @@ function DeviceConnectionContent({
   onContainerIssued,
 }: {
   method: Method;
-  onContainerIssued?: (id: string) => void;
+  onContainerIssued?: (grant: ContainerNodeGrant) => void;
 }) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   return (
@@ -62,7 +63,7 @@ function DeviceConnectionContent({
 export function DeviceConnectionCards({
   onContainerIssued,
 }: {
-  onContainerIssued: (id: string) => void;
+  onContainerIssued: (grant: ContainerNodeGrant) => void;
 }) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   return (

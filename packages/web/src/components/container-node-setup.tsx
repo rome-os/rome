@@ -92,7 +92,11 @@ function useContainerNodes() {
   });
 }
 
-export function ContainerNodeSetup({ onIssued }: { onIssued?: (id: string) => void }) {
+export function ContainerNodeSetup({
+  onIssued,
+}: {
+  onIssued?: (grant: ContainerNodeGrant) => void;
+}) {
   const { t } = useContainerNodeText();
   const query = useContainerNodes();
   return (
@@ -115,25 +119,25 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
   const { t, i18n } = useContainerNodeText();
   const query = useContainerNodes();
   const client = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ id: string; grant?: ContainerNodeGrant } | null>(null);
   const [renaming, setRenaming] = useState<ContainerNode | null>(null);
   const [removing, setRemoving] = useState<ContainerNode | null>(null);
   const pairingTrigger = useRef<HTMLButtonElement>(null);
   const nodes = query.data?.nodes ?? [];
   const waiting = nodes.filter((node) => node.status === "waiting" && !node.deviceId);
-  const pairing = waiting.find((node) => node.id === selected);
+  const pairing = waiting.find((node) => node.id === selected?.id);
+  const issuedGrant = selected?.grant;
   useEffect(() => {
     if (selected && !pairing) setSelected(null);
   }, [selected, pairing]);
-  const openPairing = (id: string, trigger: HTMLButtonElement | null = null) => {
-    pairingTrigger.current = trigger;
-    setSelected(id);
-  };
   const pairings = waiting.map<NodeDevicePairing>((node) => ({
     id: node.id,
     name: node.name,
     waitingLabel: t("status.waiting"),
-    onOpen: (event) => openPairing(node.id, event.currentTarget),
+    onOpen: (event) => {
+      pairingTrigger.current = event.currentTarget;
+      setSelected({ id: node.id });
+    },
     onRename: () => setRenaming(node),
     onRemove: () => setRemoving(node),
   }));
@@ -158,7 +162,10 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
       ...linked,
     ],
     pairings,
-    openPairing,
+    openIssuedPairing(grant: ContainerNodeGrant) {
+      pairingTrigger.current = null;
+      setSelected({ id: grant.id, grant });
+    },
     dialogs: (
       <>
         {pairing && (
@@ -180,7 +187,13 @@ export function useContainerNodeCards(devices: DevicesStatus["devices"]) {
               <DialogDescription>{t("status.waiting")}</DialogDescription>
             </DialogHeader>
             <DialogBody className="min-h-0 space-y-4">
-              <SavedCompose id={pairing.id} />
+              {issuedGrant?.origin ? (
+                <ComposeInstructions
+                  grant={containerNodeCompose(issuedGrant, issuedGrant.origin)}
+                />
+              ) : (
+                <SavedCompose id={pairing.id} />
+              )}
             </DialogBody>
           </Dialog>
         )}
@@ -276,7 +289,7 @@ function PairContainerNode({
   onIssued,
 }: {
   direct: boolean;
-  onIssued?: (id: string) => void;
+  onIssued?: (grant: ContainerNodeGrant) => void;
 }) {
   const { t } = useContainerNodeText();
   const nameId = useId();
@@ -299,16 +312,17 @@ function PairContainerNode({
           fallback: "unavailable",
         }),
       );
-      if (!direct && !grant.origin) throw new Error("unavailable");
-      return grant;
+      const issuedOrigin = grant.origin ?? origin;
+      if (!issuedOrigin) throw new Error("unavailable");
+      return { ...grant, origin: issuedOrigin };
     },
     onSettled: (grant) => {
       const refresh = client.invalidateQueries({ queryKey: ["container-nodes"] });
-      if (grant && onIssued) void refresh.then(() => onIssued(grant.id));
+      if (grant && onIssued) void refresh.then(() => onIssued(grant));
     },
     onSuccess: (data) => setInstallationId(data.id),
   });
-  const origin = issue.data?.origin ?? (direct ? deploymentOrigin(address) : null);
+  const origin: string | null = issue.data?.origin ?? (direct ? deploymentOrigin(address) : null);
   const originUnavailable = direct && !origin;
   const addressInvalid = originUnavailable && addressRejected;
   const loopback = origin && isContainerNodeLoopback(new URL(origin).hostname.replace(/\.$/, ""));

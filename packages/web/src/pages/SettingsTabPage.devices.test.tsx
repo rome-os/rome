@@ -331,7 +331,10 @@ it("reopens the original Compose while the node is waiting for deployment", asyn
   expect(screen.getByRole("button", { name: "Link device" })).toBeTruthy();
 }, 15_000);
 
-it("opens Compose when generating the first container node with the service stopped", async () => {
+it.each([
+  "direct",
+  "cloud",
+] as const)("shows the first container node's issued Compose with the %s transport", async (transport) => {
   const path = "/api/devices/container-nodes";
   const id = "73426989-9646-4579-9869-af5a321ff48d";
   const grant = {
@@ -340,28 +343,37 @@ it("opens Compose when generating the first container node with the service stop
     origin: "https://rome.example",
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   };
+  const readCompose = rs.fn(() =>
+    transport === "direct"
+      ? Response.json(grant)
+      : Response.json({ error: "compose_unavailable" }, { status: 404 }),
+  );
   let nodes: ContainerNode[] = [];
   renderDevices(
     () => ({ connection: "not_running", checkedAt: new Date().toISOString(), devices: [] }),
     undefined,
     (url, init) => {
-      if (url === `${path}/${id}/compose`) return Response.json(grant);
+      if (url === `${path}/${id}/compose`) return readCompose();
       if (init?.method === "POST") {
         nodes = [{ id, deviceId: null, name: "First node", status: "waiting" }];
         return Response.json(grant, { status: 201 });
       }
-      return Response.json({ nodes, transport: "direct" });
+      return Response.json({ nodes, transport });
     },
   );
   const user = userEvent.setup();
   const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
   fireEvent.change(await setup.findByLabelText("Node name"), { target: { value: "First node" } });
-  fireEvent.change(setup.getByLabelText("Rome address"), { target: { value: grant.origin } });
+  if (transport === "direct")
+    fireEvent.change(setup.getByLabelText("Rome address"), { target: { value: grant.origin } });
   await user.click(setup.getByRole("button", { name: "Generate Compose" }));
   const firstPreview = within(await screen.findByRole("dialog", { name: "First node" }));
   expect(
     (await firstPreview.findByRole("region", { name: "Compose configuration" })).textContent,
   ).toContain(grant.installToken);
+  expect(firstPreview.getByRole("button", { name: "Download Compose" })).toBeTruthy();
+  expect(firstPreview.getByRole("button", { name: "Copy Compose" })).toBeTruthy();
+  expect(readCompose).not.toHaveBeenCalled();
   await user.keyboard("{Escape}");
 
   const devices = within(await screen.findByRole("list", { name: "Devices" }));
@@ -375,7 +387,14 @@ it("opens Compose when generating the first container node with the service stop
   await user.keyboard("{Enter}");
   const dialog = within(await screen.findByRole("dialog", { name: "First node" }));
   expect(dialog.getByText("Waiting for deployment")).toBeTruthy();
-  expect(await dialog.findByRole("region", { name: "Compose configuration" })).toBeTruthy();
+  if (transport === "direct") {
+    expect(await dialog.findByRole("region", { name: "Compose configuration" })).toBeTruthy();
+  } else {
+    expect((await dialog.findByRole("alert")).textContent).toContain(
+      "The original Compose file is unavailable.",
+    );
+  }
+  expect(readCompose).toHaveBeenCalledTimes(1);
   await user.keyboard("{Escape}");
   await waitFor(() => expect(document.activeElement).toBe(card));
 });
