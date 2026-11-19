@@ -422,7 +422,7 @@ class SourceReader {
           calleeName &&
           ts.isPropertyAccessExpression(callee) &&
           DRIZZLE_WRITES.has(calleeName) &&
-          /(^|\.)(db|tx)$/.test(callee.expression.getText())
+          /(^|\.)(db|tx|connection)$/.test(compact(callee.expression.getText()))
         ) {
           writes.add(compact(callee.getText()));
         } else if (depth < MAX_CALL_DEPTH) {

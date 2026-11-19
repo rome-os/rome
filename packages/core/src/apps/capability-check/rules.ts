@@ -149,7 +149,8 @@ export function checkApp(app: AppFacts): AppVerdict {
   } else {
     const ranByRoutes = new Set<string>();
     for (const route of app.routes) {
-      for (const name of route.runs) ranByRoutes.add(localName(app.id, name));
+      // A machine route gives no person a way to run what it runs.
+      if (!route.noAuth) for (const name of route.runs) ranByRoutes.add(localName(app.id, name));
       judgeRoute(app, route, gap, cannotJudge);
     }
     for (const action of app.actions) {

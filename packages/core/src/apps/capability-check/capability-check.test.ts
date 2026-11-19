@@ -313,4 +313,37 @@ declare function defineAction(spec: unknown): unknown;
       expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/lib/network.ts:1"]]);
     });
   });
+
+  it("I3: finds a write through the SDK's Drizzle handle in a store outside the data folder", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace(
+        'return this.ctx.runAction("add_note", { text: "x" });',
+        'await clearNotes(this.ctx as never);\n    return this.ctx.runAction("add_note", { text: "x" });',
+      )
+      .replace("export class", 'import { clearNotes } from "./store.js";\nexport class');
+    const gaps = await gapsOf({
+      ...COMPLIANT,
+      "src/api/index.ts": api,
+      "src/api/store.ts":
+        "export async function clearNotes(ctx: { db: { connection: { delete(t: unknown): unknown } } }) {\n  return ctx.db.connection.delete({});\n}\n",
+    });
+    expect(gaps.map((g) => [g.rule, g.message])).toEqual([
+      ["I3", expect.stringContaining("(`ctx.db.connection.delete`)")],
+    ]);
+  });
+
+  it("I2: does not count a machine route as a person's way to run an action", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return "not found";',
+      'if (request.method === "POST" && route === "webhook") return this.ctx.runAction("archive_note", {});\n    return "not found";',
+    );
+    const manifest = `${(COMPLIANT["app.yaml"] as string).replace("  entry: api/index\n", "  entry: api/index\n  noAuth:\n    - /webhook\n")}  - actions/archive_note\n`;
+    const gaps = await gapsOf({
+      ...COMPLIANT,
+      "app.yaml": manifest,
+      "src/api/index.ts": api,
+      ...ACTION("archive_note", SCHEMA_ACTION),
+    });
+    expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I2", "src/actions/archive_note"]]);
+  });
 });
