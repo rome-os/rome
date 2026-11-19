@@ -94,6 +94,8 @@ describe("Slack app members who did not sign in (R12)", () => {
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: async () => ({ messages: [] }),
+        memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
       openMailbox: (_mailbox, handler) => {

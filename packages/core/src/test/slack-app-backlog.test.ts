@@ -120,6 +120,8 @@ describe("a Slack app backlog, end to end", () => {
           openDirectMessage: async () => "D_NEW",
           userName: async () => ({ displayName: "Member" }),
           conversationHistory: async () => ({ messages: [], hasMore: false }),
+          conversationReplies: async () => ({ messages: [] }),
+          memberChannels: async () => ({ channels: [] }),
           revoke: async () => {},
         },
         cloud: {} as never,

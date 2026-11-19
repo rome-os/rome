@@ -36,6 +36,26 @@ export interface SlackAppWebApi {
     input: { channel: string; latest?: string; limit: number },
     signal?: AbortSignal,
   ): Promise<{ messages: SlackWireMessage[]; hasMore: boolean }>;
+  /** One page of a thread's messages, oldest first, its root included: at
+   *  most `limit` after `cursor`, or from the start. */
+  conversationReplies(
+    botToken: string,
+    input: { channel: string; ts: string; cursor?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<{ messages: SlackWireMessage[]; nextCursor?: string }>;
+  /** One page of the channels the app is a member of, public and private. */
+  memberChannels(
+    botToken: string,
+    input: { cursor?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<{ channels: SlackChannel[]; nextCursor?: string }>;
+}
+
+/** A channel the app is a member of, as Slack names it. */
+export interface SlackChannel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
 }
 
 interface SlackApiResponse {
@@ -213,6 +233,57 @@ export function createSlackAppWebApi(
         ),
         hasMore: body.has_more === true,
       };
+    },
+    async conversationReplies(botToken, input, signal) {
+      const body = await get(
+        botToken,
+        "conversations.replies",
+        {
+          channel: input.channel,
+          ts: input.ts,
+          limit: String(input.limit),
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+        },
+        signal,
+      );
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const nextCursor = stringField(
+        (body.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor,
+      );
+      return {
+        messages: messages.filter(
+          (message): message is SlackWireMessage =>
+            typeof message === "object" &&
+            message !== null &&
+            typeof (message as { ts?: unknown }).ts === "string",
+        ),
+        ...(nextCursor ? { nextCursor } : {}),
+      };
+    },
+    async memberChannels(botToken, input, signal) {
+      const body = await get(
+        botToken,
+        "users.conversations",
+        {
+          types: "public_channel,private_channel",
+          exclude_archived: "true",
+          limit: String(input.limit),
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+        },
+        signal,
+      );
+      const listed = Array.isArray(body.channels) ? body.channels : [];
+      const channels: SlackChannel[] = [];
+      for (const each of listed) {
+        const channel = each as { id?: unknown; name?: unknown; is_private?: unknown };
+        const id = stringField(channel.id);
+        const name = stringField(channel.name);
+        if (id && name) channels.push({ id, name, isPrivate: channel.is_private === true });
+      }
+      const nextCursor = stringField(
+        (body.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor,
+      );
+      return { channels, ...(nextCursor ? { nextCursor } : {}) };
     },
   };
 }
