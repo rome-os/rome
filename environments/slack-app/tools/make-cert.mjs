@@ -46,12 +46,22 @@ const octets = (b) => der(0x04, b);
 const bits = (b) => der(0x03, Buffer.concat([Buffer.from([0]), b]));
 const explicit = (n, inner) => der(0xa0 + n, inner);
 
+/**
+ * Makes a serial from random bytes that DER encodes as a positive INTEGER with
+ * no padding: a zero first byte would be an illegal leading zero, and a set top
+ * bit would make it negative.
+ */
+export function certSerial(bytes) {
+  const serial = Buffer.from(bytes);
+  serial[0] = (serial[0] & 0x7f) | 0x40;
+  return serial;
+}
+
 export function makeCert(hosts) {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const spki = publicKey.export({ type: "spki", format: "der" });
   const name = seq(set(seq(oid("2.5.4.3"), utf8(`Slack app test environment (${hosts[0]})`))));
-  const serial = randomBytes(16);
-  serial[0] &= 0x7f;
+  const serial = certSerial(randomBytes(16));
   const now = new Date();
   const ecdsaSha256 = seq(oid("1.2.840.10045.4.3.2"));
   const san = seq(...hosts.map((h) => der(0x82, Buffer.from(h))));

@@ -32,7 +32,7 @@ Each instance and Rome Cloud run inside the network namespace of a small forward
 
 ## Fake Slack
 
-`fake-slack/server.mjs` stands in for `slack.com`. It has no dependencies and runs on Node 22 or later. Its tests, and the model proxy's, run with `node --test environments/slack-app/fake-slack/server.test.mjs environments/slack-app/tools/model-proxy.test.mjs`.
+`fake-slack/server.mjs` stands in for `slack.com`. It has no dependencies and runs on Node 22 or later. Its tests, and those of the model proxy and the certificate maker, run with `node --test environments/slack-app/fake-slack/server.test.mjs environments/slack-app/tools/model-proxy.test.mjs environments/slack-app/tools/make-cert.test.mjs`.
 
 It serves:
 
