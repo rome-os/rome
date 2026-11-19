@@ -206,7 +206,8 @@ describe("checkImports with the feature rules", () => {
           line.startsWith("people/") ||
           line.startsWith("chats/") ||
           line.startsWith("api/") ||
-          line.startsWith("connections/"),
+          line.startsWith("connections/") ||
+          line.startsWith("index.ts"),
       );
     expect(lines).toEqual([
       "api/routes/people/phone-book.ts:1 → ../../../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
