@@ -1968,15 +1968,19 @@ describe("ActionEngine", () => {
       expect(row!.payload).toMatchObject({ turnId: "turn-3" });
     });
 
-    it("runs a nested approval's preview as the asking turn, so it reads no chat outside it", async () => {
-      const seen: Array<{ turnId?: string; audience?: string }> = [];
+    it("runs a nested approval's preview as the asking turn, told who reads it only as its execute would be", async () => {
+      const seen: Array<{ turnId?: string; audience?: string; actor?: string }> = [];
       await setup({
         actions: [
           {
             ...buildAction("needs_approval", { requiresApproval: true }),
             preview: () => {
               const store = actionExecutionContext.getStore();
-              seen.push({ turnId: store?.turnId, audience: store?.audience });
+              seen.push({
+                turnId: store?.turnId,
+                audience: store?.audience,
+                actor: store?.actor?.kind,
+              });
               return { kind: "generic" as const, title: "Nested", summary: "card" };
             },
           },
@@ -1989,12 +1993,17 @@ describe("ActionEngine", () => {
         ],
       });
 
-      // A summoned agent's call in a shared chat: a turn, but no chat. With
-      // no turn, a read in the preview would count as outside any turn and
-      // read any chat (app-host chat-calls).
-      await rome.actionEngine.run("parent", {}, { turnId: "turn-3", audience: "shared" });
+      // A turn in the guardian's direct message. Without its turn a preview
+      // would count as outside any turn and read any chat (app-host
+      // chat-calls). A nested action, like this one in its worker, is never
+      // told who reads the turn, since "private" would let it read any chat.
+      await rome.actionEngine.run(
+        "parent",
+        {},
+        { turnId: "turn-3", audience: "private", actor: { kind: "anonymous" } },
+      );
 
-      expect(seen).toEqual([{ turnId: "turn-3", audience: "shared" }]);
+      expect(seen).toEqual([{ turnId: "turn-3", audience: undefined, actor: "anonymous" }]);
     });
 
     it("fires onApprovalCreated with preview for a nested requiresApproval action", async () => {

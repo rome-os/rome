@@ -2190,6 +2190,12 @@ export class ActionEngine {
     const caller = actionExecutionContext.getStore();
     const turnId = context?.turnId ?? caller?.turnId;
     const audience = context?.audience ?? caller?.audience;
+    // The preview is the action's own code, so it runs with what its execute
+    // would get (executeNestedInvocation): the audience only for a
+    // first-party action in main, and the caller's accountable human. The
+    // replay goes back through run(), which gates the audience itself.
+    const previewAudience =
+      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
     let preview: PreviewPayload | undefined;
     try {
       const action = this.registry.get(actionName);
@@ -2200,14 +2206,14 @@ export class ActionEngine {
         parentExecutionId: context?.parentExecutionId,
         parentActionName: context?.parentActionName,
         initiator: context?.initiator ?? "unknown",
-        actor: context?.actor,
+        actor: caller?.actor ?? context?.actor,
         callerAppId: context?.callerAppId,
         engine: this,
         channelContext: context?.channelContext,
         sharedContext: context?.sharedContext,
         sessionId: context?.sessionId,
         turnId,
-        audience,
+        audience: previewAudience,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
       };
