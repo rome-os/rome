@@ -67,7 +67,9 @@ function fromEnvironment(raw) {
     repos: raw.repos && {
       rome: raw.repos.rome,
       romeCloud: raw.repos.romeCloud ?? raw.repos.rome_cloud,
-      romeCloudBase: raw.repos.romeCloudBase ?? raw.repos.rome_cloud_base,
+      romeCloudBase:
+        raw.repos.romeCloudBase ?? raw.repos.rome_cloud_base_ref ?? raw.repos.rome_cloud_base,
+      romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },
     instances: (raw.instances ?? []).map((i) => ({

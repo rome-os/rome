@@ -64,7 +64,12 @@
         "scripts/**/*.{mjs,mts,ts,js}",
         "lint/**/*.ts",
         "infra/**/*.test.mjs",
-        "ios/Tools/**/*.mjs"
+        "ios/Tools/**/*.mjs",
+        // A verifier runs by path: run.sh starts verify.mjs, and prove.mjs
+        // spawns the stand-in's up.mjs, which spawns instance.mjs.
+        "verifiers/*/verify.mjs",
+        "verifiers/*/prove.mjs",
+        "verifiers/*/standin/{up,instance}.mjs"
       ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.

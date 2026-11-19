@@ -14,8 +14,18 @@ const SLACK_KIND = "slack_app";
 export function instance(inst, slackOrigin) {
   const api = inst.api.replace(/\/$/, "");
   const origin = new URL(api).origin;
+  // Rome refuses a mutation that does not come from its own origin, as the
+  // dashboard's requests do, so every call carries it.
   const call = (path, opts = {}) =>
-    json(`${api}${path}`, { ...opts, headers: { ...inst.headers, ...(opts.headers ?? {}) } });
+    json(`${api}${path}`, {
+      ...opts,
+      headers: {
+        origin,
+        "sec-fetch-site": "same-origin",
+        ...inst.headers,
+        ...(opts.headers ?? {}),
+      },
+    });
 
   async function control(what) {
     const target = inst.control[what];

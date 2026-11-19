@@ -86,18 +86,26 @@ export async function r7(ctx) {
   const control = await oneReply(ctx, ws, "R7C");
   const posts = await ctx.slack.posts({ team: ws.id, channel, since });
   const replied = forged.filter((f) => posts.some((p) => p.text?.includes(f.code)));
+  // Only the good message's one reply may follow the forged events. A reply
+  // that repeats no code still answers one of them.
+  const others = posts.filter((p) => !p.text?.includes(code("R7C", 0)));
   const recorded = await readable(() => ctx.a.recordedFrom(ws.id, ws.guardian));
   const recordedForged = recorded && forged.filter((f) => recorded.some((b) => b.includes(f.code)));
   evidence.forged = {
     sent: forged.map((f) => f.eventId),
     deliveryStatuses: forged.map((f) => f.status),
     replied: replied.map((f) => f.eventId),
+    otherPosts: others.map((p) => ({ ts: p.ts, text: p.text?.slice(0, 120) })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
     goodMessageAfter: { eventId: control.eventId, replies: control.replies },
   };
   if (!control.ok)
     problems.push("the good message after the forged ones did not get exactly one reply");
   if (replied.length) problems.push(`${replied.length} of 10 forged events got a reply`);
+  else if (others.length)
+    problems.push(
+      `${others.length} posts besides the good message's reply followed the forged events`,
+    );
   if (recordedForged?.length)
     problems.push(`${recordedForged.length} of 10 forged events were recorded`);
 

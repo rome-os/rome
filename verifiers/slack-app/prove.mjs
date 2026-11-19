@@ -68,6 +68,18 @@ const CASES = [
     what: "Rome Cloud delivers every event to every bound instance",
   },
   { name: "R11", breaks: "R11", rule: "R11", what: "the relay gains a Slack file" },
+  {
+    name: "R7-quiet",
+    breaks: "R7-signature,R7-quiet",
+    rule: "R7",
+    what: "forged events get through and are answered with no code",
+  },
+  {
+    name: "R11-migration",
+    breaks: "R11-migration",
+    rule: "R11",
+    what: "a migration adds a bot token column",
+  },
   { name: "R11-store", breaks: "R11-store", rule: "R11", what: "Rome Cloud stores the bot token" },
 ];
 

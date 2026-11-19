@@ -17,7 +17,7 @@ Every seeded message asks the Concierge to repeat a code unique to the message a
 | R1 | Signs in to Slack as workspace A's guardian and walks Connect on the first instance the way the dashboard and a browser would, pressing Allow and filling nothing. Fails on any field from Rome's setup or Rome's own screens (Slack's own approve screen is not counted), on a connected account whose agent is not `core:concierge`, and when the first direct message does not get exactly one reply. The verifier never calls an agent link route. |
 | R3 | Walks Connect for workspace A on the second instance. Passes when the setup ends `failed` with a reason saying the workspace is already connected, the second instance gains no connected account, and one more direct message to the first gets exactly one reply. |
 | R4 | 20 direct messages from the guardian, one at a time, each after the previous one's reply. Each must get exactly one reply in the same direct message, and no reply may match no message. |
-| R7 | 10 direct messages with a bad signature, then one good message to show the path was open. No forged one may get a reply or be recorded in the guardian's timeline; the report also keeps each forged event's delivery status. Then R4's 20 messages from workspace A: the instance bound to workspace B may not record them, observe an account of workspace A, or make a Slack call about them. |
+| R7 | 10 direct messages with a bad signature, then one good message to show the path was open. No forged one may get a reply or be recorded in the guardian's timeline, and nothing but the good message's one reply may follow them; the report also keeps each forged event's delivery status. Then R4's 20 messages from workspace A: the instance bound to workspace B may not record them, observe an account of workspace A, or make a Slack call about them. |
 | R6 | Stops the first instance, sends 20 direct messages, holds the stop for `stopSeconds`, starts it, and wants each message answered exactly once and no reply while stopped. |
 | R11 | `git diff <romeCloudBase> -- webhook-relay` in rome-cloud is empty. Columns added under `packages/pantheon` schemas and migrations hold only the workspace to instance binding (team, instance, timestamps). `pnpm lint:imports` passes in rome. No file under `packages/core/src/connections` imports from `rome_apps`. |
 
@@ -25,7 +25,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 
 ## Stand-in
 
-`prove.mjs` shows the verifier can tell good from broken before the product exists. It runs the environment's own fake Slack (taken from the environment branch by git ref), a stand-in Rome Cloud and relay (`standin/cloud.mjs`), and two stand-in instances (`standin/instance.mjs`), started by `standin/up.mjs`. `BREAK` switches one rule off at a time:
+`prove.mjs` shows the verifier can tell good from broken before the product exists. It runs the environment's own fake Slack (taken from the environment branch by git ref), a stand-in Rome Cloud and relay (`standin/cloud.mjs`), and two stand-in instances (`standin/instance.mjs`) that refuse a mutation from another origin as Rome does, started by `standin/up.mjs`. `BREAK` switches one rule off at a time:
 
 | Break | What the stand-in does wrong |
 |---|---|
@@ -36,7 +36,9 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `R6` | The instance throws away its mailbox when it starts. |
 | `R7-signature` | Rome Cloud skips Slack's signature check. |
 | `R7-route` | Rome Cloud delivers every event to every bound instance. |
+| `R7-quiet` (with `R7-signature`) | Forged events get through and are answered without their code. |
 | `R11` | The relay gains a Slack file. |
+| `R11-migration` | A migration adds a bot token column with `ALTER TABLE`. |
 | `R11-store` | Rome Cloud stores the bot token. |
 
 ```bash

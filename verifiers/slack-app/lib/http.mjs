@@ -102,14 +102,13 @@ function attr(attrs, name) {
   return decodeEntities(m[2] ?? m[3] ?? m[4] ?? "");
 }
 
+const ENTITIES = { amp: "&", quot: '"', "#39": "'", lt: "<", gt: ">" };
+
+// One pass, so an entity that decodes to `&` is never decoded again.
 function decodeEntities(s) {
-  return s
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+  return s.replace(/&(amp|quot|#39|lt|gt|#\d+);/g, (_whole, name) =>
+    name in ENTITIES ? ENTITIES[name] : String.fromCharCode(Number(name.slice(1))),
+  );
 }
 
 /** Resolves after `ms` milliseconds. */

@@ -4,7 +4,7 @@
 import { ask, code } from "../lib/codes.mjs";
 import { awaitReplies, tally } from "../lib/replies.mjs";
 
-export const CONCIERGE = "core:concierge";
+const CONCIERGE = "core:concierge";
 
 // The refusal must say why, in any words: the workspace is already connected
 // to another Rome.

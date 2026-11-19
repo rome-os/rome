@@ -43,13 +43,22 @@ export async function r11(ctx) {
   }
 
   if (rome && existsSync(rome)) {
-    try {
-      await run("pnpm", ["run", "--silent", "lint:imports"], { cwd: rome, maxBuffer: 64 << 20 });
-      evidence.importRules = "pass";
-    } catch (err) {
-      const out = `${err.stdout ?? ""}${err.stderr ?? ""}`.trim().split("\n").slice(-15).join("\n");
-      evidence.importRules = { exitCode: err.code, tail: out };
-      problems.push("rome's import rules fail");
+    if (ctx.env.repos.romeDependencies === "failed") {
+      evidence.importRules = "not run: the environment could not install rome's dependencies";
+      unchecked.push("rome's import rules not run: its dependencies failed to install");
+    } else {
+      try {
+        await run("pnpm", ["run", "--silent", "lint:imports"], { cwd: rome, maxBuffer: 64 << 20 });
+        evidence.importRules = "pass";
+      } catch (err) {
+        const out = `${err.stdout ?? ""}${err.stderr ?? ""}`
+          .trim()
+          .split("\n")
+          .slice(-15)
+          .join("\n");
+        evidence.importRules = { exitCode: err.code, tail: out };
+        problems.push("rome's import rules fail");
+      }
     }
     const appImports = importsOfApps(rome);
     evidence.connectionsImportingApps = appImports;
@@ -73,13 +82,15 @@ export async function r11(ctx) {
 
 /**
  * Columns added under packages/pantheon in files that define stored data
- * (schemas and migrations), against `base`. Reads Drizzle column calls and SQL
- * column lines from the added lines of the diff.
+ * (schemas and migrations), against `base`. Reads Drizzle column calls, SQL
+ * column lines and `ALTER TABLE ... ADD COLUMN` from the added lines of the diff.
  */
 async function storedColumns(dir, base) {
   const files = (await git(dir, "diff", "--name-only", base, "--", "packages/pantheon"))
     .split("\n")
-    .filter((f) => /(schema|migration|\/db\/)/i.test(f) && !/\.(md|json|snap)$/.test(f));
+    .filter(
+      (f) => /(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) && !/\.(md|json|snap)$/.test(f),
+    );
   const columns = [];
   for (const file of files) {
     const diff = await git(dir, "diff", "-U0", base, "--", file);
@@ -91,7 +102,8 @@ async function storedColumns(dir, base) {
       const sql = line.match(
         /^\+\s*[`"]?(\w+)[`"]?\s+(TEXT|INTEGER|VARCHAR|TIMESTAMP|BOOLEAN|JSONB?|UUID|BIGINT|BLOB)\b/i,
       );
-      const name = drizzle ? (drizzle[3] ?? drizzle[1]) : sql?.[1];
+      const altered = line.match(/\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?/i);
+      const name = drizzle ? (drizzle[3] ?? drizzle[1]) : (sql?.[1] ?? altered?.[1]);
       if (name) columns.push({ file, name });
     }
   }

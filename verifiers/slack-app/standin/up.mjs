@@ -132,6 +132,12 @@ write(
     (breaks.has("R11-store") ? "  botToken: text('bot_token'),\n" : "") +
     "  createdAt: integer('created_at'),\n});\n",
 );
+if (breaks.has("R11-migration"))
+  write(
+    romeCloud,
+    "packages/pantheon/drizzle/0002_slack_token.sql",
+    'ALTER TABLE "slack_bindings" ADD COLUMN "bot_token" text;\n',
+  );
 if (breaks.has("R11"))
   write(romeCloud, "webhook-relay/src/slack.ts", "export const verifySlack = () => true;\n");
 commitAll(romeCloud, "product");

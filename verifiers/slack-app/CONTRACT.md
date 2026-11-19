@@ -29,7 +29,7 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
 }
 ```
 
-The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. That env.json names no checkouts yet, so R11 takes them from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
+The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, and `rome_dependencies`: when it is `failed`, the import-rule check reports not checked). Without `repos`, R11 takes the checkouts from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
 
 ## Fake Slack control
 
@@ -37,7 +37,7 @@ The environment's control API, as its README gives it (`environments/slack-app/R
 
 ## Instance
 
-The routes the dashboard uses today, relative to `api`:
+The routes the dashboard uses today, relative to `api`. Every call sends the instance's own `Origin` and `Sec-Fetch-Site: same-origin`, since Rome refuses a mutation from another origin.
 
 | Route | Used for |
 |---|---|

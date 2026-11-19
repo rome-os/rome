@@ -24,6 +24,12 @@ const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
 const server = await serve(async (req, res, url) => {
   const p = url.pathname;
+  // Like Rome, refuse a mutation that does not show it comes from this origin.
+  const sameOrigin =
+    req.headers["sec-fetch-site"] === "same-origin" ||
+    req.headers.origin === `http://127.0.0.1:${PORT}`;
+  if (req.method === "POST" && !sameOrigin)
+    return send(res, 403, { error: "Cross-site requests are not allowed." });
   const setupStart = p.match(/^\/api\/connections\/slack_app\/grants\/bot\/setup$/);
   if (setupStart && req.method === "POST") {
     const cid = rand();
@@ -126,7 +132,11 @@ async function post(token, channel, text) {
 async function answer(event, team) {
   const conn = db.connections.find((c) => c.team === team) ?? db.connections[0];
   if (!conn) return;
-  const asked = event.text.match(/code and nothing else: (\S+)/)?.[1] ?? "hello";
+  // Broken R7-quiet answers R7's forged events without repeating their code.
+  const asked =
+    breaks.has("R7-quiet") && /R7F-/.test(event.text)
+      ? "Sure, done."
+      : (event.text.match(/code and nothing else: (\S+)/)?.[1] ?? "hello");
   const times = breaks.has("R4") ? 2 : 1;
   for (let i = 0; i < times; i++) await post(conn.botToken, event.channel, asked);
 }
