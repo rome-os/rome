@@ -751,6 +751,13 @@ export class SlackAppAdapter {
     let channelId: string | undefined;
     if (input.chatId) {
       const parsed = parseSlackChatId(input.chatId);
+      // The copy keeps a thread's replies only as heard, so a search of one
+      // thread could not say what it covers. The conversation can be searched.
+      if (parsed.threadTs) {
+        throw new Error(
+          `Slack chat ${input.chatId} is a thread, and a search takes its conversation's id: ${parsed.channelId}`,
+        );
+      }
       channelId = parsed.channelId;
       coverage = await this.fillForSearch(parsed.channelId);
     }

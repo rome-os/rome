@@ -123,7 +123,8 @@ export async function readTimeline(
   const within = (ts: string) =>
     (since === undefined || compareTs(ts, since) >= 0) &&
     (until === undefined || compareTs(ts, until) <= 0);
-  const found: ChannelMessage[] = [];
+  const found: Array<{ ts: string; message: ChannelMessage }> = [];
+  const answer = () => found.map(({ message }) => message);
   const row = (ts: string) => deps.copy.timelineRow(deps.teamId, channelId, ts);
 
   // `above` is the message just above the next one to take, when the copy
@@ -140,15 +141,15 @@ export async function readTimeline(
     next = headOf(deps, channelId) ?? null;
   }
   while (found.length < read.limit) {
-    if (next === "") return found;
+    if (next === "") return answer();
     const current: TimelineRow | null = next === null ? null : row(next);
     if (!current) break;
-    if (since !== undefined && compareTs(current.ts, since) < 0) return found;
-    if (within(current.ts)) found.push(current.message);
+    if (since !== undefined && compareTs(current.ts, since) < 0) return answer();
+    if (within(current.ts)) found.push({ ts: current.ts, message: current.message });
     above = current.ts;
     next = current.prevTs;
   }
-  if (found.length >= read.limit) return found;
+  if (found.length >= read.limit) return answer();
 
   // The copy does not know what comes next: ask Slack, below the last
   // message taken or below the read's own bound.
@@ -159,6 +160,13 @@ export async function readTimeline(
   const adjacent = above !== undefined && (bound === undefined || compareTs(above, bound) <= 0);
   const latest = adjacent ? above : bound;
   const page = await deps.fetchPage(channelId, latest !== undefined ? { latest } : {});
+  // What the copy answered before the page arrived, as it holds it now: an
+  // edit or a deletion may have arrived meanwhile.
+  const held = found.splice(0).flatMap(({ ts }) => {
+    const now = row(ts);
+    return now ? [{ ts, message: now.message }] : [];
+  });
+  found.push(...held);
   // The page as the copy keeps it: a change that arrived while it was read
   // is taken.
   const kept = deps.copy.keepRun(deps.teamId, channelId, {
@@ -176,7 +184,7 @@ export async function readTimeline(
   for (const { ts, message } of kept) {
     if (found.length >= read.limit) break;
     if (since !== undefined && compareTs(ts, since) < 0) break;
-    if (within(ts)) found.push(message);
+    if (within(ts)) found.push({ ts, message });
   }
   // An empty answer reads as the chat's start, so a page Slack answered with
   // none Rome reads says where to read on instead.
@@ -185,7 +193,7 @@ export async function readTimeline(
       `Slack's page of chat ${channelId} held only messages Rome does not read, such as joins or edits, and Slack holds older ones. Read on with olderThan=${page.oldest}.`,
     );
   }
-  return found;
+  return answer();
 }
 
 /** The `limit` messages right after `newerThan`, newest first. */

@@ -1,5 +1,6 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import {
   FORWARD_SIGNATURE_HEADER,
   FORWARD_TEAM_HEADER,
@@ -1806,5 +1807,53 @@ describe("Slack app takes edits and deletions into its copy", () => {
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
 
     expect(texts(read)).toEqual(["edited while read"]);
+  });
+  it("answers what the copy gave before Slack's page arrived as the copy holds it after", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    let during: (() => Promise<void>) | undefined;
+    const reading = rs.fn(
+      async (token: string, input: { channel: string; latest?: string; limit: number }) => {
+        const page = await slack.conversationHistory(token, input);
+        await during?.();
+        return page;
+      },
+    );
+    const db = createTestDb().db;
+    const { adapter: a } = adapter(
+      mailbox,
+      fakeApi({ conversationHistory: reading }),
+      new SlackMessageCopyRepository(db),
+      undefined,
+      openGate(),
+    );
+    await a.start();
+    for (let i = 1; i <= 4; i++) slack.say(i);
+    await a.readHistory("D_GUARDIAN" as never, { limit: 4 });
+    // The copy no longer knows what comes before message 2, so the next read
+    // takes 4, 3 and 2 from the copy and asks Slack below 2. While it does,
+    // message 4 is edited and message 3 deleted.
+    db.update(slackAppTimeline)
+      .set({ prevTs: null })
+      .where(eq(slackAppTimeline.ts, "1700000000.000002"))
+      .run();
+    during = () =>
+      mailbox.deposit(
+        changeFrame(10, 4, "message 4, edited", "1700000001.000000"),
+        changeFrame(11, 3, null, "1700000002.000000"),
+      );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 4 });
+
+    expect(texts(read)).toEqual(["message 4, edited", "message 2", "message 1"]);
+  });
+
+  it("refuses to search one thread, naming the conversation to search", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, fakeSlackHistory());
+    await a.start();
+    await expect(
+      a.search({ text: "x", chatId: "D_GUARDIAN:1700000000.000001" as never, limit: 5 }),
+    ).rejects.toThrow(/is a thread.*D_GUARDIAN$/);
   });
 });
