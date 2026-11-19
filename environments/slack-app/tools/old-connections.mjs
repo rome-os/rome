@@ -85,7 +85,7 @@ async function prepare(fake, team, guardian) {
   // slack: Rome Cloud's OAuth app, installed by the guardian. Rome Cloud read
   // the workspace from auth.test and the installer from users.info; the
   // instance kept the profile grantProfileFromBundle builds (providers-import.ts).
-  const oauth = await control("/other-app", {
+  const cloudApp = await control("/other-app", {
     team,
     kind: "oauth",
     name: "Rome",
@@ -93,10 +93,10 @@ async function prepare(fake, team, guardian) {
     user_scopes: OLD_OAUTH_USER_SCOPES.join(","),
     installed_by: guardian,
   });
-  const ws = await slack("auth.test", oauth.bot_token);
-  const user = (await slack("users.info", oauth.bot_token, { user: guardian })).user;
+  const ws = await slack("auth.test", cloudApp.bot_token);
+  const user = (await slack("users.info", cloudApp.bot_token, { user: guardian })).user;
   const p = user.profile ?? {};
-  const oauthProfile = dropEmpty({
+  const cloudProfile = dropEmpty({
     subject: `${ws.team_id}:${guardian}`,
     displayName: p.real_name ?? user.real_name ?? p.display_name ?? ws.user,
     email: p.email,
@@ -118,11 +118,11 @@ async function prepare(fake, team, guardian) {
       account_id: `${botProfile.teamId}/${botProfile.botUserId}`,
     },
     slack: {
-      app_id: oauth.app_id,
-      bot_user_id: oauth.bot_user_id,
-      material: { botToken: oauth.bot_token, userToken: oauth.user_token },
-      profile: oauthProfile,
-      account_id: oauthProfile.subject,
+      app_id: cloudApp.app_id,
+      bot_user_id: cloudApp.bot_user_id,
+      material: { botToken: cloudApp.bot_token, userToken: cloudApp.user_token },
+      profile: cloudProfile,
+      account_id: `${ws.team_id}:${guardian}`,
     },
   };
 }
