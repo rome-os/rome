@@ -34,7 +34,6 @@ export function useDeviceManage(onRemoved?: (deviceId: string) => void): NodeDev
     const refresh = () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["node-devices"] }),
-        queryClient.invalidateQueries({ queryKey: ["container-nodes"] }),
         queryClient.invalidateQueries({ queryKey: ["chat-locations"] }),
       ]);
     const after = async (error: NodeDeviceManageError | null) => {

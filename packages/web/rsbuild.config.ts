@@ -92,13 +92,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": { target: internalApiTarget, changeOrigin: true },
-      "/v1/gateway/config": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
       "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       "/ws/events": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       "/ws/node": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
-      "/ws/container-node": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       "/ws/voice-input": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       // Route /desktop-proxy through the backend so its WebSocket upgrade
       // handler can authorize the connection before reaching noVNC.

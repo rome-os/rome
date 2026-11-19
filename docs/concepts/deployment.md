@@ -1,4 +1,4 @@
-# Deployment
+# Deployment: Profiles & Instances
 
 Profiles isolate *what the user has*. Instances identify *what is running*. The two are deliberately distinct — the runtime invariants that fall out of this split live in [`../architecture/process.md`](../architecture/process.md).
 
@@ -28,9 +28,3 @@ In development, the instance name is the worktree slug, so sibling worktrees on 
 **Not to be confused with:**
 
 - **[Profile](#profiles)** — an instance identifies the running Rome. A profile isolates the data it serves.
-
-## Container node
-
-A container node is a Rome Node deployment that runs in Docker. It pairs with a
-Rome instance and keeps its device identity in a state volume. See
-[Deploy a container node](../rome-node.md#deploy-a-container-node) for setup.
