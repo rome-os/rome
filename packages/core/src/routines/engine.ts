@@ -43,6 +43,10 @@ export class RoutineEngine {
   // consults this so a guardian-requested stop is recorded as "cancelled"
   // (not "error") and is never retried.
   private cancellingExecutions = new Set<string>();
+  // rootExecutionIds whose run is recorded but whose action has not started
+  // yet. A stop in that window has nothing to kill, so dispatch checks the
+  // marker before starting the action.
+  private admitting = new Set<string>();
 
   constructor(
     private routinesRepo: RoutinesRepository,
@@ -245,6 +249,8 @@ export class RoutineEngine {
       const killed = await this.actionEngine.cancel(run.executionId);
       if (killed) {
         killedLiveProcess = true;
+      } else if (this.admitting.has(run.executionId)) {
+        // Not started yet: dispatch finds the marker and starts nothing.
       } else {
         // Nothing live to kill (stale run): drop the marker and repair the
         // status ourselves — no dispatch is awaiting to do it.
@@ -331,6 +337,7 @@ export class RoutineEngine {
             ? RUN_NOW_IN_BACKGROUND
             : routine.trigger.type,
     });
+    this.admitting.add(rootExecutionId);
     opts.onStarted?.(runId);
 
     // Captured inside the span callback and returned to the caller so a manual
@@ -369,6 +376,16 @@ export class RoutineEngine {
           whenWorkersBusy: "queue",
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
         };
+
+        this.admitting.delete(rootExecutionId);
+        if (this.cancellingExecutions.delete(rootExecutionId)) {
+          outcome = { status: "cancelled" };
+          log.info("routine run stopped before it started", {
+            routineId: routine.id,
+            name: routine.name,
+          });
+          return;
+        }
 
         try {
           const result = await runWithoutHookInvocationContext(() =>
@@ -529,7 +546,7 @@ export class RoutineEngine {
           await this.routinesRepo.updateLastFired(routine.id, this.clock.now());
         }
       },
-    );
+    ).finally(() => this.admitting.delete(rootExecutionId));
 
     return { runId, ...outcome };
   }
