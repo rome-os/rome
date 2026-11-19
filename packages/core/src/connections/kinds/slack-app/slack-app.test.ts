@@ -212,9 +212,9 @@ describe("Slack app direct messages (R4)", () => {
     expect(faults).toEqual(["credential"]);
   });
 
-  it("keeps a connection whose new token outlived a removal that waited in the mailbox", async () => {
+  it("keeps a connection whose new token outlived a removal that waited in the mailbox, and hears what follows", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, faults } = adapter(mailbox);
+    const { adapter: a, faults, delivered } = adapter(mailbox);
     await a.start();
     await mailbox.deposit(
       frame({ ...dmEvent(1), event_id: "Ev_old1", event: { type: "app_uninstalled" } }),
@@ -223,8 +223,11 @@ describe("Slack app direct messages (R4)", () => {
         event_id: "Ev_old2",
         event: { type: "tokens_revoked", tokens: { bot: [BOT] } },
       }),
+      frame(dmEvent(3)),
     );
     expect(faults).toEqual([]);
+    // The direct message after a repair is heard, as the first one after it.
+    expect(delivered.map((m) => m.text)).toEqual(["message 3"]);
   });
 });
 
