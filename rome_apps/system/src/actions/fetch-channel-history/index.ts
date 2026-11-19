@@ -15,6 +15,11 @@ const log = createAppLogger("fetch_channel_history");
 /** What a channel query answers when no limit is named. */
 const DEFAULT_LIMIT = 100;
 
+/** The platforms whose accounts are read from the platform itself, which
+ *  takes a message id to read before or after. The transcript names each
+ *  message's id there, so an agent can ask for what lies beside it. */
+const READ_BY_MESSAGE_ID = new Set(["discord"]);
+
 /**
  * JSON-safe attachment metadata. Mirrors the subset of {@link Attachment}
  * that is useful to downstream consumers (e.g. fetching a text excerpt from a
@@ -40,6 +45,8 @@ interface StructuredMessage {
   threadName?: string;
   /** The root of the chat thread the message is in, where its chat keeps them. */
   chatThread?: string;
+  /** The platform thread opened from the message, read with it as threadId. */
+  openedThread?: string;
   text: string;
   attachments: StructuredAttachment[];
 }
@@ -68,6 +75,7 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
     threadId: m.chatId,
     threadName: m.thread?.name,
     ...(m.chatThread ? { chatThread: m.chatThread } : {}),
+    ...(m.openedThread ? { openedThread: m.openedThread } : {}),
     text: m.text,
     attachments: m.attachments.map((a) => ({
       type: a.type,
@@ -83,6 +91,7 @@ function formatMessages(
   channel: string,
   messages: ChannelMessage[],
   since: Date | undefined,
+  byMessageId: boolean,
 ): string {
   if (messages.length === 0) {
     return "(No messages found in the requested window.)";
@@ -116,11 +125,16 @@ function formatMessages(
         if (!text) return null;
         // A chat that keeps chat threads names each message, which a reply
         // can point to, and the root of its thread when that is another message.
+        // An account read by message id names each message, which a read
+        // before or after it takes, and the thread a message opened.
+        const opened = m.openedThread ? `, opened thread ${m.openedThread}` : "";
         const placed = m.chatThread
           ? m.chatThread === m.messageId
             ? ` (message ${m.messageId})`
             : ` (message ${m.messageId}, chat thread ${m.chatThread})`
-          : "";
+          : byMessageId
+            ? ` (message ${m.messageId}${opened})`
+            : "";
         return `[${time}] **${senderLabel(channel, m)}**${placed}: ${text}`;
       })
       .filter(Boolean);
@@ -189,7 +203,7 @@ export function createAction(
         newerThan: {
           type: "string",
           description:
-            "A message id in the thread: return the messages said just after it, such as ones missed in a gap. Needs threadId. Only Discord reads by message id.",
+            "A message id in the thread: return the messages said just after it, such as ones missed in a gap. Needs threadId. Only Discord reads by message id. A full page returns nextNewerThan: pass it as newerThan to read on.",
         },
         includeMessages: {
           type: "boolean",
@@ -242,6 +256,7 @@ export function createAction(
 
       let messages: ChannelMessage[];
       let nextCursor: string | null = null;
+      let nextNewerThan: string | null = null;
       try {
         const page = await channels.query(addressOf(target), {
           ...(threadId ? { chatId: threadId as ChatId } : {}),
@@ -255,9 +270,12 @@ export function createAction(
           // agree on its size.
           ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),
         });
-        // A full page may have older messages behind it; a short one does not.
+        // A full page may have more behind it; a short one does not. A page
+        // read forward continues from its newest message, and any other from
+        // its oldest.
         if (paging && page.length >= (limit ?? DEFAULT_LIMIT)) {
-          nextCursor = page.at(-1)?.cursor ?? null;
+          if (newerThan) nextNewerThan = page[0]?.messageId ?? null;
+          else nextCursor = page.at(-1)?.cursor ?? null;
         }
         // `query` answers newest first; the transcript reads oldest first.
         messages = page.reverse();
@@ -277,6 +295,7 @@ export function createAction(
         messageCount: number;
         windowHours?: number;
         nextCursor?: string | null;
+        nextNewerThan?: string | null;
         content: string;
         messages?: StructuredMessage[];
       };
@@ -287,8 +306,13 @@ export function createAction(
         ...(windowHours !== undefined ? { windowHours } : {}),
         // Only a paged read names where the next page starts, so a plain read
         // keeps the payload it always had.
-        ...(paging ? { nextCursor } : {}),
-        content: formatMessages(channel, messages, since),
+        ...(paging ? (newerThan ? { nextNewerThan } : { nextCursor }) : {}),
+        content: formatMessages(
+          channel,
+          messages,
+          since,
+          READ_BY_MESSAGE_ID.has(target.platform ?? ""),
+        ),
       };
 
       // Opt-in: only add the structured array when explicitly requested, so

@@ -31,7 +31,7 @@ import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
-import { type Messages, queryLimit, querySince } from "../history/messages.js";
+import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -202,11 +202,12 @@ function connectionMessages(backing: Backing): Messages {
       if (!offers(connection, "history")) {
         throw new Error(`Channel "${channel}" reads no messages while its connection is locked`);
       }
-      const cursorId = after ? messageIdOf(after.ref, chatId) : undefined;
+      const cursorId = after ? messageIdOf(after.ref) : undefined;
       const unbounded = !since && !until && !cursorId && !olderThan && !newerThan;
       const read: TalkHistoryRead = {
         ...(unbounded ? { since: new Date(Date.now() - DEFAULT_LIVE_WINDOW_MS) } : {}),
-        ...(since ? { since: querySince(since) } : {}),
+        // A live read keeps the platform's own precision, so `since` is not rounded.
+        ...(since ? { since } : {}),
         ...(until ? { until } : {}),
         ...((cursorId ?? olderThan) ? { olderThan: cursorId ?? olderThan } : {}),
         ...(newerThan ? { newerThan } : {}),
@@ -220,14 +221,10 @@ function connectionMessages(backing: Backing): Messages {
 }
 
 /** The platform id of the message a cursor's ref names, which is
- *  `<chatId>:<messageId>` (`channelMessageOrder`). A cursor from another chat
- *  names no message here. */
-function messageIdOf(ref: string, chatId: string): string {
-  const at = ref.lastIndexOf(":");
-  if (at < 0 || ref.slice(0, at) !== chatId) {
-    throw new Error(`The cursor names a message of another chat than "${chatId}"`);
-  }
-  return ref.slice(at + 1);
+ *  `<chatId>:<messageId>` (`channelMessageOrder`). The chat part is not
+ *  checked: a DM read by the user's id answers messages of the DM's own id. */
+function messageIdOf(ref: string): string {
+  return ref.slice(ref.lastIndexOf(":") + 1);
 }
 
 /** The Connection that backs the channel now. A channel is one presence, so

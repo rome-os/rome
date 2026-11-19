@@ -443,18 +443,6 @@ describe("messages port", () => {
     const since = (asked[1] as { since: Date }).since.getTime();
     expect(since).toBeGreaterThanOrEqual(before - 24 * HOUR);
     expect(since).toBeLessThanOrEqual(Date.now() - 24 * HOUR);
-    await expect(
-      messages!.query({
-        chatId,
-        after: {
-          source: "discord_2",
-          timestamp: 1,
-          direction: "inbound",
-          ref: "other:42",
-          body: null,
-        },
-      }),
-    ).rejects.toThrow("another chat");
   });
 
   it("says so while talk is locked", async () => {
