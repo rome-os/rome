@@ -217,7 +217,8 @@ function connectionMessages(backing: Backing): Messages {
 
 /** The platform id of the message a cursor's ref names, which is
  *  `<chatId>:<messageId>` (`channelMessageOrder`). The chat part is not
- *  checked: a DM read by the user's id answers messages of the DM's own id. */
+ *  checked: a live read's message ids are unique across chats, so one from
+ *  another chat is still a bound in time. */
 function messageIdOf(ref: string): string {
   return ref.slice(ref.lastIndexOf(":") + 1);
 }

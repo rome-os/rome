@@ -217,18 +217,18 @@ describe("readDiscordHistory", () => {
     expect(calls.filter((call) => call.includes("/messages"))).toHaveLength(6);
   });
 
-  it("reads the DM with a user a chat id names, as a send takes it", async () => {
+  it("reads a DM by its own chat id, and never opens one for a user's id", async () => {
     const dm = "100000000000000004";
-    const { get } = discord({
+    const { get, calls } = discord({
       [dm]: { channel: { id: dm, type: 1 }, messages: [said(1, {}, dm)] },
     });
 
-    const page = await readDiscordHistory(
-      { ...deps(get), directChannelFor: async () => dm },
-      "200000000000000001",
-      { limit: 5 },
-    );
+    const page = await readDiscordHistory(deps(get), dm, { limit: 5 });
 
     expect(page).toEqual([expect.objectContaining({ chatId: dm, thread: { kind: "dm" } })]);
+    await expect(readDiscordHistory(deps(get), "200000000000000001", { limit: 5 })).rejects.toThrow(
+      "This Discord account sees no chat 200000000000000001",
+    );
+    expect(calls.every((call) => !call.includes("/users/"))).toBe(true);
   });
 });

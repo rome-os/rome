@@ -80,9 +80,6 @@ export interface DiscordHistoryDeps {
   /** A message's text as an inbound message carries it, the bot's mention
    *  stripped, in the guild the chat is in, if any. */
   textOf: (content: string, guildId?: string) => string;
-  /** The DM channel with the user an id names, where a chat id is a user's,
-   *  as a send takes it. Rejects when the id names no user. */
-  directChannelFor?: (userId: string) => Promise<string>;
   /** Whether the bot holds Read Message History in a guild chat, or null
    *  where that cannot be told. Discord answers a bot without it an empty
    *  history, not a refusal, so a read asks first. */
@@ -139,18 +136,10 @@ async function asReadable<T>(chatId: string, call: () => Promise<T>): Promise<T>
   }
 }
 
-/** The channel `chatId` names: the chat itself, or the DM with the user it
- *  names, as a send takes it. */
+/** The channel `chatId` names. A read takes a chat's own id only, never a
+ *  user's: opening a DM to read it would be a write. */
 async function channelOf(deps: DiscordHistoryDeps, chatId: string): Promise<WireChannel> {
-  try {
-    return (await deps.get(`/channels/${chatId}`)) as WireChannel;
-  } catch (err) {
-    if (refusal(err).status !== 404 || !deps.directChannelFor)
-      throw notReadable(chatId, err) ?? err;
-    const direct = await deps.directChannelFor(chatId).catch(() => null);
-    if (!direct) throw notReadable(chatId, err) ?? err;
-    return asReadable(chatId, async () => (await deps.get(`/channels/${direct}`)) as WireChannel);
-  }
+  return asReadable(chatId, async () => (await deps.get(`/channels/${chatId}`)) as WireChannel);
 }
 
 /**

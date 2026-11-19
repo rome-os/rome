@@ -1418,8 +1418,8 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   /** `chatId`'s history as Discord keeps it, read live through REST
-   *  (discord-history.ts). A chat id that is a user's reads the DM with them,
-   *  as a send takes it. */
+   *  (discord-history.ts). A DM is read by its own chat id, the one its
+   *  messages carry. */
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
     const botUser = this.client.user;
     const botId =
@@ -1442,7 +1442,6 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        directChannelFor: (userId) => this.directConversationFor(userId),
         readsHistoryIn: (channelId) => this.readsHistoryIn(channelId),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
