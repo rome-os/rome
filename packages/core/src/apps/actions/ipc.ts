@@ -100,6 +100,23 @@ export function isIpcMessage(message: unknown): message is IpcMessage {
   }
 }
 
+/** Worker calls main answers by who makes them. Main reads a call without
+ *  the caller as one made outside any agent turn, which reads every chat, so
+ *  a gated call missing here is open to any turn. */
+const CALLER_GATED_CALLS = new Set([
+  "channels.query",
+  "channels.search",
+  "channels.send",
+  "notify.send",
+  "session.continue",
+  "agent.session.runTurn",
+]);
+
+/** Whether a worker call to `method` carries the calling action's context. */
+export function carriesCaller(method: string): boolean {
+  return method.startsWith("connections.app.") || CALLER_GATED_CALLS.has(method);
+}
+
 export class IpcRpcTimeoutError extends Error {
   constructor(method: string, timeoutMs: number) {
     super(`IpcRpc timeout: ${method} (${timeoutMs}ms)`);
@@ -255,14 +272,7 @@ export class IpcRpc {
       request.callerActionName = actionContext.actionName;
       // A dashboard read or send carries who makes it, so private chats stay
       // private, and a push goes to the person the calling chat serves.
-      if (
-        method.startsWith("connections.app.") ||
-        method === "channels.query" ||
-        method === "channels.send" ||
-        method === "notify.send" ||
-        method === "session.continue" ||
-        method === "agent.session.runTurn"
-      ) {
+      if (carriesCaller(method)) {
         request.callerActionContext = {
           actor: actionContext.actor,
           audience: actionContext.audience,
