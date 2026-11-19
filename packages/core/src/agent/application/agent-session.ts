@@ -80,7 +80,12 @@ import {
   type SentHeaders,
   withoutRepeatedHeaders,
 } from "../domain/prompt.js";
-import { type AgentPolicy, resolveAgentPolicy } from "../domain/agent-policy.js";
+import {
+  type AgentPolicy,
+  type PlaceSetup,
+  policyInPlace,
+  resolveAgentPolicy,
+} from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
@@ -404,6 +409,12 @@ interface ManagerDeps {
     thread: ThreadContext | undefined,
     agentName: string,
   ) => Promise<string | null>;
+  /**
+   * How the place a session serves changes its agent's setup there, or null
+   * when it changes nothing. Asked once when the session's setup is made.
+   * Absent, every place takes the agent's setup as it is.
+   */
+  placeSetup?: (agentName: string, thread: ThreadContext | undefined) => PlaceSetup | null;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -1068,7 +1079,12 @@ function sessionSetupOf(
 ): SessionSetupSource {
   const config = agent.definition;
   const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
-  const policy = resolveAgentPolicy({ name: agent.localName, policy: config.policy });
+  // The place can override the agent's policy and take actions away, never add them.
+  const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
+  const policy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    place,
+  );
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
   // agent for a human reply. That only works when (a) the channel's surface can
   // render it, and (b) this session will actually receive the next user turn.
@@ -1079,7 +1095,9 @@ function sessionSetupOf(
   // The answer feeds the cached system prompt, so the opener states it for
   // the session's life.
   const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
-  const allowList = config.actions ?? [];
+  const allowList = (config.actions ?? []).filter(
+    (action) => !place?.withoutActions?.includes(action),
+  );
   const subagents = subagentsOf(deps.agentLoader, config);
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
@@ -1094,7 +1112,7 @@ function sessionSetupOf(
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferTool: DeferTool | undefined =
-    init.guardianFacing === true && !isSubagent
+    init.guardianFacing === true && !isSubagent && place?.withoutDefer !== true
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,
@@ -1349,6 +1367,11 @@ async function openSession(
   const { log } = deps;
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
+  // The agent's policy where this session opens: its place may override it.
+  const placedPolicy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    deps.placeSetup?.(agent.name, init.threadContext) ?? null,
+  );
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
   const sessionToolsFor = sessionToolsOf(
     deps,
@@ -1457,10 +1480,7 @@ async function openSession(
       });
       reason = undefined;
     }
-    const handsOff =
-      !!deps.handoffs &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal;
+    const handsOff = !!deps.handoffs && !config.codeBacked && placedPolicy.handoffOnRenewal;
     // A setup change hands off lightly, unless what the successor would read
     // is too large for its first turn.
     const light =
@@ -1588,7 +1608,10 @@ async function openSession(
     sessionId,
     getRomeSessionId: () => impl.currentTurnRomeSessionIdRef,
     getTurnId: () => impl.currentTurnId,
-    getThreadContext: () => impl.currentTurnThreadContextRef,
+    // The session's tools are built while it first opens, before `impl`
+    // exists, and read the place it opens in then.
+    getThreadContext: () =>
+      impl === undefined ? init.threadContext : impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
@@ -1616,8 +1639,11 @@ async function openSession(
     // in the same session. An agent whose definition omits its actions, or
     // that the catalog no longer holds, may call none: never the list it
     // had when the session opened.
+    // The session's place may withhold some of them, as its setup does.
     get actions() {
-      return deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+      const granted = deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+      const withheld = deps.placeSetup?.(key.agentName, refs.getThreadContext())?.withoutActions;
+      return withheld ? granted.filter((action) => !withheld.includes(action)) : granted;
     },
     widgets,
     turnId: refs.getTurnId,
@@ -2058,10 +2084,7 @@ async function openSession(
     // open tasks and its messages, whether or not a handoff was written: all
     // its predecessor held after a setup change, else the recent ones.
     carriesMessages:
-      continuesChat &&
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      continuesChat && !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? session.handoff === LIGHT_HANDOFF
           ? "held"
           : "recent"
@@ -2081,9 +2104,7 @@ async function openSession(
     // Past this size a turn's end renews the session with a handoff
     // (docs/concepts/sessions.md#handoff).
     contextLimitTokens:
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? deps.handoffs?.contextLimitTokens
         : undefined,
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,

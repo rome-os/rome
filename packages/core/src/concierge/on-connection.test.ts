@@ -1,16 +1,31 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  agentOnConnect,
+  CONCIERGE_CHAT_ACTIONS,
   CONNECTION_INSTRUCTION,
   chatInstructionsOf,
   conciergeOnConnection,
-  onConnection,
+  conciergePlaceSetup,
 } from "./on-connection.js";
 
 describe("the Concierge on a connection", () => {
-  it("tells a chat on a connection from a dashboard chat, and an unknown place from both", () => {
-    expect(onConnection({ channel: "telegram" })).toBe(true);
-    expect(onConnection({ channel: "webchat" })).toBe(false);
-    expect(onConnection(undefined)).toBe(false);
+  it("starts a newly connected own account with the Concierge, and a delegate or a kind that takes no agent with none", () => {
+    expect(agentOnConnect("own_account")).toBe("core:concierge");
+    expect(agentOnConnect("delegate")).toBeNull();
+    expect(agentOnConnect(null)).toBeNull();
+  });
+
+  it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {
+    expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
+      finalText: "deliver",
+      handoffOnRenewal: false,
+      withoutActions: CONCIERGE_CHAT_ACTIONS,
+      withoutDefer: true,
+    });
+    expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
+    expect(conciergePlaceSetup("core:concierge", { channel: "webchat" })).toBeNull();
+    expect(conciergePlaceSetup("core:concierge", undefined)).toBeNull();
+    expect(conciergePlaceSetup("core:main", { channel: "telegram" })).toBeNull();
   });
 
   it("adds its instruction only to the Concierge, and only on a connection", async () => {
@@ -20,6 +35,11 @@ describe("the Concierge on a connection", () => {
     expect(await conciergeOnConnection({ channel: "webchat" }, "core:concierge")).toBeNull();
     expect(await conciergeOnConnection({ channel: "slack" }, "core:main")).toBeNull();
     expect(await conciergeOnConnection(undefined, "core:concierge")).toBeNull();
+  });
+
+  it("cancels the dashboard's closing `done` and private sends, since its text is the reply", () => {
+    expect(CONNECTION_INSTRUCTION).toContain("do not end your turn with `done`");
+    expect(CONNECTION_INSTRUCTION).toContain("never put a code, password, token or other secret");
   });
 
   it("joins every chat instruction that adds one, and answers null when none does", async () => {
