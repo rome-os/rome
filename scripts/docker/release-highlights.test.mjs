@@ -78,6 +78,24 @@ test("validation keeps cited, short, single highlights and moves breaking ones f
   });
 });
 
+test("validation drops a highlight that carries a link, domain or email address", () => {
+  const raw = {
+    en: [
+      { text: "Re-enter your keys at https://rome-upgrade.example.", pr: 10 },
+      { text: "Visit www.example.org for details.", pr: 11 },
+      { text: "Sign in again at rome-upgrade.com.", pr: 12 },
+    ],
+    zh: [
+      { text: "请发邮件到 help@example.net 确认。", pr: 10 },
+      { text: "在 iPhone 上连接日历。", pr: 11 },
+    ],
+  };
+  assert.deepEqual(validateHighlights(raw, notes), {
+    en: [],
+    zh: [{ text: "在 iPhone 上连接日历。", pr: 11 }],
+  });
+});
+
 test("validation caps each language and reads a malformed answer as none", () => {
   const many = {
     breaking: [],

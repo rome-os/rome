@@ -9,6 +9,14 @@ export const HIGHLIGHT_LIMIT = 5;
 const MAX_TEXT = { en: 200, zh: 100 };
 /** How much of a pull request's description the model reads. */
 const MAX_BODY = 3000;
+/** Well inside the release job's limit, so a slow model never holds up the release. */
+const MODEL_TIMEOUT_MS = 60_000;
+/**
+ * A link, domain or email address. Highlights never need one, and a pull
+ * request description, which its author can edit after merge, could steer
+ * the model into writing one.
+ */
+const LINK = /https?:|www\.|\b[\w-]+\.(com|io|cc|net|org|ai|dev|app|co|me|xyz)\b|\S+@\S+\.\S+/i;
 
 export const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 export const DEEPSEEK_MODEL = "deepseek-chat";
@@ -68,8 +76,9 @@ export function highlightsPrompt(notes, pulls) {
 /**
  * The model's answer narrowed to what a reader may show: at most
  * HIGHLIGHT_LIMIT highlights per language, each citing one of the release's
- * own pull requests once, with a short single-line text. Anything else is
- * dropped. A breaking change's highlight moves first.
+ * own pull requests once, with a short single-line text and no link, domain
+ * or email address. Anything else is dropped. A breaking change's highlight
+ * moves first.
  *
  * @param {unknown} raw The parsed answer.
  * @param {{ breaking: Entry[], new: Entry[], fixes: Entry[] }} notes The release's entries.
@@ -92,7 +101,7 @@ export function validateHighlights(raw, notes) {
         continue;
       }
       const line = text.replace(/\s+/g, " ").trim();
-      if (!line || line.length > MAX_TEXT[language]) continue;
+      if (!line || line.length > MAX_TEXT[language] || LINK.test(line)) continue;
       seen.add(pr);
       kept.push({ text: line, pr });
     }
@@ -130,7 +139,7 @@ export async function writeHighlights({ notes, pulls, apiKey, fetch = globalThis
         response_format: { type: "json_object" },
         temperature: 0.2,
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`DeepSeek answered ${response.status}`);
     const reply = await response.json();

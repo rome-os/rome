@@ -157,7 +157,7 @@ export function releaseNotes({ tag, previousTag, sha, image, repository, commits
 
 /**
  * The version of the release-notes.json format. 2 adds `highlights` to the
- * fields of 1, so a reader of 1 can read 2 by ignoring them.
+ * fields of 1. A reader accepts the versions it knows and rejects the rest.
  */
 export const NOTES_SCHEMA = 2;
 

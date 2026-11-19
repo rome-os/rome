@@ -267,7 +267,9 @@ jobs:
   github-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Room for the highlights' model call (release-highlights.mjs) before the
+    # release is created.
+    timeout-minutes: 10
     needs:
       - release
       - publish
@@ -277,6 +279,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
     permissions:
       contents: write
+      # The highlights read each cited pull request's title and description.
+      pull-requests: read
 
     steps:
       - uses: actions/checkout@v6
