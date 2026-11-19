@@ -774,21 +774,21 @@ describe("Concierge tools", () => {
       );
     });
 
-    it("replies into the thread the guardian wrote in, to their latest message, when it names none", async () => {
+    it("replies to nothing when it names none, even where the guardian wrote inside a thread", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
       guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
-      guardianSays(s, { id: "g2", replyTo: "g0", chatThread: "g0" }, "And Nara");
-      const said = saidId(await s.tool("say", { text: "Added both" }));
-      expect([replyOf(s, said), threadOf(s, said)]).toEqual(["g2", "g0"]);
-      // A repeat in the same turn is the same message, as when it names the target.
-      expect(saidId(await s.tool("say", { text: "Added both" }))).toBe(said);
-      // Naming a message still wins.
+      const said = saidId(await s.tool("say", { text: "Added" }));
+      expect(replyOf(s, said)).toBeUndefined();
+      // Naming a message still replies to it.
       const named = saidId(await s.tool("say", { text: "About Kyoto", replyTo: "g0" }));
       expect(replyOf(s, named)).toBe("g0");
+      // So does a null, which is how the model says it answers nothing.
+      const none = saidId(await s.tool("say", { text: "Anything else?", replyTo: null }));
+      expect(replyOf(s, none)).toBeUndefined();
     });
 
-    it("shows a card that answers a threaded follow-up in that thread, with no quote, and settles it", async () => {
+    it("shows a card with no reply, and settles the turn's only guardian message", async () => {
       const s = setup({ said: false });
       const answer = rs.spyOn(s.taskRepo, "answerMessage");
       guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
@@ -803,31 +803,11 @@ describe("Concierge tools", () => {
       const result = await s.tool("show_card", { ui, text: "Saturday: 9:00 Fushimi Inari" });
       expect(result.isError).toBeFalsy();
       const card = saidId(result);
-      expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+      expect(replyOf(s, card)).toBeUndefined();
       expect(partsOf(s, card)).toEqual([
         expect.objectContaining({ type: "widget", appId: "core", ui }),
       ]);
       expect(answer).toHaveBeenCalledWith(CONCIERGE_CHAT, "g1");
-    });
-
-    it("replies to nothing when the guardian wrote in the main line, or in several threads", async () => {
-      const main = setup({ said: false });
-      guardianSays(main, { id: "g1" });
-      expect(replyOf(main, saidId(await main.tool("say", { text: "Hi" })))).toBeUndefined();
-
-      // A message that starts a thread is in the main line, not inside the thread.
-      const root = setup({ said: false });
-      guardianSays(root, { id: "g0", turnId: "older" }, "Plan Kyoto");
-      guardianSays(root, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
-      guardianSays(root, { id: "g2" });
-      expect(replyOf(root, saidId(await root.tool("say", { text: "Hi" })))).toBeUndefined();
-
-      const mixed = setup({ said: false });
-      guardianSays(mixed, { id: "a0", turnId: "older" }, "Plan Kyoto");
-      guardianSays(mixed, { id: "b0", turnId: "older" }, "Book a table");
-      guardianSays(mixed, { id: "g1", replyTo: "a0", chatThread: "a0" });
-      guardianSays(mixed, { id: "g2", replyTo: "b0", chatThread: "b0" });
-      expect(replyOf(mixed, saidId(await mixed.tool("say", { text: "Hi" })))).toBeUndefined();
     });
 
     it("replies to the guardian message it names, and shows its quote", async () => {
@@ -882,12 +862,12 @@ describe("Concierge tools", () => {
         render: { kind: "inline", componentId: "question-card", builtin: true },
       } as const;
 
-      it("replies like its messages do: into the thread the guardian wrote in", async () => {
+      it("replies to nothing when it names none, even where the guardian wrote inside a thread, with no quote", async () => {
         const s = setup({ said: false });
         guardianSays(s, { id: "g0", turnId: "older" }, "Plan Kyoto");
         guardianSays(s, { id: "g1", replyTo: "g0", chatThread: "g0" }, "Add Osaka");
         const card = await s.service.addCard(CONCIERGE_CHAT, "concierge-turn-1", question);
-        expect([replyOf(s, card), threadOf(s, card)]).toEqual(["g1", "g0"]);
+        expect(replyOf(s, card)).toBeUndefined();
         // A card is a message of its own: no quote beside it.
         expect(partsOf(s, card)).toEqual([question]);
       });
@@ -5435,7 +5415,7 @@ describe("Concierge connect_card", () => {
     expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: "said-1" });
   });
 
-  it("lands in the thread the guardian wrote in, as its messages do", async () => {
+  it("replies to nothing, even where the guardian wrote inside a thread", async () => {
     const s = setup({ said: false });
     withServices(s, [
       { service: "mail", label: "Mail", icon: "glyph:gmail", state: null, connect: MAIL_CONNECT },
@@ -5458,7 +5438,7 @@ describe("Concierge connect_card", () => {
       CONCIERGE_CHAT,
       "concierge-turn-1",
       [expect.objectContaining({ type: "connect_card", service: "mail" })],
-      { replyTo: "g1" },
+      {},
     );
   });
 
@@ -5770,32 +5750,13 @@ describe("Concierge tasks started for a guardian message", () => {
       expect(settled).toHaveBeenCalledWith(taskId);
     });
 
-    describe("a say that names no message in a report turn", () => {
-      it("replies to the start message of the one task the turn reports, and settles its result", async () => {
-        const { s, taskId } = await finishedWith(concluded("Found 3 flights."));
-        const start = await startKeyOf(s, taskId);
-        s.reportedTask(taskId);
-        const settled = rs.spyOn(s.tasks, "resultSaid");
-        const said = idOf(await s.tool("say", { text: "Found 3 flights, cheapest ¥4,380." }));
-        expect(replyOfId(s, said)).toBe(start);
-        expect(settled).toHaveBeenCalledWith(taskId);
-        expect(await startKeyOf(s, taskId)).toBe(start);
-      });
-
-      it("replies to nothing when the turn reports on several tasks", async () => {
-        const { s } = await finishedWith(concluded("Found 3 flights."));
-        s.reportedTask(undefined);
-        const said = idOf(await s.tool("say", { text: "Found 3 flights." }));
-        expect(replyOfId(s, said)).toBeUndefined();
-      });
-
-      it("keeps the guardian-message default when the turn holds one", async () => {
-        const { s, taskId } = await finishedWith(concluded("Found 3 flights."));
-        s.reportedTask(taskId);
-        guardianSays(s, "g2", "report-turn");
-        const said = idOf(await s.tool("say", { text: "Found 3 flights." }));
-        expect(replyOfId(s, said)).toBeUndefined();
-      });
+    it("replies to nothing when a say in a report turn names no message, and says the result unsettled", async () => {
+      const { s, taskId } = await finishedWith(concluded("Found 3 flights."));
+      s.reportedTask(taskId);
+      const settled = rs.spyOn(s.tasks, "resultSaid");
+      const said = idOf(await s.tool("say", { text: "Found 3 flights, cheapest ¥4,380." }));
+      expect(replyOfId(s, said)).toBeUndefined();
+      expect(settled).not.toHaveBeenCalled();
     });
 
     it("takes an automated input as a message the turn answers", async () => {

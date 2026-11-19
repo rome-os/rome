@@ -6,10 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
-import {
-  defaultReplyTarget as defaultReplyTargetOf,
-  turnPrompts as turnPromptsOf,
-} from "./reply-target.js";
+import { turnPrompts as turnPromptsOf } from "./reply-target.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
@@ -663,34 +660,13 @@ export async function buildConciergeTools(
     return guardian.length === 1 ? guardian[0] : undefined;
   };
 
-  // The message a `say` that names none replies to (reply-target.ts).
-  const defaultReplyTarget = () => {
-    const { chatId, turnId } = currentTurn();
-    return defaultReplyTargetOf(service, chatId, turnId);
-  };
-
-  // The start message of the one task a report turn reports on, which a `say`
-  // that names none and has no default replies to: such a turn took no
-  // guardian message, so its result would otherwise land on the main line.
-  // Nothing when the turn holds a guardian message, or reports on none or
-  // several tasks.
-  const reportedStartMessage = async () => {
-    const taskId = context.getTurnReportedTask();
-    if (!taskId) return undefined;
-    for (const key of await turnPrompts()) {
-      if (await isGuardianMessage(key)) return undefined;
-    }
-    return startOf(taskId);
-  };
-
   const say = async (
     text: string,
     format: "bubble" | "long",
     isPrivate: boolean,
-    named?: string,
+    replyTo?: string,
   ) => {
     const { chatId, turnId } = currentTurn();
-    const replyTo = named ?? (await defaultReplyTarget()) ?? (await reportedStartMessage());
     const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
@@ -1454,9 +1430,6 @@ export async function buildConciergeTools(
                 ? { cardId: message.id }
                 : {}),
               at: message.at.toISOString(),
-              ...(message.chatThread && message.chatThread !== message.id
-                ? { root: message.chatThread }
-                : {}),
             })),
           };
         }),
@@ -1669,17 +1642,9 @@ export async function buildConciergeTools(
               `The card was not shown: ${card.problems.join("; ")}. Fix it and call show_card once more, or say the content with say instead.`,
             );
           }
-          // A card joins the thread a threaded follow-up was said in, as a
-          // `say` does, but shows no quote: a card stands alone in its message.
-          const replyTo = await defaultReplyTarget();
-          const { id } = await webchatRepo.addBackendMessage(
-            chatId,
-            turnId,
-            [card.part],
-            replyTo ? { replyTo } : {},
-          );
+          const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [card.part]);
           said(chatId, turnId, card.part.text);
-          await settleAnswered(replyTo, undefined);
+          await settleAnswered(undefined, undefined);
           return {
             sent: "Shown; the guardian sees the card. Send nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
             messageId: id,

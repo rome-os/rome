@@ -2296,7 +2296,7 @@ describe("WebChatRepository", () => {
     expect(messages.map((m) => m.id)).toEqual(["u1", "t1", "u2", "t2"]);
   });
 
-  it("stores turn recap messages in the original turn group even when inserted late", async () => {
+  it("stores a turn recap message where it was said, even when its turn is older", async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     await repo.createSession("sess-recap-order", "Recap Order");
 
@@ -2318,9 +2318,9 @@ describe("WebChatRepository", () => {
     expect(messages.map((m) => m.id)).toEqual([
       "a-user",
       "a-assistant",
-      recap.id,
       "b-user",
       "b-assistant",
+      recap.id,
     ]);
     expect(JSON.parse(recap.content)).toEqual([
       {
