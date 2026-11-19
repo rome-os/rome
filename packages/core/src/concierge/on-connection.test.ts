@@ -42,6 +42,11 @@ describe("the Concierge on a connection", () => {
     expect(CONNECTION_INSTRUCTION).toContain("never put a code, password, token or other secret");
   });
 
+  it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {
+    expect(CONNECTION_INSTRUCTION).toContain("`system:fetch_channel_history`");
+    expect(CONNECTION_INSTRUCTION).toContain("Never send anyone to the dashboard for them.");
+  });
+
   it("joins every chat instruction that adds one, and answers null when none does", async () => {
     const combined = chatInstructionsOf([
       async () => "first",
