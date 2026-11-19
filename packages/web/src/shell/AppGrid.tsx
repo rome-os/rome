@@ -182,8 +182,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const [pins, setPins] = useState<PinnedEntry[]>(() =>
     normalizeSidebarPins(readLocalPins() ?? DEFAULT_SIDEBAR_PINS),
   );
-  const [storedApps, setInstalledApps] =
-    useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
+  const [storedApps, setInstalledApps] = useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
   // The cached list predates the feature answer, so it is filtered here too: a
   // hidden app read from the cache never shows, even while the app list loads.
   const featureState = useFeatureStates();

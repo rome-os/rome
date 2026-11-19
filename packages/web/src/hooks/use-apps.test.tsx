@@ -41,7 +41,13 @@ describe("useAppsList", () => {
   });
 
   describe("while a feature is hidden", () => {
-    const installed = [{ id: "inbox" }, { id: "notes" }, { id: "briefing" }] as InstalledAppCard[];
+    // `constructor` is an app id that names no feature, though every object
+    // inherits a property by that name.
+    const installed = [
+      { id: "inbox" },
+      { id: "notes" },
+      { id: "constructor" },
+    ] as InstalledAppCard[];
 
     function renderList(features: () => Promise<Response>) {
       rs.stubGlobal(
@@ -62,14 +68,14 @@ describe("useAppsList", () => {
         Response.json({ features: { people: true, envoys: true, inbox: false } }),
       );
       await waitFor(() =>
-        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "briefing"]),
+        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "constructor"]),
       );
     });
 
     it("holds back only the gated app until core says which features are shown", async () => {
       const { result } = renderList(() => new Promise<Response>(() => {}));
       await waitFor(() =>
-        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "briefing"]),
+        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "constructor"]),
       );
     });
   });

@@ -308,3 +308,27 @@ describe("Recent apps on the rail", () => {
     expect(screen.getByRole("img", { name: "Not opened on this device" })).toBeTruthy();
   });
 });
+
+describe("Apps of a hidden feature", () => {
+  it("never shows a cached app whose feature is hidden, even before the app list loads", async () => {
+    seed([fixture("a", "Alpha"), fixture("inbox", "Inbox", { origin: "builtin" })], {
+      a: minutesAgo(1),
+      inbox: minutesAgo(2),
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL): Promise<Response> => {
+        const url = String(input);
+        if (url === FEATURES_URL) {
+          return Response.json({ features: { people: true, envoys: true, inbox: false } });
+        }
+        if (url === "/api/apps") return new Promise<Response>(() => {});
+        if (url === "/api/settings") return Response.json({});
+        return new Response(null, { status: 404 });
+      }),
+    );
+    renderSidebar();
+    expect(await screen.findByRole("link", { name: "Alpha", exact: true })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Inbox", exact: true })).toBeNull();
+  });
+});

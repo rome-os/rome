@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { PeopleList } from "@rome/api-types/people";
 import { usePeople } from "./use-people";
@@ -65,5 +65,26 @@ describe("usePeople", () => {
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current.data).toEqual([]));
+  });
+
+  it("offers no listing it read before People was hidden", async () => {
+    let peopleShown = true;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
+      String(input) === FEATURES_URL
+        ? Response.json({ features: { people: peopleShown, envoys: true, inbox: true } })
+        : Response.json(peopleList())) as typeof fetch);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => usePeople(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.data).toEqual(peopleList().people));
+
+    peopleShown = false;
+    await act(() => queryClient.invalidateQueries({ queryKey: ["features"] }));
+
+    await waitFor(() => expect(result.current.data).toBeUndefined());
+    expect(queryClient.getQueryData(["people"])).toEqual(peopleList().people);
   });
 });
