@@ -98,6 +98,13 @@ describe("core:routine_pause and core:routine_resume", () => {
       error: expect.stringContaining("system:search_routine"),
     });
   });
+
+  it("names the field to pass when the id comes under another name", async () => {
+    expect(await engine.run(ROUTINE_PAUSE_ACTION, { id: "a-routine" }, guardianAsked)).toEqual({
+      status: "error",
+      error: "Pass the routine's id as routineId. Find it with system:search_routine.",
+    });
+  });
 });
 
 describe("who may pause or resume a routine", () => {

@@ -24,6 +24,8 @@ const INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const MISSING_ID = "Pass the routine's id as routineId. Find it with system:search_routine.";
+
 /** Registers pausing and resuming a routine. */
 export function registerRoutineEnabledActions(
   actions: Pick<ActionRegistry, "register">,
@@ -50,9 +52,8 @@ export function registerRoutineEnabledActions(
         const refusal = changeRefusal();
         if (refusal) return { status: "error", error: refusal };
         const routineId = typeof args.routineId === "string" ? args.routineId.trim() : "";
-        const result = routineId
-          ? await updateRoutine(deps, routineId, { enabled })
-          : ({ status: "not-found" } as const);
+        if (!routineId) return { status: "error", error: MISSING_ID };
+        const result = await updateRoutine(deps, routineId, { enabled });
         if (result.status === "not-found") {
           return {
             status: "error",
