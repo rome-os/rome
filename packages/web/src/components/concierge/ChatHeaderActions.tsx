@@ -12,7 +12,7 @@ import { ListChecks, MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { dropdownMenuItemVariants } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { FLOATING_SURFACE } from "./ConciergeHeaderStatus";
 
@@ -66,7 +66,12 @@ export function ChatHeaderActions({
         <>
           <IconButton
             size={size}
-            label={t("concierge.menu.tasks")}
+            // The dot is drawn only; the name says it too.
+            label={
+              tasks.needsYou
+                ? `${t("concierge.menu.tasks")}, ${t("concierge.menu.needsYouDot")}`
+                : t("concierge.menu.tasks")
+            }
             data-chat-header-tasks
             className={button}
             onClick={tasks.open}
@@ -75,8 +80,7 @@ export function ChatHeaderActions({
                 <ListChecks />
                 {tasks.needsYou ? (
                   <span
-                    role="img"
-                    aria-label={t("concierge.menu.needsYouDot")}
+                    aria-hidden
                     data-chat-header-tasks-dot
                     className="absolute -right-1 -top-1 size-1.5 rounded-full bg-primary"
                   />
@@ -108,6 +112,7 @@ const LEAVE_DELAY_MS = 150;
 
 type MoreButtonProps = {
   onClick: (event: MouseEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
   onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
   onPointerLeave: (event: PointerEvent<HTMLElement>) => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
@@ -133,6 +138,8 @@ function MoreMenu({
   const leaveTimer = useRef<number | null>(null);
   // Set when the keyboard opened the menu, which then takes focus.
   const fromKeyboard = useRef(false);
+  // The pointer that pressed the button, read by the click that follows.
+  const pressedWith = useRef<string | null>(null);
   const cancelLeave = () => {
     if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
@@ -157,14 +164,20 @@ function MoreMenu({
     onPointerLeave: (event) => {
       if (event.pointerType === "mouse") leave();
     },
-    // A hover has shown it already; a click keeps it, and a tap toggles it.
-    // A keyboard's Enter or Space arrives as a click with no pointer.
+    onPointerDown: (event) => {
+      pressedWith.current = event.pointerType;
+    },
+    // A hover has shown it already, so a mouse's click keeps it; a tap
+    // toggles it. A keyboard's Enter or Space arrives as a click with no
+    // press count (`detail` 0), and moves focus into the menu.
     onClick: (event) => {
       event.preventDefault();
       cancelLeave();
-      const pointer = (event.nativeEvent as globalThis.PointerEvent).pointerType;
-      if (!pointer) fromKeyboard.current = true;
-      setOpen((was) => (pointer === "mouse" ? true : !was));
+      const keyboard = event.detail === 0;
+      const mouse = !keyboard && pressedWith.current === "mouse";
+      pressedWith.current = null;
+      if (keyboard) fromKeyboard.current = true;
+      setOpen((was) => (mouse ? true : !was));
     },
     onKeyDown: (event) => {
       if (event.key === "ArrowDown") {
@@ -177,8 +190,9 @@ function MoreMenu({
   const sections = menu.sections.filter((section) => section.length > 0);
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
-      {/* The button itself is the anchor: it forwards the ref the menu is placed by. */}
-      <PopoverAnchor asChild>{children(buttonProps)}</PopoverAnchor>
+      {/* The button is the menu's trigger, so Escape returns focus to it. Its
+          click handler prevents the trigger's own toggle: the open state is ours. */}
+      <PopoverTrigger asChild>{children(buttonProps)}</PopoverTrigger>
       <PopoverContent
         role="menu"
         aria-label={t("chatHeader.menu")}

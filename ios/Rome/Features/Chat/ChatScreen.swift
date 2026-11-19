@@ -656,7 +656,8 @@ enum MenuTitle {
 
 /// The right of a chat's header: one glass capsule holding Tasks and "…".
 /// Tasks opens the Agent page on its Tasks tab, with a dot while a task needs
-/// the guardian. "…" holds what else the Agent page shows (Outputs,
+/// the guardian; a chat with no task list yet (a blank topic chat) has "…"
+/// alone, as the web does. "…" holds what else the Agent page shows (Outputs,
 /// Routines), then what is done to the chat: a topic chat's Rename, then
 /// Share and Shared links, then Archive and Delete. The main Chat is only
 /// shared. Each button keeps a 44 pt target; the targets overlap so the
@@ -676,19 +677,21 @@ struct ChatHeaderButtons: View {
     var body: some View {
         let needsYou = tasks?.needsYou ?? false
         HStack(spacing: -10) {
-            Button { onAgent(.tasks) } label: {
-                ChecklistGlyph()
-                    .overlay(alignment: .topTrailing) {
-                        if needsYou {
-                            Circle().fill(Palette.primary).frame(width: 7, height: 7).offset(x: 2, y: -1)
+            if tasks != nil {
+                Button { onAgent(.tasks) } label: {
+                    ChecklistGlyph()
+                        .overlay(alignment: .topTrailing) {
+                            if needsYou {
+                                Circle().fill(Palette.primary).frame(width: 7, height: 7).offset(x: 2, y: -1)
+                            }
                         }
-                    }
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScaleStyle(scale: 0.9))
+                .accessibilityLabel("Tasks")
+                .accessibilityValue(needsYou ? Text("Needs you") : Text(verbatim: ""))
             }
-            .buttonStyle(PressScaleStyle(scale: 0.9))
-            .accessibilityLabel("Tasks")
-            .accessibilityValue(needsYou ? Text("Needs you") : Text(verbatim: ""))
             Menu {
                 Section {
                     Button { onAgent(.outputs) } label: { Label("Outputs", systemImage: "doc.on.doc") }
@@ -727,6 +730,8 @@ struct ChatHeaderButtons: View {
         // The dot reads the chat's task list, which is listened to while the
         // header shows.
         .holdsTaskList(tasks)
+        // As wide with "…" alone, so the identity stays in the middle.
+        .frame(width: Self.width, alignment: .trailing)
     }
 }
 

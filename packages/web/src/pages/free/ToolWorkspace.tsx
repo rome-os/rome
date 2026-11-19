@@ -61,9 +61,19 @@ export { COMPACT_WIDTH } from "./use-free-cells";
 const WIDTH_KEY = "rome:tool-chat-ratio";
 const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
-// The widest a tab's name runs before it is cut: the trigger's `max-w-48`
-// (192 px) less its left padding and border.
-const MAX_TAB_NAME_WIDTH = 182;
+// The widest a tab's name and dot run before the name is cut: the trigger's
+// `max-w-48` (192 px) less its left padding and border.
+const MAX_TAB_CONTENT_WIDTH = 182;
+
+/** The width of what `el` holds side by side: its children and the gaps between them. */
+function contentWidth(el: HTMLElement) {
+  const children = [...el.children] as HTMLElement[];
+  const gap = Number.parseFloat(getComputedStyle(el).columnGap) || 0;
+  return (
+    children.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0) +
+    gap * Math.max(0, children.length - 1)
+  );
+}
 const SEPARATOR_WIDTH = 1;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
@@ -387,18 +397,20 @@ export function ToolWorkspace({
     chrome: 0,
   });
   const [measure, setMeasure] = useState<HTMLDivElement | null>(null);
+  // Both sides are measured the same way, from what a tab holds: its name and
+  // its own dots. The chrome is a drawn tab less all it holds, so it is the
+  // same whichever tab is drawn; were it read with one tab's dot in it, the
+  // tabs that fit would change it, and it them, without end.
   useLayoutEffect(() => {
     if (!measure) return;
     const names: Record<string, number> = {};
     for (const el of measure.querySelectorAll<HTMLElement>("[data-measure-tab]")) {
-      names[el.dataset.measureTab!] = Math.ceil(el.getBoundingClientRect().width);
+      names[el.dataset.measureTab!] = Math.ceil(contentWidth(el));
     }
     const tab = strip?.querySelector<HTMLElement>("[data-tool-tab]");
-    const name = tab?.querySelector<HTMLElement>("[data-tool-tab-label]");
+    const trigger = tab?.querySelector<HTMLElement>("[role=tab]");
     const chrome =
-      tab && name
-        ? Math.ceil(tab.getBoundingClientRect().width - name.getBoundingClientRect().width)
-        : 0;
+      tab && trigger ? Math.ceil(tab.getBoundingClientRect().width - contentWidth(trigger)) : 0;
     setTabWidths((prev) =>
       prev.chrome === chrome && JSON.stringify(prev.names) === JSON.stringify(names)
         ? prev
@@ -432,6 +444,12 @@ export function ToolWorkspace({
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   // Each tab's name, which the measuring row below draws for every tab, the
   // ones in the menu too, so the strip knows each tab's own width.
+  // Which tabs carry a dot after their name: the trace while it streams, an
+  // app with an update.
+  const tabDots = new Set([
+    ...(trace?.streaming ? [TRACE_TAB_ID] : []),
+    ...sorted.filter((widget) => view.unreadIds.includes(widget.id)).map((widget) => widget.id),
+  ]);
   const tabLabels: Record<string, string> = {
     ...(trace ? { [TRACE_TAB_ID]: tActivity("trace.drawer.title") } : {}),
     ...(tasksOpen
@@ -445,7 +463,7 @@ export function ToolWorkspace({
   const shownIds = new Set(
     fitTabs(tabIds, activeTabId, stripWidth, (id) =>
       tabWidths.names[id]
-        ? Math.min(tabWidths.names[id], MAX_TAB_NAME_WIDTH) + tabWidths.chrome
+        ? Math.min(tabWidths.names[id], MAX_TAB_CONTENT_WIDTH) + tabWidths.chrome
         : 0,
     ),
   );
@@ -645,8 +663,10 @@ export function ToolWorkspace({
           className="pointer-events-none invisible absolute top-0 left-0 flex"
         >
           {Object.entries(tabLabels).map(([id, name]) => (
-            <span key={id} data-measure-tab={id} className="text-ui whitespace-nowrap">
-              {name}
+            // As a tab's trigger holds it: the name, then its dot.
+            <span key={id} data-measure-tab={id} className="flex gap-1 text-ui whitespace-nowrap">
+              <span data-measure-label>{name}</span>
+              {tabDots.has(id) ? <span className="size-1.5 shrink-0" /> : null}
             </span>
           ))}
         </div>

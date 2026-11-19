@@ -1,5 +1,8 @@
+import OSLog
 import SwiftUI
 import UIKit
+
+private let headerBlurLog = Logger(subsystem: "cc.romeos.mobile", category: "HeaderBlur")
 
 /// Behind a chat's header, the main Chat's and a topic chat's: rows show
 /// through it blurred under the status bar, lightly blurred at the header's
@@ -165,16 +168,23 @@ final class HeaderBlurView: UIView {
     /// matched by kind and filter name; a layout without them keeps its
     /// look, as before.
     private static func keepBlurOnly(_ view: UIVisualEffectView) {
+        var matched = false
         for subview in view.subviews where subview !== view.contentView {
             if let filters = subview.layer.filters, !filters.isEmpty {
                 // The backdrop: the blur, and the colour filters beside it.
                 let blur = filters.filter { String(describing: $0).contains("gaussianBlur") }
+                if !blur.isEmpty { matched = true }
                 if !blur.isEmpty, blur.count < filters.count { subview.layer.filters = blur }
             } else if !String(describing: type(of: subview)).contains("Backdrop") {
                 // The wash over the blur.
                 subview.isHidden = true
             }
         }
+        #if DEBUG
+        // A UIKit that lays the effect out otherwise brings the tint and its
+        // seam back with nothing failing: say so where a snapshot run looks.
+        if !matched { headerBlurLog.error("header blur kept its tint: no backdrop blur filter found") }
+        #endif
     }
 
     /// Stops the animators, which a paused animator needs before it is

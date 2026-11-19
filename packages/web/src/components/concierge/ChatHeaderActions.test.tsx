@@ -59,13 +59,15 @@ describe("ChatHeaderActions", () => {
     expect(items()).toEqual([]);
   });
 
-  it("keeps the needs-you dot on the Tasks button, only while a task needs the guardian", () => {
-    renderActions({ needsYou: true });
-    const dot = screen.getByRole("img", { name: "A task needs you" });
-    expect(dot.closest("button")?.getAttribute("aria-label")).toBe("Tasks");
+  it("keeps the needs-you dot on the Tasks button, and says it in the button's name", () => {
+    const { container } = renderActions({ needsYou: true });
+    const button = screen.getByRole("button", { name: "Tasks, A task needs you" });
+    expect(button.querySelector("[data-chat-header-tasks-dot]")).not.toBeNull();
+    expect(container.querySelectorAll("[data-chat-header-tasks-dot]")).toHaveLength(1);
     cleanup();
     renderActions({ needsYou: false });
-    expect(screen.queryByRole("img", { name: "A task needs you" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Tasks" })).toBeTruthy();
+    expect(document.querySelector("[data-chat-header-tasks-dot]")).toBeNull();
   });
 
   it("has ⋯ alone in a chat with no task list", () => {
@@ -101,12 +103,19 @@ describe("ChatHeaderActions", () => {
     await waitFor(() => expect(items()).toEqual([]));
   });
 
-  it("opens on a tap too, and closes on Escape", async () => {
+  it("opens on a tap too, and closes on Escape with focus back on ⋯", async () => {
     const { more } = renderActions();
     fireEvent.click(more);
     expect(items()).toHaveLength(5);
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     await waitFor(() => expect(items()).toEqual([]));
+    // From the keyboard: Arrow Down moves into the menu, Escape comes back.
+    more.focus();
+    fireEvent.keyDown(more, { key: "ArrowDown" });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Outputs"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(items()).toEqual([]));
+    expect(document.activeElement).toBe(more);
   });
 
   it("names the model that answered last at its foot, as text only", () => {

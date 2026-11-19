@@ -174,6 +174,42 @@ describe("ToolWorkspace", () => {
       expect(tabNames()).toEqual(["app a", "app b", "app e"]);
     });
 
+    it("keeps one fit near the threshold when the first tab has a dot and a later one is active", () => {
+      // A drawn tab is 34 px around what it holds; a name is 8 px a letter,
+      // a dot 6. "app a" with its dot is 80 px, the others 74.
+      const widthOf = (el: Element): number => {
+        if (el.matches("[data-tool-tab]")) {
+          const trigger = el.querySelector("[role=tab]")!;
+          return 34 + [...trigger.children].reduce((sum, child) => sum + widthOf(child), 0);
+        }
+        if (el.matches(".size-1\\.5")) return 6;
+        if (el.matches("[data-tool-tab-label], [data-measure-label]")) {
+          return (el.textContent ?? "").length * 8;
+        }
+        return 0;
+      };
+      rs.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: Element,
+      ) {
+        return {
+          width: widthOf(this),
+          height: 0,
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+        } as DOMRect;
+      });
+      // a + e = 80 + 4 + 74. Measured with "a"'s dot taken for every tab, the
+      // strip flipped between [a, e] and [e] until React gave up.
+      stripWidth = 160;
+      render(labelled({ activeId: "e", collapsed: false, unreadIds: ["a"] }));
+      expect(tabNames()).toEqual(["app a", "app e"]);
+      rs.restoreAllMocks();
+    });
+
     it("lists every tab on the menu and keeps the plain label when all fit", async () => {
       const user = userEvent.setup();
       stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
