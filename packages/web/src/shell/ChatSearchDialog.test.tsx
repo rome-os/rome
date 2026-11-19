@@ -403,8 +403,8 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("uses the page search icon treatment only for the four first-party apps", async () => {
-    const ids = ["briefing", "inbox", "showcases", "skills"];
+  it("uses the page search icon treatment only for the three first-party apps", async () => {
+    const ids = ["inbox", "showcases", "skills"];
     mockSessionSearch(
       [],
       [],

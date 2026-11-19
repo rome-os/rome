@@ -477,9 +477,9 @@ export class ConciergeTasks {
   }
 
   /**
-   * Task `taskId`'s result was just said, as a message naming it or a
-   * forward: its messages settle now (docs/domains/chats.md#status), not
-   * when the turn that said it ends.
+   * Task `taskId`'s result was just said, as a message that replies to its
+   * start message or a forwarded card: its messages settle now
+   * (docs/domains/chats.md#status), not when the turn that said it ends.
    */
   async resultSaid(taskId: string): Promise<void> {
     const row = await this.repo.get(taskId);

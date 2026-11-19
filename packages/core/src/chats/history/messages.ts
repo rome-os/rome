@@ -26,7 +26,7 @@ import type { ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
  * only the address a person mapping happens to carry would answer an empty
  * history for a conversation that plainly exists.
  *
- * What `timelineAccounts` (../people/timeline-sources.ts) folds a person's
+ * What `timelineAccounts` (../../people/person-history/timeline-sources.ts) folds a person's
  * links into, and what every store a person's history is read from is then
  * scoped by.
  */

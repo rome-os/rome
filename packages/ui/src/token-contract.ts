@@ -18,7 +18,6 @@ export const INHERITED_TOKENS = [
   "--destructive-bg",
   "--destructive-border",
   "--destructive-fg",
-  "--destructive-hover-bg",
   "--foreground",
   "--info",
   "--info-bg",

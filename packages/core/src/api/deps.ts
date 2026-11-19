@@ -1,9 +1,10 @@
-import type { AgentNameEvents } from "../people/agent-name.js";
+import type { PhoneBook } from "../people/phone-book/index.js";
+import type { AgentNameEvents } from "../people/guardian-profile/index.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import type { PlaceAudience } from "../core/place-audience.js";
-import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import type { GuardianLinkCodes } from "../people/link-code/index.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
@@ -13,7 +14,7 @@ import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../apps/actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import type { PeopleRepository } from "../db/repositories/people.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
 import type {
   Channels,
   PlatformOfChannel,
@@ -111,7 +112,7 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (people/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/link-code/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
@@ -176,6 +177,8 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
+  /** The phone book's routes and actions. Absent, the phone book is left out. */
+  phoneBook?: PhoneBook;
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
