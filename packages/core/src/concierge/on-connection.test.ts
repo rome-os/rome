@@ -22,6 +22,8 @@ describe("the Concierge on a connection", () => {
       withoutDefer: true,
     });
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
+    // Renaming checks a dashboard chat's owner, so a bot turn is refused even for the guardian.
+    expect(CONCIERGE_CHAT_ACTIONS).toContain("core:set_agent_name");
     expect(conciergePlaceSetup("core:concierge", { channel: "webchat" })).toBeNull();
     expect(conciergePlaceSetup("core:concierge", undefined)).toBeNull();
     expect(conciergePlaceSetup("core:main", { channel: "telegram" })).toBeNull();
