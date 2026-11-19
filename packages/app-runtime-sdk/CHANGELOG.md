@@ -1,5 +1,16 @@
 # @rome-os/app-runtime
 
+## [0.11.6](https://github.com/rome-os/rome/compare/app-runtime-v0.11.5...app-runtime-v0.11.6) (2026-11-19)
+
+
+### Features
+
+* **app-runtime:** add a Markdown widget component ([#2316](https://github.com/rome-os/rome/issues/2316)) ([78f3467](https://github.com/rome-os/rome/commit/78f3467fab2793d11142b0c939c43cd43a02f34c))
+* **app-runtime:** agent cards gain usual ranges, bar charts, callouts, icons and links ([#2335](https://github.com/rome-os/rome/issues/2335)) ([f7827f2](https://github.com/rome-os/rome/commit/f7827f24c31b4142299ffa9d21cb655d660e2d57))
+* **connector:** add Freshdesk to the connectable Composio toolkits ([#2375](https://github.com/rome-os/rome/issues/2375)) ([822172c](https://github.com/rome-os/rome/commit/822172c8ec40ed4a4fea909cea65792c2e824ec4))
+* **ios:** connect Calendar, synced and read and written live ([#2338](https://github.com/rome-os/rome/issues/2338)) ([4f888c2](https://github.com/rome-os/rome/commit/4f888c2bc8ac978553e513280de01387d9a15871))
+* **vault:** require a guardian PIN, checked by the signer, for grants and secret writes ([#2309](https://github.com/rome-os/rome/issues/2309)) ([fd79e29](https://github.com/rome-os/rome/commit/fd79e29e65dc1f909488cec0ebcccd8cf9785dab))
+
 ## [0.11.5](https://github.com/rome-os/rome/compare/app-runtime-v0.11.4...app-runtime-v0.11.5) (2026-11-17)
 
 
