@@ -1,7 +1,8 @@
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type { ThreadContext } from "@rome-os/app-runtime";
 import type { PlaceSetup } from "../agent/index.js";
 import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
-import { isConciergeAgent } from "../webchat/privacy.js";
+import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
 
 // The Concierge on one of Rome's connected accounts, such as a Telegram or
 // Slack bot: it answers there in plain text, without the tools that need a
@@ -15,6 +16,16 @@ export const CONNECTION_INSTRUCTION = [
   "",
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
 ].join("\n");
+
+/**
+ * The agent a newly connected account starts with: the Concierge for one of
+ * Rome's own accounts, such as a bot. A delegate, such as the guardian's
+ * signed-in Telegram, speaks as the guardian, so it starts with none and
+ * waits for the guardian to link one. A kind that takes no agent gets none.
+ */
+export function agentOnConnect(link: AccountLink | null): string | null {
+  return link === "own_account" ? CONCIERGE_AGENT_ID : null;
+}
 
 /**
  * The Concierge's actions that act for the owner of the Concierge chat a turn

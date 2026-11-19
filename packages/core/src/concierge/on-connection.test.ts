@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  agentOnConnect,
   CONCIERGE_CHAT_ACTIONS,
   CONNECTION_INSTRUCTION,
   chatInstructionsOf,
@@ -8,6 +9,12 @@ import {
 } from "./on-connection.js";
 
 describe("the Concierge on a connection", () => {
+  it("starts a newly connected own account with the Concierge, and a delegate or a kind that takes no agent with none", () => {
+    expect(agentOnConnect("own_account")).toBe("core:concierge");
+    expect(agentOnConnect("delegate")).toBeNull();
+    expect(agentOnConnect(null)).toBeNull();
+  });
+
   it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {
     expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
       finalText: "deliver",
