@@ -187,6 +187,7 @@ describe("chatPromptFacts earlier messages", () => {
     expect(latest).toHaveBeenCalledWith(place, {
       limit: 16,
       until: new Date(before.getTime() + 999),
+      olderThan: "q1",
     });
   });
 
