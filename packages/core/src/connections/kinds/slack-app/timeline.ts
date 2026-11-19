@@ -61,20 +61,30 @@ function justAfter(ts: string): string {
 }
 
 /** Note a message the connection heard or sent in a direct message, in the
- *  drain open now. A message heard twice is noted once. */
+ *  drain open now. One the copy holds already, such as from a page Slack
+ *  answered before its event arrived, still moves the drain on: the next one
+ *  heard comes after it. Its link is written only where the copy had none,
+ *  since a link from Slack's page is the surer of the two. */
 export function noteInDrain(
   deps: SlackTimelineDeps,
   channelId: string,
   ts: string,
   message: ChannelMessage,
 ): void {
-  if (deps.copy.timelineRow(deps.teamId, channelId, ts)) return;
   const head = deps.heads.get(channelId);
   const follows = head !== undefined && compareTs(head, ts) < 0;
-  deps.copy.keepRun(deps.teamId, channelId, {
-    messages: [{ ts, message }],
-    before: follows ? head : null,
-  });
+  const held = deps.copy.timelineRow(deps.teamId, channelId, ts);
+  if (!held) {
+    deps.copy.keepRun(deps.teamId, channelId, {
+      messages: [{ ts, message }],
+      before: follows ? head : null,
+    });
+  } else if (follows && held.prevTs === null) {
+    deps.copy.keepRun(deps.teamId, channelId, {
+      messages: [{ ts, message: held.message }],
+      before: head,
+    });
+  }
   if (head === undefined || follows) deps.heads.set(channelId, ts);
 }
 
@@ -121,12 +131,17 @@ export async function readTimeline(
 
   // The copy does not know what comes next: ask Slack, below the last
   // message taken or below the read's own bound.
-  const latest = above ?? (until !== undefined ? justAfter(until) : undefined);
+  // Below the last message taken, which the page then links to, unless that
+  // is still newer than the read's own bound: then below the bound, with no
+  // link, since the messages between are not read.
+  const bound = until !== undefined ? justAfter(until) : undefined;
+  const adjacent = above !== undefined && (bound === undefined || compareTs(above, bound) <= 0);
+  const latest = adjacent ? above : bound;
   const page = await deps.fetchPage(channelId, latest !== undefined ? { latest } : {});
   deps.copy.keepRun(deps.teamId, channelId, {
     messages: page.messages,
     before: page.hasMore ? null : "",
-    ...(above !== undefined ? { after: above } : {}),
+    ...(adjacent ? { after: above } : {}),
   });
   // Slack's newest, read with no upper bound: anything newer is heard in the
   // drain, so it heads the chat unless a newer one was heard meanwhile.

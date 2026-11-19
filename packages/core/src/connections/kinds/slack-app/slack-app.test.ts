@@ -10,7 +10,7 @@ import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-ap
 import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
 import { createTestDb } from "../../../test/db.js";
 import { SlackMessageCopyRepository } from "./message-copy.js";
-import type { SlackWireMessage } from "./message.js";
+import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
 import { slackAppTimeline } from "../../../db/schema.js";
@@ -726,9 +726,9 @@ function fakeSlackHistory() {
     calls,
     conversationHistory,
     /** A message said in Slack, by the member or by Rome's bot. */
-    say(i: number, by: "member" | "bot" = "member"): SlackWireMessage {
+    say(i: number, by: "member" | "bot" = "member", ts?: string): SlackWireMessage {
       const message = {
-        ts: `1700000000.${String(i).padStart(6, "0")}`,
+        ts: ts ?? `1700000000.${String(i).padStart(6, "0")}`,
         user: by === "bot" ? BOT : "U_GUARDIAN",
         ...(by === "bot" ? { bot_id: "B_ROME" } : {}),
         text: `message ${i}`,
@@ -869,6 +869,44 @@ describe("Slack app reads a direct message (R13)", () => {
 
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("moves the drain on past a message a page brought before its event", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, copy } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = [1, 2, 3].map((i) => slack.say(i));
+    await mailbox.deposit(frame(dmEvent(1)));
+    // Message 2 reached the copy from a page of Slack's, with no link yet.
+    const context = { channel: "slack_app", teamId: TEAM, botUserId: BOT, chatId: "D_GUARDIAN" };
+    copy.keepRun(TEAM, "D_GUARDIAN", {
+      messages: [{ ts: said[1].ts, message: slackMessage(context, said[1])! }],
+      before: null,
+    });
+    await mailbox.deposit(frame(dmEvent(2)), frame(dmEvent(3)));
+
+    expect(copy.timelineRow(TEAM, "D_GUARDIAN", said[2].ts)?.prevTs).toBe(said[1].ts);
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("reads below its own upper bound when the newest message it holds is past it", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    // One message a second, the newest heard live with nothing known before it.
+    for (let i = 1; i <= 20; i++) slack.say(i, "member", `${1700000000 + i}.000000`);
+    await mailbox.deposit(
+      frame({ ...dmEvent(20), event: { ...dmEvent(20).event, ts: "1700000020.000000" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, {
+      until: new Date(1_700_000_005_000),
+      limit: 3,
+    });
+    expect(texts(read)).toEqual(["message 5", "message 4", "message 3"]);
   });
 
   it("refuses a read of a chat the app may not read, naming it", async () => {
