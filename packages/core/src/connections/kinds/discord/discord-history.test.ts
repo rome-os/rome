@@ -78,7 +78,7 @@ describe("readDiscordHistory", () => {
     expect(calls).toEqual([
       `/channels/${CHAT}`,
       `/channels/${CHAT}/messages?limit=100`,
-      `/channels/${CHAT}/messages?limit=50&before=${idAt(150)}`,
+      `/channels/${CHAT}/messages?limit=100&before=${idAt(150)}`,
     ]);
   });
 
@@ -172,7 +172,7 @@ describe("readDiscordHistory", () => {
       readDiscordHistory({ ...deps(get), readsHistoryIn: async () => false }, CHAT, { limit: 5 }),
     ).rejects.toThrow(`This Discord account may not read chat ${CHAT}`);
     await expect(
-      readDiscordHistory({ ...deps(get), readsHistoryIn: async () => null }, CHAT, { limit: 5 }),
+      readDiscordHistory({ ...deps(get), readsHistoryIn: async () => true }, CHAT, { limit: 5 }),
     ).resolves.toEqual([]);
   });
 
@@ -191,6 +191,30 @@ describe("readDiscordHistory", () => {
     );
 
     expect(page[0]?.senderDisplayName).toBe("nick of 200000000000000001");
+  });
+
+  it("refuses a read whose permission it cannot tell, and an id that is no Discord id", async () => {
+    const { get, calls } = discord(chats);
+
+    await expect(
+      readDiscordHistory({ ...deps(get), readsHistoryIn: async () => null }, CHAT, { limit: 5 }),
+    ).rejects.toThrow(`Cannot tell yet whether this Discord account may read chat ${CHAT}`);
+    await expect(
+      readDiscordHistory(deps(get), CHAT, { olderThan: "m1", limit: 5 }),
+    ).rejects.toThrow('olderThan "m1" is no Discord id');
+    await expect(readDiscordHistory(deps(get), "../users/@me", { limit: 5 })).rejects.toThrow(
+      "chatId",
+    );
+    expect(calls).toEqual([`/channels/${CHAT}`]);
+  });
+
+  it("asks for whole pages and stops after a few spare ones in a chat of system messages", async () => {
+    const joins = Array.from({ length: 1000 }, (_, n) => said(n, { type: 7 }));
+    const { get, calls } = discord({ [CHAT]: { channel: textChannel, messages: joins } });
+
+    await expect(readDiscordHistory(deps(get), CHAT, { limit: 1 })).resolves.toEqual([]);
+    // One page the limit needs, and five spare.
+    expect(calls.filter((call) => call.includes("/messages"))).toHaveLength(6);
   });
 
   it("reads the DM with a user a chat id names, as a send takes it", async () => {

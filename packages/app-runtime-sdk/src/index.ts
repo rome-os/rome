@@ -1911,10 +1911,6 @@ export interface ChannelsService {
    * What was said on one of Rome's accounts: its newest messages, newest
    * first. A channel's name in place of the account reads that channel.
    *
-   * An account read live through its Connection shares one read for 30
-   * seconds among the queries over the same window, so a message just sent
-   * through `send` may not appear until that read expires.
-   *
    * A Discord account is read from Discord itself, one chat or thread at a
    * time, so it answers messages Rome never heard. It needs `chatId`, and
    * rejects with an error that says so when the account may not read that

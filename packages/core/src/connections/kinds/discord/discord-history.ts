@@ -15,6 +15,11 @@ import { discordAttachment } from "./discord-attachment.js";
 const DISCORD_EPOCH = 1420070400000n;
 /** The most messages Discord answers in one request. */
 const PAGE = 100;
+/** The most requests one read makes beyond the pages its limit needs, so a
+ *  chat full of messages no read answers (joins, pins) cannot hold it. */
+const SPARE_PAGES = 5;
+/** What a Discord id looks like: a snowflake, digits only. */
+const SNOWFLAKE = /^\d{1,20}$/;
 
 /** Discord's channel types this read tells apart. */
 const DM = 1;
@@ -159,9 +164,28 @@ export async function readDiscordHistory(
   chatId: string,
   read: TalkHistoryRead,
 ): Promise<ChannelMessage[]> {
+  for (const [field, id] of [
+    ["chatId", chatId],
+    ["olderThan", read.olderThan],
+    ["newerThan", read.newerThan],
+  ] as const) {
+    if (id !== undefined && !SNOWFLAKE.test(id)) {
+      throw new Error(`${field} "${id}" is no Discord id: a Discord id is digits only`);
+    }
+  }
   const channel = await channelOf(deps, chatId);
   const isDm = channel.type === DM || channel.type === GROUP_DM;
-  if (!isDm && (await deps.readsHistoryIn?.(channel.id)) === false) throw mayNotRead(chatId);
+  if (!isDm && deps.readsHistoryIn) {
+    const reads = await deps.readsHistoryIn(channel.id);
+    // Discord answers no messages, not a refusal, where the bot may not read
+    // the history, so a read that cannot tell does not guess.
+    if (reads === false) throw mayNotRead(chatId);
+    if (reads === null) {
+      throw new Error(
+        `Cannot tell yet whether this Discord account may read chat ${chatId}; try again shortly`,
+      );
+    }
+  }
   // Bounds as Discord ids, both exclusive.
   const lowers = [
     read.newerThan === undefined ? null : BigInt(read.newerThan),
@@ -178,9 +202,10 @@ export async function readDiscordHistory(
 
   const found: WireMessage[] = [];
   let from: bigint | null = forward ? lower : upper;
-  while (found.length < read.limit) {
-    const asked = Math.min(PAGE, read.limit - found.length);
-    const query = new URLSearchParams({ limit: String(asked) });
+  const pages = Math.ceil(read.limit / PAGE) + SPARE_PAGES;
+  for (let request = 0; found.length < read.limit && request < pages; request++) {
+    // A whole page each time: messages no read answers are dropped after it.
+    const query = new URLSearchParams({ limit: String(PAGE) });
     if (from !== null) query.set(forward ? "after" : "before", String(from));
     const page = (await asReadable(chatId, () =>
       deps.get(`/channels/${channel.id}/messages`, query),
@@ -193,7 +218,7 @@ export async function readDiscordHistory(
     const bounded = ordered.filter((message) => inside(BigInt(message.id)));
     found.push(...bounded.filter((message) => READ_TYPES.has(message.type)));
     const last = ordered.at(-1);
-    if (!last || page.length < asked || bounded.length < ordered.length) break;
+    if (!last || page.length < PAGE || bounded.length < ordered.length) break;
     from = BigInt(last.id);
   }
   const page = found.slice(0, read.limit);
