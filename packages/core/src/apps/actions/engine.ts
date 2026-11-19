@@ -2184,6 +2184,12 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
+    // The preview and the replay both run as the turn that asked: without
+    // them a chatless turn reads as outside any turn (app-host chat-calls). A
+    // nested call's own context names no turn, so the caller's is read.
+    const caller = actionExecutionContext.getStore();
+    const turnId = context?.turnId ?? caller?.turnId;
+    const audience = context?.audience ?? caller?.audience;
     let preview: PreviewPayload | undefined;
     try {
       const action = this.registry.get(actionName);
@@ -2200,7 +2206,8 @@ export class ActionEngine {
         channelContext: context?.channelContext,
         sharedContext: context?.sharedContext,
         sessionId: context?.sessionId,
-        turnId: context?.turnId,
+        turnId,
+        audience,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
       };
@@ -2227,11 +2234,8 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
-        // The replay reads as the turn that asked: without them a chatless
-        // turn's replay reads as outside any turn (app-host chat-calls). A
-        // nested call's own context names no turn, so the caller's is read.
-        turnId: context?.turnId ?? actionExecutionContext.getStore()?.turnId,
-        audience: context?.audience ?? actionExecutionContext.getStore()?.audience,
+        turnId,
+        audience,
         preview,
       },
     });

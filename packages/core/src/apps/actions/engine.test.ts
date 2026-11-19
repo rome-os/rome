@@ -1968,6 +1968,35 @@ describe("ActionEngine", () => {
       expect(row!.payload).toMatchObject({ turnId: "turn-3" });
     });
 
+    it("runs a nested approval's preview as the asking turn, so it reads no chat outside it", async () => {
+      const seen: Array<{ turnId?: string; audience?: string }> = [];
+      await setup({
+        actions: [
+          {
+            ...buildAction("needs_approval", { requiresApproval: true }),
+            preview: () => {
+              const store = actionExecutionContext.getStore();
+              seen.push({ turnId: store?.turnId, audience: store?.audience });
+              return { kind: "generic" as const, title: "Nested", summary: "card" };
+            },
+          },
+          buildAction("parent", {
+            execute: async () => {
+              await callAction("needs_approval", { target: "prod" });
+              return { status: "ok" };
+            },
+          }),
+        ],
+      });
+
+      // A summoned agent's call in a shared chat: a turn, but no chat. With
+      // no turn, a read in the preview would count as outside any turn and
+      // read any chat (app-host chat-calls).
+      await rome.actionEngine.run("parent", {}, { turnId: "turn-3", audience: "shared" });
+
+      expect(seen).toEqual([{ turnId: "turn-3", audience: "shared" }]);
+    });
+
     it("fires onApprovalCreated with preview for a nested requiresApproval action", async () => {
       const needsApproval: Action = {
         ...buildAction("needs_approval", { requiresApproval: true }),
