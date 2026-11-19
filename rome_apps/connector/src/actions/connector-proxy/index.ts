@@ -19,6 +19,8 @@ import {
 } from "../../api/shopify-proxy.js";
 import {
   SLACK_APP_CONNECT_HINT,
+  SLACK_BOTH_ON_APP,
+  SLACK_NO_SIGN_IN,
   slackAppAccount,
   slackAppProxyCall,
 } from "../../api/slack-app-proxy.js";
@@ -99,6 +101,12 @@ const inputSchema = z.object({
     .record(z.string(), z.string())
     .optional()
     .describe("Extra request headers as { name: value }, e.g. { 'Notion-Version': '2022-06-28' }."),
+  via: z
+    .enum(["app", "sign_in"])
+    .optional()
+    .describe(
+      "Slack only: which Slack connection makes the call. 'app' is Rome's own Slack app; 'sign_in' is the older Slack sign-in. Omit it to take the app when it is connected; the result's `via` names the one taken.",
+    ),
 });
 
 export function createAction(
@@ -108,7 +116,7 @@ export function createAction(
   return defineAction({
     config,
     schema: inputSchema,
-    execute: async ({ toolkit, path, host, method, body, query, headers }) => {
+    execute: async ({ toolkit, path, host, method, body, query, headers, via }) => {
       // Shopify's API host is the connected store's own domain, which only the
       // token file knows, so read it before assembling the endpoint. The store
       // domain isn't secret; the token is not used until the endpoint clears
@@ -169,22 +177,41 @@ export function createAction(
       // endpoint has already cleared the host allowlist above, so the token is
       // only ever sent to a slack.com host.
       if (toolkit.toLowerCase() === SLACK_TOOLKIT) {
+        // Rome reaches Slack two ways: its own Slack app, which keeps its
+        // token to itself, and the older Slack sign-in, whose token sits in a
+        // file. A call that names neither takes the app when it is connected,
+        // since it replaces the sign-in, and says so when both are.
         const tokens = await readSlackOAuthTokens();
-        if (!tokens) {
-          // No Slack sign-in: answer through Rome's own Slack app connection,
-          // which keeps its token to itself.
-          const channels = deps.channelsService;
-          const account = channels ? await slackAppAccount(channels) : null;
+        const channels = deps.channelsService;
+        const account = channels ? await slackAppAccount(channels) : null;
+        const both = tokens !== null && account !== null;
+        const route = via ?? (account ? "app" : "sign_in");
+        if (route === "app") {
           if (!channels || !account) {
             return { status: "error", error: SLACK_APP_CONNECT_HINT };
           }
-          return await slackAppProxyCall({
+          const result = await slackAppProxyCall({
             channels,
             account,
             path: new URL(endpoint).pathname,
             body,
             query,
           });
+          if (result.status === "error") {
+            return both && via === undefined
+              ? { ...result, error: `${result.error} ${SLACK_BOTH_ON_APP}` }
+              : result;
+          }
+          return {
+            ...result,
+            data: { ...result.data, via: "app", ...(both ? { note: SLACK_BOTH_ON_APP } : {}) },
+          };
+        }
+        if (!tokens) {
+          return {
+            status: "error",
+            error: via === "sign_in" ? SLACK_NO_SIGN_IN : SLACK_APP_CONNECT_HINT,
+          };
         }
         try {
           const res = await slackProxyCall({ tokens, endpoint, method, body, query, headers });
@@ -203,7 +230,10 @@ export function createAction(
               };
             }
           }
-          return mapProxyResponse(toolkit, method, endpoint, res);
+          const mapped = mapProxyResponse(toolkit, method, endpoint, res);
+          return both && mapped.status === "ok"
+            ? { ...mapped, data: { ...mapped.data, via: "sign_in" } }
+            : mapped;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.error("slack proxy call failed", { endpoint, method, error: message });

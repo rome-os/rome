@@ -364,7 +364,14 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             },
             search: {
               async search(input) {
-                return adapter.search(input);
+                try {
+                  return await adapter.search(input);
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
               },
             },
             directMessaging: {

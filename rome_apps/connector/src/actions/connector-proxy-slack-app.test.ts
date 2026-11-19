@@ -1,16 +1,22 @@
 import type { ActionConfig, AppActionRuntimeDeps, ChannelsService } from "@rome-os/app-runtime";
-import { describe, expect, it, rs } from "@rstest/core";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 // With no Slack sign-in token on disk, connector_proxy answers Slack through
 // Rome's own Slack app connection: the channels service, never a token.
+const readSlackOAuthTokens = rs.fn(async (): Promise<unknown> => null);
+const slackProxyCall = rs.fn(async (): Promise<unknown> => {
+  throw new Error("the Slack sign-in path must not be reached");
+});
 rs.mock("../api/slack-proxy.js", () => ({
-  readSlackOAuthTokens: async () => null,
-  slackProxyCall: () => {
-    throw new Error("the Slack sign-in path must not be reached");
-  },
+  readSlackOAuthTokens: () => readSlackOAuthTokens(),
+  slackProxyCall: (args: unknown) => slackProxyCall(args),
 }));
 
 const { createAction } = await import("./connector-proxy/index.js");
+
+beforeEach(() => {
+  readSlackOAuthTokens.mockResolvedValue(null);
+});
 
 const config: ActionConfig = {
   name: "connector_proxy",
@@ -89,5 +95,89 @@ describe("connector_proxy for Slack through Rome's Slack app", () => {
       error: expect.stringMatching(/Refusing to proxy/),
     });
     expect(list).not.toHaveBeenCalled();
+  });
+});
+
+describe("connector_proxy for Slack with both the sign-in and the Slack app connected", () => {
+  const TOKENS = { botToken: "xoxb-old", userToken: null, teamId: "T1" };
+  const app = () => {
+    const send = rs.fn(async () => ({ chatId: "D1", messageId: "1700000000.000200" }));
+    const service = {
+      list: async () => [
+        { name: "slack_app", account: APP, platform: "slack", sendable: true, searchable: true },
+      ],
+      send,
+      query: rs.fn(),
+      search: rs.fn(),
+    } as unknown as ChannelsService;
+    return { service, send };
+  };
+  const post = {
+    toolkit: "slack",
+    path: "/api/chat.postMessage",
+    method: "POST",
+    body: { channel: "D1", text: "hi" },
+  };
+
+  beforeEach(() => {
+    readSlackOAuthTokens.mockResolvedValue(TOKENS);
+    slackProxyCall.mockReset();
+    slackProxyCall.mockResolvedValue({ status: 200, data: { ok: true, ts: "1.1" }, headers: {} });
+  });
+
+  it("takes the Slack app when the call names neither, and says which and why", async () => {
+    const { service, send } = app();
+
+    const result = await run(service, post);
+
+    expect(send).toHaveBeenCalledWith(APP, "D1", { text: "hi" });
+    expect(slackProxyCall).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "ok",
+      data: { via: "app", note: expect.stringContaining('Pass via: "sign_in"') },
+    });
+  });
+
+  it("takes the sign-in when the call names it, and says so", async () => {
+    const { service, send } = app();
+
+    const result = await run(service, { ...post, via: "sign_in" });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(slackProxyCall).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: "ok", data: { via: "sign_in", data: { ok: true } } });
+  });
+
+  it("tells an agent whose method the app refuses that the sign-in can make it", async () => {
+    const { service } = app();
+
+    const result = await run(service, { toolkit: "slack", path: "/api/auth.test", method: "POST" });
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining('Pass via: "sign_in"'),
+    });
+    expect(slackProxyCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses a connection the call names that is not connected", async () => {
+    readSlackOAuthTokens.mockResolvedValue(null);
+    const { service } = app();
+
+    expect(await run(service, { ...post, via: "sign_in" })).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("The Slack sign-in is not connected"),
+    });
+    readSlackOAuthTokens.mockResolvedValue(TOKENS);
+    const none = {
+      list: async () => [],
+      send: rs.fn(),
+      query: rs.fn(),
+    } as unknown as ChannelsService;
+    expect(await run(none, { ...post, via: "app" })).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/Settings → Connections/),
+    });
+    expect(slackProxyCall).not.toHaveBeenCalled();
   });
 });

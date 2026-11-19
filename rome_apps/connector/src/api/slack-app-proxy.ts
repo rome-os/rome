@@ -12,6 +12,14 @@ import type { Account, ChannelMessage, ChannelsService, ChatId } from "@rome-os/
 export const SLACK_APP_CONNECT_HINT =
   "Slack is connected by Rome itself, not by this app. Ask the guardian to connect Rome's Slack app in Settings → Connections, then retry.";
 
+/** What a call that named no Slack connection says when both are connected. */
+export const SLACK_BOTH_ON_APP =
+  'Both Slack connections are connected: this call went through Rome\'s Slack app, which replaces the Slack sign-in. Pass via: "sign_in" to make it through the sign-in instead.';
+
+/** What a call that asked for the Slack sign-in says when there is none. */
+export const SLACK_NO_SIGN_IN =
+  'The Slack sign-in is not connected. Omit via, or pass via: "app", to go through Rome\'s Slack app.';
+
 const OFFERED =
   "It offers chat.postMessage (send), conversations.history (read) and search.messages (search over what Rome has kept of the app's direct messages and mentions).";
 

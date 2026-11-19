@@ -30,9 +30,12 @@ description: |
   Slack through Rome's own Slack app takes three methods: `/api/chat.postMessage`
   ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
   ({ channel, limit?, latest?, oldest? }) reads, and `/api/search.messages`
-  ({ query, count?, channel? }) searches. Search covers only what Rome has kept
-  of the app's direct messages and mentions, and its `coverage` field says so.
-  Any other Slack method is refused.
+  ({ query, count?, channel? }) searches. Search covers what Rome has kept of
+  the app's direct messages and mentions, reading a named `channel`'s newest
+  messages first, and its `coverage` field says what it covered.
+  Any other Slack method is refused. With both the Slack app and the older Slack
+  sign-in connected, a call takes the app unless `via: "sign_in"` names the
+  sign-in, and the result's `via` names the connection taken.
 
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never

@@ -13,7 +13,7 @@ import { SlackMessageCopyRepository } from "./message-copy.js";
 import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
-import { slackAppTimeline } from "../../../db/schema.js";
+import { slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -1387,16 +1387,69 @@ describe("Slack app searches what it keeps (R9)", () => {
     await a.handleFrame(frame(mentionEvent(7)));
     await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
 
-    const found = a.search({ text: "MESSAGE", limit: 10 });
-    const mentions = a.search({ text: "question", limit: 10 });
-    const inChat = a.search({ text: "e", chatId: "D_GUARDIAN" as never, limit: 2 });
+    const found = await a.search({ text: "MESSAGE", limit: 10 });
+    const mentions = await a.search({ text: "question", limit: 10 });
 
     // Message 3 was both heard and read: it counts once.
     expect(texts(found.messages)).toEqual(["message 3", "message 2", "message 1"]);
     expect(found.messages[1]).toMatchObject({ direction: "outbound" });
     expect(found.coverage).toContain("not a workspace-wide search");
+    expect(found.coverage).toContain("before Rome's copy was last cleared");
     expect(texts(mentions.messages)).toEqual(["question 7"]);
-    expect(inChat.messages.map((m) => m.chatId)).toEqual(["D_GUARDIAN", "D_GUARDIAN"]);
+  });
+
+  it("searches one chat after a wipe as well as a read of it would, from Slack's newest page", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 20; i++) slack.say(i, i % 4 === 0 ? "bot" : "member");
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 20 });
+    const whole = await a.search({ text: "message", chatId: "D_GUARDIAN" as never, limit: 15 });
+
+    db.delete(slackAppTimeline).run();
+    db.delete(slackAppMessages).run();
+    const wiped = await a.search({ text: "message", chatId: "D_GUARDIAN" as never, limit: 15 });
+
+    expect(texts(wiped.messages)).toEqual(texts(whole.messages));
+    expect(texts(wiped.messages)).toEqual(
+      Array.from({ length: 15 }, (_, i) => `message ${20 - i}`),
+    );
+    expect(wiped.coverage).toContain("after reading its newest messages from Slack");
+  });
+
+  it("searches across chats only what it holds, with no read of Slack, wiped or not", async () => {
+    const slack = fakeSlackHistory();
+    for (let i = 1; i <= 5; i++) slack.say(i);
+    const mailbox = fakeMailbox();
+    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+    const reads = slack.calls.length;
+
+    expect(texts((await a.search({ text: "message", limit: 10 })).messages)).toHaveLength(5);
+    db.delete(slackAppTimeline).run();
+    const wiped = await a.search({ text: "message", limit: 10 });
+
+    expect(wiped.messages).toEqual([]);
+    expect(wiped.coverage).toContain("not a workspace-wide search");
+    expect(slack.calls).toHaveLength(reads);
+  });
+
+  it("searches a channel it may not read in the mentions it heard", async () => {
+    const slack = fakeSlackHistory();
+    slack.conversationHistory.mockImplementation(async () => {
+      throw new SlackApiError("missing_scope");
+    });
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.handleFrame(frame(mentionEvent(1)));
+
+    const found = await a.search({ text: "question", chatId: "C_TEAM" as never, limit: 5 });
+
+    expect(texts(found.messages)).toEqual(["question 1"]);
+    expect(found.coverage).toContain("may not read the chat's history");
   });
 
   it("takes a search's wildcards as plain text", async () => {
@@ -1410,8 +1463,8 @@ describe("Slack app searches what it keeps (R9)", () => {
       }),
     );
 
-    expect(texts(a.search({ text: "%", limit: 10 }).messages)).toEqual(["50% off_today"]);
-    expect(texts(a.search({ text: "f_t", limit: 10 }).messages)).toEqual(["50% off_today"]);
-    expect(a.search({ text: "x_y", limit: 10 }).messages).toEqual([]);
+    expect(texts((await a.search({ text: "%", limit: 10 })).messages)).toEqual(["50% off_today"]);
+    expect(texts((await a.search({ text: "f_t", limit: 10 })).messages)).toEqual(["50% off_today"]);
+    expect((await a.search({ text: "x_y", limit: 10 })).messages).toEqual([]);
   });
 });

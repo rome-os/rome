@@ -61,7 +61,13 @@ const HISTORY_PAGE = 15;
 const HISTORY_MAX_WAIT_MS = 60 * 1000;
 /** What a search covers, as its result says. */
 export const SEARCH_COVERAGE =
-  "The direct messages of Rome's Slack app in this workspace, and the messages that mention it, as far as Rome has kept them. This is not a workspace-wide search: other channels, and messages Rome never heard or read, are left out.";
+  "The messages Rome's Slack app holds in this workspace: its direct messages and the messages that mention it, as Rome heard or read them. This is not a workspace-wide search: other channels, messages from before the app joined, and messages from before Rome's copy was last cleared are not covered.";
+/** What a search in one chat covers, once the chat's newest messages are read. */
+export const SEARCH_CHAT_COVERAGE =
+  "This chat as Rome holds it, after reading its newest messages from Slack: older messages count only where Rome heard or read them before.";
+/** What a search covers in a chat the app may not read. */
+export const SEARCH_UNREADABLE_CHAT_COVERAGE =
+  "The messages in this chat that mention Rome's Slack app, as Rome heard them: the app may not read the chat's history.";
 /** Slack's refusals that mean the app may not read a conversation. */
 const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
@@ -656,22 +662,44 @@ export class SlackAppAdapter {
 
   /**
    * Messages whose text holds `text`, newest first, from what this connection
-   * keeps: every direct message and mention it heard, and every message of a
-   * direct message's timeline it read. It searches no further, since Slack
-   * lets the app read a conversation's history only a page of 15 a minute,
-   * and holds no search scope.
+   * keeps: every direct message and mention it heard, and every timeline
+   * message it read. A search in one chat reads that chat first, as a read
+   * would, so it takes what Slack holds that the copy lacks. A search across
+   * chats reads none: Slack lets the app read a conversation's history one
+   * page of 15 a minute, and the app holds no search scope.
    */
-  search(input: { text: string; chatId?: ChatId; limit: number }): {
+  async search(input: { text: string; chatId?: ChatId; limit: number }): Promise<{
     messages: ChannelMessage[];
     coverage: string;
-  } {
-    const channelId = input.chatId ? parseSlackChatId(input.chatId).channelId : undefined;
+  }> {
+    let coverage = SEARCH_COVERAGE;
+    let channelId: string | undefined;
+    if (input.chatId) {
+      const parsed = parseSlackChatId(input.chatId);
+      channelId = parsed.channelId;
+      coverage = await this.fillForSearch(parsed.channelId);
+    }
     const messages = this.config.copy.search(this.config.teamId, {
       text: input.text,
       ...(channelId ? { channelId } : {}),
       limit: input.limit,
     });
-    return { messages, coverage: SEARCH_COVERAGE };
+    return { messages, coverage };
+  }
+
+  /** Read a chat's newest messages into the copy before searching it, and
+   *  say what the search then covers. A chat the app may not read, such as a
+   *  channel it is only mentioned in, is searched in what it heard. */
+  private async fillForSearch(channelId: string): Promise<string> {
+    try {
+      await readTimeline(this.timeline(), channelId as ChatId, { limit: HISTORY_PAGE });
+      return SEARCH_CHAT_COVERAGE;
+    } catch (error) {
+      if (error instanceof SlackApiError && NOT_READABLE.has(error.code)) {
+        return SEARCH_UNREADABLE_CHAT_COVERAGE;
+      }
+      throw error;
+    }
   }
 
   /** The direct-message conversation with a member of this workspace. */
