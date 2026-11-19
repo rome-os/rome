@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 const LAST_OPENED_KEY = "rome-app-last-opened";
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -49,6 +50,7 @@ const fetchMock = rs.fn(
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/apps") return json({ apps });
     if (url === "/api/apps/updates") return json({ upgradable: [] });
     if (url === "/api/settings") return json({});

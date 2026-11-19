@@ -13,6 +13,7 @@ import * as timestampModule from "@/lib/message-timestamp" with { rstest: "impor
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
 import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 // Counts timestamp formatting, which every drawn chat row does.
 const formatted = rs.hoisted(() => ({ count: 0 }));
@@ -94,6 +95,7 @@ function mockSessionSearch(
 ) {
   return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/chat/sessions?status=all") {
       return Response.json(sessions);
     }
@@ -159,13 +161,15 @@ describe("chat search shortcut", () => {
   it("opens and closes the dialog with Ctrl+K", async () => {
     const fetchSpy = mockSessionSearch([]);
     renderSearch();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Only which pages are shown is read before the dialog opens.
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([FEATURES_URL]);
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     expect(screen.getByRole("dialog", { name: "Search pages, apps, and chats" })).toBeTruthy();
     expect(document.activeElement).toBe(input);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy).toHaveBeenCalledWith(FEATURES_URL, expect.any(Object));
     expect(fetchSpy).toHaveBeenCalledWith("/api/apps", expect.any(Object));
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
@@ -206,6 +210,7 @@ describe("ChatSearchDialog", () => {
     const titled = chatSession("titled", "Roadmap review", "work/rome");
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") return Response.json([titled]);
       if (url.startsWith("/api/chat/sessions/search?q=")) return new Promise(() => {});
       if (url === "/api/apps") return Response.json({ apps: [] });
@@ -634,6 +639,7 @@ describe("ChatSearchDialog", () => {
   it("keeps app matches usable when chats fail", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") throw new Error("chat offline");
       if (url.startsWith("/api/chat/sessions/search?q=")) return Response.json([]);
       if (url === "/api/apps") return Response.json({ apps: [installedApp("road", "Roadmap")] });
@@ -652,6 +658,7 @@ describe("ChatSearchDialog", () => {
   it("keeps chat matches usable while apps load", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") {
         return Response.json([chatSession("road", "Roadmap review", "work/rome")]);
       }
@@ -675,6 +682,7 @@ describe("ChatSearchDialog", () => {
     let appCalls = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") {
         return Response.json([chatSession("beta-chat", "Beta plan", "work")]);
       }
@@ -705,6 +713,7 @@ describe("ChatSearchDialog", () => {
       input: RequestInfo | URL,
     ) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") {
         sessionListCalls += 1;
         if (sessionListCalls === 1) throw new Error("offline");
@@ -738,6 +747,7 @@ describe("ChatSearchDialog", () => {
     let sessionListCalls = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       if (url === "/api/chat/sessions?status=all") {
         sessionListCalls += 1;
         if (sessionListCalls === 1) throw new Error("offline");
@@ -798,6 +808,7 @@ function mockAgentMessaging({ turnResponses = [], agentResponses = [] }: AgentFe
     init?: RequestInit,
   ) => {
     const url = String(input);
+    if (url === FEATURES_URL) return allFeaturesShown();
     const method = init?.method ?? "GET";
     if (method === "POST") {
       const body =

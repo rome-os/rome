@@ -4,6 +4,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { useAppsList } from "./use-apps";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 let urls: string[];
 
@@ -12,6 +13,7 @@ beforeEach(() => {
   rs.stubGlobal(
     "fetch",
     rs.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === FEATURES_URL) return allFeaturesShown();
       urls.push(String(input));
       return new Response(JSON.stringify({ apps: [] }), { status: 200 });
     }),

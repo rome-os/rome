@@ -10,6 +10,7 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import AppsIndexPage from "./AppsIndexPage";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
 // an inline error strip); mock sonner so tests can assert on them without
@@ -28,15 +29,16 @@ rs.mock("sonner", () => ({
 // The built-in nav grid imports .svg icons that resolve to URL strings under
 // Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
-rs.mock("@/shell/builtin-nav", () => ({
-  APP_NAV: [
+rs.mock("@/shell/builtin-nav", () => {
+  const APP_NAV = [
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
     { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
     { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: () => null },
-  ],
-}));
+  ];
+  return { APP_NAV, useBuiltinNav: () => APP_NAV };
+});
 rs.mock("@/shell/AppGrid", () => ({
   DEFAULT_SIDEBAR_PINS: [
     { type: "builtin" as const, id: "apps" },
@@ -153,6 +155,7 @@ function mockBackend(initial: {
     const ok = (json: unknown) =>
       ({ ok: true, status: 200, json: async () => structuredClone(json) }) as Response;
 
+    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/auth/me" && method === "GET") {
       return ok({ kind: "guardian", userId: "ray", displayName: "Ray", avatarUrl: null });
     }

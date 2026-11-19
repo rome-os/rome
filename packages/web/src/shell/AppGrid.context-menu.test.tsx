@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 const apps = [
   {
@@ -21,6 +22,7 @@ const apps = [
 
 const fetchMock = rs.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = String(input);
+  if (url === FEATURES_URL) return allFeaturesShown();
   if (url === "/api/apps") {
     return new Response(JSON.stringify({ apps }), {
       status: 200,

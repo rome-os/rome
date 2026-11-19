@@ -12,6 +12,7 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
 import { toast } from "sonner";
 import { stateOfGrants } from "@/test/connection-state";
 import { linkOf } from "@/test/account-links";
+import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 rs.mock("sonner", () => ({
   toast: Object.assign(
@@ -44,6 +45,7 @@ afterEach(() => {
 function mockCeremonyFetch(routes: Record<string, unknown> = {}) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
+    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/approvals") return new Response("[]", { status: 200 });
     for (const [needle, payload] of Object.entries(routes)) {
       if (url.includes(needle)) {
@@ -423,33 +425,32 @@ describe("ConnectionDetailBody — accounts", () => {
     return { ...result, rerenderCard: (next: ConnectionCard) => result.rerender(tree(next)) };
   }
 
-  it("shows the account's agent and sends changes to its Envoys settings", () => {
+  it("shows the account's agent and sends changes to its Envoys settings", async () => {
     renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
 
+    const change = await screen.findByRole("link", { name: /Change in Envoys/ });
     expect(screen.getByText("sales:agent")).toBeTruthy();
     expect(screen.getByText("Speaks as this account")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
+    expect(change.getAttribute("href")).toBe(
       `/envoys/${encodeURIComponent("sales:agent")}/settings`,
     );
   });
 
-  it("shows main by its short name", () => {
+  it("shows main by its short name", async () => {
     renderAccountBody(cardFor([feishu({ agent: "main" })], "feishu"));
 
+    const change = await screen.findByRole("link", { name: /Change in Envoys/ });
     expect(screen.getByText("main")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
-      `/envoys/${encodeURIComponent("core:main")}/settings`,
-    );
+    expect(change.getAttribute("href")).toBe(`/envoys/${encodeURIComponent("core:main")}/settings`);
   });
 
-  it("sends an account with no agent to the Envoys list", () => {
+  it("sends an account with no agent to the Envoys list", async () => {
     renderAccountBody(cardFor([feishu()], "feishu"));
 
+    const change = await screen.findByRole("link", { name: /Change in Envoys/ });
     expect(screen.getByText("No agent")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
-      "/envoys",
-    );
+    expect(change.getAttribute("href")).toBe("/envoys");
   });
 
   it("shows no agent for a kind of connection core reports takes none", () => {
@@ -471,6 +472,7 @@ describe("ConnectionDetailBody — accounts", () => {
     const calls: FetchCall[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
+      if (url === FEATURES_URL) return allFeaturesShown();
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url.endsWith("/setup") && method === "POST") {
