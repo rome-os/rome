@@ -1958,6 +1958,35 @@ describe("AgentRunner", () => {
       expect(toolNames(provider.sessions[1].tools, "ask_user")).toContain("defer");
     });
 
+    it("gives the agent its place's instructions in place of its own, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { systemPromptPrefix: "You answer on a bot." } : null,
+      });
+      for (const [channel, threadId] of [
+        ["telegram", "bot-1"],
+        ["webchat", "chat-1"],
+      ]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      }
+      const [onBot, onDashboard] = provider.sessions.map((session) => session.config.systemPrompt);
+      expect(onBot).toContain("You answer on a bot.");
+      expect(onBot).not.toContain("You are a test main agent.");
+      expect(onDashboard).toContain("You are a test main agent.");
+      expect(onDashboard).not.toContain("You answer on a bot.");
+    });
+
     it("lets the session's tools read its place while the session first opens", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const places: Array<string | undefined> = [];

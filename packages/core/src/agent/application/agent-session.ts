@@ -402,13 +402,9 @@ interface ManagerDeps {
    * What the conversation a session serves adds to its context: text for the
    * end of its system prompt, or null. Every open and resume of a
    * conversation session asks, so a cold continuation holds it too. Absent,
-   * nothing is added. `agentName` is the canonical id of the agent the
-   * session runs.
+   * nothing is added.
    */
-  chatInstructions?: (
-    thread: ThreadContext | undefined,
-    agentName: string,
-  ) => Promise<string | null>;
+  chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
   /**
    * How the place a session serves changes its agent's setup there, or null
    * when it changes nothing. Asked once when the session's setup is made.
@@ -1078,9 +1074,15 @@ function sessionSetupOf(
   isSubagent: boolean,
 ): SessionSetupSource {
   const config = agent.definition;
-  const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
-  // The place can override the agent's policy and take actions away, never add them.
+  // The place can override the agent's policy and instructions and take
+  // actions away, never add them.
   const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
+  const promptAgent = {
+    ...config,
+    name: agent.localName,
+    owner: agent.ownerType,
+    systemPromptPrefix: place?.systemPromptPrefix ?? config.systemPromptPrefix,
+  };
   const policy = policyInPlace(
     resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
     place,
@@ -1235,7 +1237,7 @@ async function prepareSetup(
   // no session.
   const added =
     init.kind === "conversation" && !isSubagent
-      ? await deps.chatInstructions?.(init.threadContext, agent.name)
+      ? await deps.chatInstructions?.(init.threadContext)
       : null;
   const source = sessionSetupOf(
     deps,
