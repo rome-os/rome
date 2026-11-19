@@ -37,7 +37,7 @@ import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isChatPath } from "@/lib/chat-session";
 import { type BuiltinNavEntry, useBuiltinNav } from "./builtin-nav";
 import { appFeature } from "@rome/api-types/features";
-import { useFeatureStates } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
   ACTIVE_CLASS,
@@ -183,12 +183,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     normalizeSidebarPins(readLocalPins() ?? DEFAULT_SIDEBAR_PINS),
   );
   const [storedApps, setInstalledApps] = useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
-  // The cached list predates the feature answer, so it is filtered here too: a
-  // hidden app read from the cache never shows, even while the app list loads.
-  const featureState = useFeatureStates();
+  // The cached list is filtered too, so a hidden app read from the cache never
+  // shows, even while the app list loads.
   const installedApps = useMemo(
-    () => storedApps.filter((app) => featureState(appFeature(app.id)) === "shown"),
-    [storedApps, featureState],
+    () => storedApps.filter((app) => isShown(appFeature(app.id))),
+    [storedApps],
   );
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);

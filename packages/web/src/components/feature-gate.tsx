@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import type { GatedFeature } from "@rome/api-types/features";
-import { useFeatureState } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 
 interface FeatureGateProps {
   feature: GatedFeature;
@@ -10,12 +10,9 @@ interface FeatureGateProps {
   fallback?: ReactNode;
 }
 
-/** Shows its children only while `feature` is shown. Nothing renders until core
- *  has said, so a hidden feature never flashes into view. */
+/** Shows its children only while `feature` is shown. */
 export function FeatureGate({ feature, children, fallback = null }: FeatureGateProps) {
-  const state = useFeatureState(feature);
-  if (state === "pending") return null;
-  return state === "shown" ? children : fallback;
+  return isShown(feature) ? children : fallback;
 }
 
 /** A route's element for a gated feature's page: a hidden feature's address

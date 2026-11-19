@@ -9,7 +9,7 @@ import { parseEmailTextarea } from "@/lib/email-list";
 import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
-import { useFeatureState } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 
 /**
  * The email field of an access allow-list, completing from the contacts list
@@ -57,9 +57,9 @@ export function AccessEmailInput({
   const searchable = term.length > 0 && !/[,;]/.test(term);
   // Suggestions come from the contacts People keeps, so none show while it is
   // hidden.
-  const people = useFeatureState("people");
+  const people = isShown("people");
   const search = useAccountSearch(searchable ? term : "", {
-    enabled: searchable && !disabled && people === "shown",
+    enabled: searchable && !disabled && people,
     channel: EMAIL_CHANNEL,
   });
   // The page lags the typed term by the debounce, so an answer to an older
@@ -67,7 +67,7 @@ export function AccessEmailInput({
   // fixed channel, so the current answer is never cut down to less than the
   // server returned.
   const suggestions = useMemo(() => {
-    if (!searchable || !search.data || people !== "shown") return [];
+    if (!searchable || !search.data || !people) return [];
     const matching = search.data.accounts.filter((account) =>
       accountMatchesQuery(account, term, { matchChannel: false }),
     );

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
+import { isShown } from "@/lib/features";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
@@ -355,8 +356,12 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     () => storedDraft?.personaId ?? "",
   );
 
+  // A persona kept from before People was hidden, such as one in a saved
+  // draft, is not sent: the guardian speaks as themselves while it is hidden.
   const personaId =
-    selectedPersonId && (impersonationEnabled || !settings) ? selectedPersonId : undefined;
+    selectedPersonId && isShown("people") && (impersonationEnabled || !settings)
+      ? selectedPersonId
+      : undefined;
 
   const [impersonationMenuOpen, setImpersonationMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);

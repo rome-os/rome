@@ -8,9 +8,9 @@ import {
   Pencil2Icon,
 } from "@radix-ui/react-icons";
 import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
-import { type ComponentType, useMemo } from "react";
+import type { ComponentType } from "react";
 import type { GatedFeature } from "@rome/api-types/features";
-import { useFeatureStates } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
  * titles and the Cmd+K switcher all read this list, so a new page shows up in
@@ -81,11 +81,7 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
 ] as const;
 
 /** The destinations navigation offers: APP_NAV without the pages of hidden
- *  features. A page whose feature has not been answered for yet waits. */
+ *  features. */
 export function useBuiltinNav(): readonly BuiltinNavEntry[] {
-  const featureState = useFeatureStates();
-  return useMemo(
-    () => APP_NAV.filter((entry) => featureState(entry.feature) === "shown"),
-    [featureState],
-  );
+  return APP_NAV.filter((entry) => isShown(entry.feature));
 }

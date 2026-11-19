@@ -1,4 +1,6 @@
 import { clearChatDraft } from "./chat-draft-storage";
+import { appFeature } from "@rome/api-types/features";
+import { isShown } from "./features";
 import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
@@ -534,10 +536,15 @@ export interface CreateSessionInput {
   deviceFolder?: { deviceId: string; path: string };
 }
 
+/** The agents a chat can pick or mention, by owner. The agents of an app that
+ *  is a hidden feature are left out, though they still run. */
 export function listChatAgents(): Promise<AgentCatalogGroup[]> {
   return shareInFlight("agents", async () => {
     const res = await fetch("/api/chat/agents", { credentials: "include" });
-    return jsonOrThrow<AgentCatalogGroup[]>(res);
+    const groups = await jsonOrThrow<AgentCatalogGroup[]>(res);
+    return groups.filter(
+      (group) => group.ownerType !== "app" || isShown(appFeature(group.ownerId)),
+    );
   });
 }
 

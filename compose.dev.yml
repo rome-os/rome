@@ -161,12 +161,6 @@ x-rome-env: &rome-env
   # stack exercises the cloud path; export FEATURE_GATE_ROME_CLOUD_AUTH=off to
   # hold the stack on local auth (e.g. CI).
   FEATURE_GATE_ROME_CLOUD_AUTH: ${FEATURE_GATE_ROME_CLOUD_AUTH:-on}
-  # People, Envoys and Inbox are hidden unless their gate is on, and the dev
-  # stack has no Statsig rules. On by default in dev so the stack keeps them;
-  # export FEATURE_GATE_<NAME>=off to see an instance with one hidden.
-  FEATURE_GATE_PEOPLE: ${FEATURE_GATE_PEOPLE:-on}
-  FEATURE_GATE_ENVOYS: ${FEATURE_GATE_ENVOYS:-on}
-  FEATURE_GATE_INBOX: ${FEATURE_GATE_INBOX:-on}
   # Dev escape hatch: boot un-enrolled even if ROME_INSTANCE_TOKEN is in the env,
   # forcing the real browser consent → enroll round trip. Empty by default so the
   # fast loop / CI keep their seeded token.

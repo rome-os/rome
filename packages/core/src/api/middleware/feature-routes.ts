@@ -1,5 +1,9 @@
 import type { MiddlewareHandler } from "hono";
-import type { FeatureVisibility, GatedFeature } from "@rome/api-types/features";
+import {
+  FEATURE_VISIBILITY,
+  type FeatureVisibility,
+  type GatedFeature,
+} from "@rome/api-types/features";
 
 /** The API routes only a gated feature's pages call, by path under `/api`.
  *  The first match names the route's feature. */
@@ -20,15 +24,15 @@ export function gatedFeatureOf(apiPath: string): GatedFeature | undefined {
 
 /**
  * Answers 404 for a hidden feature's API routes, as if they did not exist, so
- * no client reaches a feature the dashboard hides. Only a gated route reads the
- * gates; every other request passes untouched.
+ * no client reaches a feature the dashboard hides. Every other request passes
+ * untouched.
  */
 export function hideGatedFeatureRoutes(
-  resolveVisibility: () => Promise<FeatureVisibility>,
+  visibility: Readonly<FeatureVisibility> = FEATURE_VISIBILITY,
 ): MiddlewareHandler {
   return async (c, next) => {
     const feature = gatedFeatureOf(c.req.path.replace(/^\/api(?=\/|$)/, ""));
-    if (feature !== undefined && !(await resolveVisibility())[feature]) {
+    if (feature !== undefined && !visibility[feature]) {
       return c.json({ error: "Not found" }, 404);
     }
     await next();

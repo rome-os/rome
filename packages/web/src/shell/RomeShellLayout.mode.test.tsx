@@ -36,7 +36,6 @@ rs.mock("@/hooks/use-desktop", () => ({ useDesktop: () => false }));
 
 import { SlotProvider } from "../components/slot";
 import { RomeShellLayout } from "./RomeShellLayout";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 
 const CONCIERGE_AGENT = "core:concierge";
 // What the server answers for each chat id, as `GET /api/chat/sessions/:id`.
@@ -61,7 +60,6 @@ beforeEach(() => {
   );
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url === FEATURES_URL) return allFeaturesShown();
     fetched.push(url);
     const id = url.match(/^\/api\/chat\/sessions\/([^/?]+)$/)?.[1];
     if (id && sessions[id]) return Response.json(sessions[id]);

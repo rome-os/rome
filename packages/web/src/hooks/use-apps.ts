@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { AppListResponse, InstalledAppCard, SpecSource } from "@rome/api-types/apps";
 import { appFeature } from "@rome/api-types/features";
-import { useFeatureStates } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 import { fetchJson } from "@/lib/fetch-json";
 import { LIVE_QUERY_OPTIONS } from "@/lib/query-client";
 
@@ -48,12 +48,11 @@ export function useAppsList(options: { enabled?: boolean } = {}): AppsListResult
   });
 
   // An app that is a hidden feature is left out here, so no list of apps offers
-  // it. One whose feature is not answered for yet waits with it.
-  const featureState = useFeatureStates();
+  // it.
   const allApps = list.data?.apps;
   const apps = useMemo(
-    () => allApps?.filter((app) => featureState(appFeature(app.id)) === "shown") ?? null,
-    [allApps, featureState],
+    () => allApps?.filter((app) => isShown(appFeature(app.id))) ?? null,
+    [allApps],
   );
 
   // Keep the last successful list on a background refetch error (the React Query

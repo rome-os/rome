@@ -6,7 +6,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 const LAST_OPENED_KEY = "rome-app-last-opened";
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -50,7 +55,6 @@ const fetchMock = rs.fn(
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/apps") return json({ apps });
     if (url === "/api/apps/updates") return json({ upgradable: [] });
     if (url === "/api/settings") return json({});
@@ -85,6 +89,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
@@ -315,13 +320,11 @@ describe("Apps of a hidden feature", () => {
       a: minutesAgo(1),
       inbox: minutesAgo(2),
     });
+    hiddenFeatures.add("inbox");
     rs.stubGlobal(
       "fetch",
       rs.fn(async (input: RequestInfo | URL): Promise<Response> => {
         const url = String(input);
-        if (url === FEATURES_URL) {
-          return Response.json({ features: { people: true, envoys: true, inbox: false } });
-        }
         if (url === "/api/apps") return new Promise<Response>(() => {});
         if (url === "/api/settings") return Response.json({});
         return new Response(null, { status: 404 });

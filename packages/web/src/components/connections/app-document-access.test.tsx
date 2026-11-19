@@ -5,7 +5,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { AppDocumentAccess } from "./app-document-access";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
 rs.mock("@/components/ui/select", () => ({
   Select: ({
     children,
@@ -45,7 +44,6 @@ describe("Core app document authorization", () => {
     const paths: string[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const path = String(url);
-      if (path === FEATURES_URL) return allFeaturesShown();
       paths.push(path);
       if (path === "/api/apps")
         return Response.json({ apps: [{ id: "app-a", displayName: "App A", isEnabled: true }] });
@@ -83,7 +81,6 @@ describe("Core app document authorization", () => {
     let allowed = false;
     const fetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       const path = String(url);
-      if (path === FEATURES_URL) return allFeaturesShown();
       if (options?.method) {
         writes.push({
           url: path,
@@ -141,8 +138,7 @@ describe("Core app document authorization", () => {
         <AppDocumentAccess />
       </QueryClientProvider>,
     );
-    // Only which features are shown is read before the section opens.
-    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([FEATURES_URL]);
+    expect(fetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "App document access" }));
     await waitFor(() => expect(screen.getByText("App A · app-a")).toBeTruthy());
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "app-a" } });

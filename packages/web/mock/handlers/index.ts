@@ -18,7 +18,6 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { http, HttpResponse } from "msw";
-import { GATED_FEATURES, type FeaturesResponse } from "@rome/api-types/features";
 import {
   CONCIERGE_CHAT_ID,
   type ConciergeChatsResponse,
@@ -1577,21 +1576,6 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 export const handlers = [
   ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
-  // Every gated feature is shown, so mock mode reaches every page. To see the
-  // dashboard as an instance with features hidden, list them in localStorage:
-  // localStorage.setItem("rome-mock-hidden-features", "people envoys inbox").
-  http.get("/api/features", () => {
-    let hidden: string[] = [];
-    try {
-      hidden = (localStorage.getItem("rome-mock-hidden-features") ?? "").split(/\s+/);
-    } catch {
-      // Storage can be blocked; every feature then stays shown.
-    }
-    const features = Object.fromEntries(
-      GATED_FEATURES.map((feature) => [feature, !hidden.includes(feature)]),
-    ) as FeaturesResponse["features"];
-    return HttpResponse.json({ features } satisfies FeaturesResponse);
-  }),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
   http.get("/api/diagnosis", () =>

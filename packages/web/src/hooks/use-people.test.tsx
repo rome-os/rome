@@ -1,13 +1,19 @@
 // @rstest-environment jsdom
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { PeopleList } from "@rome/api-types/people";
 import { usePeople } from "./use-people";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.restoreAllMocks();
 });
@@ -45,10 +51,8 @@ function peopleList(): PeopleList {
 
 describe("usePeople", () => {
   it("unwraps the listing envelope into its rows, whole", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
-      String(input) === FEATURES_URL
-        ? allFeaturesShown()
-        : Response.json(peopleList())) as typeof fetch);
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json(peopleList())) as typeof fetch);
 
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
 
@@ -57,10 +61,8 @@ describe("usePeople", () => {
   });
 
   it("answers an empty listing when the read fails, so the composer still mounts", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
-      String(input) === FEATURES_URL
-        ? allFeaturesShown()
-        : Response.json({ error: "nope" }, { status: 500 })) as typeof fetch);
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({ error: "nope" }, { status: 500 })) as typeof fetch);
 
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
 
@@ -68,23 +70,20 @@ describe("usePeople", () => {
   });
 
   it("offers no listing it read before People was hidden", async () => {
-    let peopleShown = true;
-    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
-      String(input) === FEATURES_URL
-        ? Response.json({ features: { people: peopleShown, envoys: true, inbox: true } })
-        : Response.json(peopleList())) as typeof fetch);
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json(peopleList())) as typeof fetch);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { result } = renderHook(() => usePeople(), {
+    const { result, rerender } = renderHook(() => usePeople(), {
       wrapper: ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       ),
     });
     await waitFor(() => expect(result.current.data).toEqual(peopleList().people));
 
-    peopleShown = false;
-    await act(() => queryClient.invalidateQueries({ queryKey: ["features"] }));
+    hiddenFeatures.add("people");
+    rerender();
 
-    await waitFor(() => expect(result.current.data).toBeUndefined());
+    expect(result.current.data).toBeUndefined();
     expect(queryClient.getQueryData(["people"])).toEqual(peopleList().people);
   });
 });

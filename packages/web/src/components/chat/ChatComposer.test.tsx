@@ -21,7 +21,12 @@ import {
 } from "./ChatComposer";
 import { ReplyDraftHarness } from "./reply/reply-draft-harness";
 import type { ReplyTarget } from "./reply/reply-draft";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 // The composer reads this once each time it renders.
 const composerRenders = rs.hoisted(() => ({ count: 0 }));
@@ -37,6 +42,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   sessionStorage.clear();
   localStorage.clear();
@@ -83,7 +89,6 @@ interface RenderComposerOptions {
 function mockComposerFetch(options: RenderComposerOptions = {}) {
   return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/settings") {
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
       return Response.json({ guardianName: "Ada", ...settings });
@@ -959,6 +964,19 @@ describe("New chat draft", () => {
     else act(() => composerRef.current?.submit("Quick entry"));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
+  });
+
+  it("sends no persona restored from a draft while People is hidden", async () => {
+    hiddenFeatures.add("people");
+    saveNewChatDraft(draft);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { persistNewChatDraft: true, onSend },
+      { settings: { enableImpersonation: true } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].personaId).toBeUndefined();
   });
 
   it("restores a draft device folder and sends it with the first turn", async () => {

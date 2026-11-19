@@ -10,7 +10,14 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import AppsIndexPage from "./AppsIndexPage";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { isShownInTest } from "@/test/features";
+
+// These tests reach People, Envoys or Inbox, so they run with every feature
+// shown.
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
 // an inline error strip); mock sonner so tests can assert on them without
@@ -155,7 +162,6 @@ function mockBackend(initial: {
     const ok = (json: unknown) =>
       ({ ok: true, status: 200, json: async () => structuredClone(json) }) as Response;
 
-    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/auth/me" && method === "GET") {
       return ok({ kind: "guardian", userId: "ray", displayName: "Ray", avatarUrl: null });
     }

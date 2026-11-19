@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { PeopleList, PersonResource } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
-import { useFeatureState } from "@/hooks/use-features";
+import { isShown } from "@/lib/features";
 
 const PEOPLE_QUERY_KEY = ["people"] as const;
 
@@ -18,10 +18,10 @@ const PEOPLE_QUERY_KEY = ["people"] as const;
  * no people then.
  */
 export function usePeople() {
-  const people = useFeatureState("people");
+  const people = isShown("people");
   const query = useQuery<PersonResource[]>({
     queryKey: PEOPLE_QUERY_KEY,
-    enabled: people === "shown",
+    enabled: people,
     staleTime: 60_000,
     queryFn: ({ signal }) =>
       fetchJson<PeopleList>("/api/people", { signal, fallback: "" })
@@ -29,5 +29,5 @@ export function usePeople() {
         .catch(() => []),
   });
   // A listing read before People was hidden stays cached; it is not offered.
-  return people === "shown" ? query : { ...query, data: undefined };
+  return people ? query : { ...query, data: undefined };
 }

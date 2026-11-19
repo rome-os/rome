@@ -1,8 +1,7 @@
-// Features Rome can hide from the guardian as a whole, and whether each is
-// shown on this instance (`GET /api/features`).
+// Features Rome hides from the guardian as a whole, and whether each is shown.
+// Core and the dashboard both read the visibility below.
 
-/** Each id is the feature's gate name, and the name its usage is counted under.
- *  A feature on this list is hidden unless its gate is on. */
+/** Each id is the name the feature's usage is counted under. */
 export const GATED_FEATURES = ["people", "envoys", "inbox"] as const;
 
 export type GatedFeature = (typeof GATED_FEATURES)[number];
@@ -20,6 +19,14 @@ export function appFeature(appId: string): GatedFeature | undefined {
 /** Whether each gated feature is shown. */
 export type FeatureVisibility = Record<GatedFeature, boolean>;
 
-export interface FeaturesResponse {
-  features: FeatureVisibility;
+/** Whether each gated feature is shown in this release. */
+export const FEATURE_VISIBILITY: Readonly<FeatureVisibility> = {
+  people: false,
+  envoys: false,
+  inbox: false,
+};
+
+/** Whether `feature` is shown in this release. */
+export function isFeatureShown(feature: GatedFeature): boolean {
+  return FEATURE_VISIBILITY[feature];
 }

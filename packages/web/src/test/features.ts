@@ -1,11 +1,12 @@
-import { type FeaturesResponse, GATED_FEATURES } from "@rome/api-types/features";
+import type { GatedFeature } from "@rome/api-types/features";
 
-/** Where the dashboard asks which gated features are shown. */
-export const FEATURES_URL = "/api/features";
+/** The features a test hides. A test file that stands this module in for
+ *  `@/lib/features` shows every other feature, whatever this release shows:
+ *
+ *    rs.mock("@/lib/features", () => ({ isShown: (f) => isShownInTest(f) }));
+ */
+export const hiddenFeatures = new Set<GatedFeature>();
 
-/** Core's answer to `GET /api/features` on an instance that shows every gated
- *  feature, for tests whose fetch stub answers every URL itself. */
-export function allFeaturesShown(): Response {
-  const features = Object.fromEntries(GATED_FEATURES.map((feature) => [feature, true]));
-  return Response.json({ features } as FeaturesResponse);
+export function isShownInTest(feature: GatedFeature | undefined): boolean {
+  return feature === undefined || !hiddenFeatures.has(feature);
 }

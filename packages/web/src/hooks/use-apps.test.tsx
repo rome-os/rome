@@ -5,7 +5,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import { useAppsList } from "./use-apps";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 let urls: string[];
 
@@ -14,7 +19,6 @@ beforeEach(() => {
   rs.stubGlobal(
     "fetch",
     rs.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === FEATURES_URL) return allFeaturesShown();
       urls.push(String(input));
       return new Response(JSON.stringify({ apps: [] }), { status: 200 });
     }),
@@ -22,6 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.unstubAllGlobals();
 });
@@ -49,31 +54,17 @@ describe("useAppsList", () => {
       { id: "constructor" },
     ] as InstalledAppCard[];
 
-    function renderList(features: () => Promise<Response>) {
+    it("leaves out the app of a hidden feature and keeps the rest", async () => {
+      hiddenFeatures.add("inbox");
       rs.stubGlobal(
         "fetch",
-        rs.fn(async (input: RequestInfo | URL) =>
-          String(input) === FEATURES_URL ? features() : Response.json({ apps: installed }),
-        ),
+        rs.fn(async () => Response.json({ apps: installed })),
       );
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       const wrapper = ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={client}>{children}</QueryClientProvider>
       );
-      return renderHook(() => useAppsList(), { wrapper });
-    }
-
-    it("leaves out the app of a hidden feature and keeps the rest", async () => {
-      const { result } = renderList(async () =>
-        Response.json({ features: { people: true, envoys: true, inbox: false } }),
-      );
-      await waitFor(() =>
-        expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "constructor"]),
-      );
-    });
-
-    it("holds back only the gated app until core says which features are shown", async () => {
-      const { result } = renderList(() => new Promise<Response>(() => {}));
+      const { result } = renderHook(() => useAppsList(), { wrapper });
       await waitFor(() =>
         expect(result.current.apps?.map((app) => app.id)).toEqual(["notes", "constructor"]),
       );

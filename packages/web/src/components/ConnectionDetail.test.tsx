@@ -12,7 +12,14 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
 import { toast } from "sonner";
 import { stateOfGrants } from "@/test/connection-state";
 import { linkOf } from "@/test/account-links";
-import { allFeaturesShown, FEATURES_URL } from "@/test/features";
+import type { GatedFeature } from "@rome/api-types/features";
+import { isShownInTest } from "@/test/features";
+
+// These tests reach People, Envoys or Inbox, so they run with every feature
+// shown.
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 rs.mock("sonner", () => ({
   toast: Object.assign(
@@ -45,7 +52,6 @@ afterEach(() => {
 function mockCeremonyFetch(routes: Record<string, unknown> = {}) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
-    if (url === FEATURES_URL) return allFeaturesShown();
     if (url === "/api/approvals") return new Response("[]", { status: 200 });
     for (const [needle, payload] of Object.entries(routes)) {
       if (url.includes(needle)) {
@@ -472,7 +478,6 @@ describe("ConnectionDetailBody — accounts", () => {
     const calls: FetchCall[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url === FEATURES_URL) return allFeaturesShown();
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url.endsWith("/setup") && method === "POST") {

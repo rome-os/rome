@@ -3,14 +3,22 @@ import type { ChatMessage } from "./chat-types";
 import {
   conciergePageOf,
   isUnreachableStatus,
+  listChatAgents,
   listSessionMessagePage,
   listSessionThread,
   plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
 } from "./chat-api";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 afterEach(() => {
+  hiddenFeatures.clear();
   rs.unstubAllGlobals();
 });
 
@@ -503,5 +511,27 @@ describe("listSessionThread", () => {
         .mockResolvedValueOnce(json({ error: "Not a Concierge chat", code: "not_concierge" }, 400)),
     );
     await expect(listSessionThread("s1", "m1")).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("listChatAgents", () => {
+  it("leaves out the agents of an app that is a hidden feature", async () => {
+    hiddenFeatures.add("inbox");
+    const group = (ownerId: string, ownerType: "core" | "app") => ({
+      ownerId,
+      ownerType,
+      label: ownerId,
+      description: "",
+      iconUrl: null,
+      agents: [{ name: `${ownerId}:agent`, localName: "agent", description: "" }],
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () =>
+        Response.json([group("core", "core"), group("inbox", "app"), group("notes", "app")]),
+      ),
+    );
+    const groups = await listChatAgents();
+    expect(groups.map((g) => g.ownerId)).toEqual(["core", "notes"]);
   });
 });

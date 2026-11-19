@@ -24,10 +24,7 @@ describe("gatedFeatureOf", () => {
 
 function api(visibility: FeatureVisibility) {
   const inner = new Hono();
-  inner.use(
-    "*",
-    hideGatedFeatureRoutes(async () => visibility),
-  );
+  inner.use("*", hideGatedFeatureRoutes(visibility));
   inner.get("/people", (c) => c.json({ people: [] }));
   inner.get("/connected-accounts", (c) => c.json([]));
   inner.get("/apps", (c) => c.json({ apps: [] }));
@@ -53,5 +50,20 @@ describe("hideGatedFeatureRoutes", () => {
 
   it("serves routes no feature owns", async () => {
     expect((await api(hidden).request("/api/apps")).status).toBe(200);
+  });
+});
+
+describe("hideGatedFeatureRoutes in this release", () => {
+  it("hides People, Envoys and Inbox", async () => {
+    const inner = new Hono();
+    inner.use("*", hideGatedFeatureRoutes());
+    inner.get("/people", (c) => c.json({ people: [] }));
+    inner.get("/connected-accounts", (c) => c.json([]));
+    inner.get("/sentinel-log", (c) => c.json([]));
+    const app = new Hono();
+    app.route("/api", inner);
+    for (const path of ["/api/people", "/api/connected-accounts", "/api/sentinel-log"]) {
+      expect((await app.request(path)).status).toBe(404);
+    }
   });
 });
