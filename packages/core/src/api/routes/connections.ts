@@ -410,9 +410,20 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       settled?.status === "done" && settled.grant.ended === conn.id
         ? settled.grant.connectionId
         : conn.id;
-    if (target && findConnection(registry, target)) await registry.disconnect(target);
+    const ended =
+      target && findConnection(registry, target) ? await registry.disconnect(target) : {};
     c.header("Cache-Control", "no-store");
-    return c.json({ ok: true, connection: null });
+    // The connection ended either way. The platform may still hold the access
+    // when taking it back failed, so the guardian is told.
+    return c.json({
+      ok: true,
+      connection: null,
+      ...(ended.notTakenBack
+        ? {
+            warning: `Disconnected in Rome, but the service may still hold Rome's access: ${ended.notTakenBack}. Remove Rome there too.`,
+          }
+        : {}),
+    });
   });
 
   app.delete("/connections/:id", async (c) => {

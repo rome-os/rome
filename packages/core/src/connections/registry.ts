@@ -369,17 +369,19 @@ export class ConnectionRegistry {
     });
   }
 
-  /** End a connection, whatever its kind: remove it and its grant in one
-   *  transaction that raises disconnected, then stop its capabilities and
-   *  clear the grant's custody artifacts. Runs in the grant's section, so it
-   *  never interleaves with a setup's terminal write. A failed write throws
-   *  and leaves the connection as it was. */
-  async disconnect(id: ConnectionId): Promise<void> {
+  /** End a connection, whatever its kind: take back at the platform what the
+   *  grant gave (`onDisconnect`), remove it and its grant in one transaction
+   *  that raises disconnected, then stop its capabilities and clear the
+   *  grant's custody artifacts. Runs in the grant's section, so it never
+   *  interleaves with a setup's terminal write. A failed write throws and
+   *  leaves the connection as it was. Answers why the platform may still hold
+   *  the access, when taking it back failed; the connection ends either way. */
+  async disconnect(id: ConnectionId): Promise<{ notTakenBack?: string }> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
     const { connectionKind } = conn;
     const grant = conn.descriptor.grant;
-    await this.withGrantSection(connectionKind, grant, () =>
+    return await this.withGrantSection(connectionKind, grant, () =>
       this.connectionMutex.runExclusive(connectionKind, async () => {
         // A disconnect that ran while this one waited may have removed it. A
         // fix that reached another account while this one waited ended it and
@@ -389,9 +391,11 @@ export class ConnectionRegistry {
         while (current && this.connections.get(current.id) !== current) {
           current = this.startedInPlaceOf.get(current);
         }
-        if (!current) return;
+        if (!current) return {};
+        const notTakenBack = await current.takeBack();
         await current.disconnect(grant);
         this.connections.delete(current.id);
+        return notTakenBack === null ? {} : { notTakenBack };
       }),
     );
   }
@@ -1365,6 +1369,30 @@ class ConnectionImpl implements Connection {
 
   revoke(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     return this.withGrantLock(grant, () => this.revokeLocked(grant, opts));
+  }
+
+  /** Ask the kind to take back at the platform what the grant gave, before
+   *  the guardian's disconnect deletes it. Null when that is done or there is
+   *  nothing to take back; otherwise why it failed, which is logged. */
+  async takeBack(): Promise<string | null> {
+    const onDisconnect = this.descriptor.onDisconnect;
+    if (!onDisconnect) return null;
+    try {
+      const held = await this.store.grantOf(this.id);
+      if (!held?.credential) return null;
+      const { material } = fromPersisted(held.credential, this.descriptor.auth);
+      await onDisconnect({
+        material: typeof material === "function" ? await material() : material,
+        profile: held.profile ?? {},
+      });
+      return null;
+    } catch (err) {
+      this.log.warn("could not take back access at the platform on disconnect", {
+        connectionId: this.id,
+        error: errMsg(err),
+      });
+      return errMsg(err);
+    }
   }
 
   /** Remove this connection and its grant in one transaction that raises

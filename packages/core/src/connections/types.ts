@@ -360,6 +360,17 @@ export interface ConnectionDescriptor {
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
+  /**
+   * Take back at the platform what the grant gave, when the guardian
+   * disconnects: revoke a token, release a binding. It runs before the
+   * connection is deleted, with the grant's material and profile, and only for
+   * a disconnect the guardian asked for, never when a grant degrades or a fix
+   * ends a connection. A rejection does not stop the disconnect: the
+   * connection still ends, and the reason comes back to the guardian, since
+   * the access may still be live at the platform. Run again after a failure,
+   * it must finish what is left. Omitted by kinds with nothing to take back.
+   */
+  onDisconnect?(grant: { material: SecretRecord; profile: ProfileRecord }): Promise<void>;
   /** True when the guardian can add another account of this connection kind, each
    *  with its own Connection and channel. A connection kind that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature

@@ -886,3 +886,66 @@ describe("custody follows grant state", () => {
     }
   });
 });
+
+describe("disconnect takes back access at the platform", () => {
+  async function connected(onDisconnect?: (grant: unknown) => Promise<void>) {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    const taken: unknown[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      onDisconnect: async (grant) => {
+        // The connection still exists while the kind takes its access back.
+        taken.push({ grant, existed: registry.find("fake-oauth-provider").length });
+        await onDisconnect?.(grant);
+      },
+    });
+    const conn = await registry.connect("fake-oauth-provider");
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential(), {
+      login: "octocat",
+    });
+    return { registry, conn, taken, close };
+  }
+
+  it("hands the kind the grant's material and profile before the connection is deleted", async () => {
+    const { registry, conn, taken, close } = await connected();
+    try {
+      expect(await registry.disconnect(conn.id)).toEqual({});
+      expect(taken).toEqual([
+        {
+          grant: { material: { accessToken: "initial-user-token" }, profile: { login: "octocat" } },
+          existed: 1,
+        },
+      ]);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("still ends the connection when taking back fails, and says why", async () => {
+    const { registry, conn, close } = await connected(async () => {
+      throw new Error("Slack is unreachable");
+    });
+    try {
+      expect(await registry.disconnect(conn.id)).toEqual({ notTakenBack: "Slack is unreachable" });
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it("takes nothing back when a grant is revoked rather than disconnected", async () => {
+    const { conn, taken, close } = await connected();
+    try {
+      await conn.auth.revoke("user");
+      expect(taken).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+});
