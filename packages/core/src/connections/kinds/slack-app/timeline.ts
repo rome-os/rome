@@ -216,7 +216,12 @@ async function readForward(
     deps.copy.keepRun(deps.teamId, channelId, { messages: page.messages, before: null });
     const newer = page.messages.filter(({ ts }) => compareTs(ts, from) > 0);
     const wanted = newer.filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0);
-    if (newer.length === page.messages.length && page.hasMore) {
+    // The page reaches the read's lower bound, `from` or `since`, once it
+    // holds a message at or below it.
+    const reaches = page.messages.some(
+      ({ ts }) => compareTs(ts, from) <= 0 || (since !== undefined && compareTs(ts, since) <= 0),
+    );
+    if (!reaches && page.hasMore) {
       throw new Error(
         `More than ${page.messages.length} messages follow ${from} in Slack chat ${channelId}, and Slack answers its newest first. Read back from the newest with olderThan instead.`,
       );

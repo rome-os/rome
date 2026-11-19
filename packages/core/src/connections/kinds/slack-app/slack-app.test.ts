@@ -1203,6 +1203,23 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 6", "message 5"]);
   });
 
+  it("reads forward from a wiped copy when one page reaches the read's time bound", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = Array.from({ length: 30 }, (_, i) =>
+      slack.say(i + 1, "member", `${1700000000 + i + 1}.000000`),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, {
+      newerThan: said[0].ts,
+      since: new Date((1700000000 + 25) * 1000),
+      limit: 2,
+    });
+    expect(texts(read)).toEqual(["message 26", "message 25"]);
+  });
+
   it("reads below its own upper bound when the newest message it holds is past it", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
