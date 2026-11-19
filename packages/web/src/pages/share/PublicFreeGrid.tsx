@@ -4,6 +4,7 @@ import { FolderKanban, LayoutGrid, MessageSquare } from "lucide-react";
 import { PublicChat } from "@/components/chat/PublicChat";
 import { AppWidget } from "@/pages/free/AppWidget";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
+import { isPlacementShown } from "@/pages/free/widget-visibility";
 import type { ChatMessage } from "@/lib/chat-types";
 import { PublicProjectsWidget } from "./PublicProjectsWidget";
 import { ShareHeader } from "./ShareBranding";
@@ -61,7 +62,10 @@ function PublicWidgetIcon({ widget, className }: { widget: WidgetPlacement; clas
 export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps) {
   const { t } = useTranslation("common");
   const sorted = useMemo(
-    () => [...placements].filter((p) => p.type !== "desktop").sort((a, b) => a.order - b.order),
+    () =>
+      [...placements]
+        .filter((p) => p.type !== "desktop" && isPlacementShown(p))
+        .sort((a, b) => a.order - b.order),
     [placements],
   );
   const hasApps = sorted.length > 0;

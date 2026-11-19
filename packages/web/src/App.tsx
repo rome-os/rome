@@ -14,7 +14,7 @@ import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
 import FreePage, { HomeRedirect, MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
-import { FeatureRoute } from "./components/feature-gate";
+import { AppFeatureRoute, FeatureGate, FeatureRoute } from "./components/feature-gate";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
 // the shell stay eager. Every other route is split into its own chunk so the
@@ -132,7 +132,16 @@ export default function App() {
           {/* Inbox is a host page, not an embedded app (see HOST_APP_ROUTES in
               lib/auth-routing.ts) — a full-mode link to it must not reach
               AppFullPage, which would 404 probing the nonexistent manifest. */}
-          <Route path="/full/apps/inbox/*" element={<Navigate to="/apps/inbox" replace />} />
+          {/* A hidden Inbox renders nothing here: this address loads in a widget's
+              frame, where a redirect home would nest the dashboard. */}
+          <Route
+            path="/full/apps/inbox/*"
+            element={
+              <FeatureGate feature="inbox">
+                <Navigate to="/apps/inbox" replace />
+              </FeatureGate>
+            }
+          />
           {/* Sessions is a host-owned app. show_app addresses it through the
               same /full/apps/:appId/:route shape as installed apps so it can
               be mounted as a workspace tile for background fork processing. */}
@@ -243,7 +252,14 @@ export default function App() {
                 namespace would be treated as embedded app "detail" (public-app
                 visitor exemptions could then apply to this guardian-only host
                 page, and a real app with id "detail" would be shadowed). */}
-            <Route path="/app-details/:appId" element={<AppDetailPage />} />
+            <Route
+              path="/app-details/:appId"
+              element={
+                <AppFeatureRoute>
+                  <AppDetailPage />
+                </AppFeatureRoute>
+              }
+            />
             <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
             <Route path="/desktop" element={<DesktopPage />} />
             <Route path="/desktop/wechat" element={<WechatDesktopPage />} />

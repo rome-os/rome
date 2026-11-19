@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
-import type { GatedFeature } from "@rome/api-types/features";
+import { Navigate, useParams } from "react-router-dom";
+import { appFeature, type GatedFeature } from "@rome/api-types/features";
 import { isShown } from "@/lib/features";
 
 interface FeatureGateProps {
@@ -22,5 +22,16 @@ export function FeatureRoute({ feature, children }: Omit<FeatureGateProps, "fall
     <FeatureGate feature={feature} fallback={<Navigate to="/" replace />}>
       {children}
     </FeatureGate>
+  );
+}
+
+/** A route's element for a page about one app, read from the `:appId` route
+ *  parameter: an app that is a hidden feature opens the home page instead. */
+export function AppFeatureRoute({ children }: { children: ReactNode }) {
+  const feature = appFeature(useParams().appId ?? "");
+  return feature === undefined ? (
+    children
+  ) : (
+    <FeatureRoute feature={feature}>{children}</FeatureRoute>
   );
 }

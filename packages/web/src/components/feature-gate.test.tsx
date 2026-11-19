@@ -3,7 +3,7 @@ import { cleanup, render, renderHook, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { FEATURE_VISIBILITY } from "@rome/api-types/features";
-import { FeatureGate, FeatureRoute } from "./feature-gate";
+import { AppFeatureRoute, FeatureGate, FeatureRoute } from "./feature-gate";
 import { useBuiltinNav } from "@/shell/builtin-nav";
 import type { GatedFeature } from "@rome/api-types/features";
 import { hiddenFeatures, isShownInTest } from "@/test/features";
@@ -64,6 +64,42 @@ describe("FeatureRoute", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("home")).toBeTruthy();
+  });
+});
+
+describe("AppFeatureRoute", () => {
+  function openAppDetails(appId: string) {
+    render(
+      <MemoryRouter initialEntries={[`/app-details/${appId}`]}>
+        <Routes>
+          <Route path="/" element={<p>home</p>} />
+          <Route
+            path="/app-details/:appId"
+            element={
+              <AppFeatureRoute>
+                <p>details</p>
+              </AppFeatureRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("sends the details address of a hidden feature's app to the home page", () => {
+    hiddenFeatures.add("inbox");
+    openAppDetails("inbox");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("opens the details of an app that is no feature, or whose feature is shown", () => {
+    hiddenFeatures.add("people");
+    openAppDetails("inbox");
+    expect(screen.getByText("details")).toBeTruthy();
+    cleanup();
+    hiddenFeatures.add("inbox");
+    openAppDetails("notes");
+    expect(screen.getByText("details")).toBeTruthy();
   });
 });
 

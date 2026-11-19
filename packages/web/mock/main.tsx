@@ -20,7 +20,9 @@ if (
   };
 }
 
-showAllFeaturesInMock();
+// The dev mock shows every feature so its fixtures and browser suites reach
+// every page; the static build is the public demo, so it hides what a release does.
+if (import.meta.env.DEV) showAllFeaturesInMock();
 
 // Register the interception worker before the app boots, so the AuthGate's
 // very first /api/health + /api/bootstrap probes are already answered by

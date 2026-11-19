@@ -966,6 +966,20 @@ describe("New chat draft", () => {
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
   });
 
+  it("shows and sends no mention of a hidden feature's app restored from a draft", async () => {
+    hiddenFeatures.add("inbox");
+    saveNewChatDraft({
+      ...draft,
+      agentMention: { appId: "inbox", agentName: "inbox:sentinel", appLabel: "Inbox" },
+    });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ persistNewChatDraft: true, onSend }, { settings: {} });
+    expect(screen.queryByText("Inbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].agentMention).toBeUndefined();
+  });
+
   it("sends no persona restored from a draft while People is hidden", async () => {
     hiddenFeatures.add("people");
     saveNewChatDraft(draft);

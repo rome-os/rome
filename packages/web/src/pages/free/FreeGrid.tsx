@@ -64,6 +64,7 @@ import {
   WorkspaceContextRegistryContext,
 } from "./workspace-context";
 import { createWorkspaceEventBus, WorkspaceEventBusContext } from "./workspace-event-bus";
+import { isPlacementShown } from "./widget-visibility";
 import { createWorkspaceStore, WorkspaceStoreContext } from "./workspace-store";
 
 // App widgets render their real installed-app identity (icon + display name),
@@ -214,7 +215,7 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const {
-    placements,
+    placements: savedPlacements,
     addWidget,
     removeWidget,
     toolView,
@@ -222,6 +223,9 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     selectTool,
     setToolsCollapsed,
   } = useFreeCells();
+  // A saved widget of a hidden feature's app is left out, so its frame never
+  // mounts. The saved layout keeps it.
+  const placements = useMemo(() => savedPlacements.filter(isPlacementShown), [savedPlacements]);
   const { apps } = useAppsList();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>
