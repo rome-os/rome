@@ -29,6 +29,9 @@ import {
   splitSlackText,
 } from "../slack/slack.js";
 import { isForwardedBy } from "./forward.js";
+import type { SlackMessageCopy } from "./message-copy.js";
+
+export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppWebApi } from "./web-api.js";
 
@@ -84,6 +87,10 @@ export interface SlackAppAdapterConfig {
   /** Keeps refreshed drain credentials with the grant. */
   onMailboxRefreshed?: (mailbox: SlackAppMailbox) => void;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+  /** The connection's own copy of the direct messages it hears. */
+  copy: SlackMessageCopy;
+  /** Now, for the copy's times. */
+  now?: () => Date;
 }
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
@@ -142,6 +149,7 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
+    this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
     this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
@@ -257,35 +265,60 @@ export class SlackAppAdapter {
     if (payload.api_app_id && this.appId && payload.api_app_id !== this.appId) {
       return { status: 400 };
     }
-    // Slack retries and the relay delivers at least once.
-    if (typeof payload.event_id !== "string" || this.dedup.checkAndRecord(payload.event_id)) {
-      return { status: 200 };
-    }
-    await this.handleEvent(payload);
-    return { status: 200 };
+    if (typeof payload.event_id !== "string") return { status: 200 };
+    return this.handleEvent(payload, payload.event_id);
   }
 
-  private async handleEvent(payload: SlackEventCallback): Promise<void> {
+  /** Hand Rome what the copy kept but never handed over, as a stop between
+   *  keeping a message and handing it over leaves it. Rome ignores a message
+   *  it already holds. */
+  private handOverKept(): void {
+    const kept = this.config.copy.notHandedOver(this.config.teamId);
+    if (kept.length > 0) {
+      log.info("slack app handing over kept messages", { count: kept.length });
+    }
+    for (const { eventId, message } of kept) {
+      this.handOver(eventId, { ...message, channel: this.config.channel });
+    }
+  }
+
+  /** Hand `message` to Rome without waiting on it, and note it was handed. */
+  private handOver(eventId: string, message: ChannelMessage): void {
+    if (!this.handler) return;
+    try {
+      this.handler(message);
+    } catch (error) {
+      log.error("message handler error", { messageId: message.messageId, error: describe(error) });
+    }
+    this.config.copy.handedOver(this.config.teamId, eventId, this.now());
+  }
+
+  private now(): Date {
+    return this.config.now?.() ?? new Date();
+  }
+
+  private async handleEvent(
+    payload: SlackEventCallback,
+    eventId: string,
+  ): Promise<{ status: number }> {
     const event = payload.event;
-    if (event.type === "app_uninstalled") {
-      this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
-      return;
+    if (event.type !== "message") {
+      // Slack retries and the relay delivers at least once.
+      if (this.dedup.checkAndRecord(eventId)) return { status: 200 };
+      this.handleSignal(payload);
+      return { status: 200 };
     }
-    if (event.type === "tokens_revoked") {
-      if (event.tokens?.bot?.includes(this.config.botUserId)) {
-        this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
-      }
-      return;
-    }
-    if (event.type !== "message" || event.channel_type !== "im") return;
+    if (event.channel_type !== "im") return { status: 200 };
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
-    if (isExternalAuthor(payload)) return;
-    if (event.bot_id || event.user === this.config.botUserId) return;
-    if (event.subtype && event.subtype !== "file_share") return;
-    if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") return;
+    if (isExternalAuthor(payload)) return { status: 200 };
+    if (event.bot_id || event.user === this.config.botUserId) return { status: 200 };
+    if (event.subtype && event.subtype !== "file_share") return { status: 200 };
+    if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") {
+      return { status: 200 };
+    }
     const text = decodeSlackText(event.text, this.config.botUserId);
-    if (!text) return;
+    if (!text) return { status: 200 };
 
     const name = await this.lookUpName(event.user);
     const message: ChannelMessage = {
@@ -304,11 +337,45 @@ export class SlackAppAdapter {
       thread: { kind: "dm" },
       addressing: "direct",
     };
-    log.info("message received", { chatId: message.chatId });
+    // The mailbox is told the message was received only once the copy holds
+    // it: a write that fails answers 500, and the mailbox delivers it again.
+    // An event the copy holds already is a redelivery.
+    let fresh: boolean;
     try {
-      this.handler?.(message);
+      fresh = this.config.copy.keep(
+        {
+          teamId: payload.team_id,
+          eventId,
+          channelId: event.channel,
+          ts: event.ts,
+          ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
+          userId: event.user,
+          text,
+          message,
+        },
+        this.now(),
+      );
     } catch (error) {
-      log.error("message handler error", { messageId: message.messageId, error: describe(error) });
+      log.error("slack app could not keep a message", { error: describe(error) });
+      return { status: 500 };
+    }
+    if (!fresh) return { status: 200 };
+    log.info("message received", { chatId: message.chatId });
+    this.handOver(eventId, message);
+    return { status: 200 };
+  }
+
+  /** An event that is not a message: the app removed or its token revoked. */
+  private handleSignal(payload: SlackEventCallback): void {
+    const event = payload.event;
+    if (event.type === "app_uninstalled") {
+      this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
+      return;
+    }
+    if (event.type === "tokens_revoked") {
+      if (event.tokens?.bot?.includes(this.config.botUserId)) {
+        this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
+      }
     }
   }
 

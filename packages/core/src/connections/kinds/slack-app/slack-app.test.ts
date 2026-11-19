@@ -8,6 +8,13 @@ import {
 } from "./forward.js";
 import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-app.js";
 import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
+import { createTestDb } from "../../../test/db.js";
+import { SlackMessageCopyRepository } from "./message-copy.js";
+
+/** The connection's copy, in a database of its own. */
+function testCopy(): SlackMessageCopyRepository {
+  return new SlackMessageCopyRepository(createTestDb().db);
+}
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
@@ -104,7 +111,11 @@ function fakeMailbox() {
   };
 }
 
-function adapter(mailbox: ReturnType<typeof fakeMailbox>, api = fakeApi()) {
+function adapter(
+  mailbox: ReturnType<typeof fakeMailbox>,
+  api = fakeApi(),
+  copy: SlackMessageCopyRepository = testCopy(),
+) {
   const delivered: ChannelMessage[] = [];
   const faults: string[] = [];
   const a = new SlackAppAdapter({
@@ -117,9 +128,10 @@ function adapter(mailbox: ReturnType<typeof fakeMailbox>, api = fakeApi()) {
     api,
     openMailbox: mailbox.open,
     onFault: ({ kind }) => faults.push(kind),
+    copy,
   });
   a.onInbound((message) => delivered.push(message));
-  return { adapter: a, delivered, faults, api };
+  return { adapter: a, delivered, faults, api, copy };
 }
 
 describe("Slack app direct messages (R4)", () => {
@@ -208,6 +220,66 @@ describe("Slack app while the instance is stopped (R6)", () => {
   });
 });
 
+describe("Slack app's own copy of its direct messages", () => {
+  it("tells the mailbox a message arrived only once its copy holds it", async () => {
+    const mailbox = fakeMailbox();
+    const copy = testCopy();
+    const keep = copy.keep.bind(copy);
+    let failing = true;
+    copy.keep = (kept, at) => {
+      if (failing) throw new Error("disk full");
+      return keep(kept, at);
+    };
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), copy);
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(mailbox.statuses).toEqual([500]);
+    expect(delivered).toHaveLength(0);
+
+    // The mailbox kept the frame and delivers it again.
+    failing = false;
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("hands Rome on start what it kept but never handed over, once", async () => {
+    const { db } = createTestDb();
+    // Kept, then stopped before noting it was handed over.
+    const interrupted = new SlackMessageCopyRepository(db);
+    interrupted.handedOver = () => {};
+    const first = adapter(fakeMailbox(), fakeApi(), interrupted);
+    await first.adapter.start();
+    await first.adapter.handleFrame(frame(dmEvent(1)));
+    await first.adapter.stop();
+
+    const restarted = adapter(fakeMailbox(), fakeApi(), new SlackMessageCopyRepository(db));
+    await restarted.adapter.start();
+    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
+    expect(restarted.delivered[0]?.timestamp).toEqual(first.delivered[0]?.timestamp);
+
+    const again = adapter(fakeMailbox(), fakeApi(), new SlackMessageCopyRepository(db));
+    await again.adapter.start();
+    expect(again.delivered).toHaveLength(0);
+  });
+
+  it("hands over a message Slack delivers again after a restart only once", async () => {
+    const mailbox = fakeMailbox();
+    const copy = testCopy();
+    const first = adapter(mailbox, fakeApi(), copy);
+    await first.adapter.start();
+    await mailbox.deposit(frame(dmEvent(1)));
+    await first.adapter.stop();
+
+    const restarted = adapter(mailbox, fakeApi(), copy);
+    await restarted.adapter.start();
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(first.delivered).toHaveLength(1);
+    expect(restarted.delivered).toHaveLength(0);
+  });
+});
+
 describe("Slack app frames that did not come from Rome Cloud (R7)", () => {
   it("drops 10 of 10 frames with a bad forward signature", async () => {
     const mailbox = fakeMailbox();
@@ -292,6 +364,7 @@ describe("Slack app mailbox key", () => {
       refreshMailbox: rs.fn(refresh),
       onMailboxRefreshed: (mailbox) => refreshed.push(mailbox.drainKey),
       onFault: ({ kind }) => faults.push(kind),
+      copy: testCopy(),
     });
     return { adapter: a, opened, stopped, faults, refreshed };
   }
@@ -384,6 +457,7 @@ describe("Slack app mailbox key", () => {
         }),
         openMailbox: open,
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
+        copy: testCopy(),
       });
       a.onInbound((message) => order.push(`delivered ${message.text}`));
       await a.start();

@@ -102,7 +102,7 @@ describe("registerBuiltinConnections", () => {
       linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
       wechatUserRuntime: {} as WechatUserRuntime,
-      slackApp: { api: {}, cloud: {}, openMailbox: () => ({ stop() {} }) },
+      slackApp: { api: {}, cloud: {}, openMailbox: () => ({ stop() {} }), copy: {} },
     } as unknown as BuiltinConnectionDeps);
 
     const links = Object.fromEntries(

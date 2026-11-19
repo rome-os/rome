@@ -380,6 +380,7 @@ import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
+import { SlackMessageCopyRepository } from "./connections/kinds/slack-app/message-copy.js";
 import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
@@ -1868,6 +1869,7 @@ async function main() {
     slackApp: {
       api: createSlackAppWebApi(config.slackApiBaseUrl),
       cloud: romeCloudSlackApp(),
+      copy: new SlackMessageCopyRepository(db),
       openMailbox: (mailbox, onFrame) => {
         const drainer = new RelayDrainer(
           [

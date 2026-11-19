@@ -98,6 +98,7 @@ describe("connecting Rome's Slack app (R1)", () => {
       api: {} as never,
       cloud: cloud(),
       openMailbox: () => ({ stop: () => {} }),
+      copy: {} as never,
     });
     expect(descriptor.link).toBe("own_account");
     expect(descriptor.severalAccounts).toBe(true);
@@ -147,6 +148,7 @@ describe("the Slack app talker", () => {
         opened.push(mailbox.drainKey);
         return { stop: () => {} };
       },
+      copy: { keep: () => true, handedOver: () => {}, notHandedOver: () => [] },
     });
     const talker = descriptor.capabilities.talker?.build(
       {

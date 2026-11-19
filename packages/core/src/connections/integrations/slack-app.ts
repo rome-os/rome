@@ -21,7 +21,11 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { isSlackCredentialError } from "../kinds/slack/slack.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
-import { type OpenMailbox, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
+import {
+  type OpenMailbox,
+  SlackAppAdapter,
+  type SlackMessageCopy,
+} from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -212,6 +216,8 @@ export interface SlackAppDescriptorDeps {
   api: SlackAppWebApi;
   cloud: SlackAppCloud;
   openMailbox: OpenMailbox;
+  /** The connection's own copy of the direct messages it hears. */
+  copy: SlackMessageCopy;
   instanceOrigin?: () => string;
 }
 
@@ -256,6 +262,7 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
               kit.persist({ ...material, ...mailbox }).catch(() => {});
             },
             onFault: ({ kind, cause }) => routeFault(cause, kind),
+            copy: deps.copy,
           });
           return {
             start(deliver, fault): void {

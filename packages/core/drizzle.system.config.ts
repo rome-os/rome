@@ -42,6 +42,7 @@ export default defineConfig({
     "linkedin_messages",
     "linkedin_participants",
     "linkedin_thread_participants",
+    "slack_app_messages",
   ],
   dbCredentials: {
     url:
