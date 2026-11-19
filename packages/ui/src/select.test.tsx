@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsIcon } from "lucide-react";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { Select, SelectTrigger, SelectValue } from "./select.js";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select.js";
+import { mountShadowApp } from "./test/shadow-app.js";
 
 afterEach(cleanup);
 
@@ -108,5 +109,55 @@ describe("SelectTrigger", () => {
     );
 
     expect(screen.getByRole("combobox").getAttribute("aria-label")).toBeNull();
+  });
+});
+
+describe("SelectContent", () => {
+  it("moves focus between enabled options and back to the trigger in a shadow root", async () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    try {
+      const { getByRole } = render(
+        <Select defaultValue="selected">
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            <SelectItem value="first">First</SelectItem>
+            <SelectItem value="selected">Selected</SelectItem>
+            <SelectItem value="disabled" disabled>
+              Disabled
+            </SelectItem>
+            <SelectItem value="next">Next</SelectItem>
+            <SelectItem value="last">Last</SelectItem>
+          </SelectContent>
+        </Select>,
+        { container: mountRoot },
+      );
+      const trigger = getByRole("combobox");
+      trigger.focus();
+      fireEvent.keyDown(trigger, { key: "ArrowDown" });
+      await waitFor(() => expect(shadowRoot.activeElement?.textContent).toBe("Selected"));
+      const list = shadowRoot.querySelector<HTMLElement>('[role="listbox"]');
+      expect(list?.contains(shadowRoot.activeElement)).toBe(true);
+
+      for (const [key, expected] of [
+        ["ArrowDown", "Next"],
+        ["ArrowUp", "Selected"],
+        ["Home", "First"],
+        ["End", "Last"],
+      ]) {
+        fireEvent.keyDown(shadowRoot.activeElement!, { key });
+        await waitFor(() => expect(shadowRoot.activeElement?.textContent).toBe(expected));
+      }
+
+      await act(async () => list?.focus());
+      expect(shadowRoot.activeElement).toBe(list);
+
+      fireEvent.keyDown(shadowRoot.activeElement!, { key: "Escape" });
+      await waitFor(() => expect(shadowRoot.activeElement).toBe(trigger));
+    } finally {
+      cleanup();
+      shadowRoot.host.remove();
+    }
   });
 });

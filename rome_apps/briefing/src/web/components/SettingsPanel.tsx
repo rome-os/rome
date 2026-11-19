@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@rome-os/ui/select";
 import { useEffect, useState } from "react";
 import { Save, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -5,13 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { SettingsDto } from "../lib/types";
 import type { ChannelConnectivity } from "../lib/channels";
 
@@ -52,10 +46,10 @@ export function SettingsPanel({
           <div className="grid gap-2 sm:max-w-xs">
             <Label htmlFor="channel">Send briefs via</Label>
             <Select value={draft.channel} onValueChange={(v) => set("channel", v)}>
-              <SelectTrigger id="channel">
+              <SelectTrigger id="channel" className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper">
                 <SelectItem value="email">Email</SelectItem>
                 <SelectItem value="whatsapp">WhatsApp</SelectItem>
               </SelectContent>

@@ -1,16 +1,10 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@rome-os/ui/select";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { IntervalOption, ScoutDto } from "../lib/types";
 
 export interface ScoutDraft {
@@ -73,10 +67,10 @@ export function ScoutForm({
             value={String(intervalMinutes)}
             onValueChange={(v) => setIntervalMinutes(Number(v))}
           >
-            <SelectTrigger id="scout-interval">
+            <SelectTrigger id="scout-interval" className="w-full">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper">
               {intervalOptions.map((o) => (
                 <SelectItem key={o.minutes} value={String(o.minutes)}>
                   {o.label}
