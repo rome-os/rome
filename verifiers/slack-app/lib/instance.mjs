@@ -50,7 +50,13 @@ export function instance(inst, slackOrigin) {
      * "connected", "refused" or "stuck".
      */
     async connect() {
-      const walk = { setupFields: [], approveScreens: [], visited: [], agentPicks: 0 };
+      const walk = {
+        setupFields: [],
+        approveScreens: [],
+        visited: [],
+        agentPicks: 0,
+        signIns: 0,
+      };
       const { kind, grant } = inst.connect;
       const started = await call(`/connections/${kind}/grants/${grant}/setup`, {
         method: "POST",
@@ -75,6 +81,7 @@ export function instance(inst, slackOrigin) {
           };
         }
         if (state.status === "awaiting-redirect") {
+          walk.signIns++;
           const back = await this.browse(state.url, walk);
           if (back.error) return { ...walk, outcome: "stuck", reason: back.error };
           const ret = await call("/setups/return", { method: "POST", body: back.params });
@@ -147,7 +154,7 @@ export function instance(inst, slackOrigin) {
     /**
      * The messages Rome recorded as coming in through the Slack direct message
      * `dm` (its D... id): the content of each inbound entry in the bot chat's
-     * session, oldest first. A 404 throws unless `noneIfMissing`, where it
+     * session (role notification or user), oldest first. A 404 throws unless `noneIfMissing`, where it
      * means this instance never recorded that direct message.
      */
     async recordedIn(dm, { noneIfMissing = false } = {}) {
@@ -156,9 +163,13 @@ export function instance(inst, slackOrigin) {
       if (res.status === 404 && noneIfMissing) return [];
       if (!res.ok) throw new Error(`session messages on ${inst.name}: ${res.status}`);
       const list = Array.isArray(res.data) ? res.data : (res.data?.messages ?? []);
-      return list
-        .filter((m) => m.role === "notification")
-        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+      return (
+        list
+          // Rome records an inbound message as "notification", and as "user"
+          // once it starts a turn.
+          .filter((m) => m.role === "notification" || m.role === "user")
+          .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+      );
     },
 
     /**

@@ -106,9 +106,10 @@ async function storedColumns(dir, base) {
       new RegExp(`(\\w+)\\s*:\\s*(?:${TYPE})\\(\\s*(?:["'](\\w+)["'])?`, "g"),
     ))
       names.add(m[2] ?? m[1]);
-    // SQL: every column of a CREATE TABLE, one line or many.
-    for (const m of added.matchAll(/CREATE\s+TABLE[^(]*\(([\s\S]*?)\)\s*;/gi))
-      for (const part of splitTop(m[1])) {
+    // SQL: every column of a CREATE TABLE, one line or many, ended by `;`
+    // or by the end of the file.
+    for (const list of createTableLists(added))
+      for (const part of splitTop(list)) {
         const id = part.trim().match(/^[`"]?(\w+)[`"]?/)?.[1];
         if (id && !/^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK|KEY|INDEX)$/i.test(id)) names.add(id);
       }
@@ -126,6 +127,22 @@ async function storedColumns(dir, base) {
 }
 
 /** Splits a column list on the commas outside parentheses. */
+/** The text inside the outer parentheses of each `CREATE TABLE` in `sql`. */
+function createTableLists(sql) {
+  const lists = [];
+  for (const m of sql.matchAll(/CREATE\s+TABLE[^(;]*\(/gi)) {
+    const from = m.index + m[0].length;
+    let depth = 1;
+    let i = from;
+    for (; i < sql.length && depth > 0; i++) {
+      if (sql[i] === "(") depth++;
+      else if (sql[i] === ")") depth--;
+    }
+    lists.push(sql.slice(from, depth === 0 ? i - 1 : i));
+  }
+  return lists;
+}
+
 function splitTop(list) {
   const parts = [];
   let depth = 0;

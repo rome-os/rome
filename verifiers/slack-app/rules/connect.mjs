@@ -51,12 +51,14 @@ export async function r1(ctx) {
   const ws = ctx.wsA;
   const walk = await connectAs(ctx, ctx.a, ws);
   const romeFields = walk.approveScreens.filter((s) => !s.bySlack).flatMap((s) => s.fields);
+  const slackScreens = walk.approveScreens.filter((s) => s.bySlack).length;
   const evidence = {
     workspace: ws.id,
     instance: ctx.a.name,
     outcome: walk.outcome,
     setupFields: walk.setupFields,
     fieldsOnRomeScreens: romeFields,
+    signIns: walk.signIns,
     screens: walk.approveScreens,
     path: walk.visited,
     agentLinkCalls: 0,
@@ -84,6 +86,8 @@ export async function r1(ctx) {
   if (walk.setupFields.length) problems.push(`setup asked for ${walk.setupFields.length} field(s)`);
   if (romeFields.length)
     problems.push(`Rome's own screens asked for ${romeFields.length} field(s)`);
+  if (walk.signIns !== 1) problems.push(`Connect took ${walk.signIns} sign-ins, not 1`);
+  if (slackScreens > 1) problems.push(`Slack asked for approval ${slackScreens} times, not once`);
   if (!account) problems.push("no connected account for the new connection");
   else if (account.agent !== CONCIERGE)
     problems.push(`the connected account's agent is ${account.agent ?? "none"}, not the Concierge`);

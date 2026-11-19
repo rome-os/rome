@@ -151,6 +151,12 @@ if (breaks.has("R11-sql"))
     "packages/pantheon/drizzle/0003_slack_secrets.sql",
     "CREATE TABLE slack_secrets (team_id TEXT, bot_token TEXT);\n",
   );
+if (breaks.has("R11-eof"))
+  write(
+    romeCloud,
+    "packages/pantheon/drizzle/0004_slack_eof.sql",
+    "CREATE TABLE slack_eof (team_id TEXT, bot_token TEXT)",
+  );
 if (breaks.has("R11-migration"))
   write(
     romeCloud,

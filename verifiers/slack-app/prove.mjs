@@ -42,6 +42,12 @@ const CASES = [
     rule: "R1",
     what: "setup asks for a bot token and a signing secret",
   },
+  {
+    name: "R1-twice",
+    breaks: "R1-twice",
+    rule: "R1",
+    what: "Connect sends the guardian through the Slack sign-in twice",
+  },
   { name: "R1-agent", breaks: "R1-agent", rule: "R1", what: "the connected account gets no agent" },
   {
     name: "R3",
@@ -106,6 +112,12 @@ const CASES = [
     breaks: "R7-route,R7-lookup",
     rule: "R7",
     what: "the wrong instance looks up workspace A's sender, then drops the event",
+  },
+  {
+    name: "R11-eof",
+    breaks: "R11-eof",
+    rule: "R11",
+    what: "a CREATE TABLE with no semicolon at the end of the file stores the bot token",
   },
   {
     name: "R11-migration",

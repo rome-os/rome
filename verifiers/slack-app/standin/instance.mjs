@@ -69,6 +69,15 @@ const server = await serve(async (req, res, url) => {
       setup.state = { status: "failed", reason: body.message ?? body.error };
       return send(res, 200, { matched: true, state: setup.state });
     }
+    // Broken R1-twice: the first sign-in only leads to a second one.
+    if (breaks.has("R1-twice") && !setup.again) {
+      setup.again = true;
+      setup.oauthState = rand();
+      const to = new URL(setup.state.url);
+      to.searchParams.set("state", setup.oauthState);
+      setup.state = { status: "awaiting-redirect", url: to.toString() };
+      return send(res, 200, { matched: true, state: setup.state });
+    }
     const got = await fetch(`${CLOUD}/slack/redeem`, {
       method: "POST",
       headers: { "content-type": "application/json", ...cloudAuth },
@@ -94,7 +103,7 @@ const server = await serve(async (req, res, url) => {
   }
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
   // Like Rome, a Slack direct message with the bot is one session, and its
-  // inbound messages are recorded with role "notification".
+  // inbound messages are recorded with role "user" once they start a turn.
   const session = p.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (session && req.method === "GET") {
     const dm = decodeURIComponent(session[1]).match(/^channel:slack_app:(\w+)$/)?.[1];
@@ -105,7 +114,7 @@ const server = await serve(async (req, res, url) => {
       200,
       held.map((m) => ({
         id: m.eventId,
-        role: "notification",
+        role: "user",
         content: JSON.stringify([{ type: "text", content: m.text }]),
       })),
     );
