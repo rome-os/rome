@@ -46,7 +46,7 @@ The routes the dashboard uses today, relative to `api`. Every call sends the ins
 | `POST /setups/return {state, handoff?, error?, message?}` | Hands back the query of the URL the sign-in returned the browser to, the way the dashboard's callback page does. The verifier stops the browser at the first URL on the instance's origin that carries `state`. |
 | `GET /connected-accounts` | Each connected account with its `agent` and `connection`. R1 wants `agent` to be `core:concierge`. |
 | `GET /people`, then `GET /people/{id}/messages?channel=slack_app&channelUserId={team}/{user}` | The messages Rome recorded from one Slack member, as `{entries: [{body}], nextCursor}`. The verifier tries each person until one holds that account. |
-| `GET /accounts?channel=slack_app` | Every Slack account the instance has observed, as `{accounts: [{channelUserId}], nextCursor}`. A dropped event adds none. |
+| `GET /accounts` | Every account the instance has observed, as `{accounts: [{channel, channelUserId}], nextCursor}`. The verifier reads every page and keeps channel `slack` (or `slack_app`), since the filter matches the platform name exactly. A dropped event adds none. |
 
 R3 expects a refused second connect to end the setup `failed` with a reason that says the workspace is already connected, in any words. The product refuses on redeem, after the browser returns with a handoff.
 

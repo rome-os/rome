@@ -160,7 +160,10 @@ export function instance(inst, slackOrigin) {
           const q = new URLSearchParams({ channel: SLACK_KIND, channelUserId, limit: "300" });
           if (cursor) q.set("cursor", cursor);
           const res = await call(`/people/${encodeURIComponent(person.id)}/messages?${q}`);
-          if (!res.ok) break;
+          // 400 is Rome saying this person holds no such account. Anything
+          // else is a failed read, which must not pass for "nothing recorded".
+          if (res.status === 400) break;
+          if (!res.ok) throw new Error(`timeline on ${inst.name}: ${res.status}`);
           bodies.push(...res.data.entries.map((m) => m.body ?? ""));
           cursor = res.data.nextCursor;
           if (!cursor) return bodies;
@@ -170,16 +173,24 @@ export function instance(inst, slackOrigin) {
       return [];
     },
 
-    /** The `channelUserId` of every Slack account this instance has observed. */
+    /**
+     * The `channelUserId` of every Slack account this instance has observed.
+     * Reads the whole directory, since it files an account under its platform
+     * and the channel filter matches that name exactly.
+     */
     async slackAccounts() {
       const ids = [];
       let cursor = "";
-      for (let page = 0; page < 50; page++) {
-        const q = new URLSearchParams({ channel: SLACK_KIND });
+      for (let page = 0; page < 200; page++) {
+        const q = new URLSearchParams();
         if (cursor) q.set("cursor", cursor);
         const res = await call(`/accounts?${q}`);
         if (!res.ok) throw new Error(`accounts on ${inst.name}: ${res.status}`);
-        ids.push(...res.data.accounts.map((a) => a.channelUserId));
+        ids.push(
+          ...res.data.accounts
+            .filter((a) => a.channel === "slack" || a.channel === SLACK_KIND)
+            .map((a) => a.channelUserId),
+        );
         cursor = res.data.nextCursor;
         if (!cursor) break;
       }

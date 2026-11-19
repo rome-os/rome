@@ -112,9 +112,14 @@ const server = await serve(async (req, res, url) => {
       .reverse();
     return send(res, 200, { entries, nextCursor: null });
   }
+  // Like Rome's directory, accounts are filed under the platform, and the
+  // channel filter matches it exactly.
   if (p === "/api/accounts") {
     const ids = [...new Set(db.messages.map((m) => `${m.team}/${m.user}`))];
-    const accounts = ids.map((channelUserId) => ({ channel: "slack_app", channelUserId }));
+    const wanted = url.searchParams.get("channel");
+    const accounts = ids
+      .map((channelUserId) => ({ channel: "slack", channelUserId }))
+      .filter((a) => !wanted || a.channel === wanted);
     return send(res, 200, { accounts, nextCursor: null });
   }
   return send(res, 404, { error: "not found" });
