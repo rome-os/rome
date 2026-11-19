@@ -3,13 +3,19 @@
 // (docs/releases.md#github-release): the changes to the image since the
 // previous published release, grouped by what they mean to someone running it.
 //
-//   node scripts/docker/release-notes.mjs <tag> <published-versions-file>
+//   node scripts/docker/release-notes.mjs <tag> <published-versions-file> [--json <path>]
+//   node scripts/docker/release-notes.mjs backfill <out-dir> <tag>...
 //
-// The file lists the image's versions on Docker Hub, one per line. IMAGE_NAME
-// and GITHUB_REPOSITORY name the image and the repository.
+// The first form prints the Markdown notes and, with --json, also writes the
+// same changes as release-notes.json, the asset instances read. The file lists
+// the image's versions on Docker Hub, one per line. The backfill form writes
+// release-notes.json for releases that already exist, and prints the
+// `gh release upload` commands that attach them without running them.
+// IMAGE_NAME and GITHUB_REPOSITORY name the image and the repository.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRuntimeInput } from "./runtime-inputs.mjs";
 
@@ -50,19 +56,49 @@ const CONVENTIONAL = /^(?<type>[a-z]+)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?: (
 /** A Conventional Commits footer that marks a breaking change. */
 const BREAKING_FOOTER = /^BREAKING[ -]CHANGE: /m;
 
+/** The `(#1234)` suffix squash-and-merge appends to a pull request's title. */
+const PR_SUFFIX = / \(#(?<pr>[0-9]+)\)$/;
+
 /**
- * The section a commit belongs to, and the line it shows there. A `!` after
- * the type or a `BREAKING CHANGE:` footer in the body makes it breaking.
+ * The section a commit belongs to, and what it shows there: its scope, its
+ * subject without the pull request suffix, and that pull request's number.
+ * A `!` after the type or a `BREAKING CHANGE:` footer in the body makes it
+ * breaking. A subject that is not a Conventional Commit has no scope.
  */
 export function entryOf(subject, body = "") {
   const match = CONVENTIONAL.exec(subject);
-  if (!match?.groups) return { section: "other", line: subject };
-  const { type, scope, breaking, subject: text } = match.groups;
-  const line = scope ? `**${scope}:** ${text}` : text;
-  if (breaking || BREAKING_FOOTER.test(body)) return { section: "breaking", line };
-  if (type === "feat") return { section: "new", line };
-  if (type === "fix" || type === "perf" || type === "revert") return { section: "fixes", line };
-  return { section: "internal", line };
+  const { type, scope = null, breaking, subject: rest } = match?.groups ?? { subject };
+  const pr = PR_SUFFIX.exec(rest);
+  const entry = {
+    scope,
+    text: pr ? rest.slice(0, pr.index) : rest,
+    pr: pr ? Number(pr.groups.pr) : null,
+  };
+  if (!match) return { section: "other", ...entry };
+  if (breaking || BREAKING_FOOTER.test(body)) return { section: "breaking", ...entry };
+  if (type === "feat") return { section: "new", ...entry };
+  if (type === "fix" || type === "perf" || type === "revert") return { section: "fixes", ...entry };
+  return { section: "internal", ...entry };
+}
+
+/** An entry's line in the Markdown notes. */
+export function lineOf({ scope, text, pr }) {
+  return `${scope ? `**${scope}:** ` : ""}${text}${pr === null ? "" : ` (#${pr})`}`;
+}
+
+/**
+ * The commits that change the image, grouped by section. Release commits are
+ * left out. Within a section, entries keep the commits' order.
+ */
+export function groupChanges(commits) {
+  const grouped = new Map();
+  for (const commit of commits) {
+    if (/^chore(\([^)]*\))?: release\b/.test(commit.subject)) continue;
+    if (!changesImage(commit.files)) continue;
+    const { section, ...entry } = entryOf(commit.subject, commit.body);
+    grouped.set(section, [...(grouped.get(section) ?? []), entry]);
+  }
+  return grouped;
 }
 
 const SECTIONS = [
@@ -90,19 +126,12 @@ export function releaseNotes({ tag, previousTag, sha, image, repository, commits
   ];
   if (!previousTag) return `${out.join("\n")}\n`;
 
-  const grouped = new Map();
-  for (const commit of commits) {
-    if (/^chore(\([^)]*\))?: release\b/.test(commit.subject)) continue;
-    if (!changesImage(commit.files)) continue;
-    const { section, line } = entryOf(commit.subject, commit.body);
-    grouped.set(section, [...(grouped.get(section) ?? []), line]);
-  }
-
+  const grouped = groupChanges(commits);
   out.push("", `## Changes since ${previousTag}`);
   if (grouped.size === 0) out.push("", "No changes to what the image runs.");
   for (const [key, heading] of SECTIONS) {
-    const lines = grouped.get(key);
-    if (lines) out.push("", `### ${heading}`, "", ...lines.map((line) => `- ${line}`));
+    const entries = grouped.get(key);
+    if (entries) out.push("", `### ${heading}`, "", ...entries.map((e) => `- ${lineOf(e)}`));
   }
   const internal = grouped.get("internal");
   if (internal) {
@@ -111,7 +140,7 @@ export function releaseNotes({ tag, previousTag, sha, image, repository, commits
       "<details>",
       `<summary>Internal changes (${internal.length})</summary>`,
       "",
-      ...internal.map((line) => `- ${line}`),
+      ...internal.map((entry) => `- ${lineOf(entry)}`),
       "",
       "</details>",
     );
@@ -121,6 +150,40 @@ export function releaseNotes({ tag, previousTag, sha, image, repository, commits
     `**Full changelog:** https://github.com/${repository}/compare/${previousTag}...${tag}`,
   );
   return `${out.join("\n")}\n`;
+}
+
+/** The version of the release-notes.json format. A reader rejects any other. */
+export const NOTES_SCHEMA = 1;
+
+/**
+ * The release notes as release-notes.json, the asset instances read to show
+ * what an upgrade changes. It lists the Breaking changes, New and Fixes of the
+ * Markdown notes.
+ * Each entry is `{ scope, text, pr }`, where scope and pr may be null.
+ * `internal` counts the changes it does not list: internal ones and subjects
+ * that are not Conventional Commits. A first release has no previousVersion
+ * and lists nothing.
+ *
+ * @param {object} release
+ * @param {string} release.tag The release's git tag, `vX.Y.Z`.
+ * @param {string | null} release.previousTag The previous published release's tag.
+ * @param {string} release.date When the release was published, as an ISO 8601 timestamp.
+ * @param {string} release.repository The GitHub repository, `owner/name`.
+ * @param {{ subject: string, body?: string, files: string[] }[]} release.commits Newest first.
+ */
+export function releaseNotesJson({ tag, previousTag, date, repository, commits }) {
+  const grouped = previousTag ? groupChanges(commits) : new Map();
+  return {
+    schema: NOTES_SCHEMA,
+    version: tag.replace(/^v/, ""),
+    previousVersion: previousTag ? previousTag.replace(/^v/, "") : null,
+    date,
+    url: `https://github.com/${repository}/releases/tag/${tag}`,
+    breaking: grouped.get("breaking") ?? [],
+    new: grouped.get("new") ?? [],
+    fixes: grouped.get("fixes") ?? [],
+    internal: (grouped.get("internal")?.length ?? 0) + (grouped.get("other")?.length ?? 0),
+  };
 }
 
 /** The commits in `previousTag..tag`, newest first, with their bodies and files. */
@@ -139,37 +202,118 @@ function commitsBetween(previousTag, tag) {
     });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [tag, publishedFile] = process.argv.slice(2);
-  const { IMAGE_NAME: image, GITHUB_REPOSITORY: repository } = process.env;
-  if (!tag || !publishedFile || !image || !repository) {
-    console.error(
-      "usage: IMAGE_NAME=… GITHUB_REPOSITORY=… release-notes.mjs <tag> <published-versions-file>",
-    );
-    process.exit(2);
-  }
-  const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
-  const published = readFileSync(publishedFile, "utf8").split("\n").filter(Boolean);
+const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+
+/**
+ * The previous release's tag, or null when there is none or its git tag is
+ * missing, in which case the notes list no changes.
+ */
+function previousTagOf(tag, published) {
   const previous = previousRelease(tag.replace(/^v/, ""), published);
-  let previousTag = previous ? `v${previous}` : null;
-  if (previousTag) {
-    try {
-      git("rev-parse", "--verify", "--quiet", `refs/tags/${previousTag}`);
-    } catch {
-      console.error(
-        `Docker Hub has ${previous}, but no ${previousTag} tag exists; listing no changes.`,
-      );
-      previousTag = null;
+  if (!previous) return null;
+  try {
+    git("rev-parse", "--verify", "--quiet", `refs/tags/v${previous}`);
+  } catch {
+    console.error(
+      `Docker Hub has ${previous}, but no v${previous} tag exists; listing no changes.`,
+    );
+    return null;
+  }
+  return `v${previous}`;
+}
+
+/** Every tag of the image on Docker Hub. */
+async function publishedOnDockerHub(image) {
+  const names = [];
+  let url = `https://hub.docker.com/v2/repositories/${image}/tags?page_size=100`;
+  while (url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Docker Hub answered ${response.status} for ${url}`);
+    const page = await response.json();
+    names.push(...page.results.map((result) => result.name));
+    url = page.next;
+  }
+  return names;
+}
+
+function usage() {
+  console.error(
+    [
+      "usage: IMAGE_NAME=… GITHUB_REPOSITORY=… release-notes.mjs <tag> <published-versions-file> [--json <path>]",
+      "       IMAGE_NAME=… GITHUB_REPOSITORY=… release-notes.mjs backfill <out-dir> <tag>...",
+    ].join("\n"),
+  );
+  process.exit(2);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const { IMAGE_NAME: image, GITHUB_REPOSITORY: repository } = process.env;
+  if (!image || !repository) usage();
+
+  if (args[0] === "backfill") {
+    // Reads the published releases and writes files only. The upload stays
+    // with whoever runs the printed commands.
+    const [, outDir, ...tags] = args;
+    if (!outDir || tags.length === 0) usage();
+    const published = await publishedOnDockerHub(image);
+    for (const tag of tags) {
+      const date = execFileSync(
+        "gh",
+        [
+          "release",
+          "view",
+          tag,
+          "--repo",
+          repository,
+          "--json",
+          "publishedAt",
+          "--jq",
+          ".publishedAt",
+        ],
+        { encoding: "utf8" },
+      ).trim();
+      const previousTag = previousTagOf(tag, published);
+      const notes = releaseNotesJson({
+        tag,
+        previousTag,
+        date,
+        repository,
+        commits: previousTag ? commitsBetween(previousTag, tag) : [],
+      });
+      const file = join(outDir, tag, "release-notes.json");
+      mkdirSync(join(outDir, tag), { recursive: true });
+      writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
+      console.log(`gh release upload ${tag} ${file} --repo ${repository}`);
+    }
+  } else {
+    const jsonAt = args.indexOf("--json");
+    const jsonFile = jsonAt === -1 ? null : args[jsonAt + 1];
+    if (jsonAt !== -1) args.splice(jsonAt, 2);
+    const [tag, publishedFile] = args;
+    if (!tag || !publishedFile || (jsonAt !== -1 && !jsonFile)) usage();
+    const published = readFileSync(publishedFile, "utf8").split("\n").filter(Boolean);
+    const previousTag = previousTagOf(tag, published);
+    const commits = previousTag ? commitsBetween(previousTag, tag) : [];
+    process.stdout.write(
+      releaseNotes({
+        tag,
+        previousTag,
+        sha: git("rev-parse", `${tag}^{commit}`),
+        image,
+        repository,
+        commits,
+      }),
+    );
+    if (jsonFile) {
+      const notes = releaseNotesJson({
+        tag,
+        previousTag,
+        date: new Date().toISOString(),
+        repository,
+        commits,
+      });
+      writeFileSync(jsonFile, `${JSON.stringify(notes, null, 2)}\n`);
     }
   }
-  process.stdout.write(
-    releaseNotes({
-      tag,
-      previousTag,
-      sha: git("rev-parse", `${tag}^{commit}`),
-      image,
-      repository,
-      commits: previousTag ? commitsBetween(previousTag, tag) : [],
-    }),
-  );
 }

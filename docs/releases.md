@@ -58,6 +58,17 @@ The previous release is the highest stable version below this one on Docker Hub,
 
 A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
 
+The release also carries `release-notes.json`, the same changes for instances to read. It holds the version, the previous release's version, the publish date, the release URL, and the Breaking changes, New and Fixes entries. Each entry has the commit's scope, its subject without the pull request suffix, and the pull request number. Internal changes and Other changes are a count only. A published release's file never changes.
+
+To attach the file to releases that predate it, write the files and print the upload commands:
+
+```bash
+git fetch --tags
+IMAGE_NAME=yunfanye/rome GITHUB_REPOSITORY=rome-os/rome node scripts/docker/release-notes.mjs backfill /tmp/rome-release-notes v1.1.200 v1.1.201
+```
+
+Check the files, then run the printed `gh release upload` commands.
+
 A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
 
 ### Rehearsing the pipeline

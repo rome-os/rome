@@ -303,15 +303,17 @@ jobs:
             jq -r '.results[].name' <<< "$page" >> published-versions.txt
             url=$(jq -r '.next' <<< "$page")
           done
-          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt > release-notes.md
-          cat release-notes.md
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt \
+            --json release-notes.json > release-notes.md
+          cat release-notes.md release-notes.json
 
       - name: Create release
         run: |
           set -euo pipefail
 
           # Not Latest: that badge stays with the package releases, which
-          # release-please would take it back for anyway.
+          # release-please would take it back for anyway. Instances download
+          # release-notes.json to show what an upgrade changes.
           prerelease=false
           [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
           gh release create "$RELEASE_TAG" \
@@ -319,4 +321,5 @@ jobs:
             --latest=false \
             --prerelease="$prerelease" \
             --title "Rome ${RELEASE_TAG}" \
-            --notes-file release-notes.md
+            --notes-file release-notes.md \
+            release-notes.json
