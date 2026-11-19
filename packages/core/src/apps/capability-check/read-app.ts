@@ -100,25 +100,18 @@ export async function readApp(dir: string): Promise<AppFacts> {
             const machinePaths = paths.filter(machine).length;
             // `route === "webhook" || route === "erase"` is a machine route for one path only.
             const mixed = machinePaths > 0 && machinePaths < paths.length;
-            // `startsWith("webhook")` also takes `/webhook-admin`, which no `/webhook/*` covers.
-            const loosePrefix = machinePaths > 0 && paths.some((p) => p.includes("**"));
             const unreadable =
               route.unreadable ??
               (mixed
                 ? `paths ${paths.map((p) => `\`/${p}\``).join(" and ")} that are not all machine routes`
-                : loosePrefix
-                  ? "a string prefix that also matches paths beside its machine route"
-                  : undefined);
+                : undefined);
             return {
               ...route,
               ...(unreadable ? { unreadable } : {}),
               noAuth: unreadable === undefined && machinePaths === paths.length,
               mayBeNoAuth:
                 unreadable !== undefined &&
-                (mixed ||
-                  loosePrefix ||
-                  noAuth === true ||
-                  (Array.isArray(noAuth) && noAuth.length > 0)),
+                (mixed || noAuth === true || (Array.isArray(noAuth) && noAuth.length > 0)),
             };
           });
   }
@@ -136,6 +129,7 @@ export async function readApp(dir: string): Promise<AppFacts> {
     ...(apiEntryAt ? { apiEntry: apiEntryAt } : {}),
     imports,
     pageRequests: reader.pageRequests(pageFiles),
+    ...(noAuth === true ? { wholeApiNoAuth: true } : {}),
     pageApiCalls: reader.pageApiCalls(pageFiles),
     pageCrossings: imports.filter(
       (imp) =>
@@ -751,6 +745,10 @@ class SourceReader {
       const dispatch = innerSwitch(branch.then, innerThens);
       if (!unreadable && dispatch) {
         unreadable = `a \`switch (${dispatch.expression.getText()})\` dispatch inside it`;
+      }
+      // `if (isPost(request))` inside the route splits it in a way the reader cannot read.
+      if (!unreadable && unreadRequestTests(branch.then, innerThens).length > 0) {
+        unreadable = "a test on the request inside it that the reader cannot read";
       }
       if (inner.length > 0 && !unreadable && effects.runs.length + effects.writes.length === 0) {
         // Code that answers after the narrower tests may be a route that runs
@@ -1503,6 +1501,8 @@ function readCondition(
         // `startsWith("notes/")` needs a segment after `notes`; `startsWith("notes")` also takes `notes`.
         const prefix = literal(first) as string;
         segments.push({ value: prefix.endsWith("/") ? `${prefix}*` : `${prefix}/**` });
+        // `startsWith("notes")` also takes `notes-archive`, which no segment pattern says.
+        if (!prefix.endsWith("/")) patternOnPath = true;
       } else if (name === "match" || name === "test" || name === "exec") {
         opaque = true;
         const operands = [node.expression.expression, ...node.arguments].map((n) => n.getText());

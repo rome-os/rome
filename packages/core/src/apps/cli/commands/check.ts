@@ -14,7 +14,7 @@ export default class Check extends Command {
 
   static override examples = [
     "pnpm --filter @rome/core app:check",
-    "pnpm --filter @rome/core app:check rome_apps/briefing",
+    "pnpm --filter @rome/core app:check rome_apps/inbox",
     "pnpm --filter @rome/core app:check ./my-app --json",
   ];
 

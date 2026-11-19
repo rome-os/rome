@@ -150,11 +150,22 @@ export function checkApp(app: AppFacts): AppVerdict {
 
   // I1 and I2
   if (app.routes === null) {
-    gap(
-      "I1",
-      app.apiEntry ?? "app.yaml",
-      "The app declares an API, but its routes could not be read, so neither interface can be checked.",
-    );
+    // Routes the reader cannot find are not proof of a gap.
+    if (!app.wholeApiNoAuth) {
+      cannotJudge(
+        "I1",
+        app.apiEntry ?? "app.yaml",
+        "The app declares an API, but the reader found no routes in its entry.",
+      );
+    }
+    for (const action of app.actions) {
+      if (!isAgentCallable(action) || action.webhook) continue;
+      cannotJudge(
+        "I2",
+        action.at,
+        `Could not read the routes, so whether a page runs \`${action.name}\` was not judged.`,
+      );
+    }
   } else {
     for (const route of app.routes) judgeRoute(app, route, gap, cannotJudge);
     for (const action of app.actions) {
@@ -335,6 +346,15 @@ function judgeRoute(
     );
   }
   if (route.unreadable) return;
+  if (isStatusRoute(route.path, route.method) && route.openEnded) {
+    // `path[0] === "status"` also serves `/status/history`, which the exemption does not cover.
+    cannotJudge(
+      "I1",
+      route.at,
+      `${label} also serves the paths below it, which the status exemption does not cover.`,
+    );
+    return;
+  }
   if (isStatusRoute(route.path, route.method)) {
     // A status route is exempt, but not the other paths it may also serve.
     const others = (route.alternatives ?? []).filter((path) => !isStatusRoute(path, route.method));
@@ -379,7 +399,7 @@ function judgeRoute(
   }
 }
 
-/** `briefing:add_scout` and `add_scout` both name `add_scout` in app `briefing`. */
+/** `notes:add_note` and `add_note` both name `add_note` in app `notes`. */
 function localName(appId: string, name: string): string {
   const prefix = `${appId}:`;
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;

@@ -639,12 +639,47 @@ declare class NoSchemaAction { constructor(config: unknown); }
     expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I5", "src/web/Skills.tsx:1"]]);
   });
 
-  it("reports an API whose routes it cannot read instead of passing it", async () => {
-    const gaps = await gapsOf({
+  it("leaves an API whose routes it cannot read to a person instead of passing it", async () => {
+    const files = {
       ...COMPLIANT,
       "src/api/index.ts": "export const handle = (r: unknown) => r;\n",
-    });
-    expect(gaps.map((g) => g.rule)).toContain("I1");
+    };
+    const verdict = checkApp(await readApp(writeApp(files)));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule).sort()).toEqual(["I1", "I2"]);
+    // A whole API declared a machine endpoint has no I1 to judge.
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "  entry: api/index\n",
+      "  entry: api/index\n  noAuth: true\n",
+    );
+    const machine = checkApp(await readApp(writeApp({ ...files, "app.yaml": manifest })));
+    expect(machine.unverified.map((u) => u.rule)).toEqual(["I2"]);
+  });
+
+  it("I1: does not let the status exemption cover the paths below `status`", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return "not found";',
+      'if (request.method === "GET" && request.path[0] === "status") return "up";\n    return "not found";',
+    );
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+  });
+
+  it("I2: leaves a bare string prefix and a request test it cannot read to a person", async () => {
+    for (const replacement of [
+      'if (request.method === "POST" && route.startsWith("notes")) return this.add();',
+      'if (route === "notes") {\n      if (isPost(request)) return this.add();\n      return [];\n    }',
+    ]) {
+      const api =
+        `declare function isPost(r: unknown): boolean;\n${COMPLIANT["src/api/index.ts"]}`.replace(
+          'if (request.method === "POST" && route === "notes") return this.add();',
+          replacement,
+        );
+      const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api })));
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
+    }
   });
 
   describe("never passes what it cannot read", () => {

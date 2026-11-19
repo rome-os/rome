@@ -102,6 +102,8 @@ export interface AppFacts {
   imports: ImportFacts[];
   pageRequests: PageRequestFacts[];
   /** The page's calls to its own app API. */
+  /** The app declares `api.noAuth: true`: its whole API is a machine endpoint. */
+  wholeApiNoAuth?: boolean;
   pageApiCalls: PageApiCallFacts[];
   /** Imports into api/, actions/ or db/ from shared code the page reaches. */
   pageCrossings: ImportFacts[];
