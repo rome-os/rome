@@ -345,7 +345,7 @@ export class SlackAppAdapter {
     if (event.type !== "message" && event.type !== "app_mention") {
       // Slack retries and the relay delivers at least once.
       if (this.dedup.checkAndRecord(eventId)) return { status: 200 };
-      this.handleSignal(payload);
+      await this.handleSignal(payload);
       return { status: 200 };
     }
     if (!direct && !mention) return { status: 200 };
@@ -421,17 +421,27 @@ export class SlackAppAdapter {
     return { status: 200 };
   }
 
-  /** An event that is not a message: the app removed or its token revoked. */
-  private handleSignal(payload: SlackEventCallback): void {
+  /**
+   * An event that is not a message: the app removed or its token revoked.
+   * Such an event can wait in the mailbox while Rome is stopped and arrive
+   * after the guardian connected again with a new token, so it ends the
+   * connection only when Slack refuses the token now. A check that cannot
+   * reach Slack reports the connection down, and the restart checks again.
+   */
+  private async handleSignal(payload: SlackEventCallback): Promise<void> {
     const event = payload.event;
-    if (event.type === "app_uninstalled") {
-      this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
-      return;
-    }
-    if (event.type === "tokens_revoked") {
-      if (event.tokens?.bot?.includes(this.config.botUserId)) {
-        this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
-      }
+    const removed =
+      event.type === "app_uninstalled" ||
+      (event.type === "tokens_revoked" && !!event.tokens?.bot?.includes(this.config.botUserId));
+    if (!removed) return;
+    try {
+      await this.config.api.authTest(this.config.botToken, this.abort.signal);
+      log.info("slack app's token outlived a removal event", { event: event.type });
+    } catch (error) {
+      this.config.onFault?.({
+        kind: isSlackCredentialError(error) ? "credential" : "transport",
+        cause: error,
+      });
     }
   }
 
