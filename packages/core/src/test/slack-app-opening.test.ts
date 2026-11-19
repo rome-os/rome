@@ -141,8 +141,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         labels: new SenderLabels({ byAccount: async () => null }),
         channelOfChat: () => "slack_app",
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
-        latest: (place, { limit, until }) =>
-          adapter.readHistory(place.threadId as never, { limit, until }),
+        latest: (place, read) => adapter.readHistory(place.threadId as never, read),
       });
     const place: ThreadContext = { channel: "slack_app", threadId: CHAT, threadType: "private" };
     const before = new Date("2023-11-14T22:14:00.000Z");
@@ -184,5 +183,59 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     const calls = slack.conversationHistory.mock.calls;
     expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual(["1700000040.000001"]);
     expect(latestOf(calls.slice(readsBeforeWiped))).toEqual(["1700000040.000001"]);
+  });
+
+  it("reads what came before the session's first message when more than a page followed it in the same second", async () => {
+    const slack = slackSide();
+    // Three messages, the session's first at .000500 of the same second, then
+    // twenty more in that second: more than Slack's page of 15.
+    const inSecond = (micros: number) => `1700000040.${String(micros).padStart(6, "0")}`;
+    for (const [micros, text] of [
+      [100, "it is 42"],
+      [300, "or 43"],
+      [500, "what is it?"],
+    ] as const) {
+      slack.said.push({ ts: inSecond(micros), user: MEMBER, text });
+    }
+    for (let i = 0; i < 20; i++) {
+      slack.said.push({ ts: inSecond(600 + i), user: MEMBER, text: `later ${i}` });
+    }
+    const adapter = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: {
+        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
+        postMessage: async () => ({ ts: "9.0" }),
+        openDirectMessage: async () => "D_NEW",
+        userName: async () => ({ displayName: "Ouou", username: "ouou" }),
+        conversationHistory: slack.conversationHistory,
+        revoke: async () => {},
+      },
+      openMailbox: () => ({ stop: () => {} }),
+      copy: new SlackMessageCopyRepository(testDb.db),
+      readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
+    });
+    adapter.onInbound(() => {});
+    await adapter.start();
+    const facts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => {} },
+      // Rome's record of the session's first message, by its Slack ts.
+      messages: { byIds: () => [{ key: inSecond(500) } as never] },
+      labels: new SenderLabels({ byAccount: async () => null }),
+      channelOfChat: () => "slack_app",
+      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+      latest: (place, read) => adapter.readHistory(place.threadId as never, read),
+    });
+    const place: ThreadContext = { channel: "slack_app", threadId: CHAT, threadType: "private" };
+
+    // Rome's record holds the first message at the whole second.
+    const earlier = await facts.earlier!(place, new Date(1_700_000_040_000), 1);
+    await adapter.stop();
+
+    expect(earlier?.map((m) => m.text)).toEqual(["it is 42", "or 43"]);
   });
 });
