@@ -1,6 +1,16 @@
-import { describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
 import type { AgentCatalogGroup } from "./chat-types";
 import { filterAgentCatalog } from "./agent-catalog-filter";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
+
+afterEach(() => {
+  hiddenFeatures.clear();
+});
 
 const CATALOG: AgentCatalogGroup[] = [
   {
@@ -47,5 +57,26 @@ describe("filterAgentCatalog", () => {
 
   it("drops apps with nothing left", () => {
     expect(filterAgentCatalog(CATALOG, "nothing")).toEqual([]);
+  });
+});
+
+describe("filterAgentCatalog for a hidden feature", () => {
+  const inbox: AgentCatalogGroup = {
+    ownerId: "inbox",
+    ownerType: "app",
+    label: "Inbox",
+    description: "",
+    iconUrl: null,
+    agents: [{ name: "inbox:sentinel", localName: "sentinel", description: "" }],
+  };
+
+  it("offers no agents of an app that is a hidden feature, even when asked by name", () => {
+    hiddenFeatures.add("inbox");
+    expect(names(filterAgentCatalog([...CATALOG, inbox], ""))).toEqual(names(CATALOG));
+    expect(filterAgentCatalog([...CATALOG, inbox], "inbox")).toEqual([]);
+  });
+
+  it("offers them while the feature is shown", () => {
+    expect(names(filterAgentCatalog([inbox], "inbox"))).toEqual([["inbox", ["inbox:sentinel"]]]);
   });
 });

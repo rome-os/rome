@@ -515,23 +515,20 @@ describe("listSessionThread", () => {
 });
 
 describe("listChatAgents", () => {
-  it("leaves out the agents of an app that is a hidden feature", async () => {
+  it("keeps the agents of an app that is a hidden feature, for labels and icons", async () => {
     hiddenFeatures.add("inbox");
-    const group = (ownerId: string, ownerType: "core" | "app") => ({
-      ownerId,
-      ownerType,
-      label: ownerId,
+    const inbox = {
+      ownerId: "inbox",
+      ownerType: "app",
+      label: "Inbox",
       description: "",
       iconUrl: null,
-      agents: [{ name: `${ownerId}:agent`, localName: "agent", description: "" }],
-    });
+      agents: [{ name: "inbox:sentinel", localName: "sentinel", description: "" }],
+    };
     rs.stubGlobal(
       "fetch",
-      rs.fn(async () =>
-        Response.json([group("core", "core"), group("inbox", "app"), group("notes", "app")]),
-      ),
+      rs.fn(async () => Response.json([inbox])),
     );
-    const groups = await listChatAgents();
-    expect(groups.map((g) => g.ownerId)).toEqual(["core", "notes"]);
+    expect((await listChatAgents()).map((g) => g.ownerId)).toEqual(["inbox"]);
   });
 });
