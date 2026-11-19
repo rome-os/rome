@@ -8,7 +8,7 @@
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Kinds of connection laid out as mountable parts. A kind joins this list in the PR that moves it to the layout. */
-export const CONNECTION_KINDS: readonly string[] = ["linkedin"];
+export const CONNECTION_KINDS: readonly string[] = ["feishu", "linkedin"];
 
 const KINDS_FOLDER = "connections/kinds/";
 

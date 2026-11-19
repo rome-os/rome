@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { defaultHttpInstance } from "@larksuiteoapi/node-sdk";
-import { CredentialRejected } from "../errors.js";
-import { createFeishuDocumentActor, FEISHU_DOCUMENT_READ } from "./feishu-documents.js";
+import { CredentialRejected } from "../../errors.js";
+import { createFeishuDocumentActor, FEISHU_DOCUMENT_READ } from "./documents.js";
 
 const call = { operation: FEISHU_DOCUMENT_READ, input: { documentId: "DocumentA" } };
 const material = {

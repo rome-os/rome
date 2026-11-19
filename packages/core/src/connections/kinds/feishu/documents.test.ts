@@ -4,8 +4,8 @@ import {
   FEISHU_DOCUMENT_OPERATIONS,
   FEISHU_DOCUMENT_READ,
   feishuDocumentGuidance,
-} from "./feishu-documents.js";
-import { CredentialRejected, ProviderOperationError } from "../errors.js";
+} from "./documents.js";
+import { CredentialRejected, ProviderOperationError } from "../../errors.js";
 rs.mock("@larksuiteoapi/node-sdk", () => ({
   Domain: { Feishu: "https://open.feishu.cn", Lark: "https://open.larksuite.com" },
   DefaultCache: class {},

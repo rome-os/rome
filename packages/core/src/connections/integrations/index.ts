@@ -20,7 +20,6 @@ import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
-import { createFeishuDescriptor } from "./feishu.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
@@ -34,7 +33,6 @@ export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
 export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
-export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -52,9 +50,9 @@ export interface BuiltinConnectionDeps {
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
-  /** Loaded-agent lister (Discord/Feishu agent-binding validation + autocomplete). */
+  /** Loaded-agent lister (Discord agent-binding validation + autocomplete). */
   listAgents: () => string[];
-  /** The agent linked to a Connection's channel (Discord/Feishu in-chat settings). */
+  /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** A test-only back door: whether an agent keeps the Inbox app off the
    *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
@@ -114,15 +112,6 @@ export function registerBuiltinConnections(
   if (deps.wechatUserRuntime) {
     registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
   }
-  registry.register(
-    createFeishuDescriptor({
-      chatSettings: deps.chatSettings,
-      peopleRepo: deps.peopleRepo,
-      listAgents: deps.listAgents,
-      accountAgentOf: deps.accountAgentOf,
-      hasAgent: deps.hasAgent,
-    }),
-  );
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,
