@@ -1108,6 +1108,8 @@ describe("Slack app reads a direct message (R13)", () => {
     await a.start();
     slack.say(1);
     await mailbox.deposit(frame(dmEvent(1)));
+    // A read asks Slack for the chat's newest once; the drain carries it on.
+    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
     const reply = slack.say(2, "bot");
     const api = a as unknown as { config: { api: SlackAppWebApi } };
     let answer!: (value: { ts: string }) => void;
@@ -1127,6 +1129,30 @@ describe("Slack app reads a direct message (R13)", () => {
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
     expect(texts(read)).toEqual(["message 2"]);
     expect(slack.calls.length).toBe(asked);
+  });
+
+  it("answers a retry into a new drain the same with its copy wiped as whole", async () => {
+    const answers: string[][] = [];
+    for (const wipe of [false, true]) {
+      const slack = fakeSlackHistory();
+      for (const i of [1, 2]) slack.say(i);
+      const first = fakeMailbox();
+      const before = historyAdapter(first, slack);
+      await before.adapter.start();
+      await first.deposit(frame(dmEvent(1)), frame(dmEvent(2)));
+      await before.adapter.stop();
+      if (wipe) {
+        before.db.delete(slackAppTimeline).run();
+      }
+
+      // Slack retries message 1 into the new drain, and nothing new follows.
+      const second = fakeMailbox();
+      const after = historyAdapter(second, slack, { db: before.db });
+      await after.adapter.start();
+      await second.deposit(frame(dmEvent(1)));
+      answers.push(texts(await after.adapter.readHistory("D_GUARDIAN" as never, { limit: 1 })));
+    }
+    expect(answers).toEqual([["message 2"], ["message 2"]]);
   });
 
   it("takes no message Slack sends again after a restart for the chat's newest", async () => {
@@ -1187,8 +1213,11 @@ describe("Slack app reads a direct message (R13)", () => {
     const mailbox = fakeMailbox();
     const { adapter: a, copy } = historyAdapter(mailbox, slack);
     await a.start();
-    const said = [1, 2, 3].map((i) => slack.say(i));
+    const said = [slack.say(1)];
     await mailbox.deposit(frame(dmEvent(1)));
+    // A read asks Slack for the chat's newest once; the drain carries it on.
+    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    said.push(slack.say(2), slack.say(3));
     // Message 2 reached the copy from a page of Slack's, with no link yet.
     const context = { channel: "slack_app", teamId: TEAM, botUserId: BOT, chatId: "D_GUARDIAN" };
     copy.keepRun(TEAM, "D_GUARDIAN", {

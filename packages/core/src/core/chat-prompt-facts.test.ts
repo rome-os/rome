@@ -172,6 +172,9 @@ describe("chatPromptFacts earlier messages", () => {
     const page = [
       at(950, "q2", "and also"),
       at(900, "q1", "what is it?"),
+      // Shares the question's millisecond: Slack's ts orders the two finer
+      // than a Date can, and the page answers in that order.
+      at(900, "g", "or 43"),
       at(100, "f", "it is 42"),
     ];
     const { promptFacts, latest } = earlierFacts(page, true, { 31: "q1" });
@@ -180,7 +183,7 @@ describe("chatPromptFacts earlier messages", () => {
 
     const earlier = await promptFacts.earlier?.(place, before, 31);
 
-    expect(earlier?.map((m) => m.text)).toEqual(["it is 42"]);
+    expect(earlier?.map((m) => m.text)).toEqual(["it is 42", "or 43"]);
     expect(latest).toHaveBeenCalledWith(place, {
       limit: 16,
       until: new Date(before.getTime() + 999),
