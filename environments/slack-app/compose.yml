@@ -178,6 +178,9 @@ services:
     environment:
       <<: *rome-env
       PANTHEON_INSTANCE_ORIGIN: http://127.0.0.1:${ROME_A_PORT}
+      # Rome Cloud sign-in is gated per instance slug; without one a fresh
+      # instance refuses it. The explicit origin above still wins.
+      PANTHEON_SLUG: slackenv-a
       ROME_JWT_SECRET: ${ROME_A_JWT_SECRET}
     volumes:
       - rome-a-app:/app
@@ -220,6 +223,9 @@ services:
     environment:
       <<: *rome-env
       PANTHEON_INSTANCE_ORIGIN: http://127.0.0.1:${ROME_B_PORT}
+      # Rome Cloud sign-in is gated per instance slug; without one a fresh
+      # instance refuses it. The explicit origin above still wins.
+      PANTHEON_SLUG: slackenv-b
       ROME_JWT_SECRET: ${ROME_B_JWT_SECRET}
     volumes:
       - rome-b-app:/app
