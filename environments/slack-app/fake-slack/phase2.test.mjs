@@ -836,3 +836,21 @@ test("a mention in a group the bot is not in sends no event and stays in history
   assert.notEqual(general.event_sent, false);
   assert.ok(received.length > before);
 });
+
+test("a direct message with send_event false enters history and sends no event", async () => {
+  await install(A, GUARDIAN, APP_SCOPES);
+  const before = received.length;
+  const said = await ctl("/dm", {
+    team: A,
+    user: GUARDIAN,
+    text: "The pomelo crate number is 8841.",
+    send_event: false,
+  });
+  assert.equal(said.event_sent, false);
+  await sleep(50);
+  assert.equal(received.length, before);
+  const { messages } = await ctl(`/history?team=${A}&channel=${said.event.channel}`);
+  assert.ok(
+    messages.some((m) => m.text === "The pomelo crate number is 8841." && m.user === GUARDIAN),
+  );
+});

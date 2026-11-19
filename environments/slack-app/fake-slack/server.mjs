@@ -1640,6 +1640,12 @@ async function control(slack, method, url, body) {
       return { ok: true };
     case "POST /dm": {
       const event = slack.directMessage(body.team, body.user, body.text, body.thread_ts);
+      // `send_event: false` puts the message in the direct message's history
+      // without telling the app, as if it had missed the event.
+      if (body.send_event === false) {
+        slack.rememberEvent(body.team, event);
+        return { ok: true, event_sent: false, event };
+      }
       return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
     case "POST /mention": {
