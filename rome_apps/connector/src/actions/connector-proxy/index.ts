@@ -6,7 +6,6 @@ import {
   type ActionConfig,
   type AppActionRuntimeDeps,
   type ChannelsService,
-  type ChatSettingsControl,
 } from "@rome-os/app-runtime";
 
 import type { ProxiedResponse } from "../../api/composio-client.js";
@@ -112,10 +111,7 @@ const inputSchema = z.object({
 
 export function createAction(
   config: ActionConfig,
-  deps: AppActionRuntimeDeps<{
-    channelsService?: ChannelsService;
-    chatSettings?: ChatSettingsControl;
-  }>,
+  deps: AppActionRuntimeDeps<{ channelsService?: ChannelsService }>,
 ): Action {
   return defineAction({
     config,
@@ -196,7 +192,6 @@ export function createAction(
           }
           const result = await slackAppProxyCall({
             channels,
-            ...(deps.chatSettings ? { chatSettings: deps.chatSettings } : {}),
             account,
             path: new URL(endpoint).pathname,
             body,

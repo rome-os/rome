@@ -148,8 +148,6 @@ describe("the Slack app talker", () => {
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
       cloud: cloud({
@@ -207,69 +205,6 @@ describe("the Slack app talker", () => {
   });
 });
 
-describe("the Slack app's channels in chat settings", () => {
-  it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
-    const descriptor = makeSlackAppDescriptor({
-      api: {
-        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
-        postMessage: async () => ({ ts: "3.0" }),
-        openDirectMessage: async () => "D1",
-        userName: async () => ({}),
-        conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({
-          channels: [
-            { id: "C_NEWS", name: "news", isPrivate: false },
-            { id: "G_OPS", name: "ops", isPrivate: true },
-          ],
-        }),
-        revoke: async () => {},
-      },
-      cloud: cloud(),
-      openMailbox: () => ({ stop: () => {} }),
-      copy: {
-        keep: () => true,
-        handedOver: () => {},
-        mayNotHold: () => [],
-        keepRun: () => {},
-        timelineRow: () => null,
-        timelineBefore: () => [],
-        timelineAfter: () => null,
-        holdsNewer: () => false,
-        search: () => [],
-      },
-    });
-    const talker = descriptor.capabilities.talker?.build(
-      {
-        material: {
-          teamId: "T_A",
-          botUserId: "U_BOT",
-          botToken: "xoxb-a",
-          forwardSecret: "secret",
-          connectUrl: "wss://relay.test/c/mbx",
-          drainKey: "k",
-        },
-        expiresAt: "never",
-      },
-      { connectionId: "c1", persist: async () => {}, registerIngress: () => () => {} },
-    );
-
-    const all = await talker?.directory?.listConversations({ limit: 10 });
-    const found = await talker?.directory?.listConversations({ query: "#NE", limit: 10 });
-
-    expect(all?.conversations.map((each) => each.displayName)).toEqual(["#news", "#ops"]);
-    expect(found?.conversations).toEqual([
-      {
-        ref: { connectionId: "c1", chatId: "C_NEWS" },
-        connectionKind: "slack_app",
-        service: "slack_app",
-        kind: "channel",
-        displayName: "#news",
-      },
-    ]);
-  });
-});
-
 describe("disconnecting the Slack app in Rome (R8)", () => {
   const MATERIAL = {
     teamId: "T_A",
@@ -288,8 +223,6 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({ channels: [] }),
         revoke: async (token) => {
           steps.push(`revoke ${token}`);
           await revoke();

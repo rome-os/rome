@@ -120,8 +120,6 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
           openDirectMessage: async () => "D_NEW",
           userName: async () => ({ displayName: "Ouou", username: "ouou" }),
           conversationHistory: slack.conversationHistory,
-          conversationReplies: async () => ({ messages: [] }),
-          memberChannels: async () => ({ channels: [] }),
           revoke: async () => {},
         },
         openMailbox: (_mailbox, handler) => {
