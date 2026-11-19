@@ -75,6 +75,14 @@ function instantOf(ts: string): Date | undefined {
   return Number.isFinite(seconds) ? new Date(seconds * 1_000) : undefined;
 }
 
+/** A Slack `ts` in microseconds, exact where a Date keeps only
+ *  milliseconds, or undefined when it is not one. */
+function microsOf(ts: string | undefined): bigint | undefined {
+  const match = ts?.match(/^(\d+)(?:\.(\d{1,6}))?$/);
+  if (!match) return undefined;
+  return BigInt(match[1] ?? "0") * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
+}
+
 /** The message's own `ts`: a reply's id names its thread first. */
 function tsOf(messageId: string | undefined): string | undefined {
   return messageId?.slice(messageId.lastIndexOf(":") + 1);
@@ -145,16 +153,31 @@ export async function slackAppProxyCall(params: {
         const latest = stringArg(args, "latest");
         const oldest = stringArg(args, "oldest");
         const since = oldest ? instantOf(oldest) : undefined;
-        const messages = await channels.query(account, {
+        const page = await channels.query(account, {
           chatId: channel as ChatId,
           limit,
           ...(latest ? { olderThan: latest } : {}),
           ...(since ? { since } : {}),
         });
+        // `since` holds milliseconds and includes its bound. Slack's `oldest`
+        // is exact to the microsecond and excludes its own, so the page is cut
+        // there. Only messages within that one millisecond are cut, so the
+        // page keeps its length but for them.
+        const floor = microsOf(oldest);
+        const messages =
+          floor === undefined
+            ? page
+            : page.filter((message) => {
+                const ts = microsOf(tsOf(message.messageId));
+                return ts === undefined || ts > floor;
+              });
         // A page can hold fewer than `limit` with more before it, since the
-        // connection reads Slack a short page at a time. Only an empty page
-        // says nothing is left.
-        return ok({ messages: messages.map(wireOf), has_more: messages.length > 0 });
+        // connection reads Slack a short page at a time. Only an empty page,
+        // or one that reached `oldest`, says nothing is left.
+        return ok({
+          messages: messages.map(wireOf),
+          has_more: messages.length > 0 && messages.length === page.length,
+        });
       }
       case "search.messages": {
         const text = stringArg(args, "query");

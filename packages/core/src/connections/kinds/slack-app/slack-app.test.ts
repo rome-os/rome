@@ -1467,4 +1467,22 @@ describe("Slack app searches what it keeps (R9)", () => {
     expect(texts((await a.search({ text: "f_t", limit: 10 })).messages)).toEqual(["50% off_today"]);
     expect((await a.search({ text: "x_y", limit: 10 })).messages).toEqual([]);
   });
+
+  it("folds case in any script, however each side's accents were typed", async () => {
+    const { adapter: a } = adapter(fakeMailbox());
+    await a.start();
+    const say = (n: number, text: string) =>
+      a.handleFrame(frame({ ...dmEvent(n), event: { ...dmEvent(n).event, text } }));
+    await say(1, "Привет, Équipe");
+    // "É" typed as E and a combining accent.
+    await say(2, "L'E\u0301quipe arrive");
+
+    expect(texts((await a.search({ text: "ПРИВЕТ", limit: 10 })).messages)).toEqual([
+      "Привет, Équipe",
+    ]);
+    expect(texts((await a.search({ text: "équipe", limit: 10 })).messages)).toEqual([
+      "L'E\u0301quipe arrive",
+      "Привет, Équipe",
+    ]);
+  });
 });

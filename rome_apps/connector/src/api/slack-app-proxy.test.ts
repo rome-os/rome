@@ -130,6 +130,28 @@ describe("Slack's Web API through Rome's Slack app", () => {
     expect(empty.data.data).toMatchObject({ has_more: false, messages: [] });
   });
 
+  it("leaves out messages at or before oldest, to the microsecond, as Slack does", async () => {
+    const service = channels({
+      query: rs.fn(async () => [
+        said("1700000000.000500"),
+        said("1700000000.000400"),
+        said("1700000000.000100"),
+      ]),
+    });
+
+    const result = await call(service, "/api/conversations.history", undefined, {
+      channel: "D1",
+      oldest: "1700000000.000400",
+    });
+
+    if (result.status !== "ok") throw new Error(result.error);
+    expect(result.data.data).toMatchObject({
+      messages: [{ ts: "1700000000.000500" }],
+      has_more: false,
+    });
+    expect((result.data.data as { messages: unknown[] }).messages).toHaveLength(1);
+  });
+
   it("answers search.messages with its matches and says what the search covered", async () => {
     const service = channels();
 
