@@ -26,6 +26,7 @@ usage() {
   cos-env memory --file [<server|dm>/<id>]
   cos-env crash-at before-commit|after-commit-before-send|mid-outbox
   cos-env handled
+  cos-env drop-next <n> --chat <name>
   cos-env send stub|fail|hang
   cos-env chat <name> default|mentions-only|ignore-others|off|every
   cos-env link | unlink
@@ -125,6 +126,10 @@ case "$command" in
     cos_crash_at "${args[0]}"
     ;;
   handled) cos_handled ;;
+  drop-next)
+    [ ${#args[@]} -eq 1 ] && [ -n "$chat" ] || usage
+    cos_drop_next "${args[0]}" "$chat"
+    ;;
   send)
     [ ${#args[@]} -eq 1 ] || usage
     case "${args[0]}" in stub | fail | hang) ;; *) usage ;; esac

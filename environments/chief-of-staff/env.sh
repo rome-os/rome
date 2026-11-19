@@ -1245,6 +1245,24 @@ cos_crash_at() {
   echo
 }
 
+# Has the app drop the next <n> messages said in chat <name>, its threads
+# included, as if it never heard them; Discord still has them. 0 clears it.
+cos_drop_next() {
+  local count="${1:-}" name="${2:-}" id
+  [[ "$count" =~ ^[0-9]+$ ]] && [ -n "$name" ] || die "usage: cos-env drop-next <n> --chat <name>"
+  load_secrets
+  if [ "$TRANSPORT" = inject ]; then
+    id="$(inject chat "$name")"
+  else
+    id="$(state "chats.$name" 2>/dev/null)"
+    [ -n "$id" ] || die "no chat \"$name\". Chats: $(all_chat_names | tr '\n' ' ')"
+  fi
+  printf '{"chatId":"%s","count":%s}' "$id" "$count" |
+    api PUT "/apps/$COS_AGENT_APP/debug/drop-next" >/dev/null ||
+    die "the app refused drop-next. It needs an app build with the debug/drop-next route."
+  log "the app drops the next $count messages said in #$name"
+}
+
 cos_handled() {
   api GET "/apps/$COS_AGENT_APP/debug/handled"
   echo

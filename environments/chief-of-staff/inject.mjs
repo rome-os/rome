@@ -251,6 +251,14 @@ const commands = {
     process.stdout.write(`${JSON.stringify(picked, null, 2)}\n`);
   },
 
+  // Prints the chat's id, as the app hears it.
+  async chat(name) {
+    const s = state();
+    const id = chatId(s, name);
+    saveState(s);
+    process.stdout.write(`${id}\n`);
+  },
+
   // Prints the server id the chat is in, the one every test chat shares.
   async server(chat) {
     const s = state();
