@@ -1,3 +1,4 @@
+import type { PhoneBook } from "../people/phone-book/index.js";
 import type { AgentNameEvents } from "../people/guardian-profile/index.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
@@ -176,6 +177,8 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
+  /** The phone book's routes and actions. Absent, the phone book is left out. */
+  phoneBook?: PhoneBook;
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */

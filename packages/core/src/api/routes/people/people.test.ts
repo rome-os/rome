@@ -8,18 +8,18 @@ import {
   type PersonResource,
   type TimelinePage,
 } from "@rome/api-types/people";
-import { peopleRoutes } from "./people.js";
-import { personHistoryRoutes } from "../person-history.js";
+import { phoneBookRoutes } from "../../../people/phone-book/index.js";
+import { personHistoryRoutes } from "./person-history.js";
 import {
   createTestDb,
   buildTestDeps,
   ownedByGuardian,
   type TestDb,
   type TestDeps,
-} from "../../../../test/helpers.js";
-import { seedBaseline, type BaselineIds } from "../../../../test/seeds.js";
-import { sayOnChannel } from "../../../../test/speakers.js";
-import { channels as channelRows } from "../../../../db/schema.js";
+} from "../../../test/helpers.js";
+import { seedBaseline, type BaselineIds } from "../../../test/seeds.js";
+import { sayOnChannel } from "../../../test/speakers.js";
+import { channels as channelRows } from "../../../db/schema.js";
 
 // GET /people/:id/messages — one of a person's accounts, its history. These
 // tests pin what the read answers over real stores: which of the overlapping
@@ -65,7 +65,7 @@ describe("People timeline API", () => {
     await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
     ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", GUARDIAN_CHANNELS);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
 
     personId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
@@ -458,7 +458,7 @@ describe("People API", () => {
     ownedByGuardian(testDb.db, deps.peopleRepo, baseline.persons.guardianId, [
       { channel: "whatsapp", platform: "whatsapp" },
     ]);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
 
     // One WhatsApp account reachable two ways, which the mirror folds onto the
     // phone JID, and a person mapped under both of them.
@@ -710,7 +710,7 @@ describe("People create API", () => {
     testDb = createTestDb();
     await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
 
     await deps.whatsAppStoreRepo.upsertContacts([
       { jid: ALICE_JID, phoneNumber: "15550002222", name: "Alice Marsh" },
@@ -900,7 +900,7 @@ describe("People account links", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
     alice = baseline.persons.innerCircleId;
     bob = baseline.persons.acquaintanceId;
     carol = baseline.persons.otherId;
@@ -1102,7 +1102,7 @@ describe("People updates", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
   });
 
   afterEach(() => testDb.close());
@@ -1208,7 +1208,7 @@ describe("People delegate links", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
   });
 
   afterEach(() => testDb.close());
@@ -1245,7 +1245,7 @@ describe("People delete", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
   });
 
   afterEach(() => testDb.close());
@@ -1305,7 +1305,7 @@ describe("People merge", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
     alice = baseline.persons.innerCircleId;
     bob = baseline.persons.acquaintanceId;
     carol = baseline.persons.otherId;

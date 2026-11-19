@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "./model/people-repository.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { ActionEngine, type ActionRunContext } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { DrizzlePeopleRepository } from "../infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../model/people-repository.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
 import { READ_PERSON_ACTION, registerReadPersonAction } from "./read-person.js";
 
 type Actor = NonNullable<ActionRunContext["actor"]>;

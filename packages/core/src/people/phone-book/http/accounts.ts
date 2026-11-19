@@ -7,13 +7,13 @@ import {
   sliceAccountDirectory,
   type AccountState,
 } from "@rome/api-types/people";
-import { readAccountDirectory } from "../../../../people/phone-book/index.js";
-import type { ApiDeps } from "../../../deps.js";
+import { readAccountDirectory } from "../application/account-directory.js";
+import type { PhoneBookDeps } from "../deps.js";
 
 // The account read: every account Rome has observed, and what the guardian has
 // decided about each. What a page is, how it is ordered, how it resumes and
 // what its numbers count are the contract's (@rome/api-types/people). Which
-// sources they are folded from is `src/people/phone-book/account-directory.ts`. This
+// sources they are folded from is `src/people/phone-book/application/account-directory.ts`. This
 // route is the join between a query string and those two, and holds no rule of
 // its own.
 //
@@ -23,7 +23,7 @@ import type { ApiDeps } from "../../../deps.js";
 // It is a read. Placing an account is a write on the person's own route;
 // dismissing and restoring one are `./account-decisions.ts`.
 
-export function accountsRoutes(deps: ApiDeps): Hono {
+export function accountsRoutes(deps: PhoneBookDeps): Hono {
   const app = new Hono();
 
   /** The `?state=` the read narrows by, or the 400 a value that names no state

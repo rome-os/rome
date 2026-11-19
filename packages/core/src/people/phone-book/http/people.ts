@@ -1,28 +1,21 @@
 import { Hono, type Context } from "hono";
 import {
-  comparePeople,
-  countPeople,
   linkConflict,
   parseCreatePersonRequest,
   parseLinkAccountRequest,
   parseMergeRequest,
   parsePersonFilterLevel,
   parseUpdatePersonRequest,
-  personMatchesLevel,
-  personMatchesQuery,
   type PeopleList,
 } from "@rome/api-types/people";
-import {
-  createPerson,
-  deletePerson,
-  findPerson,
-  mergePeople,
-  readPeople,
-  readPerson,
-  updatePerson,
-} from "../../../../people/phone-book/index.js";
-import { accountOfWire, wireOf } from "../../../../people/model/wire.js";
-import type { ApiDeps } from "../../../deps.js";
+import { createPerson } from "../application/create.js";
+import { deletePerson } from "../application/delete.js";
+import { listPeople } from "../application/list.js";
+import { mergePeople } from "../application/merge.js";
+import { findPerson, readPerson } from "../application/resource.js";
+import { updatePerson } from "../application/update.js";
+import { accountOfWire, wireOf } from "../../model/wire.js";
+import type { PhoneBookDeps } from "../deps.js";
 
 // The phone book's people: listing, creating, editing, merging and deleting
 // people, and linking accounts to them. What a person and their accounts are,
@@ -33,7 +26,7 @@ import type { ApiDeps } from "../../../deps.js";
 // transaction there can decide it. These handlers read the request and pick a
 // status code, and hold no rule of their own.
 
-export function peopleRoutes(deps: ApiDeps): Hono {
+export function peopleRoutes(deps: PhoneBookDeps): Hono {
   const app = new Hono();
 
   app.get("/people", async (c) => {
@@ -43,19 +36,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: `level must name a bond level or "all"` }, 400);
     }
 
-    // The whole `?q=` match, before `?level=` narrows it: the counts describe
-    // it, and every chip's number has to stay true while another chip is the
-    // one selected.
-    const matching = (await readPeople(deps)).filter((person) =>
-      personMatchesQuery(person, c.req.query("q") ?? ""),
+    return c.json(
+      (await listPeople(deps, {
+        query: c.req.query("q") ?? "",
+        level: level ?? "all",
+      })) satisfies PeopleList,
     );
-
-    return c.json({
-      people: matching
-        .filter((person) => personMatchesLevel(person, level ?? "all"))
-        .sort(comparePeople),
-      counts: countPeople(matching),
-    } satisfies PeopleList);
   });
 
   app.post("/people", async (c) => {
@@ -168,7 +154,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 /** The person a write just changed, read back through the same serializer the
  *  reads answer with, so a client can render the outcome without a second
  *  request. */
-async function respondWithPerson(deps: ApiDeps, c: Context, id: string) {
+async function respondWithPerson(deps: PhoneBookDeps, c: Context, id: string) {
   const person = await readPerson(deps, id);
   return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
 }
