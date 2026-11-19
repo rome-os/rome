@@ -84,3 +84,8 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **An event already queued for an owner stays theirs,** even after they stop following its target, and reaches their own main chat.
 - **Quiet hours, the hourly cap of important turns and the digest are each owner's own.** A visitor's digest comes at their times in their own zone, and follows it when it changes. The guardian's follows the guardian's zone, as every floating routine does. One owner's quiet hours never hold another's alerts.
 - **A Concierge turn acts only within its owner's Concierge:** the chats, task chats, rows and follows its tools reach are that owner's.
+
+### On a connection
+
+- **A newly connected account answers as the guardian's Concierge.** Connecting a Feishu, Telegram, Discord or Slack account links the Concierge to it, and anyone who writes there reaches the guardian's Concierge, never a visitor's. A sender who is not the guardian passes the same bond-level and outgoing-message checks as with any agent on an account, and their turn is shared. ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-11-19-a-newly-connected-account-starts-with-the-concierge))
+- **On a connection the Concierge answers in plain text.** A chat on a connection is not a Concierge chat. The Concierge's session there gets none of the tools that need one, so it neither speaks through `say` nor starts a task or a follow, and its text is the reply. Its system prompt says so, and sends the guardian to the dashboard for a task or a follow.

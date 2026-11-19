@@ -135,6 +135,8 @@ Feishu and Lark are two platforms, because one account cannot sign in to both. A
 
 ## Amendment (2026-10-21): Rome never picks an account's agent
 
+Withdrawn by the 2026-11-19 amendment: a newly connected account starts with the Concierge.
+
 A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
 
 ### Alternatives
@@ -156,3 +158,15 @@ A connection is Rome's access to one external account ([connections.md](../domai
 ### Alternatives
 
 - **Keep webchat as the one connection with no grant.** Rejected because the rule that a connection holds exactly one grant would need an exception, and the guardian could neither fix nor disconnect it.
+
+## Amendment (2026-11-19): a newly connected account starts with the Concierge
+
+Every connection is connected to the Concierge. A newly connected account of a linkable service starts with the Concierge as its agent, so it answers from its first message with no step to link one. It answers as the guardian's Concierge: connections are the instance's, the guardian makes them, and a visitor's Concierge lives only on the dashboard. Someone else who writes to the account reaches that same Concierge, under the bond level and outgoing-message checks every agent on an account already has, and in a shared turn. An account Rome already has a connected account for keeps its agent, unlinked included, so connecting it again or fixing its connection changes nothing. The guardian can still switch or unlink the agent. The 2026-10-21 amendment's "Rome never picks an account's agent" is withdrawn. Connecting and linking stay two operations on two records, and connecting now links the Concierge in the same transaction.
+
+On a connection the Concierge answers in plain text. Its tools that need a Concierge chat on the dashboard, to speak, react, start and read task chats, and follow things, are not given to it there, and its text is the reply. Making a chat on a connection one of the guardian's Concierge chats, with tasks and follows, is later work.
+
+### Alternatives
+
+- **Keep a newly connected account silent until the guardian links an agent.** Rejected by the guardian: every connection is connected to the Concierge, and an account that says nothing after setup reads as broken.
+- **Link main.** Rejected because the Concierge is the agent the guardian talks to.
+- **Answer as the Concierge of whoever writes.** Rejected because only a dashboard user has a Concierge, and an account on a platform does not say which dashboard user, if any, a sender is.

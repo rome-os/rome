@@ -664,6 +664,15 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
+  it("register none for the Concierge in a chat on a connection, where it answers in plain text", async () => {
+    const on = setup();
+    const telegram = {
+      ...on.context(),
+      getThreadContext: () => ({ channel: "telegram", threadId: "123", channelUserId: "456" }),
+    };
+    expect(await buildConciergeTools(on.service, telegram)).toEqual([]);
+  });
+
   it("asks the guardian about a task with its own card, which the row then points to", async () => {
     const s = setup();
     const tools = await buildConciergeTools(s.service, s.context());

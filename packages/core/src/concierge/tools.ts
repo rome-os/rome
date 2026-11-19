@@ -57,6 +57,7 @@ import {
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { ownerOf } from "../webchat/owner.js";
+import { onConnection } from "./on-connection.js";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -194,6 +195,9 @@ export async function buildConciergeTools(
   context: SessionToolContext,
 ): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
+  // On a connection the Concierge answers in plain text: every tool here needs
+  // a Concierge chat on the dashboard.
+  if (onConnection(context.getThreadContext())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
