@@ -18,6 +18,7 @@ describe("the Concierge on a connection", () => {
   it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {
     expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
       finalText: "deliver",
+      handoffOnRenewal: false,
       withoutActions: CONCIERGE_CHAT_ACTIONS,
       withoutDefer: true,
     });
