@@ -98,6 +98,15 @@ describe("core:routine_runs_list", () => {
     });
   });
 
+  it("says when the routine last ran, counting a run now", async () => {
+    const routineId = await createRoutine();
+    await routineRuns.create({ routineId, executionId: "exec-1", status: "success" });
+
+    const result = (await list({ routineId })) as { data: { routine: { lastRunAt: string } } };
+
+    expect(result.data.routine.lastRunAt).toEqual(expect.any(String));
+  });
+
   it("returns only as many runs as asked for", async () => {
     const routineId = await createRoutine();
     await routineRuns.create({ routineId, executionId: "exec-1", status: "success" });
@@ -150,9 +159,30 @@ describe("core:routine_run_read", () => {
         runId,
         status: "success",
         error: null,
-        roots: [{ id: "root", actionName: "summon", children: [{ id: "child" }] }],
+        roots: [{ actionName: "summon", children: [{ actionName: "send_message" }] }],
       },
     });
+  });
+
+  it("cuts long arguments short and leaves out who ran each action", async () => {
+    const routineId = await createRoutine();
+    const runId = await routineRuns.create({ routineId, executionId: "exec-1", status: "success" });
+    await actionExecutions.create({
+      id: "root",
+      rootExecutionId: "exec-1",
+      actionName: "summon",
+      status: "success",
+      args: { prompt: "x".repeat(2000) },
+    });
+
+    const result = (await read({ routineId, runId })) as {
+      data: { roots: Array<Record<string, unknown> & { args: string }> };
+    };
+
+    const [root] = result.data.roots;
+    expect(root.args.length).toBeLessThanOrEqual(501);
+    expect(root).not.toHaveProperty("actor");
+    expect(root).not.toHaveProperty("initiator");
   });
 
   it("refuses a run of another routine", async () => {
