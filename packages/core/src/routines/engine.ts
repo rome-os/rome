@@ -191,10 +191,14 @@ export class RoutineEngine {
    * `payload` is the trigger payload to dispatch with — empty by default (a
    * "try run now" reproduces a bare fire). A caller can pass one to drive a
    * `manual` routine with input, surfaced to the action under
-   * `__triggerPayload` exactly like a real trigger's payload. */
+   * `__triggerPayload` exactly like a real trigger's payload.
+   *
+   * `onStarted` is told the run's id once its record exists, for a caller that
+   * reports the start rather than waiting for the outcome. */
   async runNow(
     routineId: string,
     payload: Record<string, unknown> = {},
+    onStarted?: (runId: string) => void,
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const row = await this.routinesRepo.findById(routineId);
     if (!row) throw new Error(`routine not found: ${routineId}`);
@@ -206,6 +210,7 @@ export class RoutineEngine {
     try {
       return await this.dispatch(toRoutine(row), payload, {
         manual: byPerson ? "person" : "background",
+        onStarted,
       });
     } finally {
       this.changed(routineId);
@@ -261,7 +266,7 @@ export class RoutineEngine {
   private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: "person" | "background" } = {},
+    opts: { manual?: "person" | "background"; onStarted?: (runId: string) => void } = {},
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     // A fire is a new root in every sense. The trigger that fires it was
     // registered from inside the action that created the routine, and a timer
@@ -296,7 +301,7 @@ export class RoutineEngine {
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: "person" | "background" },
+    opts: { manual?: "person" | "background"; onStarted?: (runId: string) => void },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     if (!opts.manual && this.fireGate && !(await this.fireGate(routine).catch(() => true))) {
       log.info("routine fire turned down", { routineId: routine.id, name: routine.name });
@@ -323,6 +328,7 @@ export class RoutineEngine {
             ? RUN_NOW_IN_BACKGROUND
             : routine.trigger.type,
     });
+    opts.onStarted?.(runId);
 
     // Captured inside the span callback and returned to the caller so a manual
     // "run now" can report the outcome. Defaults to error so an unexpected throw

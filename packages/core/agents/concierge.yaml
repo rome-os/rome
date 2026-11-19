@@ -35,6 +35,9 @@ actions:
   # Pauses and resumes a routine when the guardian asks.
   - core:routine_pause
   - core:routine_resume
+  # Runs a routine now, or stops its run, when the guardian asks.
+  - core:routine_run_now
+  - core:routine_stop
   # Follows things for the guardian and tells them about events (see Following).
   - core:concierge_follow
   - core:concierge_unfollow

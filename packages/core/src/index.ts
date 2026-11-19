@@ -224,6 +224,7 @@ import { registerAgentNameAction } from "./people/agent-name.js";
 import { registerReadPersonAction } from "./people/read-person.js";
 import { registerRoutineRunActions } from "./routines/run-actions.js";
 import { registerRoutineEnabledActions } from "./routines/enabled-actions.js";
+import { registerRoutineRunNowActions } from "./routines/run-now-actions.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -1476,6 +1477,7 @@ async function main() {
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   registerRoutineEnabledActions(actionRegistry, { routines: routinesRepo, engine: routineEngine });
+  registerRoutineRunNowActions(actionRegistry, { routines: routinesRepo, engine: routineEngine });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),

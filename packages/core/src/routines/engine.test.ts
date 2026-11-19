@@ -228,6 +228,33 @@ describe("RoutineEngine run records", () => {
     expect(contexts[0]).not.toHaveProperty("omitFromRecord");
     expect((await routines.findById(id))?.keepTriggerPayload).toBe(true);
   });
+
+  it("tells a run-now caller the run's id once it has started, before its action finishes", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    let finish: () => void = () => {};
+    const actionEngine = {
+      run: () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ status: "success", result: null });
+        }),
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const id = await routines.create({
+      name: "slow",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    const started = new Promise<string>((resolve) => {
+      void engine.runNow(id, {}, resolve);
+    });
+    const runId = await started;
+
+    expect((await runs.findById(runId))?.status).toBe("running");
+    finish();
+  });
 });
 
 describe("RoutineEngine worker admission", () => {
