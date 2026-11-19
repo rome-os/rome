@@ -303,26 +303,32 @@ describe("channels.query from a turn that is not the guardian's", () => {
     ).rejects.toThrow("reads only the chat it is in");
   });
 
-  it("reads no chat from a shared turn with no chat of its own", async () => {
+  it("reads no chat from an agent turn with no chat of its own that others read", async () => {
     const query = rs.fn(async () => []);
     const calls = makeCalls({
       channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
     });
-    // An agent a guardian's group turn summoned, or a shared routine's fire:
-    // the guardian acts, others read, and there is no chat to read.
-    const summoned = {
-      callerActionContext: { actor: { kind: "guardian" }, audience: "shared" },
-    } as never;
+    const read = (callerActionContext: object) =>
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {
+        callerActionContext,
+      } as never);
+    const guardian = { kind: "guardian" };
 
-    await expect(
-      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, summoned),
-    ).rejects.toThrow("reads only the chat it is in");
-    // A private one, and a call outside any turn, read any chat.
-    await calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {
-      callerActionContext: { actor: { kind: "guardian" }, audience: "private" },
-    } as never);
+    // An agent a group turn summoned: the guardian acts, others read, and
+    // there is no chat to read.
+    await expect(read({ actor: guardian, audience: "shared", turnId: "t1" })).rejects.toThrow(
+      "reads only the chat it is in",
+    );
+    // A third-party action in that turn carries no audience, and reads none.
+    await expect(read({ actor: guardian, turnId: "t1" })).rejects.toThrow(
+      "reads only the chat it is in",
+    );
+    // A private one reads any chat, and so does a routine's fire, which runs
+    // outside any agent turn, and a call outside any action.
+    await read({ actor: guardian, audience: "private", turnId: "t1" });
+    await read({ actor: guardian, audience: "shared" });
     await calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {});
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(3);
   });
 
   it("reads any chat only from a turn whose audience is private", async () => {
