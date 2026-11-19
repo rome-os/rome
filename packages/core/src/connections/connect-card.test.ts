@@ -41,6 +41,17 @@ describe("connect_account", () => {
     expect(output).toContain("Settings › Connections");
   });
 
+  it("sends an agent asked to connect Slack to the Slack app in Settings, and lists no old Slack", () => {
+    const refused = parseConnectAccountInput({ kind: "slack" });
+    expect(refused).toMatchObject({ ok: false });
+    if (refused.ok) throw new Error("expected a refusal");
+    expect(refused.error).toContain("Rome's own Slack app");
+    expect(refused.error).toContain("Settings › Connections");
+    const other = parseConnectAccountInput({ kind: "notion" });
+    if (other.ok) throw new Error("expected a refusal");
+    expect(other.error).not.toContain('"slack"');
+  });
+
   it("refuses a kind Rome does not connect itself", () => {
     expect(parseConnectAccountInput({ kind: "notion" })).toMatchObject({ ok: false });
     expect(parseConnectAccountInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });

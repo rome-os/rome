@@ -154,9 +154,16 @@ export function deviceWords(device: DeviceKind, language?: string | null): Devic
   };
 }
 
+/** OAuth kinds another kind replaced, so Rome connects no new account of
+ *  them, each with what an agent tells the guardian instead. */
+const REPLACED_KINDS: Partial<Record<OAuthProvider, string>> = {
+  slack:
+    "Slack is connected through Rome's own Slack app, not from the chat. Ask the guardian, in a message, to connect Slack in Settings › Connections, then wait for their reply.",
+};
+
 /** The connection kinds the card connects: those Rome connects itself. */
 export function connectableKinds(): OAuthProvider[] {
-  return getEnabledOAuthProviders();
+  return getEnabledOAuthProviders().filter((kind) => !REPLACED_KINDS[kind]);
 }
 
 /**
@@ -196,6 +203,11 @@ export function parseConnectAccountInput(
   | { ok: true; kind: string; device: DeviceKind }
   | { ok: false; error: string } {
   const kind = (input as { kind?: unknown } | null)?.kind;
+  const replaced =
+    !options.devicesOnly && typeof kind === "string" && isOAuthProvider(kind)
+      ? REPLACED_KINDS[kind]
+      : undefined;
+  if (replaced) return { ok: false, error: replaced };
   const kinds = options.devicesOnly ? [] : connectableKinds();
   if (typeof kind === "string" && kinds.includes(kind as OAuthProvider)) {
     return { ok: true, kind: kind as OAuthProvider };
