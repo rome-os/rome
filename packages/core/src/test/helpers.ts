@@ -2,6 +2,7 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
+import { ContainerNodeError } from "../desktops/container-nodes.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
@@ -871,6 +872,24 @@ export async function buildTestDeps(
         checkedAt: new Date().toISOString(),
         devices: [],
       }),
+    },
+    containerNodes: {
+      list: async () => ({ nodes: [] }),
+      pair: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
+      getCompose: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
+      renameInstallation: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
+      removeInstallation: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
+      switchStatus: async () => {
+        throw new ContainerNodeError("not_configured");
+      },
     },
     connectionKinds: [],
     computerUse: {

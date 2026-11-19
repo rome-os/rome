@@ -25,6 +25,10 @@
       "types": "./dist/host.d.ts",
       "default": "./dist/host.js"
     },
+    "./container-node-address": {
+      "types": "./dist/container-node-address.d.ts",
+      "default": "./dist/container-node-address.js"
+    },
     "./daemon": {
       "types": "./dist/daemon.d.ts",
       "default": "./dist/daemon.js"
