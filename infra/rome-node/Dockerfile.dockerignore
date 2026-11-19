@@ -1,0 +1,10 @@
+*
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
+!tsconfig.json
+!packages/rome-node-core/package.json
+!packages/rome-node-core/tsconfig*.json
+!packages/rome-node-core/src/
+!packages/rome-node-core/src/**
+packages/rome-node-core/src/**/*.test.ts

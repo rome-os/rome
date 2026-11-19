@@ -23,7 +23,7 @@ describe("generateCaddyfile", () => {
     expect(out).toContain(
       "copy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email",
     );
-    expect(out).not.toContain("gateway");
+    expect(out).toMatch(/@dynamic path[^\n]* \/v1\/gateway\/config/);
   });
 
   it("serves the SPA from disk (no Hono round-trip)", () => {

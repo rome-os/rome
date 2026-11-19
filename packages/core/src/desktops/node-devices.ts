@@ -51,6 +51,7 @@ export function createNodeDevicesService(
   // Discovery is refused until the spawned daemon listens. A real failure rejects.
   start: () => Promise<unknown> = () =>
     withTracingSuppressed(() => startDaemon(nodeConfigFromEnvironment(process.env))),
+  cloudContainerIds?: () => string[],
 ) {
   let client: ReturnType<typeof createClient> | undefined;
   async function manage(
@@ -77,7 +78,7 @@ export function createNodeDevicesService(
     async getStatus(): Promise<DevicesStatus> {
       try {
         client ??= createClient();
-        const status = await client.getDevicesStatus();
+        const status = await client.getDevicesStatus(cloudContainerIds?.());
         return status === null
           ? { connection: "not_running", checkedAt: new Date().toISOString(), devices: [] }
           : devicesStatusSchema.parse(status);
@@ -102,13 +103,20 @@ export function createNodeDevicesService(
      * Authorized, unrevoked devices from Cloud's list. Unlike getStatus it sends
      * no probe to any device. Null when the caller cannot reach the list.
      */
-    async listDevices(): Promise<DeviceList | null> {
+    async listDevices(includeContainers = false): Promise<DeviceList | null> {
       try {
         client ??= createClient();
         const list = await client.listDevices();
+        const containers = new Set(cloudContainerIds?.());
         return {
           devices: list.items
-            .filter((item) => !item.revoked_at)
+            .filter(
+              (item) =>
+                !item.revoked_at &&
+                (includeContainers ||
+                  (item.device_kind !== "container_node" &&
+                    !containers.has(item.id.toLowerCase()))),
+            )
             .map((item) => ({
               id: item.id,
               name: typeof item.device_name === "string" ? item.device_name : item.id,

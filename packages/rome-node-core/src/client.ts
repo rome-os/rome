@@ -34,7 +34,8 @@ const REAUTH_INTERVAL_MS = 60_000;
 const DEVICE_TOKEN = /^(?:romedev_|romemob_)[A-Za-z0-9_-]{43}$/;
 
 export interface GatewayClientOptions {
-  gatewayUrl: string;
+  /** Required when there is no Gateway discovery callback. */
+  gatewayUrl?: string;
   /**
    * Called on every connect and reconnect, and for each refresh of a JWT connection. Returns
    * a device token or a JWT. A JWT lives 60 seconds, so return a fresh one each time.
@@ -56,8 +57,12 @@ export interface GatewayClientOptions {
   beforeConnect?(): Promise<string | null>;
 }
 
-export function connectGateway(options: GatewayClientOptions) {
-  let url = parseGatewayUrl(options.gatewayUrl);
+export function connectGateway(options: GatewayClientOptions, directHttpOrigin?: string) {
+  const initialUrl =
+    options.gatewayUrl === undefined
+      ? undefined
+      : parseGatewayUrl(options.gatewayUrl, directHttpOrigin);
+  if (!initialUrl && !options.beforeConnect) throw new Error("Gateway address is required.");
   let stopped = false;
   let socket: ClientSocket | null = null;
   let attempt = 0;
@@ -99,6 +104,7 @@ export function connectGateway(options: GatewayClientOptions) {
     status("connecting");
     let current: ClientSocket;
     let token: string;
+    let url = initialUrl;
     try {
       const pending = options.getToken();
       token = typeof pending === "string" ? pending : await pending;
@@ -111,13 +117,15 @@ export function connectGateway(options: GatewayClientOptions) {
           status("revoked");
           return;
         }
-        url = parseGatewayUrl(next);
+        url = parseGatewayUrl(next, directHttpOrigin);
       }
+      if (!url) throw new Error("Gateway address is required.");
       current = options.createSocket(url.toString(), `Bearer ${token}`);
     } catch {
       schedule();
       return;
     }
+    const connectedUrl = url;
     socket = current;
     let finished = false;
     const finish = (code?: number) => {
@@ -147,8 +155,8 @@ export function connectGateway(options: GatewayClientOptions) {
       }, 30_000);
       status("online");
       if (isJwt(token)) {
-        const reauth = new URL(url);
-        reauth.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        const reauth = new URL(connectedUrl);
+        reauth.protocol = connectedUrl.protocol === "wss:" ? "https:" : "http:";
         reauth.pathname = "/reauth";
         reauthTimer = setInterval(() => void refresh(current, reauth), REAUTH_INTERVAL_MS);
       }

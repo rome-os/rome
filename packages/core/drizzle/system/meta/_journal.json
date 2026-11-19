@@ -1037,6 +1037,13 @@
       "when": 1795092902102,
       "tag": "0148_drop_message_read_at",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "6",
+      "when": 1795100482682,
+      "tag": "0149_container_node_installations",
+      "breakpoints": true
     }
   ]
 }

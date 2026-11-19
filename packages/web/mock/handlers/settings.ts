@@ -1,4 +1,10 @@
-import type { DeviceFilesResponse, DeviceList, DevicesStatus } from "@rome/api-types/devices";
+import {
+  containerNodeNameSchema,
+  type ContainerNodeCredential,
+  type DeviceFilesResponse,
+  type DeviceList,
+  type DevicesStatus,
+} from "@rome/api-types/devices";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   listAnthropicCompatibleProviderSummaries,
@@ -338,9 +344,32 @@ export const settingsHandlers = [
     HttpResponse.json({
       connection: "online",
       checkedAt: new Date().toISOString(),
+      containerNodeTransport: "cloud",
       devices: statusDevices,
     } satisfies DevicesStatus),
   ),
+  http.post("/api/devices/container-nodes", async ({ request }) => {
+    const { name } = (await request.json()) as { name?: unknown };
+    const validName = containerNodeNameSchema.safeParse(name);
+    if (!validName.success)
+      return HttpResponse.json({ error: "invalid_device_name" }, { status: 400 });
+    const deviceId = crypto.randomUUID();
+    statusDevices.push({
+      id: deviceId,
+      name: validName.data,
+      platform: "linux",
+      status: "unknown",
+      kind: "container_node",
+    });
+    const fixture = {
+      deviceId,
+      deviceToken: `romedev_${"A".repeat(43)}`,
+      origin: "https://cloud.example.invalid",
+    } satisfies ContainerNodeCredential;
+    return new HttpResponse(`event: credential\ndata: ${JSON.stringify(fixture)}\n\n`, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
   http.patch("/api/devices/:deviceId", async ({ params, request }) => {
     const device = statusDevices.find((item) => item.id === params.deviceId);
     if (!device || device.status === "revoked")

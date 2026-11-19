@@ -9,6 +9,8 @@ import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
+import { createLocalContainerNodes } from "./desktops/local-container-nodes.js";
+import { ContainerNodesRepository } from "./db/repositories/container-nodes.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import {
   createGuardianLinkAdmission,
@@ -516,15 +518,20 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+  const containerNodes = new ContainerNodesRepository(db);
+  const localContainerNodes = createLocalContainerNodes(containerNodes);
   // A device removed from the account through this Rome loses its connection
   // rows; an origin the removal leaves with no install is turned off.
-  const nodeDevices = withDeviceLifecycle(createNodeDevicesService(), {
-    connections: () => deviceConnectionsRepo,
-    turnOriginOff: (originId) => {
-      for (const spec of PERSONAL_DATA_SOURCES)
-        personalDataRepo.setState(spec.source, originId, "off");
+  const nodeDevices = withDeviceLifecycle(
+    createNodeDevicesService(undefined, undefined, () => containerNodes.cloudDeviceIds()),
+    {
+      connections: () => deviceConnectionsRepo,
+      turnOriginOff: (originId) => {
+        for (const spec of PERSONAL_DATA_SOURCES)
+          personalDataRepo.setState(spec.source, originId, "off");
+      },
     },
-  });
+  );
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -2327,6 +2334,8 @@ async function main() {
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       cloudProfile: cloudProfileClient,
       nodeDevices,
+      localContainerNodes,
+      containerNodes,
       channelsService,
       chatSettings,
       actionEngine,

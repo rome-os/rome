@@ -405,9 +405,16 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
               throw cause;
             }
             break;
-          case "devices.status":
-            result = await deviceStatus.read();
+          case "devices.status": {
+            const { containerNodeIds } = params;
+            if (
+              containerNodeIds !== undefined &&
+              (!Array.isArray(containerNodeIds) || !containerNodeIds.every((id) => isUuid(id)))
+            )
+              throw new RpcError(-32602, "Container node IDs must be UUIDs.");
+            result = await deviceStatus.read(containerNodeIds);
             break;
+          }
           case "devices.list":
             result = await connector.list();
             break;

@@ -7,6 +7,7 @@ export interface DeviceStatus {
   name: string;
   platform: string | null;
   status: "connected" | "not_connected" | "unknown" | "revoked";
+  kind?: "container_node";
   /** The device's audit log, from system.info. Absent for hosts that predate it. */
   audit?: { state: "ok" | "unavailable"; code?: string; message?: string };
 }
@@ -25,6 +26,7 @@ export class DeviceStatusReader {
   private cached?: DevicesStatus;
   private pending?: Promise<DevicesStatus>;
   private generation = 0;
+  private containerNodes = new Set<string>();
 
   constructor(private connector: Pick<DeviceConnector, "list" | "run" | "getStatus">) {}
 
@@ -40,7 +42,17 @@ export class DeviceStatusReader {
    * gets its result. Only a read without a snapshot waits: the first one, or one after
    * invalidate. A failed background check keeps the last snapshot.
    */
-  async read(): Promise<DevicesStatus> {
+  async read(containerNodeIds?: string[]): Promise<DevicesStatus> {
+    if (containerNodeIds) {
+      const nodes = new Set(containerNodeIds.map((id) => id.toLowerCase()));
+      if (
+        nodes.size !== this.containerNodes.size ||
+        [...nodes].some((id) => !this.containerNodes.has(id))
+      ) {
+        this.containerNodes = nodes;
+        this.invalidate();
+      }
+    }
     if (!this.cached) return this.refresh();
     if (Date.now() - Date.parse(this.cached.checkedAt) >= REFRESH_AFTER_MS)
       this.refresh().catch(() => undefined);
@@ -51,7 +63,7 @@ export class DeviceStatusReader {
   private refresh(): Promise<DevicesStatus> {
     if (this.pending) return this.pending;
     const generation = this.generation;
-    const pending = this.check()
+    const pending = this.check(this.containerNodes)
       .then((snapshot) => {
         if (generation === this.generation) this.cached = snapshot;
         return snapshot;
@@ -63,7 +75,7 @@ export class DeviceStatusReader {
     return pending;
   }
 
-  private async check(): Promise<DevicesStatus> {
+  private async check(containerNodes: Set<string>): Promise<DevicesStatus> {
     const list = await this.connector.list();
     if (!isRecord(list) || !Array.isArray(list.items)) throw new Error("Invalid device list");
     const devices: DeviceStatus[] = list.items.map((item) => {
@@ -73,6 +85,10 @@ export class DeviceStatusReader {
         name: typeof item.device_name === "string" ? item.device_name : item.id,
         platform: typeof item.platform === "string" ? item.platform : null,
         status: item.revoked_at ? "revoked" : "unknown",
+        ...((item.device_kind === "container_node" ||
+          containerNodes.has(item.id.toLowerCase())) && {
+          kind: "container_node",
+        }),
       };
     });
     // Bound both parallel requests and each refresh's work, including large account histories.
@@ -82,7 +98,7 @@ export class DeviceStatusReader {
       Array.from({ length: Math.min(4, devices.length) }, async () => {
         while (next < devices.length && Date.now() < deadline) {
           const device = devices[next++];
-          if (device.status === "revoked") continue;
+          if (device.status === "revoked" || device.kind === "container_node") continue;
           const response = await this.connector.run(device.id, "system.info", {}, 3000);
           device.status = response.ok
             ? "connected"
