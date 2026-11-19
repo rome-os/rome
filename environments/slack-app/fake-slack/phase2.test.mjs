@@ -374,3 +374,44 @@ test("the app hears of its own post in a direct message, and history keeps menti
     await ctl("/config", { history_limit: true });
   }
 });
+
+test("without public distribution only the home workspace can approve the app", async () => {
+  const C = "TC0000CCCC";
+  const state = await ctl("/state");
+  assert.equal(state.distribution.on, true);
+  assert.equal(state.distribution.home_team, A);
+  const approve = (team, user) =>
+    fetch(`${base}/oauth/v2/authorize/approve`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: "111.222",
+        scope: APP_SCOPES,
+        redirect_uri: "http://cloud.test/cb",
+        state: "s9",
+        team,
+        user,
+        decision: "allow",
+      }),
+    });
+  const since = state.seq;
+  assert.equal((await ctl("/config", { distributed: false })).distributed, false);
+  const refused = await approve(C, "UC0000OWNR1");
+  assert.equal(refused.status, 403);
+  assert.match(await refused.text(), /invalid_team_for_non_distributed_app/);
+  assert.equal((await approve(A, GUARDIAN)).status, 302);
+  assert.equal((await ctl("/config", { distributed: true })).distributed, true);
+  const allowed = await approve(C, "UC0000OWNR1");
+  assert.equal(allowed.status, 302);
+  assert.ok(new URL(allowed.headers.get("location")).searchParams.get("code"));
+  const { approvals } = await ctl(`/approvals?since=${since}`);
+  assert.deepEqual(
+    approvals.map((a) => [a.teamId, a.userId, a.outcome, a.error]),
+    [
+      [C, "UC0000OWNR1", "refused", "invalid_team_for_non_distributed_app"],
+      [A, GUARDIAN, "approved", null],
+      [C, "UC0000OWNR1", "approved", null],
+    ],
+  );
+});

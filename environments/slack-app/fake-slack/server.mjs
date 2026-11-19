@@ -50,6 +50,12 @@ export function loadConfig(overrides = {}) {
     selfEvents: !/^(0|false|off)$/i.test(
       String(overrides.selfEvents ?? env.FAKE_SLACK_SELF_EVENTS ?? "on"),
     ),
+    // Whether the app's public distribution is active. Off, only its home
+    // workspace (the one the app was created in) can install it.
+    distributed: !/^(0|false|off)$/i.test(
+      String(overrides.distributed ?? env.FAKE_SLACK_DISTRIBUTED ?? "on"),
+    ),
+    homeTeam: overrides.homeTeam ?? env.FAKE_SLACK_HOME_TEAM ?? workspaces[0]?.id,
     historyWindowMs: Number(
       overrides.historyWindowMs ?? env.FAKE_SLACK_HISTORY_WINDOW_MS ?? 60_000,
     ),
@@ -82,6 +88,7 @@ function emptyState() {
     deliveries: [], // { seq, at, eventId, attempt, status, error, ms }
     defaultSignIn: null, // { teamId, userId } preselected on the approve screen
     history: {}, // "teamId/channel" -> messages as Slack holds them, oldest first
+    approvals: [], // { seq, at, teamId, userId, outcome: approved|cancelled|refused, error }
   };
 }
 
@@ -527,6 +534,19 @@ export class FakeSlack {
   }
 
   /** What a message event's message looks like in the conversation's history. */
+  /** Records who answered the approve screen, from which workspace, and how. */
+  recordApproval(teamId, userId, outcome, error = null) {
+    this.state.approvals.push({
+      seq: this.nextSeq(),
+      at: new Date().toISOString(),
+      teamId,
+      userId,
+      outcome,
+      error,
+    });
+    this.save();
+  }
+
   rememberEvent(teamId, event) {
     const { channel, channel_type: _type, event_ts: _eventTs, ...message } = event;
     return this.remember(teamId, channel, message);
@@ -625,6 +645,8 @@ export class FakeSlack {
         };
       }),
       default_sign_in: this.state.defaultSignIn,
+      distribution: { on: this.config.distributed, home_team: this.config.homeTeam },
+      approvals: this.state.approvals,
       history_limit: {
         on: this.config.historyLimit,
         window_ms: this.config.historyWindowMs,
@@ -994,6 +1016,15 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
+function refusedPage(slack, teamId, error) {
+  const w = slack.workspaces.get(teamId);
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Installation failed</title></head>
+<body><main><p class="note">Fake Slack: a stand-in for slack.com used in tests.</p>
+<h1>Rome can't be installed in ${escapeHtml(w?.name ?? teamId)}</h1>
+<p>This app can only be installed in the workspace it was created in.</p>
+<p><code id="error">${error}</code></p></main></body></html>`;
+}
+
 function approvePage(slack, params) {
   const def = slack.state.defaultSignIn;
   const teamId = params.get("team") || def?.teamId || slack.config.workspaces[0]?.id;
@@ -1050,12 +1081,20 @@ export function createHandler(slack) {
         const form = new URLSearchParams(raw);
         const redirect = new URL(form.get("redirect_uri"));
         if (form.get("state")) redirect.searchParams.set("state", form.get("state"));
+        const teamId = form.get("team");
         if (form.get("decision") !== "allow") {
+          slack.recordApproval(teamId, form.get("user"), "cancelled");
           redirect.searchParams.set("error", "access_denied");
           return send(res, 302, "", { location: redirect.toString() });
         }
-        const teamId = form.get("team");
         slack.member(teamId, form.get("user"));
+        // An app without public distribution installs only where it was made.
+        if (!slack.config.distributed && teamId !== slack.config.homeTeam) {
+          const error = "invalid_team_for_non_distributed_app";
+          slack.recordApproval(teamId, form.get("user"), "refused", error);
+          return send(res, 403, refusedPage(slack, teamId, error));
+        }
+        slack.recordApproval(teamId, form.get("user"), "approved");
         const code = slack.issueCode({
           teamId,
           userId: form.get("user"),
@@ -1180,6 +1219,8 @@ async function control(slack, method, url, body) {
       return { ok: true, seq: slack.state.seq, posts: slack.posts(q) };
     case "GET /calls":
       return { ok: true, seq: slack.state.seq, calls: slack.calls(q) };
+    case "GET /approvals":
+      return { ok: true, seq: slack.state.seq, approvals: slack.since(slack.state.approvals, q) };
     case "GET /events":
       return { ok: true, seq: slack.state.seq, events: slack.since(slack.state.events, q) };
     case "GET /deliveries":
@@ -1201,7 +1242,10 @@ async function control(slack, method, url, body) {
       if (body.history_window_ms !== undefined)
         slack.config.historyWindowMs = body.history_window_ms;
       if (body.self_events !== undefined) slack.config.selfEvents = Boolean(body.self_events);
+      if (body.distributed !== undefined) slack.config.distributed = Boolean(body.distributed);
       return {
+        distributed: slack.config.distributed,
+        home_team: slack.config.homeTeam,
         ok: true,
         events_url: slack.config.eventsUrl,
         retry_delays_ms: slack.config.retryDelaysMs,

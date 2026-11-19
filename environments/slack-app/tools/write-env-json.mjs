@@ -14,6 +14,7 @@ const ctl = join(envDir, "ctl.sh");
 const workspaces = JSON.parse(
   readFileSync(join(envDir, "config/workspaces.json"), "utf8"),
 ).workspaces;
+const home = process.env.FAKE_SLACK_HOME_TEAM || workspaces[0].id;
 const enroll = (name) => {
   try {
     return JSON.parse(readFileSync(join(stateDir, `${name}-enroll.json`), "utf8"));
@@ -74,11 +75,26 @@ console.log(
         // Slack's limit on conversations.history and .replies for an app
         // outside the Marketplace; POST control/config {history_limit} changes it.
         history_limit: { on: true, requests_per_minute: 1, max_messages: 15 },
-        workspaces: workspaces.map((w) => ({
+        // The app's public distribution (R2): on, any workspace can approve
+        // it; off, only its home workspace. ctl.sh distribution on|off sets it,
+        // and control/approvals records each answer with its workspace.
+        distribution: { on: true, home_team: home, switch: [ctl, "distribution"] },
+        workspaces: workspaces.map((w, i) => ({
           id: w.id,
           name: w.name,
+          home: w.id === home,
+          // The first two are the guardians' own (rome-a and rome-b sign in
+          // there); the rest belong to nobody on the team and no instance.
+          owned_by_team: i < 2,
           guardian: w.members.find((m) => m.is_owner)?.id ?? null,
           members: w.members.map((m) => m.id),
+          // Each member's direct message with the bot, as the fake names it.
+          im_channels: Object.fromEntries(
+            w.members.map((m) => [
+              m.id,
+              `D${w.id.replace(/^T/, "").slice(0, 4)}${m.id.replace(/^U/, "")}`,
+            ]),
+          ),
           groups: (w.channels ?? []).map((c) => c.id),
         })),
       },

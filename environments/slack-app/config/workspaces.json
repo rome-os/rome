@@ -13,7 +13,12 @@
           "is_admin": true,
           "is_owner": true
         },
-        { "id": "UA0000BOB01", "name": "bob", "real_name": "Bob Member", "email": "bob@acme.test" },
+        {
+          "id": "UA0000BOB01",
+          "name": "bob",
+          "real_name": "Bob Member",
+          "email": "bob@acme.test"
+        },
         {
           "id": "UA0000CARA1",
           "name": "cara",
@@ -60,6 +65,34 @@
           "id": "CB0000GENRL",
           "name": "general",
           "members": ["UB0000GUARD", "UB0000ERIN1", "UB0000FINN1"]
+        }
+      ]
+    },
+    {
+      "id": "TC0000CCCC",
+      "name": "Cobalt",
+      "domain": "cobalt",
+      "members": [
+        {
+          "id": "UC0000OWNR1",
+          "name": "gale",
+          "real_name": "Gale Owner",
+          "email": "gale@cobalt.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "UC0000HANK1",
+          "name": "hank",
+          "real_name": "Hank Member",
+          "email": "hank@cobalt.test"
+        }
+      ],
+      "channels": [
+        {
+          "id": "CC0000GENRL",
+          "name": "general",
+          "members": ["UC0000OWNR1", "UC0000HANK1"]
         }
       ]
     }

@@ -4,6 +4,7 @@
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
+#   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
 #   environments/slack-app/ctl.sh logs <service>
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
@@ -29,12 +30,17 @@ case "$action" in
     ;;
   esac ;;
   cloud-query) ;;
+  distribution) case "$svc" in on | off) ;; *)
+    echo "usage: ctl.sh distribution on|off" >&2
+    exit 2
+    ;;
+  esac ;;
   logs) [ -n "$svc" ] || {
     echo "usage: ctl.sh logs <service>" >&2
     exit 2
   } ;;
   *)
-    sed -n '2,13p' "$0"
+    sed -n '2,14p' "$0"
     exit 2
     ;;
 esac
@@ -116,6 +122,14 @@ case "$action" in
       let wipe; try { wipe = JSON.parse(process.env.RESULT.trim().split("\n").at(-1)); } catch { wipe = { ok: false, error: "no result from the wipe", output: process.env.RESULT }; }
       console.log(JSON.stringify({ instance: process.env.INSTANCE, state: process.env.STATE, ...wipe }));'
     exit "$code"
+    ;;
+  distribution)
+    # Off, only the app's home workspace can approve it, as on Slack.
+    port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+    # shellcheck disable=SC2016 # the backticks are JavaScript
+    node -e '
+      fetch(`http://127.0.0.1:${process.argv[1]}/_control/config`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ distributed: process.argv[2] === "on" }) })
+        .then((r) => r.json()).then((c) => console.log(JSON.stringify({ distributed: c.distributed, home_team: c.home_team })), (e) => { console.error(String(e)); process.exit(1); });' "$port" "$svc"
     ;;
   cloud-query)
     # The query is wrapped as a subquery, so one SELECT (or WITH) is taken,
