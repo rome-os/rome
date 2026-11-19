@@ -1,9 +1,14 @@
 // HTTP helpers for the verifier: JSON calls and a small browser that follows
 // redirects and reads HTML forms, enough to walk a sign-in.
 
+// No request, body read included, may outlast this, so a stalled endpoint
+// cannot hold a check past its own deadline by more than this much.
+const REQUEST_MS = 15_000;
+
 /** Calls `url` and parses a JSON answer. Never throws on a non-2xx status. */
 export async function json(url, { method = "GET", body, headers = {} } = {}) {
   const res = await fetch(url, {
+    signal: AbortSignal.timeout(REQUEST_MS),
     method,
     headers: { "content-type": "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -32,6 +37,7 @@ export async function follow(url, { method = "GET", form, stopAt = () => false, 
     visited.push(next);
     if (stopAt(new URL(next))) return { stoppedAt: new URL(next), visited };
     const res = await fetch(next, {
+      signal: AbortSignal.timeout(REQUEST_MS),
       method: nextMethod,
       redirect: "manual",
       headers: nextBody ? { "content-type": "application/x-www-form-urlencoded" } : {},
@@ -116,14 +122,22 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Polls `probe` until it returns a truthy value or `timeoutMs` passes, and
- * returns the last value either way.
+ * returns the last value either way. A probe still running at the deadline is
+ * not waited for: its answer counts as falsy.
  */
 export async function waitFor(probe, { timeoutMs, everyMs = 500 }) {
   const end = Date.now() + timeoutMs;
-  let last = await probe();
+  const bounded = () => {
+    let timer;
+    const late = new Promise((r) => {
+      timer = setTimeout(() => r(undefined), Math.max(0, end - Date.now()));
+    });
+    return Promise.race([probe(), late]).finally(() => clearTimeout(timer));
+  };
+  let last = await bounded();
   while (!last && Date.now() < end) {
-    await sleep(everyMs);
-    last = await probe();
+    await sleep(Math.min(everyMs, Math.max(0, end - Date.now())));
+    last = await bounded();
   }
   return last;
 }

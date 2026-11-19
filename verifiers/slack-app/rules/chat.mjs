@@ -80,15 +80,15 @@ export async function r7(ctx) {
   // shows the path was open while the forged ones went by.
   const since = await ctx.slack.seq();
   const forged = [];
-  let channel;
   for (let i = 1; i <= 10; i++) {
     const c = code("R7F", i);
     const sent = await ctx.slack.forged(ws.id, ws.guardian, ask(c));
-    channel = sent.channel;
     forged.push({ code: c, eventId: sent.eventId, status: sent.delivery?.status ?? null });
   }
   const control = await oneReply(ctx, ws, "R7C");
-  const posts = await ctx.slack.posts({ team: ws.id, channel, since });
+  // Every post in the workspace since before the forged events, wherever it
+  // went: a reply to a forged event in another conversation still answers it.
+  const posts = await ctx.slack.posts({ team: ws.id, since });
   const replied = forged.filter((f) => posts.some((p) => p.text?.includes(f.code)));
   // Only the good message's one reply may follow the forged events. A reply
   // that repeats no code still answers one of them.
@@ -105,7 +105,7 @@ export async function r7(ctx) {
     sent: forged.map((f) => f.eventId),
     deliveryStatuses: forged.map((f) => f.status),
     replied: replied.map((f) => f.eventId),
-    otherPosts: others.map((p) => ({ ts: p.ts, text: p.text?.slice(0, 120) })),
+    otherPosts: others.map((p) => ({ channel: p.channel, ts: p.ts, text: p.text?.slice(0, 120) })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
     goodMessageVisibleInRecord: Boolean(sawGood),
     goodMessageAfter: { eventId: control.eventId, replies: control.replies },
@@ -198,7 +198,7 @@ export async function r6(ctx) {
       eventIds.push(sent.eventId);
     }
     await sleep(Math.max(0, env.stopSeconds * 1000 - (Date.now() - stoppedAt)));
-    whileStopped = (await ctx.slack.posts({ team: ws.id, channel, since })).length;
+    whileStopped = (await ctx.slack.posts({ team: ws.id, since })).length;
   } finally {
     await ctx.a.start();
   }

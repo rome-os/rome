@@ -81,6 +81,12 @@ const CASES = [
     what: "forged events get through and are answered with no code",
   },
   {
+    name: "R7-elsewhere",
+    breaks: "R7-signature,R7-elsewhere",
+    rule: "R7",
+    what: "forged events get through, go unrecorded and are answered in another direct message",
+  },
+  {
     name: "R7-lookup",
     breaks: "R7-route,R7-lookup",
     rule: "R7",

@@ -133,6 +133,12 @@ async function post(token, channel, text) {
   });
 }
 
+async function otherDirectMessage(team, channel) {
+  const state = await (await fetch(`${SLACK}/_control/state`)).json();
+  return state.workspaces.find((w) => w.id === team)?.members.find((m) => m.im_channel !== channel)
+    ?.im_channel;
+}
+
 // "The Concierge": repeats the code a seeded message carries.
 async function answer(event, team) {
   const conn = db.connections.find((c) => c.team === team) ?? db.connections[0];
@@ -142,14 +148,17 @@ async function answer(event, team) {
     breaks.has("R7-quiet") && /R7F-/.test(event.text)
       ? "Sure, done."
       : (event.text.match(/code and nothing else: (\S+)/)?.[1] ?? "hello");
+  // Broken R7-elsewhere answers R7's forged events in another member's direct message.
+  if (breaks.has("R7-elsewhere") && /R7F-/.test(event.text)) {
+    const other = await otherDirectMessage(team, event.channel);
+    if (other) await post(conn.botToken, other, asked);
+    return;
+  }
   const times = breaks.has("R4") ? 2 : 1;
   for (let i = 0; i < times; i++) await post(conn.botToken, event.channel, asked);
   // Broken R4-elsewhere: each reply is also posted in another member's direct message.
   if (breaks.has("R4-elsewhere")) {
-    const state = await (await fetch(`${SLACK}/_control/state`)).json();
-    const other = state.workspaces
-      .find((w) => w.id === team)
-      ?.members.find((m) => m.im_channel !== event.channel)?.im_channel;
+    const other = await otherDirectMessage(team, event.channel);
     if (other) await post(conn.botToken, other, asked);
   }
 }
@@ -179,13 +188,16 @@ async function drainOnce() {
       });
       continue;
     }
-    db.messages.push({
-      eventId: payload.event_id,
-      team: payload.team_id,
-      user: ev.user,
-      channel: ev.channel,
-      text: ev.text,
-    });
+    // Broken R7-elsewhere also leaves forged events unrecorded.
+    const unrecorded = breaks.has("R7-elsewhere") && /R7F-/.test(ev.text ?? "");
+    if (!unrecorded)
+      db.messages.push({
+        eventId: payload.event_id,
+        team: payload.team_id,
+        user: ev.user,
+        channel: ev.channel,
+        text: ev.text,
+      });
     save();
     await answer(ev, payload.team_id);
   }
