@@ -161,26 +161,31 @@ export async function r6(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
   const ws = ctx.wsA;
   const env = ctx.env;
-  await ctx.a.stop();
-  const down = await waitFor(async () => !(await ctx.a.up()), { timeoutMs: 60_000 });
-  if (!down) return { result: "fail", reason: "The instance still answered a minute after stop." };
-  const stoppedAt = Date.now();
-
   const since = await ctx.slack.seq();
   const codes = [];
   const eventIds = [];
   let channel;
-  for (let i = 1; i <= 20; i++) {
-    const c = code("R6", i);
-    const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(c));
-    channel = sent.channel;
-    codes.push(c);
-    eventIds.push(sent.eventId);
+  let whileStopped;
+  // Whatever fails while the instance is down, start it again, so a crash
+  // here leaves the environment as it found it.
+  await ctx.a.stop();
+  try {
+    const down = await waitFor(async () => !(await ctx.a.up()), { timeoutMs: 60_000 });
+    if (!down)
+      return { result: "fail", reason: "The instance still answered a minute after stop." };
+    const stoppedAt = Date.now();
+    for (let i = 1; i <= 20; i++) {
+      const c = code("R6", i);
+      const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(c));
+      channel = sent.channel;
+      codes.push(c);
+      eventIds.push(sent.eventId);
+    }
+    await sleep(Math.max(0, env.stopSeconds * 1000 - (Date.now() - stoppedAt)));
+    whileStopped = (await ctx.slack.posts({ team: ws.id, channel, since })).length;
+  } finally {
+    await ctx.a.start();
   }
-  await sleep(Math.max(0, env.stopSeconds * 1000 - (Date.now() - stoppedAt)));
-  const whileStopped = (await ctx.slack.posts({ team: ws.id, channel, since })).length;
-
-  await ctx.a.start();
   const up = await waitFor(() => ctx.a.up(), { timeoutMs: env.timeouts.restartSeconds * 1000 });
   const evidence = {
     workspace: ws.id,
