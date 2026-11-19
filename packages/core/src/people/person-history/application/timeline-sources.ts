@@ -23,7 +23,7 @@ import {
   foldAccounts,
   type AccountFold,
   type AddressBooks,
-} from "../../chats/accounts/account-fold.js";
+} from "../../../chats/accounts/account-fold.js";
 import {
   addressBooks,
   storedOn,
@@ -31,11 +31,11 @@ import {
   messageStores,
   type Channels,
   type PlatformOfChannel,
-} from "../../chats/connected-accounts/connected-account.js";
-import type { AccountMessages, MessageAccount } from "../../chats/history/messages.js";
-import { chatsAgentMessages } from "../../chats/history/messages-agent.js";
-import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../model/people-repository.js";
+} from "../../../chats/connected-accounts/connected-account.js";
+import type { AccountMessages, MessageAccount } from "../../../chats/history/messages.js";
+import { chatsAgentMessages } from "../../../chats/history/messages-agent.js";
+import type { DrizzleDb } from "../../../db/index.js";
+import type { PeopleRepository } from "../../model/people-repository.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an

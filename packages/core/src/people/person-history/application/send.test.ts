@@ -4,8 +4,8 @@ import {
   type Channel,
   AccountNotConnected,
   type ChannelSend,
-} from "../../chats/connected-accounts/connected-account.js";
-import { send } from "../../chats/send.js";
+} from "../../../chats/connected-accounts/connected-account.js";
+import { send } from "../../../chats/send.js";
 import { directPlace, readSendStates, resolveSendTarget } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {

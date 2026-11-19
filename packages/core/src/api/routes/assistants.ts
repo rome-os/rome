@@ -18,7 +18,7 @@ import { chatKey, placeIn } from "../../chats/storage/place.js";
 import { send } from "../../chats/send.js";
 import { directPlace } from "../../people/person-history/index.js";
 import type { ApiDeps } from "../deps.js";
-import { respondToSend } from "./send-response.js";
+import { respondToSend } from "../../people/person-history/index.js";
 
 const log = createLogger("assistants-api");
 
