@@ -11,7 +11,9 @@ const message = {
 };
 const actor = () =>
   createGmailActor({ material: { accessToken: "test-token" }, expiresAt: "never" });
-afterEach(() => rs.unstubAllGlobals());
+afterEach(() => {
+  rs.unstubAllGlobals();
+});
 
 describe("Gmail API boundary", () => {
   it("allows only enumerated reads and safely encodes query values", async () => {
@@ -64,7 +66,16 @@ describe("Gmail API boundary", () => {
       ).rejects.toThrow();
     }
     expect(fetch).not.toHaveBeenCalled();
-    expect(actor().operations()).toEqual([]);
+    expect(
+      actor()
+        .operations()
+        .map((operation) => operation.name),
+    ).toEqual(["read", "send"]);
+    expect(
+      actor()
+        .operations()
+        .every((operation) => operation.appAccess === undefined),
+    ).toBe(true);
   });
 
   it("sends only generated MIME to the one send endpoint, with the approved sender", async () => {
@@ -90,6 +101,23 @@ describe("Gmail API boundary", () => {
         .map((part) => Buffer.from(part[1], "base64").toString())
         .join(""),
     ).toBe(message.subject);
+  });
+
+  it("keeps an approved send in its Gmail thread and lets an already-dispatched POST finish across renewal", async () => {
+    const connected = actor();
+    const fetch = rs
+      .fn()
+      .mockResolvedValueOnce(Response.json({ emailAddress: message.from }))
+      .mockImplementationOnce(async (_url: unknown, init?: RequestInit) => {
+        connected.stop!();
+        expect(init!.signal!.aborted).toBe(false);
+        expect(JSON.parse(init!.body as string).threadId).toBe("thread_1");
+        return Response.json({ id: "sent-1" });
+      });
+    rs.stubGlobal("fetch", fetch);
+    await expect(
+      connected.invoke({ operation: "send", input: { ...message, threadId: "thread_1" } }),
+    ).resolves.toMatchObject({ status: 200 });
   });
 
   it("rejects a changed sender, unknown operations, and MIME/header injection", async () => {

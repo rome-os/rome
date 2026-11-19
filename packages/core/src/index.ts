@@ -271,6 +271,7 @@ import { instanceWorkerCalls } from "./app-host/instance-calls.js";
 import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
 import { chatWorkerCalls } from "./app-host/chat-calls.js";
+import { gmailWorkerCalls } from "./app-host/gmail-calls.js";
 import { connectionWorkerCalls } from "./app-host/connection-calls.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
@@ -2141,6 +2142,7 @@ async function main() {
     },
     {
       ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...gmailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
         appConnections,
         appIdForAction: (actionName) => {

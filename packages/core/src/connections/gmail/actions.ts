@@ -16,7 +16,8 @@ function response(result: unknown, connectionId: string): ActionResult {
 
 export function registerGmailActions(
   actions: Pick<ActionRegistry, "register">,
-  connections: Pick<ConnectionRegistry, "find">,
+  connections: Pick<ConnectionRegistry, "find" | "grantOf"> | undefined,
+  forward?: (name: string, args: Record<string, unknown>) => Promise<ActionResult>,
 ): void {
   actions.register({
     config: {
@@ -44,12 +45,30 @@ export function registerGmailActions(
         .strict(),
     ),
     async execute(args) {
+      if (forward) return forward(GMAIL_READ_ACTION, args);
+      if (!connections) return { status: "error", error: "Gmail service unavailable." };
       const found = connections.find("google").filter((connection) => connection.state() !== null);
       if (found.length === 0)
         return {
           status: "error",
           error: "gmail_not_connected: No Rome-managed Google connection.",
         };
+      if (found.length !== 1)
+        return {
+          status: "error",
+          error: "Gmail connection is ambiguous. Fix Google in Settings → Connections.",
+        };
+      const scopes = (await connections.grantOf(found[0].id))?.profile?.scopes;
+      if (
+        !Array.isArray(scopes) ||
+        !scopes.includes("https://www.googleapis.com/auth/gmail.readonly")
+      ) {
+        return {
+          status: "error",
+          error:
+            "gmail_not_connected: Google has no Gmail read permission. Reconnect Google to grant it, or use Composio.",
+        };
+      }
       const parsed = gmailReadSchema.safeParse(args);
       if (!parsed.success)
         return {
@@ -80,7 +99,7 @@ export function registerGmailActions(
       name: GMAIL_SEND_ACTION,
       type: "system",
       description:
-        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. Optional inReplyTo is the original email's Message-ID header. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls.",
+        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -106,11 +125,14 @@ export function registerGmailActions(
           { label: "To", value: input.to.join(", ") },
           { label: "Subject", value: input.subject },
           { label: "Body", value: input.body },
+          ...(input.threadId ? [{ label: "Gmail thread", value: input.threadId }] : []),
           ...(input.inReplyTo ? [{ label: "In reply to", value: input.inReplyTo }] : []),
         ],
       };
     },
     async execute(args) {
+      if (forward) return forward(GMAIL_SEND_ACTION, args);
+      if (!connections) return { status: "error", error: "Gmail service unavailable." };
       const parsed = gmailSendSchema.safeParse(args);
       if (!parsed.success)
         return { status: "error", error: "Invalid Gmail message. Nothing was sent." };
@@ -122,6 +144,18 @@ export function registerGmailActions(
           status: "error",
           error: "The approved Google connection is unavailable. Nothing was sent.",
         };
+      const scopes = (await connections.grantOf(connection.id))?.profile?.scopes;
+      if (
+        !Array.isArray(scopes) ||
+        !scopes.includes("https://www.googleapis.com/auth/gmail.send") ||
+        !scopes.includes("https://www.googleapis.com/auth/gmail.readonly")
+      ) {
+        return {
+          status: "error",
+          error:
+            "The approved Google connection needs Gmail read and send permissions. Reconnect Google. Nothing was sent.",
+        };
+      }
       try {
         return response(
           await connection.act.invoke({ operation: "send", input: parsed.data }),

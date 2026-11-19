@@ -2,6 +2,16 @@ import { z } from "zod";
 import { CredentialRejected } from "../errors.js";
 import type { Actor, Credential, SecretRecord } from "../types.js";
 
+const queryKeys = [
+  "q",
+  "pageToken",
+  "maxResults",
+  "labelIds",
+  "format",
+  "metadataHeaders",
+  "includeSpamTrash",
+  "fields",
+] as const;
 const queryValue = z.union([z.string(), z.number(), z.boolean()]);
 export const gmailReadSchema = z
   .object({
@@ -10,7 +20,7 @@ export const gmailReadSchema = z
       .regex(
         /^\/gmail\/v1\/users\/me\/(?:profile|(?:messages|threads)(?:\/(?!send$|import$|batchModify$|batchDelete$)[a-zA-Z0-9_-]+)?)$/,
       ),
-    query: z.record(z.string(), queryValue).optional(),
+    query: z.partialRecord(z.enum(queryKeys), queryValue).optional(),
     method: z.literal("GET").optional(),
     host: z.enum(["gmail.googleapis.com", "www.googleapis.com"]).optional(),
     body: z.never().optional(),
@@ -31,6 +41,10 @@ export const gmailSendSchema = z
     subject: headerLine,
     body: z.string().max(1_000_000),
     inReplyTo: headerLine.regex(/^<[^<>\s]+>$/).optional(),
+    threadId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]+$/)
+      .optional(),
   })
   .strict();
 export type GmailSendInput = z.infer<typeof gmailSendSchema>;
@@ -78,25 +92,13 @@ export function createGmailActor(credential: Credential): Actor {
     typeof credential.material === "function" ? credential.material() : credential.material;
   const request = async (
     path: string,
-    query?: Record<string, string | number | boolean>,
+    query?: Record<string, string | number | boolean | undefined>,
     raw?: string,
+    threadId?: string,
   ): Promise<GmailResponse> => {
     const url = new URL(`https://gmail.googleapis.com${path}`);
     for (const [key, value] of Object.entries(query ?? {})) {
-      if (
-        ![
-          "q",
-          "pageToken",
-          "maxResults",
-          "labelIds",
-          "format",
-          "metadataHeaders",
-          "includeSpamTrash",
-          "fields",
-        ].includes(key)
-      ) {
-        throw new Error(`Unsupported Gmail query parameter: ${key}`);
-      }
+      if (value === undefined) continue;
       url.searchParams.set(key, String(value));
     }
     lifetime.signal.throwIfAborted();
@@ -106,11 +108,19 @@ export function createGmailActor(credential: Credential): Actor {
     const response = await fetch(url, {
       method: raw === undefined ? "GET" : "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      ...(raw === undefined ? {} : { body: JSON.stringify({ raw }) }),
+      ...(raw === undefined
+        ? {}
+        : { body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) }) }),
       redirect: "manual",
-      signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+      // A send already dispatched with approval finishes across routine renewal.
+      // The epoch checks above still prevent a retired Actor starting a send.
+      signal:
+        raw === undefined
+          ? AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)])
+          : AbortSignal.timeout(30_000),
     });
-    if (response.status === 401) throw new CredentialRejected("Google refused the access token.");
+    if (response.status === 401)
+      throw new CredentialRejected({ cause: new Error("Google refused the access token.") });
     return {
       status: response.status,
       data: await response.json(),
@@ -118,7 +128,18 @@ export function createGmailActor(credential: Credential): Actor {
     };
   };
   return {
-    operations: () => [],
+    operations: () => [
+      {
+        name: "read",
+        description: "Read Gmail profile, messages and threads.",
+        inputSchema: z.toJSONSchema(gmailReadSchema),
+      },
+      {
+        name: "send",
+        description: "Send an exact message approved through core:gmail_send.",
+        inputSchema: z.toJSONSchema(gmailSendSchema),
+      },
+    ],
     stop: () => lifetime.abort(),
     async invoke({ operation, input }) {
       if (operation === "read") {
@@ -135,7 +156,12 @@ export function createGmailActor(credential: Credential): Actor {
         ) {
           throw new Error("The connected Gmail sender does not match the approved From address.");
         }
-        return request("/gmail/v1/users/me/messages/send", undefined, gmailRawMessage(parsed));
+        return request(
+          "/gmail/v1/users/me/messages/send",
+          undefined,
+          gmailRawMessage(parsed),
+          parsed.threadId,
+        );
       }
       throw new Error("Unsupported Gmail operation.");
     },
