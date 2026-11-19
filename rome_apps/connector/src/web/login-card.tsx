@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Loader2, LogIn, PlugZap } from "lucide-react";
 import { defineComponent, type AppComponentContext } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
 import { useComposioLogin } from "@/lib/use-composio-login";
 import { wasDismissed } from "@/lib/interaction";
 
@@ -73,52 +74,40 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
           {phase === "awaiting" ? "Waiting for you to authorize in the opened tab…" : ""}
         </span>
-        <div className="flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           {phase === "awaiting" ? (
             <>
               {loginUrl ? (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => window.open(loginUrl, "_blank", "noopener,noreferrer")}
-                  className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
                 >
                   Reopen tab
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                onClick={cancel}
-                className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
-              >
+              <Button type="button" variant="outline" size="sm" onClick={cancel}>
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => ctx.host.dismiss()}
-                className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
-              >
+              <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
                 Dismiss
-              </button>
-              <button
-                type="button"
-                onClick={start}
-                disabled={phase === "starting"}
-                className="inline-flex items-center gap-1.5 rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              >
+              </Button>
+              <Button type="button" size="sm" onClick={start} disabled={phase === "starting"}>
                 {phase === "starting" ? (
-                  <Loader2 size={14} className="animate-spin" />
+                  <Loader2 size={14} data-icon="inline-start" className="animate-spin" />
                 ) : (
-                  <LogIn size={14} />
+                  <LogIn size={14} data-icon="inline-start" />
                 )}
                 {phase === "starting" ? "Starting…" : "Sign in"}
-              </button>
+              </Button>
             </>
           )}
         </div>

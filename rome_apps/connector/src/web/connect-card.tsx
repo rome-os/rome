@@ -6,6 +6,7 @@ import {
   navigateRome,
   type AppComponentContext,
 } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
 import {
   CATALOG_BY_SLUG,
   isRomeSettingsLink,
@@ -378,21 +379,17 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
       <div className="rounded-12 border border-border bg-surface p-4">
         <span className="text-sm font-medium text-foreground">Connect {name}</span>
         {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => ctx.host.dismiss()}
-            className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
-          >
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
             Dismiss
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
             onClick={() => navigateRome({ path: "settings", tab: "connections" })}
-            className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
           >
             Open Settings
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -407,35 +404,27 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
 
       {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
 
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
           {phase === "authorizing" ? "Waiting for you to authorize in the opened tab…" : ""}
         </span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => ctx.host.dismiss()}
-            className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
-          >
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => ctx.host.dismiss()}>
             Dismiss
-          </button>
+          </Button>
           {phase === "authorizing" ? (
-            <button
-              type="button"
-              onClick={checkNow}
-              className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-            >
+            <Button type="button" size="sm" onClick={checkNow}>
               I've authorized
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={connect}
               disabled={phase === "starting" || !toolkit}
-              className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {phase === "starting" ? "Starting…" : phase === "error" ? "Try again" : "Connect"}
-            </button>
+            </Button>
           )}
         </div>
       </div>
