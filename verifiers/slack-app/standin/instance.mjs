@@ -243,14 +243,16 @@ async function drainOnce() {
 }
 
 // Broken R6: whatever waited in the mailbox while stopped is thrown away.
-if (breaks.has("R6")) {
+// Broken R6-drop5: the first 5 of them are, as a full worker pool would.
+if (breaks.has("R6") || breaks.has("R6-drop5")) {
   const { frames } = await (
     await fetch(`${CLOUD}/relay/${NAME}/drain`, { headers: cloudAuth })
   ).json();
+  const dropped = breaks.has("R6") ? frames : frames.slice(0, 5);
   await fetch(`${CLOUD}/relay/${NAME}/ack`, {
     method: "POST",
     headers: { "content-type": "application/json", ...cloudAuth },
-    body: JSON.stringify({ ids: frames.map((f) => f.id) }),
+    body: JSON.stringify({ ids: dropped.map((f) => f.id) }),
   });
 }
 

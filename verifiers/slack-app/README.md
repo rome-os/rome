@@ -47,6 +47,7 @@ Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, 
 | `R7-transport` | Rome Cloud drops every forged event's connection unanswered. R7 must report "not checked", not pass. |
 | `R7-gateway` | A gateway answers 502 to every forged event. R7 must report "not checked". |
 | `R7-blind` (with `R7-route`) | The wrong instance answers workspace A's events in its own workspace with a reply naming nothing of A, and records nothing. |
+| `R6-drop5` | 5 of the 20 messages waiting at restart are lost. |
 | `R6-stop-error` | The stop control stops the instance, then reports a failure. R6 must still restart it and pass. |
 | `R7-elsewhere` (with `R7-signature`) | Forged events get through, are not recorded, and are answered in another member's direct message. |
 | `R11` | The relay gains a Slack file. |

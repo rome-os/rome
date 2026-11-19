@@ -164,7 +164,10 @@ export function instance(inst, slackOrigin) {
       const session = encodeURIComponent(`channel:${SLACK_KIND}:${dm}`);
       const res = await call(`/sessions/${session}/messages`);
       if (res.status === 404 && noneIfMissing) return [];
-      if (!res.ok) throw new Error(`session messages on ${inst.name}: ${res.status}`);
+      if (!res.ok)
+        throw new Error(
+          `GET /sessions/${session}/messages on ${inst.name}: ${res.status} ${JSON.stringify(res.data)}`,
+        );
       const list = Array.isArray(res.data) ? res.data : (res.data?.messages ?? []);
       return (
         list

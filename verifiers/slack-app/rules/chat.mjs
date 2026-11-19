@@ -65,10 +65,14 @@ export async function r7(ctx) {
   const evidence = {};
   const problems = [];
   let partial = null;
+  // A failed read is kept in the evidence whatever the result, so its cause
+  // can be found even when R7 fails for another reason.
+  const readErrors = [];
   const readable = async (read) => {
     try {
       return await read();
     } catch (err) {
+      readErrors.push(err.message);
       partial ??= `a read of what Rome recorded failed: ${err.message}`;
       return null;
     }
@@ -190,7 +194,13 @@ export async function r7(ctx) {
       );
   }
 
-  if (problems.length) return { result: "fail", reason: problems.join("; "), evidence };
+  evidence.readErrors = readErrors;
+  if (problems.length)
+    return {
+      result: "fail",
+      reason: problems.join("; ") + (partial ? `. Also not checked: ${partial}` : ""),
+      evidence,
+    };
   if (partial)
     return { result: "not checked", reason: `No failure seen, but ${partial}.`, evidence };
   return {
@@ -284,7 +294,7 @@ export async function r6(ctx) {
     : {
         result: "fail",
         reason:
-          `${inChat} repl${inChat === 1 ? "y" : "ies"} posted in the direct message for 20 messages sent while stopped, not 20` +
+          `20 messages sent while stopped; ${inChat} repl${inChat === 1 ? "y" : "ies"} posted in their direct message after the restart, so at most ${Math.min(inChat, 20)} of 20 answered` +
           (t.postsElsewhere.length
             ? `; ${t.postsElsewhere.length} posted in other conversations`
             : ""),

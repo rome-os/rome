@@ -94,6 +94,12 @@ const CASES = [
     what: "the instance throws away its mailbox when it starts",
   },
   {
+    name: "R6-drop5",
+    breaks: "R6-drop5",
+    rule: "R6",
+    what: "5 of the 20 messages waiting at restart are lost",
+  },
+  {
     name: "R7-signature",
     breaks: "R7-signature",
     rule: "R7",
