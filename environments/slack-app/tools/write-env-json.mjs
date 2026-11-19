@@ -141,6 +141,21 @@ console.log(
         query: [ctl, "cloud-query"],
       },
       relay: { url_inside_network: "http://relay:8787" },
+      // Test files of the rome commit under test, run unchanged in an image of
+      // that commit with every dependency (built on first use per commit).
+      // Append repo-relative paths. Prints the runner's output, then a last
+      // line {ok, commit, runs: [{package, files, exit_code}], error?}; exits
+      // 0 when all pass, 2 when a file is not in the commit.
+      product_tests: [ctl, "product-tests"],
+      // A Playwright browser in a container on the host's network, so the
+      // instances' own origins work. Connect with the client below:
+      // (await import(browser.import)).chromium.connect(browser.ws_endpoint).
+      browser: {
+        ws_endpoint: `ws://127.0.0.1:${e.BROWSER_PORT}/`,
+        version: e.SLACKENV_PLAYWRIGHT_VERSION,
+        client: join(stateDir, "browser-client"),
+        import: join(stateDir, "browser-client/node_modules/playwright-core/index.mjs"),
+      },
       // R10. The older connections, as an upgrade leaves them, and how each
       // sends. Routes are the instance's, signed with the guardian's cookies.
       old_connections: {

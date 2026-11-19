@@ -164,7 +164,11 @@ chmod 644 "$STATE_DIR/tls/tls.key" # read by the fake Slack's container user; th
 export SLACKENV_PROJECT="${SLACKENV_PROJECT:-slackenv}"
 export SLACKENV_NODE_IMAGE="${SLACKENV_NODE_IMAGE:-node:24-slim}"
 export SLACKENV_POSTGRES_IMAGE="${SLACKENV_POSTGRES_IMAGE:-postgres:16-alpine}"
-export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182
+# The Playwright release rome pins (packages/web @playwright/test), and the
+# digest rome's CI pins for it.
+export SLACKENV_PLAYWRIGHT_VERSION="${SLACKENV_PLAYWRIGHT_VERSION:-1.62.1}"
+export SLACKENV_PLAYWRIGHT_IMAGE="${SLACKENV_PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e}"
+export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182 BROWSER_PORT=47190
 export HOST_UID HOST_GID
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
@@ -178,8 +182,9 @@ CLOUD="http://127.0.0.1:$PANTHEON_PORT"
 
 # What compose interpolates, kept for ctl.sh and down.sh. The model credential
 # is left out: only `up` passes it, through this script's environment.
-for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE HOST_UID HOST_GID ENV_DIR STATE_DIR \
-  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
+for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE SLACKENV_PLAYWRIGHT_IMAGE \
+  SLACKENV_PLAYWRIGHT_VERSION HOST_UID HOST_GID ENV_DIR STATE_DIR \
+  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
   FAKE_SLACK_RETRY_DELAYS_MS SLACK_APP_ID SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET \
   ROME_A_JWT_SECRET ROME_B_JWT_SECRET; do
   printf '%s=%s\n' "$v" "${!v}"
@@ -239,8 +244,19 @@ wait_for() { # <what> <seconds> <command...>
   done
   die "$what did not come up in ${limit}s (see: docker compose -p $SLACKENV_PROJECT logs)"
 }
+log "starting the browser for the verifier"
+compose up -d browser
+# The client the verifier connects with, at the browser's version: pure
+# JavaScript, installed into .state only.
+if [ ! -f "$STATE_DIR/browser-client/node_modules/playwright-core/package.json" ]; then
+  mkdir -p "$STATE_DIR/browser-client"
+  docker run --rm -u "$HOST_UID:$HOST_GID" -e HOME=/tmp -v "$STATE_DIR/browser-client:/client" "$SLACKENV_NODE_IMAGE" \
+    npm install --prefix /client --no-audit --no-fund --silent "playwright-core@$SLACKENV_PLAYWRIGHT_VERSION" >/dev/null
+fi
 wait_for "the fake Slack" 60 curl -fsS "http://127.0.0.1:$FAKE_SLACK_PORT/_control/health"
 wait_for "Rome Cloud" 600 curl -fsS -o /dev/null "$CLOUD/api/health"
+# run-server answers plain HTTP once it listens.
+wait_for "the browser" 300 curl -s -o /dev/null "http://127.0.0.1:$BROWSER_PORT/"
 wait_for "the relay" 300 compose exec -T relay node -e 'fetch("http://127.0.0.1:8787/").then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))'
 
 # Two guardian accounts, one per instance. Created directly, as the seed

@@ -256,6 +256,28 @@ services:
       - rome-b-signer-key:/keys
       - rome-b-signer-sock:/run/rome-signer
 
+  # A browser for the verifier to drive (env.json browser): Playwright's own
+  # image, at the version rome pins, serving `playwright run-server`. It shares
+  # the host's network, so the dashboards' own origins (127.0.0.1:<port>) and
+  # the guardians' cookies work as they are.
+  browser:
+    image: ${SLACKENV_PLAYWRIGHT_IMAGE}
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    shm_size: 1gb
+    environment:
+      HOME: /tmp
+    command:
+      - npx
+      - -y
+      - playwright@${SLACKENV_PLAYWRIGHT_VERSION}
+      - run-server
+      - --host
+      - 127.0.0.1
+      - --port
+      - "${BROWSER_PORT}"
+
 volumes:
   postgres:
   rome-a-app:

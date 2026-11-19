@@ -7,6 +7,7 @@
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
 #   environments/slack-app/ctl.sh old-connections rome-a|rome-b  (R10's slack_bot and slack)
+#   environments/slack-app/ctl.sh product-tests <repo-relative test file>...  (R9)
 #   environments/slack-app/ctl.sh logs <service>
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
@@ -16,6 +17,8 @@
 # one query on Rome Cloud's database as a role that can only read.
 # old-connections writes the two older Slack connections an upgrade leaves
 # (tools/old-connections.mjs) into the stopped instance and starts it again.
+# product-tests runs test files of the rome commit under test, unchanged, in
+# an image of that commit with its dependencies (test-runner/Dockerfile).
 set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$ENV_DIR/.state"
@@ -33,7 +36,7 @@ case "$action" in
     exit 2
     ;;
   esac ;;
-  cloud-query) ;;
+  cloud-query | product-tests) ;;
   distribution) case "$svc" in on | off) ;; *)
     echo "usage: ctl.sh distribution on|off" >&2
     exit 2
@@ -44,7 +47,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,18p' "$0"
+    sed -n '2,21p' "$0"
     exit 2
     ;;
 esac
@@ -197,6 +200,67 @@ case "$action" in
     node -e '
       fetch(`http://127.0.0.1:${process.argv[1]}/_control/config`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ distributed: process.argv[2] === "on" }) })
         .then((r) => r.json()).then((c) => console.log(JSON.stringify({ distributed: c.distributed, home_team: c.home_team })), (e) => { console.error(String(e)); process.exit(1); });' "$port" "$svc"
+    ;;
+  product-tests)
+    shift
+    [ $# -gt 0 ] || {
+      echo "usage: ctl.sh product-tests <repo-relative test file>..." >&2
+      exit 2
+    }
+    src="$STATE_DIR/rome-src"
+    sha="$(git -C "$src" rev-parse HEAD)"
+    result() { # <exit code> <runs json>
+      printf '{"ok":%s,"commit":"%s","runs":[%s]%s}\n' "$([ "$1" -eq 0 ] && echo true || echo false)" "$sha" "$2" "${3:-}"
+      exit "$1"
+    }
+    for f in "$@"; do
+      if [[ "$f" == /* || "$f" == *..* ]] || ! git -C "$src" cat-file -e "HEAD:$f" 2>/dev/null; then
+        result 2 "" ",\"error\":\"not in the commit: $f\""
+      fi
+    done
+    image="slackenv-rome-test:${sha:0:12}"
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      echo "building $image from rome $sha (first time for this commit: several minutes)" >&2
+      ctx="$(mktemp -d)"
+      git -C "$src" archive HEAD | tar -x -C "$ctx"
+      docker build -q -t "$image" --label "slackenv.rome_sha=$sha" -f "$ENV_DIR/test-runner/Dockerfile" "$ctx" >&2 ||
+        {
+          rm -rf "$ctx"
+          result 1 "" ',"error":"the test image did not build"'
+        }
+      rm -rf "$ctx"
+    fi
+    # Each file runs in the package whose rstest config takes it, the way that
+    # package's own test script runs: rome_apps' tests run under packages/core.
+    declare -A groups=()
+    for f in "$@"; do
+      d="$(dirname "$f")"
+      pkg=""
+      while [ "$d" != . ] && [ "$d" != / ]; do
+        if compgen -G "$src/$d/rstest.config.*" >/dev/null; then
+          pkg="$d"
+          break
+        fi
+        d="$(dirname "$d")"
+      done
+      pkg="${pkg:-packages/core}"
+      groups[$pkg]+="$f "
+    done
+    runs=""
+    code=0
+    for pkg in "${!groups[@]}"; do
+      read -ra files <<<"${groups[$pkg]}"
+      set +e
+      # rstest keeps the test files that start with an absolute filter.
+      docker run --rm --network none -w "/repo/$pkg" "$image" \
+        pnpm exec /repo/scripts/test-env.sh rstest run "${files[@]/#//repo/}"
+      c=$?
+      set -e
+      [ "$code" -eq 0 ] && code=$c
+      list="$(printf '"%s",' "${files[@]}")"
+      runs+="${runs:+,}{\"package\":\"$pkg\",\"files\":[${list%,}],\"exit_code\":$c}"
+    done
+    result "$code" "$runs"
     ;;
   cloud-query)
     # The query is wrapped as a subquery, so one SELECT (or WITH) is taken,
