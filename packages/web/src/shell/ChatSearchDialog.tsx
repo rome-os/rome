@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/command";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
+import { Kbd } from "@/components/ui/kbd";
 import { useAppsList } from "@/hooks/use-apps";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
@@ -950,9 +951,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               className="text-muted-foreground hover:text-foreground"
             />
           ) : (
-            <kbd className="hidden shrink-0 rounded-4 border border-border bg-surface-muted px-2 py-1 font-sans text-aux text-muted-foreground sm:inline-flex">
-              {shortcut}
-            </kbd>
+            <Kbd className="hidden sm:inline-flex">{shortcut}</Kbd>
           )}
         </CommandInput>
 
@@ -1183,15 +1182,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
       <div className="hidden items-center gap-4 border-t border-border px-4 py-2 text-aux text-muted-foreground sm:flex">
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            ↑↓
-          </kbd>
+          <Kbd>↑↓</Kbd>
           {t("recentChats.searchNavigateHint")}
         </span>
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            ↵
-          </kbd>
+          <Kbd>↵</Kbd>
           {pickingAgent
             ? t("recentChats.agentPickHint")
             : messagingAgent
@@ -1199,9 +1194,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               : t("recentChats.searchOpenHint")}
         </span>
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            Esc
-          </kbd>
+          <Kbd>Esc</Kbd>
           {t("recentChats.searchCloseHint")}
         </span>
       </div>

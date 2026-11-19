@@ -28,7 +28,6 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { Kbd } from "@/components/ui/kbd";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -398,16 +398,7 @@ function NewChatRow({
         <Plus className="size-4 shrink-0" />
       </span>
       <span className="flex-1 truncate">{label}</span>
-      {shortcut ? (
-        <Badge
-          asChild
-          variant="muted"
-          shape="square"
-          className="shrink-0 border-border font-sans font-normal"
-        >
-          <kbd>{shortcut}</kbd>
-        </Badge>
-      ) : null}
+      {shortcut ? <Kbd>{shortcut}</Kbd> : null}
     </Link>
   );
 }
