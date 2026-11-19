@@ -30,16 +30,17 @@ const fact = (thing, v) => `Please remember this for later: my ${thing} is ${v.t
 const question = (thing) => `What is my ${thing}?`;
 
 /** Sends `text` as `user`'s direct message and waits for a reply or the timeout. */
-async function send(ctx, ws, user, text) {
+async function send(ctx, ws, user, text, timeoutMs = ctx.env.timeouts.replySeconds * 1000) {
   const since = await ctx.slack.seq();
+  const at = Date.now();
   const sent = await ctx.slack.dm(ws.id, user, text);
-  await replyAfter(ctx.slack, {
-    team: ws.id,
-    channel: sent.channel,
+  const answered = await replyAfter(ctx.slack, { team: ws.id, channel: sent.channel, since, timeoutMs });
+  return {
     since,
-    timeoutMs: ctx.env.timeouts.replySeconds * 1000,
-  });
-  return { since, channel: sent.channel, eventId: sent.eventId };
+    channel: sent.channel,
+    eventId: sent.eventId,
+    answeredAfterSeconds: answered ? Math.round((Date.now() - at) / 100) / 10 : null,
+  };
 }
 
 /** The text of the posts in `channel` after `since` and up to `until`. */
@@ -224,27 +225,57 @@ const NOTES = [
   ["suitcase lock code", "CORMORANT"],
 ];
 
-/** Asks the 10 questions in order, one reply each, and reads each answer. */
-async function askAll(ctx, ws, notes, round) {
+/** Five facts in one message, and five questions in one message. */
+const fiveFacts = (notes) =>
+  `Please remember these for later: ${notes.map((n) => `my ${n.thing} is ${n.v.text}`).join("; ")}.`;
+const fiveQuestions = (notes) =>
+  `What are my ${notes
+    .slice(0, -1)
+    .map((n) => n.thing)
+    .join(", ")} and ${notes.at(-1).thing}?`;
+
+// Slack lets an app like this one read 15 messages a request, once a minute,
+// so the first answer after the wipe may wait out the minute.
+const FIRST_AFTER_WIPE_MS = 150_000;
+
+/**
+ * Sends each of `asks` ({tag, text, notes}) in order, one reply each, and
+ * reads which notes each answer gets right. The first ask may wait `firstMs`.
+ */
+async function askRound(ctx, ws, asks, firstMs) {
   const since = await ctx.slack.seq();
   const sent = [];
   let channel = null;
-  for (const [i, n] of notes.entries()) {
-    const tag = code(`R13${round}`, i + 1);
-    const s = await send(ctx, ws, ws.guardian, `${question(n.thing)} (message ${tag})`);
+  for (const [i, a] of asks.entries()) {
+    const s = await send(
+      ctx,
+      ws,
+      ws.guardian,
+      `${a.text} (message ${a.tag})`,
+      i === 0 && firstMs ? firstMs : undefined,
+    );
     channel = s.channel;
-    sent.push({ tag, since: s.since, note: n });
+    sent.push({ ...a, since: s.since, answeredAfterSeconds: s.answeredAfterSeconds });
   }
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
   const posts = await ctx.slack.posts({ team: ws.id, since });
   const t = tally(posts, { channel, sent });
   const inChat = posts.filter((p) => p.channel === channel);
-  const right = sent.map((m, i) => {
+  const right = sent.flatMap((m, i) => {
     const next = sent[i + 1]?.since ?? Number.POSITIVE_INFINITY;
     const replies = inChat.filter((p) => p.seq > m.since && p.seq <= next);
-    return { tag: m.tag, thing: m.note.thing, right: replies.some((p) => m.note.v.seen(p.text)) };
+    return m.notes.map((n) => ({
+      tag: m.tag,
+      thing: n.thing,
+      right: replies.some((p) => n.v.seen(p.text)),
+    }));
   });
-  return { t, right, rightCount: right.filter((r) => r.right).length, since, channel };
+  return {
+    t,
+    right,
+    rightCount: right.filter((r) => r.right).length,
+    firstAnsweredAfterSeconds: sent[0]?.answeredAfterSeconds ?? null,
+  };
 }
 
 /** What Rome shows outside the connection: its view and the connected accounts. */
@@ -266,15 +297,22 @@ export async function r13(ctx) {
     };
   const ws = ctx.wsA;
   const notes = NOTES.map(([thing, word]) => ({ thing, v: value(word) }));
+  const halves = [notes.slice(0, 5), notes.slice(5)];
+  // The 10 facts in two messages, asked back in two: with the replies, the
+  // facts sit within the last 15 messages of the chat when it is wiped.
   let channel = null;
-  for (const n of notes) {
-    const s = await send(ctx, ws, ws.guardian, `${fact(n.thing, n.v)} (message ${code("R13S", 0)})`);
+  for (const [i, half] of halves.entries()) {
+    const s = await send(ctx, ws, ws.guardian, `${fiveFacts(half)} (message ${code("R13S", i + 1)})`);
     channel = s.channel;
   }
 
   // With the copy, then without it: the answers, and all Rome shows outside
   // the connection, must be the same.
-  const withCopy = await askAll(ctx, ws, notes, "A");
+  const withCopy = await askRound(
+    ctx,
+    ws,
+    halves.map((half, i) => ({ tag: code("R13A", i + 1), text: fiveQuestions(half), notes: half })),
+  );
   const outsideBefore = await outside(ctx);
   const wipeSeq = await ctx.slack.seq();
   const wiped = await ctx.a.wipeChat(channel);
@@ -285,11 +323,19 @@ export async function r13(ctx) {
       reason: `the wipe left a copy of the direct message: ${JSON.stringify(wiped.remaining ?? wiped)}`,
       evidence: { chat: channel, wipe: wiped },
     };
-  const withoutCopy = await askAll(ctx, ws, notes, "B");
+  const withoutCopy = await askRound(
+    ctx,
+    ws,
+    notes.map((n, i) => ({ tag: code("R13B", i + 1), text: question(n.thing), notes: [n] })),
+    FIRST_AFTER_WIPE_MS,
+  );
   const outsideAfter = await outside(ctx);
+  // Counted at the fake Slack, refused ones too: the product may read
+  // history without any sign in its own log.
   const reads = (await ctx.slack.calls({ team: ws.id, since: wipeSeq })).filter((c) =>
     /^conversations\.(history|replies)$/.test(c.method),
   );
+  const refused = reads.filter((c) => c.ok === false || c.error || c.response?.ok === false);
 
   const evidence = {
     chat: channel,
@@ -297,20 +343,29 @@ export async function r13(ctx) {
     wipe: wiped,
     withCopy: { said: summary(withCopy.t), right: withCopy.right },
     withoutCopy: { said: summary(withoutCopy.t), right: withoutCopy.right },
+    slackHistoryRequestsAfterWipe: reads.length,
+    slackHistoryRequestsRefused: refused.length,
+    firstAnswerAfterWipeSeconds: withoutCopy.firstAnsweredAfterSeconds,
     slackReadsAfterWipe: reads.map((c) => c.method),
     outsideSame: outsideBefore === outsideAfter,
     ...(outsideBefore === outsideAfter
       ? {}
       : { outsideBefore: JSON.parse(outsideBefore), outsideAfter: JSON.parse(outsideAfter) }),
   };
-  const said = `with the copy ${withCopy.rightCount} of 10 answered right, without it ${withoutCopy.rightCount} of 10; ${reads.length} Slack history read(s) after the wipe`;
+  const first = withoutCopy.firstAnsweredAfterSeconds;
+  const said = `with the copy ${withCopy.rightCount} of 10 answered right, without it ${withoutCopy.rightCount} of 10; Slack saw ${reads.length} history request(s) after the wipe (${refused.length} refused); the first answer after the wipe took ${first === null ? "longer than 150" : first} s`;
   const problems = [];
   if (withoutCopy.rightCount !== 10)
     problems.push(`${10 - withoutCopy.rightCount} question(s) went wrong or unanswered without the copy`);
   if (withoutCopy.t.answeredOnce !== 10 || withoutCopy.t.postsElsewhere.length)
     problems.push(`without the copy: ${summary(withoutCopy.t)}`);
-  if (withCopy.rightCount !== withoutCopy.rightCount)
-    problems.push("the answers differ with and without the copy");
+  if (withCopy.t.answeredOnce !== 2 || withCopy.t.postsElsewhere.length)
+    problems.push(`with the copy: ${summary(withCopy.t)}`);
+  const differ = withoutCopy.right.filter(
+    (r) => withCopy.right.find((x) => x.thing === r.thing)?.right !== r.right,
+  );
+  if (differ.length)
+    problems.push(`the answers differ with and without the copy for ${differ.map((r) => r.thing).join(", ")}`);
   if (outsideBefore !== outsideAfter)
     problems.push("Rome shows something different outside the connection once the copy is gone");
   if (problems.length) return { result: "fail", reason: `${said}. ${problems.join("; ")}`, evidence };

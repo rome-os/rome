@@ -200,13 +200,14 @@ async function post(token, channel, text, threadTs) {
 
 const slackState = async () => (await fetch(`${SLACK}/_control/state`)).json();
 
-const REMEMBER = /Please remember this for later: my (.+?) is (\S+?)\.(\s|$)/i;
+const REMEMBER = /Please remember (?:this|these) for later:/i;
 
 /** The value noted for `thing` in `texts`, newest last. */
 const noted = (texts, thing) =>
   texts
-    .map((t) => t?.match(REMEMBER))
-    .filter((m) => m && m[1].toLowerCase() === thing.toLowerCase())
+    .filter((t) => REMEMBER.test(t ?? ""))
+    .flatMap((t) => [...t.matchAll(/my ([^;]+?) is ([A-Z]+-\d+)/g)])
+    .filter((m) => m[1].toLowerCase() === thing.toLowerCase())
     .at(-1)?.[2];
 
 /**
@@ -237,6 +238,8 @@ async function recall(conn, channel, thing) {
     if (!page.ok) break;
     read.push(...page.messages);
     cursor = page.response_metadata?.next_cursor ?? "";
+    // Enough once the fact is in what was read, as Slack's limit asks.
+    if (noted(read.map((m) => m.text), thing)) break;
     if (!page.has_more || !cursor) break;
   }
   conn.readSlack = true;
@@ -262,10 +265,15 @@ async function words(conn, event, team) {
   const text = event.text ?? "";
   if (REMEMBER.test(text)) return "Noted, I'll remember that.";
   const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
-  const mine = text.match(/What is my (.+?)\?/i);
+  const mine = text.match(/What (?:is|are) my (.+?)\?/i);
   if (mine && event.user === guardian) {
-    const v = await recall(conn, event.channel, mine[1]);
-    return v ? `Your ${mine[1]} is ${v}.` : "I don't have that noted.";
+    const things = mine[1].split(/, | and /);
+    const said = [];
+    for (const thing of things) {
+      const v = await recall(conn, event.channel, thing);
+      said.push(v ? `Your ${thing} is ${v}.` : `I don't have your ${thing} noted.`);
+    }
+    return said.join(" ");
   }
   const about = text.match(/(?:What is|remind me of) .+?'s (.+?)(?:,|\?)/i);
   if (about && event.user !== guardian) {

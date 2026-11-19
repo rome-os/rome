@@ -58,9 +58,6 @@ const { slack, servers } = fake.start(
     port: 0,
     workspacesFile: join(fakeDir, "workspaces.json"),
     retryDelaysMs: "200,500,1000",
-    // Slack's history limit is off here: paging through it, a minute a page,
-    // would outlast the stand-in's reply timeout. The real run keeps it on.
-    historyLimit: false,
     ...secrets,
   }),
 );
