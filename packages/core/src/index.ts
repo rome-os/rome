@@ -1351,13 +1351,17 @@ async function main() {
         // A new session reads the chat's latest messages through its
         // channel, from where the chat lives, as an action reading the
         // chat's history would: a read of the chat the turn is in.
-        // The query here has no upper bound yet, so earlier() drops what
-        // came after `until` itself.
-        latest: (place, { limit }) =>
-          channelsService.query(place.channel, {
-            chatId: place.threadId as ChatId,
-            limit,
-          }),
+        // Only a chat read live from its platform takes `until`; one read
+        // from Rome's record refuses it (app-host/accounts-service.ts), and
+        // reads its latest instead. Any other failure stands, so a platform
+        // that rations reads, such as Slack, is not asked twice.
+        latest: (place, { limit, until }) => {
+          const chatId = place.threadId as ChatId;
+          return channelsService.query(place.channel, { chatId, until, limit }).catch((error) => {
+            if (!(error instanceof Error && error.message.includes("until a time"))) throw error;
+            return channelsService.query(place.channel, { chatId, limit });
+          });
+        },
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>

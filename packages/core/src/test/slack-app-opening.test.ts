@@ -47,7 +47,7 @@ function slackSide() {
 
 /** Message `i` as Rome Cloud deposits its event, signed: the member's when
  *  `i` is odd, else the app's own post, which Slack also sends an event for. */
-function heard(i: number): MailboxFrame {
+function heard(i: number, ts = tsOf(i)): MailboxFrame {
   const body = new TextEncoder().encode(
     JSON.stringify({
       type: "event_callback",
@@ -61,7 +61,7 @@ function heard(i: number): MailboxFrame {
         user: i % 2 === 0 ? BOT : MEMBER,
         ...(i % 2 === 0 ? { bot_id: "B_ROME" } : {}),
         text: `message ${i}`,
-        ts: tsOf(i),
+        ts,
       },
     }),
   );
@@ -97,6 +97,12 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         ...(i % 2 === 0 ? { bot_id: "B_ROME" } : {}),
         text: `message ${i}`,
       });
+    }
+    // A backlog said after the turn the session opens on, more than a page
+    // holds: it takes no room on the page of earlier messages.
+    const backlogTs = (i: number) => `1700000100.${String(i).padStart(6, "0")}`;
+    for (let i = 7; i <= 23; i++) {
+      slack.said.push({ ts: backlogTs(i), user: MEMBER, text: `message ${i}` });
     }
 
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
@@ -135,7 +141,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         labels: new SenderLabels({ byAccount: async () => null }),
         channelOfChat: () => "slack_app",
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
-        latest: (place, limit) => adapter.readHistory(place.threadId as never, { limit }),
+        latest: (place, { limit, until }) =>
+          adapter.readHistory(place.threadId as never, { limit, until }),
       });
     const place: ThreadContext = { channel: "slack_app", threadId: CHAT, threadType: "private" };
     const before = new Date("2023-11-14T22:14:00.000Z");
@@ -144,6 +151,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     const first = connect();
     await first.start();
     for (let i = 1; i <= 6; i++) await onFrame!(heard(i));
+    for (let i = 7; i <= 23; i++) await onFrame!(heard(i, backlogTs(i)));
     expect(testDb.db.select().from(slackAppMessages).all()).not.toHaveLength(0);
     const readsBeforeFull = slack.conversationHistory.mock.calls.length;
     const full = await factsOver(first).earlier!(place, before);
@@ -169,11 +177,11 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     ]);
     expect(wiped).toEqual(full);
     // The full copy asked Slack only what came before the first message it
-    // heard; the wiped one asked from the newest.
+    // heard; the wiped one asked from the turn's time.
     const latestOf = (calls: typeof slack.conversationHistory.mock.calls) =>
       calls.map(([, input]) => input.latest);
     const calls = slack.conversationHistory.mock.calls;
     expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual([tsOf(1)]);
-    expect(latestOf(calls.slice(readsBeforeWiped))).toEqual([undefined]);
+    expect(latestOf(calls.slice(readsBeforeWiped))).toEqual(["1700000040.000001"]);
   });
 });
