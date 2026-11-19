@@ -116,9 +116,13 @@ function lineOf(message: ChannelMessage, id: number): ContextLine {
   const platform = message.account?.platform;
   const account: Account | null =
     !fromRome && platform && message.senderId ? { platform, id: message.senderId } : null;
+  // As a stored message reads (sessions/turn-links contextOf): an outbound
+  // message keeps the name the platform gives its sender, since on a
+  // personal account the guardian writes from Rome's account too.
+  const named = message.senderDisplayName ?? message.senderUsername ?? null;
   return {
     id,
-    senderName: fromRome ? "Rome" : (message.senderDisplayName ?? message.senderUsername ?? null),
+    senderName: named ?? (fromRome ? "Rome" : null),
     account,
     text: message.text ?? "",
     at: message.timestamp,

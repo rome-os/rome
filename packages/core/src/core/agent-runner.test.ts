@@ -6964,6 +6964,51 @@ describe("AgentRunner", () => {
       expect(second).not.toContain("12 May");
     });
 
+    it("reads nothing earlier when the unseen messages fill the catch-up already", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "D_BUSY",
+        agentName: "main",
+      });
+      const unseen = Array.from({ length: 20 }, (_, i) => ({
+        id: i + 1,
+        sender: "Sam",
+        who: null,
+        text: `backlog ${i + 1}`,
+        at: new Date(Date.UTC(2026, 7, 3, 8, i)),
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      }));
+      const earlier = rs.fn(async () => []);
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* () {
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: {
+          unseen: async () => unseen,
+          read: async () => [],
+          seen: () => undefined,
+          earlier,
+        },
+      });
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "hi",
+          channelThreadKey: "slack_app:D_BUSY",
+          romeSessionId: conversation.id,
+          threadContext: { channel: "slack_app", threadId: "D_BUSY", threadType: "private" },
+        }),
+      );
+      expect(earlier).not.toHaveBeenCalled();
+    });
+
     it("opens a session as before when the platform's read fails or takes too long", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       for (const [threadId, latest] of [

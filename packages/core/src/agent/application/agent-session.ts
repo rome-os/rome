@@ -28,7 +28,7 @@ import { evaluateProviderSessionReset } from "../domain/session-reset.js";
 import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
-import { catchUpPrompt } from "../domain/catch-up.js";
+import { CATCH_UP_LIMIT, catchUpPrompt } from "../domain/catch-up.js";
 import {
   handoffSections,
   LIGHT_HANDOFF,
@@ -4140,7 +4140,13 @@ class AgentSessionImpl implements AgentSession {
         // chat's latest messages from where the chat lives
         // (docs/domains/participation.md#projection).
         const opening =
-          !this.isSubagent && this.threadFresh && !this.threadContextInjected && promptFacts.earlier
+          // Not when the unseen messages fill the catch-up already, so a
+          // platform that rations reads, such as Slack, keeps its read.
+          !this.isSubagent &&
+          this.threadFresh &&
+          !this.threadContextInjected &&
+          unseen.length < CATCH_UP_LIMIT &&
+          promptFacts.earlier
             ? await promptFacts
                 .earlier(
                   sink.threadContext as ThreadContext,
