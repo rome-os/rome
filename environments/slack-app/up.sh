@@ -24,16 +24,34 @@ CLOUD_ONLY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --rome) ROME_REF="$2"; shift 2 ;;
-    --rome-cloud) ROME_CLOUD_REF="$2"; shift 2 ;;
-    --cloud-only) CLOUD_ONLY=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
-    *) echo "unknown argument: $1" >&2; exit 2 ;;
+    --rome)
+      ROME_REF="$2"
+      shift 2
+      ;;
+    --rome-cloud)
+      ROME_CLOUD_REF="$2"
+      shift 2
+      ;;
+    --cloud-only)
+      CLOUD_ONLY=1
+      shift
+      ;;
+    -h | --help)
+      sed -n '2,15p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 2
+      ;;
   esac
 done
 
 log() { printf '[slackenv] %s\n' "$*" >&2; }
-die() { printf '[slackenv] %s\n' "$*" >&2; exit 1; }
+die() {
+  printf '[slackenv] %s\n' "$*" >&2
+  exit 1
+}
 
 # ----------------------------------------------------------------- commits
 # The environment runs only committed code: this folder must be clean, and
@@ -56,7 +74,14 @@ log "environment $ENV_SHA, rome $ROME_SHA ($ROME_REF), rome-cloud $ROME_CLOUD_SH
 
 # --------------------------------------------------------------- the model
 AGENT_MODEL="${SLACKENV_AGENT_MODEL:-claude-haiku-5-5}"
-read_secret() { [ -n "${!1:-}" ] && { printf '%s' "${!1}"; return; }; [ -f "$2" ] && tr -d '\n' < "$2"; true; }
+read_secret() {
+  [ -n "${!1:-}" ] && {
+    printf '%s' "${!1}"
+    return
+  }
+  [ -f "$2" ] && tr -d '\n' <"$2"
+  true
+}
 MODEL_PROXY_API_KEY="$(read_secret SLACKENV_ANTHROPIC_API_KEY "$HOME/.config/slackenv/anthropic-api-key")"
 MODEL_PROXY_OAUTH_TOKEN="$(read_secret SLACKENV_CLAUDE_OAUTH_TOKEN "$HOME/.config/slackenv/claude-oauth-token")"
 if [ "$CLOUD_ONLY" = 0 ] && [ -z "$MODEL_PROXY_API_KEY" ] && [ -z "$MODEL_PROXY_OAUTH_TOKEN" ]; then
@@ -94,15 +119,17 @@ if [ ! -f "$STATE_DIR/secrets.env" ]; then
     echo "ROME_B_JWT_SECRET=$(secret)"
     echo "RELAY_SIGNING_KEY='$(node -e 'console.log(JSON.stringify(JSON.parse(process.argv[1]).priv))' "$RELAY_KEYS")'"
     echo "RELAY_PUBLIC_KEY='$(node -e 'console.log(JSON.stringify(JSON.parse(process.argv[1]).pub))' "$RELAY_KEYS")'"
-  } > "$STATE_DIR/secrets.env"
+  } >"$STATE_DIR/secrets.env"
   chmod 600 "$STATE_DIR/secrets.env"
 fi
-set -a; . "$STATE_DIR/secrets.env"; set +a
+set -a
+. "$STATE_DIR/secrets.env"
+set +a
 
 # The fake Slack answers as https://slack.com inside the network with this
 # certificate. SLACKENV_EXTRA_CA adds a CA the host's own network needs.
 if [ ! -f "$STATE_DIR/tls/tls.crt" ]; then node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" slack.com api.slack.com; fi
-cat "$STATE_DIR/tls/tls.crt" ${SLACKENV_EXTRA_CA:+"$SLACKENV_EXTRA_CA"} > "$STATE_DIR/trust.pem"
+cat "$STATE_DIR/tls/tls.crt" ${SLACKENV_EXTRA_CA:+"$SLACKENV_EXTRA_CA"} >"$STATE_DIR/trust.pem"
 chmod 644 "$STATE_DIR/tls/tls.key" # read by the fake Slack's container user; the key guards nothing outside this environment
 
 # ----------------------------------------------------------- configuration
@@ -110,7 +137,9 @@ export SLACKENV_PROJECT="${SLACKENV_PROJECT:-slackenv}"
 export SLACKENV_NODE_IMAGE="${SLACKENV_NODE_IMAGE:-node:24-slim}"
 export SLACKENV_POSTGRES_IMAGE="${SLACKENV_POSTGRES_IMAGE:-postgres:16-alpine}"
 export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182
-export HOST_UID HOST_GID; HOST_UID="$(id -u)"; HOST_GID="$(id -g)"
+export HOST_UID HOST_GID
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
 export ENV_DIR STATE_DIR AGENT_MODEL
 export SLACK_APP_ID=A0SLACKENV1 SLACK_CLIENT_ID=1000000001.2000000002
 export FAKE_SLACK_EVENTS_URL="http://pantheon-net:3100/api/slack/events"
@@ -126,10 +155,10 @@ for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE HOST_UID H
   FAKE_SLACK_RETRY_DELAYS_MS SLACK_APP_ID SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET \
   ROME_A_JWT_SECRET ROME_B_JWT_SECRET; do
   printf '%s=%s\n' "$v" "${!v}"
-done > "$STATE_DIR/compose.env"
+done >"$STATE_DIR/compose.env"
 chmod 600 "$STATE_DIR/compose.env"
 
-cat > "$STATE_DIR/pantheon.env" <<EOF
+cat >"$STATE_DIR/pantheon.env" <<EOF
 NODE_ENV=development
 APP_PORT=3100
 DATABASE_URL=postgresql://pantheon:pantheon@postgres:5432/pantheon
@@ -156,7 +185,7 @@ SLACK_APP_ID=$SLACK_APP_ID
 EOF
 chmod 600 "$STATE_DIR/pantheon.env"
 # The relay reads its trust anchor from .dev.vars in its (scratch) worktree.
-printf "RELAY_PUBLIC_KEY='%s'\n" "$RELAY_PUBLIC_KEY" > "$STATE_DIR/rome-cloud-src/webhook-relay/.dev.vars"
+printf "RELAY_PUBLIC_KEY='%s'\n" "$RELAY_PUBLIC_KEY" >"$STATE_DIR/rome-cloud-src/webhook-relay/.dev.vars"
 
 compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/compose.yml" "$@"; }
 
@@ -171,8 +200,12 @@ log "starting Rome Cloud, the relay, the fake Slack and the model proxy"
 compose up -d postgres fake-slack relay pantheon-net pantheon model-proxy
 
 wait_for() { # <what> <seconds> <command...>
-  local what="$1" limit="$2"; shift 2
-  for ((i = 0; i < limit; i++)); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  local what="$1" limit="$2"
+  shift 2
+  for ((i = 0; i < limit; i++)); do
+    "$@" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
   die "$what did not come up in ${limit}s (see: docker compose -p $SLACKENV_PROJECT logs)"
 }
 wait_for "the fake Slack" 60 curl -fsS "http://127.0.0.1:$FAKE_SLACK_PORT/_control/health"
@@ -197,11 +230,11 @@ for name in $([ "$CLOUD_ONLY" = 1 ] || echo a b); do
   port_var="ROME_$(echo "$name" | tr a-z A-Z)_PORT"
   log "enrolling $svc in Rome Cloud"
   node "$ENV_DIR/tools/enroll.mjs" "$CLOUD" "http://127.0.0.1:${!port_var}" "guardian-$name@slackenv.test" \
-    "$STATE_DIR/$svc-cookies.json" > "$STATE_DIR/$svc-enroll.json"
+    "$STATE_DIR/$svc-cookies.json" >"$STATE_DIR/$svc-enroll.json"
 done
 
 # ------------------------------------------------------------ env.json
-node "$ENV_DIR/tools/write-env-json.mjs" > "$STATE_DIR/env.json" \
-  "$ENV_SHA" "$ROME_SHA" "$ROME_REF" "$ROME_CLOUD_SHA" "$ROME_CLOUD_REF" "$AGENT_MODEL" "$STATE_DIR"
+node "$ENV_DIR/tools/write-env-json.mjs" \
+  "$ENV_SHA" "$ROME_SHA" "$ROME_REF" "$ROME_CLOUD_SHA" "$ROME_CLOUD_REF" "$AGENT_MODEL" "$STATE_DIR" >"$STATE_DIR/env.json"
 log "ready: $STATE_DIR/env.json"
 cat "$STATE_DIR/env.json"
