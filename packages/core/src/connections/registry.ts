@@ -1214,9 +1214,26 @@ class ConnectionImpl implements Connection {
       epoch.dead = true;
       epoch.backoffGen++; // cancel any in-flight backoff loop
       await this.stopInstanceAwaiting(slot, epoch);
+      // A slot started again meanwhile keeps its new epoch.
+      if (slot.epoch !== epoch) continue;
       slot.epoch = null;
       slot.messageHandlers = [];
       slot.eventHandlers = [];
+    }
+  }
+
+  /** Tear down every capability and wait, at most `ms`, for each stop() to
+   *  drain. Answers false when a drain ran out of time; it goes on alone. */
+  private async teardownAllWithin(ms: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const drained = this.teardownAllAwaiting().then(() => true);
+    const late = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+    });
+    try {
+      return await Promise.race([drained, late]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -1374,8 +1391,9 @@ class ConnectionImpl implements Connection {
   /** The guardian's disconnect, under the grant lock so no renewal or fault
    *  runs beside it. A renewal a fault started asks the platform without the
    *  lock, so the disconnect lets it land first and takes back what it
-   *  minted. Then: stop every capability, so a live transport never meets the
-   *  token being revoked; ask the kind to take back at the platform what the
+   *  minted. Then: stop every capability and, for a kind with a take-back,
+   *  let it drain (at most {@link TAKE_BACK_TIMEOUT_MS}), so a live transport
+   *  never meets the token being revoked; ask the kind to take back at the platform what the
    *  grant gave (`onDisconnect`, at most {@link TAKE_BACK_TIMEOUT_MS}); then
    *  remove the connection as {@link disconnect} does.
    *
@@ -1387,12 +1405,22 @@ class ConnectionImpl implements Connection {
    *  and the error is thrown. Answers why the take-back failed, or null. */
   async disconnectTakingBack(grant: GrantName): Promise<string | null> {
     for (;;) {
-      await this.renewalsInFlight.get(grant)?.catch(() => {});
+      // Only a kind that takes back access needs what a renewal mints.
+      const takesBack = this.descriptor.onDisconnect !== undefined;
+      if (takesBack) await this.renewalsInFlight.get(grant)?.catch(() => {});
       const ended = await this.withGrantLock(grant, async () => {
         // A renewal applies its result under this lock, so one that started
         // since is waited out with the lock free.
-        if (this.renewalsInFlight.has(grant)) return undefined;
-        this.teardownAll();
+        if (takesBack && this.renewalsInFlight.has(grant)) return undefined;
+        // The kind takes back the token only once no transport uses it, so
+        // its stop() drains first. A kind with nothing to take back does not
+        // wait.
+        if (!takesBack) this.teardownAll();
+        else if (!(await this.teardownAllWithin(TAKE_BACK_TIMEOUT_MS))) {
+          this.log.warn("a transport did not stop in time; taking back access anyway", {
+            connectionId: this.id,
+          });
+        }
         const notTakenBack = await this.takeBack();
         try {
           await this.disconnectLocked(grant, {});
@@ -1441,7 +1469,8 @@ class ConnectionImpl implements Connection {
         connectionId: this.id,
         error: errMsg(err),
       });
-      return errMsg(err);
+      // An empty reason still says the take-back failed.
+      return errMsg(err) || "the service gave no reason";
     } finally {
       clearTimeout(timer);
     }
@@ -1645,8 +1674,8 @@ class ConnectionImpl implements Connection {
       return;
     }
     // scheme.renew is the flow's longest await, and runs outside the grant's
-    // lock so a slow renewer never holds up a grant or a disconnect. A
-    // grant completing during it superseded this fault, so the result is
+    // lock so a slow renewer never holds up a grant. A disconnect that takes
+    // back access waits for it, so it takes back what it mints. A grant completing during it superseded this fault, so the result is
     // applied under the lock, and only while the faulting epoch is current.
     if (renewed === "needs-fix") {
       await this.degradeGrant(grant, `renew returned fix (${reason})`, stillCurrent);
