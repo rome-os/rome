@@ -249,6 +249,37 @@ private let listJSON = #"""
 }
 
 
+/// The header's Tasks button: its dot, and the list it keeps live.
+@MainActor
+@Suite struct ChatHeaderTasksTests {
+    @Test func theDotShowsWhileATaskNeedsTheGuardian() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try JSONDecoder().decode(TaskListResponse.self, from: Data(listJSON.utf8))
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        #expect(!store.needsYou)
+        await store.load()
+        #expect(store.needsYou)
+        backend.taskLists["concierge"] = TaskListResponse(chatId: "concierge", groups: [TaskListGroup(key: .needsYou, items: [])])
+        await store.load()
+        #expect(!store.needsYou)
+    }
+
+    @Test func theListIsListenedToUntilItsLastHolderLetsGo() {
+        let backend = FakeBackend()
+        let store = TaskListStore(chatId: "topic-1", backend: backend)
+        let topic = LiveTopic.chatTasks("topic-1")
+        // The header and the Agent page over it.
+        store.hold()
+        store.hold()
+        #expect(backend.bus.isListening(to: topic))
+        // The Agent page closes: the header still shows the dot live.
+        store.release()
+        #expect(backend.bus.isListening(to: topic))
+        store.release()
+        #expect(!backend.bus.isListening(to: topic))
+    }
+}
+
 @Suite struct TaskLinkTests {
     @Test func readsAndBuildsTheLinkTheConciergeWrites() {
         #expect(TaskLink.chatId(ofHref: "#rome-task=abc-123") == "abc-123")

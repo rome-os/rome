@@ -67,11 +67,8 @@ struct AgentPage: View {
                 TaskListView(store: taskList, mode: .routines, onOpenChat: onOpenTask)
             }
         }
-        .task(id: route.tasksChatId) {
-            // The list as it was last read shows at once, and is read again.
-            taskList?.open()
-        }
-        .onDisappear { taskList?.stop() }
+        // The list as it was last read shows at once, and is read again.
+        .holdsTaskList(taskList)
         .readableColumn()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.bg.ignoresSafeArea())

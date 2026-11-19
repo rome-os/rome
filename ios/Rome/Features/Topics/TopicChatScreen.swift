@@ -9,8 +9,9 @@ struct TopicChatScreen: View {
     /// Whose draft the composer keeps: the chat, or the blank chat until it exists.
     let draftKey: String
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: (String?) -> Void
+    /// The Agent page for this chat: on a tab from the header's buttons, or
+    /// as it was last from the mascot (nil).
+    let onAgent: (String?, AgentTab?) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
@@ -62,7 +63,7 @@ struct TopicChatScreen: View {
                     composerFocused = false
                     onMenu()
                 },
-                onAgent: { onAgent(chatId) },
+                onAgent: { onAgent(chatId, $0) },
                 onRename: { title in
                     newName = title
                     renaming = true
@@ -301,8 +302,8 @@ private struct TopicChatHeader: View {
     let draftKey: String
     let share: ChatShareFlow?
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: () -> Void
+    /// The Agent page for this chat, on a tab or as it was last.
+    let onAgent: (AgentTab?) -> Void
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
     /// Archive, with the chat's current title.
@@ -325,6 +326,7 @@ private struct TopicChatHeader: View {
             onMenu: onMenu,
             onAgent: onAgent,
             zoomSource: AgentZoom.source(chatId ?? draftKey),
+            tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
             // A blank chat has nothing to rename, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
             onArchive: chatId == nil ? nil : { onArchive(title) },
