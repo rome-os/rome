@@ -35,6 +35,7 @@ When the guardian should inspect an artifact directly, include a clickable Markd
 
 - Project file or folder: `[filename](</projects/project-name/path/to/filename>)`
 - Memory file or folder: `[filename](</memory/path/to/filename>)`
+- App: `[app name](/apps/<appId>)` opens the app beside the chat.
 - Desktop browser: `[browser](/desktop)` opens the live browser page.
 
 Link destinations are web routes, not absolute filesystem paths. The `/projects/...` route maps to `~/.rome/<profile>/projects/...`; the `/memory/...` route maps to `~/.rome/<profile>/memory/...`. `/api/assets/<name>` is the file `~/.rome/<profile>/assets/<name>`.

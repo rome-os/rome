@@ -493,6 +493,36 @@ describe("ChatLink", () => {
     expect(autoPlaceApp).toHaveBeenCalledWith("issue-triage", undefined, undefined, true);
   });
 
+  it("opens the app tile for a same-origin absolute app URL", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/apps/connector/setup?connector=gmail">go</ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("go"));
+
+    expect(autoPlaceApp).toHaveBeenCalledWith("connector", "setup", { connector: "gmail" }, true);
+  });
+
+  it("leaves an app URL on another instance as an external link", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ChatLink href="https://other-tenant.romeos.cc/apps/calendar">calendar</ChatLink>,
+      { store, bus },
+    );
+    const link = screen.getByText("calendar").closest("a") as HTMLAnchorElement;
+    fireEvent.click(link);
+
+    expect(autoPlaceApp).not.toHaveBeenCalled();
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
   it("preserves the in-app sub-route for a deep /apps link", () => {
     const store = createWorkspaceStore();
     const bus = createWorkspaceEventBus();
