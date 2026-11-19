@@ -66,10 +66,10 @@ async function redeem(
         signal.throwIfAborted();
         return { session, callerId: data.caller_id.toLowerCase() };
       }
-    } else {
-      await response?.body?.cancel().catch(() => {});
-      if (response && [400, 401, 403, 409, 410].includes(response.status))
-        throw new PairingRequired();
+    } else if (response) {
+      await response.body?.cancel().catch(() => {});
+      if ([400, 401, 403, 409, 410].includes(response.status)) throw new PairingRequired();
+      if (!signal.aborted) onEvent?.({ type: "pairing_retry", code: `HTTP_${response.status}` });
     }
     // A response can be lost after the issuer commits. Retry with the persisted verifier.
     await delay(Math.min(60_000, 1000 * 2 ** Math.min(attempt, 6)), undefined, { signal });

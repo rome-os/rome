@@ -28,13 +28,25 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-it("reports the network error code when pairing retries without exposing the error text", async () => {
+it.each([
+  {
+    code: "ENOTFOUND",
+    respond: async () => {
+      throw new TypeError(first.grant, { cause: { code: "ENOTFOUND", message: first.token } });
+    },
+  },
+  {
+    code: "HTTP_503",
+    respond: async () => new Response(first.token, { status: 503 }),
+  },
+])("reports $code when pairing retries without exposing the response or error text", async ({
+  code,
+  respond,
+}) => {
   const stateDir = await mkdtemp(join(tmpdir(), "container-node-retry-"));
   const stop = new AbortController();
   const report = rs.fn();
-  rs.spyOn(globalThis, "fetch").mockRejectedValue(
-    new TypeError(first.grant, { cause: { code: "ENOTFOUND", message: first.token } }),
-  );
+  rs.spyOn(globalThis, "fetch").mockImplementation(respond);
   try {
     const result = await runContainerNode({
       cloudUrl: "https://rome.example",
@@ -49,7 +61,7 @@ it("reports the network error code when pairing retries without exposing the err
       },
     });
     expect(result).toBe("stopped");
-    expect(report).toHaveBeenCalledExactlyOnceWith({ type: "pairing_retry", code: "ENOTFOUND" });
+    expect(report).toHaveBeenCalledExactlyOnceWith({ type: "pairing_retry", code });
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
