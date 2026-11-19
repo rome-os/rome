@@ -999,6 +999,9 @@ const API_METHODS = {
       channel = this.imChannel(info.teamId, channel);
     } else if (channel.startsWith("D")) {
       if (!this.imOwner(info.teamId, channel)) return { ok: false, error: "channel_not_found" };
+      // A user token posts only into its own member's direct message.
+      const outside = this.notInChannel(info, channel);
+      if (outside) return outside;
     } else if (!this.group(info.teamId, channel)) {
       return { ok: false, error: "channel_not_found" };
     } else {
@@ -1007,10 +1010,9 @@ const API_METHODS = {
       // A bot posts where it is not a member only to a public group, and
       // only with chat:write.public.
       const isPublic = !group.is_private && !group.id.startsWith("G");
-      if (
-        this.notInChannel(info, channel) &&
-        !(isPublic && granted(this, info).includes("chat:write.public"))
-      ) {
+      const outside = this.notInChannel(info, channel);
+      if (outside && info.kind === "user") return outside;
+      if (outside && !(isPublic && granted(this, info).includes("chat:write.public"))) {
         return { ok: false, error: "not_in_channel" };
       }
     }

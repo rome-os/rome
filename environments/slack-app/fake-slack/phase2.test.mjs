@@ -708,6 +708,15 @@ test("a user token reads only the private conversations its member is in", async
     assert.equal(await read("conversations.history", "GC0000BORD1", hank), "channel_not_found");
     assert.equal(await read("conversations.replies", "GC0000BORD1", hank), "channel_not_found");
     assert.equal(await read("conversations.history", "CC0000GENRL", hank), "ok");
+    // Nor does a user token post into a conversation its member is not in.
+    const post = async (channel, t) =>
+      (await api("chat.postMessage", { channel, text: "hello" }, t)).error ?? "ok";
+    const writer = (await install(C, HANK, "chat:write", `${reads},chat:write`)).authed_user
+      .access_token;
+    assert.equal(await post(dmOf(OWNER), writer), "channel_not_found");
+    assert.equal(await post("GC0000BORD1", writer), "channel_not_found");
+    assert.equal(await post(dmOf(HANK), writer), "ok");
+    assert.equal(await post("CC0000GENRL", writer), "ok");
   } finally {
     await ctl("/config", { history_limit: true });
   }
