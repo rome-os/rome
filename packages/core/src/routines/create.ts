@@ -4,6 +4,7 @@
 // worker call). Each caller adds only what it alone knows: a person's request
 // names the chat it was made in, an app's routine is managed by that app.
 
+import type { SessionActor } from "../access/session-actor.js";
 import { z } from "zod";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -23,7 +24,15 @@ export type CreateRoutineResult =
  * the chat it was made in, if any. */
 export type RoutineCreator =
   | { kind: "person"; madeIn?: string }
-  | { kind: "action"; callerAppId?: string; agentName?: string };
+  | {
+      kind: "action";
+      callerAppId?: string;
+      agentName?: string;
+      /** The person the action acts for (null for no one) and the dashboard
+       * chat it runs in, when it runs in an app's worker: main reads no action
+       * of its own then. Absent, the running action's context says. */
+      origin?: { actor: SessionActor | null; chatId?: string };
+    };
 
 // The engine merges trigger payloads into action args under this key. Forbid
 // it in caller-supplied args so a routine never silently overwrites it.
@@ -408,6 +417,9 @@ export async function createRoutine(
   // every fire; reject and persist the trimmed canonical form.
   const trimmedName = input.actionName.trim();
   const actionName = (await deps.actionRegistry.getCanonicalName?.(trimmedName)) ?? trimmedName;
+  // An action stores the name as given: defers and the system upgrade check
+  // read their routines by the short name.
+  const storedName = creator.kind === "person" ? actionName : trimmedName;
   if (!actionName) {
     return { status: "error", error: "actionName must be a non-empty action name" };
   }
@@ -479,15 +491,19 @@ export async function createRoutine(
   const managedBy = callerAppId;
 
   const enabled = input.enabled ?? true;
+  const origin = creator.kind === "action" ? creator.origin : undefined;
+  const madeIn = creator.kind === "person" ? creator.madeIn : origin?.chatId;
   const routineId = await deps.routinesRepo.create({
     name,
     key,
     managedBy,
     trigger,
-    actionName,
+    actionName: storedName,
     args,
     enabled,
-    ...(creator.kind === "person" && creator.madeIn ? { madeIn: creator.madeIn } : {}),
+    ...(madeIn ? { madeIn } : {}),
+    // An app's routine acts for the guardian, as the repository decides.
+    ...(origin && !managedBy ? { createdBy: origin.actor ?? { kind: "anonymous" } } : {}),
   });
 
   if (enabled) {
@@ -498,7 +514,7 @@ export async function createRoutine(
       managedBy,
       enabled: true,
       trigger,
-      actionName,
+      actionName: storedName,
       args,
       createdAt: new Date(),
     };

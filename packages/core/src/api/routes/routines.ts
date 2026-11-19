@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import { publicRoutineRow, toRoutine } from "../../db/repositories/routines.js";
+import { publicRoutineRow } from "../../db/repositories/routines.js";
 import { ownerOfChat } from "../../webchat/owner.js";
 import { conciergeCallerOwner } from "./concierge.js";
 import { resolveOneOffDate } from "../../routines/schedule-trigger-provider.js";

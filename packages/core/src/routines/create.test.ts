@@ -1621,3 +1621,80 @@ describe("create_routine — explicit action targets (#679)", () => {
     expect(result.status).toBe("ok");
   });
 });
+
+describe("create_routine — the action name it stores", () => {
+  const manual = (actionName: string) => ({
+    name: "follow up",
+    trigger: { type: "manual" as const },
+    actionName,
+    args: {},
+  });
+  const canonical = {
+    ...allActions,
+    getCanonicalName: (name: string) => (name.includes(":") ? name : `system:${name}`),
+  };
+
+  it("keeps the name an action gives, which defers and the upgrade check read", async () => {
+    const result = await createRoutine(manual("resume_session"), {
+      routinesRepo: repo,
+      actionRegistry: canonical,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
+
+    const id = (result as { data: { routineId: string } }).data.routineId;
+    expect((await repo.findById(id))?.actionName).toBe("resume_session");
+  });
+
+  it("stores the full name for a person on the Routines page", async () => {
+    const result = await createRoutine(
+      manual("resume_session"),
+      {
+        routinesRepo: repo,
+        actionRegistry: canonical,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
+      { kind: "person" },
+    );
+
+    const id = (result as { data: { routineId: string } }).data.routineId;
+    expect((await repo.findById(id))?.actionName).toBe("system:resume_session");
+  });
+});
+
+describe("create_routine — for an action in an app's worker", () => {
+  it("acts for the person the worker's action acts for, in its chat", async () => {
+    const visitor = { kind: "visitor" as const, accountId: "v", email: "v@example.test" };
+    const result = await createRoutine(
+      { name: "nudge", trigger: { type: "manual" }, actionName: "do_thing", args: {} },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
+      { kind: "action", origin: { actor: visitor, chatId: "chat-1" } },
+    );
+
+    const id = (result as { data: { routineId: string } }).data.routineId;
+    expect(await repo.creatorOf(id)).toEqual(visitor);
+    expect((await repo.findById(id))?.chatId).toBe("chat-1");
+  });
+
+  it("acts for no one when the worker's action acts for no one", async () => {
+    const result = await createRoutine(
+      { name: "nudge", trigger: { type: "manual" }, actionName: "do_thing", args: {} },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
+      { kind: "action", origin: { actor: null } },
+    );
+
+    const id = (result as { data: { routineId: string } }).data.routineId;
+    expect(await repo.creatorOf(id)).toEqual({ kind: "anonymous" });
+  });
+});
