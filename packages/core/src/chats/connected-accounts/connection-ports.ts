@@ -19,13 +19,19 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import type { Connection, TalkFeatureName, Talker } from "../../connections/types.js";
+import type {
+  Connection,
+  TalkFeatureName,
+  TalkHistoryRead,
+  Talker,
+} from "../../connections/types.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
+import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -91,6 +97,9 @@ export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: ChannelInbound | null;
   directory: AccountChats;
+  /** The chat history the platform keeps, read live, where the Talk reads
+   *  it (`reads`). Null otherwise. */
+  messages: Messages | null;
 }
 
 /**
@@ -116,6 +125,7 @@ export function connectionPorts(
     send: talker.sends === false ? null : connectionSend(backing),
     inbound: talker.receives === false ? null : connectionInbound(backing),
     directory: connectionDirectory(backing),
+    messages: talker.reads === true ? connectionMessages(backing) : null,
   };
 }
 
@@ -167,6 +177,50 @@ function connectionDirectory(backing: Backing): AccountChats {
       return listed.flat();
     },
   };
+}
+
+/**
+ * A chat's history read live from the platform through the Connection that
+ * backs the channel now, one chat at a time. A cursor from an earlier page
+ * (`after`) names the message the page ended on, so it reads as `olderThan`
+ * that message. With no bound, it reads back as far as `limit` reaches.
+ */
+function connectionMessages(backing: Backing): Messages {
+  const { channel } = backing;
+  return {
+    live: true,
+    byAccount: null,
+    async query({ chatId, since, until, after, olderThan, newerThan, limit }) {
+      if (!chatId) {
+        throw new Error(`Channel "${channel}" reads one chat at a time: name its chatId`);
+      }
+      const connection = connectionFor(backing);
+      if (!connection) throw new AccountNotConnected(channel);
+      if (!offers(connection, "history")) {
+        throw new Error(`Channel "${channel}" reads no messages while its connection is locked`);
+      }
+      const cursorId = after ? messageIdOf(after.ref) : undefined;
+      const read: TalkHistoryRead = {
+        // A live read keeps the platform's own precision, so `since` is not rounded.
+        ...(since ? { since } : {}),
+        ...(until ? { until } : {}),
+        ...((cursorId ?? olderThan) ? { olderThan: cursorId ?? olderThan } : {}),
+        ...(newerThan ? { newerThan } : {}),
+        limit: queryLimit(limit),
+      };
+      const messages = await callTalker(connection, (talker) => talker.history?.read(chatId, read));
+      // A later channel of the kind names itself, not the kind's first one.
+      return messages.map((message) => ({ ...message, channel }));
+    },
+  };
+}
+
+/** The platform id of the message a cursor's ref names, which is
+ *  `<chatId>:<messageId>` (`channelMessageOrder`). The chat part is not
+ *  checked: a live read's message ids are unique across chats, so one from
+ *  another chat is still a bound in time. */
+function messageIdOf(ref: string): string {
+  return ref.slice(ref.lastIndexOf(":") + 1);
 }
 
 /** The Connection that backs the channel now. A channel is one presence, so

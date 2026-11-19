@@ -42,7 +42,10 @@ const QueryParams = z
     channel: AccountOrChannel,
     chatId: z.string().optional(),
     since: z.string().datetime().optional(),
+    until: z.string().datetime().optional(),
     after: z.string().optional(),
+    olderThan: z.string().min(1).optional(),
+    newerThan: z.string().min(1).optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
@@ -110,18 +113,18 @@ export function chatWorkerCalls(
       });
     },
     "channels.query": async (params, caller) => {
-      const { channel, chatId, since, after, limit } = parseWorkerCallParams(
-        "channels.query",
-        QueryParams,
-        params,
-      );
+      const { channel, chatId, since, until, after, olderThan, newerThan, limit } =
+        parseWorkerCallParams("channels.query", QueryParams, params);
       // The dashboard chat reads as the person accountable for the calling
       // action's turn, in the chat it runs in.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
         channelsService.query(channel, {
           ...(chatId ? { chatId: chatId as ChatId } : {}),
           ...(since ? { since: new Date(since) } : {}),
+          ...(until ? { until: new Date(until) } : {}),
           ...(after ? { after } : {}),
+          ...(olderThan ? { olderThan } : {}),
+          ...(newerThan ? { newerThan } : {}),
           ...(limit ? { limit } : {}),
         }),
       );

@@ -252,6 +252,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     auth: botScheme,
     capabilities: {
       talker: {
+        reads: true,
         build(cred, kit): Talker {
           const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -358,6 +359,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             inboundMedia,
             activity,
             directory,
+            history: { read: (chatId, read) => adapter.readHistory(chatId, read) },
           };
           return {
             start(deliver, fault): void {

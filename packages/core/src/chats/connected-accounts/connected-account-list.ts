@@ -29,8 +29,8 @@ import { whatsAppMessages } from "../history/whatsapp-messages.js";
  * Where an answer comes from is the channel's business. WhatsApp's and
  * LinkedIn's address books and stores read tables a sync fills; every connection kind
  * with a Talk backs its channel's `send` and `inbound` through its Connection.
- * A channel a Connection backs has no `messages`: Rome does not read a
- * platform's own history.
+ * A channel a Connection backs has `messages` only where its Talk reads the
+ * platform's own history live, as Discord's does.
  * A channel answering the same questions from a live API call implements the
  * same ports and joins the same way.
  *
@@ -96,7 +96,6 @@ export function channelList(deps: {
     channels.push({
       name,
       accounts: deps.connectionAccounts?.[name] ?? null,
-      messages: null,
       ...backed,
     });
   }
@@ -125,7 +124,7 @@ export function laterChannel(
 ): Channel | null {
   const backed = connectionPorts(connections, connectionKind, name);
   if (!backed || (!backed.send && !backed.inbound)) return null;
-  return { name, accounts: null, messages: null, ...backed };
+  return { name, accounts: null, ...backed };
 }
 
 /**

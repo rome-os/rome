@@ -191,11 +191,12 @@ export function queryLimit(limit: number | undefined): number {
  *
  * `query` is the one read every channel answers, whoever holds the data. A
  * channel reading a copy Rome keeps and one asking the platform live answer
- * the same record in the same order, and no caller can tell them apart. What
- * does differ is left to the port rather than the caller: a live read costs a
- * platform call and fails while nothing backs the channel, and neither kind is
- * complete — a copy holds what was synced, and a live read what the platform
- * hands back within its own limits.
+ * the same record in the same order for the same query. They differ in what
+ * they take and what they cost. Only a live read takes the bounds the
+ * platform's own message ids give (`live`), and it reads one chat at a time.
+ * It costs a platform call and fails while nothing backs the channel. Neither
+ * kind is complete: a copy holds what was synced, and a live read what the
+ * platform hands back within its own limits.
  */
 export interface Messages {
   /**
@@ -206,6 +207,13 @@ export interface Messages {
    * answer as one it has never heard of.
    */
   query(request: MessageQuery): Promise<ChannelMessage[]>;
+
+  /**
+   * True where `query` reads the platform live, which keeps messages in an
+   * order its own ids follow, so it takes `until`, `olderThan` and
+   * `newerThan`. Absent, a store keeps a copy and takes none of them.
+   */
+  readonly live?: boolean;
 
   /**
    * The reads a People timeline makes per person, where the channel keeps a
