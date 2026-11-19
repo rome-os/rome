@@ -27,8 +27,9 @@ export function kindOf(
   return kinds.includes(kind) && rest.length > 0 ? { kind, rest } : null;
 }
 
+/** A test, or the test kit under src/test/ that drives a kind's adapter the way a platform would. */
 function isTest(path: string): boolean {
-  return /\.test\.tsx?$/.test(path);
+  return /\.test\.tsx?$/.test(path) || path.startsWith("test/");
 }
 
 function isIndex(rest: string[]): boolean {
@@ -62,7 +63,7 @@ export function kindRulesFor(kinds: readonly string[]): ImportRule[] {
     {
       name: "kinds-enter-through-index",
       description:
-        "A kind's index.ts is the one entry the wiring mounts, so code outside a kind imports nothing of it but index.ts. Tests may reach further.",
+        "A kind's index.ts is the one entry the wiring mounts, so code outside a kind imports nothing of it but index.ts. Tests and the test kit in test/ may reach further.",
       rejects: (imp) => {
         const to = into(imp);
         if (to === null || isIndex(to.rest) || isTest(imp.from)) return false;

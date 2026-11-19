@@ -144,6 +144,7 @@ write(
   "src/chats/slack-probe.ts",
   'import "../connections/kinds/slack/index.js";\nimport "../connections/kinds/slack/slack.js";\n',
 );
+write("src/test/kit/slack.ts", 'import "../../connections/kinds/slack/slack.js";\n');
 write("src/chats/slack-probe.test.ts", 'import "../connections/kinds/slack/slack.js";\n');
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
