@@ -157,8 +157,9 @@ interface RegisteredDescriptor {
 
 /** How long a guardian's disconnect waits for each step before a kind takes
  *  back its access: a renewal in flight, the transports' drain, and the
- *  take-back at the platform. It holds the kind's locks for the last two, so
- *  for at most twice this. */
+ *  take-back at the platform. The kind's connection lock is held across all
+ *  three, so a connect or disconnect of the same kind can wait about three
+ *  times this. */
 const TAKE_BACK_TIMEOUT_MS = 10 * 1000;
 
 export class ConnectionRegistry {
@@ -1404,8 +1405,9 @@ class ConnectionImpl implements Connection {
    *  the platform still honours: an instance that dies between the two keeps
    *  the connection with a revoked token, which reads broken and disconnects
    *  again cleanly. The cost is that a failed write, after a take-back that
-   *  worked, leaves the same broken connection; its capabilities start again
-   *  and the error is thrown. Answers why the take-back failed, or null. */
+   *  worked, leaves the same broken connection: it reads broken, its
+   *  capabilities stay stopped, and the error is thrown. Answers why the
+   *  take-back failed or may not hold, or null. */
   async disconnectTakingBack(grant: GrantName): Promise<string | null> {
     let renewalWaitedOut = false;
     for (;;) {
@@ -1424,22 +1426,56 @@ class ConnectionImpl implements Connection {
         // The kind takes back the token only once no transport uses it, so
         // its stop() drains first. A kind with nothing to take back does not
         // wait.
-        if (!takesBack) this.teardownAll();
-        else if (!(await this.teardownAllWithin(TAKE_BACK_TIMEOUT_MS))) {
+        // A kind with nothing to take back disconnects as before: the delete
+        // first, and the capabilities stop after it.
+        if (!takesBack) {
+          await this.disconnectLocked(grant, {});
+          return { notTakenBack: null };
+        }
+        if (!(await this.teardownAllWithin(TAKE_BACK_TIMEOUT_MS))) {
           this.log.warn("a transport did not stop in time; taking back access anyway", {
             connectionId: this.id,
           });
         }
-        const notTakenBack = await this.takeBack();
+        const failed = await this.takeBack();
+        // A renewal still running may yet mint a token the take-back never
+        // saw, so the guardian is warned even when the take-back worked.
+        const notTakenBack =
+          failed ??
+          (renewalWaitedOut
+            ? "a renewal of the token was still running, so a token it mints may still work"
+            : null);
         try {
           await this.disconnectLocked(grant, {});
         } catch (err) {
-          this.reconcile(grant);
+          if (failed === null) await this.keepBrokenAfterTakeBack(grant);
+          else this.reconcile(grant);
           throw err;
         }
         return { notTakenBack };
       });
       if (ended) return ended.notTakenBack;
+    }
+  }
+
+  /** After a take-back that worked and a delete that failed: the connection
+   *  is kept, so the guardian can disconnect again, but it reads broken and
+   *  its capabilities stay stopped, since the platform no longer honours its
+   *  credential. If even that write fails, the grant is broken in memory. */
+  private async keepBrokenAfterTakeBack(grant: GrantName): Promise<void> {
+    try {
+      await this.degradeLocked(
+        grant,
+        "access was taken back, but the disconnect was not saved",
+        () => true,
+      );
+    } catch (err) {
+      this.log.warn("could not mark a taken-back grant broken", {
+        connectionId: this.id,
+        error: errMsg(err),
+      });
+      this.grantState.set(grant, "degraded");
+      this.liveCreds.delete(grant);
     }
   }
 
