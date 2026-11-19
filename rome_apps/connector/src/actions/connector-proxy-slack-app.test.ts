@@ -160,6 +160,26 @@ describe("connector_proxy for Slack with both the sign-in and the Slack app conn
     expect(slackProxyCall).not.toHaveBeenCalled();
   });
 
+  it("fails a call the locked Slack app cannot make, and never falls back to the sign-in", async () => {
+    const locked = {
+      list: async () => [
+        { name: "slack_app", platform: "slack", sendable: true, searchable: true },
+      ],
+      send: rs.fn(),
+      query: rs.fn(),
+      search: rs.fn(),
+    } as unknown as ChannelsService;
+
+    const result = await run(locked, post);
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/cannot make calls now.*Pass via: "sign_in"/),
+    });
+    expect(slackProxyCall).not.toHaveBeenCalled();
+    expect(locked.send).not.toHaveBeenCalled();
+  });
+
   it("refuses a connection the call names that is not connected", async () => {
     readSlackOAuthTokens.mockResolvedValue(null);
     const { service } = app();

@@ -302,6 +302,7 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
         // The connection reads a chat from its own copy where that holds the
         // whole chat, and from Slack where it does not (slack-app/timeline.ts).
         reads: true,
+        searches: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;

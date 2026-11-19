@@ -23,15 +23,24 @@ export const SLACK_NO_SIGN_IN =
 const OFFERED =
   "It offers chat.postMessage (send), conversations.history (read) and search.messages (search over what Rome has kept of the app's direct messages and mentions).";
 
-/** The Slack account Rome's Slack app connection is, or null when none is
- *  connected. It is the Slack account whose channel searches: the Slack bot
- *  connection, also on Slack, does not. */
-export async function slackAppAccount(channels: ChannelsService): Promise<Account | null> {
+/** What a call that takes the Slack app says while the app's connection
+ *  names no account yet, such as while it is locked. */
+export const SLACK_APP_NOT_READY =
+  "Rome's Slack app is connected but cannot make calls now: its connection reports no Slack account yet. Ask the guardian to check it in Settings → Connections, then retry.";
+
+/** Rome's Slack app connection, with the Slack account it is, or null when
+ *  none is connected. It is the Slack channel that searches: the Slack bot
+ *  connection, also on Slack, does not. A host declares that whether or not
+ *  the connection is locked, so a locked app is still found here, with no
+ *  account when it names none. */
+export async function slackAppConnection(
+  channels: ChannelsService,
+): Promise<{ account: Account | null } | null> {
   const summaries = await channels.list();
-  const held = summaries.find(
-    (summary) => summary.platform === "slack" && summary.searchable === true && summary.account,
+  const app = summaries.find(
+    (summary) => summary.platform === "slack" && summary.searchable === true,
   );
-  return held?.account ?? null;
+  return app ? { account: app.account ?? null } : null;
 }
 
 export type SlackAppProxyResult =
@@ -142,7 +151,10 @@ export async function slackAppProxyCall(params: {
           ...(latest ? { olderThan: latest } : {}),
           ...(since ? { since } : {}),
         });
-        return ok({ messages: messages.map(wireOf), has_more: messages.length >= limit });
+        // A page can hold fewer than `limit` with more before it, since the
+        // connection reads Slack a short page at a time. Only an empty page
+        // says nothing is left.
+        return ok({ messages: messages.map(wireOf), has_more: messages.length > 0 });
       }
       case "search.messages": {
         const text = stringArg(args, "query");

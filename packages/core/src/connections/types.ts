@@ -433,6 +433,11 @@ export interface ConnectionDescriptor {
        *  (`TalkHistory`), so the channel it backs has a `messages` port read
        *  live. Absent means it does not, and the channel reads no messages. */
       reads?: boolean;
+      /** True when the talker searches its messages (`TalkSearch`). It holds
+       *  while the connection is locked, so a caller can tell this channel
+       *  from another on the same platform before it unlocks. Absent means
+       *  it does not. */
+      searches?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */

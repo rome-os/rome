@@ -373,6 +373,28 @@ describe("ChannelsService — search", () => {
     return { channelsService, search };
   }
 
+  it("names a locked connection's channel searchable by its kind, and says why it cannot search now", async () => {
+    const locked = {
+      id: "c-slack",
+      connectionKind: "slack_app",
+      withTalker: () => undefined,
+      status: () => ({ chat: { state: "locked" } }),
+    } as unknown as Connection;
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => [locked] },
+      channelOf: kindChannelOf,
+      searches: (kind) => kind === "slack_app",
+    });
+
+    const listed = await channelsService.list();
+
+    expect(listed.find((each) => each.name === "slack_app")?.searchable).toBe(true);
+    await expect(channelsService.search?.("slack_app", { text: "launch" })).rejects.toThrow(
+      'Channel "slack_app" cannot search now: its connection is locked',
+    );
+  });
+
   it("lists which channels search, and answers a search with what it covered", async () => {
     const { channelsService, search } = searching();
 

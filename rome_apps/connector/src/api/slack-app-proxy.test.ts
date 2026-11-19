@@ -1,7 +1,7 @@
 import type { ChannelMessage, ChannelsService, ChatId } from "@rome-os/app-runtime";
 import { describe, expect, it, rs } from "@rstest/core";
 
-import { slackAppAccount, slackAppProxyCall } from "./slack-app-proxy.js";
+import { slackAppConnection, slackAppProxyCall } from "./slack-app-proxy.js";
 
 // Rome's Slack app connection answers Slack's Web API through the channels
 // service, which holds no token here; fake the service and assert what each
@@ -54,8 +54,14 @@ const call = (
 
 describe("Slack's Web API through Rome's Slack app", () => {
   it("finds the Slack account whose channel searches, not the Slack bot's", async () => {
-    expect(await slackAppAccount(channels())).toEqual(APP);
-    expect(await slackAppAccount(channels({ list: async () => [] }))).toBeNull();
+    expect(await slackAppConnection(channels())).toEqual({ account: APP });
+    expect(await slackAppConnection(channels({ list: async () => [] }))).toBeNull();
+    const locked = channels({
+      list: async () => [
+        { name: "slack_app", platform: "slack", sendable: true, searchable: true },
+      ],
+    });
+    expect(await slackAppConnection(locked)).toEqual({ account: null });
   });
 
   it("sends chat.postMessage as the app, into a thread when it names one", async () => {
@@ -105,6 +111,23 @@ describe("Slack's Web API through Rome's Slack app", () => {
         { ts: "1700000000.000100" },
       ],
     });
+  });
+
+  it("says more history may be left whenever a page held a message, even a short one", async () => {
+    const short = await call(channels(), "/api/conversations.history", undefined, {
+      channel: "D1",
+      limit: "100",
+    });
+    const empty = await call(
+      channels({ query: rs.fn(async () => []) }),
+      "/api/conversations.history",
+      undefined,
+      { channel: "D1", latest: "1600000000.000000" },
+    );
+
+    if (short.status !== "ok" || empty.status !== "ok") throw new Error("history failed");
+    expect(short.data.data).toMatchObject({ has_more: true });
+    expect(empty.data.data).toMatchObject({ has_more: false, messages: [] });
   });
 
   it("answers search.messages with its matches and says what the search covered", async () => {

@@ -21,7 +21,8 @@ import {
   SLACK_APP_CONNECT_HINT,
   SLACK_BOTH_ON_APP,
   SLACK_NO_SIGN_IN,
-  slackAppAccount,
+  SLACK_APP_NOT_READY,
+  slackAppConnection,
   slackAppProxyCall,
 } from "../../api/slack-app-proxy.js";
 import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
@@ -180,15 +181,24 @@ export function createAction(
         // Rome reaches Slack two ways: its own Slack app, which keeps its
         // token to itself, and the older Slack sign-in, whose token sits in a
         // file. A call that names neither takes the app when it is connected,
-        // since it replaces the sign-in, and says so when both are.
+        // since it replaces the sign-in, and says so when both are. An app
+        // that cannot make the call fails it: only a call naming the sign-in
+        // goes through the sign-in.
         const tokens = await readSlackOAuthTokens();
         const channels = deps.channelsService;
-        const account = channels ? await slackAppAccount(channels) : null;
-        const both = tokens !== null && account !== null;
-        const route = via ?? (account ? "app" : "sign_in");
+        const app = channels ? await slackAppConnection(channels) : null;
+        const both = tokens !== null && app !== null;
+        const route = via ?? (app ? "app" : "sign_in");
         if (route === "app") {
-          if (!channels || !account) {
+          if (!channels || !app) {
             return { status: "error", error: SLACK_APP_CONNECT_HINT };
+          }
+          const account = app.account;
+          if (!account) {
+            return {
+              status: "error",
+              error: both ? `${SLACK_APP_NOT_READY} ${SLACK_BOTH_ON_APP}` : SLACK_APP_NOT_READY,
+            };
           }
           const result = await slackAppProxyCall({
             channels,

@@ -64,6 +64,10 @@ export interface ChannelsServiceDeps {
   /** The platform a channel is an account on, or null where no record names
    *  one. A backed channel no record names reads its Connection's. */
   platformOf?: (channel: string) => string | null;
+  /** Whether a connection kind's talker searches its messages, as the kind
+   *  declares it. Absent, a channel is searchable only while its talker is
+   *  live. */
+  searches?: (connectionKind: string) => boolean;
   /** Channels Rome serves itself, which no Connection backs, such as webchat.
    *  Each sends through its own port, before the channel list is built too. */
   own?: readonly Channel[];
@@ -197,7 +201,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const found = connection.withTalker((talker) =>
       talker.search?.search({ text, ...(chatId ? { chatId } : {}), limit: capped }),
     );
-    if (!found) throw new Error(`Channel "${channel}" searches no messages`);
+    if (!found) {
+      const state = connection.status().chat.state;
+      throw new Error(
+        state === "unlocked"
+          ? `Channel "${channel}" searches no messages`
+          : `Channel "${channel}" cannot search now: its connection is ${state}`,
+      );
+    }
     const { messages, coverage } = await found;
     return {
       messages: messages.map((message) => ({
@@ -219,7 +230,10 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           if (name === null) continue;
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           const account = accountOf(connection);
-          const searchable = connection.withTalker((talker) => talker.search !== undefined);
+          // Declared, so a locked connection still names what it is.
+          const searchable =
+            deps.searches?.(connection.connectionKind) ??
+            connection.withTalker((talker) => talker.search !== undefined);
           summaries.set(name, {
             name,
             ...(account ? { account } : {}),
