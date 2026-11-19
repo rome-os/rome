@@ -110,8 +110,16 @@ export class ReleaseNotes {
         break;
       }
       found.push(lookup.notes);
+      if (from === null) break;
       const previous = lookup.notes.previousVersion;
-      if (from === null || previous === null || compareVersions(previous, from) <= 0) break;
+      // A null predecessor marks a release whose notes could not say what
+      // came before it, not the start of history, so coverage back to
+      // `from` is unknown.
+      if (previous === null) {
+        status = "partial";
+        break;
+      }
+      if (compareVersions(previous, from) <= 0) break;
       // A file whose previousVersion is not older would walk in a circle.
       if (compareVersions(previous, version) >= 0) {
         status = "partial";

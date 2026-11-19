@@ -36,10 +36,13 @@ export function UpgradeWhatsNew({
   let heading: string;
   if (notes && notes.releases.length > 0) {
     const start = notes.status === "complete" ? notes.from : notes.coveredFrom;
+    const count = notes.releases.length;
     heading =
-      notes.releases.length === 1 && notes.status === "complete"
+      count === 1 && notes.status === "complete"
         ? t("system.notesSingle", { version: to })
-        : t("system.notesRange", { from: start ?? "", to, count: notes.releases.length });
+        : start
+          ? t("system.notesRange", { from: start, to, count })
+          : t("system.notesUpTo", { to, count });
   } else {
     heading = from
       ? t("system.notesRangePending", { from, to })
@@ -112,9 +115,11 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
 
   return (
     <>
-      {notes.status === "partial" && notes.coveredFrom ? (
+      {notes.status === "partial" ? (
         <p className="text-aux text-muted-foreground">
-          {t("system.notesPartial", { version: notes.coveredFrom })}
+          {notes.coveredFrom
+            ? t("system.notesPartial", { version: notes.coveredFrom })
+            : t("system.notesPartialUnknown")}
         </p>
       ) : null}
       {notes.breaking.length > 0 ? (

@@ -149,6 +149,19 @@ describe("UpgradeWhatsNew", () => {
     expect(screen.getByText(/Notes for releases before 1\.1\.209 are not available/)).toBeTruthy();
   });
 
+  it("says the notes cover part of the upgrade when a release does not name its predecessor", async () => {
+    backend(() => ({
+      status: 200,
+      body: range({ status: "partial", from: "1.1.180", coveredFrom: null }),
+    }));
+    renderNotes("1.1.180", "1.1.210");
+
+    expect(
+      await screen.findByRole("heading", { name: "What's new up to 1.1.210 (1 release)" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/Notes for earlier releases are not available/)).toBeTruthy();
+  });
+
   it("says the notes are missing, or could not load, and links GitHub either way", async () => {
     backend((to) =>
       to === "1.1.210"

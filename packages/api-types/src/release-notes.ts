@@ -41,7 +41,8 @@ export const rangeEntrySchema = releaseNoteEntrySchema.extend({ version: z.strin
  * How much of the upgrade range `GET /api/system/release-notes` covers.
  *   complete — every release from `from` (exclusive) to `to`
  *   partial  — the newest releases down to `coveredFrom`. Older notes were
- *              missing, could not be read, or lay past the walk's cap
+ *              missing, could not be read, or lay past the walk's cap, or a
+ *              release did not name its predecessor (`coveredFrom` null)
  *   missing  — the target release has no notes
  *   failed   — the target's notes could not be downloaded or read
  */
@@ -54,7 +55,10 @@ export const releaseNotesRangeSchema = z.object({
   to: z.string(),
   /** The releases covered, newest first. Empty for missing and failed. */
   releases: z.array(z.object({ version: z.string(), date: z.string(), url: z.string() })),
-  /** The version the covered changes count from: the oldest covered release's predecessor. */
+  /**
+   * The version the covered changes count from: the oldest covered release's
+   * predecessor. Null when that release does not name one.
+   */
   coveredFrom: z.string().nullable(),
   /** Breaking changes across the range, newest release first. */
   breaking: z.array(rangeEntrySchema),

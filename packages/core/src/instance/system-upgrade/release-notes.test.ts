@@ -144,6 +144,31 @@ describe("ReleaseNotes.range", () => {
     expect(range.new).toHaveLength(1);
   });
 
+  it("is partial when a release in the range does not name its predecessor", async () => {
+    const atTarget = new ReleaseNotes({
+      baseUrl: BASE,
+      cacheDir: null,
+      fetch: github({ "1.0.3": notes("1.0.3", null) }).fetch,
+    });
+    const target = await atTarget.range("1.0.1", "1.0.3");
+    expect(target.status).toBe("partial");
+    expect(target.coveredFrom).toBeNull();
+    expect(target.releases.map((r) => r.version)).toEqual(["1.0.3"]);
+
+    const older = new ReleaseNotes({
+      baseUrl: BASE,
+      cacheDir: null,
+      fetch: github({ "1.0.3": notes("1.0.3", "1.0.2"), "1.0.2": notes("1.0.2", null) }).fetch,
+    });
+    const range = await older.range("1.0.0", "1.0.3");
+    expect(range.status).toBe("partial");
+    expect(range.coveredFrom).toBeNull();
+    expect(range.releases.map((r) => r.version)).toEqual(["1.0.3", "1.0.2"]);
+
+    // Without a start there is no range to cover, only the target's release.
+    expect((await atTarget.range(null, "1.0.3")).status).toBe("complete");
+  });
+
   it("is partial past the cap", async () => {
     const assets: Record<string, unknown> = {};
     for (let patch = 1; patch <= 10; patch += 1) {
