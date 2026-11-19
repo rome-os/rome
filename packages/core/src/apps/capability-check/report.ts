@@ -23,7 +23,8 @@ export function renderReport(verdicts: readonly AppVerdict[]): string {
         `| ${verdict.appId} | ` +
         RULES.map((rule) => {
           const count = verdict.gaps.filter((gap) => gap.rule === rule.id).length;
-          return count === 0 ? "✓" : String(count);
+          if (count > 0) return String(count);
+          return verdict.unverified.some((item) => item.rule === rule.id) ? "?" : "✓";
         }).join(" | ") +
         " |",
     ),
@@ -33,10 +34,15 @@ export function renderReport(verdicts: readonly AppVerdict[]): string {
     lines.push("", `## ${GOALS[goal]}`);
     for (const rule of RULES.filter((r) => r.goal === goal)) {
       const ruleGaps = gaps.filter((gap) => gap.rule === rule.id);
-      lines.push(
-        "",
-        `### ${rule.id}: ${ruleGaps.length === 0 ? "holds" : `${ruleGaps.length} gaps`}`,
-      );
+      const ruleUnverified = unverified.filter((item) => item.rule === rule.id);
+      // A rule holds only where nothing was left unjudged.
+      const verdict = [
+        ruleGaps.length > 0 ? `${ruleGaps.length} gaps` : "",
+        ruleUnverified.length > 0 ? `${ruleUnverified.length} left for a person to judge` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      lines.push("", `### ${rule.id}: ${verdict || "holds"}`);
       lines.push("", rule.statement);
       if (ruleGaps.length > 0) lines.push("");
       for (const gap of ruleGaps) lines.push(`- **${gap.appId}** \`${gap.at}\`: ${gap.message}`);
@@ -46,7 +52,7 @@ export function renderReport(verdicts: readonly AppVerdict[]): string {
   if (unverified.length > 0) {
     lines.push("", "## Left for a person to judge", "");
     for (const item of unverified)
-      lines.push(`- **${item.appId}** \`${item.at}\`: ${item.message}`);
+      lines.push(`- **${item.appId}** ${item.rule} \`${item.at}\`: ${item.message}`);
   }
   return `${lines.join("\n")}\n`;
 }

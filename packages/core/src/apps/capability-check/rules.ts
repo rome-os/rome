@@ -81,6 +81,8 @@ export interface Gap {
 
 /** Something the check could not judge, so a person has to. */
 export interface Unverified {
+  /** The rule the check could not judge. */
+  rule: RuleId;
   appId: string;
   at: string;
   message: string;
@@ -104,8 +106,8 @@ export function checkApp(app: AppFacts): AppVerdict {
   const unverified: Unverified[] = [];
   const gap = (rule: RuleId, at: string, message: string) =>
     gaps.push({ rule, appId: app.id, at, message });
-  const cannotJudge = (at: string, message: string) =>
-    unverified.push({ appId: app.id, at, message });
+  const cannotJudge = (rule: RuleId, at: string, message: string) =>
+    unverified.push({ rule, appId: app.id, at, message });
 
   // D1
   if (app.description.trim().length < MIN_DESCRIPTION_LENGTH) {
@@ -134,7 +136,7 @@ export function checkApp(app: AppFacts): AppVerdict {
           `\`${action.name}\` leaves ${action.arguments.names.map((n) => `\`${n}\``).join(", ")} undescribed.`,
         );
       } else if (action.arguments.kind === "unknown") {
-        cannotJudge(action.at, `Could not read the input schema of \`${action.name}\` (D3).`);
+        cannotJudge("D3", action.at, `Could not read the input schema of \`${action.name}\`.`);
       }
     }
   }
@@ -155,7 +157,8 @@ export function checkApp(app: AppFacts): AppVerdict {
     }
     for (const action of app.actions) {
       if (!isAgentCallable(action) || action.webhook) continue;
-      if (ranByRoutes.has(action.name)) continue;
+      // A route reaches a person only through a page that calls it.
+      if (app.hasPage && ranByRoutes.has(action.name)) continue;
       gap(
         "I2",
         action.at,
@@ -188,11 +191,20 @@ function judgeRoute(
   app: AppFacts,
   route: RouteFacts,
   gap: (rule: RuleId, at: string, message: string) => void,
-  cannotJudge: (at: string, message: string) => void,
+  cannotJudge: (rule: RuleId, at: string, message: string) => void,
 ): void {
   if (route.noAuth) return;
   if (route.path === "" && (route.method === "GET" || route.method === "ANY")) return;
   const label = `\`${route.method} /${route.path}\``;
+  // Without its path, the route may be an exempt one, so neither I1 nor I3 is judged.
+  if (route.unreadable) {
+    cannotJudge(
+      "I1",
+      route.at,
+      `Could not tell which path a \`${route.method}\` route matches (${route.unreadable}), so it and its exemptions were not judged.`,
+    );
+    return;
+  }
   if (route.writes.length > 0) {
     gap(
       "I3",
@@ -200,25 +212,18 @@ function judgeRoute(
       `${label} writes app data itself (${route.writes.map((w) => `\`${w}\``).join(", ")}), so an agent cannot make the same change.`,
     );
   }
-  if (route.unreadable) {
-    cannotJudge(
-      route.at,
-      `Could not tell which path a \`${route.method}\` route matches (${route.unreadable}), so I1 and its exemptions were not judged.`,
-    );
-    return;
-  }
   if (route.runs.length === 0) {
     gap("I1", route.at, `${label} runs no action, so no agent can do what it does.`);
     return;
   }
   for (const name of route.runs) {
     if (name === "<dynamic>") {
-      cannotJudge(route.at, `${label} runs an action whose name is computed (I1).`);
+      cannotJudge("I1", route.at, `${label} runs an action whose name is computed.`);
       continue;
     }
     const own = app.actions.find((action) => action.name === localName(app.id, name));
     if (!own) {
-      cannotJudge(route.at, `${label} runs \`${name}\`, which another app owns (I1).`);
+      cannotJudge("I1", route.at, `${label} runs \`${name}\`, which another app owns.`);
       continue;
     }
     if (!isAgentCallable(own)) {

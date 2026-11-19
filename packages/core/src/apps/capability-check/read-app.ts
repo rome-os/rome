@@ -42,7 +42,6 @@ const DIRECT_REQUESTS = new Set([
   "axios.post",
 ]);
 const ZOD_ADDS_FIELDS = new Set(["extend", "merge", "and", "safeExtend"]);
-const ZOD_DESCRIBES = new Set(["describe", "meta"]);
 /** A factory that opens a repository writes nothing by itself. */
 const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
 /** How deep the reader follows calls from a route to find the actions it runs. */
@@ -289,13 +288,36 @@ class SourceReader {
             ? this.followIdentifier(property.name)
             : undefined;
         if (!value) return { kind: "unknown" };
-        if (!isDescribedZod(value)) undescribed.push(propertyName(property));
+        const described = this.zodFieldDescribed(value);
+        if (described === undefined) return { kind: "unknown" };
+        if (!described) undescribed.push(propertyName(property));
       }
       return undescribed.length === 0
         ? { kind: "described" }
         : { kind: "undescribed", names: undescribed };
     }
     return { kind: "unknown" };
+  }
+
+  /**
+   * Whether a zod field's own outermost chain gives it a description: a
+   * `.describe(...)`, or a `.meta(...)` whose object carries `description`.
+   * Undefined when it passes `.meta` something the reader cannot see into.
+   */
+  private zodFieldDescribed(node: TS.Expression): boolean | undefined {
+    let current: TS.Expression = node;
+    while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+      const name = current.expression.name.text;
+      if (name === "describe") return true;
+      if (name === "meta") {
+        const first = current.arguments[0] && this.followIdentifier(current.arguments[0]);
+        if (!first || !ts.isObjectLiteralExpression(first)) return undefined;
+        if (first.properties.some((p) => ts.isSpreadAssignment(p))) return undefined;
+        if (propertyValue(first, "description")) return true;
+      }
+      current = current.expression.expression;
+    }
+    return false;
   }
 
   private jsonSchemaArguments(schema: TS.ObjectLiteralExpression): ArgumentDescriptions {
@@ -517,16 +539,6 @@ function findZodObjectShape(node: TS.Expression): TS.ObjectLiteralExpression | u
   return undefined;
 }
 
-/** Whether the outermost chain of a zod field ends in `.describe(...)` or `.meta(...)`. */
-function isDescribedZod(node: TS.Expression): boolean {
-  let current: TS.Expression = node;
-  while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
-    if (ZOD_DESCRIBES.has(current.expression.name.text)) return true;
-    current = current.expression.expression;
-  }
-  return false;
-}
-
 function propertyName(property: TS.ObjectLiteralElementLike): string {
   const name = property.name;
   if (!name) return "?";
@@ -574,8 +586,8 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
 
 /** Whether `condition` tests the request method or path. */
 function isRouteCondition(condition: TS.Expression, literal: LiteralOf): boolean {
-  const { methods, segments, root } = readCondition(condition, literal);
-  return methods.length > 0 || segments.length > 0 || root;
+  const { methods, segments, root, patternOnPath } = readCondition(condition, literal);
+  return methods.length > 0 || segments.length > 0 || root || patternOnPath;
 }
 
 /** The string a literal or a `const` bound to one stands for. */
@@ -645,12 +657,15 @@ function readCondition(
   root: boolean;
   /** The condition tests something against a literal, or a pattern, the reader cannot place. */
   opaque: boolean;
+  /** The condition matches the path against a pattern, so it is a route the reader cannot place. */
+  patternOnPath: boolean;
 } {
   const methods: string[] = [];
   const segments: Segment[] = [];
   let depth: number | undefined;
   let root = false;
   let opaque = false;
+  let patternOnPath = false;
   const visit = (node: TS.Node) => {
     // A negated test (`!path.startsWith("x")`) excludes a path; it names none.
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
@@ -695,6 +710,10 @@ function readCondition(
         segments.push({ value: `${(literal(first) as string).replace(/\/$/, "")}/*` });
       } else if (name === "match" || name === "test" || name === "exec") {
         opaque = true;
+        const operands = [node.expression.expression, ...node.arguments].map((n) => n.getText());
+        if (operands.some((text) => isDispatchSubject(text) || /path$/i.test(text))) {
+          patternOnPath = true;
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -706,6 +725,7 @@ function readCondition(
     segments: segments.length > 1 && isAlternation(condition) ? segments.slice(0, 1) : segments,
     root,
     opaque,
+    patternOnPath,
     ...(depth !== undefined ? { depth } : {}),
   };
 }

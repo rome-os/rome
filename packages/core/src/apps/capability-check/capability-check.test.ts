@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { readApp } from "./read-app.js";
+import { renderReport } from "./report.js";
 import { checkApp, type RuleId } from "./rules.js";
 
 const DESCRIPTION = "Keeps a list of notes the guardian can add to, read and remove.";
@@ -187,6 +188,16 @@ declare function defineAction(spec: unknown): unknown;
     expect(gaps).toEqual([expect.objectContaining({ rule: "I2", at: "src/actions/archive_note" })]);
   });
 
+  it("I2: does not count a route as a person's way in when the app has no page", async () => {
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "web:\n  manifest: web/manifest.json\n",
+      "",
+    );
+    const { "src/web/App.tsx": _page, ...rest } = COMPLIANT;
+    const gaps = await gapsOf({ ...rest, "app.yaml": manifest });
+    expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I2", "src/actions/add_note"]]);
+  });
+
   it("I4: reports an action that imports the API, and an API that imports an action", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,
@@ -288,8 +299,8 @@ declare function defineAction(spec: unknown): unknown;
       ).replace("export function", "const base = {};\nexport function");
       const verdict = await verdictOf({ ...COMPLIANT, ...ACTION("add_note", spread) });
       expect(verdict.gaps).toEqual([]);
-      expect(verdict.unverified.map((u) => u.message)).toEqual([
-        "Could not read the input schema of `add_note` (D3).",
+      expect(verdict.unverified.map((u) => [u.rule, u.message])).toEqual([
+        ["D3", "Could not read the input schema of `add_note`."],
       ]);
     });
 
@@ -302,6 +313,34 @@ declare function defineAction(spec: unknown): unknown;
 `;
       const gaps = await gapsOf({ ...COMPLIANT, ...ACTION("add_note", zod) });
       expect(gaps.map((g) => g.message)).toEqual(["`add_note` leaves `items` undescribed."]);
+    });
+
+    it("leaves a route matched only by a pattern to a person", async () => {
+      const verdict = await verdictOf(
+        withRoute(
+          'if (/^erase$/.test(route)) return createNotesRepository(null).insert("x");',
+          'import { createNotesRepository } from "../db/notes.js";\n',
+        ),
+      );
+      expect(verdict.gaps).toEqual([]);
+      expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+    });
+
+    it("does not take a zod meta without a description as one", async () => {
+      const zod = (field: string) => `import { z } from "zod";
+const schema = z.object({ text: z.string().meta(${field}) });
+export function createAction(config: unknown) { return defineAction({ config, schema, execute: async () => ({}) }); }
+declare function defineAction(spec: unknown): unknown;
+declare const extra: unknown;
+`;
+      const titled = await verdictOf({
+        ...COMPLIANT,
+        ...ACTION("add_note", zod('{ title: "Note" }')),
+      });
+      expect(titled.gaps.map((g) => g.message)).toEqual(["`add_note` leaves `text` undescribed."]);
+      const opaque = await verdictOf({ ...COMPLIANT, ...ACTION("add_note", zod("extra")) });
+      expect(opaque.gaps).toEqual([]);
+      expect(opaque.unverified.map((u) => u.rule)).toEqual(["D3"]);
     });
 
     it("finds a request the page makes through a shared helper", async () => {
@@ -345,5 +384,24 @@ declare function defineAction(spec: unknown): unknown;
       ...ACTION("archive_note", SCHEMA_ACTION),
     });
     expect(gaps.map((g) => [g.rule, g.at])).toEqual([["I2", "src/actions/archive_note"]]);
+  });
+
+  it("report: does not say a rule holds while part of it is left to a person", async () => {
+    const report = renderReport([
+      checkApp(
+        await readApp(
+          writeApp({
+            ...COMPLIANT,
+            "src/api/index.ts": (COMPLIANT["src/api/index.ts"] as string).replace(
+              'return "not found";',
+              'switch (route) {\n      case "other":\n        return "other";\n    }\n    return "not found";',
+            ),
+          }),
+        ),
+      ),
+    ]);
+    expect(report).toContain("| notes | ✓ | ✓ | ✓ | ? |");
+    expect(report).toContain("### I1: 1 left for a person to judge");
+    expect(report).toContain("### I2: holds");
   });
 });
