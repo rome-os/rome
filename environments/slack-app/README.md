@@ -5,11 +5,30 @@ Everything the official Slack app and its verifier need to run with no person pr
 ## Start and stop
 
 ```bash
-environments/slack-app/up.sh      # builds and starts everything, writes env.json
-environments/slack-app/down.sh    # stops everything and removes its state
+environments/slack-app/up.sh --rome <ref> --rome-cloud <ref>   # default origin/main for both
+environments/slack-app/ctl.sh stop rome-a                       # and start, status; logs <service>
+environments/slack-app/down.sh                                  # removes containers, volumes and .state
 ```
 
-`up.sh` refuses to start when the rome checkout, the rome-cloud checkout, or this folder has uncommitted changes. It writes `environments/slack-app/.state/env.json` (gitignored), which names the commits, the agent model, and every address and control endpoint.
+`up.sh` needs Docker with Compose, Node 22 or later and git. It finds the rome-cloud checkout at `$ROME_CLOUD_DIR`, else next to this rome checkout. It needs one model credential, `SLACKENV_ANTHROPIC_API_KEY` or `SLACKENV_CLAUDE_OAUTH_TOKEN` (or the files `~/.config/slackenv/anthropic-api-key`, `~/.config/slackenv/claude-oauth-token`), which only the model proxy holds. `--cloud-only` starts everything but the instances and needs no credential.
+
+It runs only committed code. It refuses to start when this folder has uncommitted changes, and it checks rome and rome-cloud out at the given commits into fresh worktrees under `.state/`, so nothing uncommitted in either checkout reaches the environment. The first start of a rome commit builds its production image, which takes several minutes.
+
+When it is ready it writes `.state/env.json` (gitignored): the commits of the environment, rome and rome-cloud, the agent model, the fake Slack's address and control API, Rome Cloud's address, and each instance's address, guardian, signed-in guardian session and stop and start commands.
+
+## What runs
+
+| Service | Address | What it is |
+|---|---|---|
+| `fake-slack` | `http://127.0.0.1:47200`, and `https://slack.com` inside the network | The fake Slack, below |
+| `pantheon` | `http://127.0.0.1:47100` | Rome Cloud from the given rome-cloud commit, `next dev`, with its own Postgres. Slack's events go to `/api/slack/events`. |
+| `relay` | `http://relay:8787` inside the network | The webhook relay from the given rome-cloud commit, unmodified, under `wrangler dev` |
+| `rome-a`, `rome-b` | `http://127.0.0.1:47181`, `:47182` | Rome from the given rome commit's production image, each with its signer, enrolled in Rome Cloud with the Concierge on. Guardians `guardian-a@slackenv.test` and `guardian-b@slackenv.test`. |
+| `model-proxy` | inside the network | Pins every model request to Haiku 5.5 and adds the credential |
+
+Each instance and Rome Cloud run inside the network namespace of a small forwarder (`tools/forward.mjs`) that maps the same loopback ports to Rome Cloud and the fake Slack. So `http://127.0.0.1:47100` names Rome Cloud and `http://127.0.0.1:47200` names the fake Slack on the host, in a browser, and inside every container alike, and the sign-in redirects work without host name tricks.
+
+[DIFFERENCES.md](DIFFERENCES.md) lists every way this differs from production.
 
 ## Fake Slack
 
