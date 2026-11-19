@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import { ListChecks, MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { dropdownMenuItemVariants } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -205,47 +207,59 @@ function MoreMenu({
         className="w-auto max-w-64 min-w-44 gap-0 p-1"
       >
         {sections.map((section, index) => (
-          <div
-            key={section[0]!.key}
-            role="group"
-            data-chat-header-menu-section
-            className={cn(
-              "flex flex-col gap-1",
-              index > 0 && "mt-1 border-t border-border-subtle pt-1",
-            )}
-          >
-            {section.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                role="menuitem"
-                data-chat-header-menu-item={item.key}
-                onClick={() => choose(item.run)}
-                className={cn(
-                  "flex h-[var(--control-h-md)] w-full min-w-0 cursor-pointer items-center gap-2 rounded-8 px-2 text-left text-ui outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0",
-                  item.destructive
-                    ? "text-destructive [&_svg]:text-destructive"
-                    : "text-foreground [&_svg]:text-muted-foreground",
-                )}
-              >
-                {item.icon}
-                <span className="min-w-0 truncate">{item.label}</span>
-              </button>
-            ))}
-          </div>
+          <Fragment key={section[0]!.key}>
+            {index > 0 ? <MenuDivider /> : null}
+            <div role="group" data-chat-header-menu-section className="flex flex-col gap-0">
+              {section.map((item) => (
+                // The shared menu's item, as a plain button: this menu opens
+                // on hover, which a Radix menu does not.
+                <button
+                  key={item.key}
+                  type="button"
+                  role="menuitem"
+                  data-chat-header-menu-item={item.key}
+                  data-variant={item.destructive ? "destructive" : undefined}
+                  onClick={() => choose(item.run)}
+                  className={cn(
+                    dropdownMenuItemVariants(),
+                    "w-full min-w-0 cursor-pointer text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring/50 data-[variant=destructive]:hover:bg-destructive/10 data-[variant=destructive]:hover:text-destructive",
+                    !item.destructive && "[&_svg]:text-muted-foreground",
+                  )}
+                >
+                  {item.icon}
+                  <span className="min-w-0 truncate">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </Fragment>
         ))}
         {menu.caption ? (
-          <div
-            data-chat-header-menu-caption
-            className={cn(
-              "flex min-w-0 items-center gap-2 px-2 pt-2 pb-1 text-aux text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0",
-              sections.length > 0 && "mt-1 border-t border-border-subtle",
-            )}
-          >
-            {menu.caption}
-          </div>
+          <>
+            {sections.length > 0 ? <MenuDivider /> : null}
+            <div
+              data-chat-header-menu-caption
+              className="flex min-w-0 items-center gap-2 px-2 py-1 text-aux text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0"
+            >
+              {menu.caption}
+            </div>
+          </>
         ) : null}
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * A rule between the menu's parts: the shared menu separator's line, with no
+ * space of its own, so rows keep one rhythm across it. In dark the stronger
+ * border, or it is lost on the dark popover.
+ */
+function MenuDivider() {
+  return (
+    <div
+      role="separator"
+      data-chat-header-menu-divider
+      className="-mx-1 h-px bg-border dark:bg-border-strong"
+    />
   );
 }
