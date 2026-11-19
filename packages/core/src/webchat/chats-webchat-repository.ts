@@ -1052,21 +1052,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
     });
   }
 
-  override async taskChatPartMessages(
-    sessionId: string,
-    since?: Date,
-  ): Promise<Array<{ id: string; content: string; createdAt: Date }>> {
-    const from = since ? sql` AND p.created_at >= ${Math.floor(since.getTime() / 1000)}` : sql``;
-    return this.db
-      .all<LineRow>(sql`
-        SELECT p.* FROM ${sessionLines([sessionId])} p
-        WHERE p.role = 'assistant' AND p.content LIKE '%"task_chat"%'${from}
-        ORDER BY p.created_at, p.seq
-      `)
-      .map(storedLine)
-      .map(({ id, content, createdAt }) => ({ id, content, createdAt }));
-  }
-
   private selectLines(sessionIds: readonly string[], where: SQL = sql``): TranscriptLine[] {
     // In the order the lines were said, whichever turn they belong to.
     return this.db

@@ -56,7 +56,7 @@ export class WaitExpiry {
     void this.deps.tasks.repo
       .listForAgent(true)
       .then(async (rows) => {
-        const open = rows.map((task) => task.row).filter((row) => row.sessionId && !row.stoppedAt);
+        const open = rows.map((task) => task.row).filter((row) => !row.stoppedAt);
         const status = await this.deps.tasks.statusOf(open);
         for (const [taskId, view] of status) {
           if (view.waitingSince !== null && view.expiredWaitAt === view.waitingSince) {
@@ -150,7 +150,7 @@ export class WaitExpiry {
   private async handle(taskId: string): Promise<void> {
     const row = await this.deps.tasks.repo.get(taskId);
     // A stopped or archived task ended otherwise: its wait ends with nothing to tell.
-    if (!row?.sessionId || row.stoppedAt || row.archivedAt) return;
+    if (!row || row.stoppedAt || row.archivedAt) return;
     // Read again: the read re-arms a wait that is not due yet.
     const status = (await this.deps.tasks.statusOf([row])).get(taskId);
     if (!status || status.waitingSince === null) return;

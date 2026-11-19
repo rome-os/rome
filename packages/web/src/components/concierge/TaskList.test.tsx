@@ -10,8 +10,7 @@ import i18n from "@/i18n";
 import { keyboardFocus } from "@/test/keyboard-focus";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
-import { onConciergeJump } from "./concierge-jump";
-import { ENDED_PAGE, TaskList, creationAge } from "./TaskList";
+import { ENDED_PAGE, TaskList, type TaskListView, useChatTaskList } from "./TaskList";
 
 const NOW = Date.now();
 const HOUR = 60 * 60 * 1000;
@@ -24,13 +23,9 @@ function task(
   return {
     id,
     title: id,
-    state: "next",
+    state: "doing",
     status,
     endReason: status === "ended" ? "done" : null,
-    summary: null,
-    waitingOn: null,
-    dueAt: null,
-    rank: null,
     chat: { id: `chat-${id}`, name: id },
     conciergeChat: { id: "concierge", name: "Main chat", main: true },
     sourceMessageId: "source-message",
@@ -48,7 +43,6 @@ const taskItem = (t: ConciergeTaskDto, extra: Partial<TaskListParts["tasks"][num
   task: t,
   schedule: null,
   check: null,
-  cardMessageId: null,
   ...extra,
 });
 
@@ -74,10 +68,9 @@ beforeEach(() => {
           openWait: { kind: "approval", id: "a1", since: NOW },
           waitingSince: NOW - HOUR,
         }),
-        { cardMessageId: "card-message" },
       ),
-      taskItem(task("Review PRs", "active")),
-      taskItem(task("Morning brief", "later", { chat: null }), {
+      taskItem(task("Review PRs", "active", { updatedAt: NOW - 25 * 60_000 })),
+      taskItem(task("Morning brief", "later"), {
         schedule: { at: "08:00", days: null },
         check: { id: "run-1", at: NOW + HOUR + 30_000, recurring: true },
       }),
@@ -143,13 +136,13 @@ function Where() {
   return <output aria-label="Location">{useLocation().pathname}</output>;
 }
 
-function renderList() {
+function renderList(view: TaskListView = "tasks") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <MemoryRouter>
-          <TaskList chatId="concierge" />
+          <TaskList chatId="concierge" view={view} />
           <Where />
         </MemoryRouter>
       </LiveEventsClientContext.Provider>
@@ -191,7 +184,7 @@ describe("TaskList", () => {
         },
       },
     ];
-    renderList();
+    renderList("routines");
 
     await waitFor(() => expect(within(rowOf("acme/down")).getByText(/Not available/)).toBeTruthy());
     expect(within(rowOf("acme/up")).queryByText(/Not available/)).toBeNull();
@@ -222,7 +215,7 @@ describe("TaskList", () => {
         capabilities: { watch: { state: "unlocked", follows: [] } },
       },
     ];
-    renderList();
+    renderList("routines");
     await screen.findByText("acme/up");
     const connectorReads = () =>
       requests.filter((r) => r.url === "/api/concierge/connectors").length;
@@ -256,140 +249,148 @@ describe("TaskList", () => {
     expect(screen.queryByRole("status", { name: "Loading tasks" })).toBeNull();
   });
 
-  it("gives every row a title and one line of state and time, with nothing else on the right", async () => {
+  it("lists only the task chats in Tasks, by status, and the rest in Routines", async () => {
+    parts.checks = [
+      {
+        kind: "check",
+        check: {
+          id: "c1",
+          name: "Remind me at 3",
+          at: NOW + 40 * 60_000,
+          waitingFor: null,
+          taskId: null,
+        },
+      },
+    ];
+    renderList();
+    await screen.findByRole("region", { name: "Later" });
+    // Task chats grouped by status, and nothing that is no task chat, with no tabs.
+    expect(screen.queryByRole("radio")).toBeNull();
+    for (const group of ["Needs you", "Active", "Later"]) {
+      expect(screen.getByRole("region", { name: group })).toBeTruthy();
+    }
+    expect(screen.getByText("Pick a hotel")).toBeTruthy();
+    expect(screen.queryByText("Daily summary")).toBeNull();
+    expect(screen.queryByText("Remind me at 3")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Routines" })).toBeNull();
+
+    cleanup();
+    renderList("routines");
+    const own = await screen.findByRole("region", { name: "Routines" });
+    // Routines and one-off reminders in one list, with no groups, and no task chat.
+    expect(within(own).getByText("Daily summary")).toBeTruthy();
+    expect(within(own).getByText("Summarize Rome releases")).toBeTruthy();
+    expect(within(own).getByText("Remind me at 3")).toBeTruthy();
+    expect(screen.queryByText("Pick a hotel")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+    // The soonest first: the reminder in 40 minutes, then the routine in an hour.
+    expect(
+      within(own)
+        .getAllByRole("listitem")
+        .map((item) => item.querySelector(".truncate")?.textContent ?? ""),
+    ).toEqual(["Remind me at 3", "Summarize Rome releases", "Daily summary"]);
+  });
+
+  it("says a task chat needs its owner for the header's Tasks dot, and not otherwise", async () => {
+    const Dot = () => (
+      <output aria-label="Needs you">{String(useChatTaskList("concierge").needsYou)}</output>
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = () => (
+      <QueryClientProvider client={client}>
+        <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+          <Dot />
+        </LiveEventsClientContext.Provider>
+      </QueryClientProvider>
+    );
+    render(view());
+    await waitFor(() => expect(screen.getByLabelText("Needs you").textContent).toBe("true"));
+    cleanup();
+
+    parts.tasks = parts.tasks.filter((item) => item.task.status !== "needs_you");
+    client.clear();
+    render(view());
+    await waitFor(() => expect(requests.length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByLabelText("Needs you").textContent).toBe("false"));
+  });
+
+  it("gives every task row its name and one line of state and time, with Stop only on the right", async () => {
     renderList();
     await screen.findByRole("region", { name: "Later" });
     expect(
       within(rowOf("Pick a hotel")).getByText("Waiting for your approval · 1 hr ago"),
     ).toBeTruthy();
-    expect(within(rowOf("Review PRs")).getByText("Running")).toBeTruthy();
+    // Active, with how long ago it began.
+    expect(within(rowOf("Review PRs")).getByText("Active · 25 min ago")).toBeTruthy();
     // A scheduled task's repeat is in its line, with no repeat mark.
-    expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
-    expect(within(rowOf("Morning brief")).queryByLabelText("Repeats")).toBeNull();
-    expect(within(rowOf("Daily summary")).getByText(/Paused · Last run failed/)).toBeTruthy();
-    // A routine made in one of the chat's task chats names its task.
     expect(
-      within(rowOf("Summarize Rome releases")).getByText(
-        /^Daily at .* · in 1 hr · From Rome releases$/,
-      ),
+      within(rowOf("Morning brief")).getByText(/^Daily at .* · in \d+ (hr|min)$/),
     ).toBeTruthy();
-    // Respond and Stop where a card waits; Stop on any task not ended; nothing else.
+    expect(within(rowOf("Morning brief")).queryByLabelText("Repeats")).toBeNull();
+    // Stop on any task not ended, and nothing else: no Respond.
     const names = (title: string) =>
       within(rowOf(title))
         .queryAllByRole("button")
         .map((button) => button.getAttribute("aria-label"));
-    expect(names("Pick a hotel")).toEqual(["Respond to Pick a hotel", "Stop Pick a hotel"]);
+    expect(names("Pick a hotel")).toEqual(["Stop Pick a hotel"]);
     expect(names("Review PRs")).toEqual(["Stop Review PRs"]);
     expect(names("Morning brief")).toEqual(["Stop Morning brief"]);
-    expect(names("Daily summary")).toEqual([]);
     // They show on hover and focus only.
     const buttons = within(rowOf("Pick a hotel")).getByRole("button", {
-      name: "Respond to Pick a hotel",
+      name: "Stop Pick a hotel",
     }).parentElement as HTMLElement;
     expect(buttons.className).toContain("opacity-0");
     expect(buttons.className).toContain("group-hover/row:opacity-100");
+    // The Routines list has no groups, and no buttons on its rows.
+    cleanup();
+    renderList("routines");
+    await screen.findByText("Daily summary");
+    expect(within(rowOf("Daily summary")).getByText(/Paused · Last run failed/)).toBeTruthy();
+    expect(within(rowOf("Daily summary")).queryAllByRole("button")).toEqual([]);
+    expect(
+      within(rowOf("Summarize Rome releases")).getByText(
+        /^Daily at .* · in \d+ (hr|min) · From Rome releases$/,
+      ),
+    ).toBeTruthy();
   });
 
-  it("draws Respond and Stop as icons named by their label and tooltip", async () => {
+  it("opens the task chat when its row is pressed, and Stop is its only action", async () => {
     renderList();
-    await screen.findByRole("region", { name: "Needs you" });
-    for (const name of ["Respond to Pick a hotel", "Stop Pick a hotel"]) {
-      const button = within(rowOf("Pick a hotel")).getByRole("button", { name });
-      expect(button.textContent).toBe("");
-      expect(button.querySelector("svg")).toBeTruthy();
-    }
-    keyboardFocus(within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }));
-    // Its tooltip names it; the row says it nowhere else.
+    await screen.findByRole("region", { name: "Later" });
+    const row = rowOf("Review PRs");
+    const link = within(row).getByRole("link", { name: "Review PRs" });
+    expect(link.getAttribute("href")).toBe("/chat/chat-Review%20PRs");
+    // The link covers the row: its box is stretched over it.
+    expect(link.className).toContain("after:absolute");
+    fireEvent.click(link);
+    expect(screen.getByRole("status", { name: "Location" }).textContent).toBe(
+      "/chat/chat-Review%20PRs",
+    );
+    // A task chat's name is its row's: one name.
+    expect(within(row).queryByRole("link", { name: /Open the chat/ })).toBeNull();
+    // Stop is an icon named by its label and tooltip.
+    const stop = within(row).getByRole("button", { name: "Stop Review PRs" });
+    expect(stop.textContent).toBe("");
+    expect(stop.querySelector("svg")).toBeTruthy();
+    keyboardFocus(stop);
     expect((await screen.findAllByText("Stop")).length).toBeGreaterThan(0);
   });
 
-  it("says how old a not-started task is, and when each row was made in its title's tooltip", async () => {
-    parts.tasks.push(taskItem(task("Plan a trip", "later", { createdAt: NOW - 3 * 24 * HOUR })));
-    renderList();
-    await screen.findByRole("region", { name: "Later" });
-    expect(within(rowOf("Plan a trip")).getByText("Not started · Created 3 days ago")).toBeTruthy();
-    // A scheduled one keeps its schedule line.
-    expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
-    keyboardFocus(screen.getByText("Plan a trip"));
-    expect((await screen.findAllByText(/^Created /)).length).toBeGreaterThan(0);
-  });
-
-  it("counts a creation's age by calendar day, in the iOS app's words", () => {
-    const at = new Date(2026, 10, 13, 9, 0).getTime();
-    expect(creationAge(at - 2 * HOUR, at, "en")).toBe("today");
-    expect(creationAge(new Date(2026, 10, 12, 23, 0).getTime(), at, "en")).toBe("yesterday");
-    expect(creationAge(new Date(2026, 10, 10, 23, 0).getTime(), at, "en")).toBe("3 days ago");
-    expect(creationAge(new Date(2026, 10, 10, 23, 0).getTime(), at, "zh-CN")).toBe("3天前");
-    expect(creationAge(new Date(2026, 10, 12, 23, 0).getTime(), at, "zh-CN")).toBe("昨天");
-    expect(creationAge(at - HOUR, at, "zh-CN")).toBe("今天");
-  });
-
-  it("links to a task's chat beside its title only when it has one, and the row itself opens nothing", async () => {
-    const jumps: string[] = [];
-    const stop = onConciergeJump(async (id) => {
-      jumps.push(id);
-      return true;
-    });
-    renderList();
-    await screen.findByRole("region", { name: "Later" });
-    expect(
-      within(rowOf("Review PRs"))
-        .getByRole("link", { name: "Open the chat for Review PRs" })
-        .getAttribute("href"),
-    ).toBe("/chat/chat-Review PRs");
-    expect(within(rowOf("Morning brief")).queryByRole("link")).toBeNull();
-    fireEvent.click(screen.getByText("Review PRs"));
-    expect(jumps).toEqual([]);
-    stop();
-  });
-
-  it("jumps to the card's message on Respond, pending until it lands", async () => {
-    let land!: (landed: boolean) => void;
-    const jumps: string[] = [];
-    const stop = onConciergeJump(
-      (id) =>
-        new Promise((resolve) => {
-          jumps.push(id);
-          land = resolve;
-        }),
+  it("marks each task row with the status glyph it shares with a task link", async () => {
+    parts.tasks.push(
+      taskItem(task("Stopped one", "ended", { endReason: "stopped" })),
+      taskItem(task("Failed one", "ended", { endReason: "failed" })),
     );
     renderList();
-    await screen.findByRole("region", { name: "Needs you" });
-    fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
-    expect(jumps).toEqual(["card-message"]);
-    expect(within(rowOf("Pick a hotel")).getByText("Opening…")).toBeTruthy();
-    // Pending: both buttons stay shown and take no other press.
-    const row = rowOf("Pick a hotel");
-    expect(
-      within(row)
-        .getAllByRole("button")
-        .every((b) => (b as HTMLButtonElement).disabled),
-    ).toBe(true);
-    expect(
-      within(row).getByRole("button", { name: "Stop Pick a hotel" }).parentElement?.className,
-    ).not.toContain("opacity-0");
-    await act(async () => land(true));
-    expect(
-      within(rowOf("Pick a hotel")).getByText("Waiting for your approval · 1 hr ago"),
-    ).toBeTruthy();
-    stop();
-  });
-
-  it("opens the task chat on Respond when no message here shows the card it waits on", async () => {
-    parts.tasks[0] = taskItem(parts.tasks[0]!.task, { cardMessageId: null });
-    const jumps: string[] = [];
-    const stop = onConciergeJump(async (id) => {
-      jumps.push(id);
-      return true;
-    });
-    renderList();
-    await screen.findByRole("region", { name: "Needs you" });
-    fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
-    expect(jumps).toEqual([]);
-    expect(screen.getByRole("status", { name: "Location" }).textContent).toBe(
-      "/chat/chat-Pick a hotel",
-    );
-    stop();
+    await screen.findByRole("region", { name: "Ended" });
+    fireEvent.click(screen.getByRole("button", { name: /^Ended/ }));
+    const glyph = (title: string) => rowOf(title).querySelector("svg")?.getAttribute("class") ?? "";
+    expect(glyph("Pick a hotel")).toContain("lucide-circle-alert");
+    expect(rowOf("Review PRs").querySelector(".rome-status-spin")).toBeTruthy();
+    expect(glyph("Morning brief")).toContain("lucide-clock");
+    expect(glyph("Old work")).toContain("lucide-circle-check");
+    expect(glyph("Failed one")).toContain("lucide-circle-x");
+    expect(glyph("Stopped one")).toContain("lucide-circle-stop");
   });
 
   it("stops an active task at once, pending until the task is read as ended", async () => {
@@ -521,10 +522,13 @@ describe("TaskList", () => {
     expect(within(ended).getByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
   });
 
-  it("says nothing runs here when the chat has none", async () => {
+  it("says so when the chat has no task chat and no routines", async () => {
     parts = { tasks: [], checks: [], follows: [], routines: [] };
     renderList();
-    expect(await screen.findByText("Nothing runs here yet.")).toBeTruthy();
+    expect(await screen.findByText("No tasks yet.")).toBeTruthy();
+    cleanup();
+    renderList("routines");
+    expect(await screen.findByText("No routines yet.")).toBeTruthy();
   });
 
   it("reads the list again when the server says it changed", async () => {

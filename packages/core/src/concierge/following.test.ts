@@ -1507,7 +1507,6 @@ describe("follows in several Concierge chats", () => {
       text: `<task_review>\n<ended_no_response task="${id}" title="Flights"/>\n</task_review>`,
       passive: [],
       noResponse: [id],
-      unstarted: [],
     });
 
     it("gives a chat with only task notes a digest turn that lists them", async () => {

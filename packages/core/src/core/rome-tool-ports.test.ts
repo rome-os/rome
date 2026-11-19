@@ -168,13 +168,13 @@ describe("romeToolPorts defer", () => {
   });
 });
 
-describe("romeToolPorts defer for a task", () => {
-  const wake = (taskId: string) => ({
+describe("romeToolPorts defer for a task chat", () => {
+  const wake = (chatId: string) => ({
     kind: "time" as const,
     name: "check CI",
     note: "Check the run.",
     fireAtMs: Date.now() + 60_000,
-    taskId,
+    chatId,
   });
 
   it("schedules a check for a task of the chat's own owner", async () => {
@@ -187,8 +187,8 @@ describe("romeToolPorts defer for a task", () => {
     const { defer, run } = ports(undefined, async (id) =>
       id === "theirs" ? "visitor:acct-ann" : null,
     );
-    for (const taskId of ["nope", "theirs"]) {
-      await expect(defer.schedule(turn(), wake(taskId))).rejects.toThrow(`No task ${taskId}`);
+    for (const chatId of ["nope", "theirs"]) {
+      await expect(defer.schedule(turn(), wake(chatId))).rejects.toThrow(`No task chat ${chatId}`);
     }
     expect(run).not.toHaveBeenCalled();
   });

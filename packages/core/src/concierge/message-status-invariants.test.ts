@@ -62,8 +62,8 @@ describe("message status invariants", () => {
     it(`keeps every settled message as it settled (seed ${seed})`, async () => {
       const next = random(seed);
       const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
-      const rows = await repo.upsertMany(
-        TASKS.map((id) => ({ title: id, sessionId: `chat-${id}`, chatId: CHAT })),
+      const rows = await Promise.all(
+        TASKS.map((id) => repo.create(`chat-${id}`, { chatId: CHAT })),
       );
       const taskIds = rows.map((row) => row.id);
       const chatOf = new Map(rows.map((row) => [row.id, row.sessionId!]));

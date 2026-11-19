@@ -3016,14 +3016,13 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from the menu on the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
+  it("opens Tasks, Routines and Outputs from the menu on the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    // A topic chat with a message: a blank one shows no header.
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
       {
         id: "m-1",
@@ -3034,13 +3033,18 @@ describe("Chat Concierge empty state", () => {
       },
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    // The header settles once the chat loads; its menu holds Tasks.
-    await screen.findByRole("button", { name: "chatHeader.menu" });
-    await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.tasks" }));
-      expect(mockOpenTaskList).toHaveBeenCalled();
-    });
+    // The header settles once the chat loads; its menu holds Tasks, Routines and Outputs, in that order.
+    fireEvent.click(await screen.findByRole("button", { name: "chatHeader.menu" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.tasks",
+      "concierge.menu.routines",
+      "concierge.menu.outputs",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
+    fireEvent.click(await screen.findByRole("button", { name: "chatHeader.menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.tasks" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
       "concierge.tasks.title",

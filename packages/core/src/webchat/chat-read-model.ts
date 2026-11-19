@@ -86,7 +86,7 @@ export interface ChatSearchHit {
 // (concierge/task-cards.ts), and the list, the task card and the Concierge's
 // activity must not say it waits. The session index makes it one lookup.
 export const sessionTaskEnded = sql`exists (
-  select 1 from "concierge_tasks" t
+  select 1 from "task_chats" t
   where t."session_id" = "rome_sessions"."id" and t."ended_at" is not null
 )`;
 

@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import {
+  type TaskLinksResponse,
   type TaskListParts,
   type TaskListResponse,
   groupTaskList,
@@ -30,10 +31,6 @@ function task(
     waitingSince: null,
     openWait: null,
     laterAt: null,
-    summary: null,
-    waitingOn: null,
-    dueAt: null,
-    rank: null,
     chat: { id: `mock-task-chat-${id}`, name: title },
     conciergeChat: { id: CONCIERGE_CHAT_ID, name: "Main chat", main: true },
     sourceMessageId: null,
@@ -60,12 +57,8 @@ function fixture(): TaskListParts {
         }),
         schedule: null,
         check: null,
-        // The main chat's first turn shows this task's card.
-        cardMessageId: `${CONCIERGE_CHAT_ID}-t1-assistant`,
       },
       {
-        // Its question is the table thread's third message, so Respond lands
-        // there and focuses the thread.
         kind: "task",
         task: task("table", "Book a table for Friday", "needs_you", {
           waitingSince: Date.now() - 12 * MINUTE,
@@ -74,42 +67,48 @@ function fixture(): TaskListParts {
         }),
         schedule: null,
         check: null,
-        cardMessageId: `${CONCIERGE_CHAT_ID}-pm-5`,
       },
       {
         kind: "task",
         task: task("pr-review", "Review the open pull requests", "active"),
         schedule: null,
         check: null,
-        cardMessageId: null,
       },
       {
         kind: "task",
         task: task("visa", "Check the visa appointment", "later", { laterAt: now + 20 * MINUTE }),
         schedule: null,
         check: { id: "check-visa", at: now + 20 * MINUTE, recurring: false },
-        cardMessageId: null,
       },
       {
         kind: "task",
         task: task("morning-brief", "Morning brief", "later", { laterAt: now + 14 * HOUR }),
         schedule: { at: "08:00", days: ["mon", "tue", "wed", "thu", "fri"] },
         check: { id: "run-morning-brief", at: now + 14 * HOUR, recurring: true },
-        cardMessageId: null,
       },
       {
         kind: "task",
         task: task("hotel", "Compare hotels near Alfama", "ended"),
         schedule: null,
         check: null,
-        cardMessageId: null,
+      },
+      {
+        kind: "task",
+        task: task("passport", "Renew the passport", "ended", { endReason: "stopped" }),
+        schedule: null,
+        check: null,
+      },
+      {
+        kind: "task",
+        task: task("lease", "Summarize the lease penalties", "ended", { endReason: "failed" }),
+        schedule: null,
+        check: null,
       },
       {
         kind: "task",
         task: task("refund", "Ask for the train refund", "ended", { endReason: "no_response" }),
         schedule: null,
         check: null,
-        cardMessageId: null,
       },
     ],
     checks: [
@@ -133,6 +132,7 @@ function fixture(): TaskListParts {
         target: "rome-os/rome",
         state: "active",
         digestTimes: ["09:00", "18:00"],
+        nextAt: now + 4 * HOUR,
       },
     ],
     routines: [
@@ -188,6 +188,23 @@ export const taskListHandlers = [
       ),
     } satisfies TaskListResponse);
   }),
+  // The task chats a message's task links name, by their ids.
+  http.get("/api/chats/:chatId/task-links", ({ params, request }) => {
+    const ids = (new URL(request.url).searchParams.get("ids") ?? "").split(",");
+    const tasks = partsOf(String(params.chatId)).tasks.flatMap((item) =>
+      ids.includes(item.task.chat.id)
+        ? [
+            {
+              id: item.task.chat.id,
+              name: item.task.chat.name,
+              status: item.task.status ?? "active",
+              endReason: item.task.endReason ?? null,
+            },
+          ]
+        : [],
+    );
+    return HttpResponse.json({ tasks } satisfies TaskLinksResponse);
+  }),
   // Held open without events: the tab reads again after its own actions.
   http.get("/api/chats/:chatId/tasks/events", () => {
     const stream = new ReadableStream({ start() {} });
@@ -208,7 +225,6 @@ export const taskListHandlers = [
         reportPending: false,
         laterAt: null,
         lastOutcome: null,
-        started: true,
       },
       now,
     );
