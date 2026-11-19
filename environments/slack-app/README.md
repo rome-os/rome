@@ -14,7 +14,7 @@ environments/slack-app/down.sh                                  # removes contai
 
 It runs only committed code. It refuses to start when this folder has uncommitted changes, and it checks rome and rome-cloud out at the given commits into fresh worktrees under `.state/`, so nothing uncommitted in either checkout reaches the environment. The first start of a rome commit builds its production image, which takes several minutes.
 
-When it is ready it writes `.state/env.json` (gitignored): the scratch checkouts of rome (with its dependencies installed, so `pnpm lint:imports` runs there) and rome-cloud, the rome-cloud base ref to diff against, the commits of the environment, rome and rome-cloud, the agent model, the fake Slack's address and control API, Rome Cloud's address, and each instance's address, guardian, signed-in guardian session, stop and start commands, and `messages_path` (null until the product names the route that lists recorded messages).
+When it is ready it writes `.state/env.json` (gitignored): the scratch checkouts of rome (with its dependencies installed, so `pnpm lint:imports` runs there) and rome-cloud, the rome-cloud base ref to diff against, the commits of the environment, rome and rome-cloud, the agent model, the fake Slack's address and control API, Rome Cloud's address, and each instance's address, guardian, signed-in guardian session, and stop and start commands.
 
 ## What runs
 

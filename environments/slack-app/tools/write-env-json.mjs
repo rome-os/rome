@@ -31,8 +31,6 @@ const instance = (name, port, guardian) => ({
   stop: [ctl, "stop", name],
   start: [ctl, "start", name],
   status: [ctl, "status", name],
-  // The instance route that lists recorded messages, once the product names it.
-  messages_path: null,
 });
 
 const fakeSlack = `http://127.0.0.1:${e.FAKE_SLACK_PORT}`;
