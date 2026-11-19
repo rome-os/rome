@@ -286,8 +286,12 @@ class SourceReader {
       const visit = (node: TS.Node) => {
         const call = ts.isCallExpression(node) ? this.appApiCall(node) : undefined;
         if (call && ts.isCallExpression(node)) {
-          const method = call === "appApiUrl" ? "GET" : this.callMethod(node.arguments[1]);
-          for (const path of this.calledPaths(node.arguments[0], pageSources)) {
+          const init = call === "appApiUrl" ? undefined : node.arguments[1];
+          for (const { path, method } of this.calledRequests(
+            node.arguments[0],
+            init,
+            pageSources,
+          )) {
             found.push({ at: this.at(source.fileName, node), path, method });
           }
         }
@@ -327,53 +331,95 @@ class SourceReader {
     return this.stringLiteral(method)?.toUpperCase() ?? null;
   }
 
-  /** The app API paths an argument can stand for; `[null]` when the reader cannot tell. */
-  private calledPaths(
-    argument: TS.Expression | undefined,
+  /**
+   * The path and method of each request a call can make, read together at
+   * each call site when a helper takes them as parameters, so a path keeps
+   * the method it is sent with. Null where the reader cannot tell.
+   */
+  private calledRequests(
+    pathArgument: TS.Expression | undefined,
+    init: TS.Expression | undefined,
     pageSources: readonly TS.SourceFile[],
     hops = 0,
-  ): (string | null)[] {
-    if (!argument) return [""];
+  ): { path: string | null; method: string | null }[] {
+    const pathParameter = this.parameterOf(pathArgument);
+    const initParameter = this.parameterOf(init);
+    const owner = pathParameter?.parent ?? initParameter?.parent;
+    // Both, when both are parameters, must be the same helper's.
+    if (
+      !owner ||
+      (pathParameter && initParameter && pathParameter.parent !== initParameter.parent)
+    ) {
+      return [{ path: this.calledPath(pathArgument), method: this.callMethod(init) }];
+    }
+    const sites = hops < 2 ? this.callSites(owner, pageSources) : undefined;
+    if (!sites || sites.length === 0) {
+      return [
+        {
+          path: pathParameter ? null : this.calledPath(pathArgument),
+          method: initParameter ? null : this.callMethod(init),
+        },
+      ];
+    }
+    return sites.flatMap((site) =>
+      this.calledRequests(
+        pathParameter ? site.arguments[owner.parameters.indexOf(pathParameter)] : pathArgument,
+        initParameter ? site.arguments[owner.parameters.indexOf(initParameter)] : init,
+        pageSources,
+        hops + 1,
+      ),
+    );
+  }
+
+  /** The parameter an argument names, when it names one. */
+  private parameterOf(argument: TS.Expression | undefined): TS.ParameterDeclaration | undefined {
+    const declaration =
+      argument && ts.isIdentifier(argument) ? this.declarationOf(argument)[0] : undefined;
+    return declaration && ts.isParameter(declaration) ? declaration : undefined;
+  }
+
+  /** The page's calls to a function, or undefined when the reader cannot name it. */
+  private callSites(
+    owner: TS.SignatureDeclaration,
+    pageSources: readonly TS.SourceFile[],
+  ): TS.CallExpression[] | undefined {
+    const name = owner.name && ts.isIdentifier(owner.name) ? owner.name : undefined;
+    const ownerName =
+      name ??
+      (ts.isVariableDeclaration(owner.parent) && ts.isIdentifier(owner.parent.name)
+        ? owner.parent.name
+        : undefined);
+    const ownerSymbol = ownerName && this.checker.getSymbolAtLocation(ownerName);
+    if (!ownerSymbol) return undefined;
+    const sites: TS.CallExpression[] = [];
+    for (const source of pageSources) {
+      const visit = (node: TS.Node) => {
+        if (ts.isCallExpression(node)) {
+          let symbol = this.checker.getSymbolAtLocation(node.expression);
+          if (symbol && symbol.flags & ts.SymbolFlags.Alias)
+            symbol = this.checker.getAliasedSymbol(symbol);
+          if (symbol === ownerSymbol) sites.push(node);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    return sites;
+  }
+
+  /** The app API path an argument names, or null when the reader cannot tell. */
+  private calledPath(argument: TS.Expression | undefined): string | null {
+    if (!argument) return "";
     const text = this.stringLiteral(argument);
-    if (text !== undefined) return [normalizeCallPath(text)];
+    if (text !== undefined) return normalizeCallPath(text);
     if (ts.isTemplateExpression(argument)) {
       let path = argument.head.text;
       for (const span of argument.templateSpans) path += `\u0000${span.literal.text}`;
       const normalized = normalizeCallPath(path);
       // A path whose first segment is computed could be any route.
-      return [normalized === ":id" || normalized.startsWith(":id/") ? null : normalized];
+      return normalized === ":id" || normalized.startsWith(":id/") ? null : normalized;
     }
-    // A path the enclosing function takes as a parameter: read each call site.
-    const declaration = ts.isIdentifier(argument) ? this.declarationOf(argument)[0] : undefined;
-    if (hops < 2 && declaration && ts.isParameter(declaration)) {
-      const owner = declaration.parent;
-      const index = owner.parameters.indexOf(declaration);
-      const name = owner.name && ts.isIdentifier(owner.name) ? owner.name : undefined;
-      const ownerName =
-        name ??
-        (ts.isVariableDeclaration(owner.parent) && ts.isIdentifier(owner.parent.name)
-          ? owner.parent.name
-          : undefined);
-      if (!ownerName) return [null];
-      const ownerSymbol = this.checker.getSymbolAtLocation(ownerName);
-      const paths: (string | null)[] = [];
-      for (const source of pageSources) {
-        const visit = (node: TS.Node) => {
-          if (ts.isCallExpression(node) && ownerSymbol) {
-            let symbol = this.checker.getSymbolAtLocation(node.expression);
-            if (symbol && symbol.flags & ts.SymbolFlags.Alias)
-              symbol = this.checker.getAliasedSymbol(symbol);
-            if (symbol === ownerSymbol) {
-              paths.push(...this.calledPaths(node.arguments[index], pageSources, hops + 1));
-            }
-          }
-          ts.forEachChild(node, visit);
-        };
-        visit(source);
-      }
-      return paths.length > 0 ? paths : [null];
-    }
-    return [null];
+    return null;
   }
 
   private fromSource(file: string): string {
@@ -1109,6 +1155,11 @@ function describeRoute(
     reads.some((read) => read.segments.some((segment) => segment.index !== undefined)) &&
     reads.every((read) => read.depth === undefined);
   const extra = { ...(alternatives ? { alternatives } : {}), ...(openEnded ? { openEnded } : {}) };
+  // `route === "webhook" || /^erase$/.test(route)` serves a path the reader
+  // cannot name beside the one it can, so no exemption may rest on the known one.
+  if (reads.some((read) => read.patternOnPath)) {
+    return { method, path: path || "?", unreadable: "a path test the reader cannot follow" };
+  }
   // `path === "" || path === "status"` serves the root among its paths.
   if (root) return { method, path: "", ...extra };
   if (path === "") {
@@ -1216,7 +1267,9 @@ function readCondition(
         first &&
         literal(first) !== undefined
       ) {
-        segments.push({ value: `${(literal(first) as string).replace(/\/$/, "")}/*` });
+        // `startsWith("notes/")` needs a segment after `notes`; `startsWith("notes")` also takes `notes`.
+        const prefix = literal(first) as string;
+        segments.push({ value: prefix.endsWith("/") ? `${prefix}*` : `${prefix}/**` });
       } else if (name === "match" || name === "test" || name === "exec") {
         opaque = true;
         const operands = [node.expression.expression, ...node.arguments].map((n) => n.getText());

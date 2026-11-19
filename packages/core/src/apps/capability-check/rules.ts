@@ -211,11 +211,24 @@ function judgeHumanInterface(
   const called = running.some((route) =>
     app.pageApiCalls.some(
       (call) =>
-        call.path !== null && pathMatches(route, call.path) && methodMatches(route, call.method),
+        call.path !== null &&
+        call.method !== null &&
+        pathMatches(route, call.path) &&
+        methodMatches(route, call.method),
     ),
   );
   if (called) return;
-  if (running.some((route) => route.unreadable) || app.pageApiCalls.some((c) => c.path === null)) {
+  // A call whose method the reader cannot tell may be the one that reaches the route.
+  const unknownMethod = running.some((route) =>
+    app.pageApiCalls.some(
+      (call) => call.path !== null && call.method === null && pathMatches(route, call.path),
+    ),
+  );
+  if (
+    unknownMethod ||
+    running.some((route) => route.unreadable) ||
+    app.pageApiCalls.some((c) => c.path === null)
+  ) {
     cannotJudge(
       "I2",
       action.at,
@@ -236,20 +249,24 @@ function isStatusRoute(path: string, method: string): boolean {
   return path === "status" && method === "GET";
 }
 
-/** Whether a call with `method` (null: any) reaches `route`, which may take several. */
-function methodMatches(route: RouteFacts, method: string | null): boolean {
-  if (method === null || route.method === "ANY") return true;
+/** Whether a call with `method` reaches `route`, which may take several. */
+function methodMatches(route: RouteFacts, method: string): boolean {
+  if (route.method === "ANY") return true;
   return route.method.split("|").includes(method);
 }
 
-/** Whether a page's call to `called` reaches `route`; `:id` and `*` match any segment. */
+/**
+ * Whether a page's call to `called` reaches `route`. `:id` matches any one
+ * segment, `*` one or more, and `**` any number.
+ */
 function pathMatches(route: RouteFacts, called: string): boolean {
   const callSegments = called === "" ? [] : called.split("/");
   return (route.alternatives ?? [route.path]).some((path) => {
     const routeSegments = path === "" ? [] : path.split("/");
     for (let i = 0; i < routeSegments.length; i++) {
       const segment = routeSegments[i] as string;
-      if (segment === "*") return callSegments.length >= i;
+      if (segment === "*") return callSegments.length > i;
+      if (segment === "**") return callSegments.length >= i;
       const call = callSegments[i];
       if (call === undefined) return false;
       if (segment !== ":id" && call !== ":id" && segment !== call) return false;

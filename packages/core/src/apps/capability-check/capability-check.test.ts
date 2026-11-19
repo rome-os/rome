@@ -236,6 +236,82 @@ export const save = () => call("notes");
     expect(await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page })).toEqual([]);
   });
 
+  it("I2: pairs each path with the method a helper forwards for it", async () => {
+    const page = (call: string) => `import { fetchAppApi } from "@rome-os/app-web-sdk";
+async function api(path: string, init?: RequestInit) { return fetchAppApi(path, init); }
+export const go = () => ${call};
+`;
+    expect(
+      (await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page('api("notes")') })).map((g) => g.rule),
+    ).toEqual(["I2"]);
+    expect(
+      await gapsOf({ ...COMPLIANT, "src/web/App.tsx": page('api("notes", { method: "POST" })') }),
+    ).toEqual([]);
+  });
+
+  it("I2: leaves a call whose method it cannot read to a person", async () => {
+    const page = `import { fetchAppApi } from "@rome-os/app-web-sdk";
+declare const options: RequestInit;
+export const go = () => fetchAppApi("notes", options);
+`;
+    const verdict = checkApp(await readApp(writeApp({ ...COMPLIANT, "src/web/App.tsx": page })));
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I2"]);
+  });
+
+  it("I2: a `prefix/` route needs a segment after the prefix", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'route === "notes"',
+      'route.startsWith("notes/")',
+    );
+    const page = (path: string) =>
+      `import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const save = () => fetchAppApi("${path}", { method: "POST" });\n`;
+    const files = { ...COMPLIANT, "src/api/index.ts": api };
+    expect(
+      (await gapsOf({ ...files, "src/web/App.tsx": page("notes") })).map((g) => g.rule),
+    ).toEqual(["I2"]);
+    expect(await gapsOf({ ...files, "src/web/App.tsx": page("notes/today") })).toEqual([]);
+  });
+
+  it("I1 and I3: keep a path test it cannot read beside an exempt path", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'return "not found";',
+      'if (route === "webhook" || /^erase$/.test(route)) return "done";\n    return "not found";',
+    );
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "  entry: api/index\n",
+      "  entry: api/index\n  noAuth:\n    - /webhook\n",
+    );
+    const verdict = checkApp(
+      await readApp(writeApp({ ...COMPLIANT, "app.yaml": manifest, "src/api/index.ts": api })),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toEqual(["I1"]);
+  });
+
+  it("I3: does not let a machine path nested under another route spare it", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string)
+      .replace(
+        'return "not found";',
+        `if (request.path[0] === "admin") {
+      if (request.path[1] === "hook" || request.path[1] === "webhook") {
+        return createNotesRepository(null).insert("x");
+      }
+    }
+    return "not found";`,
+      )
+      .replace(
+        "export class",
+        'import { createNotesRepository } from "../db/notes.js";\nexport class',
+      );
+    const manifest = (COMPLIANT["app.yaml"] as string).replace(
+      "  entry: api/index\n",
+      "  entry: api/index\n  noAuth:\n    - /hook\n    - /webhook\n",
+    );
+    const gaps = await gapsOf({ ...COMPLIANT, "app.yaml": manifest, "src/api/index.ts": api });
+    expect(gaps.map((g) => g.rule)).toEqual(["I3", "I1"]);
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,
