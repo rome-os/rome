@@ -94,18 +94,32 @@ const server = await serve(async (req, res, url) => {
     }
     const grant = await got.json();
     const connectionId = `conn_${rand()}`;
+    // A repair of the same workspace replaces its connection and keeps its
+    // channel and connected account, as Rome does. Broken R8-new-account
+    // gives the repair a new connected account.
+    const prior = db.connections.find((c) => c.team === grant.team);
+    db.connections = db.connections.filter((c) => c.team !== grant.team);
     db.connections.push({
       id: connectionId,
-      channel: randomUUID(),
+      channel: prior?.channel ?? randomUUID(),
       team: grant.team,
       botToken: grant.botToken,
     });
-    db.accounts.push({
-      account: { platform: "slack", id: `${grant.team}:${grant.botUserId}` },
-      name: `Rome in ${grant.team}`,
-      agent: breaks.has("R1-agent") ? null : "core:concierge",
-      connection: connectionId,
-    });
+    const accountId = `${grant.team}:${grant.botUserId}`;
+    const kept = db.accounts.find((a) => a.account.id === accountId);
+    if (kept && !breaks.has("R8-new-account")) kept.connection = connectionId;
+    else {
+      if (kept) kept.connection = null;
+      db.accounts.push({
+        account: {
+          platform: "slack",
+          id: kept ? `${accountId}:${rand()}` : accountId,
+        },
+        name: `Rome in ${grant.team}`,
+        agent: breaks.has("R1-agent") ? null : "core:concierge",
+        connection: connectionId,
+      });
+    }
     save();
     setup.state = { status: "done", grant: { connectionId } };
     return send(res, 200, { matched: true, state: setup.state });
@@ -120,7 +134,29 @@ const server = await serve(async (req, res, url) => {
   if (view && req.method === "GET") {
     const conn = db.connections.find((c) => c.id === decodeURIComponent(view[1]));
     if (!conn) return send(res, 404, { error: "Unknown connection." });
-    return send(res, 200, { connection: { id: conn.id, channel: conn.channel } });
+    return send(res, 200, {
+      connection: {
+        id: conn.id,
+        channel: conn.channel,
+        state: conn.broken ? "broken" : "working",
+        // Broken R13-tell shows that it had to read Slack for a chat.
+        ...(breaks.has("R13-tell") && conn.readSlack ? { copyMissing: true } : {}),
+      },
+    });
+  }
+  // Disconnect: Rome gives the token up with Slack. Broken R8-keep-token does not.
+  if (view && req.method === "DELETE") {
+    const conn = db.connections.find((c) => c.id === decodeURIComponent(view[1]));
+    if (!conn) return send(res, 404, { error: "Unknown connection." });
+    if (!breaks.has("R8-keep-token"))
+      await fetch(`${SLACK}/api/auth.revoke`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${conn.botToken}` },
+      });
+    db.connections = db.connections.filter((c) => c !== conn);
+    for (const a of db.accounts) if (a.connection === conn.id) a.connection = null;
+    save();
+    return send(res, 200, { ok: true, connection: null });
   }
   const session = p.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (session && req.method === "GET") {
@@ -154,12 +190,93 @@ const server = await serve(async (req, res, url) => {
   return send(res, 404, { error: "not found" });
 }, Number(PORT));
 
-async function post(token, channel, text) {
+async function post(token, channel, text, threadTs) {
   await fetch(`${SLACK}/api/chat.postMessage`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ channel, text }),
+    body: JSON.stringify({ channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) }),
   });
+}
+
+const slackState = async () => (await fetch(`${SLACK}/_control/state`)).json();
+
+const REMEMBER = /Please remember this for later: my (.+?) is (\S+?)\.(\s|$)/i;
+
+/** The value noted for `thing` in `texts`, newest last. */
+const noted = (texts, thing) =>
+  texts
+    .map((t) => t?.match(REMEMBER))
+    .filter((m) => m && m[1].toLowerCase() === thing.toLowerCase())
+    .at(-1)?.[2];
+
+/**
+ * What the guardian noted for `thing` in direct message `channel`: from this
+ * instance's copy, else by reading the chat's history in Slack. Broken
+ * R13-forget never reads Slack.
+ */
+async function recall(conn, channel, thing) {
+  const fromCopy = noted(
+    db.messages.filter((m) => m.channel === channel).map((m) => m.text),
+    thing,
+  );
+  if (fromCopy || breaks.has("R13-forget")) return fromCopy;
+  // Pages through Slack's history under its limit, waiting out a 429, and
+  // keeps what it read as its copy again.
+  const read = [];
+  let cursor = "";
+  for (let i = 0; i < 100; i++) {
+    const q = new URLSearchParams({ channel, limit: "15", ...(cursor ? { cursor } : {}) });
+    const res = await fetch(`${SLACK}/api/conversations.history?${q}`, {
+      headers: { authorization: `Bearer ${conn.botToken}` },
+    });
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, Number(res.headers.get("retry-after") ?? 1) * 1000));
+      continue;
+    }
+    const page = await res.json();
+    if (!page.ok) break;
+    read.push(...page.messages);
+    cursor = page.response_metadata?.next_cursor ?? "";
+    if (!page.has_more || !cursor) break;
+  }
+  conn.readSlack = true;
+  for (const m of read)
+    if (!m.bot_id && m.user)
+      db.messages.push({ team: conn.team, user: m.user, channel, text: m.text, ts: m.ts });
+  save();
+  return noted(
+    read
+      .slice()
+      .sort((x, y) => Number(x.ts) - Number(y.ts))
+      .map((m) => m.text),
+    thing,
+  );
+}
+
+/**
+ * The stand-in Concierge's words for `event`: it notes what the guardian asks
+ * it to remember and gives it back to the guardian alone. A visitor's
+ * question about the guardian gets a refusal; broken R12-leak answers it.
+ */
+async function words(conn, event, team) {
+  const text = event.text ?? "";
+  if (REMEMBER.test(text)) return "Noted, I'll remember that.";
+  const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
+  const mine = text.match(/What is my (.+?)\?/i);
+  if (mine && event.user === guardian) {
+    const v = await recall(conn, event.channel, mine[1]);
+    return v ? `Your ${mine[1]} is ${v}.` : "I don't have that noted.";
+  }
+  const about = text.match(/(?:What is|remind me of) .+?'s (.+?)(?:,|\?)/i);
+  if (about && event.user !== guardian) {
+    if (!breaks.has("R12-leak")) return "I can't share another person's details.";
+    const theirs = db.messages.filter((m) => m.team === team && m.user === guardian);
+    return `It is ${noted(
+      theirs.map((m) => m.text),
+      about[1],
+    )}.`;
+  }
+  return "Sure, happy to help with that.";
 }
 
 async function otherDirectMessage(team, channel) {
@@ -188,7 +305,7 @@ async function answer(event, team, { now = false } = {}) {
   if (breaks.has("silent")) return;
   const asked = breaks.has("refuse")
     ? "I can't repeat codes or other secrets here."
-    : "Sure, happy to help with that.";
+    : await words(conn, event, team);
   // Broken R7-elsewhere answers R7's forged events in another member's direct message.
   if (breaks.has("R7-elsewhere") && /R7F-/.test(event.text)) {
     const other = await otherDirectMessage(team, event.channel);
@@ -204,6 +321,15 @@ async function answer(event, team, { now = false } = {}) {
   }
 }
 
+// A mention is answered once in a thread under it. Broken R5-top answers at
+// the top of the group; R5-twice answers twice.
+async function answerMention(conn, ev) {
+  const thread = breaks.has("R5-top") ? undefined : ev.ts;
+  const times = breaks.has("R5-twice") ? 2 : 1;
+  for (let i = 0; i < times; i++)
+    await post(conn.botToken, ev.channel, "Sure, happy to help with that.", thread);
+}
+
 async function drainOnce() {
   const res = await fetch(`${CLOUD}/relay/${NAME}/drain`, { headers: cloudAuth });
   const { frames } = await res.json();
@@ -215,7 +341,20 @@ async function drainOnce() {
     if (db.seen.includes(payload.event_id)) continue;
     db.seen.push(payload.event_id);
     const ev = payload.event;
+    const conn = db.connections.find((c) => c.team === payload.team_id);
+    // Removal: the connection shows broken. Broken R8-never ignores it.
+    if (ev?.type === "app_uninstalled" || ev?.type === "tokens_revoked") {
+      if (conn && !breaks.has("R8-never")) conn.broken = true;
+      save();
+      continue;
+    }
+    if (ev?.type === "app_mention") {
+      if (conn && !breaks.has("silent")) await answerMention(conn, ev);
+      continue;
+    }
     if (ev?.type !== "message" || ev.channel_type !== "im") continue;
+    // Slack echoes the bot's own posts back as events; they are not messages to answer.
+    if (ev.bot_id) continue;
     // Broken R7-blind: an event for a workspace this instance does not hold
     // gets a generic answer in this instance's own workspace, unrecorded.
     if (breaks.has("R7-blind") && !db.connections.some((c) => c.team === payload.team_id)) {

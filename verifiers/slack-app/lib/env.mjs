@@ -80,11 +80,16 @@ function fromEnvironment(raw) {
       romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },
+    romeCloud: { query: raw.rome_cloud?.query },
     instances: (raw.instances ?? []).map((i) => ({
       name: i.name,
       api: i.url ? `${i.url}/api` : undefined,
       headers: cookie(i.guardian_cookies_file),
-      control: { stop: i.stop, start: i.start },
+      control: {
+        stop: i.stop,
+        start: i.start,
+        wipeChat: i.control?.wipe_chat ?? i.wipe_chat,
+      },
       connect: i.connect,
     })),
   };

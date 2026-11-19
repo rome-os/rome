@@ -37,6 +37,24 @@ export function fakeSlack(base) {
           body: { team, user, text, mode: "bad_signature" },
         }),
       ),
+    /** A member mentions the bot in a group (default `general`). */
+    mention: async (team, user, text, channel) =>
+      seeded(await call("/mention", { method: "POST", body: { team, user, channel, text } })),
+    /** A member says something in a group without mentioning the bot. */
+    groupMessage: async (team, user, text, channel) => {
+      const r = await call("/group-message", {
+        method: "POST",
+        body: { team, user, channel, text },
+      });
+      return { ...seeded(r), channel: r.event?.channel ?? r.channel, ts: r.event?.ts ?? r.ts };
+    },
+    /** Removes the app from a workspace: Slack's two events, then its tokens stop working. */
+    uninstall: (team) => call("/uninstall", { method: "POST", body: { team } }),
+    /** auth.test with the newest bot token issued in `team`, as Slack answers it. */
+    authTest: async (team) => {
+      const r = await call("/auth-test", { method: "POST", body: { team } });
+      return { ...(r.auth_test ?? r), tokenState: r.token_state ?? null };
+    },
     /** The current seq, to read only what comes after it. */
     seq: async () => (await call("/posts?since=999999999")).seq,
     /** What the bot posted, oldest first, after `since`. */

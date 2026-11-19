@@ -17,23 +17,27 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
     "romeCloudBase": "origin/main"
   },
   "slack": { "control": "http://host:port/_control" },
+  "romeCloud": { "query": ["argv", "..."] },  // R1: SQL on stdin, a JSON array of rows out
   "instances": [                       // first binds to workspace A, second to B
     {
       "name": "a",
       "api": "http://host:port/api",
       "headers": { "cookie": "..." },  // assumed: how the verifier signs in as the guardian
-      "control": { "stop": "<URL to POST, or a shell command>", "start": "..." },
+      "control": {
+        "stop": "<URL to POST, or a shell command>", "start": "...",
+        "wipeChat": ["argv", "..."]    // R13: the Slack conversation id is appended
+      },
       "connect": { "kind": "slack_app", "grant": "bot" }
     }
   ]
 }
 ```
 
-The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, `rome_base_ref` (default `origin/main`), and `rome_dependencies`: when it is `failed`, the import-rule check reports not checked). Without `repos`, R11 takes the checkouts from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
+The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, and `shortened.r6_stop_minutes`, plus `instances[i].control.wipe_chat` (or `instances[i].wipe_chat`) and `rome_cloud.query`, both argv arrays. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, `rome_base_ref` (default `origin/main`), and `rome_dependencies`: when it is `failed`, the import-rule check reports not checked). Without `repos`, R11 takes the checkouts from `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE` (default `origin/main`), and reports "not checked" without them.
 
 ## Fake Slack control
 
-The environment's control API, as its README gives it (`environments/slack-app/README.md`). The verifier uses `GET /state` (workspaces, and the guardian as the member with `is_owner`), `POST /sign-in`, `POST /dm`, `POST /forged` with `mode: bad_signature`, `GET /posts?team&channel&since` and `GET /calls?team&since`. It reads only records after the `seq` it saw before acting.
+The environment's control API, as its README gives it (`environments/slack-app/README.md`). The verifier uses `GET /state` (workspaces, and the guardian as the member with `is_owner`), `POST /sign-in`, `POST /dm`, `POST /forged` with `mode: bad_signature`, `GET /posts?team&channel&since` and `GET /calls?team&since`. Phase 2 adds `POST /mention` (R5), `POST /group-message {team, user, channel?, text}` (R5), `POST /uninstall {team}` (R8) and `POST /auth-test {team}`, answering `{token_state, auth_test}` with Slack's auth.test answer for the newest bot token issued in the workspace (R8). R13 counts `conversations.history` and `conversations.replies` in `/calls` after the wipe. It reads only records after the `seq` it saw before acting.
 
 ## Instance
 
@@ -47,11 +51,19 @@ The routes the dashboard uses today, relative to `api`. Every call sends the ins
 | `GET /connected-accounts` | Each connected account with its `agent` and `connection`. R1 wants `agent` to be `core:concierge`. |
 | `GET /connections/{connection id}` | The connection's view. The verifier reads `connection.channel`, the channel the connection backs, to name the chat Rome recorded. The connection id is the one the setup's done state gave. |
 | `GET /sessions/channel:{channel}:{direct message id}/messages` | The bot chat's session for one Slack direct message, as an array oldest first of `{id, role, content, ...}`. `{channel}` comes from the connection's view, never from the direct message id alone. The verifier keeps inbound entries, role `notification` or `user` (an inbound message that started a turn), and searches their `content`. The People timeline is not used: it leaves agent chats out. Rome has no public listing that gives a connection's chats with their session ids, so the name is built from the view. |
+| `GET /connections/{connection id}` (R8, R13) | R8 polls its `state` for `broken` after the removal. R13 compares the whole view, less `setups`, before and after the wipe. A 404 is read as the connection being gone. |
+| `DELETE /connections/{connection id}` | R8's disconnect, as the dashboard's Disconnect does. |
 | `GET /accounts` | Every account the instance has observed, as `{accounts: [{channel, channelUserId}], nextCursor}`. The verifier reads every page and keeps channel `slack` (or `slack_app`), since the filter matches the platform name exactly. A dropped event adds none. |
 
 R3 expects a refused second connect to end the setup `failed` with a reason that says the workspace is already connected, in any words. The product refuses on redeem, after the browser returns with a handoff.
 
 R7 reads what Rome recorded through the session route above: a forged event must leave nothing in the direct message's session, which must show the good message, and the instance bound to workspace B must hold no account of workspace A and no session for A's direct message (a 404 there means none). If a read fails, including a 403 or 404 on the first instance, R7 reports "not checked" unless it already saw a failure.
+
+## Wipe and query
+
+`control.wipe_chat` wipes Rome's copy of one Slack conversation. The verifier runs it with the conversation id appended (or POSTs to it with `?conversation=` when it is a URL) and takes exit 0 as the copy being gone and the instance healthy again. Exit 3 means a copy is left, and R13 is not checked. It prints JSON with what it removed, which goes into R13's evidence. The verifier never reads Rome's database itself.
+
+`rome_cloud.query` takes SQL on stdin and prints rows as a JSON array, read only. R1 runs `select result is null as cleared, consumed_at is not null as consumed from slack_app_installs order by created_at desc limit 1`.
 
 ## Stop and start
 

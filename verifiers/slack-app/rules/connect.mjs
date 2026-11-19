@@ -1,11 +1,16 @@
 // R1 (one sign-in, nothing pasted) and R3 (one workspace binds to one
 // instance). Rule text: rule set v1 in the planner's rules.md.
 
+import { query } from "../lib/cloud.mjs";
 import { ask, code } from "../lib/codes.mjs";
 import { sleep } from "../lib/http.mjs";
 import { allOnce, replyAfter, summary, tally } from "../lib/replies.mjs";
 
 const CONCIERGE = "core:concierge";
+
+// The newest sign-in attempt: whether its outcome is gone and it is used up.
+const ATTEMPT_SQL =
+  "select result is null as cleared, consumed_at is not null as consumed from slack_app_installs order by created_at desc limit 1";
 
 // The refusal must say why, in any words: the workspace is already connected
 // to another Rome.
@@ -92,7 +97,23 @@ export async function r1(ctx) {
   // Kept apart so a silent agent is not read as a failed connect.
   evidence.parts = { connected: yn(Boolean(account)), replied: yn(reply.ok) };
 
+  // Live: the newest sign-in attempt in Rome Cloud no longer holds its
+  // outcome once the instance redeemed it.
+  const q = ctx.env.romeCloud?.query;
+  if (Array.isArray(q)) {
+    try {
+      const [row] = await query(q, ATTEMPT_SQL);
+      evidence.signInAttempt = row ?? null;
+      // No row at all: the attempt was deleted, which clears it too.
+      evidence.parts.attemptCleared = row ? yn(row.cleared === true) : "yes (no attempt row left)";
+    } catch (err) {
+      evidence.signInAttempt = `not checked: ${err.message}`;
+    }
+  } else evidence.signInAttempt = "not checked: the environment gives no rome_cloud.query";
+
   const problems = [];
+  if (evidence.parts.attemptCleared === "no")
+    problems.push("Rome Cloud's sign-in attempt still holds its outcome after the redemption");
   if (walk.setupFields.length) problems.push(`setup asked for ${walk.setupFields.length} field(s)`);
   if (romeFields.length)
     problems.push(`Rome's own screens asked for ${romeFields.length} field(s)`);

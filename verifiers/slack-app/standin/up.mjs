@@ -8,7 +8,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +58,9 @@ const { slack, servers } = fake.start(
     port: 0,
     workspacesFile: join(fakeDir, "workspaces.json"),
     retryDelaysMs: "200,500,1000",
+    // Slack's history limit is off here: paging through it, a minute a page,
+    // would outlast the stand-in's reply timeout. The real run keeps it on.
+    historyLimit: false,
     ...secrets,
   }),
 );
@@ -104,6 +107,20 @@ const stopInstance = (name) =>
     child.kill("SIGTERM");
   });
 const control = await serve(async (req, res, url) => {
+  // Wipes the instance's copy of one Slack conversation: stop, wipe, start.
+  const w = url.pathname.match(/^\/instances\/(a|b)\/wipe$/);
+  if (w && req.method === "POST") {
+    const conversation = url.searchParams.get("conversation");
+    await stopInstance(w[1]);
+    const file = join(workDir, `instance-${w[1]}.json`);
+    const db = JSON.parse(readFileSync(file, "utf8"));
+    const before = db.messages.length;
+    db.messages = db.messages.filter((m) => m.channel !== conversation);
+    writeFileSync(file, JSON.stringify(db));
+    startInstance(w[1]);
+    await listening(`http://127.0.0.1:${ports[w[1]]}/`);
+    return send(res, 200, { messages: before - db.messages.length });
+  }
   const m = url.pathname.match(/^\/instances\/(a|b)\/(stop|start)$/);
   if (!m || req.method !== "POST") return send(res, 404, { error: "not found" });
   if (m[2] === "stop") await stopInstance(m[1]);
@@ -251,7 +268,7 @@ write(
 commitAll(rome, "product");
 
 const env = {
-  ruleSet: "v1",
+  ruleSet: "v2",
   commits: {
     rome: git(rome, "rev-parse", "HEAD").toString().trim(),
     romeCloud: git(romeCloud, "rev-parse", "HEAD").toString().trim(),
@@ -263,13 +280,14 @@ const env = {
   timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10 },
   repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
   slack: { url: slackUrl, control: `${slackUrl}/_control` },
-  romeCloud: { url: cloud.url },
+  romeCloud: { url: cloud.url, query: [process.execPath, join(here, "query.mjs"), cloud.url] },
   instances: ["a", "b"].map((name) => ({
     name,
     api: `http://127.0.0.1:${ports[name]}/api`,
     control: {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
+      wipeChat: `${control.url}/instances/${name}/wipe`,
     },
     connect: { kind: "slack_app", grant: "bot" },
   })),

@@ -64,6 +64,57 @@ export function instance(inst, slackOrigin) {
     name: inst.name,
     call,
 
+    /** The connection's public view, or null when Rome no longer knows it. */
+    async connection(id) {
+      const res = await call(`/connections/${encodeURIComponent(id)}`);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`GET /connections/${id} on ${inst.name}: ${res.status}`);
+      return res.data.connection;
+    },
+
+    /** Disconnects in Rome, as the dashboard's Disconnect does. */
+    async disconnect(id) {
+      const res = await call(`/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok)
+        throw new Error(
+          `DELETE /connections/${id} on ${inst.name}: ${res.status} ${JSON.stringify(res.data)}`,
+        );
+      return res.data;
+    },
+
+    /** Whether the environment can wipe Rome's copy of one chat. */
+    canWipe: () => Array.isArray(inst.control.wipeChat) || typeof inst.control.wipeChat === "string",
+
+    /**
+     * Runs the environment's command that wipes Rome's copy of the Slack
+     * conversation `conversation`. It returns once the instance is healthy
+     * again, with what the command printed.
+     */
+    async wipeChat(conversation) {
+      const target = inst.control.wipeChat;
+      if (typeof target === "string" && /^https?:\/\//.test(target)) {
+        const res = await json(`${target}?conversation=${encodeURIComponent(conversation)}`, {
+          method: "POST",
+        });
+        if (!res.ok) throw new Error(`wipe_chat ${inst.name}: ${res.status}`);
+        return res.data;
+      }
+      // Exit 3: the command ran, and a copy is left. Its JSON says what.
+      const { stdout } = await (
+        Array.isArray(target)
+          ? run(target[0], [...target.slice(1), conversation], { timeout: 600_000 })
+          : run("sh", ["-c", `${target} "$1"`, "wipe", conversation], { timeout: 600_000 })
+      ).catch((err) => {
+        if (err.code === 3 && err.stdout) return { stdout: err.stdout, left: true };
+        throw new Error(`wipe_chat on ${inst.name}: ${err.message}`);
+      });
+      try {
+        return JSON.parse(stdout);
+      } catch {
+        return stdout.trim();
+      }
+    },
+
     /**
      * Walks Connect for the Slack kind the way the dashboard and a browser
      * would, and records every screen it passed. Fills nothing: a setup that

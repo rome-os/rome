@@ -1,4 +1,4 @@
-// Scores the official Slack app against rule set v1, phase 1, in one
+// Scores the official Slack app against rule set v2, phases 1 and 2, in one
 // environment. Usage: node verify.mjs <env.json> <out dir> <verifier commit>.
 // run.sh is the entry point: it refuses uncommitted verifier code first.
 
@@ -9,6 +9,7 @@ import { instance } from "./lib/instance.mjs";
 import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
 import { connectAs, r1, r3 } from "./rules/connect.mjs";
+import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
 import { r11 } from "./rules/structure.mjs";
 
 const RULES = [
@@ -16,19 +17,31 @@ const RULES = [
   { id: "R2", phase: 3, title: "Any workspace can add it" },
   { id: "R3", phase: 1, title: "One workspace binds to one instance", check: r3 },
   { id: "R4", phase: 1, title: "Direct messages work", check: r4 },
-  { id: "R5", phase: 2, title: "Mentions in a group work" },
+  { id: "R5", phase: 2, title: "Mentions in a group work", check: r5 },
   { id: "R6", phase: 1, title: "Nothing is lost while the instance is offline", check: r6 },
   { id: "R7", phase: 1, title: "Nothing forged or misrouted arrives", check: r7 },
-  { id: "R8", phase: 2, title: "Removal marks broken; fix returns the same connected account" },
+  {
+    id: "R8",
+    phase: 2,
+    title: "Removal marks broken; fix returns the same connected account",
+    check: r8,
+  },
   { id: "R9", phase: 3, title: "Every connector Slack action passes on the new connection" },
   { id: "R10", phase: 3, title: "Connect shows one Slack entry" },
   { id: "R11", phase: 1, title: "Lower layers stay ignorant", check: r11 },
-  { id: "R12", phase: 2, title: "A member who is not the guardian is answered as a visitor" },
+  {
+    id: "R12",
+    phase: 2,
+    title: "A member who is not the guardian is answered as a visitor",
+    check: r12,
+  },
+  { id: "R13", phase: 2, title: "Slack holds what was said", check: r13 },
 ];
 
 // Order matters: R3 and the second binding need R1's connection; R7 reads
-// R4's messages; R6 stops the instance, so it runs last.
-const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R6"];
+// R4's messages; R6 stops the instance; R8 removes the app and disconnects,
+// so it runs last.
+const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R6", "R8"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
@@ -85,8 +98,8 @@ for (const step of ORDER) {
 }
 
 const report = {
-  ruleSet: "v1",
-  phase: 1,
+  ruleSet: "v2",
+  phases: [1, 2],
   startedAt,
   finishedAt: new Date().toISOString(),
   commits: {
@@ -104,7 +117,7 @@ const report = {
     phase: r.phase,
     ...(r.check
       ? results[r.id]
-      : { result: "not checked", reason: `Phase ${r.phase} rule; this verifier scores phase 1.` }),
+      : { result: "not checked", reason: `Phase ${r.phase} rule; this verifier scores phases 1 and 2.` }),
   })),
 };
 mkdirSync(outDir, { recursive: true });
@@ -127,7 +140,7 @@ function markdown(r) {
     .filter((x) => x.evidence)
     .map((x) => `### ${x.id}\n\n\`\`\`json\n${JSON.stringify(x.evidence, null, 2)}\n\`\`\``);
   return [
-    `# Slack app verifier report, rule set ${r.ruleSet}, phase ${r.phase}`,
+    `# Slack app verifier report, rule set ${r.ruleSet}, phases ${r.phases.join(" and ")}`,
     "",
     `- rome: \`${r.commits.rome}\``,
     `- rome-cloud: \`${r.commits.romeCloud}\``,

@@ -1,5 +1,5 @@
 // Proves the verifier before the product exists: runs it against the good
-// stand-in, where every phase 1 rule must pass, and against each broken
+// stand-in, where every phase 1 and 2 rule must pass, and against each broken
 // stand-in, where the rule it breaks must fail (or, where the case says,
 // report "not checked" or still pass).
 //
@@ -35,8 +35,9 @@ const dirty = execFileSync("git", ["-C", here, "status", "--porcelain", "--", ".
 const commit = `${execFileSync("git", ["-C", here, "rev-parse", "HEAD"]).toString().trim()}${dirty ? "+uncommitted" : ""}`;
 
 const PHASE1 = ["R1", "R3", "R4", "R6", "R7", "R11"];
+const SCORED = [...PHASE1, "R5", "R8", "R12", "R13"];
 const CASES = [
-  { name: "good", breaks: "", expect: "every phase 1 rule passes" },
+  { name: "good", breaks: "", expect: "every phase 1 and phase 2 rule passes" },
   {
     name: "R1-fields",
     breaks: "R1-fields",
@@ -53,6 +54,7 @@ const CASES = [
   {
     name: "refuse",
     breaks: "refuse",
+    only: PHASE1,
     expect:
       "every phase 1 rule passes when the Concierge declines what it was asked, once per message",
   },
@@ -67,6 +69,50 @@ const CASES = [
     breaks: "R1-twice",
     rule: "R1",
     what: "Connect sends the guardian through the Slack sign-in twice",
+  },
+  {
+    name: "R1-kept",
+    breaks: "R1-kept",
+    rule: "R1",
+    what: "Rome Cloud keeps the sign-in's outcome after the instance redeemed it",
+  },
+  { name: "R5-top", breaks: "R5-top", rule: "R5", what: "mentions are answered at the top of the group" },
+  { name: "R5-twice", breaks: "R5-twice", rule: "R5", what: "each mention gets two replies in its thread" },
+  {
+    name: "R12-leak",
+    breaks: "R12-leak",
+    rule: "R12",
+    what: "the visitor is told the guardian's private facts",
+  },
+  {
+    name: "R13-forget",
+    breaks: "R13-forget",
+    rule: "R13",
+    what: "with Rome's copy wiped, nothing reads Slack and the answers are lost",
+  },
+  {
+    name: "R13-tell",
+    breaks: "R13-tell",
+    rule: "R13",
+    what: "the connection's view shows that it had to read Slack",
+  },
+  {
+    name: "R8-never",
+    breaks: "R8-never",
+    rule: "R8",
+    what: "removing the app never marks the connection broken",
+  },
+  {
+    name: "R8-new-account",
+    breaks: "R8-new-account",
+    rule: "R8",
+    what: "the repair gives a new connected account",
+  },
+  {
+    name: "R8-keep-token",
+    breaks: "R8-keep-token",
+    rule: "R8",
+    what: "disconnecting in Rome leaves the token working",
   },
   { name: "R1-agent", breaks: "R1-agent", rule: "R1", what: "the connected account gets no agent" },
   {
@@ -254,14 +300,14 @@ for (const c of CASES.filter((x) => !only.length || only.includes(x.name))) {
   const result = Object.fromEntries(report.rules.map((r) => [r.id, r.result]));
   const proved = c.rule
     ? result[c.rule] === (c.result ?? "fail")
-    : PHASE1.every((id) => result[id] === "pass");
+    : (c.only ?? SCORED).every((id) => result[id] === "pass");
   ok &&= proved;
   rows.push(
-    `| ${c.name} | ${c.rule ? `${c.rule} ${c.result ?? "fail"}: ${c.what}` : c.expect} | ${PHASE1.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
+    `| ${c.name} | ${c.rule ? `${c.rule} ${c.result ?? "fail"}: ${c.what}` : c.expect} | ${SCORED.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
   );
   if (c.rule)
     rows.push(
-      `|  | ${report.rules.find((r) => r.id === c.rule).reason.replaceAll("|", "\\|")} | | | | | | | |`,
+      `|  | ${report.rules.find((r) => r.id === c.rule).reason.replaceAll("|", "\\|")} |${" |".repeat(SCORED.length + 1)}`,
     );
 }
 
@@ -272,8 +318,8 @@ const md = [
   `- fake Slack: \`${envCommit}\` (environments/slack-app/fake-slack)`,
   `- product: the stand-in in standin/`,
   "",
-  `| Case | Expected | ${PHASE1.join(" | ")} | Proved |`,
-  `|---|---|${PHASE1.map(() => "---|").join("")}---|`,
+  `| Case | Expected | ${SCORED.join(" | ")} | Proved |`,
+  `|---|---|${SCORED.map(() => "---|").join("")}---|`,
   ...rows,
   "",
 ].join("\n");

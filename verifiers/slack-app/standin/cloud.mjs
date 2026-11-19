@@ -26,6 +26,9 @@ export async function startCloud({
   const pending = new Map();
   const handoffs = new Map();
   const bindings = new Map();
+  // Sign-in attempts as Rome Cloud keeps them: the outcome (with the token)
+  // until the instance redeems it. Broken R1-kept never clears it.
+  const attempts = [];
   const mailboxes = new Map(Object.keys(instanceSecrets).map((n) => [n, []]));
   let self;
 
@@ -112,6 +115,7 @@ export async function startCloud({
           botUserId: exchange.bot_user_id,
           refused,
         });
+        attempts.push({ handoff, result: exchange.access_token, consumed: false });
         back.searchParams.set("handoff", handoff);
       }
       res.writeHead(302, { location: back.toString() });
@@ -122,6 +126,11 @@ export async function startCloud({
       const { instance, handoff } = JSON.parse(await readBody(req));
       const h = handoffs.get(handoff);
       handoffs.delete(handoff);
+      const attempt = attempts.find((a) => a.handoff === handoff);
+      if (attempt) {
+        attempt.consumed = true;
+        if (!breaks.has("R1-kept")) attempt.result = null;
+      }
       if (!h || h.instance !== instance || !authorized(req, instance))
         return send(res, 403, { error: "bad handoff" });
       if (h.refused)
@@ -132,6 +141,14 @@ export async function startCloud({
         });
       return send(res, 200, { team: h.team, botToken: h.botToken, botUserId: h.botUserId });
     }
+
+    // What the query command reads: the newest attempt.
+    if (p === "/cloud/attempts")
+      return send(
+        res,
+        200,
+        attempts.slice(-1).map((a) => ({ cleared: a.result === null, consumed: a.consumed })),
+      );
 
     // Slack's events address for the one app.
     if (p === "/slack/events" && req.method === "POST") {
