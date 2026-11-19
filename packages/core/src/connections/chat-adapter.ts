@@ -446,6 +446,8 @@ export function channelAdapter(
             tickets.get(event)?.accept();
           } catch (error) {
             tickets.get(event)?.refuse(error);
+            // A message the receiver chose not to take in is no fault.
+            if (error instanceof InboundNotAccepted) continue;
             fault(error instanceof Error ? error : new Error(String(error)));
           }
         }
