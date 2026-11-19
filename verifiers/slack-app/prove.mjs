@@ -75,6 +75,12 @@ const CASES = [
     what: "forged events get through and are answered with no code",
   },
   {
+    name: "R7-lookup",
+    breaks: "R7-route,R7-lookup",
+    rule: "R7",
+    what: "the wrong instance looks up workspace A's sender, then drops the event",
+  },
+  {
     name: "R11-migration",
     breaks: "R11-migration",
     rule: "R11",

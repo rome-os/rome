@@ -46,7 +46,7 @@ export async function r4(ctx) {
       settleMs: ctx.env.timeouts.settleSeconds * 1000,
     }),
   );
-  ctx.fromA = { codes, eventIds, since };
+  ctx.fromA = { codes, eventIds, since, channel };
   const evidence = { workspace: ws.id, channel, eventIds, ...t };
   return allOnce(t)
     ? {
@@ -117,9 +117,14 @@ export async function r7(ctx) {
     partial ??= "the misrouting half had nothing to check";
   } else {
     const callsByB = await ctx.slack.calls({ team: ctx.wsB.id, since: ctx.fromA.since });
-    const aboutA = callsByB.filter((c) =>
-      ctx.fromA.codes.some((k) => JSON.stringify(c.args ?? {}).includes(k)),
-    );
+    // A call is about workspace A's messages when it names one of their codes,
+    // A's team, A's guardian or the direct message they came in, whatever the
+    // method: a lookup with nothing posted still means the event reached B.
+    const marks = [...ctx.fromA.codes, ws.id, ws.guardian, ctx.fromA.channel].filter(Boolean);
+    const aboutA = callsByB.filter((c) => {
+      const args = JSON.stringify(c.args ?? {});
+      return marks.some((k) => args.includes(k));
+    });
     const accountsB = await readable(() => ctx.b.slackAccounts());
     const fromAOnB = accountsB?.filter((id) => id.startsWith(`${ws.id}/`));
     const recordedB = await readable(() => ctx.b.recordedFrom(ws.id, ws.guardian));
@@ -128,7 +133,7 @@ export async function r7(ctx) {
     evidence.misrouted = {
       fromWorkspace: ws.id,
       events: ctx.fromA.eventIds,
-      slackCallsBySecondInstanceAboutThem: aboutA.length,
+      slackCallsBySecondInstanceAboutThem: aboutA.map((c) => c.method),
       accountsOfWorkspaceAOnSecond: fromAOnB ?? "not readable",
       recordedBySecondInstance: reachedB?.length ?? "not readable",
     };

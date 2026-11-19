@@ -158,6 +158,19 @@ async function drainOnce() {
     db.seen.push(payload.event_id);
     const ev = payload.event;
     if (ev?.type !== "message" || ev.channel_type !== "im") continue;
+    // Broken R7-lookup: an event for a workspace this instance does not hold
+    // is looked up in Slack, then dropped with nothing recorded.
+    if (breaks.has("R7-lookup") && !db.connections.some((c) => c.team === payload.team_id)) {
+      await fetch(`${SLACK}/api/users.info`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${db.connections[0]?.botToken}`,
+        },
+        body: JSON.stringify({ user: ev.user }),
+      });
+      continue;
+    }
     db.messages.push({
       eventId: payload.event_id,
       team: payload.team_id,
