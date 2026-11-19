@@ -20,6 +20,8 @@ export interface SlackWireMessage {
   text?: string;
   thread_ts?: string;
   subtype?: string;
+  /** Its last edit, when it was edited. */
+  edited?: { ts?: string };
 }
 
 /** Subtypes someone said: a plain message has none. */

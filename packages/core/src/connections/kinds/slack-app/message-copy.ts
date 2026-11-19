@@ -42,7 +42,8 @@ export interface TimelineRow {
  * nothing between them it did not see. Newest first.
  */
 export interface TimelineRun {
-  messages: Array<{ ts: string; message: ChannelMessage }>;
+  /** Each with the ts of its last edit when a page Slack answered showed one. */
+  messages: Array<{ ts: string; message: ChannelMessage; editedTs?: string }>;
   /** The message just before the oldest: "" when that is the chat's first
    *  message, null when unknown. */
   before: string | null;
@@ -199,12 +200,25 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       // A page read before a change, or a message heard again, is taken as
       // Slack shows it since: a deleted message is not there, and an edited
       // one reads as edited.
+      // The newer of the page's version and the change the copy took wins:
+      // a page read before an edit's event arrived can show the newer text.
       const messages = run.messages.flatMap((m) => {
         const changed = this.changeOf(tx, teamId, channelId, m.ts);
-        if (!changed) return [m];
-        return changed.text === null
-          ? []
-          : [{ ...m, message: { ...m.message, text: changed.text } }];
+        if (changed?.text === null) return [];
+        if (changed && compareTs(changed.changedTs, m.editedTs ?? m.ts) >= 0) {
+          return [{ ...m, message: { ...m.message, text: changed.text } }];
+        }
+        if (m.editedTs !== undefined) {
+          const change = { changedTs: m.editedTs, text: m.message.text };
+          tx.insert(slackAppChanges)
+            .values({ teamId, channelId, ts: m.ts, ...change })
+            .onConflictDoUpdate({
+              target: [slackAppChanges.teamId, slackAppChanges.channelId, slackAppChanges.ts],
+              set: change,
+            })
+            .run();
+        }
+        return [m];
       });
       // A row the copy holds between the run's oldest message and the one it
       // says comes before shows that link wrong, as a page Slack answered

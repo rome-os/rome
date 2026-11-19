@@ -1688,6 +1688,7 @@ describe("Slack app takes edits and deletions into its copy", () => {
                 ts: `1700000000.${String(message).padStart(6, "0")}`,
                 user: "U_GUARDIAN",
                 text,
+                edited: { user: "U_GUARDIAN", ts: changedTs },
               },
             }),
       },
@@ -1750,5 +1751,30 @@ describe("Slack app takes edits and deletions into its copy", () => {
     const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
     expect(await search("Launch")).toEqual(["Launch Monday"]);
     expect(await search("Friday")).toEqual([]);
+  });
+  it("keeps a newer edit a page shows over an older one it heard, and over a late retry", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    await mailbox.deposit(frame(dmEvent(1)));
+    await mailbox.deposit(changeFrame(10, 1, "edit A", "1700000001.000000"));
+    // Slack shows edit B before its event arrives.
+    Object.assign(slack.said[0], { text: "edit B", edited: { ts: "1700000002.000000" } });
+
+    const first = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
+    const calls = slack.calls.length;
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    // Read from the copy before edit B's event arrives.
+    expect(texts(await a.readHistory("D_GUARDIAN" as never, { limit: 1 }))).toEqual(["edit B"]);
+    expect(slack.calls).toHaveLength(calls);
+    expect(await search("edit")).toEqual(["edit B"]);
+    // A late retry of edit A changes nothing.
+    await mailbox.deposit(changeFrame(10, 1, "edit A", "1700000001.000000"));
+
+    expect(texts(first)).toEqual(["edit B"]);
+    expect(texts(await a.readHistory("D_GUARDIAN" as never, { limit: 1 }))).toEqual(["edit B"]);
+    expect(await search("edit")).toEqual(["edit B"]);
   });
 });

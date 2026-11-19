@@ -29,7 +29,8 @@ import { compareTs, tsAt } from "./timeline-order.js";
 
 /** One page of a chat's history as Slack answered it, newest first. */
 export interface SlackHistoryPage {
-  messages: Array<{ ts: string; message: ChannelMessage }>;
+  /** Each with the ts of its last edit, when Slack shows one. */
+  messages: Array<{ ts: string; message: ChannelMessage; editedTs?: string }>;
   /** Whether Slack holds older messages than the page within its bounds. */
   hasMore: boolean;
   /** The oldest message Slack answered, kept or not: a page of only joins

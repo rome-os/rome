@@ -479,9 +479,11 @@ export class SlackAppAdapter {
       event.subtype === "message_changed" && event.message
         ? slackMessage(this.context(channelId), { ...event.message, ts })
         : null;
-    // Slack stamps each change with its own ts: a retried or late change
-    // older than one the copy took changes nothing.
-    const changedTs = event.event_ts ?? event.ts;
+    // An edit is stamped with the ts Slack gives it, as a history page shows
+    // it too, and any other change with the event's own ts: a retried or late
+    // change older than one the copy took changes nothing.
+    const changedTs =
+      (edited ? event.message?.edited?.ts : undefined) ?? event.event_ts ?? event.ts;
     if (!changedTs) return { status: 200 };
     try {
       this.config.copy.change(this.config.teamId, channelId, ts, {
@@ -680,11 +682,17 @@ export class SlackAppAdapter {
         wire.user && wire.user !== this.config.botUserId ? [wire.user] : [],
       ),
     );
-    const messages: Array<{ ts: string; message: ChannelMessage }> = [];
+    const messages: Array<{ ts: string; message: ChannelMessage; editedTs?: string }> = [];
     for (const wire of wires) {
       const name = (wire.user && names.get(wire.user)) || {};
       const message = slackMessage(this.context(channelId), wire, name);
-      if (message) messages.push({ ts: wire.ts, message });
+      if (message) {
+        messages.push({
+          ts: wire.ts,
+          message,
+          ...(wire.edited?.ts ? { editedTs: wire.edited.ts } : {}),
+        });
+      }
     }
     return { messages, hasMore: page.hasMore, oldest: page.messages.at(-1)?.ts };
   }
