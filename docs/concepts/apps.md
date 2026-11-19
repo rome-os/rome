@@ -325,6 +325,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 **Contracts:**
 
 - Both the data directory and the app's tables survive an install→uninstall→re-install round-trip. Only an explicit purge at uninstall wipes them.
+- The routines an app manages do not survive an uninstall. Uninstall deletes them with their run history, and the app recreates them after a reinstall. See [Routines](data.md#routines).
 - A database-backed scoped app must declare `db.tablePrefix`. The scoped app id itself is not a SQL identifier.
 
 **Not to be confused with:**
