@@ -71,10 +71,10 @@ describe("TaskChecks", () => {
     });
 
   it("reads a task's soonest pending check, from its time or its deadline", async () => {
-    await timed("chat-1", NOW + 2 * HOUR, { taskId: "task-1" });
-    await waiting("chat-1", NOW + HOUR, { taskId: "task-1" });
-    await timed("chat-1", NOW - HOUR, { taskId: "task-2" }); // fired already
-    const other = await timed("chat-1", NOW + HOUR, { taskId: "task-3" });
+    await timed("chat-1", NOW + 2 * HOUR, { chatId: "task-1" });
+    await waiting("chat-1", NOW + HOUR, { chatId: "task-1" });
+    await timed("chat-1", NOW - HOUR, { chatId: "task-2" }); // fired already
+    const other = await timed("chat-1", NOW + HOUR, { chatId: "task-3" });
     await routines.update(other, { enabled: false });
     expect(await checks.laterOf(["task-1", "task-2", "task-3"])).toEqual(
       new Map([["task-1", NOW + HOUR]]),
@@ -83,7 +83,7 @@ describe("TaskChecks", () => {
 
   it("lists a chat's pending checks, the soonest first, with what an event wait waits for", async () => {
     const later = await timed("chat-1", NOW + 2 * HOUR);
-    const soon = await waiting("chat-1", NOW + HOUR, { taskId: "task-1" });
+    const soon = await waiting("chat-1", NOW + HOUR, { chatId: "task-1" });
     await timed("chat-2", NOW + HOUR);
     expect(await checks.inChat("chat-1")).toEqual([
       {
@@ -115,9 +115,9 @@ describe("TaskChecks", () => {
   });
 
   it("cancels every check of a task its owner's chats scheduled, and no other", async () => {
-    await timed("chat-1", NOW + HOUR, { taskId: "task-1" });
-    await waiting("chat-1", NOW + HOUR, { taskId: "task-1" });
-    const kept = await timed("chat-1", NOW + HOUR, { taskId: "task-2" });
+    await timed("chat-1", NOW + HOUR, { chatId: "task-1" });
+    await waiting("chat-1", NOW + HOUR, { chatId: "task-1" });
+    const kept = await timed("chat-1", NOW + HOUR, { chatId: "task-2" });
     const others = await timed("ann-chat", NOW + HOUR, {
       taskId: "task-1",
       ownerKey: "visitor:acct-ann",
@@ -129,7 +129,7 @@ describe("TaskChecks", () => {
   });
 
   it("cancels a stopped task's check whose time passed while Rome was down, which would fire", async () => {
-    const overdue = await timed("chat-a", NOW - 60_000, { taskId: "t1" });
+    const overdue = await timed("chat-a", NOW - 60_000, { chatId: "t1" });
     expect(await checks.pendingTaskIds()).toEqual(["t1"]);
     expect(await checks.cancelFor("t1", "guardian")).toBe(1);
     expect(deactivated).toEqual([overdue]);
@@ -141,8 +141,8 @@ describe("TaskChecks", () => {
     const ended = new Set(["stopped-task"]);
     checks.guardFires(async (taskId) => ended.has(taskId));
     const routine = async (id: string) => (await routines.findById(id)) as unknown as Routine;
-    const stopped = await timed("chat-a", NOW + 60_000, { taskId: "stopped-task" });
-    const open = await timed("chat-b", NOW + 60_000, { taskId: "open-task" });
+    const stopped = await timed("chat-a", NOW + 60_000, { chatId: "stopped-task" });
+    const open = await timed("chat-b", NOW + 60_000, { chatId: "open-task" });
     const plain = await timed("chat-c", NOW + 60_000);
     expect(await gate!(await routine(stopped))).toBe(false);
     expect(deactivated).toEqual([stopped]);
@@ -155,7 +155,7 @@ describe("TaskChecks", () => {
       name: "old wait",
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
       actionName: "resume_session",
-      args: { channel: "webchat", threadId: "chat-1", sessionId: "s", taskId: "task-1" },
+      args: { channel: "webchat", threadId: "chat-1", sessionId: "s", chatId: "task-1" },
     });
     expect(await checks.laterOf(["task-1"])).toEqual(new Map([["task-1", Infinity]]));
     expect(await checks.inChatForApi("chat-1")).toEqual([
@@ -175,12 +175,12 @@ describe("TaskChecks", () => {
     checks.watch((taskId) => changed.push(taskId));
     const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
     await flush();
-    const id = await timed("chat-1", NOW + HOUR, { taskId: "task-1" });
+    const id = await timed("chat-1", NOW + HOUR, { chatId: "task-1" });
     for (const listener of listeners) listener(id);
     await flush();
     expect(changed).toEqual(["task-1"]);
     // A change that moves no task's check tells nothing.
-    await timed("chat-1", NOW + 3 * HOUR, { taskId: "task-1" });
+    await timed("chat-1", NOW + 3 * HOUR, { chatId: "task-1" });
     for (const listener of listeners) listener(id);
     await flush();
     expect(changed).toEqual(["task-1"]);

@@ -300,8 +300,7 @@ enum TaskListWords {
             }
             if let repeats { return repeats }
             if let at = task.laterAt { return String(localized: "Checks \(time(at, now: now))") }
-            // Not started: its age, so a stale one stands out.
-            return String(localized: "Not started · Created \(age(task.createdAt, now: now))")
+            return ""
         case "ended":
             let how: String
             switch task.endReason {
@@ -312,7 +311,8 @@ enum TaskListWords {
             }
             return line(how, time(task.completedAt ?? task.updatedAt, now: now))
         default:
-            return line(repeats, String(localized: "Running"))
+            // Active, with how long ago it began.
+            return line(repeats, String(localized: "Active"), time(task.updatedAt, now: now))
         }
     }
 
@@ -324,7 +324,7 @@ enum TaskListWords {
         return when.map { String(localized: "Checks \($0)") } ?? ""
     }
 
-    static func follow(_ item: TaskListItem.Follow) -> String {
+    static func follow(_ item: TaskListItem.Follow, now: Date = .now) -> String {
         let state: String?
         switch item.state {
         case "unavailable": state = String(localized: "Not available")
@@ -332,7 +332,7 @@ enum TaskListWords {
         default: state = nil
         }
         let digest = item.digestTimes.isEmpty ? nil : String(localized: "Digest daily at \(list(item.digestTimes.map(clock)))")
-        return line(item.label, state, digest)
+        return line(item.label, state, digest, item.nextAt.map { time($0, now: now) })
     }
 
     static func routine(_ item: TaskListItem.Routine, now: Date) -> String {

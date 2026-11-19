@@ -1,22 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { makeTask } from "../../test/task-chats.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatMessages, conciergeMessageTurns, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
-import { ConciergeTasksRepository } from "./concierge-tasks.js";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { renderTaskEvents } from "../../concierge/events.js";
 import { mainChatIdOf } from "../../concierge/main-chat.js";
-import type { ConciergeService } from "../../concierge/service.js";
-import { ConciergeTasks } from "../../concierge/tasks.js";
+import { conciergeMessageTasks, romeSessions, taskChats } from "../schema.js";
+import { ConciergeTasksRepository } from "./concierge-tasks.js";
 
 const DAY = 86_400_000;
 
-describe("ConciergeTasksRepository", () => {
+describe("ConciergeTasksRepository: a task is its task chat", () => {
   let testDb: TestDb;
   let repo: ConciergeTasksRepository;
   let chats: WebChatRepository;
+  const make = (input: Parameters<typeof makeTask>[1]) => makeTask({ chats, repo }, input);
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -25,637 +23,220 @@ describe("ConciergeTasksRepository", () => {
   });
   afterEach(() => testDb.close());
 
-  it("creates and updates rows in one batch", async () => {
-    const [made] = await repo.upsertMany([{ title: "Book flights", state: "next", rank: 2 }]);
-    expect(made).toMatchObject({
+  it("reads the task's id, name, owner and archive state from its chat", async () => {
+    const task = await make({ id: "chat-1", title: "Book flights", ownerKey: "visitor:ann" });
+    expect(task).toMatchObject({
+      id: "chat-1",
+      sessionId: "chat-1",
       title: "Book flights",
-      state: "next",
-      rank: 2,
-      completedAt: null,
+      ownerKey: "visitor:ann",
+      archivedAt: null,
+      stoppedAt: null,
     });
-
-    const [updated, created] = await repo.upsertMany([
-      { id: made.id, state: "watching", waitingOn: "CI", summary: "Waiting for the run" },
-      { title: "Renew passport" },
-    ]);
-    expect(updated).toMatchObject({
-      id: made.id,
-      title: "Book flights",
-      state: "watching",
-      waitingOn: "CI",
-      rank: 2,
+    // Renaming the chat renames the task: one name.
+    await chats.updateSessionName("chat-1", "Book direct flights");
+    expect((await repo.getWithChat("chat-1"))?.chat).toEqual({
+      id: "chat-1",
+      name: "Book direct flights",
     });
-    expect(created).toMatchObject({ title: "Renew passport", state: "next" });
+    expect((await repo.get("chat-1"))?.title).toBe("Book direct flights");
   });
 
-  it("applies a batch whole or not at all", async () => {
-    await expect(
-      repo.upsertMany([{ title: "First" }, { id: "missing", state: "done" }]),
-    ).rejects.toThrow("No task missing");
-    expect(await repo.listForAgent(true)).toEqual([]);
-    await expect(repo.upsertMany([{ state: "doing" }])).rejects.toThrow("needs a title");
-  });
-
-  it("sets completedAt on done or dropped and clears it on reopen", async () => {
-    const [row] = await repo.upsertMany([{ title: "Task", state: "doing" }]);
-    const done = new Date(Date.now() + 1000);
-    const [finished] = await repo.upsertMany([{ id: row.id, state: "done" }], done);
-    expect(finished.completedAt).toEqual(done);
-    const [dropped] = await repo.upsertMany(
-      [{ id: row.id, state: "dropped" }],
-      new Date(Date.now() + 2000),
+  it("reports to the main chat unless its Concierge chat is a live topic chat", async () => {
+    await chats.createSession(
+      "topic-1",
+      "Trips",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
     );
-    expect(dropped.completedAt).toEqual(done);
-    const [reopened] = await repo.upsertMany([{ id: row.id, state: "doing" }]);
-    expect(reopened.completedAt).toBeNull();
+    await make({ id: "chat-main", title: "A" });
+    await make({ id: "chat-topic", title: "B", chatId: "topic-1" });
+    expect((await repo.getWithChat("chat-main"))?.conciergeChat).toMatchObject({
+      id: mainChatIdOf("guardian"),
+      main: true,
+    });
+    expect((await repo.getWithChat("chat-topic"))?.conciergeChat).toEqual({
+      id: "topic-1",
+      name: "Trips",
+      main: false,
+    });
+    // An archived topic chat's tasks read as the main chat's.
+    await chats.archiveSession("topic-1");
+    expect((await repo.getWithChat("chat-topic"))?.conciergeChat.main).toBe(true);
+    // A deleted one leaves the row reporting to the main chat.
+    await chats.deleteSession("topic-1");
+    expect((await repo.getWithChat("chat-topic"))?.conciergeChat.main).toBe(true);
+    expect((await repo.get("chat-topic"))?.chatId).toBeNull();
   });
 
-  it("links a chat to one row and says which row holds it", async () => {
-    await chats.createSession("chat-1", "Chat one");
-    const [first] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
-    await expect(repo.upsertMany([{ title: "B", sessionId: "chat-1" }])).rejects.toThrow(
-      `Chat chat-1 is already linked to task ${first.id}`,
+  it("makes no task for a chat or a Concierge chat it cannot find", async () => {
+    await expect(repo.create("missing", {})).rejects.toThrow("No chat missing");
+    await chats.createSession("chat-1", "A");
+    await expect(repo.create("chat-1", { chatId: "gone-topic" })).rejects.toThrow(
+      "No Concierge chat gone-topic",
     );
-    expect((await repo.findBySession("chat-1"))?.id).toBe(first.id);
-    // Writing the row that holds the chat is not a conflict.
-    await repo.upsertMany([{ id: first.id, sessionId: "chat-1", summary: "still here" }]);
-    // Unlinking frees the chat.
-    await repo.upsertMany([{ id: first.id, sessionId: null }]);
-    await repo.upsertMany([{ title: "B", sessionId: "chat-1" }]);
-    // A row never links another task chat, nor its own again.
-    await chats.createSession("chat-2", "Chat two");
-    for (const sessionId of ["chat-2", "chat-1"]) {
-      await expect(repo.upsertMany([{ id: first.id, sessionId }])).rejects.toThrow(
-        `Task ${first.id} already had a task chat`,
-      );
-    }
+    expect(await repo.listForAgent(true)).toEqual([]);
   });
 
-  it("makes no row in a Concierge chat it cannot find, rather than the guardian's", async () => {
-    await expect(
-      repo.upsertMany([{ title: "A", state: "doing", chatId: "gone-topic" }]),
-    ).rejects.toThrow("No Concierge chat gone-topic");
-    expect(await repo.listForAgent(true)).toEqual([]);
+  it("stops a task, and takes it up again unless its chat is archived", async () => {
+    await make({ id: "chat-1", title: "A" });
+    await repo.stop("chat-1");
+    const stoppedAt = (await repo.get("chat-1"))?.stoppedAt;
+    expect(stoppedAt).toEqual(expect.any(Date));
+    // A later stop changes nothing.
+    await repo.stop("chat-1");
+    expect((await repo.get("chat-1"))?.stoppedAt).toEqual(stoppedAt);
+    expect(await repo.resume("chat-1")).toBe(true);
+    expect((await repo.get("chat-1"))?.stoppedAt).toBeNull();
+
+    await repo.stop("chat-1");
+    await chats.archiveSession("chat-1");
+    expect(await repo.resume("chat-1")).toBe(false);
+    await chats.unarchiveSession("chat-1");
+    expect(await repo.resume("chat-1")).toBe(true);
   });
 
   describe("a task chat that ends", () => {
-    const visitor = "visitor:acct-ann";
-    const taskChat = async (id: string, ownerKey: string | null = null) =>
-      chats.createSession(id, id, undefined, undefined, null, undefined, null, "webchat", null, {
-        ownerKey,
-      });
-
-    it("stops and archives its row in the chat's own archive", async () => {
-      await taskChat("chat-1");
-      const [row] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
+    it("stops its task in the chat's own archive, which archives the task", async () => {
+      await make({ id: "chat-1", title: "A" });
       const announced: string[] = [];
-      repo.onChange(({ row: written }) => announced.push(written.id));
+      repo.onChange(({ row }) => announced.push(row.id));
       const ended = await repo.endWithChat("chat-1", "guardian", "archived", (tx) =>
         chats.archiveSessionIn(tx, "chat-1"),
       );
-      expect(ended?.id).toBe(row.id);
-      expect(await repo.get(row.id)).toMatchObject({
-        stopReason: "archived",
+      expect(ended).toMatchObject({ id: "chat-1", stoppedAt: expect.any(Date) });
+      expect(await repo.get("chat-1")).toMatchObject({
         stoppedAt: expect.any(Date),
         archivedAt: expect.any(Date),
-        archivedWithChat: true,
       });
-      expect((await chats.getSession("chat-1"))?.archivedAt).toEqual(expect.any(Date));
-      expect(announced).toEqual([row.id]);
-
-      // Unarchiving brings the row back to the list; the task stays stopped.
+      expect(announced).toEqual(["chat-1"]);
+      // An archived task is out of the Tasks view, and unarchiving lists it again, still stopped.
+      expect(await repo.listForPanel(new Date(0))).toEqual([]);
       await chats.unarchiveSession("chat-1");
-      await repo.restoreWithChat("chat-1", "guardian");
-      expect(await repo.get(row.id)).toMatchObject({
-        archivedAt: null,
-        archivedWithChat: false,
-        stopReason: "archived",
-      });
+      expect(await repo.listForPanel(new Date(0))).toHaveLength(1);
+      expect((await repo.get("chat-1"))?.stoppedAt).toEqual(expect.any(Date));
     });
 
-    it("stops and archives its row in the chat's own delete, and keeps the row", async () => {
-      await taskChat("chat-1");
-      const [row] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
+    it("keeps how a task that already ended ended", async () => {
+      await make({ id: "chat-1", title: "A" });
+      await repo.endWithChat(
+        "chat-1",
+        "guardian",
+        "archived",
+        (tx) => chats.archiveSessionIn(tx, "chat-1"),
+        new Date(),
+        false,
+      );
+      expect((await repo.get("chat-1"))?.stoppedAt).toBeNull();
+    });
+
+    it("takes the task and its message links with the chat when it is deleted", async () => {
+      await make({ id: "chat-1", title: "A" });
+      await repo.linkMessage("chat-1", { chatId: "concierge", messageKey: "m1" });
+      const announced: string[] = [];
+      repo.onChange(({ row }) => announced.push(row.id));
+      const touched: string[] = [];
+      repo.onMessageChange(({ messageKey }) => touched.push(messageKey));
       await repo.endWithChat("chat-1", "guardian", "deleted", (tx) =>
         chats.deleteSessionIn(tx, "chat-1"),
       );
-      expect(await chats.getSession("chat-1")).toBeNull();
-      expect(await repo.get(row.id)).toMatchObject({
-        sessionId: null,
-        stopReason: "deleted",
-        archivedAt: expect.any(Date),
-      });
+      expect(await repo.get("chat-1")).toBeNull();
+      expect(testDb.db.select().from(taskChats).all()).toEqual([]);
+      expect(testDb.db.select().from(conciergeMessageTasks).all()).toEqual([]);
+      // The Tasks view and the message's status are told.
+      expect(announced).toEqual(["chat-1"]);
+      expect(touched).toContain("m1");
     });
 
-    it("writes neither the row nor the chat when either write fails", async () => {
-      await taskChat("chat-1");
-      const [row] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
-      await expect(
-        repo.endWithChat("chat-1", "guardian", "archived", (tx) => {
-          chats.archiveSessionIn(tx, "chat-1");
-          throw new Error("disk full");
-        }),
-      ).rejects.toThrow("disk full");
-      expect(await repo.get(row.id)).toMatchObject({ stoppedAt: null, archivedAt: null });
-      expect((await chats.getSession("chat-1"))?.archivedAt).toBeNull();
-    });
-
-    it("keeps a row archived before its chat archived when the chat comes back", async () => {
-      await taskChat("chat-1");
-      const [row] = await repo.upsertMany([
-        { title: "A", state: "done", sessionId: "chat-1", archived: true },
-      ]);
-      await repo.endWithChat("chat-1", "guardian", "archived", (tx) =>
+    it("leaves a chat of another owner alone", async () => {
+      await make({ id: "chat-1", title: "A", ownerKey: "visitor:ann" });
+      const ended = await repo.endWithChat("chat-1", "guardian", "archived", (tx) =>
         chats.archiveSessionIn(tx, "chat-1"),
       );
-      await chats.unarchiveSession("chat-1");
-      await repo.restoreWithChat("chat-1", "guardian");
-      expect(await repo.get(row.id)).toMatchObject({
-        archivedAt: expect.any(Date),
-        archivedWithChat: false,
-      });
-    });
-
-    it("leaves a row of another owner that links the chat alone", async () => {
-      await taskChat("chat-1", visitor);
-      const [row] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
-      expect(
-        await repo.endWithChat("chat-1", visitor, "archived", (tx) =>
-          chats.archiveSessionIn(tx, "chat-1"),
-        ),
-      ).toBeNull();
-      expect(await repo.get(row.id)).toMatchObject({ stoppedAt: null, archivedAt: null });
-    });
-
-    it("keeps the first stop", async () => {
-      const [row] = await repo.upsertMany([{ title: "A", state: "doing" }]);
-      const first = new Date(Date.now() - 1000);
-      await repo.stop(row.id, "concierge", first);
-      await repo.stop(row.id, "guardian");
-      expect(await repo.get(row.id)).toMatchObject({ stoppedAt: first, stopReason: "concierge" });
+      expect(ended).toBeNull();
+      expect((await repo.get("chat-1"))?.stoppedAt).toBeNull();
     });
   });
 
-  it("keeps a row, unlinked, when its chat is deleted", async () => {
-    await chats.createSession("chat-1", "Chat one");
-    const [row] = await repo.upsertMany([{ title: "A", state: "doing", sessionId: "chat-1" }]);
-    await chats.deleteSession("chat-1");
-    expect(await repo.get(row.id)).toMatchObject({ id: row.id, sessionId: null });
+  it("marks a task whose first turn failed as ended failed, with nothing to report", async () => {
+    await make({ id: "chat-1", title: "A" });
+    await repo.markStartFailed("chat-1");
+    expect(await repo.get("chat-1")).toMatchObject({ lastOutcome: "failed", outcomeUnsaid: false });
   });
 
-  it("lists one Concierge chat's live rows only: open ones, and finished ones whose task chat is active", async () => {
-    const now = Date.now();
-    const concierge = (id: string, ownerKey: string | null) =>
-      chats.createSession(
-        id,
-        id,
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-        "webchat",
-        null,
-        { ownerKey },
-      );
-    const visitorMain = mainChatIdOf("visitor:a");
-    await concierge("concierge", null);
-    await concierge("topic", null);
-    await concierge("gone-topic", null);
-    await concierge(visitorMain, "visitor:a");
-    await repo.upsertMany([{ title: "Main's", state: "doing" }]);
-    await repo.upsertMany([{ title: "Topic's", state: "doing", chatId: "topic" }]);
-    await repo.upsertMany([{ title: "Gone topic's", state: "doing", chatId: "gone-topic" }]);
-    await repo.upsertMany([{ title: "Visitor's", state: "doing", chatId: visitorMain }]);
-    const [oldDone] = await repo.upsertMany([{ title: "Old done" }], new Date(now - 30 * DAY));
-    await repo.keepEnded([oldDone!.id], [], new Date(now - 30 * DAY));
-    // Finished long ago, with a task chat: one resumed now, one quiet since.
-    await chats.createSession("resumed-chat", "Resumed");
-    await chats.createSession("quiet-chat", "Quiet");
-    await testDb.db
+  it("lists a Concierge chat's tasks by the chat it reports to", async () => {
+    await chats.createSession(
+      "topic-1",
+      "Trips",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+    );
+    await make({ id: "main-1", title: "Main task" });
+    await make({ id: "topic-task", title: "Topic task", chatId: "topic-1" });
+    await make({ id: "other", title: "Another owner's", ownerKey: "visitor:ann" });
+    const since = new Date(Date.now() - DAY);
+    expect(
+      (await repo.listForConciergeChat(mainChatIdOf("guardian"), "guardian", since)).map(
+        (task) => task.row.id,
+      ),
+    ).toEqual(["main-1"]);
+    expect(
+      (await repo.listForConciergeChat("topic-1", "guardian", since)).map((task) => task.row.id),
+    ).toEqual(["topic-task"]);
+    expect(
+      (await repo.taskChatsStartedBy("topic-1", "guardian")).map((chat) => chat.chatId),
+    ).toEqual(["topic-task"]);
+  });
+
+  it("shows a task that ended inside the window, and none that ended before it", async () => {
+    await make({ id: "open", title: "Open" });
+    await make({ id: "recent", title: "Recent" });
+    await make({ id: "old", title: "Old" });
+    const now = new Date();
+    await repo.keepEnded(["recent"], [], new Date(now.getTime() - DAY));
+    await repo.keepEnded(["old"], [], new Date(now.getTime() - 10 * DAY));
+    const shown = await repo.listForPanel(new Date(now.getTime() - 7 * DAY));
+    expect(shown.map((task) => task.row.id).sort()).toEqual(["open", "recent"]);
+  });
+
+  it("keeps the wait that ended for no response, and clears it once", async () => {
+    await make({ id: "chat-1", title: "A" });
+    const since = new Date(Date.now() - 2 * DAY);
+    expect(await repo.markWaitExpired("chat-1", since)).toBe(true);
+    // Rome handles one wait once.
+    expect(await repo.markWaitExpired("chat-1", since)).toBe(false);
+    expect(await repo.noResponseUnlisted(["chat-1"])).toEqual(["chat-1"]);
+    await repo.markNoResponseListed(["chat-1"]);
+    expect(await repo.noResponseUnlisted(["chat-1"])).toEqual([]);
+    await repo.clearWaitExpired("chat-1");
+    expect((await repo.get("chat-1"))?.expiredWaitAt).toBeNull();
+  });
+
+  it("writes only a note and where a task points, and tells the listeners", async () => {
+    await make({ id: "chat-1", title: "A" });
+    const kinds: string[] = [];
+    repo.onChange((_, change) => kinds.push(change));
+    const row = await repo.write("chat-1", { note: "check the PR" });
+    expect(row.note).toBe("check the PR");
+    expect((await repo.write("chat-1", { note: null })).note).toBeNull();
+    await expect(repo.write("missing", { note: "x" })).rejects.toThrow("No task missing");
+    expect(kinds).toEqual(["write", "write"]);
+  });
+
+  it("lists the tasks a restart may have missed: chats active after the row was written", async () => {
+    await make({ id: "quiet", title: "Quiet" });
+    await make({ id: "busy", title: "Busy" });
+    testDb.db
       .update(romeSessions)
-      .set({ activityAt: new Date(now - 30 * DAY) })
-      .where(eq(romeSessions.id, "quiet-chat"));
-    const finished = await repo.upsertMany(
-      [
-        { title: "Resumed old task", sessionId: "resumed-chat" },
-        { title: "Quiet old task", sessionId: "quiet-chat" },
-      ],
-      new Date(now - 30 * DAY),
-    );
-    await repo.keepEnded(
-      finished.map((row) => row.id),
-      [],
-      new Date(now - 30 * DAY),
-    );
-    await chats.deleteSession("gone-topic");
-    const since = new Date(now - 7 * DAY);
-    const titles = async (chatId: string, owner: string) =>
-      (await repo.listForConciergeChat(chatId, owner, since)).map(({ row }) => row.title).sort();
-
-    expect(await titles("concierge", "guardian")).toEqual([
-      "Gone topic's",
-      "Main's",
-      "Resumed old task",
-    ]);
-    expect(await titles("topic", "guardian")).toEqual(["Topic's"]);
-    expect(await titles(visitorMain, "visitor:a")).toEqual(["Visitor's"]);
-  });
-
-  it("lists open rows whatever their age and ended rows only inside the window, by when they ended", async () => {
-    const now = Date.now();
-    const old = new Date(now - 30 * DAY);
-    // When each ended, as its derived status read it.
-    const ended = async (title: string, at: Date | null) => {
-      const [row] = await repo.upsertMany([{ title }], old);
-      if (at) await repo.keepEnded([row!.id], [], at);
-      return row!;
-    };
-    await ended("Old watch", null);
-    await ended("Old done", old);
-    await ended("Old dropped", old);
-    await ended("Fresh done", new Date(now - DAY));
-    const archived = await ended("Archived", new Date(now));
-    await repo.upsertMany([{ id: archived.id, archived: true }]);
-
-    const titles = (await repo.listForPanel(new Date(now - 7 * DAY))).map(({ row }) => row.title);
-    expect(titles.sort()).toEqual(["Fresh done", "Old watch"]);
-    expect((await repo.listForAgent(false)).map(({ row }) => row.title)).toEqual(["Old watch"]);
-  });
-
-  it("carries the linked chat's current name", async () => {
-    await chats.createSession("chat-1", "Chat one");
-    const [row] = await repo.upsertMany([{ title: "A", sessionId: "chat-1" }]);
-    await chats.updateSessionName("chat-1", "Renamed");
-    expect((await repo.getWithChat(row.id))?.chat).toEqual({ id: "chat-1", name: "Renamed" });
-  });
-
-  describe("source message", () => {
-    const say = async (chatId: string, text = "Hello") =>
-      (await chats.addBackendMessage(chatId, "turn-1", [{ type: "text", content: text }])).id;
-    const sourceOf = async (id: string) => (await repo.getWithChat(id))?.sourceMessageId;
-
-    it("answers the id while the message is in the Concierge chat, and null once it is gone", async () => {
-      await chats.createSession("concierge", "Concierge");
-      const messageId = await say("concierge");
-      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: messageId }]);
-      // The row holds the message's id in Chats, and answers its key.
-      expect(row.sourceMessageId).toEqual(expect.any(Number));
-      expect(await sourceOf(row.id)).toBe(messageId);
-      expect((await repo.listForPanel(new Date(0)))[0].sourceMessageId).toBe(messageId);
-
-      testDb.db.delete(chatMessages).where(eq(chatMessages.key, messageId)).run();
-      expect(await sourceOf(row.id)).toBeNull();
-      // The message's going clears the row's pointer; no text was copied.
-      expect((await repo.get(row.id))?.sourceMessageId).toBeNull();
-    });
-
-    it("counts only a user or assistant message of the Concierge chat", async () => {
-      await chats.createSession("concierge", "Concierge");
-      await chats.createSession("other", "Other");
-      const foreign = await say("other");
-      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: foreign }]);
-      expect(await sourceOf(row.id)).toBeNull();
-
-      // A trace is the agent's own row, never a message of the chat.
-      const trace = "trace-1";
-      await chats.addMessage(trace, "concierge", "trace", "[]", "turn-1");
-      await repo.upsertMany([{ id: row.id, sourceMessageId: trace }]);
-      expect(await sourceOf(row.id)).toBeNull();
-    });
-
-    it("keeps the message on a later write unless one is given", async () => {
-      await chats.createSession("concierge", "Concierge");
-      const first = await say("concierge");
-      const second = await say("concierge");
-      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: first }]);
-      await repo.upsertMany([{ id: row.id, summary: "Later" }]);
-      expect(await sourceOf(row.id)).toBe(first);
-      await repo.upsertMany([{ id: row.id, sourceMessageId: second }]);
-      expect(await sourceOf(row.id)).toBe(second);
-    });
-
-    it("is null for a row that never had one", async () => {
-      const [row] = await repo.upsertMany([{ title: "A" }]);
-      expect(await sourceOf(row.id)).toBeNull();
-    });
-    it("looks the message up in the row's own Concierge chat", async () => {
-      await chats.createSession("concierge", "Concierge");
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const inTopic = await say("topic-1");
-      const [row] = await repo.upsertMany([
-        { title: "A", chatId: "topic-1", sourceMessageId: inTopic },
-      ]);
-      expect(await sourceOf(row.id)).toBe(inTopic);
-      // The same message named for a row of the main chat is not its source.
-      const [other] = await repo.upsertMany([{ title: "B", sourceMessageId: inTopic }]);
-      expect(await sourceOf(other.id)).toBeNull();
-    });
-  });
-
-  describe("tasks started in a chat thread", () => {
-    const say = async (chatId: string, text: string, replyTo?: string) =>
-      (
-        await chats.addBackendMessage(
-          chatId,
-          "turn-1",
-          [{ type: "text", content: text }],
-          replyTo ? { replyTo } : {},
-        )
-      ).id;
-
-    it("finds the tasks a message started, in its chat, and no others", async () => {
-      await chats.createSession("concierge", "Concierge");
-      const start = await say("concierge", "Book flights");
-      const other = await say("concierge", "Weather?");
-      const [flights, hotels] = await repo.upsertMany(
-        [
-          { title: "Flights", sourceMessageId: start },
-          { title: "Hotels", sourceMessageId: start },
-          { title: "Weather", sourceMessageId: other },
-        ],
-        new Date(1000),
-      );
-
-      const started = await repo.listStartedAt("concierge", start);
-
-      expect(started.map((task) => task.row.id).sort()).toEqual([flights!.id, hotels!.id].sort());
-      expect(started.every((task) => task.sourceMessageId === start)).toBe(true);
-      expect(await repo.listStartedAt("concierge", "missing")).toEqual([]);
-      expect(await repo.listStartedAt("topic-none", start)).toEqual([]);
-    });
-  });
-
-  describe("Concierge chat of a row", () => {
-    it("is the main chat unless the row names another, and the main chat once that chat is gone", async () => {
-      await chats.createSession("concierge", "Concierge");
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const [main, topic] = await repo.upsertMany([
-        { title: "A", chatId: "concierge" },
-        { title: "B", chatId: "topic-1" },
-      ]);
-      // The main chat is stored as no chat.
-      expect(main.chatId).toBeNull();
-      expect((await repo.getWithChat(main.id))?.conciergeChat).toEqual({
-        id: "concierge",
-        name: "Concierge",
-        main: true,
-      });
-      expect((await repo.getWithChat(topic.id))?.conciergeChat).toEqual({
-        id: "topic-1",
-        name: "Calendar",
-        main: false,
-      });
-      await chats.deleteSession("topic-1");
-      expect((await repo.getWithChat(topic.id))?.conciergeChat.main).toBe(true);
-    });
-
-    it("gives a finished row of an archived chat to the main chat, where its buttons can write", async () => {
-      await chats.createSession("concierge", "Concierge");
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const [done] = await repo.upsertMany([{ title: "Old", chatId: "topic-1", state: "done" }]);
-      expect((await repo.getWithChat(done.id))?.conciergeChat.id).toBe("topic-1");
-      await chats.archiveSession("topic-1");
-      expect((await repo.getWithChat(done.id))?.conciergeChat).toEqual({
-        id: "concierge",
-        name: "Concierge",
-        main: true,
-      });
-      // The row still names its chat, so unarchiving gives it back.
-      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
-    });
-
-    it("reads the open rows of an archived chat as the main chat's, without moving them", async () => {
-      await chats.createSession(
-        "topic-1",
-        "Calendar",
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-      );
-      const [open, done] = await repo.upsertMany([
-        { title: "A", chatId: "topic-1", state: "doing" },
-        { title: "B", chatId: "topic-1", state: "done" },
-      ]);
-      await chats.archiveSession("topic-1");
-      // The open rows are the ones whose status has not ended, as the caller derives it.
-      expect(await repo.leaveChat("topic-1", async () => new Set([open.id]))).toBe(1);
-      for (const id of [open.id, done.id]) {
-        const found = await repo.getWithChat(id);
-        expect(found?.row.chatId).toBe("topic-1");
-        expect(found?.conciergeChat).toMatchObject({ id: CONCIERGE_CHAT_ID, main: true });
-      }
-    });
-
-    it("keeps a row its owner's when its chat is deleted without moving it", async () => {
-      const owner = "visitor:acct-ann";
-      const main = mainChatIdOf(owner);
-      for (const id of [main, "ann-topic"]) {
-        await chats.createSession(
-          id,
-          "Concierge",
-          undefined,
-          undefined,
-          null,
-          undefined,
-          "core:concierge",
-          "webchat",
-          null,
-          { ownerKey: owner },
-        );
-      }
-      const [row] = await repo.upsertMany([{ title: "A", chatId: "ann-topic", state: "doing" }]);
-      // Deleting the chat clears the row's link to it; the owner is the row's own.
-      await chats.deleteSession("ann-topic");
-      expect((await repo.get(row.id))?.chatId).toBeNull();
-      expect(await repo.getWithChat(row.id)).toMatchObject({
-        owner,
-        conciergeChat: { id: main, main: true },
-      });
-      // Its task events group under that owner's main chat, never the guardian's.
-      const service = {
-        deps: {
-          tasks: new ConciergeTasks(repo),
-          messages: { recent: async () => [], before: async () => [] },
-        },
-        dashboard: { chats: { activeTurns: () => [] } },
-      } as unknown as ConciergeService;
-      const [delivery] = await renderTaskEvents(service, [
-        { taskId: row.id, changes: [{ kind: "summary" } as never], quiet: true },
-      ]);
-      // A held row is its owner's and that chat's, however often its turn waits.
-      expect(delivery).toMatchObject({ chatId: main, owner, taskIds: [row.id] });
-    });
-
-    it("keeps a visitor's rows, finished ones too, theirs after their topic chat is deleted", async () => {
-      const owner = "visitor:acct-ann";
-      const main = mainChatIdOf(owner);
-      for (const id of [main, "ann-topic"]) {
-        await chats.createSession(
-          id,
-          "Concierge",
-          undefined,
-          undefined,
-          null,
-          undefined,
-          "core:concierge",
-          "webchat",
-          null,
-          { ownerKey: owner },
-        );
-      }
-      const [open, done] = await repo.upsertMany([
-        { title: "A", chatId: "ann-topic", state: "doing" },
-        { title: "B", chatId: "ann-topic", state: "done" },
-      ]);
-      await chats.deleteSession("ann-topic");
-      for (const id of [open.id, done.id]) {
-        expect(await repo.getWithChat(id)).toMatchObject({
-          owner,
-          conciergeChat: { id: main, main: true },
-        });
-      }
-    });
-  });
-
-  it("finds rows whose chat was active after the row was written", async () => {
-    await chats.createSession("quiet", "Quiet");
-    await chats.createSession("busy", "Busy");
-    await chats.createSession("archived", "Archived");
-    const longAgo = new Date(Date.now() - 3600_000);
-    await repo.upsertMany(
-      [
-        { title: "Quiet", sessionId: "quiet" },
-        { title: "Busy", sessionId: "busy" },
-        { title: "Archived", sessionId: "archived", archived: true },
-        { title: "No chat" },
-      ],
-      longAgo,
-    );
-    await repo.upsertMany([{ id: (await repo.findBySession("quiet"))!.id, summary: "now" }]);
-    expect((await repo.listBehindTheirChat()).map((row) => row.title)).toEqual(["Busy"]);
-  });
-
-  it("tells the change listeners once a batch is stored", async () => {
-    const seen: string[] = [];
-    repo.onChange(({ row }, change) => seen.push(`${row.title}:${row.state}:${change}`));
-    const [first] = await repo.upsertMany([{ title: "A", state: "doing" }, { title: "B" }]);
-    await expect(repo.upsertMany([{ title: "C" }, { id: "nope" }])).rejects.toThrow();
-    expect(seen).toEqual(["A:doing:write", "B:next:write"]);
-    // A row looked at again is told apart from a row written.
-    await repo.reannounce(first.id);
-    expect(seen.at(-1)).toBe("A:doing:refresh");
-  });
-  describe("message turns", () => {
-    const conciergeChat = (id: string, ownerKey: string | null = null) =>
-      chats.createSession(
-        id,
-        id,
-        undefined,
-        undefined,
-        null,
-        undefined,
-        "core:concierge",
-        "webchat",
-        null,
-        { ownerKey },
-      );
-    // Whether the turn that took message `key` of chat `chatId` answered it, or null when none took it.
-    const answered = async (chatId: string, key: string) => {
-      const [row] = await testDb.db
-        .select({ answeredAt: conciergeMessageTurns.answeredAt })
-        .from(conciergeMessageTurns)
-        .where(
-          and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.messageKey, key)),
-        );
-      return row ? row.answeredAt !== null : null;
-    };
-
-    it("keeps which turn took a message and whether it answered it", async () => {
-      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      expect(await answered("concierge", "g1")).toBe(false);
-      expect(await answered("concierge", "g3")).toBeNull();
-      // Saying an answer answers that message; the end of every turn not running, the rest.
-      await repo.answerMessage("concierge", "g1");
-      await repo.takeMessage("t3", { chatId: "concierge", messageKey: "g3" });
-      expect(await repo.answerTurns("concierge", ["t3"])).toBe(1);
-      expect(await answered("concierge", "g1")).toBe(true);
-      expect(await answered("concierge", "g2")).toBe(true);
-      expect(await answered("concierge", "g3")).toBe(false);
-    });
-
-    it("tells a stopped turn's messages to the next turn, once", async () => {
-      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      await repo.answerTurns("concierge", ["t2"], new Date(), { stopped: true });
-      expect(await repo.takeStoppedRequests("concierge")).toEqual(["g1"]);
-      expect(await repo.takeStoppedRequests("concierge")).toEqual([]);
-    });
-
-    it("hands a message on to the turn that takes it over, and reopens what its failure left when that turn runs again", async () => {
-      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      // A newer turn took g1 over.
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g1" });
-      // It answered g3 before it failed.
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g3" });
-      await repo.answerMessage("concierge", "g3");
-      await repo.answerTurns("concierge", [], new Date(), { failed: true });
-      expect(await repo.reopenTurn("concierge", "t2")).toBe(2);
-      expect(
-        await Promise.all(["g1", "g2", "g3"].map((key) => answered("concierge", key))),
-      ).toEqual([false, false, true]);
-    });
-
-    it("answers every open message after a restart, except in a chat whose turn continues", async () => {
-      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
-      await repo.takeMessage("t2", { chatId: "topic", messageKey: "g2" });
-      expect(await repo.answerInterrupted(new Set(["topic"]))).toBe(1);
-      expect(await answered("concierge", "g1")).toBe(true);
-      expect(await answered("topic", "g2")).toBe(false);
-    });
-
-    it("forgets a deleted chat's turns, and no other chat's", async () => {
-      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g1" });
-      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
-      await repo.forgetMessages("topic");
-      expect(await answered("topic", "g1")).toBeNull();
-      expect(await answered("concierge", "g2")).toBe(false);
-    });
-
-    it("keeps a task's result unsaid from the end of its chat's work until it is reported", async () => {
-      const [task] = await repo.upsertMany([{ title: "A" }]);
-      await repo.setLastOutcome(task!.id, "succeeded");
-      expect(await repo.tasksWithUnsaidOutcome()).toEqual([task!.id]);
-      await repo.markReported([task!.id]);
-      expect(await repo.tasksWithUnsaidOutcome()).toEqual([]);
-    });
+      .set({ activityAt: new Date(Date.now() + 60_000) })
+      .where(eq(romeSessions.id, "busy"))
+      .run();
+    expect((await repo.listBehindTheirChat()).map((row) => row.id)).toEqual(["busy"]);
   });
 });

@@ -3,13 +3,7 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { type ChatRef, chatKey } from "../chats/storage/place.js";
 import { WebChatRepository } from "./repository.js";
-import {
-  approvals,
-  channels,
-  conciergeTasks,
-  romeAgentMessages,
-  romeSessions,
-} from "../db/schema.js";
+import { approvals, channels, romeAgentMessages, romeSessions, taskChats } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
@@ -615,12 +609,8 @@ describe("ChatReadModel", () => {
         at: new Date(20_000),
         parts: card,
       });
-      await testDb.db.insert(conciergeTasks).values({
-        id: "task-1",
-        title: "Fruit",
-        state: "doing",
+      await testDb.db.insert(taskChats).values({
         sessionId: "task-chat",
-        createdAt: new Date(10_000),
         updatedAt: new Date(10_000),
       });
       expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set(["task-chat"]));
@@ -630,9 +620,9 @@ describe("ChatReadModel", () => {
 
       // The guardian stops it: its card closes, and the chat waits on no one.
       await testDb.db
-        .update(conciergeTasks)
+        .update(taskChats)
         .set({ stoppedAt: new Date(30_000), endedAt: new Date(30_000) })
-        .where(sql`${conciergeTasks.id} = 'task-1'`);
+        .where(sql`${taskChats.sessionId} = 'task-chat'`);
       expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set());
       expect(await repo.awaitingGuardianSince(["task-chat"])).toEqual(new Map());
       const [row] = await testDb.db

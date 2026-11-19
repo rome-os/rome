@@ -97,10 +97,10 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
         },
         ...(defer.taskChecks
           ? {
-              taskId: {
+              chatId: {
                 type: "string",
                 description:
-                  "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
+                  "Optional: the task chat this check is for, from chat_list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
               },
             }
           : {}),

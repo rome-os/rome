@@ -90,9 +90,9 @@ function buildResumeArgs(
   const channelContext = context.channelContext;
   return {
     sessionId: context.sessionId,
-    // The task the check is for: its "later" time is read from here, and
-    // stopping the task cancels it.
-    ...(wakeUp.taskId ? { taskId: wakeUp.taskId } : {}),
+    // The task chat the check is for: the task's "later" time is read from
+    // here, and stopping the task cancels it.
+    ...(wakeUp.chatId ? { chatId: wakeUp.chatId } : {}),
     channel: channelContext?.channel,
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
@@ -111,7 +111,7 @@ function wakePrompt(headline: string, wakeUp: WakeUp, context: DeferContext): st
   const attrs = [
     `scheduled_at="${context.scheduledAt.toISOString()}"`,
     ...(context.turnId ? [`turn_id="${xmlAttr(context.turnId)}"`] : []),
-    ...(wakeUp.taskId ? [`task_id="${xmlAttr(wakeUp.taskId)}"`] : []),
+    ...(wakeUp.chatId ? [`chat_id="${xmlAttr(wakeUp.chatId)}"`] : []),
   ].join(" ");
   return `${headline}\n<defer_note ${attrs}>\n${wakeUp.note}\n</defer_note>`;
 }

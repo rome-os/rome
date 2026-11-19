@@ -46,6 +46,8 @@ struct ChatScreen: View {
         // Reply brings the keyboard up.
         .onChange(of: store.replies) { composerFocused = true }
         .pageBackground()
+        // The task links in its messages draw the task chats' live status.
+        .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
