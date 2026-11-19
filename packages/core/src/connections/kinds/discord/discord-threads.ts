@@ -56,7 +56,10 @@ async function archive(
     threads.push(...page.threads);
     const last = page.threads.at(-1);
     const next = last ? before(last) : undefined;
-    if (!page.has_more || !next || next === from) return threads;
+    if (!page.has_more) return threads;
+    // A page that leaves the cursor where it was would end the listing short.
+    if (!next || next === from)
+      throw new Error(`Discord's archive at ${route} stopped paging before its end`);
     from = next;
   }
 }

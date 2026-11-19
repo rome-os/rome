@@ -68,4 +68,16 @@ describe("archivedDiscordThreads", () => {
       "Could not list the archived threads of Discord chat 7: Internal Server Error",
     );
   });
+
+  it("fails a read whose next page would start where the last one did", async () => {
+    // A full page of threads archived at one instant gives no later cursor.
+    const stuck: DiscordGet = async () => ({
+      threads: [thread("31", "3", "2026-01-01T00:00:00Z")],
+      has_more: true,
+    });
+
+    await expect(
+      archivedDiscordThreads(stuck, [{ id: "3", holdsPrivateThreads: false }]),
+    ).rejects.toThrow("stopped paging before its end");
+  });
 });
