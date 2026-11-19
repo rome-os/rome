@@ -812,3 +812,27 @@ test("the channels option: users.conversations, and channel history and replies,
     await ctl("/config", { history_limit: true });
   }
 });
+
+test("a mention in a group the bot is not in sends no event and stays in history", async () => {
+  await install(A, GUARDIAN, APP_SCOPES);
+  const before = received.length;
+  const quiet = await ctl("/mention", {
+    team: A,
+    user: BOB,
+    channel: "CA0000QUIET",
+    text: "are you there?",
+  });
+  assert.equal(quiet.event_sent, false);
+  await sleep(50);
+  assert.equal(received.length, before);
+  const { messages } = await ctl(`/history?team=${A}&channel=CA0000QUIET`);
+  assert.ok(messages.some((m) => m.text.endsWith("> are you there?")));
+  const general = await ctl("/mention", {
+    team: A,
+    user: BOB,
+    channel: "CA0000GENRL",
+    text: "hello",
+  });
+  assert.notEqual(general.event_sent, false);
+  assert.ok(received.length > before);
+});

@@ -1644,6 +1644,12 @@ async function control(slack, method, url, body) {
     }
     case "POST /mention": {
       const event = slack.mention(body.team, body.user, body.channel, body.text, body.thread_ts);
+      // Slack sends app_mention only from a conversation the app is in, and
+      // the fake has no invitations, so a mention elsewhere stays in history.
+      if (!slack.botInConversation(body.team, event.channel)) {
+        slack.rememberEvent(body.team, event);
+        return { ok: true, event_sent: false, event };
+      }
       return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
     case "POST /group-message": {
