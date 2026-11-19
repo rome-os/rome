@@ -8,6 +8,7 @@
 // outside the connection can tell whether the copy exists.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
+import type Database from "better-sqlite3";
 import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, max, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
 import { slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
@@ -297,10 +298,14 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     teamId: string,
     { text, channelId, limit }: { text: string; channelId?: string; limit: number },
   ): ChannelMessage[] {
-    // SQLite's LIKE folds ASCII case only, so the copy is read newest first a
-    // page at a time and matched here, folding any script's case.
+    // SQLite's LIKE folds ASCII case only, so the copy is read newest first
+    // and matched here, folding any script's case. Each table is read by one
+    // statement, streamed until enough match, so a search sorts once however
+    // far back it reads.
     const needle = folded(text);
-    const heard = newestMatching(limit, needle, (offset) =>
+    const heard = this.newestMatching(
+      limit,
+      needle,
       this.db
         .select({
           message: slackAppMessages.message,
@@ -314,12 +319,11 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
             channelId === undefined ? undefined : eq(slackAppMessages.channelId, channelId),
           ),
         )
-        .orderBy(desc(slackAppMessages.saidAt), desc(slackAppMessages.ts))
-        .limit(SEARCH_PAGE)
-        .offset(offset)
-        .all(),
+        .orderBy(desc(slackAppMessages.saidAt), desc(slackAppMessages.ts)),
     );
-    const read = newestMatching(limit, needle, (offset) =>
+    const read = this.newestMatching(
+      limit,
+      needle,
       this.db
         .select({
           message: slackAppTimeline.message,
@@ -333,10 +337,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
             channelId === undefined ? undefined : eq(slackAppTimeline.channelId, channelId),
           ),
         )
-        .orderBy(desc(slackAppTimeline.saidAt), desc(slackAppTimeline.ts))
-        .limit(SEARCH_PAGE)
-        .offset(offset)
-        .all(),
+        .orderBy(desc(slackAppTimeline.saidAt), desc(slackAppTimeline.ts)),
     );
     const found = new Map<string, ChannelMessage>();
     for (const row of [...heard, ...read].sort((a, b) => compareTs(b.ts, a.ts))) {
@@ -346,33 +347,36 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     }
     return [...found.values()].slice(0, limit);
   }
-}
 
-/** How many rows of the copy a search reads at a time. */
-const SEARCH_PAGE = 500;
+  /** The first `limit` rows of `query`, which selects message, ts and text in
+   *  that order, whose text holds `needle`. The rows are streamed, so reading
+   *  stops once enough match. */
+  private newestMatching(
+    limit: number,
+    needle: string,
+    query: { toSQL(): { sql: string; params: unknown[] } },
+  ): Array<{ message: unknown; ts: string }> {
+    const { sql: statement, params } = query.toSQL();
+    const client = (this.db as DrizzleDb & { $client: Database.Database }).$client;
+    const matched: Array<{ message: unknown; ts: string }> = [];
+    if (limit <= 0) return matched;
+    for (const row of client
+      .prepare(statement)
+      .raw()
+      .iterate(...params)) {
+      const [message, ts, text] = row as [string, string, string | null];
+      if (text === null || !folded(text).includes(needle)) continue;
+      matched.push({ message: JSON.parse(message), ts });
+      if (matched.length === limit) break;
+    }
+    return matched;
+  }
+}
 
 /** `text` with its case folded in any script, and its characters composed
  *  one way, so `Équipe` matches `équipe` however each was typed. */
 function folded(text: string): string {
   return text.normalize("NFC").toLowerCase();
-}
-
-/** The newest `limit` rows whose text holds `needle`, read a page at a time. */
-function newestMatching<Row extends { text: string | null }>(
-  limit: number,
-  needle: string,
-  page: (offset: number) => Row[],
-): Row[] {
-  const matched: Row[] = [];
-  for (let offset = 0; matched.length < limit; offset += SEARCH_PAGE) {
-    const rows = page(offset);
-    for (const row of rows) {
-      if (row.text !== null && folded(row.text).includes(needle)) matched.push(row);
-      if (matched.length === limit) break;
-    }
-    if (rows.length < SEARCH_PAGE) break;
-  }
-  return matched;
 }
 
 function timelineRowOf(row: typeof slackAppTimeline.$inferSelect): TimelineRow {

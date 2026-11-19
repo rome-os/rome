@@ -1468,6 +1468,24 @@ describe("Slack app searches what it keeps (R9)", () => {
     expect((await a.search({ text: "x_y", limit: 10 })).messages).toEqual([]);
   });
 
+  it("finds the one old match under many newer messages, folding any script's case", async () => {
+    const { adapter: a } = adapter(fakeMailbox());
+    await a.start();
+    await a.handleFrame(
+      frame({ ...dmEvent(1), event: { ...dmEvent(1).event, text: "Réunion de l'Équipe" } }),
+    );
+    for (let i = 2; i <= 1_200; i++) await a.handleFrame(frame(dmEvent(i)));
+
+    expect(texts((await a.search({ text: "ÉQUIPE", limit: 5 })).messages)).toEqual([
+      "Réunion de l'Équipe",
+    ]);
+    expect(texts((await a.search({ text: "message", limit: 3 })).messages)).toEqual([
+      "message 1200",
+      "message 1199",
+      "message 1198",
+    ]);
+  });
+
   it("folds case in any script, however each side's accents were typed", async () => {
     const { adapter: a } = adapter(fakeMailbox());
     await a.start();
