@@ -93,7 +93,7 @@ describe("connecting Rome's Slack app (R1)", () => {
     expect(slackAppAccountId(grant.profile ?? {})).toBe("T_A/U_BOT");
   });
 
-  it("names the account the way the Slack bot kind does, and takes an agent", () => {
+  it("names the account the way the Slack bot kind does, and holds one workspace", () => {
     const descriptor = makeSlackAppDescriptor({
       api: {} as never,
       cloud: cloud(),
@@ -101,7 +101,7 @@ describe("connecting Rome's Slack app (R1)", () => {
       copy: {} as never,
     });
     expect(descriptor.link).toBe("own_account");
-    expect(descriptor.severalAccounts).toBe(true);
+    expect(descriptor.severalAccounts).toBeUndefined();
     expect(descriptor.accountIdOf?.({ teamId: "T_A", botUserId: "U_BOT" })).toBe("T_A/U_BOT");
   });
 

@@ -227,7 +227,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
   return {
     connectionKind: SLACK_APP_KIND,
     label: "Slack",
-    severalAccounts: true,
+    // Phase 1 connects one workspace. Adding another goes through a redirect
+    // that returns to Settings, which cannot yet follow a second setup.
     reviveProfile: (record) => toSlackAppDisplay(slackAppGrantProfileSchema.parse(record)),
     accountIdOf: (record) => slackAppAccountId(record),
     link: "own_account",
