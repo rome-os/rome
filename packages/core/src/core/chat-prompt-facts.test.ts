@@ -139,6 +139,22 @@ describe("chatPromptFacts earlier messages", () => {
     expect(earlier?.every((m) => m.id < 0)).toBe(true);
   });
 
+  it("names an outbound message as the platform names its sender, and Rome only where it names none", async () => {
+    const outbound = (minute: number, senderDisplayName?: string) => ({
+      ...message(minute),
+      direction: "outbound",
+      senderId: "T_A/U_ROME",
+      senderDisplayName,
+    });
+    // On a personal account the guardian writes from Rome's account too.
+    const { promptFacts, read } = earlierFacts([outbound(2, "Ouou"), outbound(1)]);
+    await promptFacts.earlier?.(place, new Date(Date.UTC(2026, 7, 3, 8, 20)));
+    expect(read.mock.calls[0][0].map((line) => [line.senderName, line.account])).toEqual([
+      ["Rome", null],
+      ["Ouou", null],
+    ]);
+  });
+
   it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
     const { promptFacts, latest } = earlierFacts([message(1)]);
     const before = new Date(Date.UTC(2026, 7, 3, 8, 20));
