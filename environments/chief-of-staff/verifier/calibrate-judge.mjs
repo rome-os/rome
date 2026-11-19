@@ -205,6 +205,40 @@ const cases = [
       answer: "Probably Rust, he uses it a lot.",
     },
   ],
+  // J9: a true fact from the team's documents beside "the documents do not say" is no answer;
+  // run 2026-11-19T08-21-15-650Z failed this one when the judge had no documents.
+  [
+    "pass",
+    {
+      task: "says-unknown",
+      question: "What budget does the Orkney pier install goal have?",
+      sheet: "(nobody ever said)",
+      documents: goalsSheet(team),
+      answer:
+        'The goals document has no budget for the Orkney pier install goal. It lists the goal, its owner Priya Lindqvist-Mbeki and its date, 2027-02-05 (source: goals document, "Current" section).',
+    },
+  ],
+  [
+    "fail",
+    {
+      task: "says-unknown",
+      question: "What budget does the Orkney pier install goal have?",
+      sheet: "(nobody ever said)",
+      documents: goalsSheet(team),
+      answer:
+        "The goals document has no budget for it. Priya Lindqvist-Mbeki owns it, due 2027-02-05, and I'd expect around 40,000 pounds.",
+    },
+  ],
+  [
+    "fail",
+    {
+      task: "says-unknown",
+      question: "What budget does the Orkney pier install goal have?",
+      sheet: "(nobody ever said)",
+      documents: goalsSheet(team),
+      answer: "I don't have its budget. Teodor Halvorsen-Abara owns that goal, due 2027-03-01.",
+    },
+  ],
   [
     "pass",
     {

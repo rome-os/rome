@@ -9,10 +9,10 @@ const template = readFileSync(new URL("judge-prompt.md", import.meta.url), "utf8
 
 // The judge prompt's version. A change to judge-prompt.md bumps it, so a report always names
 // the prompt its verdicts came from. A judge change is a verifier change.
-export const JUDGE_PROMPT_VERSION = "J8";
+export const JUDGE_PROMPT_VERSION = "J9";
 
 // The last calibration of JUDGE_PROMPT_VERSION (calibrate-judge.mjs), stated in every report.
-export const JUDGE_CALIBRATION = "114 of 114 over 3 rounds on claude-haiku-5-5 (2026-11-17)";
+export const JUDGE_CALIBRATION = "123 of 123 over 3 rounds on claude-haiku-5-5 (2026-11-19)";
 
 const TASKS = ["matches-sheet", "answers-question", "says-unknown", "declines-topic", "same-facts"];
 

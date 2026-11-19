@@ -38,6 +38,7 @@ export default {
               task: "says-unknown",
               question: question.q,
               sheet: "(nobody ever said)",
+              documents,
               answer: reply.text,
             },
       );
