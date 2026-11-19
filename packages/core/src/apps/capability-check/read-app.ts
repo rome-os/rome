@@ -2,9 +2,10 @@
 // `app.yaml` and every `action.yaml` with the packaging schemas, and the app's
 // TypeScript with the compiler. It runs nothing from the app.
 
+import { createRequire } from "node:module";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import ts from "typescript";
+import type TS from "typescript";
 import { parse as parseYaml } from "yaml";
 import { isAppApiPathNoAuth } from "../no-auth.js";
 import { parseAppManifest, parseManifestObject } from "../packaging/manifest.js";
@@ -16,6 +17,10 @@ import type {
   PageRequestFacts,
   RouteFacts,
 } from "./facts.js";
+
+// The compiler is a development tool, absent from the runtime image that also
+// ships this CLI, so it loads when a check runs, not when the module does.
+let ts: typeof TS;
 
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts"];
@@ -42,6 +47,7 @@ const OPENS_STORE = /(Repository|Repo|Store|Client)$/;
 const MAX_CALL_DEPTH = 8;
 
 export async function readApp(dir: string): Promise<AppFacts> {
+  ts ??= createRequire(import.meta.url)("typescript") as typeof TS;
   const manifestPath = join(dir, "app.yaml");
   const manifest = parseAppManifest(await parseManifestObject(manifestPath), manifestPath);
   const sourceRoot = manifest.appRoot && existsSync(join(dir, "src")) ? "src" : ".";
@@ -113,10 +119,10 @@ function readAction(reader: SourceReader, appDir: string, actionDir: string): Ac
 }
 
 class SourceReader {
-  private readonly checker: ts.TypeChecker;
+  private readonly checker: TS.TypeChecker;
 
   constructor(
-    private readonly program: ts.Program,
+    private readonly program: TS.Program,
     private readonly appDir: string,
     private readonly sourceDir: string,
   ) {
@@ -124,7 +130,7 @@ class SourceReader {
   }
 
   /** `file:line` relative to the app directory. */
-  at(file: string, node?: ts.Node): string {
+  at(file: string, node?: TS.Node): string {
     const path = relative(this.appDir, file).split(sep).join("/");
     if (!node) return path;
     const source = node.getSourceFile();
@@ -141,8 +147,8 @@ class SourceReader {
     const found: ImportFacts[] = [];
     for (const source of this.program.getSourceFiles()) {
       if (!this.ownFile(source.fileName) || isTestFile(source.fileName)) continue;
-      const visit = (node: ts.Node) => {
-        let specifier: ts.Expression | undefined;
+      const visit = (node: TS.Node) => {
+        let specifier: TS.Expression | undefined;
         if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
           specifier = node.moduleSpecifier;
         } else if (
@@ -179,14 +185,14 @@ class SourceReader {
     for (const source of this.program.getSourceFiles()) {
       if (!this.ownFile(source.fileName) || isTestFile(source.fileName)) continue;
       if (!this.fromSource(source.fileName).startsWith("web/")) continue;
-      const visit = (node: ts.Node) => {
+      const visit = (node: TS.Node) => {
         const callee =
           ts.isCallExpression(node) || ts.isNewExpression(node) ? node.expression : undefined;
         const name = callee && compact(callee.getText());
         if (name && DIRECT_REQUESTS.has(name)) {
           const first =
             node.kind === ts.SyntaxKind.CallExpression || ts.isNewExpression(node)
-              ? (node as ts.CallExpression).arguments?.[0]
+              ? (node as TS.CallExpression).arguments?.[0]
               : undefined;
           found.push({
             at: this.at(source.fileName, node),
@@ -211,7 +217,7 @@ class SourceReader {
    * Undefined when it hands none. Looks in the entry file, then in the files
    * it imports, since an entry may re-export an action built elsewhere.
    */
-  inputSchema(entryFile: string): ts.Expression | undefined {
+  inputSchema(entryFile: string): TS.Expression | undefined {
     const entry = this.program.getSourceFile(entryFile);
     if (!entry) return undefined;
     const inEntry = findInputSchema(entry);
@@ -224,7 +230,7 @@ class SourceReader {
     return undefined;
   }
 
-  private importsOf(source: ts.SourceFile): string[] {
+  private importsOf(source: TS.SourceFile): string[] {
     const files: string[] = [];
     for (const statement of source.statements) {
       if (
@@ -245,7 +251,7 @@ class SourceReader {
     return files;
   }
 
-  argumentDescriptions(schema: ts.Expression): ArgumentDescriptions {
+  argumentDescriptions(schema: TS.Expression): ArgumentDescriptions {
     const node = this.followIdentifier(schema);
     if (!node) return { kind: "unknown" };
     if (ts.isObjectLiteralExpression(node)) return this.jsonSchemaArguments(node);
@@ -263,7 +269,7 @@ class SourceReader {
     return { kind: "unknown" };
   }
 
-  private jsonSchemaArguments(schema: ts.ObjectLiteralExpression): ArgumentDescriptions {
+  private jsonSchemaArguments(schema: TS.ObjectLiteralExpression): ArgumentDescriptions {
     const properties = propertyValue(schema, "properties");
     if (!properties) return { kind: "described" };
     const literal = this.followIdentifier(properties);
@@ -283,8 +289,8 @@ class SourceReader {
   }
 
   /** The initializer an identifier names, or the expression itself. */
-  private followIdentifier(node: ts.Expression): ts.Expression | undefined {
-    let current: ts.Expression = node;
+  private followIdentifier(node: TS.Expression): TS.Expression | undefined {
+    let current: TS.Expression = node;
     for (let hops = 0; hops < 5; hops++) {
       while (
         ts.isAsExpression(current) ||
@@ -303,7 +309,7 @@ class SourceReader {
     return undefined;
   }
 
-  private declarationOf(node: ts.Node): ts.Declaration[] {
+  private declarationOf(node: TS.Node): TS.Declaration[] {
     // `{ schema }` names the variable `schema`, not the property it makes.
     let symbol =
       node.parent && ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
@@ -319,8 +325,8 @@ class SourceReader {
     const entry = this.program.getSourceFile(entryFile);
     if (!entry) return [];
     const literal: LiteralOf = (node) => this.stringLiteral(node);
-    const routeIfs: ts.IfStatement[] = [];
-    const visit = (node: ts.Node) => {
+    const routeIfs: TS.IfStatement[] = [];
+    const visit = (node: TS.Node) => {
       if (ts.isIfStatement(node) && isRouteCondition(node.expression, literal)) routeIfs.push(node);
       ts.forEachChild(node, visit);
     };
@@ -359,11 +365,11 @@ class SourceReader {
    * What `node` does through the app's own calls: the names it passes to
    * `runAction`, and the app data it writes itself, without an action.
    */
-  private effects(node: ts.Node): { runs: string[]; writes: string[] } {
+  private effects(node: TS.Node): { runs: string[]; writes: string[] } {
     const names = new Set<string>();
     const writes = new Set<string>();
-    const seen = new Set<ts.Node>();
-    const walk = (current: ts.Node, depth: number) => {
+    const seen = new Set<TS.Node>();
+    const walk = (current: TS.Node, depth: number) => {
       if (ts.isCallExpression(current)) {
         const callee = current.expression;
         const calleeName = ts.isPropertyAccessExpression(callee)
@@ -409,7 +415,7 @@ class SourceReader {
   }
 
   /** The string `node` stands for: a literal, or a `const` initialized with one. */
-  private stringLiteral(node: ts.Expression): string | undefined {
+  private stringLiteral(node: TS.Expression): string | undefined {
     if (ts.isStringLiteralLike(node)) return node.text;
     if (!ts.isIdentifier(node)) return undefined;
     const declaration = this.declarationOf(node)[0];
@@ -430,9 +436,9 @@ class SourceReader {
   }
 }
 
-function findInputSchema(source: ts.SourceFile): ts.Expression | undefined {
-  let found: ts.Expression | undefined;
-  const visit = (node: ts.Node) => {
+function findInputSchema(source: TS.SourceFile): TS.Expression | undefined {
+  let found: TS.Expression | undefined;
+  const visit = (node: TS.Node) => {
     if (found) return;
     if (ts.isPropertyAssignment(node) && propertyName(node) === "inputSchema") {
       found = node.initializer;
@@ -454,8 +460,8 @@ function findInputSchema(source: ts.SourceFile): ts.Expression | undefined {
 }
 
 /** The shape literal of `z.object({...})`, through any chained calls such as `.strict()`. */
-function findZodObjectShape(node: ts.Expression): ts.ObjectLiteralExpression | undefined {
-  let current: ts.Expression = node;
+function findZodObjectShape(node: TS.Expression): TS.ObjectLiteralExpression | undefined {
+  let current: TS.Expression = node;
   while (ts.isCallExpression(current)) {
     const callee = current.expression;
     if (!ts.isPropertyAccessExpression(callee)) return undefined;
@@ -468,7 +474,7 @@ function findZodObjectShape(node: ts.Expression): ts.ObjectLiteralExpression | u
   return undefined;
 }
 
-function propertyName(property: ts.ObjectLiteralElementLike): string {
+function propertyName(property: TS.ObjectLiteralElementLike): string {
   const name = property.name;
   if (!name) return "?";
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
@@ -478,9 +484,9 @@ function propertyName(property: ts.ObjectLiteralElementLike): string {
 }
 
 function propertyValue(
-  literal: ts.ObjectLiteralExpression,
+  literal: TS.ObjectLiteralExpression,
   name: string,
-): ts.Expression | undefined {
+): TS.Expression | undefined {
   for (const property of literal.properties) {
     if (ts.isPropertyAssignment(property) && propertyName(property) === name) {
       return property.initializer;
@@ -492,7 +498,7 @@ function propertyValue(
   return undefined;
 }
 
-function functionBody(declaration: ts.Declaration): ts.Node | undefined {
+function functionBody(declaration: TS.Declaration): TS.Node | undefined {
   if (
     (ts.isFunctionDeclaration(declaration) ||
       ts.isMethodDeclaration(declaration) ||
@@ -514,17 +520,17 @@ function functionBody(declaration: ts.Declaration): ts.Node | undefined {
 }
 
 /** Whether `condition` tests the request method or path against a literal. */
-function isRouteCondition(condition: ts.Expression, literal: LiteralOf): boolean {
+function isRouteCondition(condition: TS.Expression, literal: LiteralOf): boolean {
   const { methods, segments } = readCondition(condition, literal);
   return methods.length > 0 || segments.length > 0;
 }
 
 /** The methods and path segments a route condition compares against. */
 /** The string a literal or a `const` bound to one stands for. */
-type LiteralOf = (node: ts.Expression) => string | undefined;
+type LiteralOf = (node: TS.Expression) => string | undefined;
 
 function readCondition(
-  condition: ts.Expression,
+  condition: TS.Expression,
   literal: LiteralOf,
 ): {
   methods: string[];
@@ -534,7 +540,7 @@ function readCondition(
   const methods: string[] = [];
   const segments: string[] = [];
   let depth: number | undefined;
-  const visit = (node: ts.Node) => {
+  const visit = (node: TS.Node) => {
     // A negated test (`!path.startsWith("x")`) excludes a path; it names none.
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
       return;
@@ -580,8 +586,8 @@ function readCondition(
   };
 }
 
-function isAlternation(condition: ts.Expression): boolean {
-  let node: ts.Expression = condition;
+function isAlternation(condition: TS.Expression): boolean {
+  let node: TS.Expression = condition;
   while (ts.isParenthesizedExpression(node)) node = node.expression;
   if (
     ts.isBinaryExpression(node) &&
@@ -592,9 +598,9 @@ function isAlternation(condition: ts.Expression): boolean {
   return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken;
 }
 
-function enclosingRouteConditions(node: ts.Node, literal: LiteralOf): ts.Expression[] {
-  const found: ts.Expression[] = [];
-  let child: ts.Node = node;
+function enclosingRouteConditions(node: TS.Node, literal: LiteralOf): TS.Expression[] {
+  const found: TS.Expression[] = [];
+  let child: TS.Node = node;
   let parent = node.parent;
   while (parent) {
     if (
@@ -614,7 +620,7 @@ function compact(text: string): string {
   return text.replace(/\s+/g, "");
 }
 
-function contains(outer: ts.Node, inner: ts.Node): boolean {
+function contains(outer: TS.Node, inner: TS.Node): boolean {
   return (
     inner.pos >= outer.pos &&
     inner.end <= outer.end &&
