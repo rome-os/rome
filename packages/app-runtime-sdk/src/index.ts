@@ -1916,8 +1916,9 @@ export interface ChannelsService {
    * {@link send} take. A thread names its chat as `parent`. On Discord these
    * are the chats of every server the account is in, read from Discord.
    *
-   * Rejects with an error that says so when the account lists no chats.
-   * Absent from a host that predates it.
+   * Rejects with an error that says why when the account cannot list its
+   * chats, such as before its connection has connected; an empty list means
+   * it sees none. Absent from a host that predates it.
    */
   chats?(account: Account | string, query?: ChatListQuery): Promise<ChatDescriptor[]>;
 }
