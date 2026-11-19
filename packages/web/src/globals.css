@@ -485,6 +485,11 @@ button.rome-upgrade-row:hover {
 .rome-status-spin {
   animation: rome-status-spin 1s linear infinite;
 }
+@media (prefers-reduced-motion: reduce) {
+  .rome-status-spin {
+    animation: none;
+  }
+}
 
 @keyframes rome-status-spin {
   to {

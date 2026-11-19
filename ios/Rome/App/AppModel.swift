@@ -611,6 +611,7 @@ final class Workspace {
         topics.stop()
         for store in topicStores.values { store.close() }
         for store in taskStores.values { store.close() }
+        for store in taskLinkStores.values { store.stop() }
         for actions in shells.values { actions.reset() }
         shells = [:]
         backend.events.pause()

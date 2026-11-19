@@ -282,6 +282,40 @@ private let listJSON = #"""
         #expect(symbol("sleeping") == "arrow.triangle.2.circlepath")
     }
 
+    @Test func coloursEachStatusAsTheWebDoes() {
+        func tone(_ status: String, _ reason: String? = nil) -> TaskMarkTone {
+            TaskLinkInfo(id: "c", name: "N", status: status, endReason: reason).tone
+        }
+        #expect(tone("active") == .running)
+        #expect(tone("needs_you") == .needsYou)
+        #expect(tone("ended", "done") == .done)
+        #expect(tone("ended", "failed") == .failed)
+        #expect(tone("ended", "stopped") == .quiet)
+        #expect(tone("ended", "no_response") == .quiet)
+        #expect(tone("later") == .quiet)
+        // Read as leniently as the symbol: an unknown status runs, an ended task with no reason is done.
+        #expect(tone("sleeping") == .running)
+        #expect(tone("ended") == .done)
+    }
+
+    @Test func turnsTheRunningRingOnceAPeriod() {
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        #expect(TaskMarkRing.frame(at: start) == 0)
+        #expect(TaskMarkRing.frame(at: start.addingTimeInterval(TaskMarkRing.frameInterval * 1.5)) == 1)
+        #expect(TaskMarkRing.frame(at: start.addingTimeInterval(TaskMarkRing.period)) == 0)
+    }
+
+    @MainActor
+    @Test func aStoppedWorkspaceStopsListeningForTaskLinks() async {
+        let backend = FakeBackend()
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-task-links-stop-\(UUID().uuidString)/Drafts"), instance: "t"))
+        let links = workspace.taskLinks(forChat: "topic-1")
+        links?.register(["c1"])
+        #expect(backend.bus.isListening(to: LiveTopic.chatTasks("topic-1")))
+        workspace.stop()
+        #expect(!backend.bus.isListening(to: LiveTopic.chatTasks("topic-1")))
+    }
+
     @Test func readsTheLinksResponseLeniently() throws {
         let json = #"{"tasks":[{"id":"c1","name":"Flights","status":"needs_you","endReason":null},{"id":"c2","name":"Hotels","status":"ended","endReason":"stopped"}]}"#
         let response = try JSONDecoder().decode(TaskLinksResponse.self, from: Data(json.utf8))

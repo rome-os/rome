@@ -14,6 +14,10 @@ final class LocalEventBus: LiveEventSource {
     }
 
     func unsubscribe(_ token: UUID) { handlers[token] = nil }
+
+    /// Whether anyone still listens to `topic`.
+    func isListening(to topic: String) -> Bool { handlers.values.contains { $0.topic == topic } }
+
     func pause() {}
     func resume() {}
 
@@ -379,6 +383,14 @@ final class DemoBackend: RomeBackend {
         if let session = running.first(where: { $0.value == turnId })?.key {
             setRunning(session, nil)
         }
+    }
+
+    /// The task chats the demo's task links name, by id.
+    private var taskLinkInfo: [String: TaskLinkInfo] = [:]
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await pause(0.1)
+        return TaskLinksResponse(tasks: ids.compactMap { taskLinkInfo[$0] })
     }
 
     /// The demo's task list: its tasks in the groups their status gives
@@ -988,10 +1000,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
+            ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1251,6 +1264,20 @@ final class DemoBackend: RomeBackend {
         ]
         // Cards the Concierge composed itself: Rome's own, every value
         // written out, with no `bind`.
+        // Task links in each status, the way the Concierge refers to its tasks.
+        taskLinkInfo = Dictionary(uniqueKeysWithValues: [
+            TaskLinkInfo(id: "chat-site", name: "官网首页双语文案", status: "active"),
+            TaskLinkInfo(id: "chat-price", name: "价格追踪：发提醒邮件", status: "needs_you"),
+            TaskLinkInfo(id: "chat-login", name: "修复登录页样式", status: "ended", endReason: "done"),
+            TaskLinkInfo(id: "chat-export", name: "导出季度报表", status: "ended", endReason: "failed"),
+            TaskLinkInfo(id: "chat-quotes", name: "抓取供应商报价", status: "ended", endReason: "stopped"),
+            TaskLinkInfo(id: "chat-research", name: "竞品定价调研", status: "ended", endReason: "no_response"),
+            TaskLinkInfo(id: "chat-weekly", name: "每周一整理周报", status: "later"),
+        ].map { ($0.id, $0) })
+        messages["topic-task-links"] = [
+            user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
+            agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
+        ]
         messages["topic-itinerary"] = [
             user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),
             parts([Self.agentItinerary], at: at(9, 1), session: "topic-itinerary"),

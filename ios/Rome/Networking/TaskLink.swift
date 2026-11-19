@@ -51,6 +51,7 @@ struct TaskLinkInfo: Decodable, Hashable, Sendable {
     var endReason: String?
 
     /// The SF Symbol that stands for the status, the set the web's chip uses.
+    /// An active task draws the running ring (`TaskMarkRing`) instead.
     var symbol: String {
         switch status {
         case "needs_you": return "exclamationmark.circle"
@@ -63,6 +64,33 @@ struct TaskLinkInfo: Decodable, Hashable, Sendable {
             default: return "checkmark.circle"
             }
         default: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    /// The colour family of the status's mark.
+    var tone: TaskMarkTone { TaskMarkTone(status: status, endReason: endReason) }
+}
+
+/// The colour of a task's status mark, shared by the task link chip and the
+/// Tasks tab's rows: running blue for an active task, warning for one that
+/// needs the guardian, green for done, red for failed, and the quiet grey for
+/// later, stopped and no response (docs/domains/chats.md#task-link).
+enum TaskMarkTone: Equatable, Sendable {
+    case running, needsYou, done, failed, quiet
+
+    /// Read leniently, as `TaskLinkInfo.symbol` is: a status this build does
+    /// not know is active, and an ended task with no reason is done.
+    init(status: String, endReason: String?) {
+        switch status {
+        case "needs_you": self = .needsYou
+        case "later": self = .quiet
+        case "ended":
+            switch endReason {
+            case "failed": self = .failed
+            case "stopped", "no_response": self = .quiet
+            default: self = .done
+            }
+        default: self = .running
         }
     }
 }
