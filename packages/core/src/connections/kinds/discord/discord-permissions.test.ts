@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { DiscordGet } from "./discord-history.js";
+import type { DiscordGet, WireChannel } from "./discord-history.js";
 import { botReadsHistory } from "./discord-permissions.js";
 
 // Whether the bot may read a chat's history, worked out from Discord's own
@@ -51,22 +51,24 @@ function discord(options: {
   };
 }
 
+/** Whether the bot reads `chat`, given the chat as a read has just fetched it. */
+async function reads(get: DiscordGet): Promise<boolean | null> {
+  const chat = (await get(`/channels/${CHAT}`)) as WireChannel;
+  return botReadsHistory(get, chat, BOT);
+}
+
 describe("botReadsHistory", () => {
   it("reads the guild's roles, then the chat's overwrites over them", async () => {
-    await expect(botReadsHistory(discord({ everyone: VIEW | HISTORY }), CHAT, BOT)).resolves.toBe(
-      true,
-    );
+    await expect(reads(discord({ everyone: VIEW | HISTORY }))).resolves.toBe(true);
     // A role overwrite on the chat takes Read Message History away.
     await expect(
-      botReadsHistory(
+      reads(
         discord({ everyone: VIEW | HISTORY, overwrites: [{ id: ROLE, type: 0, deny: HISTORY }] }),
-        CHAT,
-        BOT,
       ),
     ).resolves.toBe(false);
     // The bot's own overwrite comes last and gives it back.
     await expect(
-      botReadsHistory(
+      reads(
         discord({
           everyone: VIEW,
           overwrites: [
@@ -74,32 +76,24 @@ describe("botReadsHistory", () => {
             { id: BOT, type: 1, allow: VIEW | HISTORY },
           ],
         }),
-        CHAT,
-        BOT,
       ),
     ).resolves.toBe(true);
   });
 
   it("lets an administrator or the guild's owner read whatever the overwrites say", async () => {
     const denied = [{ id: GUILD, type: 0, deny: BigInt(BOTH) }];
-    await expect(
-      botReadsHistory(discord({ role: ADMIN, overwrites: denied }), CHAT, BOT),
-    ).resolves.toBe(true);
-    await expect(
-      botReadsHistory(discord({ owner: BOT, overwrites: denied }), CHAT, BOT),
-    ).resolves.toBe(true);
+    await expect(reads(discord({ role: ADMIN, overwrites: denied }))).resolves.toBe(true);
+    await expect(reads(discord({ owner: BOT, overwrites: denied }))).resolves.toBe(true);
   });
 
   it("reads a thread by its parent chat's overwrites", async () => {
     await expect(
-      botReadsHistory(
+      reads(
         discord({
           thread: true,
           role: VIEW | HISTORY,
           overwrites: [{ id: ROLE, type: 0, deny: VIEW }],
         }),
-        CHAT,
-        BOT,
       ),
     ).resolves.toBe(false);
   });

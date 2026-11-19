@@ -7,42 +7,27 @@
  * https://docs.discord.com/developers/topics/permissions#permission-overwrites
  */
 
-import type { DiscordGet } from "./discord-history.js";
+import type { DiscordGet, WireChannel } from "./discord-history.js";
 
 const ADMINISTRATOR = 1n << 3n;
 const VIEW_CHANNEL = 1n << 10n;
 const READ_MESSAGE_HISTORY = 1n << 16n;
 const THREADS = new Set([10, 11, 12]);
 
-interface Overwrite {
-  id: string;
-  type: number;
-  allow: string;
-  deny: string;
-}
-
-interface WireGuildChannel {
-  id: string;
-  type: number;
-  guild_id?: string;
-  parent_id?: string | null;
-  permission_overwrites?: Overwrite[];
-}
-
 /** Whether `botId` holds View Channel and Read Message History in guild chat
- *  `chatId`, or null when the chat is in no guild. Rejects as `get` does. */
+ *  `chat`, as Discord just answered it, or null when the chat is in no guild.
+ *  Rejects as `get` does. */
 export async function botReadsHistory(
   get: DiscordGet,
-  chatId: string,
+  chat: WireChannel,
   botId: string,
 ): Promise<boolean | null> {
-  const chat = (await get(`/channels/${chatId}`)) as WireGuildChannel;
   const guildId = chat.guild_id;
   if (!guildId) return null;
   // A thread takes its parent chat's overwrites.
   const source =
     THREADS.has(chat.type) && chat.parent_id
-      ? ((await get(`/channels/${chat.parent_id}`)) as WireGuildChannel)
+      ? ((await get(`/channels/${chat.parent_id}`)) as WireChannel)
       : chat;
   const [guild, member] = (await Promise.all([
     get(`/guilds/${guildId}`),

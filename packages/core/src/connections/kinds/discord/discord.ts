@@ -64,7 +64,7 @@ import {
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
 import type { TalkHistoryRead } from "../../types.js";
-import { type DiscordGet, readDiscordHistory } from "./discord-history.js";
+import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
 import { botReadsHistory } from "./discord-permissions.js";
 import { discordAttachment } from "./discord-attachment.js";
 
@@ -1485,7 +1485,7 @@ Use \`/channel agent clear\` to undo.`,
                 }
               : { id: botId },
           ),
-        readsHistoryIn: (channelId) => this.readsHistoryIn(get, channelId, botId, signal),
+        readsHistoryIn: (chat) => this.readsHistoryIn(get, chat, botId, signal),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
       },
@@ -1500,12 +1500,12 @@ Use \`/channel agent clear\` to undo.`,
    *  chat answers no; a failure that says nothing about access answers null. */
   private async readsHistoryIn(
     get: DiscordGet,
-    channelId: string,
+    chat: WireChannel,
     botId: string,
     signal: AbortSignal,
   ): Promise<boolean | null> {
     try {
-      return await botReadsHistory(get, channelId, botId);
+      return await botReadsHistory(get, chat, botId);
     } catch (err) {
       const status = (err as { status?: unknown } | null)?.status;
       // A stopped read, and a 401 (already reported by `get`), end the read.

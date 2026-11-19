@@ -51,6 +51,7 @@ export interface WireChannel {
   name?: string | null;
   parent_id?: string | null;
   guild_id?: string;
+  permission_overwrites?: Array<{ id: string; type: number; allow: string; deny: string }>;
 }
 
 /** A Discord message as its REST API spells it, in the fields read here. */
@@ -84,10 +85,11 @@ export interface DiscordHistoryDeps {
   /** A message's text as an inbound message carries it, the bot's mention
    *  stripped, in the guild the chat is in, if any. */
   textOf: (content: string, guildId?: string) => string;
-  /** Whether the bot holds Read Message History in a guild chat, or null
-   *  where that cannot be told. Discord answers a bot without it an empty
-   *  history, not a refusal, so a read asks first. */
-  readsHistoryIn?: (chatId: string) => Promise<boolean | null>;
+  /** Whether the bot holds Read Message History in a guild chat, given the
+   *  chat as Discord just answered it, or null where that cannot be told.
+   *  Discord answers a bot without it an empty history, not a refusal, so a
+   *  read asks first. */
+  readsHistoryIn?: (chat: WireChannel) => Promise<boolean | null>;
   /** A guild member's nickname there, where known. Discord's REST history
    *  carries no member, which a message heard live does. */
   nicknameOf?: (guildId: string, userId: string) => string | undefined;
@@ -169,7 +171,7 @@ export async function readDiscordHistory(
   const channel = await channelOf(deps, chatId);
   const isDm = channel.type === DM || channel.type === GROUP_DM;
   if (!isDm && deps.readsHistoryIn) {
-    const reads = await deps.readsHistoryIn(channel.id);
+    const reads = await deps.readsHistoryIn(channel);
     // Discord answers no messages, not a refusal, where the bot may not read
     // the history, so a read that cannot tell does not guess.
     if (reads === false) throw mayNotRead(chatId);
