@@ -944,6 +944,19 @@ describe("disconnect takes back access at the platform", () => {
     }
   });
 
+  it("says taking back failed when the kind's error gives no reason", async () => {
+    const { registry, conn, close } = await connected(async () => {
+      throw new Error();
+    });
+    try {
+      expect(await registry.disconnect(conn.id)).toEqual({
+        notTakenBack: "the service gave no reason",
+      });
+    } finally {
+      close();
+    }
+  });
+
   it("ends the connection when the kind does not answer within 10s, says so, and stops the kind", async () => {
     let signal: AbortSignal | undefined;
     const { registry, conn, close } = await connected((_grant, opts) => {
@@ -1143,6 +1156,62 @@ describe("disconnect takes back access at the platform", () => {
 
       expect(events).toEqual(["stopped", "taken back"]);
     } finally {
+      close();
+    }
+  });
+
+  async function withTransport(stop: () => Promise<void>, events: string[]) {
+    const { ledger, close } = makeLedger();
+    const { descriptor, userCredential } = makeCustodyGrant();
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      backoff: { baseMs: 1, maxMs: 1 },
+    });
+    registry.register({
+      ...descriptor,
+      capabilities: {
+        talker: { build: (cred) => ({ ...makeFakeTalker(cred), stop }) },
+      },
+      onDisconnect: async () => {
+        events.push("taken back");
+      },
+    });
+    const conn = await registry.connect("fake-oauth-provider");
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
+    return { registry, conn, close };
+  }
+
+  it("waits for a transport's stop to drain before the kind takes back its access", async () => {
+    const events: string[] = [];
+    const { registry, conn, close } = await withTransport(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      events.push("drained");
+    }, events);
+    try {
+      await registry.disconnect(conn.id);
+      expect(events).toEqual(["drained", "taken back"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("takes back access after 10s when a transport never stops", async () => {
+    const events: string[] = [];
+    const { registry, conn, close } = await withTransport(
+      () => new Promise<void>(() => {}),
+      events,
+    );
+    rs.useFakeTimers();
+    try {
+      const ended = registry.disconnect(conn.id);
+      await rs.advanceTimersByTimeAsync(9_999);
+      expect(events).toEqual([]);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(await ended).toEqual({});
+      expect(events).toEqual(["taken back"]);
+      expect(registry.find("fake-oauth-provider")).toHaveLength(0);
+    } finally {
+      rs.useRealTimers();
       close();
     }
   });

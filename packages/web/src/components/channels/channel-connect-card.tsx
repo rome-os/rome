@@ -235,9 +235,10 @@ export function ChannelConnectCard({
     } else {
       // Drop any stale terminal setup state so the unconnected card offers a
       // fresh Connect instead of the previous "done" view (no page reload).
+      // Warned first, so a refresh that fails still shows it.
+      warnIfAccessKept(result);
       setup.reset();
       await onRefresh();
-      warnIfAccessKept(result);
     }
     setDisconnecting(false);
   }
