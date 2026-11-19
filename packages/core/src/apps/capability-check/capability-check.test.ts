@@ -682,6 +682,53 @@ declare class NoSchemaAction { constructor(config: unknown); }
     }
   });
 
+  it("I2: carries method guards into the routes after them", async () => {
+    const page = 'fetchAppApi("notes")';
+    for (const [replacement, expected] of [
+      [
+        'if (request.method !== "POST") return "not allowed";\n    if (route === "notes") return this.add();',
+        "gap",
+      ],
+      [
+        'if (request.method === "GET" || request.method === "POST") {\n      if (request.method === "POST" && route === "notes") return this.add();\n    }',
+        "gap",
+      ],
+      [
+        'if (request.path[0] !== "notes") return "not found";\n    if (request.method === "POST" && route === "notes") return this.add();',
+        "unverified",
+      ],
+    ] as const) {
+      const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+        'if (request.method === "POST" && route === "notes") return this.add();',
+        replacement,
+      );
+      const web = `import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => ${page};\n`;
+      const verdict = checkApp(
+        await readApp(writeApp({ ...COMPLIANT, "src/api/index.ts": api, "src/web/App.tsx": web })),
+      );
+      if (expected === "gap") expect(verdict.gaps.map((g) => g.rule)).toContain("I2");
+      else expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
+    }
+  });
+
+  it("D3: leaves an argument schema with a spread to a person", async () => {
+    const actions = SCHEMA_ACTION.replace(
+      'description: "The note." }',
+      'description: "The note.", ...extra }',
+    );
+    expect(actions).toContain("...extra");
+    const verdict = checkApp(
+      await readApp(
+        writeApp({
+          ...COMPLIANT,
+          ...ACTION("add_note", `declare const extra: object;\n${actions}`),
+        }),
+      ),
+    );
+    expect(verdict.gaps).toEqual([]);
+    expect(verdict.unverified.map((u) => u.rule)).toContain("D3");
+  });
+
   describe("never passes what it cannot read", () => {
     const withRoute = (route: string, imports = ""): Record<string, string> => ({
       ...COMPLIANT,

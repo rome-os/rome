@@ -658,6 +658,8 @@ class SourceReader {
         ? this.followIdentifier(property.initializer)
         : undefined;
       if (!value || !ts.isObjectLiteralExpression(value)) return { kind: "unknown" };
+      // `{ description: "Note", ...extra }` may lose its description to the spread.
+      if (value.properties.some((p) => ts.isSpreadAssignment(p))) return { kind: "unknown" };
       if (!propertyValue(value, "description")) undescribed.push(propertyName(property));
     }
     return undescribed.length === 0
@@ -750,6 +752,11 @@ class SourceReader {
       if (!unreadable && unreadRequestTests(branch.then, innerThens).length > 0) {
         unreadable = "a test on the request inside it that the reader cannot read";
       }
+      // `if (request.method !== "POST") return …` before the route narrows it.
+      const guard = guardsBefore(branch.node, branches, literal);
+      if (!unreadable && guard.unreadable) {
+        unreadable = "a guard on the request before it that the reader cannot carry into the route";
+      }
       if (inner.length > 0 && !unreadable && effects.runs.length + effects.writes.length === 0) {
         // Code that answers after the narrower tests may be a route that runs
         // nothing, or only a "not allowed" reply; the reader cannot tell which.
@@ -758,6 +765,12 @@ class SourceReader {
       }
       const conditions = [branch.condition, ...enclosingRouteConditions(branch.node, literal)];
       const described = describeRoute(conditions.reverse(), literal);
+      if (guard.methods) {
+        const own = described.method === "ANY" ? guard.methods : described.method.split("|");
+        const left = own.filter((method) => guard.methods?.includes(method));
+        if (left.length === 0) unreadable ||= "method tests that no method passes";
+        else described.method = left.join("|");
+      }
       routes.push({
         ...described,
         ...(unreadable ? { unreadable } : {}),
@@ -1114,6 +1127,69 @@ function functionBody(declaration: TS.Declaration): TS.Node | undefined {
 const REQUEST_ARGUMENT = /^(request|req|path|route|parts|segments)$|\.(path|route|pathname)$/;
 
 /**
+ * What guards before `node` in a function around it leave of the request,
+ * such as `if (request.method !== "GET" && request.method !== "HEAD") return …`,
+ * which leaves GET and HEAD. A guard the reader cannot read this way, such as
+ * one on the path, leaves `unreadable`. Guards inside a route test belong to it.
+ */
+function guardsBefore(
+  node: TS.Node,
+  branches: readonly RouteBranch[],
+  literal: LiteralOf,
+): { methods?: string[]; unreadable?: true } {
+  const readsRequest = (child: TS.Node): boolean =>
+    ((ts.isPropertyAccessExpression(child) || ts.isElementAccessExpression(child)) &&
+      isDispatchSubject(child.getText())) ||
+    (ts.forEachChild(child, (inner) => readsRequest(inner) || undefined) ?? false);
+  // `method !== "GET" && method !== "HEAD"` leaves GET and HEAD.
+  const allowed = (condition: TS.Expression): string[] | undefined => {
+    let current = condition;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    if (!ts.isBinaryExpression(current)) return undefined;
+    const kind = current.operatorToken.kind;
+    if (kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+      const left = allowed(current.left);
+      const right = allowed(current.right);
+      return left && right ? [...left, ...right] : undefined;
+    }
+    if (
+      kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+      kind !== ts.SyntaxKind.ExclamationEqualsToken
+    ) {
+      return undefined;
+    }
+    const [subject, value] = /method$/i.test(current.left.getText())
+      ? [current.left, current.right]
+      : [current.right, current.left];
+    if (!/method$/i.test(subject.getText())) return undefined;
+    const method = literal(value);
+    return method ? [method.toUpperCase()] : undefined;
+  };
+  let methods: string[] | undefined;
+  let current: TS.Node = node;
+  while (current.parent && !ts.isSourceFile(current)) {
+    const parent: TS.Node = current.parent;
+    if (ts.isBlock(parent) || ts.isSourceFile(parent)) {
+      for (const statement of parent.statements) {
+        if (statement === current) break;
+        if (!ts.isIfStatement(statement)) continue;
+        if (branches.some((branch) => branch.node === statement)) continue;
+        const exits =
+          hasExit(statement.thenStatement, new Set()) ||
+          ts.isReturnStatement(statement.thenStatement);
+        if (!exits || !readsRequest(statement.expression)) continue;
+        const left = allowed(statement.expression);
+        if (!left) return { unreadable: true };
+        methods = methods ? methods.filter((method) => left.includes(method)) : left;
+      }
+    }
+    if (ts.isFunctionLike(parent)) break;
+    current = parent;
+  }
+  return methods ? { methods } : {};
+}
+
+/**
  * Tests on the request, outside the recognized route tests, that answer a
  * request: an `if` or ternary that returns or throws. Guards that turn a
  * request away (`!ok`, `!==`) are not routes.
@@ -1308,7 +1384,16 @@ function describeRoute(
   literal: LiteralOf,
 ): Pick<RouteFacts, "method" | "path" | "unreadable" | "alternatives" | "openEnded"> {
   const reads = conditions.map((condition) => readCondition(condition, literal));
-  const methods = new Set(reads.flatMap((read) => read.methods));
+  // Nested tests narrow each other: `GET || POST` around `POST` matches only POST.
+  const methodReads = reads.filter((read) => read.methods.length > 0);
+  const methods = new Set(
+    methodReads.length === 0
+      ? []
+      : methodReads[0].methods.filter((method) =>
+          methodReads.every((read) => read.methods.includes(method)),
+        ),
+  );
+  const noMethodLeft = methodReads.length > 0 && methods.size === 0;
   const depth = Math.max(0, ...reads.map((read) => read.depth ?? 0));
   const opaque = reads.some((read) => read.opaque);
   // The path the route matches when one side of an alternation stands in for
@@ -1364,6 +1449,9 @@ function describeRoute(
   const extra = { ...(alternatives ? { alternatives } : {}), ...(openEnded ? { openEnded } : {}) };
   // `route === "webhook" || /^erase$/.test(route)` serves a path the reader
   // cannot name beside the one it can, so no exemption may rest on the known one.
+  if (noMethodLeft) {
+    return { method: "ANY", path: path || "?", unreadable: "method tests that no method passes" };
+  }
   if (reads.some((read) => read.patternOnPath)) {
     return { method, path: path || "?", unreadable: "a path test the reader cannot follow" };
   }

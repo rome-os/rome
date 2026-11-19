@@ -284,8 +284,10 @@ function judgeHumanInterface(
 
 /** The root route, or `GET /status`, which only report that the app is up. */
 function isStatusRoute(path: string, method: string): boolean {
-  if (path === "") return method === "GET" || method === "ANY";
-  return path === "status" && method === "GET";
+  // HEAD is GET without the body, so `GET|HEAD` still only reads.
+  const reads = method.split("|").every((one) => one === "GET" || one === "HEAD");
+  if (path === "") return reads || method === "ANY";
+  return path === "status" && reads;
 }
 
 /** Whether a call with `method` reaches `route`, which may take several. */
