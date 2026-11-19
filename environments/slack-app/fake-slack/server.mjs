@@ -367,7 +367,15 @@ export class FakeSlack {
    * is "valid", or one of the forgeries a test uses for R7. Waits for the
    * first attempt; a valid event that fails is retried in the background.
    */
-  async sendEvent(teamId, event, { signature = "valid", requireInstall = true } = {}) {
+  /**
+   * `onAccepted` runs once Slack would accept the event, before it is
+   * delivered, so what it records is there when the app reacts to the event.
+   */
+  async sendEvent(
+    teamId,
+    event,
+    { signature = "valid", requireInstall = true, onAccepted = null } = {},
+  ) {
     if (!this.config.eventsUrl) throw httpError(409, "no events address configured");
     if (requireInstall && signature === "valid" && !this.activeInstall(teamId)) {
       throw httpError(409, `the app is not installed in ${teamId}`);
@@ -382,6 +390,7 @@ export class FakeSlack {
         `Slack sends no ${event.type} event: the install in ${teamId} lacks ${eventScope}`,
       );
     }
+    onAccepted?.();
     const envelope = this.envelope(teamId, event);
     const body = JSON.stringify(envelope);
     this.state.events.push({
@@ -1173,6 +1182,8 @@ async function control(slack, method, url, body) {
         tokens: keep.tokens,
         history: body.history ? {} : slack.state.history,
         seq: slack.state.seq,
+        // Kept, so a message after a reset never takes an earlier one's ts.
+        tsCounter: slack.state.tsCounter,
       };
       slack.rateLimited.clear();
       slack.save();
@@ -1183,12 +1194,11 @@ async function control(slack, method, url, body) {
   }
 }
 
-/** Sends a member's message event, and keeps the message in Slack's history once
- *  Slack accepted it (the app is installed). */
+/** Sends a member's message event. The message enters Slack's history once
+ *  Slack accepts it (the app is installed and holds the scope), before the app
+ *  hears of it. */
 async function sendAndRemember(slack, team, event) {
-  const sent = await slack.sendEvent(team, event);
-  slack.rememberEvent(team, event);
-  return sent;
+  return slack.sendEvent(team, event, { onAccepted: () => slack.rememberEvent(team, event) });
 }
 
 export function start(config = loadConfig()) {

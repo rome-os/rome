@@ -13,6 +13,8 @@ const A = "TA0000AAAA";
 const GUARDIAN = "UA0000GUARD";
 const BOB = "UA0000BOB01";
 const received = [];
+// Set by a test to act on an event before acknowledging it, as an app may.
+let onEvent = null;
 let receiver;
 let fake;
 let base;
@@ -21,7 +23,9 @@ before(async () => {
   receiver = createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const envelope = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    received.push(envelope);
+    if (onEvent) await onEvent(envelope);
     res.writeHead(200).end("ok");
   }).listen(0);
   await new Promise((r) => receiver.once("listening", r));
@@ -231,4 +235,52 @@ test("an install without a scope gets no event that needs it", async () => {
   );
   assert.equal(denied.error, "missing_scope");
   assert.equal(denied.needed, "users:read");
+});
+
+test("a message is in history before the app hears of it", async () => {
+  const C = "TA0000AAAA";
+  const { access_token: token } = await install(C, GUARDIAN, `${APP_SCOPES},channels:history`);
+  await ctl("/config", { history_limit: false });
+  let seen = null;
+  onEvent = async (envelope) => {
+    if (envelope.event?.type !== "app_mention") return;
+    const { channel, ts } = envelope.event;
+    seen = await api("conversations.replies", { channel, ts }, token);
+    await api("chat.postMessage", { channel, text: "on it", thread_ts: ts }, token);
+  };
+  try {
+    const mention = await ctl("/mention", { team: C, user: BOB, text: "before you answer" });
+    assert.equal(seen.ok, true);
+    assert.equal(seen.messages[0].ts, mention.event.ts);
+    const thread = await api(
+      "conversations.replies",
+      { channel: "CA0000GENRL", ts: mention.event.ts },
+      token,
+    );
+    assert.deepEqual(
+      thread.messages.map((m) => m.text),
+      ["<@UBOTA0000AAAA> before you answer", "on it"],
+    );
+    assert.equal(thread.messages[0].reply_count, 1);
+  } finally {
+    onEvent = null;
+    await ctl("/config", { history_limit: true });
+  }
+});
+
+test("a reset never lets a later message take an earlier one's ts", async () => {
+  const C = "TA0000AAAA";
+  await install(C, GUARDIAN, APP_SCOPES);
+  const realNow = Date.now;
+  const fixed = realNow();
+  Date.now = () => fixed;
+  try {
+    const before = await ctl("/dm", { team: C, user: BOB, text: "before the reset" });
+    await ctl("/reset", {});
+    const after = await ctl("/dm", { team: C, user: BOB, text: "after the reset" });
+    assert.notEqual(after.event.ts, before.event.ts);
+    assert.ok(Number(after.event.ts) > Number(before.event.ts));
+  } finally {
+    Date.now = realNow;
+  }
 });
