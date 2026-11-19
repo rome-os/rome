@@ -8,7 +8,7 @@ import type {
   SentMessage,
   TimelinePage,
 } from "@rome/api-types/people";
-import { peopleRoutes } from "./phone-book/people.js";
+import { peopleRoutes } from "../../../people/phone-book/http/people.js";
 import { personHistoryRoutes } from "./person-history.js";
 import {
   createTestConnections,

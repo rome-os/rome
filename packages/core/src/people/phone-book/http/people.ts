@@ -20,9 +20,9 @@ import {
   readPeople,
   readPerson,
   updatePerson,
-} from "../../../../people/phone-book/index.js";
-import { accountOfWire, wireOf } from "../../../../people/model/wire.js";
-import type { ApiDeps } from "../../../deps.js";
+} from "../index.js";
+import { accountOfWire, wireOf } from "../../model/wire.js";
+import type { ApiDeps } from "../../../api/deps.js";
 
 // The phone book's people: listing, creating, editing, merging and deleting
 // people, and linking accounts to them. What a person and their accounts are,

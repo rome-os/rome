@@ -15,7 +15,7 @@ import {
   type TestDeps,
 } from "../../../test/helpers.js";
 import { seedBaseline } from "../../../test/seeds.js";
-import { peopleRoutes } from "./phone-book/people.js";
+import { peopleRoutes } from "../../../people/phone-book/http/people.js";
 import { personHistoryRoutes } from "./person-history.js";
 
 const MEMBER = "ACoAARecipient";

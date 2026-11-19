@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { ApiDeps } from "../../../deps.js";
+import type { ApiDeps } from "../../../api/deps.js";
 import { accountDecisionRoutes } from "./account-decisions.js";
 import { accountsRoutes } from "./accounts.js";
 import { peopleRoutes } from "./people.js";

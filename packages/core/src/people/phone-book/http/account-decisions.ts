@@ -1,12 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import {
-  dismissAccount,
-  restoreAccount,
-  type AccountDecision,
-  type AccountRef,
-} from "../../../../people/phone-book/index.js";
-import type { ApiDeps } from "../../../deps.js";
+import { dismissAccount, restoreAccount, type AccountDecision, type AccountRef } from "../index.js";
+import type { ApiDeps } from "../../../api/deps.js";
 
 // The account directory's two writes: dismiss an account, and restore one.
 // What either means, when either refuses, and what each answers are

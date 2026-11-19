@@ -9,15 +9,10 @@ import {
 } from "@rome/api-types/people";
 import { accountDecisionRoutes } from "./account-decisions.js";
 import { accountsRoutes } from "./accounts.js";
-import { dismissAccount, type AccountDecisionDeps } from "../../../../people/phone-book/index.js";
-import {
-  createTestDb,
-  buildTestDeps,
-  type TestDb,
-  type TestDeps,
-} from "../../../../test/helpers.js";
-import { seedBaseline } from "../../../../test/seeds.js";
-import { dismissedAccounts, links } from "../../../../db/schema.js";
+import { dismissAccount, type AccountDecisionDeps } from "../index.js";
+import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../../test/helpers.js";
+import { seedBaseline } from "../../../test/seeds.js";
+import { dismissedAccounts, links } from "../../../db/schema.js";
 
 // Dismiss and restore are the two writes that move an account between "nobody
 // has decided about this" and "the guardian does not want to hear from it".

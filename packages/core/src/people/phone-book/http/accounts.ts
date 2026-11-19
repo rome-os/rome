@@ -7,8 +7,8 @@ import {
   sliceAccountDirectory,
   type AccountState,
 } from "@rome/api-types/people";
-import { readAccountDirectory } from "../../../../people/phone-book/index.js";
-import type { ApiDeps } from "../../../deps.js";
+import { readAccountDirectory } from "../index.js";
+import type { ApiDeps } from "../../../api/deps.js";
 
 // The account read: every account Rome has observed, and what the guardian has
 // decided about each. What a page is, how it is ordered, how it resumes and

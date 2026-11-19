@@ -9,17 +9,17 @@ import {
   type TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { personHistoryRoutes } from "../person-history.js";
+import { personHistoryRoutes } from "../../../api/routes/people/person-history.js";
 import {
   createTestDb,
   buildTestDeps,
   ownedByGuardian,
   type TestDb,
   type TestDeps,
-} from "../../../../test/helpers.js";
-import { seedBaseline, type BaselineIds } from "../../../../test/seeds.js";
-import { sayOnChannel } from "../../../../test/speakers.js";
-import { channels as channelRows } from "../../../../db/schema.js";
+} from "../../../test/helpers.js";
+import { seedBaseline, type BaselineIds } from "../../../test/seeds.js";
+import { sayOnChannel } from "../../../test/speakers.js";
+import { channels as channelRows } from "../../../db/schema.js";
 
 // GET /people/:id/messages — one of a person's accounts, its history. These
 // tests pin what the read answers over real stores: which of the overlapping

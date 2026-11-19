@@ -55,7 +55,7 @@ import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { linkCodeRoutes } from "./routes/people/link-code.js";
 import { personHistoryRoutes } from "./routes/people/person-history.js";
-import { phoneBookRoutes } from "./routes/people/phone-book/index.js";
+import { phoneBookRoutes } from "../people/phone-book/http/index.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
