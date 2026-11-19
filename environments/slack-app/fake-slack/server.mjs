@@ -175,7 +175,9 @@ export class FakeSlack {
     const w = this.workspace(teamId);
     const { botUserId, botId } = this.botIds(teamId);
     let install = this.state.installs[teamId];
-    if (!install || !install.active) {
+    // A new sign-in after the app was removed or its token revoked gets a new
+    // token; one over a working install keeps the token, as Slack does.
+    if (!install || !install.active || this.state.tokens[install.botToken]?.revoked) {
       const botToken = `xoxb-${teamId}-${randomBytes(12).toString("hex")}`;
       install = {
         teamId,
@@ -494,7 +496,9 @@ const API_METHODS = {
 
   "chat.postMessage"(args, _token, info) {
     if (!args.channel) return { ok: false, error: "channel_not_found" };
-    if (!args.text && !args.blocks && !args.attachments) return { ok: false, error: "no_text" };
+    if (!args.text && !args.markdown_text && !args.blocks && !args.attachments) {
+      return { ok: false, error: "no_text" };
+    }
     let channel = args.channel;
     if (channel.startsWith("U") || channel.startsWith("W")) {
       if (!this.workspace(info.teamId).members.some((m) => m.id === channel)) {
@@ -518,7 +522,9 @@ const API_METHODS = {
       channel,
       ts,
       threadTs: args.thread_ts ?? null,
-      text: args.text ?? "",
+      // Slack takes `markdown_text` in place of `text`; the record keeps both.
+      text: args.text ?? args.markdown_text ?? "",
+      markdownText: args.markdown_text ?? null,
       blocks: blocks ?? null,
       user: info.userId,
       tokenKind: info.kind,

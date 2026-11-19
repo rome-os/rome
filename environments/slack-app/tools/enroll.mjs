@@ -104,15 +104,22 @@ if (new URL(consent.url).origin === new URL(instance).origin) {
   callback = await follow(new URL(approve.headers.get("location"), cloud).toString());
 }
 const landed = new URL(callback.url);
-if (landed.pathname.startsWith("/login")) fail("instance callback", { url: callback.url });
+if (callback.response.status >= 400 || landed.pathname.startsWith("/login")) {
+  fail("instance callback", { status: callback.response.status, url: callback.url });
+}
 
-// 5. Prove the session works and read who the instance is.
+// 5. Prove it: the instance is enrolled, and the session is the guardian's.
+// The enroll status route is public, so the identity check is what proves the
+// session works.
 const status = await request(`${instance}/api/instance/enroll/status`);
-const statusBody = status.ok ? await status.json() : { status: status.status };
+const enroll = status.ok ? await status.json() : null;
+if (enroll?.enrolled !== true) fail("enroll status", { status: status.status, enroll });
+const me = await request(`${instance}/api/auth/me`);
+const identity = me.ok ? await me.json() : null;
+if (identity?.kind !== "guardian") fail("guardian session", { status: me.status, identity });
 writeFileSync(cookieFile, JSON.stringify(Object.fromEntries(jarFor(instance))), { mode: 0o600 });
-console.log(JSON.stringify({ guardian: email, landed: landed.pathname, enroll: statusBody }));
+console.log(JSON.stringify({ guardian: email, landed: landed.pathname, enroll, identity }));
 
-// One pass, so "&amp;lt;" decodes to "&lt;" and not to "<".
 function decodeEntities(s) {
   const named = {
     "&amp;": "&",

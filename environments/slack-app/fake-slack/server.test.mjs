@@ -191,9 +191,28 @@ test("sign-in, Web API, signed events, uninstall", async () => {
   assert.notEqual(again.access_token, a.access_token);
   assert.equal((await api("auth.test", {}, again.access_token)).ok, true);
 
-  // auth.revoke ends the token.
+  // auth.revoke ends the token, and a new sign-in gets a working one.
   assert.equal((await api("auth.revoke", {}, again.access_token)).revoked, true);
   assert.equal((await api("auth.test", {}, again.access_token)).error, "token_revoked");
+  const third = await install("TA0000AAAA", "UA0000GUARD");
+  assert.notEqual(third.access_token, again.access_token);
+  assert.equal((await api("auth.test", {}, third.access_token)).ok, true);
+
+  // The official app replies with markdown_text and no text, as a JSON body.
+  const md = await (
+    await fetch(`${base}/api/chat.postMessage`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        authorization: `Bearer ${third.access_token}`,
+      },
+      body: JSON.stringify({ channel: envelope.event.channel, markdown_text: "**hi** bob" }),
+    })
+  ).json();
+  assert.equal(md.ok, true);
+  const mdPost = (await ctl(`/posts?channel=${envelope.event.channel}`)).posts.at(-1);
+  assert.equal(mdPost.text, "**hi** bob");
+  assert.equal(mdPost.markdownText, "**hi** bob");
 });
 
 test("a failed delivery is retried with Slack's retry headers", async () => {
