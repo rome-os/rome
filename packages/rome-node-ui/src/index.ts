@@ -6,7 +6,6 @@ export {
 } from "./device-activity.js";
 export { byteFormat, clock, commandText, formatDuration, resultOf } from "./format.js";
 export { messagesFor } from "./messages.js";
-export { DeviceRenameDialog } from "./device-manage.js";
 export { ResultMark } from "./parts.js";
 export {
   BUCKET_MS,
@@ -19,7 +18,6 @@ export {
   NodeDeviceCard,
   NodeDevices,
   type NodeDeviceCardProps,
-  type NodeDevicePairing,
   type NodeDevicesProps,
 } from "./devices-overview.js";
 export type { NodeActionRow, NodeEvent, NodeStats, NodeStatus } from "./protocol.js";

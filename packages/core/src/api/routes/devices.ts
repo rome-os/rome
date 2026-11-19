@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { CallerConfigurationError, DaemonVersionError } from "@rome-os/node-core/client";
 import { z } from "zod";
 import type { DeviceFilesErrorCode, DeviceManageErrorCode } from "@rome/api-types/devices";
-import { containerNodeGuardian } from "../../access/container-node-guardian.js";
-import type { Context } from "hono";
 import type { ApiDeps } from "../deps.js";
 
 const filesErrorStatus = {
@@ -24,16 +22,8 @@ const manageErrorStatus = {
 
 const renameSchema = z.object({ name: z.string() });
 
-export function devicesRoutes(
-  deps: Pick<ApiDeps, "nodeDevices" | "localContainerNodes"> & Partial<Pick<ApiDeps, "db">>,
-): Hono {
+export function devicesRoutes(deps: Pick<ApiDeps, "nodeDevices">): Hono {
   const app = new Hono();
-  async function mayManage(c: Context, id: string) {
-    const owner = deps.localContainerNodes?.deviceOwner(id);
-    return (
-      owner === undefined || (deps.db && owner === (await containerNodeGuardian(c, deps.db, true)))
-    );
-  }
   app.get("/devices", async (c) => {
     c.header("Cache-Control", "no-store");
     return c.json(await deps.nodeDevices.getStatus());
@@ -59,19 +49,15 @@ export function devicesRoutes(
   // device itself is not contacted, so it may be offline.
   app.patch("/devices/:deviceId", async (c) => {
     c.header("Cache-Control", "no-store");
-    const id = c.req.param("deviceId");
-    if (!(await mayManage(c, id))) return c.json({ error: "sign_in_required" }, 403);
     const body = renameSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "invalid_device_name" }, 400);
-    const result = await deps.nodeDevices.renameDevice(id, body.data.name);
+    const result = await deps.nodeDevices.renameDevice(c.req.param("deviceId"), body.data.name);
     if (!result.ok) return c.json({ error: result.code }, manageErrorStatus[result.code]);
     return c.body(null, 204);
   });
   app.delete("/devices/:deviceId", async (c) => {
     c.header("Cache-Control", "no-store");
-    const id = c.req.param("deviceId");
-    if (!(await mayManage(c, id))) return c.json({ error: "sign_in_required" }, 403);
-    const result = await deps.nodeDevices.removeDevice(id);
+    const result = await deps.nodeDevices.removeDevice(c.req.param("deviceId"));
     if (!result.ok) return c.json({ error: result.code }, manageErrorStatus[result.code]);
     return c.body(null, 204);
   });

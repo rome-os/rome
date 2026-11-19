@@ -108,7 +108,7 @@ export function createNodeDevicesService(
         const list = await client.listDevices();
         return {
           devices: list.items
-            .filter((item) => !item.revoked_at && item.device_kind !== "container_node")
+            .filter((item) => !item.revoked_at)
             .map((item) => ({
               id: item.id,
               name: typeof item.device_name === "string" ? item.device_name : item.id,
