@@ -496,7 +496,7 @@ export class SlackAppAdapter {
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push({ ts: wire.ts, message });
     }
-    return { messages, hasMore: page.hasMore };
+    return { messages, hasMore: page.hasMore, oldest: page.messages.at(-1)?.ts };
   }
 
   /**

@@ -151,9 +151,34 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         eq(slackAppTimeline.ts, ts),
       );
     this.db.transaction((tx) => {
+      // A row the copy holds between the run's oldest message and the one it
+      // says comes before shows that link wrong, as a page Slack answered
+      // before a late event does.
+      const oldestTs = messages.at(-1)?.ts;
+      const before =
+        run.before && oldestTs !== undefined
+          ? tx
+              .select({ ts: slackAppTimeline.ts })
+              .from(slackAppTimeline)
+              .where(
+                and(
+                  eq(slackAppTimeline.teamId, teamId),
+                  eq(slackAppTimeline.channelId, channelId),
+                  gt(slackAppTimeline.ts, run.before),
+                  lt(slackAppTimeline.ts, oldestTs),
+                ),
+              )
+              .all()
+              .some(
+                (row) =>
+                  compareTs(row.ts, run.before as string) > 0 && compareTs(row.ts, oldestTs) < 0,
+              )
+            ? null
+            : run.before
+          : run.before;
       for (const [i, { ts, message }] of messages.entries()) {
         const { raw: _raw, ...kept } = message;
-        const prevTs = i + 1 < messages.length ? messages[i + 1].ts : run.before;
+        const prevTs = i + 1 < messages.length ? messages[i + 1].ts : before;
         tx.insert(slackAppTimeline)
           .values({ teamId, channelId, ts, prevTs, saidAt: kept.timestamp, message: kept })
           .onConflictDoUpdate({

@@ -891,6 +891,64 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
+  it("links no message across one a page brought before a late event", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, copy } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = [1, 2, 3].map((i) => slack.say(i));
+    await mailbox.deposit(frame(dmEvent(1)));
+    // Message 2 reached the copy from a page of Slack's; its event comes late.
+    const context = { channel: "slack_app", teamId: TEAM, botUserId: BOT, chatId: "D_GUARDIAN" };
+    copy.keepRun(TEAM, "D_GUARDIAN", {
+      messages: [{ ts: said[1].ts, message: slackMessage(context, said[1])! }],
+      before: null,
+    });
+    await mailbox.deposit(frame(dmEvent(3)));
+    await mailbox.deposit(frame(dmEvent(2)));
+
+    expect(copy.timelineRow(TEAM, "D_GUARDIAN", said[2].ts)?.prevTs).toBeNull();
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("says where to read on when a page holds only messages it does not read", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    slack.say(1);
+    // Sixteen joins above it: a page of 15 keeps none.
+    for (let i = 2; i <= 17; i++) {
+      (slack.say(i) as { subtype?: string }).subtype = "channel_join";
+    }
+
+    await expect(a.readHistory("D_GUARDIAN" as never, { limit: 15 })).rejects.toThrow(
+      "Read on with olderThan=1700000000.000003",
+    );
+  });
+
+  it("counts toward a forward read's limit only messages within its time bound", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    const said = Array.from({ length: 10 }, (_, i) =>
+      slack.say(i + 1, "member", `${1700000000 + i + 1}.000000`),
+    );
+    for (let i = 1; i <= 10; i++) {
+      const event = dmEvent(i);
+      await mailbox.deposit(frame({ ...event, event: { ...event.event, ts: said[i - 1].ts } }));
+    }
+
+    const read = await a.readHistory("D_GUARDIAN" as never, {
+      newerThan: said[0].ts,
+      since: new Date((1700000000 + 5) * 1000),
+      limit: 2,
+    });
+    expect(texts(read)).toEqual(["message 6", "message 5"]);
+  });
+
   it("reads below its own upper bound when the newest message it holds is past it", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();

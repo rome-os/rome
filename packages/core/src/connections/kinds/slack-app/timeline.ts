@@ -32,6 +32,9 @@ export interface SlackHistoryPage {
   messages: Array<{ ts: string; message: ChannelMessage }>;
   /** Whether Slack holds older messages than the page within its bounds. */
   hasMore: boolean;
+  /** The oldest message Slack answered, kept or not: a page of only joins
+   *  or edits keeps none, while Slack holds older messages below it. */
+  oldest?: string;
 }
 
 /** One request for a page: only messages before `latest` (exclusive). */
@@ -155,6 +158,13 @@ export async function readTimeline(
     if (since !== undefined && compareTs(ts, since) < 0) break;
     if (within(ts)) found.push(message);
   }
+  // An empty answer reads as the chat's start, so a page Slack answered with
+  // none Rome reads says where to read on instead.
+  if (found.length === 0 && page.messages.length === 0 && page.hasMore && page.oldest) {
+    throw new Error(
+      `Slack's page of chat ${channelId} held only messages Rome does not read, such as joins or edits, and Slack holds older ones. Read on with olderThan=${page.oldest}.`,
+    );
+  }
   return found;
 }
 
@@ -187,7 +197,8 @@ async function readForward(
       ended = true;
       break;
     }
-    found.push(after);
+    // Messages before the read's lower bound take no room on the page.
+    if (since === undefined || compareTs(after.ts, since) >= 0) found.push(after);
     current = after.ts;
   }
   const done = known && (found.length >= read.limit || ended);
@@ -200,19 +211,17 @@ async function readForward(
     );
     deps.copy.keepRun(deps.teamId, channelId, { messages: page.messages, before: null });
     const newer = page.messages.filter(({ ts }) => compareTs(ts, from) > 0);
+    const wanted = newer.filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0);
     if (newer.length === page.messages.length && page.hasMore) {
       throw new Error(
         `More than ${page.messages.length} messages follow ${from} in Slack chat ${channelId}, and Slack answers its newest first. Read back from the newest with olderThan instead.`,
       );
     }
     found.length = 0;
-    for (const { ts, message } of [...newer].reverse()) {
+    for (const { ts, message } of [...wanted].reverse()) {
       if (found.length >= read.limit) break;
       found.push({ ts, prevTs: null, message });
     }
   }
-  return found
-    .filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0)
-    .reverse()
-    .map(({ message }) => message);
+  return found.reverse().map(({ message }) => message);
 }
