@@ -1464,7 +1464,11 @@ function readCondition(
       if (value !== undefined && subject) {
         const subjectText = subject.getText();
         const indexed = /path\[(\d+)\]$/.exec(subjectText);
-        if (/method$/i.test(subjectText) && HTTP_METHODS.has(value.toUpperCase())) {
+        // `m === "POST"` compares a method, whatever the name that holds it.
+        if (
+          (/method$/i.test(subjectText) && HTTP_METHODS.has(value.toUpperCase())) ||
+          (HTTP_METHODS.has(value) && ts.isIdentifier(subject))
+        ) {
           methods.push(value.toUpperCase());
         } else if (indexed) {
           segments.push({ index: Number(indexed[1]), value });

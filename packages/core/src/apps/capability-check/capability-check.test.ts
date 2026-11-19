@@ -528,6 +528,21 @@ declare class NoSchemaAction { constructor(config: unknown); }
     expect(verdict.unverified.map((u) => u.rule)).toContain("I2");
   });
 
+  it("I2: reads a method test on a name that holds the method", async () => {
+    const api = (COMPLIANT["src/api/index.ts"] as string).replace(
+      'if (request.method === "POST" && route === "notes") return this.add();',
+      `const m = request.method;
+    if (route === "notes") {
+      if (m === "POST") return this.add();
+      return [];
+    }`,
+    );
+    const page =
+      'import { fetchAppApi } from "@rome-os/app-web-sdk";\nexport const list = () => fetchAppApi("notes");\n';
+    const gaps = await gapsOf({ ...COMPLIANT, "src/api/index.ts": api, "src/web/App.tsx": page });
+    expect(gaps.map((g) => g.rule)).toContain("I2");
+  });
+
   it("I4: reports shared code the page is built from importing data", async () => {
     const gaps = await gapsOf({
       ...COMPLIANT,
