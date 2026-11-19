@@ -176,12 +176,13 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
       ["message 6", true],
     ]);
     expect(wiped).toEqual(full);
-    // The full copy asked Slack only what came before the first message it
-    // heard; the wiped one asked from the turn's time.
+    // Each asked Slack once, from the turn's time: a drain's first messages
+    // never say which is the chat's newest, since Slack may be retrying old
+    // ones, so the copy answers only once a read has asked Slack.
     const latestOf = (calls: typeof slack.conversationHistory.mock.calls) =>
       calls.map(([, input]) => input.latest);
     const calls = slack.conversationHistory.mock.calls;
-    expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual([tsOf(1)]);
+    expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual(["1700000040.000001"]);
     expect(latestOf(calls.slice(readsBeforeWiped))).toEqual(["1700000040.000001"]);
   });
 });
