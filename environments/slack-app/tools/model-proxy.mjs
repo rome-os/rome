@@ -44,7 +44,12 @@ createServer(async (req, res) => {
     );
   }
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  try {
+    for await (const c of req) chunks.push(c);
+  } catch {
+    // The instance went away mid-upload: nothing to forward or answer.
+    return res.destroy();
+  }
   let body = Buffer.concat(chunks);
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k)) headers[k] = v;

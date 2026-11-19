@@ -93,3 +93,24 @@ test("a stream cut off upstream ends that response and leaves the proxy running"
   const next = await send(p.port, {});
   assert.equal(next.body.model, "claude-haiku-5-5");
 });
+
+test("an upload cut off by the instance leaves the proxy running", async () => {
+  const p = await startProxy({ MODEL_PROXY_API_KEY: "real-key" });
+  children.push(p.child);
+  let exited = false;
+  p.child.once("exit", () => {
+    exited = true;
+  });
+  const { connect } = await import("node:net");
+  const socket = connect(p.port, "127.0.0.1");
+  await new Promise((r) => socket.once("connect", r));
+  socket.write(
+    'POST /v1/messages HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"model":',
+  );
+  await new Promise((r) => setTimeout(r, 50));
+  socket.destroy();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(exited, false);
+  const next = await send(p.port, {});
+  assert.equal(next.body.model, "claude-haiku-5-5");
+});
