@@ -208,6 +208,13 @@ export interface Messages {
   query(request: MessageQuery): Promise<ChannelMessage[]>;
 
   /**
+   * True where `query` reads the platform live, which keeps messages in an
+   * order its own ids follow, so it takes `until`, `olderThan` and
+   * `newerThan`. Absent, a store keeps a copy and takes none of them.
+   */
+  readonly live?: boolean;
+
+  /**
    * The reads a People timeline makes per person, where the channel keeps a
    * copy that can answer them at a directory's scale. Null where it does not.
    */

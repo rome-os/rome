@@ -181,6 +181,16 @@ export function createAction(
           description:
             "The nextCursor a previous call returned: return the messages older than that page.",
         },
+        olderThan: {
+          type: "string",
+          description:
+            "A message id in the thread: return the messages said just before it. Needs threadId. Only Discord reads by message id.",
+        },
+        newerThan: {
+          type: "string",
+          description:
+            "A message id in the thread: return the messages said just after it, such as ones missed in a gap. Needs threadId. Only Discord reads by message id.",
+        },
         includeMessages: {
           type: "boolean",
           description:
@@ -199,10 +209,16 @@ export function createAction(
       const threadId = (args.threadId as string | undefined) ?? null;
       const limit = args.limit as number | undefined;
       const cursor = args.cursor as string | undefined;
-      const paging = limit !== undefined || cursor !== undefined;
+      const olderThan = args.olderThan as string | undefined;
+      const newerThan = args.newerThan as string | undefined;
+      const byMessage = olderThan !== undefined || newerThan !== undefined;
+      const paging = limit !== undefined || cursor !== undefined || byMessage;
       // Paging walks back through one chat; across every chat it has no use.
       if (paging && !threadId) {
-        return { status: "error", error: "Paging with limit or cursor needs a threadId." };
+        return {
+          status: "error",
+          error: "Paging with limit, cursor, olderThan or newerThan needs a threadId.",
+        };
       }
       const windowHours = (args.windowHours as number | undefined) ?? (paging ? undefined : 24);
       const since =
@@ -233,6 +249,8 @@ export function createAction(
           // the last day.
           since: since ?? new Date(0),
           ...(cursor ? { after: cursor } : {}),
+          ...(olderThan ? { olderThan } : {}),
+          ...(newerThan ? { newerThan } : {}),
           // Named whenever paging, so the page and the full-page check below
           // agree on its size.
           ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),

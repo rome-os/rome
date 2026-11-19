@@ -34,10 +34,34 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 
+/** What one read of a chat's history asks the platform for. Every bound is
+ *  optional, and `limit` is already defaulted and capped. */
+export interface TalkHistoryRead {
+  /** Only messages said at or after this instant. */
+  since?: Date;
+  /** Only messages said at or before this instant. */
+  until?: Date;
+  /** Only messages said before the one with this platform id. */
+  olderThan?: string;
+  /** Only messages said after the one with this platform id: the `limit`
+   *  right after it. Not with `olderThan`. */
+  newerThan?: string;
+  limit: number;
+}
+
+/** A chat's history as the platform keeps it, read live, so it holds
+ *  messages Rome never heard. */
+export interface TalkHistory {
+  /** The chat's messages within the bounds, newest first, at most `limit`.
+   *  Rejects with an error naming the chat when the account may not read it. */
+  read(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]>;
+}
+
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
+  history: TalkHistory;
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
@@ -370,6 +394,10 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
+      /** True when the talker reads a chat's history from the platform
+       *  (`TalkHistory`), so the channel it backs has a `messages` port read
+       *  live. Absent means it does not, and the channel reads no messages. */
+      reads?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */

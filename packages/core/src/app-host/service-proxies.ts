@@ -327,6 +327,7 @@ export class ChannelsServiceProxy implements ChannelsService {
         channel,
         ...query,
         ...(query.since ? { since: query.since.toISOString() } : {}),
+        ...(query.until ? { until: query.until.toISOString() } : {}),
       }),
     );
   }

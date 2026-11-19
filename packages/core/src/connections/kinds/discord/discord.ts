@@ -63,6 +63,8 @@ import {
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import type { TalkHistoryRead } from "../../types.js";
+import { readDiscordHistory } from "./discord-history.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
@@ -1425,6 +1427,28 @@ Use \`/channel agent clear\` to undo.`,
     const channel = await this.client.channels.fetch(address).catch(() => null);
     if (channel) return address;
     return this.directConversationFor(address);
+  }
+
+  /** `chatId`'s history as Discord keeps it, read live through REST
+   *  (discord-history.ts). A chat id that is a user's reads the DM with them,
+   *  as a send takes it. */
+  async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
+    const botUser = this.client.user;
+    const botId = botUser?.id ?? ((await this.rest.get(discordJs().Routes.user())) as { id: string }).id;
+    return readDiscordHistory(
+      {
+        get: (route, query) => this.rest.get(route, query ? { query } : {}),
+        botId,
+        textOf: (content) =>
+          discordInboundText(
+            content,
+            botUser ? { id: botUser.id, displayName: botUser.displayName } : { id: botId },
+          ),
+        directChannelFor: (userId) => this.directConversationFor(userId),
+      },
+      chatId,
+      read,
+    );
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {

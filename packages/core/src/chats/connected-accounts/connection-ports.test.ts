@@ -372,3 +372,82 @@ describe("send port", () => {
     await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(AccountNotConnected);
   });
 });
+
+describe("messages port", () => {
+  /** A Connection whose talker reads its chat history live, and records each
+   *  read it is asked for. */
+  function portsFor(reads: boolean | undefined) {
+    const asked: unknown[] = [];
+    const live = { talker: true };
+    const talker = {
+      send: async () => ({ chatId: "chat-1" }),
+      history: {
+        async read(chatId: string, read: unknown) {
+          asked.push({ chatId, ...(read as object) });
+          return [{ ...said("m1", chatId, 1), channel: "discord" }];
+        },
+      },
+    };
+    const connection = {
+      id: "conn-1",
+      service: "discord",
+      withTalker: (call: (talker: object) => unknown) => (live.talker ? call(talker) : undefined),
+      hearTalker: () => () => {},
+    };
+    const deps = {
+      registry: {
+        getDescriptor: () => ({ capabilities: { talker: { reads } } }),
+        find: () => [connection],
+        onUnlocked: () => {},
+        registeredKinds: () => ["discord"],
+      },
+      channelOf: () => "discord_2",
+    } as unknown as ConnectionPortsDeps;
+    return { messages: connectionPorts(deps, "discord", "discord_2")!.messages, asked, live };
+  }
+
+  const chatId = "chat-1" as ChatId;
+
+  it("is present only where the Talk reads history", () => {
+    expect(portsFor(undefined).messages).toBeNull();
+    expect(portsFor(true).messages).toMatchObject({ live: true, byAccount: null });
+  });
+
+  it("reads one chat live, naming the channel it backs", async () => {
+    const { messages, asked } = portsFor(true);
+
+    const page = await messages!.query({ chatId, newerThan: "5", limit: 5000 });
+
+    expect(page.map((message) => message.channel)).toEqual(["discord_2"]);
+    expect(asked).toEqual([{ chatId, newerThan: "5", limit: 1000 }]);
+    await expect(messages!.query({})).rejects.toThrow("reads one chat at a time");
+  });
+
+  it("reads after a cursor as older than its message, and the last day when unbounded", async () => {
+    const { messages, asked } = portsFor(true);
+    const before = Date.now();
+
+    await messages!.query({
+      chatId,
+      after: { source: "discord_2", timestamp: 1, direction: "inbound", ref: "chat-1:42", body: null },
+    });
+    await messages!.query({ chatId });
+
+    expect(asked[0]).toEqual({ chatId, olderThan: "42", limit: 100 });
+    const since = (asked[1] as { since: Date }).since.getTime();
+    expect(since).toBeGreaterThanOrEqual(before - 24 * HOUR);
+    expect(since).toBeLessThanOrEqual(Date.now() - 24 * HOUR);
+    await expect(
+      messages!.query({
+        chatId,
+        after: { source: "discord_2", timestamp: 1, direction: "inbound", ref: "other:42", body: null },
+      }),
+    ).rejects.toThrow("another chat");
+  });
+
+  it("says so while talk is locked", async () => {
+    const { messages, live } = portsFor(true);
+    live.talker = false;
+    await expect(messages!.query({ chatId })).rejects.toThrow("while its connection is locked");
+  });
+});

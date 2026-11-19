@@ -2,7 +2,10 @@ name: fetch_channel_history
 type: system
 description: >
   Fetch recent message history from a channel that keeps its messages, such
-  as WhatsApp, LinkedIn or the dashboard chat.
+  as WhatsApp, LinkedIn or the dashboard chat, or that reads them from the
+  platform, such as Discord, which needs threadId. On Discord, pass olderThan
+  or newerThan with a message id to read just before or after it, such as to
+  fill a gap in what you have seen.
   Pass threadId to fetch a specific thread, or omit it to fetch all accessible
   threads.
   Returns the newest messages as a markdown-formatted summary grouped by

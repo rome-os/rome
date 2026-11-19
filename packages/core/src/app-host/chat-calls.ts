@@ -42,7 +42,10 @@ const QueryParams = z
     channel: AccountOrChannel,
     chatId: z.string().optional(),
     since: z.string().datetime().optional(),
+    until: z.string().datetime().optional(),
     after: z.string().optional(),
+    olderThan: z.string().min(1).optional(),
+    newerThan: z.string().min(1).optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
@@ -110,7 +113,8 @@ export function chatWorkerCalls(
       });
     },
     "channels.query": async (params, caller) => {
-      const { channel, chatId, since, after, limit } = parseWorkerCallParams(
+      const { channel, chatId, since, until, after, olderThan, newerThan, limit } =
+        parseWorkerCallParams(
         "channels.query",
         QueryParams,
         params,
@@ -121,7 +125,10 @@ export function chatWorkerCalls(
         channelsService.query(channel, {
           ...(chatId ? { chatId: chatId as ChatId } : {}),
           ...(since ? { since: new Date(since) } : {}),
+          ...(until ? { until: new Date(until) } : {}),
           ...(after ? { after } : {}),
+          ...(olderThan ? { olderThan } : {}),
+          ...(newerThan ? { newerThan } : {}),
           ...(limit ? { limit } : {}),
         }),
       );
