@@ -52,7 +52,7 @@ export function UpgradeWhatsNew({
   return (
     <section aria-labelledby={headingId} className={cn("flex flex-col gap-3", className)}>
       <div>
-        <h3 id={headingId} className="text-ui font-medium text-foreground">
+        <h3 id={headingId} className="text-section text-foreground">
           {heading}
         </h3>
         {notes?.releases[0] ? <ReleasedOn date={notes.releases[0].date} /> : null}
@@ -167,7 +167,7 @@ function Loaded({ notes }: { notes: ReleaseNotesRange }) {
 function EntrySection({ title, entries }: { title: string; entries: ReleaseNotesRangeEntry[] }) {
   return (
     <div className="flex flex-col gap-1">
-      <h4 className="text-aux font-medium text-muted-foreground">{title}</h4>
+      <h4 className="text-badge text-muted-foreground">{title}</h4>
       <EntryList entries={entries} withVersion={false} />
     </div>
   );
@@ -184,7 +184,7 @@ function EntryList({
     <ul className="flex list-disc flex-col gap-1 pl-5 text-ui">
       {entries.map((entry, index) => (
         <li key={`${entry.version}-${entry.pr ?? index}`} className="[overflow-wrap:anywhere]">
-          {entry.scope ? <span className="font-medium">{scopeName(entry.scope)}: </span> : null}
+          {entry.scope ? <span className="text-badge">{scopeName(entry.scope)}: </span> : null}
           {sentenceCase(entry.text)}
           {withVersion ? (
             <span className="text-aux text-muted-foreground"> · {entry.version}</span>
