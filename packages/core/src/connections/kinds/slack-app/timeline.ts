@@ -78,12 +78,11 @@ export function noteInDrain(
   const head = deps.heads.get(channelId);
   const follows = head !== undefined && compareTs(head, ts) < 0;
   const held = deps.copy.timelineRow(deps.teamId, channelId, ts);
-  // A drain's first message heads the chat only when it is new to the copy
-  // and nothing newer is held: one the copy held, or one older than what it
-  // holds, is Slack sending a backlog, such as a retry into a new drain, and
-  // newer messages may have been said since.
-  const heads =
-    follows || (head === undefined && !held && !deps.copy.holdsNewer(deps.teamId, channelId, ts));
+  // A drain's first message never heads the chat: it may be Slack sending a
+  // backlog, such as a retry into a new drain, and newer messages may have
+  // been said since, whether or not the copy holds them. The chat's newest is
+  // known again once a read with no upper bound asks Slack (readTimeline).
+  const heads = follows;
   if (!held) {
     deps.copy.keepRun(deps.teamId, channelId, {
       messages: [{ ts, message }],

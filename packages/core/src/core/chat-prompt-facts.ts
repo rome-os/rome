@@ -80,7 +80,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       read.catch(() => {});
       const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
       if (!page) return null;
-      const said = earlierMessages(page, cutOf(page, before, key));
+      const said = earlierMessages(...olderThan(page, before, key));
       const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
       return labelled.map(
         (message, i): UnseenMessage => ({
@@ -94,11 +94,17 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
   };
 }
 
-/** Where the earlier messages end: before the page's message keyed `key`,
- *  the session's first, when the page holds it, and before `before` when not. */
-function cutOf(page: readonly ChannelMessage[], before: Date, key: string | undefined): Date {
-  const opening = key === undefined ? undefined : page.find((m) => m.messageId === key);
-  return opening ? opening.timestamp : before;
+/** The messages of `page`, newest first, said before the session's first
+ *  message, with the bound they were said before. Where the page holds that
+ *  message, by its key, it is the page's own order that cuts, so a message
+ *  said in the same millisecond is kept; where not, `before` does. */
+function olderThan(
+  page: readonly ChannelMessage[],
+  before: Date,
+  key: string | undefined,
+): [readonly ChannelMessage[], Date] {
+  const at = key === undefined ? -1 : page.findIndex((m) => m.messageId === key);
+  return at < 0 ? [page, before] : [page.slice(at + 1), new Date(8.64e15)];
 }
 
 /** The messages of `page` said before `before`, oldest first, within the
