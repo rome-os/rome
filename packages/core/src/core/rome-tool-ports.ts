@@ -107,12 +107,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
 
   const actions: AgentActions = {
     list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
+    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
-    permits: (turn, name) =>
-      actionRegistry.getForAgent([...turn.actions]).some((action) => action.config.name === name),
+    permits: (turn, name) => actions.find(turn, name) !== undefined,
     run: (turn, name, input) =>
       turn.inTurn(() =>
         asTurnActor(turn, async (actor) => {

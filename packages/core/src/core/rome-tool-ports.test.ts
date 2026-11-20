@@ -98,6 +98,14 @@ describe("romeToolPorts actions", () => {
     );
   });
 
+  it("finds an action the turn's agent may call by its full ID, and no other", () => {
+    const { actions } = ports();
+    expect(actions.find(turn(), "system:send_message")?.name).toBe("system:send_message");
+    expect(actions.find(turn(), "send_message")).toBeUndefined();
+    expect(actions.find(turn(), "secret")).toBeUndefined();
+    expect(actions.find(turn(), "missing")).toBeUndefined();
+  });
+
   it("runs a permitted action attributed to the turn, and refuses any other", async () => {
     const { actions, run } = ports();
     await actions.run(turn(), "system:send_message", { text: "hi" });
