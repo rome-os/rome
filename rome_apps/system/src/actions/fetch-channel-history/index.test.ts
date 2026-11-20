@@ -361,8 +361,8 @@ describe("fetch_channel_history", () => {
       expect(query).not.toHaveBeenCalled();
     });
 
-    it("resumes after a cursor, and ends with no cursor on a short page", async () => {
-      const { query, action } = pagedDeps([at("m1", 1, "c1")]);
+    it("resumes after a cursor, and ends with no cursor on an empty page", async () => {
+      const { query, action } = pagedDeps([]);
       const result = await action.execute({
         channel: "webchat",
         threadId: "chat-1",
@@ -377,6 +377,44 @@ describe("fetch_channel_history", () => {
         limit: 2,
       });
       expect((result as { data: { nextCursor: string | null } }).data.nextCursor).toBeNull();
+    });
+
+    it("pages on past a short page that a platform read live cut at 15 messages", async () => {
+      // Slack keeps 40 messages, and answers at most 15 at a time.
+      const all = Array.from({ length: 40 }, (_, i) => at(`m${40 - i}`, 40 - i, `c${40 - i}`));
+      const query = rs.fn<ChannelsService["query"]>(async (_target, read) => {
+        const from = read?.after ? all.findIndex((m) => m.cursor === read.after) + 1 : 0;
+        return all.slice(from, from + Math.min(read?.limit ?? 100, 15));
+      });
+      const action = createAction(actionConfig, {
+        channelsService: {
+          list: async () => [{ name: "slack", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      const read: string[] = [];
+      let cursor: string | undefined;
+      for (let call = 0; call < 10; call++) {
+        const result = await action.execute({
+          channel: "slack",
+          threadId: "C1",
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+          includeMessages: true,
+        });
+        const data = (result as { data: { nextCursor: string | null; messages: { id: string }[] } })
+          .data;
+        read.push(...data.messages.map((m) => m.id));
+        if (!data.nextCursor) break;
+        cursor = data.nextCursor;
+      }
+
+      expect(read).toHaveLength(40);
+      expect(new Set(read).size).toBe(40);
+      // Three pages of 15, 15 and 10, then one empty read that ends paging.
+      expect(query).toHaveBeenCalledTimes(4);
     });
   });
 });

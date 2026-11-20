@@ -233,12 +233,12 @@ export function createAction(
           // the last day.
           since: since ?? new Date(0),
           ...(cursor ? { after: cursor } : {}),
-          // Named whenever paging, so the page and the full-page check below
-          // agree on its size.
           ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),
         });
-        // A full page may have older messages behind it; a short one does not.
-        if (paging && page.length >= (limit ?? DEFAULT_LIMIT)) {
+        // Any page but an empty one may have older messages behind it: a
+        // platform read live can answer fewer than the limit while it holds
+        // more, as Slack answers at most 15. Paging ends on an empty page.
+        if (paging && page.length > 0) {
           nextCursor = page.at(-1)?.cursor ?? null;
         }
         // `query` answers newest first; the transcript reads oldest first.
