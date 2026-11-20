@@ -6,7 +6,9 @@
 //   scripts/test-env.sh env SONIOX_TTS_KEY_FILE=/path/to/key.txt pnpm exec rstest -c packages/core/rstest.config.ts packages/core/src/voice-output/soniox-speaker.integration.test.ts
 //
 // It prints what it measured: time to the first audio, time to stop, and
-// whether a fourth stream at once ran into the account's limit.
+// whether four sentences said at once all get spoken, in order, with the
+// default of two streams and with five allowed (which runs into the account's
+// limit of three).
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "@rstest/core";
@@ -15,7 +17,7 @@ import type { SpeakerAudioFrame, SpeakerError, SpeakerListener } from "./speaker
 
 const keyFile = process.env.SONIOX_TTS_KEY_FILE;
 const withKey = keyFile ? describe : describe.skip;
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 300_000;
 
 const SENTENCES = [
   "帮我看一下 pr#2345 的 CI 有没有过。",
@@ -103,7 +105,7 @@ const median = (values: number[]): number => {
 
 withKey("soniox speaker against the real service", () => {
   it(
-    "speaks three mixed sentences, stops at once, and reports a full account as busy",
+    "speaks three mixed sentences, stops at once, and speaks four at once in order",
     async () => {
       const longKey = readFileSync(keyFile as string, "utf8").trim();
       secrets.push(longKey);
@@ -186,17 +188,66 @@ withKey("soniox speaker against the real service", () => {
       expect(stopRun.failed.size).toBe(0);
       stopSession.close();
 
-      // 4. Four long sentences at once: the account allows 3 streams by default.
+      // 4. Four long sentences at once. With the default of two streams the
+      // account's limit of three is never reached; the other two wait.
+      const defaultRun = run();
+      const defaultSession = speaker.open(defaultRun.listener);
+      for (let i = 0; i < 4; i++) {
+        defaultRun.at.set(`d${i}`, performance.now());
+        defaultSession.say(`d${i}`, LONG);
+      }
+      await waitFor(
+        () => defaultRun.ended.size + defaultRun.failed.size === 4,
+        "four sentences",
+        120_000,
+      );
+      const startedInOrder = [0, 1, 2, 3].map(
+        (i) => defaultRun.firstFrameAt.get(`d${i}`) as number,
+      );
+      show("four at once, default streams", {
+        ended: [...defaultRun.ended.keys()],
+        failed: [...defaultRun.failed].map(([id, e]) => [id, e.kind, e.providerCode]),
+        firstAudioMs: startedInOrder.map((t, i) =>
+          Math.round(t - (defaultRun.at.get(`d${i}`) as number)),
+        ),
+      });
+      expect(defaultRun.failed.size).toBe(0);
+      expect(defaultRun.ended.size).toBe(4);
+      // The first two start together, and the other two only as they end.
+      expect(Math.max(startedInOrder[0] as number, startedInOrder[1] as number)).toBeLessThan(
+        Math.min(startedInOrder[2] as number, startedInOrder[3] as number),
+      );
+      defaultSession.close();
+
+      // 5. The same with five streams allowed: the account refuses one, and the
+      // session holds that sentence and speaks it in its turn.
       const busyRun = run();
-      const busySession = speaker.open(busyRun.listener);
-      for (let i = 0; i < 4; i++) busySession.say(`b${i}`, LONG);
-      await waitFor(() => busyRun.ended.size + busyRun.failed.size === 4, "four sentences", 90_000);
-      const busy = [...busyRun.failed].filter(([, e]) => e.kind === "busy").map(([id]) => id);
-      show("four at once", {
+      const busySession = createSonioxSpeaker({
+        token,
+        voice: "Iris",
+        language: "zh",
+        maxConcurrentStreams: 5,
+      }).open(busyRun.listener);
+      for (let i = 0; i < 4; i++) {
+        busyRun.at.set(`b${i}`, performance.now());
+        busySession.say(`b${i}`, LONG);
+      }
+      await waitFor(
+        () => busyRun.ended.size + busyRun.failed.size === 4,
+        "four sentences",
+        120_000,
+      );
+      show("four at once, five streams allowed", {
         ended: [...busyRun.ended.keys()],
         failed: [...busyRun.failed].map(([id, e]) => [id, e.kind, e.providerCode]),
-        busyTriggered: busy.length > 0,
+        firstAudioMs: [0, 1, 2, 3].map((i) =>
+          Math.round(
+            (busyRun.firstFrameAt.get(`b${i}`) as number) - (busyRun.at.get(`b${i}`) as number),
+          ),
+        ),
       });
+      expect(busyRun.failed.size).toBe(0);
+      expect(busyRun.ended.size).toBe(4);
       busySession.close();
       session.close();
 
@@ -204,6 +255,7 @@ withKey("soniox speaker against the real service", () => {
       const errors = [
         ...first.failed.values(),
         ...stopRun.failed.values(),
+        ...defaultRun.failed.values(),
         ...busyRun.failed.values(),
       ].map((e) => e.message);
       for (const secret of secrets)

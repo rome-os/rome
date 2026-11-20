@@ -108,7 +108,7 @@ Voice conversation mode lets Rome speak its replies. The speaking module in [`pa
 - With the gate off, Rome makes no speaker, asks for no credential and opens no connection to a speech provider.
 - With the gate on and no credential source, Rome says speaking is not set up. It does not fall back to a long-lived provider key.
 - The text Rome speaks goes from the instance to the speech provider. It is a new outbound flow that [voice input](#voice-input) does not have.
-- Each sentence is its own stream at the provider, so its audio starts without waiting for later text. The provider allows a few streams at once per account. A sentence that finds the account full fails with a `busy` error and is not retried.
+- Each sentence is its own stream at the provider, so its audio starts without waiting for later text. A session runs two streams at once by default, and more sentences wait their turn in order. The provider allows three streams at once per account by default. When it has no room for a stream, the session puts that sentence back at the head of its queue, runs no more streams than are running then, and starts the sentence again when one ends. When none of its streams is running, it tries again after 250 ms, 500 ms, 1 s, then every 2 s. A sentence fails with a `busy` error only after those waits add up to 10 s, or when the provider refuses the connection itself as one too many.
 - Stopping speech drops the audio of every running and waiting sentence at once, without waiting for the provider to confirm.
 - Errors and logs never carry the credential.
 

@@ -145,7 +145,7 @@ describe("soniox speaker: one stream per sentence", () => {
 
   it("sends each sentence on its own stream and closes it with text_end in the same message", async () => {
     const heard = listen();
-    const session = open(heard);
+    const session = open(heard, { maxConcurrentStreams: 3 });
     session.say("one", "好的，我帮你看一下。");
     session.say("two", "pr#2345 的 CI 已经通过了。");
     session.say("three", "Only one lint warning.");
@@ -243,7 +243,7 @@ describe("soniox speaker: one stream per sentence", () => {
 describe("soniox speaker: concurrency and stream ids", () => {
   it("runs at most five streams on a connection and starts the next sentence as one ends", async () => {
     const heard = listen();
-    const session = open(heard);
+    const session = open(heard, { maxConcurrentStreams: 5 });
     for (let i = 1; i <= 7; i++) session.say(`n${i}`, `第${i}句。`);
     await until(() => texts().length === 5);
     expect(texts().map((m) => m.stream_id)).toEqual(["s1", "s2", "s3", "s4", "s5"]);
@@ -260,6 +260,22 @@ describe("soniox speaker: concurrency and stream ids", () => {
     await until(() => texts().length === 7);
     expect(texts()[6]).toMatchObject({ text: "第7句。" });
     expect(heard.ended).toEqual(["n3", "n1"]);
+  });
+
+  it("runs two streams at once by default and queues the third sentence", async () => {
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    session.say("b", "乙。");
+    session.say("c", "丙。");
+    await until(() => texts().length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(texts().map((m) => m.text)).toEqual(["甲。", "乙。"]);
+
+    fake.send(audioMessage("s2", pcm(1), true));
+    fake.send(terminatedMessage("s2"));
+    await until(() => texts().length === 3);
+    expect(texts()[2]).toMatchObject({ stream_id: "s2", text: "丙。" });
   });
 
   it("uses fewer streams when asked to, and never more than five", async () => {
@@ -454,9 +470,6 @@ describe("soniox speaker: stop", () => {
 
 describe("soniox speaker: errors", () => {
   const cases: Array<[number, string, SpeakerErrorKind]> = [
-    [400, "max_concurrent_streams_reached", "busy"],
-    [429, "limit_exceeded", "busy"],
-    [429, "max_concurrent_connections_reached", "busy"],
     [402, "organization_balance_exhausted", "quota-exhausted"],
     [402, "organization_monthly_budget_exhausted", "quota-exhausted"],
     [402, "project_monthly_budget_exhausted", "quota-exhausted"],
@@ -522,19 +535,6 @@ describe("soniox speaker: errors", () => {
     await until(() => heard.failed.has("long"));
     expect(heard.frames).toHaveLength(1);
     expect(heard.failed.get("long")?.kind).toBe("output-too-long");
-  });
-
-  it("does not retry a busy sentence", async () => {
-    const heard = listen();
-    const session = open(heard);
-    session.say("a", "甲。");
-    await until(() => texts().length === 1);
-    fake.send(errorMessage("s1", 429, "limit_exceeded"));
-    fake.send(terminatedMessage("s1"));
-    await until(() => heard.failed.has("a"));
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(texts()).toHaveLength(1);
-    expect(heard.failed.get("a")?.kind).toBe("busy");
   });
 
   it("gives up a stream the provider goes quiet on, tells it to cancel, and says timeout", async () => {
@@ -758,6 +758,243 @@ describe("soniox speaker: sentences too long for one stream", () => {
     await until(() => heard.failed.has("long"));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(texts()).toHaveLength(1);
+  });
+});
+
+const BUSY_TYPES: Array<[number, string]> = [
+  [400, "max_concurrent_streams_reached"],
+  [429, "limit_exceeded"],
+  [429, "max_concurrent_connections_reached"],
+];
+
+/** The server answers every stream with `busy` and its end, as a full account does. */
+function alwaysBusy(status: number, type: string): void {
+  fake.onMessage = (message, reply) => {
+    if (message.text === undefined) return;
+    const id = message.stream_id as string;
+    reply(errorMessage(id, status, type));
+    reply(terminatedMessage(id));
+  };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+describe("soniox speaker: an account with no room", () => {
+  for (const [status, type] of BUSY_TYPES) {
+    it(`holds a sentence that got ${type}, runs fewer streams, and speaks it in its turn`, async () => {
+      const heard = listen();
+      const session = open(heard, { maxConcurrentStreams: 3 });
+      session.say("a", "甲。");
+      session.say("b", "乙。");
+      session.say("c", "丙。");
+      session.say("d", "丁。");
+      await until(() => texts().length === 3);
+
+      fake.send(errorMessage("s3", status, type));
+      fake.send(terminatedMessage("s3"));
+      await settle();
+      // No failure, and no new stream: the two running ones are the most it runs now.
+      expect(heard.failed.size).toBe(0);
+      expect(texts()).toHaveLength(3);
+
+      // A stream ends: the held sentence starts again, ahead of the one said after it.
+      fake.send(audioMessage("s1", pcm(1), true));
+      fake.send(terminatedMessage("s1"));
+      await until(() => texts().length === 4);
+      expect(texts()[3]).toMatchObject({ text: "丙。" });
+      await settle();
+      expect(texts()).toHaveLength(4);
+
+      fake.send(audioMessage("s2", pcm(2), true));
+      fake.send(terminatedMessage("s2"));
+      await until(() => texts().length === 5);
+      expect(texts()[4]).toMatchObject({ text: "丁。" });
+      expect(heard.failed.size).toBe(0);
+      expect(heard.closed).toEqual([]);
+    });
+  }
+
+  it("keeps the lower limit for the rest of the session", async () => {
+    const heard = listen();
+    const session = open(heard, { maxConcurrentStreams: 4 });
+    for (const [i, text] of ["甲。", "乙。", "丙。", "丁。"].entries()) session.say(`n${i}`, text);
+    await until(() => texts().length === 4);
+    // The fourth is refused while three run.
+    fake.send(errorMessage("s4", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s4"));
+    await settle();
+    for (const id of ["s1", "s2", "s3"]) {
+      fake.send(audioMessage(id, pcm(1), true));
+      fake.send(terminatedMessage(id));
+    }
+    await until(() => texts().length === 5);
+    session.say("e", "戊。");
+    session.say("f", "己。");
+    session.say("g", "庚。");
+    await until(() => texts().length === 7);
+    await settle();
+    // The held sentence and three more: at most three at once, as when the account said no.
+    expect(texts()).toHaveLength(7);
+    expect(heard.failed.size).toBe(0);
+  });
+
+  it("holds the part of a long sentence that was refused, not the whole sentence", async () => {
+    const heard = listen();
+    const session = open(heard, { splitLimits: { maxChars: 10, maxSeconds: 100 } });
+    session.say("long", "aaaa bbbb cccc dddd");
+    await until(() => texts().length === 1);
+    expect(texts()[0]?.text).toBe("aaaa bbbb");
+    fake.send(audioMessage("s1", pcm(1), true));
+    fake.send(terminatedMessage("s1"));
+    await until(() => texts().length === 2);
+    expect(texts()[1]?.text).toBe("cccc dddd");
+
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+    clock.advance(250);
+    await until(() => texts().length === 3);
+    expect(texts()[2]?.text).toBe("cccc dddd");
+    fake.send(audioMessage("s1", pcm(2), true));
+    fake.send(terminatedMessage("s1"));
+    await until(() => heard.ended.length === 1);
+    expect(heard.failed.size).toBe(0);
+  });
+
+  it("waits 250 ms, 500 ms, 1 s, then 2 s at a time when none of its streams is running", async () => {
+    alwaysBusy(429, "limit_exceeded");
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    await until(() => texts().length === 1);
+    await settle();
+
+    for (const [i, wait] of [250, 500, 1000, 2000, 2000, 2000, 2000, 2000].entries()) {
+      clock.advance(wait - 1);
+      await settle();
+      expect(texts()).toHaveLength(i + 1);
+      clock.advance(1);
+      await until(() => texts().length === i + 2, `attempt ${i + 2}`);
+      await settle();
+    }
+    // The waits so far add up to 11.75 s: the ninth refusal is final.
+    await until(() => heard.failed.has("a"), "the sentence to fail");
+    expect(heard.failed.get("a")?.kind).toBe("busy");
+    expect(texts()).toHaveLength(9);
+    expect(heard.closed).toEqual([]);
+    expect(heard.ended).toEqual([]);
+  });
+
+  for (const [status, type] of BUSY_TYPES) {
+    it(`fails the sentence as busy at last when the account keeps saying ${type}`, async () => {
+      alwaysBusy(status, type);
+      const heard = listen();
+      const session = open(heard);
+      session.say("a", "甲。");
+      await until(() => texts().length === 1);
+      for (let i = 1; i < 9; i++) {
+        await settle();
+        clock.advance(2_000);
+        await until(() => texts().length === i + 1);
+      }
+      await until(() => heard.failed.has("a"));
+      expect(heard.failed.get("a")).toMatchObject({ kind: "busy", providerCode: type });
+    });
+  }
+
+  it("starts the waits over after a stream gets through", async () => {
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    await until(() => texts().length === 1);
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+    clock.advance(250);
+    await until(() => texts().length === 2);
+    fake.send(audioMessage("s1", pcm(1), true));
+    fake.send(terminatedMessage("s1"));
+    await until(() => heard.ended.includes("a"));
+
+    session.say("b", "乙。");
+    await until(() => texts().length === 3);
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+    clock.advance(250);
+    await until(() => texts().length === 4);
+  });
+
+  it("sends the sentences held behind a refused one in the order they were said", async () => {
+    const heard = listen();
+    const session = open(heard, { maxConcurrentStreams: 2 });
+    session.say("a", "甲。");
+    session.say("b", "乙。");
+    session.say("c", "丙。");
+    await until(() => texts().length === 2);
+    // Both running streams are refused, in the opposite order.
+    fake.send(errorMessage("s2", 429, "limit_exceeded"));
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s2"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+    clock.advance(250);
+    await until(() => texts().length === 3);
+    fake.send(audioMessage("s2", pcm(1), true));
+    fake.send(terminatedMessage("s2"));
+    await until(() => texts().length === 4);
+    fake.send(audioMessage("s1", pcm(1), true));
+    fake.send(terminatedMessage("s1"));
+    await until(() => texts().length === 5);
+    expect(
+      texts()
+        .slice(2)
+        .map((m) => m.text),
+    ).toEqual(["甲。", "乙。", "丙。"]);
+    expect(heard.failed.size).toBe(0);
+  });
+
+  it("drops the wait when stop() is called, and speaks the next sentence at once", async () => {
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    await until(() => texts().length === 1);
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+
+    expect(session.stop()).toEqual(["a"]);
+    clock.advance(10_000);
+    await settle();
+    expect(texts()).toHaveLength(1);
+    expect(heard.failed.size).toBe(0);
+
+    session.say("b", "乙。");
+    await until(() => texts().length === 2);
+    expect(texts()[1]).toMatchObject({ text: "乙。" });
+  });
+
+  it("clears the wait timer when the session closes", async () => {
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    await until(() => texts().length === 1);
+    fake.send(errorMessage("s1", 429, "limit_exceeded"));
+    fake.send(terminatedMessage("s1"));
+    await settle();
+    session.close();
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("still fails the whole session on a connection-level refusal that names no stream", async () => {
+    const heard = listen();
+    const session = open(heard);
+    session.say("a", "甲。");
+    await until(() => texts().length === 1);
+    fake.send(errorMessage(undefined, 429, "max_concurrent_connections_reached"));
+    await until(() => heard.closed.length === 1);
+    expect(heard.closed[0]?.kind).toBe("busy");
+    expect(heard.failed.get("a")?.kind).toBe("busy");
   });
 });
 

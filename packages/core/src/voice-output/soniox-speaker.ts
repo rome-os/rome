@@ -26,6 +26,16 @@ const SONIOX_TTS_SAMPLE_RATE = 24_000;
 
 /** Streams one connection runs at once. Fixed by Soniox. */
 const SONIOX_TTS_MAX_STREAMS_PER_CONNECTION = 5;
+// Streams a session runs at once unless told otherwise. An account runs 3 by
+// default, and the account's streams are all its sessions' together, so one
+// session starts below that.
+const SONIOX_TTS_DEFAULT_CONCURRENT_STREAMS = 2;
+// When the account is full and nothing of this session's is running to wait
+// for, a sentence is tried again after 250 ms, 500 ms, 1 s, then every 2 s,
+// and fails as busy once the waits add up to 10 s.
+const BUSY_BACKOFF_FIRST_MS = 250;
+const BUSY_BACKOFF_LONGEST_MS = 2_000;
+const BUSY_GIVE_UP_MS = 10_000;
 /** Soniox closes a connection that has been silent for about 43 s. */
 const SONIOX_TTS_KEEP_ALIVE_MS = 25_000;
 // How long the provider has to accept the connection.
@@ -54,7 +64,11 @@ export interface SonioxSpeakerOptions {
   /** The main language of the text, which sets the prosody. Any voice speaks any language. */
   language?: string;
   sampleRate?: number;
-  /** Streams run at once on the connection, at most 5. More sentences wait their turn. */
+  /**
+   * Streams this session runs at once, 2 unless set, and at most 5 for the
+   * connection. More sentences wait their turn. The session lowers it for good
+   * when the provider says the account is full.
+   */
   maxConcurrentStreams?: number;
   keepAliveMs?: number;
   connectTimeoutMs?: number;
@@ -98,7 +112,8 @@ class SonioxSession implements SpeakerSession {
   private readonly model: string;
   private readonly voice: string;
   private readonly language: string;
-  private readonly maxStreams: number;
+  // Streams run at once. Only ever lowered after the constructor.
+  private maxStreams: number;
   private readonly keepAliveMs: number;
   private readonly stallMs: number;
   private readonly splitLimits: SplitLimits;
@@ -119,6 +134,11 @@ class SonioxSession implements SpeakerSession {
   private idCount = 0;
   private stopConnecting: () => void = () => {};
   private stopKeepAlive: () => void = () => {};
+  // Set while a sentence the account had no room for waits to be tried again.
+  private backingOff = false;
+  private stopBackoff: () => void = () => {};
+  private busyRetries = 0;
+  private busyWaitedMs = 0;
 
   constructor(
     private readonly options: SonioxSpeakerOptions,
@@ -135,7 +155,7 @@ class SonioxSession implements SpeakerSession {
     this.maxStreams = Math.max(
       1,
       Math.min(
-        options.maxConcurrentStreams ?? SONIOX_TTS_MAX_STREAMS_PER_CONNECTION,
+        options.maxConcurrentStreams ?? SONIOX_TTS_DEFAULT_CONCURRENT_STREAMS,
         SONIOX_TTS_MAX_STREAMS_PER_CONNECTION,
       ),
     );
@@ -205,6 +225,7 @@ class SonioxSession implements SpeakerSession {
     for (const sentence of this.live) sentence.over = true;
     this.live = [];
     this.waiting = [];
+    this.endBackoff();
     for (const stream of this.streams.values()) this.drop(stream, true);
     return stopped;
   }
@@ -218,7 +239,12 @@ class SonioxSession implements SpeakerSession {
   // --- starting streams ---
 
   private pump(): void {
-    while (this.connected && !this.closed && this.streams.size < this.maxStreams) {
+    while (
+      this.connected &&
+      !this.closed &&
+      !this.backingOff &&
+      this.streams.size < this.maxStreams
+    ) {
       const sentence = this.waiting.shift();
       if (!sentence) break;
       if (sentence.parts.length === 0) {
@@ -287,6 +313,9 @@ class SonioxSession implements SpeakerSession {
       pcm = pcm.subarray(0, pcm.length - 1);
     }
     if (pcm.length === 0) return;
+    // The provider has room again.
+    this.busyRetries = 0;
+    this.busyWaitedMs = 0;
     this.listener.onAudio({ sentenceId: stream.sentence.id, streamId: stream.id, pcm });
   }
 
@@ -295,8 +324,55 @@ class SonioxSession implements SpeakerSession {
     if (!stream) return;
     // The provider follows a stream's error with `terminated`; the stream
     // keeps its slot until then.
+    const running = !stream.dropped;
     this.drop(stream, false);
+    if (!running) return;
+    if (error.kind === "busy" && this.tryAgainLater(stream)) return;
     this.failSentence(stream.sentence, error);
+  }
+
+  /**
+   * The account has no room for the stream. Its sentence, from this part on,
+   * goes back to its place in the queue, and the session runs no more streams
+   * than are running now. Returns false when it has waited long enough.
+   */
+  private tryAgainLater(stream: Stream): boolean {
+    const { sentence } = stream;
+    if (sentence.over) return true;
+    const running = [...this.streams.values()].filter((s) => s !== stream && !s.dropped).length;
+    this.maxStreams = Math.min(this.maxStreams, Math.max(1, running));
+    // With a stream running, its end starts the sentence again. With none,
+    // nothing would, so wait a while and try.
+    if (running === 0 && !this.backingOff) {
+      if (this.busyWaitedMs >= BUSY_GIVE_UP_MS) {
+        this.busyRetries = 0;
+        this.busyWaitedMs = 0;
+        return false;
+      }
+      const wait = Math.min(BUSY_BACKOFF_FIRST_MS * 2 ** this.busyRetries, BUSY_BACKOFF_LONGEST_MS);
+      this.busyRetries++;
+      this.busyWaitedMs += wait;
+      this.backingOff = true;
+      this.stopBackoff = this.schedule(wait, () => {
+        this.backingOff = false;
+        this.pump();
+      });
+    }
+    sentence.next--;
+    // Sentences start in the order they were said.
+    const order = (s: Sentence) => this.live.indexOf(s);
+    const at = this.waiting.findIndex((w) => order(w) > order(sentence));
+    if (at === -1) this.waiting.push(sentence);
+    else this.waiting.splice(at, 0, sentence);
+    return true;
+  }
+
+  private endBackoff(): void {
+    this.stopBackoff();
+    this.stopBackoff = () => {};
+    this.backingOff = false;
+    this.busyRetries = 0;
+    this.busyWaitedMs = 0;
   }
 
   private terminated(stream: Stream): void {
@@ -398,6 +474,7 @@ class SonioxSession implements SpeakerSession {
   private shutDown(): void {
     this.stopConnecting();
     this.stopKeepAlive();
+    this.stopBackoff();
     for (const stream of this.streams.values()) stream.stop();
     this.streams.clear();
     this.ws.removeAllListeners();

@@ -11,7 +11,13 @@ export interface SpeakerAudioFormat {
 
 /** Why a sentence or a session failed, sorted by what the caller can do about it. */
 export type SpeakerErrorKind =
-  /** The provider has no room for another stream or connection for this account. Wait, or say fewer sentences at once. */
+  /**
+   * The provider has no room for this account. A stream the account has no room
+   * for is not an error at first: the session holds the sentence, runs fewer
+   * streams at once and tries again, so the sentence still speaks in its turn.
+   * This error means it kept finding no room for about 10 s, or that the
+   * provider refused the connection itself as one too many.
+   */
   | "busy"
   /** The credential is missing, wrong, expired or not allowed to speak. A new credential may help. */
   | "unauthorized"
