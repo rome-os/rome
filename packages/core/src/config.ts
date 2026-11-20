@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { containerNodeImageSchema } from "@rome/api-types/devices";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
 import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops/desktops.js";
@@ -118,6 +119,7 @@ const configSchema = z.object({
       host: z.string().default("127.0.0.1"),
       webhookApiKey: z.string().optional(),
       webRoot: z.string().optional(),
+      romeNodeDockerImage: containerNodeImageSchema.optional(),
     })
     .default(() => ({ port: 4141, host: "127.0.0.1" })),
 
@@ -233,6 +235,7 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
     internalApi.webhookApiKey = env.INTERNAL_API_WEBHOOK_API_KEY;
   }
   if (env.INTERNAL_API_WEB_ROOT) internalApi.webRoot = env.INTERNAL_API_WEB_ROOT;
+  if (env.ROME_NODE_DOCKER_IMAGE) internalApi.romeNodeDockerImage = env.ROME_NODE_DOCKER_IMAGE;
   raw.internalApi = internalApi;
 
   // Anthropic (optional — falls back to Claude subscription when unset)

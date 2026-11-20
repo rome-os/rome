@@ -23,11 +23,13 @@ it("returns device checks without credentials or caching at the HTTP edge", asyn
       token: "secret",
     }),
   }));
-  const response = await devicesRoutes({ nodeDevices }).request("/devices");
+  const image = `ghcr.io/rome-os/rome-node@sha256:${"a".repeat(64)}`;
+  const response = await devicesRoutes({ nodeDevices }, async () => image).request("/devices");
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   const body = await response.text();
   expect(body).toContain('"connected"');
+  expect(JSON.parse(body).dockerSetupImage).toBe(image);
   expect(body).not.toContain("secret");
   nodeDevices.close();
 });
@@ -63,7 +65,12 @@ describe("device status failures", () => {
         throw error;
       },
     }));
-    expect(await nodeDevices.getStatus()).toMatchObject({ connection, devices: [] });
+    const getDockerSetupImage = rs.fn();
+    const response = await devicesRoutes({ nodeDevices }, getDockerSetupImage).request("/devices");
+    const status = await response.json();
+    expect(status).toMatchObject({ connection, devices: [] });
+    expect(status.dockerSetupImage).toBeUndefined();
+    expect(getDockerSetupImage).not.toHaveBeenCalled();
     nodeDevices.close();
   });
 

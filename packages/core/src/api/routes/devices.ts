@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { CallerConfigurationError, DaemonVersionError } from "@rome-os/node-core/client";
 import { z } from "zod";
 import type { DeviceFilesErrorCode, DeviceManageErrorCode } from "@rome/api-types/devices";
@@ -22,11 +22,20 @@ const manageErrorStatus = {
 
 const renameSchema = z.object({ name: z.string() });
 
-export function devicesRoutes(deps: Pick<ApiDeps, "nodeDevices">): Hono {
+export function devicesRoutes(
+  deps: Pick<ApiDeps, "nodeDevices">,
+  getDockerSetupImage?: (c: Context) => Promise<string | undefined>,
+): Hono {
   const app = new Hono();
   app.get("/devices", async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json(await deps.nodeDevices.getStatus());
+    const status = await deps.nodeDevices.getStatus();
+    const dockerSetupImage = ["not_configured", "unavailable", "incompatible"].includes(
+      status.connection,
+    )
+      ? undefined
+      : await getDockerSetupImage?.(c);
+    return c.json({ ...status, dockerSetupImage });
   });
   // The chat folder picker's device list. Probes nothing: a device is probed
   // only when the guardian opens it.

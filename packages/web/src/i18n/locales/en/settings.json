@@ -1042,8 +1042,8 @@
       "download": "Download Compose",
       "copyFailed": "Clipboard access failed. Download the Compose file instead.",
       "errors": {
-        "sign_in_required": "Sign in as the owner of this Rome instance to authorize the device.",
-        "not_configured": "Link this Rome instance to Rome Cloud to generate Compose.",
+        "sign_in_required": "Sign in with this instance's Rome Cloud account to authorize the device.",
+        "not_configured": "Docker Compose setup is unavailable on this Rome instance.",
         "approval_account_mismatch": "This device was not found in this Rome Cloud account. Try again with the account that owns this Rome.",
         "authorization_failed": "Device authorization did not complete. Try again.",
         "unavailable": "Could not generate Compose. Try again.",

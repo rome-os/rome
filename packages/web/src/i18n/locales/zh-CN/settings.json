@@ -1042,8 +1042,8 @@
       "download": "下载 Compose",
       "copyFailed": "无法访问剪贴板，请下载 Compose 文件。",
       "errors": {
-        "sign_in_required": "请以此 Rome 实例的所有者身份登录，再授权此设备。",
-        "not_configured": "将此 Rome 实例关联到 Rome Cloud 后，即可生成 Compose。",
+        "sign_in_required": "请使用此 Rome 实例所属的 Rome Cloud 账号登录，再授权此设备。",
+        "not_configured": "此 Rome 实例暂不提供 Docker Compose 设置。",
         "approval_account_mismatch": "此设备未出现在当前 Rome Cloud 账号中。请使用此 Rome 实例所属的账号重试。",
         "authorization_failed": "设备授权未完成，请重试。",
         "unavailable": "无法生成 Compose，请重试。",

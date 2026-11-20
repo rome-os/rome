@@ -20,6 +20,10 @@ export const containerNodeAuthorizationSchema = z.object({
 });
 export type ContainerNodeAuthorization = z.infer<typeof containerNodeAuthorizationSchema>;
 
+export const containerNodeImageSchema = z
+  .string()
+  .regex(/^ghcr\.io\/rome-os\/rome-node@sha256:[a-f0-9]{64}$/);
+
 export const devicesStatusSchema = z.object({
   connection: z.enum([
     "not_running",
@@ -34,6 +38,7 @@ export const devicesStatusSchema = z.object({
     "superseded",
   ]),
   checkedAt: z.iso.datetime(),
+  dockerSetupImage: containerNodeImageSchema.optional(),
   devices: z.array(
     z.object({
       id: z.string(),

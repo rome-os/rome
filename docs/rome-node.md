@@ -86,7 +86,8 @@ Gateway presence protocol is involved.
 
 ## Run Rome Node with Docker
 
-On a Rome instance linked to Rome Cloud, open **Settings → Devices → Docker Compose**.
+On a Rome instance linked to Rome Cloud with a [released image](#release-the-image)
+configured, open **Settings → Devices → Docker Compose**.
 Enter a device name, choose **Authorize and generate Compose**, then approve the device
 with the Rome Cloud account that owns the instance. Download the Compose file and run
 `docker compose up -d` from its directory.
@@ -106,20 +107,22 @@ Build the [Rome Node image](../infra/rome-node/Dockerfile) for the local Docker 
 
 ```sh
 docker buildx build --file infra/rome-node/Dockerfile \
-  --tag ghcr.io/rome-os/rome-node:latest --load .
+  --tag rome-node:local --load .
 ```
 
-Start the generated Compose file with `docker compose up -d --pull never` to use
-the local image.
+To use the local image, change `image` in the generated Compose file to
+`rome-node:local`, then run `docker compose up -d --pull never`.
 
 ### Release the image
 
 Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
 `main` with **Publish the Docker image to GitHub Container Registry** selected.
-The workflow checks amd64 and arm64 before publishing both under the same tag.
-A package admin sets the package to public so Docker hosts can pull it.
-Publish an image that accepts the Compose variables before offering deployment
-in Settings.
+The workflow checks amd64 and arm64 before publishing both under the source commit
+SHA. A package admin sets the package to public and verifies anonymous pulls on
+both architectures. Set `ROME_NODE_DOCKER_IMAGE` in the instance environment to
+`ghcr.io/rome-os/rome-node@sha256:<manifest-digest>` using the manifest digest of
+that release, then redeploy the instance. Docker Compose setup is disabled until
+this setting is provided.
 
 ## Chat device folders
 

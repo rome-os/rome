@@ -25,6 +25,7 @@ try {
     entry: "cli",
     hint: "Check that the Rome Node audit volume is writable.",
   });
+  if (audit.state.state === "unavailable") console.error(audit.state.message, audit.hint);
   try {
     await connectHost({
       cloudUrl,
@@ -59,7 +60,11 @@ try {
   } finally {
     audit.close();
   }
-} catch {
-  console.error("Could not start Rome Node. Check the generated Compose configuration.");
+} catch (error) {
+  const detail = error instanceof Error ? error.message : "Unexpected error.";
+  console.error(
+    "Could not start Rome Node.",
+    detail.replace(/rome(?:dev|mob)_[A-Za-z0-9_-]{43}/g, "[redacted]"),
+  );
   process.exitCode = 1;
 }

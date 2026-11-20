@@ -5,7 +5,8 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 COPY packages/rome-node-core/ packages/rome-node-core/
 RUN pnpm --filter @rome-os/node-core install --ignore-scripts --frozen-lockfile \
     && pnpm --filter @rome-os/node-core build \
-    && cp -RL packages/rome-node-core/node_modules/ws /ws
+    && cp -RL packages/rome-node-core/node_modules/ws /ws \
+    && mkdir /audit-state
 
 FROM node:24-slim
 WORKDIR /app
@@ -13,7 +14,7 @@ COPY --from=build /workspace/packages/rome-node-core/package.json ./
 COPY --from=build /workspace/packages/rome-node-core/dist ./dist
 COPY --from=build /ws ./node_modules/ws
 COPY infra/rome-node/entrypoint.mjs ./
-RUN install -d -m 0700 -o node -g node /var/lib/rome-node
+COPY --from=build --chown=1000:1000 --chmod=0700 /audit-state /var/lib/rome-node
 USER node
 WORKDIR /home/node
 CMD ["node", "/app/entrypoint.mjs"]

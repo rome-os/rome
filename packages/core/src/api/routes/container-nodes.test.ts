@@ -8,6 +8,7 @@ import {
   VISITOR_COOKIE_NAME,
 } from "../../access/auth.js";
 import { createCloudGuardian } from "../../access/guardian-auth-state.js";
+import { guardianAuth } from "../../db/schema.js";
 import { createTestDb } from "../../test/db.js";
 import { containerNodesRoutes } from "./container-nodes.js";
 
@@ -17,14 +18,17 @@ const origin = "https://cloud.example";
 const deviceId = "28f6417c-1167-4f52-9d25-e28d07804a78";
 const deviceToken = `romedev_${"A".repeat(43)}`;
 const deviceCode = "private-device-code";
+const image = `ghcr.io/rome-os/rome-node@sha256:${"a".repeat(64)}`;
 const guardianCookie = (userId = owner) => `${COOKIE_NAME}=${createSession(userId)}`;
 
 describe("container node device authorization", () => {
   let db: ReturnType<typeof createTestDb>;
   let app: Hono;
+  let createApp: (image?: string) => Hono;
   let cloudAccount: string;
   let authorized: boolean;
   let approved: boolean;
+  let listAvailable: boolean;
   let tokenRequests: number;
   let authorizationSignal: AbortSignal | undefined;
 
@@ -34,6 +38,7 @@ describe("container node device authorization", () => {
     cloudAccount = owner;
     authorized = true;
     approved = true;
+    listAvailable = true;
     tokenRequests = 0;
     authorizationSignal = undefined;
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -71,15 +76,15 @@ describe("container node device authorization", () => {
       }
     });
     const nodeDevices = {
-      listDevices: async () => ({
-        devices: authorized ? [{ id: deviceId, name: "NAS", platform: "linux" }] : [],
-      }),
+      listDevices: async () =>
+        listAvailable
+          ? { devices: authorized ? [{ id: deviceId, name: "NAS", platform: "linux" }] : [] }
+          : null,
     };
-    app = new Hono().route(
-      path,
-      containerNodesRoutes(
-        { db: db.db, nodeDevices },
-        {
+    createApp = (image) =>
+      new Hono().route(
+        path,
+        containerNodesRoutes({ db: db.db, nodeDevices }, image, {
           origin: () => origin,
           prove: async () => ({
             status: "ok",
@@ -89,9 +94,9 @@ describe("container node device authorization", () => {
             authorizationSignal = signal;
             return loginDeviceCode(origin, name, signal, onPrompt);
           },
-        },
-      ),
-    );
+        }),
+      );
+    app = createApp(image);
   });
 
   afterEach(() => {
@@ -116,6 +121,30 @@ describe("container node device authorization", () => {
 
     cloudAccount = "different-account";
     expect((await post()).status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps setup disabled until an image is configured", async () => {
+    app = createApp();
+    const response = await post();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "not_configured" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports an unlinked owner as not configured", async () => {
+    await db.db.update(guardianAuth).set({ accountId: null });
+    const response = await post();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "not_configured" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not start approval when the Cloud device list is unavailable", async () => {
+    listAvailable = false;
+    const response = await post();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "unavailable" });
     expect(fetch).not.toHaveBeenCalled();
   });
 

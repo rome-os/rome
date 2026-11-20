@@ -74,13 +74,19 @@ export function DevicesSection() {
   const devices = data?.devices ?? [];
   const thisDevice = useThisDevice(() => void query.refetch());
   const manage = useDeviceManage();
-  const [composeTrigger, setComposeTrigger] = useState<HTMLButtonElement | null>(null);
-  const composeAction = (
+  const [composeSetup, setComposeSetup] = useState<{
+    trigger: HTMLButtonElement;
+    image: string;
+  } | null>(null);
+  const dockerSetupImage = data?.dockerSetupImage;
+  const composeAction = dockerSetupImage && (
     <Button
       id="docker-compose"
       size="sm"
       variant="outline"
-      onClick={(event) => setComposeTrigger(event.currentTarget)}
+      onClick={(event) =>
+        setComposeSetup({ trigger: event.currentTarget, image: dockerSetupImage })
+      }
     >
       {t("devices.containerNodes.title")}
     </Button>
@@ -193,8 +199,8 @@ export function DevicesSection() {
     <>
       {linkedDevices}
       {deviceSetupHelp}
-      {composeTrigger && (
-        <ContainerNodeSetup trigger={composeTrigger} onClose={() => setComposeTrigger(null)} />
+      {composeSetup && (
+        <ContainerNodeSetup {...composeSetup} onClose={() => setComposeSetup(null)} />
       )}
     </>
   );

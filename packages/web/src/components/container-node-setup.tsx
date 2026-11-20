@@ -21,17 +21,19 @@ import { Input } from "@/components/ui/input";
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { apiErrorMessageFrom, getApiErrorMessage } from "@/lib/api-error";
 import { parseSSEEvents } from "@/lib/chat-sse";
-import romeNodeImage from "@/lib/rome-node-image.json";
 
 const setupPath = "/api/devices/container-nodes";
 
-function containerNodeCompose({ deviceId, deviceToken, origin }: ContainerNodeCredential) {
+function containerNodeCompose(
+  { deviceId, deviceToken, origin }: ContainerNodeCredential,
+  image: string,
+) {
   const projectName = `rome-node-${deviceId.toLowerCase().replaceAll("-", "").slice(0, 20)}`;
   const address = JSON.stringify(origin.replaceAll("$", () => "$$"));
   return `name: "${projectName}"
 services:
   rome-node:
-    image: "${romeNodeImage.image}"
+    image: "${image}"
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -87,9 +89,11 @@ async function authorizeCloudNode(
 
 export function ContainerNodeSetup({
   trigger,
+  image,
   onClose,
 }: {
   trigger: HTMLButtonElement;
+  image: string;
   onClose(): void;
 }) {
   const { t } = useTranslation("settings");
@@ -134,7 +138,7 @@ export function ContainerNodeSetup({
       </DialogHeader>
       <DialogBody className="min-h-0 space-y-4">
         {issue.data ? (
-          <ComposeInstructions compose={containerNodeCompose(issue.data)} />
+          <ComposeInstructions compose={containerNodeCompose(issue.data, image)} />
         ) : issue.isPending && authorization ? (
           <>
             <p className="text-ui text-muted-foreground">{node("approveOnCloud")}</p>

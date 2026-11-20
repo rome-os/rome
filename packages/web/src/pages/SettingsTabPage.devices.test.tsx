@@ -165,6 +165,7 @@ it("offers computer setup for an idle running service without an error", async (
     devices: [],
   }));
   expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Docker Compose" })).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Link device" }));
   expect(await screen.findByText("rome-node connect")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
@@ -172,6 +173,7 @@ it("offers computer setup for an idle running service without an error", async (
 });
 
 it("waits for Cloud approval before showing the Compose with the account device token", async () => {
+  const dockerSetupImage = `ghcr.io/rome-os/rome-node@sha256:${"a".repeat(64)}`;
   const credential = {
     deviceId: "28f6417c-1167-4f52-9d25-e28d07804a78",
     deviceToken: `romedev_${"A".repeat(43)}`,
@@ -202,6 +204,7 @@ it("waits for Cloud approval before showing the Compose with the account device 
     () => ({
       connection: "stopped",
       checkedAt: new Date().toISOString(),
+      dockerSetupImage,
       devices,
     }),
     undefined,
@@ -222,6 +225,7 @@ it("waits for Cloud approval before showing the Compose with the account device 
   stream.enqueue(encode.encode(`event: credential\ndata: ${JSON.stringify(credential)}\n\n`));
   stream.close();
   const config = await dialog.findByRole("region", { name: "Compose configuration" });
+  expect(config.textContent).toContain(`image: "${dockerSetupImage}"`);
   expect(config.textContent).toContain(credential.deviceToken);
   expect(config.textContent).toContain(`ROME_NODE_DEVICE_ID: "${credential.deviceId}"`);
   expect(config.textContent).toContain("audit:/var/lib/rome-node");

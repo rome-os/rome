@@ -1,39 +1,55 @@
 import { containerNodeCredentialSchema, containerNodeNameSchema } from "@rome/api-types/devices";
 import { loginDeviceCode } from "@rome-os/node-core/host";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
-import { proveIdentity } from "../../instance/instance-identity.js";
+import type { DrizzleDb } from "../../db/index.js";
+import { isInstanceLinked, proveIdentity } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { withTracingSuppressed } from "../../telemetry.js";
 import type { ApiDeps } from "../deps.js";
 
 const issueBody = z.object({ name: containerNodeNameSchema }).strict();
+const signInRequired = { error: "sign_in_required", status: 403 } as const;
+const notConfigured = { error: "not_configured", status: 409 } as const;
+
+async function containerNodeAccess(c: Context, db: DrizzleDb) {
+  const guardian = await resolveGuardianSession(c, db);
+  if (guardian?.via !== "cookie") return signInRequired;
+  const seat = await getGuardianAuthState(db);
+  if (!seat.accountId) return guardian.userId === seat.userId ? notConfigured : signInRequired;
+  if (
+    guardian.userId !== seat.accountId ||
+    (seat.hasLocalPassword && guardian.userId === seat.userId)
+  )
+    return signInRequired;
+  return { accountId: seat.accountId };
+}
+
+export async function availableContainerNodeImage(c: Context, db: DrizzleDb, image?: string) {
+  if (!image || !getRomeCloudOrigin() || !isInstanceLinked()) return undefined;
+  return "accountId" in (await containerNodeAccess(c, db)) ? image : undefined;
+}
 
 export function containerNodesRoutes(
   {
     db,
     nodeDevices,
   }: Pick<ApiDeps, "db"> & { nodeDevices: Pick<ApiDeps["nodeDevices"], "listDevices"> },
+  image?: string,
   cloud = { origin: getRomeCloudOrigin, prove: proveIdentity, login: loginDeviceCode },
 ) {
   const app = new Hono();
   app.post("/", async (c) => {
     c.header("Cache-Control", "no-store");
     if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "sign_in_required" }, 403);
-    const guardian = await resolveGuardianSession(c, db);
-    const seat = await getGuardianAuthState(db);
-    const account = seat.accountId;
-    if (
-      !account ||
-      guardian?.via !== "cookie" ||
-      guardian.userId !== account ||
-      (seat.hasLocalPassword && guardian.userId === seat.userId)
-    )
-      return c.json({ error: "sign_in_required" }, 403);
+    const access = await containerNodeAccess(c, db);
+    if ("error" in access) return c.json({ error: access.error }, access.status);
+    if (!image) return c.json({ error: "not_configured" }, 409);
+    const account = access.accountId;
 
     const input = issueBody.safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: "invalid_device_name" }, 400);
@@ -49,6 +65,7 @@ export function containerNodesRoutes(
     )
       return c.json({ error: "sign_in_required" }, 403);
     if (proof.status !== "ok") return c.json({ error: "unavailable" }, 503);
+    if (!(await nodeDevices.listDevices())) return c.json({ error: "unavailable" }, 503);
 
     const response = streamSSE(c, async (stream) => {
       const connection = new AbortController();

@@ -344,6 +344,7 @@ export const settingsHandlers = [
     HttpResponse.json({
       connection: "online",
       checkedAt: new Date().toISOString(),
+      dockerSetupImage: `ghcr.io/rome-os/rome-node@sha256:${"a".repeat(64)}`,
       devices: statusDevices,
     } satisfies DevicesStatus),
   ),
