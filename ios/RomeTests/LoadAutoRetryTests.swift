@@ -63,6 +63,23 @@ import Testing
         store.stop()
     }
 
+    /// A send's refresh that works while a chat that never loaded waits for
+    /// its retry leaves the retry to finish the load: the spinner goes.
+    @Test func aRefreshDoesNotCancelTheFirstLoadsRetry() async {
+        let backend = FakeBackend()
+        backend.messagesError = .server(status: 503, message: nil)
+        let store = TranscriptStore(sessionId: "task-1", kind: .task, backend: backend)
+        store.autoRetryFirst = .milliseconds(200)
+        store.start()
+        for _ in 0..<200 where backend.pageLimits.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        backend.messagesError = nil
+        #expect(await store.refreshLatest())
+        #expect(!store.loaded)
+        for _ in 0..<200 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.loaded && store.loadBar == nil)
+        store.stop()
+    }
+
     /// A store no screen runs tries nothing more.
     @Test func stoppingEndsTheRetries() async {
         let backend = FakeBackend()

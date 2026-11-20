@@ -293,6 +293,8 @@ final class TranscriptStore {
         resyncWork = nil
         autoRetry?.cancel()
         autoRetry = nil
+        // A blip before it left says nothing about the next visit.
+        failedLoads = 0
         // Off the screen nothing waits, so a return replays no dots. The
         // turn's writing state stays: the server says it once, and a return
         // mid-turn shows the dots it still means; the turn's end clears it.
@@ -393,7 +395,9 @@ final class TranscriptStore {
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         mergeLatest(page)
-        loadWorked()
+        // A chat that never loaded keeps its retry: only a full read sets
+        // up its paging and takes the spinner away.
+        if loaded { loadWorked() }
         readOnce = true
         return true
     }
