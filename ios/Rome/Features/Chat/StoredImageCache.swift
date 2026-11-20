@@ -37,6 +37,8 @@ final class StoredImageCache {
     private let disk: ImageDiskCache?
     /// The open instance, whose folder on disk is read and written; nil when none is open.
     private var instance: String?
+    /// The largest picture kept on disk, in bytes; thumbnails are 5–30 KB.
+    nonisolated static let diskLimit = 1024 * 1024
     /// Pictures written since the disk was last trimmed.
     private var writes = 0
 
@@ -97,7 +99,8 @@ final class StoredImageCache {
         store(image, for: key)
         // Only while the same workspace is open: after a switch or sign-out,
         // even back to the same instance, nothing writes the old load back.
-        if let disk, let instance, scope == self.scope {
+        // Only thumbnails: the server returns a GIF or HEIC as its original.
+        if let disk, let instance, scope == self.scope, data.count <= Self.diskLimit {
             disk.store(data, instance: instance, key: name)
             writes += 1
             if writes >= 20 {
