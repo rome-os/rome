@@ -724,7 +724,7 @@ export class SlackAppAdapter {
       // A message deleted since, heard again because Slack retried it, is
       // not in Slack's history: the drain links across it.
       if (this.config.copy.deleted(this.config.teamId, channelId, wire.ts)) return;
-      const { raw: _raw, addressing: _addressing, ...kept } = message;
+      const { raw: _raw, addressing: _addressing, openToMembers: _open, ...kept } = message;
       noteInDrain(this.timeline(), channelId, wire.ts, kept);
     } catch (error) {
       // The message is missing from the timeline, so the next one heard must
