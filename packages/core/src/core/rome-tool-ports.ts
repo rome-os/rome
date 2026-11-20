@@ -16,6 +16,7 @@ import {
   type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
+import { didYouMean } from "../apps/actions/registry.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
 import { validateActionArgs } from "../apps/actions/validate-action-args.js";
 import type { WebChatRepository } from "../webchat/repository.js";
@@ -88,7 +89,9 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // mid-conversation by `system:app_management` is callable in the same session.
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
-    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
+    if (!requestedAction) {
+      throw new Error(`Unknown action: ${name}${didYouMean(actionRegistry, name)}`);
+    }
     return actionRegistry
       .getForAgent([...turn.actions])
       .find((action) => action.config.name === requestedAction.config.name);
@@ -100,12 +103,8 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
-    permits: (turn, name) => {
-      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return actionRegistry
-        .getForAgent([...turn.actions])
-        .some((action) => action.config.name === canonical);
-    },
+    permits: (turn, name) =>
+      actionRegistry.getForAgent([...turn.actions]).some((action) => action.config.name === name),
     run: (turn, name, input) =>
       turn.inTurn(() =>
         asTurnActor(turn, async (actor) => {

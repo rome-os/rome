@@ -2,10 +2,17 @@ import type { Action, ActionRegistry } from "./types.js";
 import type { ArtifactMetadata } from "../types.js";
 import { validateActionArgs } from "./validate-action-args.js";
 import {
+  artifactLocalName,
   formatArtifactId,
-  resolveArtifactId,
   type ArtifactIdentityContext,
 } from "../artifact-id.js";
+
+/** What an unknown-action error ends with when `name` is an action's name
+ *  without its app: the full ID to call instead, or nothing. */
+export function didYouMean(registry: Pick<ActionRegistry, "suggest">, name: string): string {
+  const suggestion = registry.suggest?.(name);
+  return suggestion ? `. Did you mean "${suggestion}"?` : "";
+}
 
 export class ActionRegistryImpl implements ActionRegistry {
   private actions = new Map<string, Action>();
@@ -61,11 +68,11 @@ export class ActionRegistryImpl implements ActionRegistry {
   }
 
   get(name: string): Action | undefined {
-    return this.actions.get(this.resolveName(name));
+    return this.actions.get(name);
   }
 
   has(name: string): boolean {
-    return this.actions.has(this.resolveName(name));
+    return this.actions.has(name);
   }
 
   isExplicit(name: string): boolean {
@@ -81,8 +88,10 @@ export class ActionRegistryImpl implements ActionRegistry {
     return validateActionArgs(action.config.name, args, action.inputSchema);
   }
 
-  getCanonicalName(name: string): string | undefined {
-    return this.get(name)?.config.name;
+  suggest(name: string): string | undefined {
+    if (name.includes(":")) return undefined;
+    const matches = this.list().filter((id) => id !== name && artifactLocalName(id) === name);
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   list(): string[] {
@@ -90,7 +99,7 @@ export class ActionRegistryImpl implements ActionRegistry {
   }
 
   getMetadata(name: string): ArtifactMetadata | undefined {
-    return this.metadata.get(this.resolveName(name));
+    return this.metadata.get(name);
   }
 
   listMetadata(): ArtifactMetadata[] {
@@ -126,18 +135,5 @@ export class ActionRegistryImpl implements ActionRegistry {
       }
     }
     return result;
-  }
-
-  private resolveName(name: string): string {
-    if (!this.identity) return name;
-    try {
-      return resolveArtifactId({
-        kind: "action",
-        value: name,
-        legacyBindings: this.identity.legacyBindings,
-      });
-    } catch {
-      return name;
-    }
   }
 }

@@ -130,7 +130,7 @@ export function unknownActionError(actionName: string): string {
     `To run multi-step work that doesn't exist yet, build it first with the ` +
     `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
     `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "summon" or "send_message".`
+    `built-in "system:summon" or "system:send_message".`
   );
 }
 

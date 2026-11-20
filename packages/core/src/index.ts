@@ -785,7 +785,15 @@ async function main() {
       await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
     ),
   };
-  // Boot removal matches qualified names and legacy bindings before actions register.
+  // Routines saved before action names carried their app fire by the full ID.
+  // Renamed before boot removal, which pauses a removed app's routines by it.
+  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
+    artifactIdentity.legacyBindings.action,
+  );
+  if (renamedRoutines > 0) {
+    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
+  }
+  // Boot removal matches routines' actions before actions register.
   // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
   let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -795,7 +803,6 @@ async function main() {
     romeCloudListings,
     pauseRoutines: appRoutinePauser({
       repository: routinesRepo,
-      legacyBindings: artifactIdentity.legacyBindings,
       engine: {
         deactivate: async (id) => {
           await deactivateRoutine?.(id);
@@ -958,13 +965,6 @@ async function main() {
   };
   if (renamedAgents.sessions + renamedAgents.chats > 0) {
     appsLog.info("old agent names renamed", renamedAgents);
-  }
-  // Routines saved before action names carried their app fire by the full ID.
-  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
-    artifactIdentity.legacyBindings.action,
-  );
-  if (renamedRoutines > 0) {
-    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
   }
 
   // Set once the email adapter is created (further down). Lets the main-agent
