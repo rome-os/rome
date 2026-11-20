@@ -62,7 +62,8 @@ export function ConnectionsSection({
   loading: boolean;
   error: string | null;
   /** Re-fetch `/api/connections` + the Composio status, after a load error or a
-   *  ceremony. Resolves to the fresh list, or null when the fetch failed. A
+   *  ceremony. Resolves to the fresh list once it is shown, or null when the
+   *  fetch failed or a newer answer overtook it. A
    *  background refresh keeps the list on screen while it loads. */
   onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>;
   onFlash: (message: string) => void;

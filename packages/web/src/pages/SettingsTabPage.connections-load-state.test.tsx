@@ -276,4 +276,75 @@ describe("Settings connections request states", () => {
 
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
+  it("keeps the members switch as its change left it when a later poll fails before the change's refresh answers", async () => {
+    rs.spyOn(console, "error").mockImplementation(() => {});
+    const feishu = (answerMembers: boolean) => ({
+      connections: [
+        {
+          id: "conn-feishu",
+          state: "connected",
+          connectionKind: "feishu",
+          label: "Feishu",
+          channel: "feishu",
+          grants: { app: "authorized" },
+          display: {
+            app: { displayName: "Support Bot", handle: null, email: null, avatarUrl: null },
+          },
+          setups: {},
+          capabilities: {
+            chat: { state: "unlocked" },
+            act: { state: "unsupported" },
+            watch: { state: "unsupported" },
+          },
+          connect: null,
+          agent: null,
+          severalAccounts: true,
+          answerMembers,
+        },
+      ],
+    });
+    // The change's refresh is held until a later poll has failed.
+    let answerRefresh: (response: Response) => void = () => {};
+    let loads = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      if (url === "/api/settings") return ok({});
+      if (url === "/api/integrations/composio/status") return ok({});
+      if (url.endsWith("/answer-members") && init?.method === "PUT") {
+        return ok({ answerMembers: true });
+      }
+      if (url === "/api/connections") {
+        loads += 1;
+        if (loads === 2) return new Promise<Response>((resolve) => (answerRefresh = resolve));
+        if (loads === 3) return failed(503, "Connections service unavailable");
+        return ok(feishu(loads > 1));
+      }
+      return ok({});
+    }) as typeof fetch);
+    const polls: Array<() => void> = [];
+    const setInterval = window.setInterval.bind(window);
+    rs.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, ms?: number) => {
+      if (typeof handler === "function") polls.push(handler as () => void);
+      return setInterval(() => {}, ms);
+    }) as typeof window.setInterval);
+
+    renderConnectionsSettings();
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Feishu/ }));
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+
+    await userEvent.click(toggle());
+    await waitFor(() => expect(loads).toBe(2));
+    for (const poll of polls) poll();
+    await waitFor(() => expect(loads).toBe(3));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    answerRefresh(ok(feishu(true)));
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
+
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
 });

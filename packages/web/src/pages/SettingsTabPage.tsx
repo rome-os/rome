@@ -188,7 +188,8 @@ export default function SettingsPage() {
   // Loads overlap: a poll can start before a change and answer after the
   // refresh that change asked for. Only an answer to a load started after
   // the last one answered is taken, so an older state never replaces a
-  // newer, nor follows a refresh that failed.
+  // newer, nor follows a refresh that failed. A load answers its list only
+  // when it is shown.
   const loadsStarted = useRef(0);
   const loadShown = useRef(0);
   const loadConnections = useCallback(
@@ -208,7 +209,9 @@ export default function SettingsPage() {
         const payload = composioRes.ok
           ? ((await composioRes.json()) as { composio?: ComposioCliStatus })
           : undefined;
-        if (load < loadShown.current) return connectionList;
+        // A load a newer answer overtook shows nothing, so it answers null
+        // like a failed one: the caller has no fresh state on screen.
+        if (load < loadShown.current) return null;
         loadShown.current = load;
         setConnections(connectionList);
         if (payload) setComposio(payload.composio ?? null);
