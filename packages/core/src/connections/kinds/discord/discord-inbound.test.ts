@@ -292,6 +292,49 @@ function guildMessage(
   } as unknown as Message;
 }
 
+describe("DiscordAdapter gateway order", () => {
+  it("hands over a chat's messages in the order they arrived, however slow a reply's lookup", async () => {
+    const { say, captured } = await startedAdapter({
+      connectionId: "conn-1",
+      chatSettings: chatSettingsOf(true),
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reply = guildMessage("first", `<@${BOT.id}> stop that`, { mentions: [BOT.id] });
+    Object.assign(reply, {
+      type: MessageType.Reply,
+      reference: {
+        channelId: "channel-1",
+        guildId: "guild-1",
+        messageId: "earlier",
+        type: MessageReferenceType.Default,
+      },
+      channel: {
+        type: ChannelType.GuildText,
+        name: "general",
+        isThread: () => false,
+        messages: {
+          fetch: async () => {
+            await held;
+            return { author: { id: BOT.id } };
+          },
+        },
+      },
+    });
+
+    const first = say(reply);
+    const second = say(guildMessage("second", "/stop"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(captured.map((message) => message.messageId)).toEqual([]);
+    release();
+    await Promise.all([first, second]);
+
+    expect(captured.map((message) => message.messageId)).toEqual(["first", "second"]);
+  });
+});
+
 describe("DiscordAdapter gateway filters", () => {
   it("hears nothing in a chat switched off but a link code and a stop said to Rome", async () => {
     const { say, captured } = await startedAdapter({

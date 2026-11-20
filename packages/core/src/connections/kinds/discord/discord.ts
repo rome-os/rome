@@ -338,6 +338,8 @@ function projectDiscordBody(
 export class DiscordAdapter {
   private client: Client;
   private handler?: (msg: connections.Message) => Promise<void>;
+  /** The last message being heard in each chat, which the next one waits on. */
+  private readonly hearing = new Map<string, Promise<void>>();
   private chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
@@ -737,56 +739,78 @@ export class DiscordAdapter {
       )._add({ id: channelId, type: discordJs().ChannelType.DM, recipients: [data.author] });
     });
 
-    this.client.on("messageCreate", async (message: Message) => {
-      if (!this.handler) return;
-
-      // ── Layer 1: Hard filter ──────────────────────────────────────────────
-      if (!message.author) return;
-      if (message.system) return;
-      // Self-messages: check after we know the client is ready
-      if (this.client.user && message.author.id === this.client.user.id) return;
-
-      const isDm =
-        message.channel.type === discordJs().ChannelType.DM ||
-        message.channel.type === discordJs().ChannelType.GroupDM;
-
-      const isThread = isThreadType(message.channel.type);
-
-      // A link code said in a guild channel must void the code, so it skips
-      // the filters below. Admission voids it and keeps it from every agent.
-      if (!isDm && isLinkCodeMessage(withoutMentions(message.content))) {
-        await this.dispatchMessage(message, isDm, isThread);
-        return;
-      }
-
-      const cfg = this.legacyConfig(await this.settingsForMessage(message));
-
-      if (isDm) {
-        await this.dispatchMessage(message, isDm, isThread);
-        return;
-      }
-
-      // A chat switched off is not heard, as an account with no agent is not:
-      // nothing of it is recorded. A stop said to Rome still reaches it.
-      // Whom a message addresses is otherwise Participation's to work out.
-      if (cfg.mode === "ignore") {
-        const botId = this.client.user?.id;
-        const stop = isStopCommand(normalizeDiscordMessageText(message.content, botId));
-        if (!stop || !(await this.saidToBot(message))) {
-          log.debug("ignoring message in channel with mode=ignore", {
-            channelId: message.channelId,
-          });
-          return;
-        }
-      }
-
-      // Every other message is handed over. Whether it wakes the agent (the
-      // reply rule, bots, mentions of others) is the wake gate's call.
-      await this.dispatchMessage(message, isDm, isThread);
-    });
+    // The gateway calls this for each message without waiting on the last,
+    // and hearing one can wait on Discord (a reply's author, a webhook's
+    // person). Messages of one chat are heard one after another, so a slow
+    // lookup never lets a later message overtake an earlier one.
+    this.client.on("messageCreate", (message: Message) =>
+      this.inChatOrder(message.channelId, () => this.hear(message)),
+    );
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
+  }
+
+  /** Runs `hear` after every message of `chatId` heard before it. */
+  private inChatOrder(chatId: string, hear: () => Promise<void>): Promise<void> {
+    const previous = this.hearing.get(chatId) ?? Promise.resolve();
+    const next = previous.then(hear).catch((err: unknown) => {
+      log.error("could not hear a message", { chatId, error: String(err) });
+    });
+    this.hearing.set(chatId, next);
+    void next.then(() => {
+      if (this.hearing.get(chatId) === next) this.hearing.delete(chatId);
+    });
+    return next;
+  }
+
+  /** Hears one message from the gateway: filters it, then hands it over. */
+  private async hear(message: Message): Promise<void> {
+    if (!this.handler) return;
+
+    // ── Layer 1: Hard filter ──────────────────────────────────────────────
+    if (!message.author) return;
+    if (message.system) return;
+    // Self-messages: check after we know the client is ready
+    if (this.client.user && message.author.id === this.client.user.id) return;
+
+    const isDm =
+      message.channel.type === discordJs().ChannelType.DM ||
+      message.channel.type === discordJs().ChannelType.GroupDM;
+
+    const isThread = isThreadType(message.channel.type);
+
+    // A link code said in a guild channel must void the code, so it skips
+    // the filters below. Admission voids it and keeps it from every agent.
+    if (!isDm && isLinkCodeMessage(withoutMentions(message.content))) {
+      await this.dispatchMessage(message, isDm, isThread);
+      return;
+    }
+
+    const cfg = this.legacyConfig(await this.settingsForMessage(message));
+
+    if (isDm) {
+      await this.dispatchMessage(message, isDm, isThread);
+      return;
+    }
+
+    // A chat switched off is not heard, as an account with no agent is not:
+    // nothing of it is recorded. A stop said to Rome still reaches it.
+    // Whom a message addresses is otherwise Participation's to work out.
+    if (cfg.mode === "ignore") {
+      const botId = this.client.user?.id;
+      const stop = isStopCommand(normalizeDiscordMessageText(message.content, botId));
+      if (!stop || !(await this.saidToBot(message))) {
+        log.debug("ignoring message in channel with mode=ignore", {
+          channelId: message.channelId,
+        });
+        return;
+      }
+    }
+
+    // Every other message is handed over. Whether it wakes the agent (the
+    // reply rule, bots, mentions of others) is the wake gate's call.
+    await this.dispatchMessage(message, isDm, isThread);
   }
 
   /** Whether the message came through a webhook that is linked to a person. */
