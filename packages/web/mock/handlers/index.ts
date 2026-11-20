@@ -1894,7 +1894,14 @@ export const handlers = [
     return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", ({ request }) => {
+    const connectionId = new URL(request.url).searchParams.get("connectionId");
+    return HttpResponse.json({
+      items: conversationSettings.items.filter(
+        (item) => !connectionId || item.snapshot.conversation.ref.connectionId === connectionId,
+      ),
+    });
+  }),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
   http.patch("/api/chat-settings", async ({ request }) => {

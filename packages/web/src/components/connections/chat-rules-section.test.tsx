@@ -4,7 +4,7 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
-import { ChannelsSettingsPage } from "./channels-settings-page";
+import { ChatRulesSection } from "./chat-rules-section";
 import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
@@ -127,8 +127,8 @@ function mockApi(options: { failPatch?: boolean; deferFirstPatch?: boolean } = {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/settings/channels"]}>
-      <ChannelsSettingsPage />
+    <MemoryRouter initialEntries={["/settings/connections/discord"]}>
+      <ChatRulesSection connectionId="discord-1" />
     </MemoryRouter>,
   );
 }
@@ -141,7 +141,7 @@ async function findCard() {
 /** Comfortably past AUTOSAVE_DEBOUNCE_MS, so "no PATCH" means it was dropped. */
 const PAST_DEBOUNCE_MS = 800;
 
-describe("ChannelsSettingsPage", () => {
+describe("ChatRulesSection", () => {
   it("auto-saves each edit, exposes provider fields and catalog agents, and paginates", async () => {
     const parent = item({
       id: "engineering",
@@ -204,8 +204,8 @@ describe("ChannelsSettingsPage", () => {
     }) as typeof fetch);
 
     render(
-      <MemoryRouter initialEntries={["/settings/channels?connectionId=discord-1"]}>
-        <ChannelsSettingsPage />
+      <MemoryRouter initialEntries={["/settings/connections/discord"]}>
+        <ChatRulesSection connectionId="discord-1" />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -223,7 +223,7 @@ describe("ChannelsSettingsPage", () => {
     expect(engineeringHeading.textContent).toBe("Rome / engineering");
 
     await user.click(within(engineeringRow).getByRole("switch", { name: "Rome in this chat" }));
-    await choose(user, within(engineeringRow).getByLabelText(/Respond/), "All");
+    await choose(user, within(engineeringRow).getByLabelText(/Respond/), "Every message");
     // The canonical id comes from /api/agents. Its owner remains visible for
     // disambiguation, while selecting it preserves the runtime value.
     await choose(user, within(engineeringRow).getByLabelText(/Agent/), "build · coding");
@@ -466,7 +466,7 @@ describe("ChannelsSettingsPage", () => {
     await waitFor(() => expect(patchBodies).toHaveLength(1));
 
     // Second edit lands while the first PATCH is still open, then that one fails.
-    await choose(user, within(card).getByLabelText(/Respond/), "All");
+    await choose(user, within(card).getByLabelText(/Respond/), "Every message");
     failFirstPatch();
 
     // Rolling the whole draft back to the confirmed snapshot would wipe this
@@ -474,7 +474,7 @@ describe("ChannelsSettingsPage", () => {
     // from the UI and the server both.
     await waitFor(() => expect(patchBodies).toHaveLength(2));
     expect(patchBodies[1]).toMatchObject({ set: { activation: { mode: "all" } } });
-    expect(within(card).getByLabelText(/Respond/).textContent).toContain("All");
+    expect(within(card).getByLabelText(/Respond/).textContent).toContain("Every message");
   });
 
   it("sends an edit made while the previous save is still in flight", async () => {

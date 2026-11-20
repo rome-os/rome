@@ -128,6 +128,7 @@ describe("GET /connections", () => {
       agent: null,
       link: "own_account",
       severalAccounts: false,
+      chatRules: ["session.reset"],
     });
 
     // Nothing granted on discord yet: its grant unauthorized, everything
@@ -233,7 +234,33 @@ describe("GET /connections", () => {
       account: null,
       link: null,
       severalAccounts: false,
+      // A kind that declares no chat rules offers the session reset alone.
+      chatRules: ["session.reset"],
     });
+  });
+
+  it("lists the chat rules each kind offers, in the dashboard's order, and none for a kind with no chats", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    const telegram = makePasteTalkWithProfile();
+    telegram.descriptor.chatRules = { offers: ["session.reset", "enabled"] };
+    const discord = makeBotAll();
+    discord.descriptor.chatRules = { offers: [] };
+    delete (discord.descriptor.capabilities as { talker?: unknown }).talker;
+    registry.register(telegram.descriptor);
+    registry.register(discord.descriptor);
+
+    const res = await makeApp(registry).request("/connections");
+    const { connections } = await res.json();
+
+    expect(
+      connections.map((c: { connectionKind: string; chatRules: string[] }) => [
+        c.connectionKind,
+        c.chatRules,
+      ]),
+    ).toEqual([
+      ["fake-discord", []],
+      ["fake-telegram", ["enabled", "session.reset"]],
+    ]);
   });
 
   it("offers OAuth placeholders only for host-enabled providers", async () => {

@@ -87,6 +87,13 @@ export const UNDECLARED_CHAT_RULES: KindChatRules = {
   fixed: WAKES_ON_EVERY_MESSAGE,
 };
 
+/** The rules a kind's group chats offer the guardian, in the order the
+ *  dashboard lists them. */
+export function offeredChatRules(kind: KindChatRules | undefined): ChatRuleName[] {
+  const offers = (kind ?? UNDECLARED_CHAT_RULES).offers;
+  return CHAT_RULE_NAMES.filter((rule) => offers.includes(rule));
+}
+
 /** The rules a direct message offers, whatever its kind: only when its
  *  session starts afresh. Every message in one is addressed to Rome's
  *  account, and another bot's message wakes the agent as anyone's would. */

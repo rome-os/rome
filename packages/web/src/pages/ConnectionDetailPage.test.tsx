@@ -368,7 +368,7 @@ describe("ConnectionDetailPage — several accounts", () => {
     mockApi([feishu(), secondFeishu()]);
     renderDetail("feishu");
 
-    const title = await screen.findByRole("heading", { level: 2 });
+    const title = await screen.findByRole("heading", { level: 2, name: "Feishu" });
     expect(title.textContent).toBe("Feishu");
   });
 
@@ -476,5 +476,43 @@ describe("ConnectionDetailPage — Shopify install return", () => {
     await screen.findByRole("heading", { name: "Shopify" });
     expect(screen.queryByText(/Finish connecting/)).toBeNull();
     expect(screen.queryByRole("link", { name: /evil\.example\.com/ })).toBeNull();
+  });
+});
+
+describe("ConnectionDetailPage — chat rules", () => {
+  const chatting = (chatRules: ApiConnection["chatRules"]) =>
+    connection({
+      connectionKind: "discord",
+      id: "discord-1",
+      channel: "discord",
+      grants: { bot: "authorized" },
+      capabilities: {
+        chat: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      chatRules,
+    });
+
+  it("lists the connection's chat rules on its page", async () => {
+    mockApi([chatting(["enabled", "activation.mode", "session.reset"])]);
+    renderDetail("discord");
+    expect(await screen.findByRole("heading", { name: "Chat rules" })).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+          ([request]) =>
+            String(request).startsWith("/api/chat-settings?") &&
+            String(request).includes("connectionId=discord-1"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("shows no chat rules where the kind offers none, as an official app", async () => {
+    mockApi([chatting([])]);
+    renderDetail("discord");
+    expect(await screen.findByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Chat rules" })).toBeNull();
   });
 });

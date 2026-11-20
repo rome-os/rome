@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { TFunction } from "i18next";
@@ -56,13 +56,9 @@ interface PageResponse {
 /** Coalesces a burst of edits — typing in the inactivity field — into one PATCH. */
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
-/**
- * A Select item cannot carry an empty value, so "no filter" needs a sentinel.
- * It never escapes this module: both filters map it back to "" before the
- * choice reaches the URL or the request, so an unfiltered list still sends no
- * `connectionId` / `availability` param at all.
- */
-const ALL_CONNECTIONS = "all";
+/** A Select item cannot carry an empty value, so "any status" needs a
+ *  sentinel. It maps back to "" before the request, so an unfiltered list
+ *  sends no `availability` param. */
 const ANY_STATUS = "any";
 
 interface AgentPage {
@@ -78,10 +74,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function ChannelsSettingsPage() {
+/**
+ * The chat rules of one connection's chats, on that connection's page: each
+ * chat it knows, with a row per rule its kind offers. A kind that offers none
+ * shows no section, which the page decides from the connection's `chatRules`.
+ * Vocabulary: docs/domains/chats.md#chat-rule.
+ */
+export function ChatRulesSection({ connectionId }: { connectionId: string }) {
   const { t } = useTranslation("settings");
-  const [params, setParams] = useSearchParams();
-  const connectionId = params.get("connectionId") ?? "";
   const [query, setQuery] = useState("");
   const [availability, setAvailability] = useState("");
   const [connections, setConnections] = useState<ApiConnection[]>([]);
@@ -97,7 +97,7 @@ export function ChannelsSettingsPage() {
       setError("");
       try {
         const search = new URLSearchParams({ limit: "100" });
-        if (connectionId) search.set("connectionId", connectionId);
+        search.set("connectionId", connectionId);
         if (query.trim()) search.set("query", query.trim());
         if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
@@ -123,18 +123,6 @@ export function ChannelsSettingsPage() {
     const timer = window.setTimeout(() => void load(), 150);
     return () => window.clearTimeout(timer);
   }, [load]);
-
-  // Offerable placeholders (a registered service that was never connected) have
-  // no ledger id, so they can own no conversation and cannot be filtered by.
-  const talkConnections = useMemo(
-    () =>
-      connections.flatMap((connection) =>
-        connection.id !== null && connection.capabilities.chat?.state !== "unsupported"
-          ? [{ id: connection.id, label: connection.label }]
-          : [],
-      ),
-    [connections],
-  );
 
   // Rome does not listen to a linkable account with no agent, whatever
   // agent a conversation on it picks. A core that predates links omits `agent`.
@@ -184,16 +172,9 @@ export function ChannelsSettingsPage() {
     );
   }, []);
 
-  function chooseConnection(next: string) {
-    const updated = new URLSearchParams(params);
-    if (next) updated.set("connectionId", next);
-    else updated.delete("connectionId");
-    setParams(updated, { replace: true });
-  }
-
   return (
     <section className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_150px]">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -203,27 +184,6 @@ export function ChannelsSettingsPage() {
             className="pl-9"
           />
         </label>
-        <Select
-          value={connectionId || ALL_CONNECTIONS}
-          onValueChange={(next) => chooseConnection(next === ALL_CONNECTIONS ? "" : next)}
-        >
-          <SelectTrigger
-            className="w-full"
-            aria-label={t("channels.conversationSettings.connectionFilterAria")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_CONNECTIONS}>
-              {t("channels.conversationSettings.allConnections")}
-            </SelectItem>
-            {talkConnections.map((connection) => (
-              <SelectItem key={connection.id} value={connection.id}>
-                {connection.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select
           value={availability || ANY_STATUS}
           onValueChange={(next) => setAvailability(next === ANY_STATUS ? "" : next)}
@@ -596,7 +556,7 @@ function ConversationRow({
             field="respond"
             overridden={settingSource(snapshot, "activation.mode") === "overridden"}
             value={draft.activation.mode}
-            options={settingOptions(t, ["mention", "all"])}
+            options={settingOptions(t, ["mention", "all"], "replyRule.")}
             onChange={(mode) => change("activation.mode", mode)}
           />
         )}
@@ -1008,10 +968,10 @@ function SessionResetRows({
   );
 }
 
-function settingOptions(t: TFunction<"settings">, values: string[]) {
+function settingOptions(t: TFunction<"settings">, values: string[], keyPrefix = "") {
   return values.map((value) => ({
     value,
-    label: t(`channels.conversationSettings.options.${value}`),
+    label: t(`channels.conversationSettings.options.${keyPrefix}${value}`),
   }));
 }
 

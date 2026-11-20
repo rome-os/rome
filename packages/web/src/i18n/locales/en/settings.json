@@ -12,7 +12,6 @@
     "Connections": "Connections",
     "Favors": "Favors",
     "Trust": "Trust",
-    "Channels": "Channels",
     "AI Tools": "AI Tools",
     "Advanced": "Advanced",
     "Devices": "Devices"
@@ -426,11 +425,8 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "Configure chats",
       "searchPlaceholder": "Search provider, workspace, or chat",
-      "allConnections": "All connections",
       "anyStatus": "Any status",
-      "connectionFilterAria": "Filter by connection",
       "statusFilterAria": "Filter by status",
       "status": {
         "online": "Online",
@@ -478,7 +474,11 @@
         "ignore": "Ignore",
         "respond": "Respond",
         "thread": "Native thread",
-        "inline": "Inline"
+        "inline": "Inline",
+        "replyRule": {
+          "mention": "Only when addressed",
+          "all": "Every message"
+        }
       },
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
@@ -500,7 +500,11 @@
         "utc": "UTC"
       },
       "saving": "Saving…",
-      "retry": "Retry"
+      "retry": "Retry",
+      "chatRules": {
+        "title": "Chat rules",
+        "description": "How Rome takes part in each chat on this account. Only the rules this kind of connection offers are shown."
+      }
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",

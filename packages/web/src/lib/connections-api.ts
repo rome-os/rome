@@ -1,3 +1,4 @@
+import type { ChatSettingField } from "@rome/api-types/chat-settings";
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
@@ -82,6 +83,9 @@ export interface ApiConnection extends ConnectionAccountFields {
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
+  /** The chat rules the connection's kind offers on its group chats. Empty
+   *  for a kind that offers none. Absent from a core that predates it. */
+  chatRules?: ChatSettingField[];
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {

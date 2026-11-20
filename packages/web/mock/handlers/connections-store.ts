@@ -1,5 +1,6 @@
 import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import type { ChatSettingField } from "@rome/api-types/chat-settings";
 
 // The connection ledger. In its own module because two surfaces read it and one
 // of them writes it: the Connections page revokes a grant, and the send routes
@@ -12,6 +13,24 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 // state its ceremony would have left, or the Connections page would contradict
 // the surfaces these fixtures feed — the People page's WhatsApp contacts, and
 // the configured Discord and Telegram conversations below.
+// What each kind of connection offers, as core's kind declarations report it
+// (packages/core/src/chat-settings/rules.ts and each kind's descriptor).
+const CHAT_RULES: Record<string, ChatSettingField[]> = {
+  discord: [
+    "enabled",
+    "activation.mode",
+    "activation.botMessages",
+    "activation.whenOthersMentioned",
+    "replies.placement",
+    "routing.agentName",
+    "session.reset",
+  ],
+  feishu: ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
+  wechat: ["enabled", "routing.agentName", "session.reset"],
+  telegram: ["session.reset"],
+  email: ["session.reset"],
+};
+
 export const connections: { connections: ApiConnection[] } = {
   connections: [
     {
@@ -34,6 +53,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      chatRules: [],
     },
     ...[
       {
@@ -67,6 +87,7 @@ export const connections: { connections: ApiConnection[] } = {
         agent: service === "feishu" ? MAIN_AGENT_ID : null,
         link: service === "feishu" ? "own_account" : null,
         severalAccounts,
+        chatRules: CHAT_RULES[service] ?? [],
       }),
     ),
     {
@@ -91,6 +112,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
+      chatRules: CHAT_RULES.discord,
     },
     {
       id: "telegram-1",
@@ -114,6 +136,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
+      chatRules: CHAT_RULES.telegram,
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -139,6 +162,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      chatRules: ["session.reset"],
     },
     {
       id: "linkedin-1",
@@ -160,6 +184,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      chatRules: ["session.reset"],
     },
     // The OAuth services this host offers but nobody has connected. Core lists
     // them as placeholders (`id: null`), so the page has something to offer.
