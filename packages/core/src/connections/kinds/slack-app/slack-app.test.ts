@@ -626,6 +626,29 @@ describe("Slack app Web API", () => {
   });
 });
 
+describe("Slack app users.info", () => {
+  it("names the workspace a full member belongs to, and none for a guest or a stranger", async () => {
+    const users: Record<string, object> = {
+      U_KIM: { name: "kim", team_id: "T_A" },
+      U_CONNECT: { name: "sam", team_id: "T_OTHER" },
+      U_GUEST: { name: "guest", team_id: "T_A", is_restricted: true },
+      U_STRANGER: { name: "stranger", team_id: "T_OTHER", is_stranger: true },
+      U_NO_TEAM: { name: "nobody" },
+    };
+    const fetchImpl = (async (url: string) => {
+      const user = new URL(url).searchParams.get("user") as string;
+      return new Response(JSON.stringify({ ok: true, user: users[user] }));
+    }) as unknown as typeof fetch;
+    const api = createSlackAppWebApi("https://slack.test", fetchImpl);
+
+    const answers = await Promise.all(
+      Object.keys(users).map(async (id) => (await api.userName("t", id)).fullMemberOf),
+    );
+
+    expect(answers).toEqual(["T_A", "T_OTHER", undefined, undefined, undefined]);
+  });
+});
+
 describe("Slack app mailbox key", () => {
   const DAY = 24 * 60 * 60 * 1000;
   const NOW = Date.UTC(2026, 10, 19);
@@ -2144,7 +2167,9 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
       userName: rs.fn(async (_token: string, user: string) =>
         user === "U_GUEST"
           ? { displayName: "Guest" }
-          : { displayName: "Kim", fullMember: true as const },
+          : user === "U_OTHER"
+            ? { displayName: "Other", fullMemberOf: "T_OTHER" }
+            : { displayName: "Kim", fullMemberOf: TEAM },
       ),
     });
     const delivered: ChannelMessage[] = [];
@@ -2176,23 +2201,26 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
     expect(delivered[0]).not.toHaveProperty("openToMembers");
   });
 
-  it("marks a full member's message while on, never a guest's, and stops from the next message once off", async () => {
+  it("marks a full member's message while on, never a guest's or another workspace's member's, and stops from the next message once off", async () => {
     const open = { on: true };
     const { a, delivered } = openable(open);
     await a.start();
     await a.handleFrame(from(1, "U_KIM"));
     await a.handleFrame(from(2, "U_GUEST"));
+    // A Slack Connect user Slack does not call a stranger, whose event names
+    // no other workspace.
+    await a.handleFrame(from(4, "U_OTHER"));
     open.on = false;
     await a.handleFrame(from(3, "U_KIM"));
 
-    expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined]);
+    expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined, undefined]);
   });
 
   it("asks Slack again after ten minutes, so a member made a guest is no longer marked", async () => {
     let guest = false;
     let at = Date.parse("2026-11-20T00:00:00Z");
     const userName = rs.fn(async () =>
-      guest ? { displayName: "Kim" } : { displayName: "Kim", fullMember: true as const },
+      guest ? { displayName: "Kim" } : { displayName: "Kim", fullMemberOf: TEAM },
     );
     const delivered: ChannelMessage[] = [];
     const a = new SlackAppAdapter({
@@ -2234,7 +2262,7 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
         forwardSecret: SECRET,
         mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
         api: fakeApi({
-          userName: rs.fn(async () => ({ displayName: "Kim", fullMember: true as const })),
+          userName: rs.fn(async () => ({ displayName: "Kim", fullMemberOf: TEAM })),
         }),
         openMailbox: fakeMailbox().open,
         copy,

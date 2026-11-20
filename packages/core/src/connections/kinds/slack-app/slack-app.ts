@@ -494,8 +494,9 @@ export class SlackAppAdapter {
         : {}),
       addressing: direct ? "direct" : "mention",
       // Only a person who is a full member of this workspace, by Slack's own
-      // answer: a guest, a bot or a sender Slack would not describe stays closed.
-      ...(event.user && name.fullMember && this.config.openToMembers?.()
+      // answer: a guest, a bot, a member of another workspace or a sender
+      // Slack would not describe stays closed.
+      ...(event.user && name.fullMemberOf === this.config.teamId && this.config.openToMembers?.()
         ? { openToMembers: true as const }
         : {}),
     };

@@ -21,7 +21,9 @@ const ALREADY_REFUSED = new Set([
  *  full member of the workspace, not a guest, a bot or someone from another
  *  workspace. */
 export interface SlackAppUser extends SlackUserName {
-  fullMember?: true;
+  /** The workspace the user is a full member of, by Slack's own answer:
+   *  absent for a guest, a bot, a deleted user and a stranger. */
+  fullMemberOf?: string;
 }
 
 export interface SlackAppWebApi {
@@ -213,12 +215,17 @@ export function createSlackAppWebApi(
             is_ultra_restricted?: unknown;
             is_stranger?: unknown;
             deleted?: unknown;
+            team_id?: unknown;
           }
         | undefined;
       // A guest is restricted, a single-channel guest ultra restricted, and
-      // someone from another workspace a stranger.
+      // someone from another workspace a stranger. Slack does not mark every
+      // Slack Connect user a stranger, so the user's own workspace is kept
+      // for the connection to compare with its own.
+      const team = stringField(user?.team_id);
       const fullMember =
         user !== undefined &&
+        team !== undefined &&
         user.is_bot !== true &&
         user.is_restricted !== true &&
         user.is_ultra_restricted !== true &&
@@ -227,7 +234,7 @@ export function createSlackAppWebApi(
       return {
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
-        ...(fullMember ? { fullMember: true as const } : {}),
+        ...(fullMember ? { fullMemberOf: team } : {}),
       };
     },
     async revoke(botToken, signal) {
