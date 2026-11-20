@@ -92,12 +92,13 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);
     const said = earlierMessages(newerThan(below, sinceKey), bound);
-    // A full page read after the message shown last that does not reach the
-    // turn's message stops short of it.
+    // A read after the message shown last that does not reach the turn's
+    // message stops short of it. The page's length tells nothing: the
+    // connection may leave out messages it cannot show, such as a thread's
+    // root on each later page.
     const cut =
       sinceKey !== undefined &&
       key !== undefined &&
-      page.length >= EARLIER_MESSAGES &&
       !page.some((message) => message.messageId === key);
     const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
     const messages = labelled.map(

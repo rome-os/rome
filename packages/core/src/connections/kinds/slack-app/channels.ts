@@ -11,9 +11,10 @@ const MEMBER_CHANNELS_TTL_MS = 5 * 60 * 1000;
 /** How old a listing may be before a name it lacks makes Slack be asked
  *  again: someone may have just added the app with /invite. */
 const RELIST_AFTER_MS = 10 * 1000;
-/** One page of Slack's listing, and how many pages a listing reads at most. */
+/** One page of Slack's listing, and how many pages a listing reads at most:
+ *  a listing that would need more is refused, never taken as whole. */
 const PAGE = 200;
-const MAX_PAGES = 10;
+const MAX_PAGES = 100;
 
 /** What a call that needs the channel scopes says when the workspace was
  *  connected before Rome's Slack app asked for them. */
@@ -37,7 +38,8 @@ export class SlackMemberChannels {
   ) {}
 
   /** The channels the app is a member of, sorted by name. Rejects with
-   *  {@link REAPPROVE_FOR_CHANNELS} where the token holds no channel scope. */
+   *  {@link REAPPROVE_FOR_CHANNELS} where the token holds no channel scope,
+   *  and rejects a listing longer than it reads. */
   async list(signal?: AbortSignal): Promise<SlackChannel[]> {
     const now = this.deps.now?.() ?? Date.now();
     if (this.cached && now - this.cached.at < MEMBER_CHANNELS_TTL_MS) return this.cached.channels;
@@ -57,6 +59,13 @@ export class SlackMemberChannels {
     } catch (error) {
       if (isMissingScope(error)) throw new Error(REAPPROVE_FOR_CHANNELS);
       throw error;
+    }
+    // A part of the listing would read as the whole, and a channel past it as
+    // one the app is not a member of.
+    if (cursor) {
+      throw new Error(
+        `Rome's Slack app is a member of more than ${PAGE * MAX_PAGES} channels, too many to list: name a channel by its id.`,
+      );
     }
     channels.sort((a, b) => a.name.localeCompare(b.name));
     this.cached = { at: now, channels };
