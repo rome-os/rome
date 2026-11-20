@@ -759,6 +759,7 @@ describe("a turn that failed, read back after a reload", () => {
   const renderFailed = (
     summary: Partial<NonNullable<ChatMessage["traceSummary"]>>,
     before: ChatMessage[] = [],
+    after: ChatMessage[] = [],
   ) => {
     const messages: ChatMessage[] = [
       ...before,
@@ -778,6 +779,7 @@ describe("a turn that failed, read back after a reload", () => {
           ...summary,
         },
       },
+      ...after,
     ];
     const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
       runningTurnId: null,
@@ -817,6 +819,35 @@ describe("a turn that failed, read back after a reload", () => {
       "/settings/ai-tools",
     );
     expect(screen.queryByText(/credit balance is 0/)).toBeNull();
+  });
+
+  it("leaves the raw error out of the trace line when a provider card explains it", () => {
+    renderFailed(
+      { terminalError: "API Error: Request rejected (429) · Claude usage limit reached" },
+      [],
+      [
+        {
+          id: "card",
+          sessionId: "s-1",
+          turnId: "turn-failed",
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              type: "provider_failure",
+              provider: "anthropic",
+              reason: "quota",
+              card: "wait",
+              followsDefault: true,
+              alternatives: ["openai"],
+              chatId: "s-1",
+            },
+          ]),
+          createdAt: "2026-06-13T00:00:02.000Z",
+        },
+      ],
+    );
+    expect(screen.queryByText(/Request rejected/)).toBeNull();
+    expect(screen.getByText(/Claude quota used up/)).toBeTruthy();
   });
 
   it("puts the guidance in the row's body, below its one-line trace header", () => {

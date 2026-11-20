@@ -1332,6 +1332,11 @@ export function Chat({
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
+      // A provider failure card says why the turn stopped and what to do, so
+      // the composer's error banner would only repeat it.
+      if (sid === mainSessionIdRef.current && message.content.includes('"provider_failure"')) {
+        setStreamError(null);
+      }
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];

@@ -111,7 +111,11 @@ function ArchivedTraceNote() {
   return <p className="px-3 text-aux text-muted-foreground">{t("trace.archived")}</p>;
 }
 
-function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => void) {
+function renderTrace(
+  trace: ChatMessage,
+  onOpen: (target: TraceDrawerTarget) => void,
+  errorExplained = false,
+) {
   if (trace.traceArchived) return null;
   return trace.traceSummary ? (
     <TraceTrigger
@@ -120,8 +124,14 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       turnId={trace.turnId ?? null}
       summary={trace.traceSummary}
       onOpen={onOpen}
+      errorExplained={errorExplained}
     />
   ) : null;
+}
+
+/** A provider failure card in the turn says why it failed, and what to do. */
+function hasProviderCard(messages: readonly ChatMessage[]): boolean {
+  return messages.some((message) => message.content.includes('"provider_failure"'));
 }
 
 /**
@@ -231,12 +241,13 @@ const RowView = memo(function RowView({
       </MessageRow>
     );
   }
+  const carded = hasProviderCard(row.messages);
   // Running turn: its persisted trace isn't written yet, so the live trace button
   // carries it. Settled turn: its stored trace.
   const subtitle = live ? (
     <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live />
   ) : row.trace ? (
-    renderTrace(row.trace, onOpenStoredTrace)
+    renderTrace(row.trace, onOpenStoredTrace, carded)
   ) : undefined;
   // Copy appears once the turn settles (`live` gone) and only when it produced
   // text — a card-only turn has nothing raw to copy.
@@ -348,7 +359,9 @@ const RowView = memo(function RowView({
         );
       })}
       {live ? <LiveTail live={live} actions={actions} /> : null}
-      {live || showsError ? null : <TraceErrorGuidance summary={row.trace?.traceSummary} />}
+      {live || showsError || carded ? null : (
+        <TraceErrorGuidance summary={row.trace?.traceSummary} />
+      )}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
     </MessageRow>
   );
