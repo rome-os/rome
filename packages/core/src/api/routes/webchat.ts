@@ -3061,7 +3061,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // Time-ordered, so new chats sit together in the id index (RFC 9562).
     const id = uuidv7();
-    const name = body.name || "New Chat";
+    const name = body.name || "New chat";
     let project;
     try {
       project = await ensureStoredProjectSelection(

@@ -1,5 +1,5 @@
 {
-  "builtinApps": "Builtin Apps",
+  "builtinApps": "Built-in apps",
   "header": {
     "title": "Apps",
     "appStore": "App Store"
@@ -37,7 +37,7 @@
     "desktop": "Embedded browser surface",
     "chat": "Talk to your agents"
   },
-  "installedApps": "Installed Apps",
+  "installedApps": "Installed apps",
   "tabs": {
     "installed": "Installed",
     "store": "App Store"
