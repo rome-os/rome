@@ -6,6 +6,8 @@ import type {
   ChannelActivity,
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
+import type * as connections from "../../connections/message.js";
+import { legacyMessage } from "../../connections/test-fixtures.js";
 import type { TalkDirectory } from "../../connections/types.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
@@ -22,10 +24,10 @@ const noAccounts: Accounts = {
   resolve: async () => null,
 };
 
-function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
-  return {
-    channel: "telegram",
-    direction: "inbound",
+function message(
+  overrides: Partial<Omit<ChannelMessage, "channel" | "direction">> = {},
+): connections.Message {
+  return legacyMessage({
     messageId: "m-1",
     chatId: "c-1" as ChatId,
     senderId: "guardian",
@@ -33,7 +35,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     attachments: [],
     timestamp: new Date(0),
     ...overrides,
-  };
+  });
 }
 
 /** A pasted-token service whose every talker epoch is recorded. */
@@ -43,8 +45,11 @@ function talkKind(
   direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
   directory: TalkDirectory | null = null,
-): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
-  const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
+): {
+  descriptor: ConnectionDescriptor;
+  epochs: Array<{ deliver?: (m: connections.Message) => void }>;
+} {
+  const epochs: Array<{ deliver?: (m: connections.Message) => void }> = [];
   return {
     epochs,
     descriptor: {
@@ -101,7 +106,7 @@ describe("channelList", () => {
             const value = Reflect.get(target, property, receiver);
             return typeof value === "function" ? value.bind(target) : value;
           }
-          return (handler: (message: ChannelMessage) => Promise<void>) => {
+          return (handler: (message: connections.Message) => Promise<void>) => {
             const detach = target.hearTalker(handler);
             if (!detach) return detach;
             subscribed.push(target.id);

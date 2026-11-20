@@ -705,12 +705,15 @@ export function startConciergeEvents(
       }
     }
     if (question) {
-      const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
+      // The question card itself, by the id `card_forward` takes: forwarded,
+      // it is the same card in the Concierge chat, answered wherever it is.
       coalescer.mark({
         taskId,
         kind: `turn_end:completed question by=${by}`,
         urgent: true,
-        detail: [said, `question: ${question.question}${options}`].filter(Boolean).join("\n"),
+        detail: [said, `card id=${question.messageId}: ${question.line}`]
+          .filter(Boolean)
+          .join("\n"),
       });
       return;
     }

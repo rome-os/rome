@@ -32,6 +32,8 @@ import {
   FolderOpen,
   PanelRightOpen,
   Pencil,
+  Pin,
+  PinOff,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -199,6 +201,7 @@ import {
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  pinSession,
   renameSession,
   updateSessionModel,
 } from "@/lib/chat-api";
@@ -613,6 +616,7 @@ export function Chat({
     isForkChat,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
+    pinnedAt,
     forkable,
     isTaskChat,
     taskOf,
@@ -1203,16 +1207,27 @@ export function Chat({
     [mainSessionId, setArchived],
   );
 
+  // An archived topic chat is in no active list, so it opens as an ordinary
+  // chat: the session itself says it is a topic chat.
+  const isTopicChat =
+    !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession);
+  // Pins or unpins the open topic chat; the chat list and this header read it again.
+  const togglePin = useCallback(async () => {
+    if (!mainSessionId) return;
+    try {
+      await pinSession(mainSessionId, !pinnedAt);
+    } catch {
+      toast.error(t("recentChats.pinFailed", { ns: "common" }));
+    }
+    emitSessionsChanged();
+  }, [mainSessionId, pinnedAt, t]);
   // A topic chat asks, as the sidebar does, what becomes of its follows and
   // open tasks when it is archived, and of the follows that moved when it is
   // unarchived.
   const topicArchive = useTopicChatArchive({
     chatId: mainSessionId ?? null,
     name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
-    // An archived topic chat is in no active list, so it opens as an ordinary
-    // chat: the session itself says it is a topic chat.
-    topic:
-      !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession),
+    topic: isTopicChat,
     onArchive: (stopWork) => void handleArchive(stopWork),
     onUnarchive: (moveBack) => void handleUnarchive(moveBack),
   });
@@ -2514,6 +2529,19 @@ export function Chat({
             run: () => setRenameOpen(true),
           },
         ]),
+    // Only a topic chat is pinned, and an archived one shows no pin.
+    ...(isTopicChat && mainSessionId && !isArchived
+      ? [
+          {
+            key: "pin",
+            icon: pinnedAt ? <PinOff /> : <Pin />,
+            label: pinnedAt
+              ? t("recentChats.unpin", { ns: "common" })
+              : t("recentChats.pin", { ns: "common" }),
+            run: () => void togglePin(),
+          },
+        ]
+      : []),
     {
       key: "share",
       icon: <Share2 />,

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -127,7 +128,7 @@ describe("WhatsAppAdapter", () => {
     it("emits a private message as the channel's record, with the WAMessage as raw", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
       const waMsg = makeWAMessage();
@@ -155,7 +156,7 @@ describe("WhatsAppAdapter", () => {
     it("emits a group message with the participant as sender", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
 
@@ -180,7 +181,7 @@ describe("WhatsAppAdapter", () => {
     it("extracts image attachments", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
 
@@ -208,7 +209,7 @@ describe("WhatsAppAdapter", () => {
     it("extracts document attachments", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
 
@@ -238,7 +239,7 @@ describe("WhatsAppAdapter", () => {
     it("uses remoteJid as senderId for private chats", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
 
@@ -366,7 +367,7 @@ describe("WhatsAppAdapter", () => {
       const handledIds: string[] = [];
       adapter.onSync(sink);
       adapter.onInbound(async (m) => {
-        handledIds.push(m.messageId);
+        handledIds.push(channelMessageOf(m, "whatsapp").messageId);
       });
       await adapter.start();
 
@@ -399,7 +400,7 @@ describe("WhatsAppAdapter", () => {
       const handled: ChannelMessage[] = [];
       adapter.onSync(sink);
       adapter.onInbound(async (m) => {
-        handled.push(m);
+        handled.push(channelMessageOf(m, "whatsapp"));
       });
       await adapter.start();
 
@@ -455,7 +456,7 @@ describe("WhatsAppAdapter", () => {
       let handled: ChannelMessage | undefined;
       adapter.onSync(sink);
       adapter.onInbound(async (m) => {
-        handled = m;
+        handled = channelMessageOf(m, "whatsapp");
       });
       await adapter.start();
 
@@ -562,7 +563,7 @@ describe("WhatsAppAdapter", () => {
     it("skips messages with fromMe=true", async () => {
       let captured: ChannelMessage | undefined;
       adapter.onInbound(async (msg) => {
-        captured = msg;
+        captured = channelMessageOf(msg, "whatsapp");
       });
       await adapter.start();
 

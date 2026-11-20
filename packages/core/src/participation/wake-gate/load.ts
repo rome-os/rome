@@ -39,17 +39,14 @@ type ChatRules = Pick<
   "enabled" | "replyRule" | "botMessages" | "whenOthersMentioned"
 >;
 
-/** The chat's settings the wake gate applies. A setting the chat's connection
- *  does not offer wakes on every message, as it did before the gate applied it. */
-export function chatRules({ effective, supportedFields }: ChatSettingsSnapshot): ChatRules {
-  const offers = (field: ChatSettingsSnapshot["supportedFields"][number]) =>
-    supportedFields.includes(field);
+/** The chat rules the wake gate applies. Core has already resolved each to
+ *  the value the chat runs on: its kind's fixed value, the guardian's choice
+ *  where the kind offers the rule, or the default (chat-settings/rules.ts). */
+export function chatRules({ effective }: ChatSettingsSnapshot): ChatRules {
   return {
     enabled: effective.enabled,
-    replyRule: offers("activation.mode") ? effective.activation.mode : "all",
-    botMessages: offers("activation.botMessages") ? effective.activation.botMessages : "all",
-    whenOthersMentioned: offers("activation.whenOthersMentioned")
-      ? effective.activation.whenOthersMentioned
-      : "respond",
+    replyRule: effective.activation.mode,
+    botMessages: effective.activation.botMessages,
+    whenOthersMentioned: effective.activation.whenOthersMentioned,
   };
 }
