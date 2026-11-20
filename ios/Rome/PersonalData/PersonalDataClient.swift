@@ -8,7 +8,7 @@ import os
 
 /// One reading as the ingest takes it.
 struct PersonalDataPoint: Codable, Equatable, Sendable {
-    enum Shape: String, Codable, Sendable { case bucket, sample, record }
+    enum Shape: String, Codable, Sendable { case bucket, sample, record, entry }
 
     /// Stable per reading, so a second send replaces the first.
     let key: String
@@ -26,6 +26,8 @@ struct PersonalDataPoint: Codable, Equatable, Sendable {
     var fields: [String: Double]?
     /// Strings only, allow-listed by the Rome: a workout's `activity`, a sample's `sourceApp`.
     var metadata: [String: String]?
+    /// An entry's words, such as an event's title, as its type declares them.
+    var content: [String: JSONValue]?
 }
 
 struct PersonalDataEnvelope: Encodable, Sendable {
@@ -52,6 +54,20 @@ struct PersonalDataEnvelope: Encodable, Sendable {
         let key: String
     }
 
+    /// A snapshot of a window: the id on every batch of the run, and the
+    /// windows on the last, which commits them.
+    struct Snapshot: Encodable, Sendable, Equatable {
+        struct Window: Encodable, Sendable, Equatable {
+            let type: String
+            let start: String
+            let end: String
+        }
+
+        let id: String
+        let readAt: String
+        var windows: [Window]?
+    }
+
     var version = 1
     let source: String
     let origin: Origin
@@ -60,6 +76,8 @@ struct PersonalDataEnvelope: Encodable, Sendable {
     var connectionId: String? = nil
     let batch: Batch
     let types: [TypeMark]
+    /// Absent for a chunk that is not a snapshot.
+    var snapshot: Snapshot? = nil
     let upserts: [PersonalDataPoint]
     let deletes: [Delete]
 }

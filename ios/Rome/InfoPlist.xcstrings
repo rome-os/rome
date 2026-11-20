@@ -1,6 +1,24 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "NSCalendarsFullAccessUsageDescription" : {
+      "comment" : "Asked when Calendar is first connected",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome sends your calendar events to your Rome and your AI model, whose terms apply, so your Agent can tell you what's on and when you're free, and adds or changes events when you ask it to."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 会把你的日历事件发送到你的 Rome 和你的 AI 模型（适用其条款），让你的 Agent 能告诉你有哪些安排、什么时候有空，并在你要求时添加或修改事件。"
+          }
+        }
+      }
+    },
     "NSCameraUsageDescription" : {
       "comment" : "Asked before the first photo from the composer's camera",
       "extractionState" : "manual",

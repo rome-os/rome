@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -112,6 +112,10 @@ export interface DiscordDeps {
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
+  /** A test-only back door: whether an agent keeps the Inbox app off the
+   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
+   *  every message, whatever its chats' settings say. */
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
@@ -259,6 +263,12 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
+            unsafeTestOnlyHearEveryMessage: () => {
+              const agent = deps.accountAgentOf?.(kit.connectionId);
+              return (
+                typeof agent === "string" && deps.unsafeTestOnlyBypassesInbox?.(agent) === true
+              );
+            },
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
               deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),

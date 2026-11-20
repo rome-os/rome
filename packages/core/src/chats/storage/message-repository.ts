@@ -303,26 +303,6 @@ export class MessageRepository {
   }
 
   /**
-   * The key of the last message said in the chat thread of the message keyed
-   * `key` in `chat`, which may be any message of the thread: the root itself
-   * when nothing replies to it, or null when Rome holds no such message.
-   * docs/domains/chats.md#chat-thread
-   */
-  lastInChatThread(chat: ChatRef, key: string): string | null {
-    return (
-      this.db.all<{ key: string }>(sql`
-        WITH thread(root) AS (
-          SELECT coalesce(root_message_id, id) FROM chat_messages
-          WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
-        )
-        SELECT m.key FROM thread JOIN chat_messages m ON m.chat_id = ${chatIdOf(chat)}
-          AND (m.id = thread.root OR m.root_message_id = thread.root)
-        ORDER BY m.said_at DESC, m.id DESC LIMIT 1
-      `)[0]?.key ?? null
-    );
-  }
-
-  /**
    * React to the message keyed `key` in `chat` with `reaction`, or with null
    * clear its reaction. One message holds one reaction, so a new one replaces
    * it. Answers whether Rome holds the message.

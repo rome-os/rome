@@ -1103,7 +1103,7 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     return app;
   }
 
-  it("dispatches into the dashboard visitor flow and completes it end-to-end", async () => {
+  it("dispatches into the dashboard admin flow and completes it end-to-end", async () => {
     insertGuardian({ accountId: "OWNER" });
     setInstanceTokenInMemory("romeinst_existing");
     const app = await buildApps({ emails: ["invitee@example.com"] });

@@ -6,6 +6,7 @@ import {
   navigateRome,
   type AppComponentContext,
 } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
 import {
   CATALOG_BY_SLUG,
   isRomeSettingsLink,
@@ -375,67 +376,75 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
   // provider): connecting inline is impossible, so offer the Settings fallback.
   if (phase === "unavailable") {
     return (
-      <div className="rounded-12 border border-border bg-surface p-4">
-        <span className="text-sm font-medium text-foreground">Connect {name}</span>
+      <div
+        data-ui-typography="inline-card"
+        className="rounded-12 border border-border bg-surface p-4"
+      >
+        <span className="text-ui font-medium text-foreground">Connect {name}</span>
         {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            compact
             onClick={() => ctx.host.dismiss()}
-            className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
           >
             Dismiss
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
+            compact
             onClick={() => navigateRome({ path: "settings", tab: "connections" })}
-            className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
           >
             Open Settings
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-12 border border-border bg-surface p-4">
+    <div
+      data-ui-typography="inline-card"
+      className="rounded-12 border border-border bg-surface p-4"
+    >
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-foreground">Connect {name}</span>
+        <span className="text-ui font-medium text-foreground">Connect {name}</span>
         {scope ? <span className="text-xs text-muted-foreground">{scope}</span> : null}
       </div>
 
       {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
 
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
           {phase === "authorizing" ? "Waiting for you to authorize in the opened tab…" : ""}
         </span>
-        <div className="flex gap-2">
-          <button
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            compact
             onClick={() => ctx.host.dismiss()}
-            className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
           >
             Dismiss
-          </button>
+          </Button>
           {phase === "authorizing" ? (
-            <button
-              type="button"
-              onClick={checkNow}
-              className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-            >
+            <Button type="button" size="sm" compact onClick={checkNow}>
               I've authorized
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
+              size="sm"
+              compact
               onClick={connect}
               disabled={phase === "starting" || !toolkit}
-              className="rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {phase === "starting" ? "Starting…" : phase === "error" ? "Try again" : "Connect"}
-            </button>
+            </Button>
           )}
         </div>
       </div>

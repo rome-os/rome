@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileBrowserStoreProvider } from "./file-browser/store/context";
+import { FileBrowserStoreProvider, useFileBrowserStoreApi } from "./file-browser/store/context";
 import { getIsDesktopViewport } from "./file-browser/store/utils";
 import { resolveInitialSelectedFolderPath } from "@/lib/file-browser-initial-selection";
 import { Shell } from "./file-browser/Shell";
@@ -40,8 +40,20 @@ interface FileBrowserPageProps {
     currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
+  /**
+   * Filled with a check a host runs before it unmounts the browser, as a
+   * sheet does on close: it settles unsaved edits the way leaving a file does
+   * and answers whether the host may go on.
+   */
+  leaveGuard?: { current: (() => Promise<boolean>) | null };
   rootLabel: string;
   rootPanelTrigger?: boolean;
+  /**
+   * Shows only the selected file: no tree, no file list and no way back to
+   * them, and a Markdown file opens straight in the editor. For a host that
+   * already chose the file, as a chat's Outputs tab does.
+   */
+  singleFile?: boolean;
   sidebarHeading?: string;
   searchPlaceholder: string;
 }
@@ -60,8 +72,10 @@ export function FileBrowserPage({
   onFolderCreated,
   renderCreateExtra,
   onSelectionChange,
+  leaveGuard,
   rootLabel,
   rootPanelTrigger = false,
+  singleFile = false,
   sidebarHeading,
   searchPlaceholder,
 }: FileBrowserPageProps) {
@@ -110,6 +124,7 @@ export function FileBrowserPage({
       getRouteSnapshot,
       t,
       embedded,
+      singleFile,
       getDeleteDescription,
       onPathsDeleted,
       onFolderCreated,
@@ -126,6 +141,7 @@ export function FileBrowserPage({
       getRouteSnapshot,
       t,
       embedded,
+      singleFile,
       getDeleteDescription,
       onPathsDeleted,
       onFolderCreated,
@@ -135,10 +151,12 @@ export function FileBrowserPage({
 
   return (
     <FileBrowserStoreProvider config={config}>
+      {leaveGuard && <LeaveGuard guard={leaveGuard} />}
       <Shell
         embedded={embedded}
         rootLabel={rootLabel}
         rootPanelTrigger={rootPanelTrigger}
+        singleFile={singleFile}
         sidebarHeading={sidebarHeading}
         searchPlaceholder={searchPlaceholder}
         externalSelection={externalSelection}
@@ -148,4 +166,15 @@ export function FileBrowserPage({
       />
     </FileBrowserStoreProvider>
   );
+}
+
+function LeaveGuard({ guard }: { guard: { current: (() => Promise<boolean>) | null } }) {
+  const store = useFileBrowserStoreApi();
+  useEffect(() => {
+    guard.current = () => store.getState().file.resolveUnsavedEditsBeforeLeaving();
+    return () => {
+      guard.current = null;
+    };
+  }, [guard, store]);
+  return null;
 }

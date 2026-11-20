@@ -584,7 +584,9 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 committedContent: nextContent,
                 lastDiskContent: nextContent,
                 textViewMode:
-                  data.kind === "text" && getTextPreviewKind(data.path, data.mimeType)
+                  data.kind === "text" &&
+                  !config.singleFile &&
+                  getTextPreviewKind(data.path, data.mimeType)
                     ? "preview"
                     : "edit",
               },
@@ -1024,7 +1026,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 nameDialog: {
                   confirmLabel: config.t("dialog.renameConfirm"),
                   currentName,
-                  description: config.t("dialog.renameDescription", { path }),
                   initialValue: currentName,
                   inputLabel: config.t("dialog.nameLabel"),
                   mode: "rename",
@@ -1319,7 +1320,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
               nameDialog: {
                 confirmLabel: config.t("dialog.renameConfirm"),
                 currentName,
-                description: config.t("dialog.renameDescription", { path }),
                 initialValue: currentName,
                 inputLabel: config.t("dialog.nameLabel"),
                 mode: "rename",

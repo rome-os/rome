@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Apple Health → Sync history: every sync of the last 30 days, by day, each
+// Apple Health → Sync history: the syncs of the last 30 days, by day, each
 // a row with how it came about, when, and how many readings went. Counts
 // only, never a value. Delete uploaded data sits at the bottom. How the sync
 // stands now, and Sync now, are on the Apple Health page.
@@ -28,13 +28,17 @@ struct SyncHistoryFormatter {
     var calendar: Calendar = .current
     var locale: Locale = .current
     var device: DeviceKind = .iPhone
+    /// A source of entries (Calendar): its counts are items, not readings.
+    var entries = false
 
-    /// Newest first, by day. A sync that found nothing new and went well
-    /// adds no row past the newest one, so the list shows what moved.
+    /// Newest first, by day. Past the newest one, a sync that went well adds
+    /// no row when it found nothing new or ran in the background, which it
+    /// does dozens of times a day; failures, skips, Sync now, Opened Rome,
+    /// history and deletes stay.
     func days(_ entries: [SyncLogEntry]) -> [SyncHistoryDay] {
         var days: [SyncHistoryDay] = []
         for (index, entry) in entries.enumerated() {
-            if index > 0, entry.outcome == .ok, entry.itemCount == 0 { continue }
+            if index > 0, Self.quiet(entry) { continue }
             let day = calendar.startOfDay(for: entry.time)
             let row = row(entry)
             if let last = days.last, last.id == day {
@@ -44,6 +48,13 @@ struct SyncHistoryFormatter {
             }
         }
         return days
+    }
+
+    /// A sync that went well with nothing to tell: no new readings, or a
+    /// background one.
+    static func quiet(_ entry: SyncLogEntry) -> Bool {
+        if entry.outcome == .ok, entry.itemCount == 0 { return true }
+        return entry.trigger == .observer && !entry.history && (entry.outcome == .ok || entry.outcome == .partial)
     }
 
     func row(_ entry: SyncLogEntry) -> SyncHistoryRow {
@@ -56,7 +67,7 @@ struct SyncHistoryFormatter {
         case .deleted:
             return SyncHistoryRow(id: entry.seq, symbol: "trash", title: triggerText(entry), detail: time, count: nil, failed: false)
         case .ok, .partial, .interrupted:
-            let count = entry.itemCount == 0 ? String(localized: "Up to date") : String(localized: "\(entry.itemCount) readings")
+            let count = entry.itemCount == 0 ? String(localized: "Up to date") : entries ? String(localized: "\(entry.itemCount) items") : String(localized: "\(entry.itemCount) readings")
             return SyncHistoryRow(id: entry.seq, symbol: symbol(entry), title: triggerText(entry), detail: time, count: count, failed: false)
         }
     }
@@ -97,6 +108,8 @@ struct SyncHistoryFormatter {
         case "network": return String(localized: "Couldn't reach your Rome")
         case "rate_limited": return String(localized: "Too many syncs, trying later")
         case "health_failed": return String(localized: "Couldn't read Health")
+        case "calendar_denied": return String(localized: "No access to Calendar")
+        case "calendar_failed": return String(localized: "Couldn't read Calendar")
         default: return String(localized: "Your Rome couldn't take it")
         }
     }
@@ -117,14 +130,17 @@ struct SyncHistoryFormatter {
 }
 
 struct SyncHistoryScreen: View {
+    /// The personal-data source whose syncs it lists.
+    let source: String
     @Environment(AppModel.self) private var model
     @State private var confirmDelete = false
     @State private var deleting = false
     @State private var deleteFailed = false
 
     var body: some View {
-        let health = model.health
-        let days = SyncHistoryFormatter(device: model.node.device).days(health.history)
+        let isHealth = source == HealthSettings.sourceId
+        let sync = model.sourceSync(source)
+        let days = SyncHistoryFormatter(device: model.node.device, entries: !isHealth).days(sync?.history ?? [])
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 if days.isEmpty {
@@ -137,7 +153,7 @@ struct SyncHistoryScreen: View {
                         }
                     }
                 }
-                if health.canSync {
+                if sync?.canSync == true {
                     deleteButton
                         .padding(.top, 14)
                 }
@@ -151,8 +167,8 @@ struct SyncHistoryScreen: View {
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
-        .task { await health.reloadHistory() }
-        .alert("Delete all Apple Health data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
+        .task { await sync?.reloadHistory() }
+        .alert(isHealth ? "Delete all Apple Health data this \(model.node.device.name) sent to your Rome?" : "Delete all calendar data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { delete() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -198,7 +214,7 @@ struct SyncHistoryScreen: View {
     private func delete() {
         deleting = true
         Task {
-            let done = await model.health.deleteUploaded()
+            let done = await model.sourceSync(source)?.deleteUploaded() ?? false
             deleting = false
             if !done { deleteFailed = true }
         }

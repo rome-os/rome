@@ -146,21 +146,47 @@ const SONIOX: VoiceInputInfo = {
 };
 
 const composers = {
-  chat: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
-    <ChatComposer ref={ref} chatId={chatId} onSend={onSend} />
+  chat: (
+    onSend: () => void,
+    chatId?: string,
+    ref?: Ref<ChatComposerHandle>,
+    onStop?: () => void,
+  ) => (
+    <ChatComposer
+      ref={ref}
+      chatId={chatId}
+      onSend={onSend}
+      isStreaming={Boolean(onStop)}
+      onStop={onStop}
+    />
   ),
-  concierge: (onSend: () => void, chatId?: string, ref?: Ref<ChatComposerHandle>) => (
+  concierge: (
+    onSend: () => void,
+    chatId?: string,
+    ref?: Ref<ChatComposerHandle>,
+    onStop?: () => void,
+  ) => (
     <ReplyDraftHarness>
-      <ConciergeComposer ref={ref} chatId={chatId} onSend={onSend} />
+      <ConciergeComposer
+        ref={ref}
+        chatId={chatId}
+        onSend={onSend}
+        isStreaming={Boolean(onStop)}
+        onStop={onStop}
+      />
     </ReplyDraftHarness>
   ),
 };
 
-/** Opens a message field; with `chatId`, the field of that chat, which keeps a draft. */
+/**
+ * Opens a message field; with `chatId`, the field of that chat, which keeps a
+ * draft; with `onStop`, while the agent replies.
+ */
 function renderComposer(
   kind: keyof typeof composers,
   info: VoiceInputInfo = SONIOX,
   chatId?: string,
+  onStop?: () => void,
 ) {
   mockFetch(info);
   const onSend = rs.fn();
@@ -169,7 +195,7 @@ function renderComposer(
   const view = render(
     <MemoryRouter>
       <QueryClientProvider client={client}>
-        {composers[kind](onSend, chatId, handle)}
+        {composers[kind](onSend, chatId, handle, onStop)}
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -507,6 +533,82 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     // The microphone is closed while the rest of the text arrives.
     expect(waveform()).toBeNull();
+  });
+
+  it("hides the agent's stop while voice input is on, so only one stop shows", async () => {
+    const onStop = rs.fn();
+    renderComposer(kind, SONIOX, undefined, onStop);
+    const agentStop = () => screen.queryByRole("button", { name: "Stop generating" });
+    await screen.findByRole("button", { name: "Start voice input" });
+    expect(agentStop()).not.toBeNull();
+
+    const socket = await startListening();
+    expect(agentStop()).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop voice input" })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+    expect(agentStop()).toBeNull();
+    socket.say({ type: "ended" });
+
+    fireEvent.click(agentStop()!);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the screen on while voice input is on", async () => {
+    const release = rs.fn(async () => {});
+    const request = rs.fn(async () => ({ release }) as unknown as WakeLockSentinel);
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request } });
+    try {
+      renderComposer(kind);
+      await screen.findByRole("button", { name: "Start voice input" });
+      expect(request).not.toHaveBeenCalled();
+      const socket = await startListening();
+      await waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
+      fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+      await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+      socket.say({ type: "ended" });
+      await waitFor(() => expect(release).toHaveBeenCalled());
+    } finally {
+      Reflect.deleteProperty(navigator, "wakeLock");
+    }
+  });
+
+  it("lets the screen sleep after voice input when the page was shown again while the lock was pending", async () => {
+    const locks: Array<{ released: boolean; release: () => Promise<void> }> = [];
+    const answers: Array<() => void> = [];
+    const request = rs.fn(
+      () =>
+        new Promise<WakeLockSentinel>((resolve) => {
+          const lock = {
+            released: false,
+            release: async () => {
+              lock.released = true;
+            },
+          };
+          locks.push(lock);
+          answers.push(() => resolve(lock as unknown as WakeLockSentinel));
+        }),
+    );
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request } });
+    try {
+      renderComposer(kind);
+      await screen.findByRole("button", { name: "Start voice input" });
+      const socket = await startListening();
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      // The page hides and shows before the browser grants the first lock.
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(request).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        for (const answer of answers) answer();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+      await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+      socket.say({ type: "ended" });
+      await waitFor(() => expect(locks.every((lock) => lock.released)).toBe(true));
+    } finally {
+      Reflect.deleteProperty(navigator, "wakeLock");
+    }
   });
 
   it("gives the field back when Rome never answers a stop", async () => {

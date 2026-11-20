@@ -10,13 +10,9 @@ struct RowInfo: Hashable {
     var date: Date?
     /// The message is in a turn, so share mode can start on it.
     var canShare = false
-    /// The quote a reply carries, on its first bubble.
+    /// The quote a reply draws, on its first bubble: not for a reply that sits
+    /// right under what it answers, or in a run of replies to one message.
     var quote: MessagePart.ReplyQuote?
-    /// The quote leads somewhere: the reply's thread view, or the original.
-    var quoteLeads = false
-    /// A reply that sits right under what it answers draws this mark and no
-    /// quote text; the quote above is still what a tap on the mark leads from.
-    var rail: ReplyRail.Kind?
     /// The badge on a guardian message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
@@ -38,7 +34,6 @@ struct RowInfo: Hashable {
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
         var infos: [String: RowInfo] = [:]
-        let joins = TranscriptBuilder.replyJoins(messages)
         for (index, row) in rows.enumerated() {
             var info = RowInfo()
             switch row {
@@ -57,14 +52,8 @@ struct RowInfo: Hashable {
                 info.canShare = message.turnId != nil
                 info.saidByAgent = message.saidByAgent
                 info.senderName = message.sender?.name
-                // The quote leads where `TranscriptStore.quoteAction` would take it:
-                // a reply is in a thread of more than one, since its root is
-                // another message.
-                if let quote = Self.quote(of: message, row: row) {
+                if let quote = Self.quote(of: message, row: row), Self.drawsQuote(message, row: row, previous: Self.messageAbove(index, rows: rows, byID: byID)) {
                     info.quote = quote
-                    info.rail = Self.rail(joins[message.id], row: row, previous: index > 0 ? rows[index - 1] : nil, own: message.id)
-                    let inThread = message.chatThreadId.map { $0 != message.id } ?? false
-                    info.quoteLeads = kind == .concierge && (inThread || byID[quote.messageId] != nil)
                 }
             }
             infos[row.id] = info
@@ -72,16 +61,27 @@ struct RowInfo: Hashable {
         return infos
     }
 
-    /// The mark of an adjacent reply. A line needs the reply it joins to be the
-    /// row right above, one gap away; with anything else between, it is a hook.
-    private static func rail(_ join: TranscriptBuilder.ReplyJoin?, row: TranscriptRow, previous: TranscriptRow?, own: String) -> ReplyRail.Kind? {
-        switch join {
-        case nil: return nil
-        case .hook: return .hook
-        case .line:
-            guard let previous, let above = previous.ownMessageId, above != own, !previous.isSeparatorOrError else { return .hook }
-            return .line(gap: TranscriptSpacing.top(row, after: previous))
+    /// The message drawn above the row at `index`, which is not its own: the
+    /// rows between, such as time lines and notices, are not messages.
+    private static func messageAbove(_ index: Int, rows: [TranscriptRow], byID: [String: ChatMessage]) -> ChatMessage? {
+        let own = rows[index].ownMessageId
+        for above in rows[..<index].reversed() {
+            if let id = above.ownMessageId, id != own { return byID[id] }
         }
+        return nil
+    }
+
+    /// Whether a reply draws its quote (docs/domains/chats.md#chat-thread).
+    /// The guardian's reply always does. The Concierge's does not when it sits
+    /// in a run of replies to one message, or right under the guardian's
+    /// message it answers. A card draws none.
+    private static func drawsQuote(_ message: ChatMessage, row: TranscriptRow, previous: ChatMessage?) -> Bool {
+        if message.isUser { return true }
+        guard case .agentText(_, _, _, _, let position) = row else { return false }
+        if position.joinsAbove { return false }
+        let target = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
+        if let previous, previous.isUser, previous.id == target { return false }
+        return true
     }
 
     /// The quote a reply carries, drawn on the first bubble or card of its message only.

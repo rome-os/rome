@@ -12,8 +12,6 @@ import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
 import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
-import { ConciergeTasks } from "./concierge/tasks.js";
-import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
@@ -104,7 +102,6 @@ describe("live events WebSocket", () => {
   let deps: Awaited<ReturnType<typeof buildTestDeps>>;
   let live: { close(): void };
   let activeSubscriptions: number;
-  let conciergeTasks: ConciergeTasks;
   let dashboardAccess: DashboardAccessState;
   let phoneWatching: PhoneWatching;
   let dashboardActivity: DashboardActivity;
@@ -152,7 +149,6 @@ describe("live events WebSocket", () => {
       createdAt: new Date(),
     });
     deps = await buildTestDeps(testDb.db);
-    conciergeTasks = new ConciergeTasks(new ConciergeTasksRepository(testDb.db));
     nameListeners.clear();
     deps.agentNameEvents = {
       subscribe(emit) {
@@ -186,7 +182,6 @@ describe("live events WebSocket", () => {
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
-      subscribeConciergeTasks: (owner, emit) => track(conciergeTasks.subscribe(emit, owner)),
       // Each owner's one chat, told on subscribe, as the activity tracker does.
       subscribeConciergeActivity: (owner, emit) => {
         emit("concierge_activity", {
@@ -269,7 +264,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives an allow-listed dashboard visitor every topic but the app catalog", async () => {
+  it("gives a dashboard admin every topic but the app catalog", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -339,15 +334,6 @@ describe("live events WebSocket", () => {
     ).toMatchObject({ message: "Not found" });
     await client.subscribe("chat.session:visitor-main");
 
-    await client.subscribe("concierge.tasks");
-    await conciergeTasks.repo.upsertMany([{ title: "The guardian's", state: "next" }]);
-    const [mine] = await conciergeTasks.repo.upsertMany([
-      { title: "Mine", state: "next", chatId: "visitor-main" },
-    ]);
-    expect(
-      await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
-    ).toMatchObject({ data: { task: { id: mine.id, title: "Mine" } } });
-
     // concierge.activity tells the visitor about their own chats only.
     await client.subscribe("concierge.activity");
     expect(
@@ -369,28 +355,13 @@ describe("live events WebSocket", () => {
     ).toMatchObject({ message: "Not found" });
   });
 
-  it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {
+  it("answers the retired concierge.tasks topic as unknown and keeps the socket", async () => {
     const client = await connect();
-    await client.subscribe("concierge.tasks");
-    const [row] = await conciergeTasks.repo.upsertMany([
-      { title: "Fix flaky test", state: "doing" },
-    ]);
+    client.send({ type: "subscribe", topic: "concierge.tasks" });
     expect(
-      await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
-    ).toMatchObject({
-      event: "task_upsert",
-      // Rome derives the status: with no task chat started yet, the task is later.
-      data: {
-        task: {
-          id: row.id,
-          title: "Fix flaky test",
-          status: "later",
-          endReason: null,
-          state: "watching",
-          chat: null,
-        },
-      },
-    });
+      await client.next((m) => m.type === "error" && m.topic === "concierge.tasks"),
+    ).toMatchObject({ message: "Unknown topic" });
+    await client.subscribe("chat.status");
   });
 
   it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {

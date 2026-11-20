@@ -11,6 +11,10 @@ enum Palette {
     static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
+    /// Behind a task link's name: the text colour, faint, so it reads on any
+    /// bubble, as the web's chip does (foreground at 7%). `fill` is nearly
+    /// the Agent's bubble in light, and the chip vanished on it.
+    static let taskChip = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.12))
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
@@ -26,10 +30,6 @@ enum Palette {
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
-    /// The rail that joins a Concierge reply to the message it answers: the
-    /// bubble's fill taken 26% of the way to the text color, since the fill
-    /// itself sits too close to the page. A guardian reply's rail is `primary`.
-    static let replyRail = dynamic(0xB5AEA5, 0x54524E)
     static let hair = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.08))
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
@@ -57,6 +57,9 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+    /// A chart's plain bars, beside the highlighted ones.
+    static let chartBar = dynamic(0xE3DBCF, 0x45403B)
+    static let successSoft = dynamic(rgba: (0x5B7A4A, 0.12), (0x4AC06C, 0.14))
     /// Apple's Health pink (system pink): only the heart on the Apple Health page wears it.
     static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
@@ -115,7 +118,7 @@ enum Palette {
 enum Metrics {
     static let pagePadding: CGFloat = 16
     static let bubbleRadius: CGFloat = 20
-    static let bubbleTight: CGFloat = 6
+    static let bubbleTight: CGFloat = 4
     static let cardRadius: CGFloat = 18
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18
@@ -144,8 +147,8 @@ extension View {
     /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
     /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
     /// tinted message's tint goes on before the width, so it hugs the bubble.
-    func bubbleWidth() -> some View {
-        modifier(BubbleWidth())
+    func bubbleWidth(full: Bool = false) -> some View {
+        modifier(BubbleWidth(full: full))
     }
 
     /// Put before a card's background: the card takes the whole width
@@ -162,13 +165,15 @@ extension View {
 }
 
 private struct BubbleWidth: ViewModifier {
+    /// The chat's whole width, as an agent card takes it, rather than a bubble's.
+    let full: Bool
     @Environment(\.rowTinted) private var tinted
 
     func body(content: Content) -> some View {
         content
             .tinted(tinted)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, Metrics.bubbleInset)
+            .padding(.trailing, full ? 0 : Metrics.bubbleInset)
     }
 }
 

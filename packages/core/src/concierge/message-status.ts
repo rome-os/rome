@@ -25,9 +25,9 @@ export const WORKING_GRACE_MS = 500;
 const ANSWER_TOOLS = new Set([
   "react",
   "say",
-  "chat_forward",
-  "chat_card",
+  "card_forward",
   "connect_card",
+  "show_card",
   "toolsearch",
 ]);
 

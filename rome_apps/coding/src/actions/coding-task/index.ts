@@ -35,7 +35,7 @@ export function createCodingTaskAction(config: ActionConfig, deps: CodingTaskDep
       }
 
       const sessionId = typeof args.sessionId === "string" ? args.sessionId : undefined;
-      return await deps.appContext.runAction("summon", {
+      return await deps.appContext.runAction("system:summon", {
         agentName: "coding",
         prompt,
         sessionId,

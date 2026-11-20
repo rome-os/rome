@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { type ComponentProps, useState } from "react";
+import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
@@ -36,13 +36,8 @@ function Harness({
   currentReplyMessageIds = new Set(["message"]),
   kind = "routine",
   aiResult,
-  hidden = false,
-  whenShown,
   scrollPaddingTop = 0,
 }: {
-  /** The card is in a thread the focus hides. */
-  hidden?: boolean;
-  whenShown?: ComponentProps<typeof ChatPendingCardJump>["whenShown"];
   scrollPaddingTop?: number;
   questionResult?: Record<string, unknown>;
   currentReplyMessageIds?: ReadonlySet<string>;
@@ -56,7 +51,7 @@ function Harness({
     <MemoryRouter>
       <div ref={setScroller} data-testid="scroller" style={{ scrollPaddingTop }}>
         <div ref={setContent}>
-          <div data-chat-card-message="message" data-thread-out={hidden || undefined}>
+          <div data-chat-card-message="message">
             {kind === "approval" ? (
               <div data-chat-pending-card="approval">Pending approval</div>
             ) : kind === "app" ? (
@@ -97,7 +92,6 @@ function Harness({
             content={content}
             floor={floor}
             currentReplyMessageIds={currentReplyMessageIds}
-            whenShown={whenShown}
           />
         </div>
       </div>
@@ -121,12 +115,7 @@ beforeEach(() => {
   rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
     const top =
       this.dataset.testid === "scroller" ? 0 : this.dataset.testid === "floor" ? 500 : cardTop;
-    // A card a thread's focus hides has no box.
-    const height = this.closest("[data-thread-out]")
-      ? 0
-      : this.dataset.testid === "scroller"
-        ? 600
-        : 100;
+    const height = this.dataset.testid === "scroller" ? 600 : 100;
     return {
       top,
       bottom: top + height,
@@ -184,24 +173,6 @@ describe("ChatPendingCardJump", () => {
     });
     expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBe(jump);
     expect(document.activeElement).toBe(jump);
-  });
-
-  it("still reminds about a card the focused thread hides, and closes the focus before it jumps", async () => {
-    const pending: Array<() => void> = [];
-    const whenShown = rs.fn((find: () => HTMLElement | null, then: (el: HTMLElement) => void) => {
-      pending.push(() => {
-        const el = find();
-        if (el) then(el);
-      });
-    });
-    render(<Harness kind="approval" hidden whenShown={whenShown} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
-
-    // The jump waits for the focus to close.
-    expect(whenShown).toHaveBeenCalledOnce();
-    expect(scrollTo).not.toHaveBeenCalled();
-    act(() => pending[0]!());
-    expect(scrollTo).toHaveBeenCalledOnce();
   });
 
   it("keeps a server-owned approval eligible even after a newer reply", async () => {

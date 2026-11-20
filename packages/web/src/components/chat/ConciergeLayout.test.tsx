@@ -481,11 +481,11 @@ describe("Concierge layout", () => {
       expect((mine as HTMLElement).parentElement?.className).toContain("gap-4");
     });
 
-    it("adds a time line at fifteen minutes and splits the group at five", () => {
+    it("adds a time line at an hour and splits the group at five", () => {
       const { container } = renderTranscript([
         userRow(guardian("u1", 0, "Morning")),
         userRow(guardian("u2", 6 * 60_000, "Later")),
-        userRow(guardian("u3", 30 * 60_000, "Much later")),
+        userRow(guardian("u3", 90 * 60_000, "Much later")),
       ]);
 
       const tags = topLevel(container).map((el) => el.tagName);
@@ -516,7 +516,6 @@ describe("Concierge reply", () => {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   });

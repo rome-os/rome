@@ -357,10 +357,11 @@ final class Workspace {
     }
 
     /// Archives a topic chat and drops it from the drawer. Returns whether the
-    /// server took it.
+    /// server took it. `stoppingWork` ends its follows and open tasks instead
+    /// of moving them to the main Chat.
     @discardableResult
-    func archiveTopic(_ chatId: String) async -> Bool {
-        guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+    func archiveTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        guard (try? await backend.archiveChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
         return true
     }
@@ -377,9 +378,9 @@ final class Workspace {
         return true
     }
 
-    /// The follows and open tasks that deleting topic chat `chatId` would
-    /// move, or nil when they cannot be read within `wait`: an older
-    /// instance, or a slow network. The delete then moves them, as before.
+    /// The follows and open tasks that archiving or deleting topic chat
+    /// `chatId` would move, or nil when they cannot be read within `wait`: an
+    /// older instance, or a slow network. Both then move them, as before.
     func topicWork(_ chatId: String, wait: Duration = .seconds(3)) async -> ConciergeChatWork? {
         let backend = backend
         return await withTaskGroup(of: ConciergeChatWork?.self) { group in
@@ -546,6 +547,32 @@ final class Workspace {
         return store
     }
 
+    /// Each Concierge chat's task links once read, kept so a chip shows at once
+    /// the next time and reads again behind.
+    @ObservationIgnored private var taskLinkStores: [String: TaskLinkStore] = [:]
+
+    /// The task links of Concierge chat `id`; nil for a blank topic chat.
+    func taskLinks(forChat id: String) -> TaskLinkStore? {
+        guard let chatId = serverChatId(id) else { return nil }
+        if let held = taskLinkStores[chatId] { return held }
+        let store = TaskLinkStore(chatId: chatId, backend: backend)
+        taskLinkStores[chatId] = store
+        return store
+    }
+
+    /// Each chat's outputs once listed, kept so the Outputs tab shows them at
+    /// once the next time and reads them again behind.
+    @ObservationIgnored private var outputLists: [String: ChatOutputsStore] = [:]
+
+    /// The outputs of Concierge chat `id`; nil for a blank topic chat.
+    func outputs(forChat id: String) -> ChatOutputsStore? {
+        guard let chatId = serverChatId(id) else { return nil }
+        if let held = outputLists[chatId] { return held }
+        let store = ChatOutputsStore(chatId: chatId, backend: backend)
+        outputLists[chatId] = store
+        return store
+    }
+
     /// The transcript of Concierge chat `id`: the main chat's or a topic chat's.
     func transcript(forChat id: String) -> TranscriptStore {
         isMainChat(id) ? concierge : topicStore(id)
@@ -584,6 +611,7 @@ final class Workspace {
         topics.stop()
         for store in topicStores.values { store.close() }
         for store in taskStores.values { store.close() }
+        for store in taskLinkStores.values { store.stop() }
         for actions in shells.values { actions.reset() }
         shells = [:]
         backend.events.pause()
@@ -645,6 +673,7 @@ final class AppModel {
             // Back on a Rome after the session ran out: Health sync goes on.
             if phase == .ready, oldValue != .ready {
                 health.instanceOpened()
+                calendarSync.instanceOpened()
                 // A report the gate held back before the app was ready goes now.
                 connections.reportIfUnsent()
             }
@@ -672,7 +701,9 @@ final class AppModel {
         // Each Rome has its own Health sync: the one open now syncs.
         didSet {
             guard currentInstanceID != oldValue else { return }
-            health.select(currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) })
+            let open = currentInstanceID.flatMap { id in (instances.first { $0.id == id } ?? Self.rememberedInstance().flatMap { $0.id == id ? $0 : nil }).map(Self.healthInstance) }
+            health.select(open)
+            calendarSync.select(open)
         }
     }
     private(set) var signInError: String?
@@ -718,6 +749,8 @@ final class AppModel {
     let node: NodeHost
     /// Apple Health's Sync with Rome.
     let health: HealthSettings
+    /// Calendar's Sync with Rome.
+    let calendarSync: CalendarSync
     /// This phone's device connections, reported to the open Rome.
     let connections: DeviceConnections
     /// A connect card's link into the authorization, for the shell to hand its cards.
@@ -747,6 +780,10 @@ final class AppModel {
     private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
     private var foreground = ForegroundGate()
+    /// Nothing over the whole app hides its pages: it is on screen, with no
+    /// device connect sheet or stacking game over it. A line said once (the
+    /// "updated" notice) waits while it is false.
+    var pagesUncovered: Bool { !foreground.isInBackground && connections.request == nil && stackGame == nil }
 
     /// The pictures the open workspace loaded; `shared` in the app.
     private let images: StoredImageCache
@@ -757,6 +794,9 @@ final class AppModel {
     init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared, instanceConfiguration: @escaping () -> URLSessionConfiguration = { .default }, update: InstanceUpdater = InstanceUpdater()) {
         self.cloud = cloud
         self.update = update
+        #if DEBUG
+        instanceMinimums = update.minimums
+        #endif
         self.images = images
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
@@ -768,9 +808,15 @@ final class AppModel {
             target: { await target.resolve($0) }
         )
         self.health = health
+        let calendarSync = CalendarSync(
+            instance: Self.rememberedInstance().map(Self.healthInstance),
+            target: { await target.resolve($0) }
+        )
+        self.calendarSync = calendarSync
         let device = DeviceKind.current
         node = NodeHost(credentials: cloud, registry: NodeCapabilityRegistry(capabilities: [
             HealthCapability(health: HealthActions(reader: health.reader, device: device), live: NodeFlag()),
+            CalendarCapability(actions: CalendarActions(reader: calendarSync.reader, device: device), live: NodeFlag()),
             DeviceCapability(live: NodeFlag(), device: device),
         ]), device: device)
         connections = DeviceConnections(node: node)
@@ -778,8 +824,10 @@ final class AppModel {
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
         // A live Health answer leaves the app in front: the sync catches up,
         // at most every 15 minutes. Live results themselves are never stored.
-        node.onAnswered = { [weak health] action in
+        node.onAnswered = { [weak health, weak calendarSync] action in
             if action.hasPrefix("health.") { health?.foreground() }
+            // A change made live reaches the Rome's store now, not at the next open.
+            if CalendarActions.writes.contains(action) { calendarSync?.changedLive() }
         }
         connections.originId = { [weak health] in health?.originId() }
         // Rome Cloud's word on an instance an upgrade waits on: one it no
@@ -821,6 +869,7 @@ final class AppModel {
         Task { await push.launch() }
         #if DEBUG
         if HealthSeed.requested { Task { await HealthSeed.run() } }
+        if CalendarSeed.requested { Task { await CalendarSeed.run() } }
         let environment = ProcessInfo.processInfo.environment
         if environment["ROME_DEMO"] == "1" {
             openDemo()
@@ -850,6 +899,15 @@ final class AppModel {
            let user = environment["ROME_LOCAL_USER"],
            let password = environment["ROME_LOCAL_PASSWORD"] {
             await openLocal(origin: origin, user: user, password: password)
+            // `-RomeConnect <capability>`: the authorization Connect runs, with no tap.
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-RomeConnect"), ProcessInfo.processInfo.arguments.count > index + 1 {
+                await connect(ProcessInfo.processInfo.arguments[index + 1])
+            }
+            if let request = CalendarSeed.nodeAction {
+                // Once the app has settled and its connections are on.
+                try? await Task.sleep(for: .seconds(3))
+                CalendarSeed.logReply(await node.debugRun(request.action, args: request.args))
+            }
             return
         }
         #endif
@@ -1346,6 +1404,7 @@ final class AppModel {
         connections.forgetAccount()
         // Health sync's switch, anchors, history and origin; the Rome keeps what it has.
         health.forgetAccount()
+        calendarSync.forgetAccount()
     }
 
     // MARK: Session expiry
@@ -1471,14 +1530,23 @@ final class AppModel {
         // Sync's upload then runs on its own, behind it.
         await connections.connect(id)
         guard currentInstanceID == instance else { return }
-        if capability.syncSource == HealthSettings.sourceId, health.canSync, !health.isEnabled {
-            health.setEnabled(true)
+        if let sync = sourceSync(capability.syncSource), sync.canSync, !sync.isEnabled {
+            sync.setEnabled(true)
+        }
+    }
+
+    /// The Sync with Rome of a personal-data source, by its id.
+    func sourceSync(_ source: String?) -> (any SourceSyncing)? {
+        switch source {
+        case HealthSettings.sourceId?: return health
+        case CalendarSync.sourceId?: return calendarSync
+        default: return nil
         }
     }
 
     /// Settings, at Apple Health's Sync history.
     func openHealthHistory() {
-        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory])
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory(HealthSettings.sourceId)])
     }
 
     /// The pages to open, once: the shell takes them when it shows.
@@ -1502,6 +1570,10 @@ final class AppModel {
     private func open(_ workspace: Workspace) async {
         // A banner from the workspace this one replaces does not carry over.
         sessionExpired = false
+        #if DEBUG
+        // The demo goes by its own minimums, a real Rome by the app's.
+        update.minimums = workspace.backend is DemoBackend ? demoMinimums : instanceMinimums
+        #endif
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
@@ -1549,6 +1621,8 @@ final class AppModel {
 
     func appDidEnterBackground() {
         foreground.enteredBackground(at: .now)
+        // Calendar has no background delivery: iOS wakes the app to refresh it.
+        if calendarSync.isEnabled { CalendarSync.scheduleRefresh() }
         // Replies under way go out, then the device disconnects.
         node.setActive(false)
         // Drafts are written before the app may be killed.
@@ -1636,6 +1710,7 @@ final class AppModel {
         appearance.apply()
         node.setActive(true)
         health.foreground()
+        calendarSync.foreground()
         // iOS Settings may have changed a permission meanwhile.
         node.permissionsChanged()
         connections.report()
@@ -1711,8 +1786,7 @@ final class AppModel {
 
     // MARK: Widget links
 
-    /// A tap on the widget: an app on its instance, the Apps page, or Chat
-    /// to make an app. It waits while no instance is open, as a push does.
+    /// A tap on the widget waits while no instance is open, as a push does.
     func openFromWidget(_ link: WidgetLink) async {
         // The tapped app shows, not the game over it.
         stackGame = nil
@@ -1835,6 +1909,11 @@ final class AppModel {
         workspace = nil
         self.phase = phase
     }
+
+    /// The minimums the demo opens with; snapshot runs pass others.
+    var demoMinimums = UpdateGate.Minimums.demo
+    /// The minimums a real Rome opens with: the updater's own, as it came.
+    @ObservationIgnored private let instanceMinimums: UpdateGate.Minimums
 
     func openDemo(_ variant: DemoBackend.Variant = .full) {
         update.reset()

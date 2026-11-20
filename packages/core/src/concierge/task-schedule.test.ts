@@ -155,7 +155,7 @@ describe("TaskSchedules", () => {
     });
     // Only the task: its chats are read from its row.
     expect(routine?.args).toEqual({
-      taskId: "task-1",
+      chatId: "task-1",
       report: "when_it_matters",
       brief: "Sum up my week",
     });
@@ -284,15 +284,6 @@ describe("TaskSchedules", () => {
     expect(await schedules.remove("task-1")).toBe(false);
   });
 
-  it("skips only the next run when the task's checks are cancelled from its row", async () => {
-    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
-
-    expect(await checks.cancelFor("task-1", "guardian", { keepSchedule: true })).toBe(1);
-    expect(await checks.inChat("concierge")).toMatchObject([
-      { at: at(14, 4, 25), recurring: true },
-    ]);
-  });
-
   it("shows no check for a schedule whose task is gone", async () => {
     await schedules.set(
       { id: "gone", title: "Gone", owner: "guardian" },
@@ -364,7 +355,7 @@ describe("registerTaskRunAction", () => {
       name: CONCIERGE_TASK_RUN_ACTION,
       visibility: "explicit",
     });
-    expect(await action!.execute({ taskId: "task-1" }, {} as never)).toEqual({
+    expect(await action!.execute({ chatId: "task-1" }, {} as never)).toEqual({
       status: "ok",
       data: { run: "sent" },
     });
@@ -403,7 +394,7 @@ describe("a task's scheduled run on the action engine", () => {
       isFirstPartyAction: () => true,
     });
 
-    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { taskId: "task-1" })).resolves.toEqual({
+    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { chatId: "task-1" })).resolves.toEqual({
       status: "ok",
       data: { run: "sent" },
     });

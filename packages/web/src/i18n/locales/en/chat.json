@@ -79,7 +79,7 @@
     },
     "topicEmpty": {
       "title": "Start an ongoing topic",
-      "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
+      "description": "Alerts and tasks here show up only in this chat.",
       "starters": {
         "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
         "work": "Keep track of work here: project progress, PRs and meetings",
@@ -120,10 +120,10 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Running on its own",
+        "on_its_own": "Routines",
         "ended": "Ended"
       },
-      "empty": "Nothing runs here yet.",
+      "empty": "No tasks yet.",
       "loading": "Loading tasks",
       "loadFailed": "Failed to load tasks",
       "showMore": "Show {{count}} more",
@@ -132,16 +132,14 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "notStarted": "Not started",
         "stopping": "Stopping…",
-        "opening": "Opening…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
           "stopped": "Stopped",
           "no_response": "No response"
         },
-        "notStartedAge": "Not started · Created {{age}}"
+        "active": "Active"
       },
       "schedule": {
         "daily": "Daily at {{time}}",
@@ -165,24 +163,28 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
-        "respond": "Respond",
-        "respondTo": "Respond to {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}",
-        "openChat": "Open the chat for {{title}}"
+        "stopTask": "Stop {{title}}"
       },
       "failed": {
         "stop": "Failed to stop the task"
       },
-      "created": "Created {{when}}",
-      "endedAt": "Ended {{when}}"
+      "endedAt": "Ended {{when}}",
+      "routines": "Routines",
+      "needsYouDot": "A task needs you",
+      "emptyRoutines": "No routines yet."
+    },
+    "menu": {
+      "tasks": "Tasks",
+      "routines": "Routines",
+      "outputs": "Outputs",
+      "needsYouDot": "A task needs you"
     }
   },
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message",
-    "openThread": "Open the chat thread"
+    "jump": "Go to the original message"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -195,7 +197,7 @@
   },
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
-    "newChat": "New Chat",
+    "newChat": "New chat",
     "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
@@ -255,7 +257,7 @@
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",
       "commentPlaceholder": "Optional: what went wrong, or what was great?",
-      "submit": "Submit",
+      "submit": "Send feedback",
       "submitting": "Submitting…",
       "submitFailed": "Couldn't submit feedback",
       "recorded": "Feedback recorded"
@@ -306,12 +308,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "Reconnect {{provider}}",
-      "description": "Your {{provider}} login has expired or was revoked. Reconnect it in AI Tools, then try your message again.",
+      "description": "Your {{provider}} login has expired or was revoked. Send your message again after reconnecting.",
       "action": "Reconnect"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} is not signed in",
-      "description": "Sign in to {{provider}} in AI Tools, then try your message again.",
+      "description": "Send your message again after signing in.",
       "action": "Go to sign in"
     },
     "providerQuotaExhausted": {
@@ -385,6 +387,7 @@
     },
     "secretAccess": {
       "allow": "Allow {{minutes}} min",
+      "separator": ", ",
       "duration": "{{minutes}} min",
       "allowed": "Allowed {{name}} · {{minutes}} min",
       "rejected": "Rejected {{name}}"
@@ -446,6 +449,12 @@
     "sendWhileRunningTitle": "Send while agent is working",
     "stopGenerating": "Stop generating"
   },
+  "agentCard": {
+    "usual": "Usual {{range}}",
+    "normal": "Normal",
+    "high": "High",
+    "low": "Low"
+  },
   "questionCard": {
     "sent": "Sent",
     "optional": "optional",
@@ -459,9 +468,14 @@
   },
   "deviceConnectCard": {
     "connected": "Connected",
-    "notConnected": "Not connected"
+    "notConnected": "Not connected",
+    "connect": "Connect",
+    "notNow": "Not now",
+    "note": "So your Rome can read the data you allow."
   },
   "locationCard": {
+    "title": "Share your location?",
+    "share": "Share",
     "shared": "Location shared · ±{{accuracy}}",
     "notShared": "Not shared",
     "locating": "Finding your location…",
@@ -642,7 +656,11 @@
       "sendInvalidResponse": "Failed to send message: invalid response.",
       "sendFallback": "Failed to send message.",
       "stopFallback": "Failed to stop generation.",
-      "stopStatus": "Stop failed ({{status}})."
+      "stopStatus": "Stop failed ({{status}}).",
+      "reconnecting": "Can't reach Rome, reconnecting…",
+      "unreachable": "Can't reach Rome, try again soon.",
+      "updating": "Updating now, try again soon.",
+      "updatingReconnecting": "Updating now, reconnecting…"
     }
   },
   "empty": {
@@ -666,10 +684,6 @@
       "label": "Morning brief",
       "prompt": "Build a morning brief app with frontend design to read my Gmail from the last 24 hours and my upcoming Google Calendar events. Update the dashboard every day at 8:00 AM with the latest priorities, urgent emails, key meetings, deadlines, and recommended next actions. Identify what needs my attention most and send me a short summary on Telegram after each daily update."
     }
-  },
-  "thread": {
-    "back": "Back to the chat: {{title}}",
-    "replyPlaceholder": "Reply: {{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
@@ -759,5 +773,68 @@
     "resolved": "No chats waiting on {{provider}}",
     "runOn": "Run them on {{provider}} now",
     "runFailed": "Could not run the chats"
+  },
+  "outputs": {
+    "title": "Outputs",
+    "close": "Close outputs",
+    "loading": "Loading outputs",
+    "loadFailed": "Failed to load outputs",
+    "emptyTitle": "No outputs yet",
+    "emptyDescription": "Files the agent writes or shows in this chat appear here.",
+    "written": "Written",
+    "shown": "Shown",
+    "from": "from {{name}}",
+    "missing": "Moved or deleted",
+    "download": "Download",
+    "noPreview": "This file has no preview.",
+    "unavailable": "This file cannot be opened here.",
+    "previewFailed": "Failed to load the file",
+    "truncated": "Showing the first {{count}} characters.",
+    "back": "Back to outputs",
+    "edit": "Edit",
+    "doneEditing": "Done",
+    "filterLabel": "Show",
+    "noneOfType": "No outputs of this kind yet.",
+    "today": "Today",
+    "earlier": "Earlier",
+    "filters": {
+      "all": "All",
+      "document": "Documents",
+      "spreadsheet": "Spreadsheets",
+      "page": "Pages"
+    },
+    "types": {
+      "document": "Document",
+      "spreadsheet": "Spreadsheet",
+      "page": "Page",
+      "image": "Picture",
+      "code": "Code",
+      "file": "File"
+    },
+    "indexing": "Still finding earlier files."
+  },
+  "memoryFile": {
+    "openPage": "Open in Memory",
+    "close": "Close memory"
+  },
+  "chatHeader": {
+    "menu": "Chat menu",
+    "project": "Project · {{name}}",
+    "lastModel": "Last answered by {{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "Needs you",
+      "active": "Active",
+      "later": "Later",
+      "done": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "no_response": "No response"
+    },
+    "label": "{{name}}, {{status}}",
+    "untitled": "Task",
+    "mainChat": "Main chat",
+    "backTo": "Back to {{name}}"
   }
 }

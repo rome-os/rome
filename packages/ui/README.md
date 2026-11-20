@@ -33,8 +33,9 @@ Every component gets its own subpath export (`@rome-os/ui/button`). Prefer the
 subpath in app code so a bundler never has to reach the whole kit to find one
 component. Components backed by optional peers stay out of the barrel.
 [`Markdown`](#markdown) needs Streamdown, [`Calendar`](#calendar) needs
-`react-day-picker`, [`Command`](#command) needs `cmdk`, and [`Toaster`](#toaster)
-needs `sonner`.
+`react-day-picker`, [`Command`](#command) needs `cmdk`,
+[`InputOTP`](#inputotp) needs `input-otp`, and [`Toaster`](#toaster) needs
+`sonner`.
 
 The stylesheet is a single import at the host's CSS entrypoint:
 
@@ -136,6 +137,33 @@ import { Command, CommandInput, CommandItem, CommandList } from "@rome-os/ui/com
 
 It intentionally has no barrel entry, so consumers of the rest of the kit do
 not need to install or resolve `cmdk`.
+
+### InputOTP
+
+`InputOTP` is an opt-in code field built on `input-otp`: one slightly tall slot
+per character over a single invisible input, so paste, autofill, and the mobile
+keypad work. Install `input-otp` only in consumers that use it, then import the
+subpath directly. `REGEXP_ONLY_DIGITS` limits the field to digits. On a slot,
+`size` picks `sm` or `md`, `masked` draws a filled circle in place of the
+character, and `invalid` draws the edge `Input` draws for `aria-invalid`. The
+active slot takes the kit's focus outline, and a filled slot takes the stronger
+border.
+
+```bash
+pnpm add input-otp
+```
+
+```tsx
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+  REGEXP_ONLY_DIGITS,
+} from "@rome-os/ui/input-otp";
+```
+
+It has no barrel entry, so consumers of the rest of the kit do not need to
+install or resolve `input-otp`.
 
 ### `Alert`
 

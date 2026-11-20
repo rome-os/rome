@@ -126,7 +126,7 @@ describe("gateGuardianUpgrade", () => {
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
-  it("admits an allow-listed dashboard visitor only when dashboard access is passed", async () => {
+  it("admits a dashboard admin only when dashboard access is passed", async () => {
     const dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
     const visitor = (email: string, origin = "https://rome.example") =>
@@ -142,7 +142,7 @@ describe("gateGuardianUpgrade", () => {
     expect(
       await gateUpgrade(visitor("visitor@example.com"), allowed.socket, testDb.db, dashboardAccess),
     ).toEqual({
-      kind: "dashboard-visitor",
+      kind: "dashboard-admin",
       accountId: "account-1",
       email: "visitor@example.com",
     });

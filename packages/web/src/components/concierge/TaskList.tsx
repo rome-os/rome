@@ -1,16 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ChevronDown,
-  Clock,
-  CornerUpLeft,
-  MessageSquare,
-  Radio,
-  Square,
-  Workflow,
-} from "lucide-react";
+import { ChevronDown, Clock, Radio, Square, Workflow } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -39,7 +31,6 @@ import { useLiveEvents } from "@/hooks/use-live-events";
 import { fetchJson } from "@/lib/fetch-json";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
-import { requestConciergeJump } from "./concierge-jump";
 import { TaskGlyph } from "./TaskGlyph";
 import { formatTaskTime } from "./tasks";
 import { describeRoutineTrigger, describeTaskSchedule, formatClock } from "./task-list-words";
@@ -51,6 +42,12 @@ const changedSchema = z.object({ chatId: z.string(), follows: z.literal(true).op
 /** How many ended rows show at first, and how many more each "Show more" adds. */
 export const ENDED_PAGE = TASK_LIST_ENDED_PAGE;
 
+/** What a list shows: the task chats, or the routines, follows and reminders that run on their own. */
+export type TaskListView = "tasks" | "routines";
+
+/** The groups the Tasks view lists, in order. The rest are routines. */
+const TASK_GROUPS: readonly TaskListGroupKey[] = ["needs_you", "active", "later", "ended"];
+
 type Translate = ReturnType<typeof useTranslation<"chat">>["t"];
 
 /** One quiet line under a row's title: its state, then the time that goes with it. */
@@ -58,25 +55,58 @@ const stateLine = (...parts: Array<string | null | undefined | false>) =>
   parts.filter(Boolean).join(" · ");
 
 /**
- * "today", "yesterday", "3 days ago": how long ago `createdAt` was, by
- * calendar day, as the iOS app says a not-started task's age.
+ * A Concierge chat's Tasks view, read now and whenever the server says
+ * something in it changed. The header reads it too, for the dot on its Tasks
+ * button.
  */
-export function creationAge(createdAt: number, now: number, locale: string): string {
-  const day = (at: number) => {
-    const date = new Date(at);
-    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+export function useChatTaskList(chatId: string | null) {
+  const { t } = useTranslation("chat");
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: chatTaskListKey(chatId ?? ""),
+    enabled: chatId !== null,
+    queryFn: () =>
+      fetchJson<TaskListResponse>(listUrl(chatId ?? ""), {
+        fallback: t("concierge.taskList.loadFailed"),
+      }),
+  });
+  const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId ?? "") });
+  useLiveEvents(
+    {
+      topic: chatTasksTopicName(chatId ?? ""),
+      sseUrl: `${listUrl(chatId ?? "")}/events`,
+    },
+    {
+      [TASK_LIST_CHANGED_EVENT]: {
+        schema: changedSchema,
+        fn: ({ follows }) => {
+          if (!chatId) return;
+          void reread();
+          // A new or changed follow may name a source the snapshot has not read.
+          if (follows) void refreshConciergeConnectors(queryClient);
+        },
+      },
+    },
+    {
+      enabled: chatId !== null,
+      onReconnect: () => {
+        void reread();
+        void refreshConciergeConnectors(queryClient);
+      },
+    },
+  );
+  return {
+    ...query,
+    reread,
+    /** Whether a task chat of the chat needs its owner. */
+    needsYou: query.data?.groups.some((group) => group.key === "needs_you") ?? false,
   };
-  const days = Math.max(0, Math.round((day(now) - day(createdAt)) / 86_400_000));
-  return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-days, "day");
 }
 
-/** A row title's tooltip: when it was made, and when it ended for one that did. */
-function timesOf(t: Translate, createdAt: number | undefined, endedAt?: number | null): string[] {
+/** A row title's tooltip: when it ended, for a task chat that did. */
+function timesOf(t: Translate, endedAt?: number | null): string[] {
   const at = (value: number) => formatMessageTimestamp(new Date(value).toISOString());
-  return [
-    createdAt !== undefined && t("concierge.taskList.created", { when: at(createdAt) }),
-    endedAt != null && t("concierge.taskList.endedAt", { when: at(endedAt) }),
-  ].filter((line): line is string => Boolean(line));
+  return endedAt != null ? [t("concierge.taskList.endedAt", { when: at(endedAt) })] : [];
 }
 
 /** A row's icon button, shown on hover and focus, and always on a touch screen. */
@@ -90,17 +120,17 @@ interface RowButton {
 }
 
 /**
- * A row of the task list, the same for every kind: a mark, the title with a
- * small link to its task chat when it has one, and one line of state and time
- * under it. The right side holds buttons only, never information, and they
- * show on hover; a pending row keeps them shown and disabled. The row itself
- * does nothing when pressed.
+ * A row of the Tasks view, the same for every kind: a mark, the title, and one
+ * line of state and time under it. A task chat's row opens its chat when
+ * pressed, `to` being the chat. The right side holds buttons only, never
+ * information, and they show on hover; a pending row keeps them shown and
+ * disabled. The rows of what runs on its own have none.
  */
 function Row({
   glyph,
   title,
   times = [],
-  chat,
+  to,
   state,
   tone,
   dimmed,
@@ -110,9 +140,10 @@ function Row({
 }: {
   glyph: ReactNode;
   title: string;
-  /** The title's tooltip lines, such as when the row was made. */
+  /** The title's tooltip lines, such as when the row ended. */
   times?: string[];
-  chat?: { id: string; label: string } | null;
+  /** Where pressing the row goes: its task chat. */
+  to?: string;
   state: string;
   tone?: "warning" | "destructive";
   dimmed?: boolean;
@@ -121,26 +152,37 @@ function Row({
   pending?: boolean;
   onNavigate?: () => void;
 }) {
+  const titleClass = cn(
+    "min-w-0 truncate text-ui",
+    dimmed ? "text-muted-foreground" : "text-foreground",
+  );
+  const titleEl = <span className={titleClass}>{title}</span>;
   return (
     <li
       data-task-list-row
-      className="group/row flex min-h-12 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover"
+      className={cn(
+        "group/row relative flex min-h-12 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover",
+      )}
     >
       <span className={cn("flex shrink-0", dimmed && "opacity-60")}>{glyph}</span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1">
-          {times.length > 0 ? (
+          {to ? (
+            // The whole row is the link: its box covers the row, and the
+            // buttons sit above it.
+            <Link
+              to={to}
+              onClick={onNavigate}
+              className={cn(
+                titleClass,
+                "outline-none outline-1 -outline-offset-1 outline-transparent after:absolute after:inset-0 focus-visible:after:outline-solid focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-ring/50",
+              )}
+            >
+              {title}
+            </Link>
+          ) : times.length > 0 ? (
             <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className={cn(
-                    "min-w-0 truncate text-ui",
-                    dimmed ? "text-muted-foreground" : "text-foreground",
-                  )}
-                >
-                  {title}
-                </span>
-              </TooltipTrigger>
+              <TooltipTrigger asChild>{titleEl}</TooltipTrigger>
               <TooltipContent side="top" align="start">
                 {times.map((line) => (
                   <div key={line}>{line}</div>
@@ -148,26 +190,8 @@ function Row({
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span
-              className={cn(
-                "min-w-0 truncate text-ui",
-                dimmed ? "text-muted-foreground" : "text-foreground",
-              )}
-            >
-              {title}
-            </span>
+            titleEl
           )}
-          {chat ? (
-            <Link
-              to={`/chat/${chat.id}`}
-              onClick={onNavigate}
-              aria-label={chat.label}
-              title={chat.label}
-              className="flex size-5 shrink-0 items-center justify-center rounded-4 text-subtle-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
-            >
-              <MessageSquare className="size-3.5" aria-hidden />
-            </Link>
-          ) : null}
         </div>
         {state ? (
           <div
@@ -187,7 +211,7 @@ function Row({
       {buttons.length > 0 ? (
         <span
           className={cn(
-            "flex shrink-0 items-center gap-1",
+            "relative z-10 flex shrink-0 items-center gap-1",
             !pending &&
               "touch-show opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100",
           )}
@@ -215,21 +239,16 @@ function Row({
   );
 }
 
-/** What a task's line says: what it waits for, that it runs, when it runs next, or how it ended. */
+/** What a task chat's line says: its status word, then the time that goes with it. */
 function taskState(
   item: TaskListTaskItem,
   t: Translate,
   now: number,
   locale: string,
-  pending: "stop" | "respond" | undefined,
+  pending: boolean,
 ): string {
-  if (pending === "stop") return t("concierge.taskList.task.stopping");
-  if (pending === "respond") return t("concierge.taskList.task.opening");
+  if (pending) return t("concierge.taskList.task.stopping");
   const { task, schedule, check } = item;
-  const age = () =>
-    t("concierge.taskList.task.notStartedAge", {
-      age: creationAge(task.createdAt, now, locale),
-    });
   const status = taskStatusOfDto(task);
   const repeats = schedule ? describeTaskSchedule(schedule, t, locale) : null;
   const when = (at: number) => formatTaskTime(at, now, locale);
@@ -242,14 +261,14 @@ function taskState(
         task.waitingSince != null && when(task.waitingSince),
       );
     case "active":
-      return stateLine(repeats, t("concierge.taskList.task.running"));
+      return stateLine(repeats, t("concierge.taskList.task.active"), when(task.updatedAt));
     case "later":
       if (check?.at != null) {
         return check.recurring
           ? stateLine(repeats, when(check.at))
           : t("concierge.taskList.task.checksIn", { when: when(check.at) });
       }
-      return repeats ?? age();
+      return repeats ?? "";
     case "ended":
       return stateLine(
         t(`concierge.taskList.task.ended.${status.endReason ?? "done"}`),
@@ -262,58 +281,41 @@ function TaskRow({
   item,
   now,
   pending,
-  onPress,
+  onStop,
   onNavigate,
 }: {
   item: TaskListTaskItem;
   now: number;
-  pending: "stop" | "respond" | undefined;
-  onPress: (action: "stop" | "respond") => void;
+  pending: boolean;
+  onStop: () => void;
   onNavigate?: () => void;
 }) {
   const { t, i18n } = useTranslation("chat");
   const { task } = item;
   const status = taskStatusOfDto(task);
-  // Respond only where a card waits on its owner; Stop on every task that has not ended.
-  const buttons: RowButton[] = [];
-  if (status.status === "needs_you") {
-    buttons.push({
-      label: t("concierge.taskList.actions.respondTo", { title: task.title }),
-      text: t("concierge.taskList.actions.respond"),
-      icon: <CornerUpLeft className="size-4" aria-hidden />,
-      onPress: () => onPress("respond"),
-    });
-  }
-  if (status.status !== "ended") {
-    buttons.push({
-      label: t("concierge.taskList.actions.stopTask", { title: task.title }),
-      text: t("concierge.taskList.actions.stop"),
-      icon: <Square className="size-4" aria-hidden />,
-      onPress: () => onPress("stop"),
-    });
-  }
+  // Stop only, on every task chat that has not ended: the row itself opens it.
+  const buttons: RowButton[] =
+    status.status === "ended"
+      ? []
+      : [
+          {
+            label: t("concierge.taskList.actions.stopTask", { title: task.title }),
+            text: t("concierge.taskList.actions.stop"),
+            icon: <Square className="size-4" aria-hidden />,
+            onPress: onStop,
+          },
+        ];
   return (
     <Row
       glyph={<TaskGlyph status={status} />}
       title={task.title}
-      times={timesOf(
-        t,
-        task.createdAt,
-        status.status === "ended" ? (task.completedAt ?? task.updatedAt) : null,
-      )}
-      chat={
-        task.chat
-          ? {
-              id: task.chat.id,
-              label: t("concierge.taskList.actions.openChat", { title: task.title }),
-            }
-          : null
-      }
+      times={timesOf(t, status.status === "ended" ? (task.completedAt ?? task.updatedAt) : null)}
+      to={`/chat/${encodeURIComponent(task.chat.id)}`}
       state={taskState(item, t, now, i18n.language, pending)}
       tone={status.status === "needs_you" && !pending ? "warning" : undefined}
       dimmed={status.status === "ended"}
       buttons={buttons}
-      pending={pending !== undefined}
+      pending={pending}
       onNavigate={onNavigate}
     />
   );
@@ -327,7 +329,6 @@ function CheckRow({ item, now }: { item: TaskListCheckItem; now: number }) {
     <Row
       glyph={<Clock className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={check.name}
-      times={timesOf(t, check.createdAt)}
       state={
         check.waitingFor
           ? stateLine(t("concierge.taskList.check.waiting", { what: check.waitingFor }), when)
@@ -339,7 +340,7 @@ function CheckRow({ item, now }: { item: TaskListCheckItem; now: number }) {
   );
 }
 
-function FollowRow({ item }: { item: TaskListFollowItem }) {
+function FollowRow({ item, now }: { item: TaskListFollowItem; now: number }) {
   const { t, i18n } = useTranslation("chat");
   const digest =
     item.digestTimes.length > 0
@@ -356,13 +357,13 @@ function FollowRow({ item }: { item: TaskListFollowItem }) {
     <Row
       glyph={<Radio className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.target}
-      times={timesOf(t, item.createdAt)}
       state={stateLine(
         connectorOf(connectors, item.source)?.label ?? item.label,
         state === "unavailable"
           ? t("concierge.taskList.follow.unavailable")
           : state === "off" && t("concierge.taskList.follow.off"),
         digest,
+        item.nextAt != null && formatTaskTime(item.nextAt, now, i18n.language),
       )}
       dimmed={state !== "active"}
     />
@@ -376,7 +377,6 @@ function RoutineRow({ item, now }: { item: TaskListRoutineItem; now: number }) {
     <Row
       glyph={<Workflow className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.name}
-      times={timesOf(t, item.createdAt)}
       state={stateLine(
         describeRoutineTrigger(item.trigger, t, i18n.language),
         !item.enabled && t("concierge.taskList.routine.paused"),
@@ -421,36 +421,29 @@ function LoadingRows() {
 }
 
 /**
- * Whether a pressed task's row can let go of its pending look: a stop once
- * the task reads as ended; a respond only when its jump lands.
+ * A Concierge chat's Tasks or Routines view. Tasks lists its task chats,
+ * grouped as Needs you, Active, Later and Ended, each a titled card of rows;
+ * Ended starts folded and shows the newest rows first. Routines lists what is
+ * no task chat, such as routines, follows and one-off reminders, in one list
+ * by the time each runs next. It reads again whenever the server says
+ * something in it changed.
  */
-function settled(item: TaskListTaskItem | undefined, action: "stop" | "respond"): boolean {
-  if (!item) return true;
-  return action === "stop" && taskStatusOfDto(item.task).status === "ended";
-}
-
-/**
- * A Concierge chat's task list, the Tasks panel: what runs for the chat,
- * grouped as Needs you, Active, Later, Running on its own and Ended, each a
- * titled card of rows. Ended starts folded and shows the newest rows first.
- * It reads again whenever the server says something in it changed.
- */
-export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: () => void }) {
+export function TaskList({
+  chatId,
+  view = "tasks",
+  onNavigate,
+}: {
+  chatId: string;
+  view?: TaskListView;
+  onNavigate?: () => void;
+}) {
   const { t } = useTranslation("chat");
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [endedOpen, setEndedOpen] = useState(false);
   // Older ended rows "Show more" read, past the first page, and the next page's cursor.
   const [older, setOlder] = useState<{ items: TaskListItem[]; cursor: string | null } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
-  const { data, isError } = useQuery({
-    queryKey: chatTaskListKey(chatId),
-    queryFn: () =>
-      fetchJson<TaskListResponse>(listUrl(chatId), {
-        fallback: t("concierge.taskList.loadFailed"),
-      }),
-  });
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  const { data, isError, reread } = useChatTaskList(chatId);
   // A re-read that changes the first page of ended rows may move rows across
   // the pages read before it: they go, and Show more reads on from the new
   // first page. A re-read with the same ended rows in the same order keeps them.
@@ -463,33 +456,13 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   useEffect(() => {
     if (endedFirstPage !== null) setOlder(null);
   }, [endedFirstPage]);
-  const reread = () => queryClient.invalidateQueries({ queryKey: chatTaskListKey(chatId) });
-  useLiveEvents(
-    { topic: chatTasksTopicName(chatId), sseUrl: `${listUrl(chatId)}/events` },
-    {
-      [TASK_LIST_CHANGED_EVENT]: {
-        schema: changedSchema,
-        fn: ({ follows }) => {
-          void reread();
-          // A new or changed follow may name a source the snapshot has not read.
-          if (follows) void refreshConciergeConnectors(queryClient);
-        },
-      },
-    },
-    {
-      onReconnect: () => {
-        void reread();
-        void refreshConciergeConnectors(queryClient);
-      },
-    },
-  );
   // Times count down by the minute.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  // A pressed Stop stays pending until the task is no longer at work.
+  // A pressed Stop stays pending until the task chat is no longer at work.
   useEffect(() => {
     if (!data || pending.size === 0) return;
     const tasks = new Map(
@@ -499,42 +472,27 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
         ),
       ),
     );
-    const left = new Map([...pending].filter(([id, action]) => !settled(tasks.get(id), action)));
+    const left = new Set(
+      [...pending].filter((id) => {
+        const item = tasks.get(id);
+        return item !== undefined && taskStatusOfDto(item.task).status !== "ended";
+      }),
+    );
     if (left.size !== pending.size) setPending(left);
   }, [data, pending]);
 
-  const press = (item: TaskListTaskItem, action: "stop" | "respond") => {
+  const stop = (item: TaskListTaskItem) => {
     const id = item.task.id;
-    setPending((current) => new Map(current).set(id, action));
-    const release = () =>
-      setPending((current) => {
-        const next = new Map(current);
-        next.delete(id);
-        return next;
-      });
-    if (action === "respond") {
-      const target = item.cardMessageId;
-      if (!target) {
-        // No message of this chat shows the card it waits on: its task chat holds it.
-        release();
-        if (!item.task.chat) {
-          toast.error(t("concierge.tasks.sourceMissing"));
-          return;
-        }
-        onNavigate?.();
-        navigate(`/chat/${item.task.chat.id}`);
-        return;
-      }
-      onNavigate?.();
-      // The card is in a chat thread, which the chat then focuses.
-      void requestConciergeJump(target, { focusThread: true }).finally(release);
-      return;
-    }
+    setPending((current) => new Set(current).add(id));
     void fetchJson<unknown>(`${listUrl(chatId)}/${encodeURIComponent(id)}/stop`, {
       method: "POST",
       fallback: t("concierge.taskList.failed.stop"),
     }).then(reread, (error: Error) => {
-      release();
+      setPending((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
       toast.error(error.message);
     });
   };
@@ -547,13 +505,6 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     );
   }
   if (!data) return <LoadingRows />;
-  if (data.groups.length === 0) {
-    return (
-      <p className="px-4 py-6 text-center text-ui text-muted-foreground">
-        {t("concierge.taskList.empty")}
-      </p>
-    );
-  }
   const showMore = (cursor: string) => {
     setLoadingMore(true);
     const readFrom = firstPageRead.current;
@@ -582,76 +533,103 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
             key={itemKey(item)}
             item={item}
             now={now}
-            pending={pending.get(item.task.id)}
-            onPress={(action) => press(item, action)}
+            pending={pending.has(item.task.id)}
+            onStop={() => stop(item)}
             onNavigate={onNavigate}
           />
         );
       case "check":
         return <CheckRow key={itemKey(item)} item={item} now={now} />;
       case "follow":
-        return <FollowRow key={itemKey(item)} item={item} />;
+        return <FollowRow key={itemKey(item)} item={item} now={now} />;
       case "routine":
         return <RoutineRow key={itemKey(item)} item={item} now={now} />;
     }
   };
+
+  const onItsOwn = data.groups.find((group) => group.key === "on_its_own")?.items ?? [];
+  const taskGroups = data.groups.filter((group) => TASK_GROUPS.includes(group.key));
   return (
     <TooltipProvider delayDuration={500}>
-      <div className="flex flex-col gap-5 px-4 pb-6 pt-4">
-        {data.groups.map((group) => {
-          const folds = group.key === "ended";
-          const open = !folds || endedOpen;
-          const heading = t(`concierge.taskList.groups.${group.key satisfies TaskListGroupKey}`);
-          // The first page, then the older pages read since, each row once.
-          const firstPage = new Set(group.items.map(itemKey));
-          const items = folds
-            ? [
-                ...group.items,
-                ...(older?.items ?? []).filter((item) => !firstPage.has(itemKey(item))),
-              ]
-            : group.items;
-          const total = group.total ?? items.length;
-          const cursor = older ? older.cursor : (group.nextCursor ?? null);
-          const more = folds && cursor ? total - items.length : 0;
-          return (
-            <section key={group.key} aria-label={heading} data-task-list-group={group.key}>
-              {folds ? (
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  onClick={() => setEndedOpen((value) => !value)}
-                  className="mb-2 flex items-center gap-1 px-3 text-aux font-medium text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
-                >
-                  <ChevronDown
-                    className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
-                    aria-hidden
-                  />
-                  {heading} <span className="tabular-nums text-subtle-foreground">{total}</span>
-                </button>
-              ) : (
-                <h3 className="mb-2 px-3 text-aux font-medium text-muted-foreground">{heading}</h3>
-              )}
-              {open ? (
-                <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
-                  {items.map(row)}
-                  {more > 0 ? (
-                    <li>
-                      <button
-                        type="button"
-                        disabled={loadingMore}
-                        onClick={() => cursor && showMore(cursor)}
-                        className="flex min-h-10 w-full items-center justify-center text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
-                      >
-                        {t("concierge.taskList.showMore", { count: Math.min(more, ENDED_PAGE) })}
-                      </button>
-                    </li>
-                  ) : null}
-                </ul>
-              ) : null}
-            </section>
-          );
-        })}
-      </div>
+      {view === "routines" ? (
+        onItsOwn.length === 0 ? (
+          <p className="px-4 py-6 text-center text-ui text-muted-foreground">
+            {t("concierge.taskList.emptyRoutines")}
+          </p>
+        ) : (
+          <section
+            aria-label={t("concierge.taskList.routines")}
+            data-task-list-group="on_its_own"
+            className="px-4 pb-6 pt-4"
+          >
+            <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+              {onItsOwn.map(row)}
+            </ul>
+          </section>
+        )
+      ) : taskGroups.length === 0 ? (
+        <p className="px-4 py-6 text-center text-ui text-muted-foreground">
+          {t("concierge.taskList.empty")}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-5 px-4 pb-6 pt-4">
+          {taskGroups.map((group) => {
+            const folds = group.key === "ended";
+            const open = !folds || endedOpen;
+            const heading = t(`concierge.taskList.groups.${group.key satisfies TaskListGroupKey}`);
+            // The first page, then the older pages read since, each row once.
+            const firstPage = new Set(group.items.map(itemKey));
+            const items = folds
+              ? [
+                  ...group.items,
+                  ...(older?.items ?? []).filter((item) => !firstPage.has(itemKey(item))),
+                ]
+              : group.items;
+            const total = group.total ?? items.length;
+            const cursor = older ? older.cursor : (group.nextCursor ?? null);
+            const more = folds && cursor ? total - items.length : 0;
+            return (
+              <section key={group.key} aria-label={heading} data-task-list-group={group.key}>
+                {folds ? (
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    onClick={() => setEndedOpen((value) => !value)}
+                    className="mb-2 flex items-center gap-1 px-3 text-aux font-medium text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+                  >
+                    <ChevronDown
+                      className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
+                      aria-hidden
+                    />
+                    {heading} <span className="tabular-nums text-subtle-foreground">{total}</span>
+                  </button>
+                ) : (
+                  <h3 className="mb-2 px-3 text-aux font-medium text-muted-foreground">
+                    {heading}
+                  </h3>
+                )}
+                {open ? (
+                  <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+                    {items.map(row)}
+                    {more > 0 ? (
+                      <li>
+                        <button
+                          type="button"
+                          disabled={loadingMore}
+                          onClick={() => cursor && showMore(cursor)}
+                          className="flex min-h-10 w-full items-center justify-center text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+                        >
+                          {t("concierge.taskList.showMore", { count: Math.min(more, ENDED_PAGE) })}
+                        </button>
+                      </li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </section>
+            );
+          })}
+        </div>
+      )}
     </TooltipProvider>
   );
 }

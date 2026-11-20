@@ -14,6 +14,10 @@ final class LocalEventBus: LiveEventSource {
     }
 
     func unsubscribe(_ token: UUID) { handlers[token] = nil }
+
+    /// Whether anyone still listens to `topic`.
+    func isListening(to topic: String) -> Bool { handlers.values.contains { $0.topic == topic } }
+
     func pause() {}
     func resume() {}
 
@@ -60,7 +64,7 @@ final class DemoBackend: RomeBackend {
     /// `updateRequired`: the full data on a Rome below the app's minimum, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
     /// `manyApps`: the full data with a screenful of apps.
-    /// `visitor`: the full demo, seen by a dashboard visitor of the shared Rome.
+    /// `visitor`: the full demo, seen by a dashboard admin of the shared Rome.
     /// `updateOffered`: a Rome behind its latest release but new enough for
     /// the app, which offers the update instead of requiring it.
     /// `longChat`: the full data with a main chat long enough to page, ending
@@ -197,6 +201,7 @@ final class DemoBackend: RomeBackend {
     func apiFile(path: String, query: String?) async throws -> Data {
         // App icons are SVG, as apps ship them.
         if let svg = Self.appIcons[path] { return Data(svg.utf8) }
+        if path.hasPrefix("/chat/sessions/") { return try await chatOutputFile(path: path) }
         var components = URLComponents()
         components.percentEncodedQuery = query
         guard path.hasPrefix("/projects/asset") || path.hasPrefix("/memory/asset"),
@@ -238,7 +243,7 @@ final class DemoBackend: RomeBackend {
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
         let turned = Self.withTurns(all)
-        return MessagePage(messages: Array(turned[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+        return MessagePage(messages: Array(turned[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
     }
 
     /// Turns the way the server keeps them: each message the guardian writes
@@ -272,26 +277,11 @@ final class DemoBackend: RomeBackend {
         for key in shares.keys { shares[key]?.removeAll { $0.id == id } }
     }
 
-    /// The demo is an instance with chat threads: every message says its thread.
-    private static func withThreads(_ message: ChatMessage) -> ChatMessage {
-        var message = message
-        message.knowsThreads = true
-        return message
-    }
-
-
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
-        try await pause(0.25)
-        let all = messages[sessionId] ?? []
-        guard all.contains(where: { $0.id == root }) else { throw APIError.notFound }
-        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }.map(Self.withThreads)
-    }
-
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, reply: nil)
     }
 
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread target: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply target: ReplyTarget?) async throws -> CreatedTurn {
         try await pause(0.35)
         if text.contains("失败") || text.lowercased().contains("fail") { throw APIError.network }
         // Stored the way the server stores it: a line per file after the text.
@@ -301,11 +291,10 @@ final class DemoBackend: RomeBackend {
             return "- File \(index + 1): [\(file.name)](</\(path)>)"
         }
         let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        // A send replies to the message it names, and so does the answer: both
-        // are in that message's chat thread and show its quote.
+        // A send replies to the message it names and shows its quote; so does
+        // the answer, which sits right under it.
         let original = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }
-        let thread = original.map { $0.chatThreadId ?? $0.id }
-        let sent = threaded(quoting(user(inputId, stored, at: .now, session: sessionId), original), thread)
+        let sent = quoting(user(inputId, stored, at: .now, session: sessionId), original)
         insert(sessionId, sent)
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
@@ -314,9 +303,9 @@ final class DemoBackend: RomeBackend {
         Task {
             try? await pause(concierge ? 1.8 : 3.5)
             if concierge {
-                insert(sessionId, threaded(quoting(agent("好，我记下了。", at: .now, session: sessionId), sent), thread))
+                insert(sessionId, quoting(agent("好，我记下了。", at: .now, session: sessionId), sent))
                 try? await pause(0.7)
-                insert(sessionId, threaded(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), thread))
+                insert(sessionId, quoting(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), sent))
                 // An untitled topic chat is named from its first message.
                 if let topic, topicChats[topic].name.isEmpty {
                     let name = String(text.prefix(16))
@@ -396,6 +385,14 @@ final class DemoBackend: RomeBackend {
         }
     }
 
+    /// The task chats the demo's task links name, by id.
+    private var taskLinkInfo: [String: TaskLinkInfo] = [:]
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await pause(0.1)
+        return TaskLinksResponse(tasks: ids.compactMap { taskLinkInfo[$0] })
+    }
+
     /// The demo's task list: its tasks in the groups their status gives
     /// them, with a schedule, a lone check, a follow and a routine.
     func taskList(chatId: String) async throws -> TaskListResponse {
@@ -439,6 +436,41 @@ final class DemoBackend: RomeBackend {
     }
 
     /// Stops a demo task: it ends as stopped, and its list reads again.
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
+        try await pause(0.2)
+        if variant == .empty || variant == .conciergeOff { return ChatOutputsResponse(outputs: []) }
+        return ChatOutputsResponse(outputs: Self.outputs(chatId: chatId))
+    }
+
+    func chatOutputFile(path: String) async throws -> Data {
+        try await pause(0.2)
+        guard let output = Self.outputs(chatId: conciergeChatID).first(where: { $0.contentUrl == "/api" + path }) else { throw APIError.notFound }
+        if let link = output.link, let data = assets[String(link.dropFirst())] { return data }
+        return Data("# \(output.title)\n\n周六：伏见稻荷、清水寺；周日：岚山、金阁寺。\n".utf8)
+    }
+
+    /// The main chat's outputs, newest first: a task chat's among them, one moved.
+    private static func outputs(chatId: String) -> [ChatOutput] {
+        if chatId.hasPrefix("topic-") { return [] }
+        func output(_ id: String, _ kind: String, _ name: String, link: String? = nil, mime: String?, minutesAgo: Double, missing: Bool = false, from: ChatOutput.Source? = nil) -> ChatOutput {
+            ChatOutput(
+                id: id, kind: kind, name: name, link: link, mimeType: mime,
+                at: RomeDate.string(.now.addingTimeInterval(-minutesAgo * 60)),
+                missing: missing, from: from,
+                contentUrl: missing ? nil : "/api/chat/sessions/\(conciergeChatID)/outputs/\(id)/content"
+            )
+        }
+        let price = ChatOutput.Source(chatId: "chat-price", name: "价格追踪：发提醒邮件")
+        return [
+            output("out-plan", "written", "京都行程.md", mime: "text/markdown", minutesAgo: 12),
+            output("out-hotel", "shown", "hotel.jpg", link: "/projects/demo/trip/hotel.jpg", mime: "image/jpeg", minutesAgo: 40),
+            output("out-prices", "written", "price-history.csv", mime: "text/csv", minutesAgo: 150, from: price),
+            output("out-kitchen", "shown", "kitchen.jpg", link: "/projects/demo/home/kitchen.jpg", mime: "image/jpeg", minutesAgo: 2 * 1440),
+            output("out-report", "written", "weekly_report.pdf", mime: "application/pdf", minutesAgo: 3 * 1440),
+            output("out-script", "written", "rename-photos.py", mime: "text/x-python", minutesAgo: 5 * 1440, missing: true),
+        ]
+    }
+
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await pause(0.4)
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
@@ -635,16 +667,21 @@ final class DemoBackend: RomeBackend {
             "render": .object([
                 "kind": .string("inline"), "componentId": .string("location-card"), "builtin": .bool(true),
                 "props": .object(autoShare ? ["reason": .string(reason), "autoShare": .bool(true)] : ["reason": .string(reason)]),
-                "ui": .object((autoShare ? ["data": .object(["autoShare": .bool(true)])] : [:]).merging(["components": .array([
-                    c("root", "Column", ["children": ids(["title", "reason", "actions"])]),
-                    c("title", "Text", ["text": .string("Share your location?"), "variant": .string("h5")]),
-                    c("reason", "Text", ["text": .string(reason)]),
-                    c("actions", "Row", ["children": ids(["decline", "share"]), "justify": .string("end")]),
-                    c("decline", "Button", ["child": .string("decline-label"), "variant": .string("borderless"), "action": event("decline")]),
-                    c("decline-label", "Text", ["text": .string("Not now")]),
-                    c("share", "Button", ["child": .string("share-label"), "variant": .string("primary"), "action": event("share-location")]),
-                    c("share-label", "Text", ["text": .string("Share")]),
-                ])]) { a, _ in a }),
+                "ui": .object([
+                    "data": .object((autoShare ? ["autoShare": .bool(true)] : [:]).merging([
+                        "romeStrings": .object(["shareLocationTitle": .string("Share your location?"), "notNow": .string("Not now"), "share": .string("Share")]),
+                    ]) { a, _ in a }),
+                    "components": .array([
+                    c("root", "Column", ["children": ids(["title", "note", "actions"])]),
+                    c("title", "Text", ["text": .object(["path": .string("/romeStrings/shareLocationTitle")]), "variant": .string("h4"), "icon": .string("map-pin")]),
+                    c("note", "Text", ["text": .string(reason), "variant": .string("caption")]),
+                    c("actions", "Row", ["children": ids(["dismiss", "confirm"]), "justify": .string("end")]),
+                    c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": event("decline")]),
+                    c("dismiss-label", "Text", ["text": .object(["path": .string("/romeStrings/notNow")])]),
+                    c("confirm", "Button", ["child": .string("confirm-label"), "variant": .string("primary"), "action": event("share-location")]),
+                    c("confirm-label", "Text", ["text": .object(["path": .string("/romeStrings/share")])]),
+                    ]),
+                ]),
             ]),
         ])
     }
@@ -676,6 +713,69 @@ final class DemoBackend: RomeBackend {
         ])
     }()
 
+    /// An agent card: Rome's own widget whose look the Concierge wrote.
+    private static func agentCard(_ id: String, text: String, _ components: [JSONValue]) -> JSONValue {
+        .object([
+            "type": .string("widget"), "toolUseId": .string(id), "appId": .string("core"),
+            "text": .string(text), "ui": .object(["components": .array(components)]),
+        ])
+    }
+
+    private static func component(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
+        .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
+    }
+
+    static let agentItinerary: JSONValue = {
+        let c = DemoBackend.component
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        // Each stop opens in Maps; the last opens the restaurant's page.
+        let stops = [
+            ("9:00", "浅草寺，早去人少", "maps://?q=Senso-ji"),
+            ("11:30", "上野公园，午饭在阿美横町", "maps://?q=Ueno+Park"),
+            ("14:00", "秋叶原", "maps://?q=Akihabara"),
+            ("18:30", "新宿思出横丁晚饭", "https://www.omoide-yokocho.com"),
+        ]
+        var components = [
+            c("root", "Column", ["children": ids(["title", "subtitle", "steps"])]),
+            c("title", "Text", ["text": .string("周六东京一日"), "variant": .string("h3")]),
+            c("subtitle", "Text", ["text": .string("点一站在地图里打开"), "variant": .string("caption")]),
+            c("steps", "List", ["children": ids(stops.indices.map { "s\($0)" })]),
+        ]
+        for (i, stop) in stops.enumerated() {
+            components.append(c("s\(i)", "Row", ["children": ids(["t\(i)", "p\(i)"]), "href": .string(stop.2)]))
+            components.append(c("t\(i)", "Text", ["text": .string(stop.0), "variant": .string("caption")]))
+            components.append(c("p\(i)", "Text", ["text": .string(stop.1)]))
+        }
+        return DemoBackend.agentCard("agent-itinerary", text: "周六东京一日：9:00 浅草寺；11:30 上野公园；14:00 秋叶原；18:30 新宿晚饭。", components)
+    }()
+
+    /// A routine's daily health summary, the case agent cards are for: each
+    /// number against its usual range, the week's steps, and one line to act on.
+    static let agentHealth: JSONValue = {
+        let c = DemoBackend.component
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        let range = { (low: Double, high: Double) in JSONValue.object(["low": .number(low), "high": .number(high)]) }
+        let week: [(String, Double, String?)] = [("一", 8120, nil), ("二", 9340, nil), ("三", 7650, nil), ("四", 10210, nil), ("五", 8890, nil), ("六", 2980, "warning"), ("今天", 4210, "accent")]
+        let points = JSONValue.array(week.map { day in
+            var point: [String: JSONValue] = ["label": .string(day.0), "value": .number(day.1)]
+            if let highlight = day.2 { point["highlight"] = .string(highlight) }
+            return .object(point)
+        })
+        return DemoBackend.agentCard("agent-health", text: "今天的健康，对比最近 14 天：睡眠 7.2 小时（通常 7–7.7），4,210 步（通常 8,000–10,000），活动 512 千卡（通常 450–600），锻炼 12 分钟（通常 30–45），静息心率 64（通常 56–60）。今晚散步 30 分钟能补上大半步数。", [
+            c("root", "Column", ["children": ids(["title", "subtitle", "stats", "week", "advice"])]),
+            c("title", "Text", ["text": .string("今天的健康"), "variant": .string("h4")]),
+            c("subtitle", "Text", ["text": .string("对比最近 14 天"), "variant": .string("caption")]),
+            c("stats", "Row", ["children": ids(["sleep", "steps", "kcal", "exercise", "rhr"])]),
+            c("sleep", "Stat", ["label": .string("睡眠"), "value": .number(7.2), "unit": .string("小时"), "range": range(7, 7.7), "icon": .string("moon")]),
+            c("steps", "Stat", ["label": .string("步数"), "value": .number(4210), "range": range(8000, 10000), "icon": .string("steps")]),
+            c("kcal", "Stat", ["label": .string("活动"), "value": .number(512), "unit": .string("千卡"), "range": range(450, 600), "icon": .string("flame")]),
+            c("exercise", "Stat", ["label": .string("锻炼"), "value": .number(12), "unit": .string("分钟"), "range": range(30, 45), "icon": .string("run")]),
+            c("rhr", "Stat", ["label": .string("静息心率"), "value": .number(64), "unit": .string("次/分"), "range": range(56, 60), "icon": .string("heart")]),
+            c("week", "Chart", ["kind": .string("bar"), "points": points, "caption": .string("最近 7 天步数")]),
+            c("advice", "Text", ["text": .string("今晚散步 30 分钟，能补上大半步数。"), "tone": .string("info")]),
+        ])
+    }()
+
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)
     }
@@ -684,10 +784,10 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "1.1.197"
+    nonisolated static let releasedVersion = "1.1.197"
     /// Below the app's minimum, and between it and the latest.
-    static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.196"
+    nonisolated static let tooOldVersion = "1.1.120"
+    nonisolated static let offeredFromVersion = "1.1.196"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion
@@ -731,7 +831,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
+        let message = Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -762,17 +862,6 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
-    /// The message, placed in the chat thread that starts at `root`, or in its
-    /// own when it has none, as the server sends it. The title is the task's
-    /// that started in the thread, when one did.
-    private func threaded(_ message: ChatMessage, _ root: String?, _ title: String? = nil) -> ChatMessage {
-        var message = message
-        message.chatThreadId = root ?? message.id
-        message.chatThreadTitle = root.flatMap { title ?? threadTitles[$0] }
-        message.knowsThreads = true
-        return message
-    }
-
     /// The message with the quote of `original` as its first part, as the
     /// server stores a reply; the message itself when there is nothing to quote.
     private func quoting(_ message: ChatMessage, _ original: ChatMessage?) -> ChatMessage {
@@ -786,9 +875,6 @@ final class DemoBackend: RomeBackend {
         message.content = json([quote] + stored)
         return message
     }
-
-    /// The title of the task each demo chat thread is, by its root.
-    private var threadTitles: [String: String] = [:]
 
     /// The guardian's reply to a message, with its quote, as the server stores it.
     private func reply(_ id: String, _ text: String, to original: String, quoting: String, at date: Date, session: String) -> ChatMessage {
@@ -907,14 +993,18 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
-            ConciergeChat(id: "topic-health", name: "睡眠和电量", main: false, unread: 0),
+            ConciergeChat(id: "topic-health", name: "睡眠和日程", main: false, unread: 0),
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
             ConciergeChat(id: "topic-errors", name: "出错的情况", main: false, unread: 0),
+            ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
+            ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
+            ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
+            ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -953,35 +1043,25 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
-        // The last eight chapters are one long chat thread, taller than the
-        // screen: its root, chapter 17's question, carries the replies line.
-        threadTitles = [
-            "b16": "读书笔记：第 17–24 章", "k1": "比较京都三家酒店",
-            "c-site": "官网首页双语文案", "c-price": "价格追踪：发提醒邮件", "c-research": "竞品定价调研", "c-login": "修复登录页样式",
-        ]
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
-            let root: String? = index >= 16 ? "b16" : nil
             return [
-                threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
+                user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"),
                 // The last answer opens with bold that closes after `。`.
-                threaded(agent(index == 23
+                agent(index == 23
                     ? "**第 24 章的重点：先把大问题拆小。**每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。"
-                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
+                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
             ]
         }
-        // One task's chat thread among messages in none: the plan's task
-        // came back into the thread of the message that started it, so its
-        // Concierge messages carry its label. The weather's question and
-        // answer are in no thread. The last word is a reply to the hotel
-        // message, in the thread, with its quote.
+        // The weather's question and answer sit between the trip's messages.
+        // The last word is the guardian's reply to the hotel message, with its quote.
         messages["topic-trip"] = [
-            threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
-            threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
-            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), nil),
-            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), nil),
-            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip", id: "k5"), "k1"),
-            threaded(reply("k6", "就按它排。", to: "k5", quoting: "酒店比较好了：河原町那家离车站最近，价格中等。", at: at(9, 24), session: "topic-trip"), "k1"),
+            user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
+            agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
+            user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"),
+            agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"),
+            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip", id: "k5"),
+            reply("k6", "就按它排。", to: "k5", quoting: "酒店比较好了：河原町那家离车站最近，价格中等。", at: at(9, 24), session: "topic-trip"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -1020,6 +1100,14 @@ final class DemoBackend: RomeBackend {
                 "status": .string("declined"), "dismissed": .bool(true),
             ])])], at: at(9, 31), session: location, role: "user"),
             agent("好的。你从哪里出发？告诉我地点就能算。", at: at(9, 31).addingTimeInterval(3), session: location),
+            // A share the app made by itself shows as one centered line.
+            user("l2b", "晚上会降温吗？", at: at(9, 45), session: location),
+            parts([Self.locationCard("loc-night", reason: "查你所在地晚上的气温")], at: at(9, 45).addingTimeInterval(2), session: location),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("loc-night"), "output": .object([
+                "status": .string("shared"), "auto": .bool(true), "latitude": .number(31.2), "longitude": .number(121.4),
+                "accuracyMeters": .number(37), "fixedAt": .string("2026-11-14T01:45:00.000Z"),
+            ])])], at: at(9, 46), session: location, role: "user"),
+            agent("晚上降到 12 度左右，加件外套。", at: at(9, 46).addingTimeInterval(3), session: location),
             user("l3", "附近有什么好的咖啡馆？", at: at(10, 5), session: location),
             parts([Self.locationCard("loc-coffee", reason: "找你附近的咖啡馆")], at: at(10, 5).addingTimeInterval(2), session: location),
         ]
@@ -1047,24 +1135,31 @@ final class DemoBackend: RomeBackend {
         digestRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "digest", name: nil)
         var digestAnswer = agent("今天的摘要：三封邮件，一个日程。", at: at(10, 20).addingTimeInterval(5))
         digestAnswer.turnId = "turn-digest"
-        // Each task's messages are in its chat thread, labelled with the
-        // task: a task card when it starts, its question or approval on its
-        // own when it asks. The login task's cards are settled and fold; the
-        // research question expired; the price approval waits.
+        let loginAsk = user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3))
+        let siteAsk = user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12))
+        let researchAsk = agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research")
+        let researchReply = reply("c-research-reply", "只看国内的就行。", to: "c-research", quoting: "竞品调研想确认一下范围，你看下。", at: at(9, 18), session: conciergeChatID)
+        // Each task: a task card when it starts, its question or approval on
+        // its own when it asks. The login task's cards are settled and fold;
+        // the research question expired; the price approval waits. The
+        // Concierge's replies to one message sit together, and a reply to an
+        // earlier message shows its quote.
         messages[conciergeChatID] = [
-            threaded(user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: questionCard("q-login", "深色模式下按钮用珊瑚色，还是用中性色？", options: ["珊瑚色", "中性色"], answered: "珊瑚色", since: at(10, 10, daysAgo: 3)), at: at(10, 11, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)), "c-login"),
-            threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
-            threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
-            threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
-            threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
-            threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
-            threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
-            threaded(taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)), "c-research"),
-            threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
-            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price"),
+            loginAsk,
+            taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)),
+            taskPart("chat-login", "修复登录页样式", show: "ask", card: questionCard("q-login", "深色模式下按钮用珊瑚色，还是用中性色？", options: ["珊瑚色", "中性色"], answered: "珊瑚色", since: at(10, 10, daysAgo: 3)), at: at(10, 11, daysAgo: 3)),
+            taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)),
+            quoting(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), loginAsk),
+            siteAsk,
+            quoting(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), siteAsk),
+            quoting(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), siteAsk),
+            taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)),
+            researchAsk,
+            taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)),
+            researchReply,
+            quoting(agent("好，只看国内的。", at: at(9, 18).addingTimeInterval(20)), researchReply),
+            agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"),
+            taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)),
             // The Concierge asks and waits for an approval in the main chat too.
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
@@ -1160,6 +1255,42 @@ final class DemoBackend: RomeBackend {
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
             // Photos alone, with a mark: the badge sits on the photos' corner.
             marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
+            // Photos with text, with a mark: the badge sits on the text bubble.
+            marked(user("er6b", "厨房这样改可以吗？\n\n- File 1: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), "👍"),
+            // Two messages in a row, the second marked: its badge sits over
+            // the bubble above, never under it.
+            user("er7", "还有一件事。", at: at(13, 12), session: "topic-errors"),
+            marked(user("er8", "明早 8 点叫我起床。", at: at(13, 12), session: "topic-errors"), "👀", status: "working"),
+        ]
+        // Cards the Concierge composed itself: Rome's own, every value
+        // written out, with no `bind`.
+        // Task links in each status, the way the Concierge refers to its tasks.
+        taskLinkInfo = Dictionary(uniqueKeysWithValues: [
+            TaskLinkInfo(id: "chat-site", name: "官网首页双语文案", status: "active"),
+            TaskLinkInfo(id: "chat-price", name: "价格追踪：发提醒邮件", status: "needs_you"),
+            TaskLinkInfo(id: "chat-login", name: "修复登录页样式", status: "ended", endReason: "done"),
+            TaskLinkInfo(id: "chat-export", name: "导出季度报表", status: "ended", endReason: "failed"),
+            TaskLinkInfo(id: "chat-quotes", name: "抓取供应商报价", status: "ended", endReason: "stopped"),
+            TaskLinkInfo(id: "chat-research", name: "竞品定价调研", status: "ended", endReason: "no_response"),
+            TaskLinkInfo(id: "chat-weekly", name: "每周一整理周报", status: "later"),
+            TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
+            TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
+        ].map { ($0.id, $0) })
+        messages["topic-task-links"] = [
+            user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
+            agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
+            // Chips on a wrapped paragraph's first line, and one that wraps itself.
+            agent("在查了：[iOS 退出 task chat 后头部模糊变实心](#rome-task=chat-blur)。会在 Mac mini 上复现、找根因，先给你看修法，不直接改。\n\n另一件：[iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现](#rome-task=chat-reload) 等你确认。", at: at(9, 32), session: "topic-task-links"),
+        ]
+        messages["topic-itinerary"] = [
+            user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),
+            parts([Self.agentItinerary], at: at(9, 1), session: "topic-itinerary"),
+        ]
+        messages["topic-cards"] = [
+            user("ac1", "周六在东京怎么安排？", at: at(10, 0), session: "topic-cards"),
+            parts([Self.agentItinerary], at: at(10, 1), session: "topic-cards"),
+            user("ac2", "今天身体怎么样？", at: at(10, 5), session: "topic-cards"),
+            parts([Self.agentHealth], at: at(10, 6), session: "topic-cards"),
         ]
         // A narrow table, and one wider than the bubble that scrolls inside it.
         messages["topic-table"] = [
@@ -1183,9 +1314,28 @@ final class DemoBackend: RomeBackend {
             | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
             """, at: at(12, 2), session: "topic-table"),
         ]
-        // A device connection's card, as core draws it: answered once the
-        // phone connected Health, then a new one for Device.
-        func deviceCard(_ id: String, kind: String, label: String) -> JSONValue {
+        // Lists nested three deep, bullets and numbers mixed.
+        messages["topic-lists"] = [
+            user("ls1", "下周搬家，帮我列个清单。", at: at(11, 0), session: "topic-lists"),
+            agent("""
+            按时间排了一下：
+
+            1. 搬家前一周
+               - 预约搬家公司
+                 - 确认电梯能用
+                 - 问清楚大件家具怎么拆
+               - 办宽带移机
+            2. 搬家当天
+               1. 先搬易碎品
+               2. 拍下电表和水表读数
+            3. 搬完以后
+               - 改快递地址
+            """, at: at(11, 1), session: "topic-lists"),
+        ]
+        // A device connection's card, as core draws it in the guardian's
+        // language from the words the phone declared (here the app's own): answered once the phone
+        // connected Health, then a new one for Calendar.
+        func deviceCard(_ id: String, kind: String, label: String, title: String, summary: String, icon: String) -> JSONValue {
             func c(_ id: String, _ type: String, _ fields: [String: JSONValue]) -> JSONValue {
                 var object = fields
                 object["id"] = .string(id)
@@ -1196,27 +1346,27 @@ final class DemoBackend: RomeBackend {
             return .object([
                 "type": .string("pending_interaction"), "toolUseId": .string(id), "appId": .string("core"),
                 "render": .object(["kind": .string("inline"), "componentId": .string("connect-card"), "builtin": .bool(true),
-                    "props": .object(["kind": .string(kind), "label": .string(label), "device": .bool(true)]),
-                    "ui": .object(["components": .array([
+                    "props": .object(["kind": .string(kind), "label": .string(label), "title": .string(title), "summary": .string(summary), "device": .bool(true)]),
+                    "ui": .object(["data": .object(["romeStrings": .object(["notNow": .string("Not now"), "connect": .string("Connect")])]), "components": .array([
                         c("root", "Column", ["children": .array([.string("title"), .string("note"), .string("actions")])]),
-                        c("title", "Text", ["text": .string("Connect \(label)"), "variant": .string("h4")]),
-                        c("note", "Text", ["text": .string("Connect it on this iPhone, then your Rome can read it."), "variant": .string("caption")]),
+                        c("title", "Text", ["text": .string(title), "variant": .string("h4"), "icon": .string(icon)]),
+                        c("note", "Text", ["text": .string(summary), "variant": .string("caption")]),
                         c("actions", "Row", ["children": .array([.string("dismiss"), .string("connect")]), "justify": .string("end")]),
-                        c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("borderless"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
-                        c("dismiss-label", "Text", ["text": .string("Not now")]),
+                        c("dismiss", "Button", ["child": .string("dismiss-label"), "variant": .string("default"), "action": .object(["event": .object(["name": .string("dismiss"), "context": context])])]),
+                        c("dismiss-label", "Text", ["text": .object(["path": .string("/romeStrings/notNow")])]),
                         c("connect", "Button", ["child": .string("connect-label"), "variant": .string("primary"), "action": .object(["event": .object(["name": .string("connect"), "context": context])])]),
-                        c("connect-label", "Text", ["text": .string("Connect")]),
+                        c("connect-label", "Text", ["text": .object(["path": .string("/romeStrings/connect")])]),
                     ])]),
                 ]),
             ])
         }
         messages["topic-health"] = [
             user("h1", "这周睡得怎么样？", at: at(9, 1), session: "topic-health"),
-            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health")], at: at(9, 2), session: "topic-health"),
+            parts([deviceCard("dc-health", kind: "apple_health", label: "Apple Health", title: String(localized: "Apple Health"), summary: String(localized: "Your Rome reads the Health data you allow."), icon: "heart")], at: at(9, 2), session: "topic-health"),
             parts([.object(["type": .string("interaction_result"), "toolUseId": .string("dc-health"), "output": .object(["kind": .string("apple_health"), "status": .string("connected")])])], at: at(9, 3), session: "topic-health", role: "user"),
             agent("这周平均每晚睡 6 小时 48 分，周三最少，只有 5 小时 10 分。", at: at(9, 4), session: "topic-health"),
-            user("h2", "手机还剩多少电？", at: at(9, 20), session: "topic-health"),
-            parts([deviceCard("dc-device", kind: "device", label: "Device")], at: at(9, 21), session: "topic-health"),
+            user("h2", "明天下午有空吗？", at: at(9, 20), session: "topic-health"),
+            parts([deviceCard("dc-calendar", kind: "apple_calendar", label: "Calendar", title: String(localized: "Calendar"), summary: String(localized: "Your Rome reads your calendars, and adds or changes events when you ask."), icon: "calendar")], at: at(9, 21), session: "topic-health"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),
@@ -1314,5 +1464,13 @@ final class DemoBackend: RomeBackend {
         ]
         approvals["ap-login"] = ApprovalRecord(id: "ap-login", status: "approved", executionState: "succeeded", resolvedAt: RomeDate.string(at(10, 32, daysAgo: 3)))
     }
+}
+
+extension UpdateGate.Minimums {
+    /// The minimums the demo's versions are set against, and the update
+    /// tests with them: `tooOldVersion` blocks, `offeredFromVersion` is only
+    /// offered `releasedVersion`. Fixed, so a release's raise of the real
+    /// minimums (`Tools/bump-minimum.mjs`) moves neither.
+    static let demo = UpdateGate.Minimums(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.offeredFromVersion)
 }
 #endif

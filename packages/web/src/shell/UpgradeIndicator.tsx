@@ -38,7 +38,7 @@ export function UpgradeIndicator({
 }) {
   const identity = useDashboardIdentity();
   const kind = identity.data?.kind;
-  const { latest, recheck, rechecking } = useUpgradeAvailable(
+  const { latest, current, recheck, rechecking } = useUpgradeAvailable(
     kind === "guardian" || kind === "visitor",
   );
   const upgrade = useSystemUpgrade(recheck, { finish: "report" });
@@ -90,6 +90,7 @@ export function UpgradeIndicator({
         open={open && latest !== null && !accepted}
         name={name}
         latest={latest}
+        current={current}
         rechecking={rechecking}
         upgrade={upgrade}
         onClose={() => setOpen(false)}

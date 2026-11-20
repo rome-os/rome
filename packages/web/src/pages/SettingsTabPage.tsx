@@ -543,7 +543,9 @@ function FavorRequestRow({
             <dl className="mt-3 grid gap-2 text-ui sm:grid-cols-2">
               {fields.map((field) => (
                 <div key={`${request.id}:${field.label}`} className="min-w-0">
-                  <dt className="text-aux uppercase text-muted-foreground">{field.label}</dt>
+                  <dt className="text-aux text-muted-foreground first-letter:uppercase">
+                    {field.label}
+                  </dt>
                   <dd className="truncate text-foreground" title={field.value}>
                     {field.value}
                   </dd>
@@ -1515,7 +1517,7 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-/** Allowed emails as rows of the Access and privacy group: a heading row with
+/** Admins as rows of the Access and privacy group: a heading row with
  * the count, the add field, then one row per address. Last in the group, so a
  * long list grows at the bottom rather than pushing the other settings down. */
 function AllowedCloudEmailsRows() {

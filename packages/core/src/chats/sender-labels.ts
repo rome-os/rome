@@ -2,9 +2,10 @@
 // Vocabulary: docs/domains/participation.md#projection and
 // docs/domains/people.md#who-is-this.
 
-import type { Account, SaidSender } from "@rome-os/app-runtime";
+import type { Account, BondLevel, SaidSender } from "@rome-os/app-runtime";
 import type { PromptMessage, UnseenMessage } from "../agent/index.js";
-import type { BondLevel, Person, PeopleRepository } from "../db/repositories/people.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
+import type { Person } from "../people/model/person.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 
 const BOND_LEVEL_WORDS: Record<BondLevel, string> = {

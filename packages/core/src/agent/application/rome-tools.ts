@@ -32,6 +32,8 @@ export interface RomeToolsOptions {
   defer?: DeferTool;
   /** Served in the ask-user group after `defer`, in the order given. */
   sessionTools?: readonly RomeTool[];
+  /** The agent's `ask_question` card says which message it replies to. */
+  repliesTo?: boolean;
 }
 
 function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): RomeToolDefinition {
@@ -39,13 +41,14 @@ function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): R
 }
 
 export function createRomeTools(options: RomeToolsOptions): RomeTools {
-  const { turn, actions, skills, subagents, widgetsShow, log, defer, sessionTools } = options;
+  const { turn, actions, skills, subagents, widgetsShow, log, defer, sessionTools, repliesTo } =
+    options;
   const run = romeToolRunner(log);
   const groups: Record<RomeToolGroup, RomeTool[]> = {
     actions: actionTools(actions, turn, widgetsShow, run, log),
     subagents: subagentTools(subagents, run),
     skills: skillTools(skills, run),
-    ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, run }),
+    ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, repliesTo, run }),
   };
 
   return {

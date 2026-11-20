@@ -12,11 +12,11 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
-import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
-import type { PeopleRepository } from "../../../db/repositories/people.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type {
   ChannelMessage,
   ChatDescriptor,

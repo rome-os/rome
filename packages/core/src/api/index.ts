@@ -23,7 +23,6 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
-import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
@@ -53,9 +52,6 @@ import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { accountsRoutes } from "./routes/accounts.js";
-import { accountDecisionRoutes } from "./routes/account-decisions.js";
-import { peopleRoutes } from "./routes/people.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -167,7 +163,9 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  api.route("/", wechatAppRoutes(deps));
+  for (const kind of deps.connectionKinds) {
+    if (kind.routes) api.route("/", kind.routes);
+  }
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
@@ -208,13 +206,11 @@ export function buildApp(
   api.route("/", personalDataRoutes(deps));
   api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
-  api.route("/", vaultRoutes());
+  api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", peopleRoutes(deps));
+  for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", accountsRoutes(deps));
-  api.route("/", accountDecisionRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
@@ -377,11 +373,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, deps.db, {
-        onAuthCommandExit: () => {
-          void deps.modelAccounts.refresh().catch(() => {});
+      const terminalServer = attachTerminalServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          onAuthCommandExit: () => {
+            void deps.modelAccounts.refresh().catch(() => {});
+          },
         },
-      });
+      );
       const liveEvents = attachLiveEventsServer(
         server as Server,
         deps.db,
@@ -394,8 +395,6 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (owner, emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
           hasChatTasks: async (chatId, owner) =>
@@ -407,7 +406,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
-      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       const voiceInput = attachVoiceInputServer(
         server as Server,

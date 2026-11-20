@@ -31,7 +31,8 @@ final class ShellActions {
     let openUsageFromCover = ShellAction<Void, Void> { _ in }
     /// The main Chat's header: the drawer or the sidebar, and the Agent page.
     let toggleNavigation = ShellAction<Void, Void> { _ in }
-    let openAgent = ShellAction<Void, Void> { _ in }
+    /// The Agent page, on a tab; nil keeps the tab it was last on (the mascot).
+    let openAgent = ShellAction<AgentTab?, Void> { _ in }
     /// A task chat opened from the main Chat, pushed over it.
     let openTaskChat = ShellAction<(chatId: String, title: String), Void> { _ in }
 

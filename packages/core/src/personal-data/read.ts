@@ -55,7 +55,7 @@ export interface QueryAnswer {
 
 interface ListedRecords {
   type: string;
-  unit: string;
+  unit?: string;
   records: ReturnType<typeof listedRecord>[];
   nextCursor?: string;
 }
@@ -81,7 +81,7 @@ export function queryPersonalData(
   const results = plan.types.map((spec) => {
     // Each type reads the origin that covers the window, so a second device
     // or a new origin after a sign-in takes over once it has caught up.
-    const reading = repo.originFor(source.source, spec.type, plan.start);
+    const reading = repo.originFor(source.source, spec.type, plan.start, plan.end);
     const at = reading?.syncedThroughAt ?? undefined;
     const answered = reading
       ? resultFor(repo, source, reading.origin, spec, plan, defaults.now)
@@ -98,19 +98,44 @@ export function queryPersonalData(
     // The device reports how far it is synced, not how far back its history
     // reaches, so the earliest reading stands in for that: a window that
     // starts before it is not known to be covered.
-    const reachesBack = earliest !== undefined && earliest <= plan.start;
+    // A rolling snapshot covers only what the last sync read: an empty
+    // calendar is covered, and a gap between syncs is not. A committed
+    // snapshot says which window it read; a device that sends changes
+    // instead is taken to read the span its type declares.
+    const snapshot =
+      reading?.snapshotStartAt != null && reading.snapshotEndAt != null
+        ? { start: reading.snapshotStartAt, end: reading.snapshotEndAt }
+        : undefined;
+    const reachesBack = snapshot
+      ? plan.start >= snapshot.start
+      : spec.syncedBackDays !== undefined
+        ? at !== undefined && plan.start >= at - spec.syncedBackDays * DAY_MS
+        : earliest !== undefined && earliest <= plan.start;
+    // A type the device sends only so far ahead of each sync (calendar
+    // events, 15 days) does not cover a window that ends past that, however
+    // recent the sync: no events there means nothing was sent, not a free day.
+    const aheadUntil = snapshot
+      ? snapshot.end
+      : at !== undefined && spec.syncedAheadDays !== undefined
+        ? at + spec.syncedAheadDays * DAY_MS
+        : undefined;
+    const reachesAhead =
+      (spec.syncedAheadDays === undefined && !snapshot) ||
+      (aheadUntil !== undefined && plan.end <= aheadUntil);
     freshness[spec.type] = {
       ...(at !== undefined ? { syncedThrough: new Date(at).toISOString() } : {}),
       ...(reading?.earliestAt != null
         ? { earliest: new Date(reading.earliestAt).toISOString() }
         : {}),
       ...(hourlyFrom !== undefined ? { hourlyFrom: new Date(hourlyFrom).toISOString() } : {}),
-      coversWindow: at !== undefined && at >= windowEnd && reachesBack,
+      coversWindow: at !== undefined && at >= windowEnd && reachesBack && reachesAhead,
       ...(at === undefined || !reachesBack
         ? { missingFrom: new Date(plan.start).toISOString() }
         : at < windowEnd
           ? { missingFrom: new Date(Math.max(at, plan.start)).toISOString() }
-          : {}),
+          : !reachesAhead && aheadUntil !== undefined
+            ? { missingFrom: new Date(Math.max(aheadUntil, plan.start)).toISOString() }
+            : {}),
     };
     if (!freshness[spec.type].coversWindow) {
       if (gapOrigin === undefined) gapOrigin = reading?.origin ?? null;
@@ -119,7 +144,9 @@ export function queryPersonalData(
       // does not reach back, or no sync at all, has no bound.
       gapMs = Math.max(
         gapMs,
-        at === undefined || !reachesBack ? Number.POSITIVE_INFINITY : windowEnd - at,
+        at === undefined || !reachesBack || !reachesAhead
+          ? Number.POSITIVE_INFINITY
+          : windowEnd - at,
       );
     }
     return answered.result;
@@ -143,7 +170,13 @@ export function queryPersonalData(
 }
 
 function emptyResult(spec: TypeSpec, plan: QueryPlan): TypeResult | ListedRecords {
-  if (plan.records) return { type: spec.type, unit: plan.unit ?? spec.unit, records: [] };
+  if (plan.records) {
+    return {
+      type: spec.type,
+      ...(spec.shape === "entry" ? {} : { unit: plan.unit ?? spec.unit }),
+      records: [],
+    };
+  }
   return rollUp(spec, plan, []);
 }
 
@@ -155,13 +188,14 @@ function resultFor(
   plan: QueryPlan,
   now: number,
 ): { result: TypeResult | ListedRecords; hoursOnly: boolean } {
-  const by = spec.bucketBy ?? "start";
+  const by = spec.shape === "entry" ? "overlap" : (spec.bucketBy ?? "start");
   const read = (range: Parameters<PersonalDataRepository["points"]>[3]) =>
     repo.points(source.source, origin, spec.type, { by, ...range });
   if (plan.records) {
     const rows = read({
       from: plan.start,
       to: plan.end,
+      ...(plan.search ? { search: plan.search } : {}),
       ...(plan.records.after ? { after: plan.records.after } : {}),
       limit: plan.records.limit + 1,
     });
@@ -170,7 +204,7 @@ function resultFor(
     return {
       result: {
         type: spec.type,
-        unit: plan.unit ?? spec.unit,
+        ...(spec.shape === "entry" ? {} : { unit: plan.unit ?? spec.unit }),
         records: page.map((point) => listedRecord(spec, plan, point)),
         ...(rows.length > page.length && last ? { nextCursor: encodeCursor(last) } : {}),
       },

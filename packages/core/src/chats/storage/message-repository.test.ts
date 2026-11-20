@@ -387,19 +387,6 @@ describe("MessageRepository", () => {
       expect(rootOf("tg-10")).toBe(first.id);
       expect(second.recorded).toBe(true);
     });
-
-    it("finds a thread's last message from any message of it", () => {
-      messages.record(heard("m1", at));
-      messages.record({ ...heard("m2", at), replyTo: "m1" });
-      messages.record({ ...heard("m3", new Date(at.getTime() + 1000)), replyTo: "m2" });
-      messages.record(heard("m4", new Date(at.getTime() + 2000), "Alone"));
-      expect(messages.lastInChatThread(chat, "m1")).toBe("m3");
-      // Any message of the thread names it.
-      expect(messages.lastInChatThread(chat, "m2")).toBe("m3");
-      expect(messages.lastInChatThread(chat, "m3")).toBe("m3");
-      expect(messages.lastInChatThread(chat, "m4")).toBe("m4");
-      expect(messages.lastInChatThread(chat, "missing")).toBeNull();
-    });
   });
 
   it("names no chat by a ref on another platform than the chat's", () => {

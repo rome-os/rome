@@ -1,7 +1,8 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, memo, useImperativeHandle, useRef, type ReactNode } from "react";
+import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatSession } from "@/lib/chat-types";
@@ -26,6 +27,7 @@ import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   acceptLatestSocket,
   FakeWebSocket,
@@ -43,6 +45,7 @@ import {
   markSessionRead,
   openTurnStream,
   postSessionTurn,
+  renameSession,
 } from "@/lib/chat-api";
 
 let agentRoleLabel = enChat.roles.agent;
@@ -51,10 +54,7 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
-// Which composer took the caret: the thread it sends into, or "" for the chat's own.
-const conciergeFocus = rs.hoisted(() => rs.fn());
-const touch = rs.hoisted(() => ({ coarse: false }));
-rs.mock("@/hooks/use-coarse-pointer", () => ({ useCoarsePointer: () => touch.coarse }));
+import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
@@ -172,7 +172,8 @@ rs.mock("@/components/agent-trace/TraceDrawer", () => ({
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
-  AgentAvatar: () => null,
+  AgentAvatar: ({ iconUrl }: { iconUrl?: string | null }) =>
+    iconUrl ? <span data-agent-avatar={iconUrl} /> : null,
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
@@ -207,33 +208,10 @@ function ReplyJump() {
       <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
         jump
       </button>
-      <button
-        type="button"
-        data-testid="open-thread"
-        onClick={() => reply?.openThread({ thread: "u-1", title: "First" })}
-      >
-        open thread
+      {/* A click on the quote of a message, which names m-1. */}
+      <button type="button" data-testid="quote-jump" onClick={() => reply?.jump("m-1")}>
+        quote
       </button>
-      <button
-        type="button"
-        data-testid="open-other-thread"
-        onClick={() => reply?.openThread({ thread: "u-2", title: "Second" })}
-      >
-        open other thread
-      </button>
-      {/* Picks a reply to a message, as the Reply button does. */}
-      {["a-1", "u-3"].map((id) => (
-        <button
-          key={id}
-          type="button"
-          data-testid={`reply-to-${id}`}
-          onClick={() => reply?.set({ messageId: id, author: "agent", preview: "quoted" })}
-        >
-          reply
-        </button>
-      ))}
-      {/* Whether a quote of the message could go to it. */}
-      <span data-testid="has-u2">{String(reply?.has("u-2"))}</span>
       {/* An older message the timeline has not loaded. */}
       <div data-testid="older-thread-message">
         <ShareMessageButton
@@ -266,7 +244,6 @@ rs.mock("@/components/chat/MessageList", () => ({
       key: string;
       message?: {
         id?: string;
-        chatThreadId?: string | null;
         content: string;
         traceArchived?: boolean;
         sender?: { name: string | null; avatarUrl?: string | null; onBehalfOf?: { kind: string } };
@@ -276,6 +253,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     <>
       <div
         data-testid="message-list"
+        data-output-links={useOutputLinks() ? "true" : ""}
         data-unread-from={unreadFrom ?? ""}
         data-writing={live.writing?.writing ? "true" : ""}
       >
@@ -313,12 +291,19 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-testid="user-row"
             data-row-key={row.key}
             data-timeline-anchor={row.message?.id}
-            data-chat-thread={row.message?.chatThreadId ?? ""}
             data-sender={row.message?.sender?.name}
             data-on-behalf={row.message?.sender?.onBehalfOf?.kind}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
-            {row.message?.content}
+            {/* The two boxes ConciergeBubble draws around a bubble, which can
+              be wider than the bubble itself. */}
+            <div data-testid="bubble-part" data-concierge-bubble-part>
+              <div data-testid="bubble-box" data-bubble-box>
+                <span data-testid="user-text">{row.message?.content}</span>
+              </div>
+            </div>
+            {/* A popover of the message, drawn outside the chat as the real ones are. */}
+            {createPortal(<div data-testid="portal-pad" />, document.body)}
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
@@ -455,15 +440,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     },
     ref,
   ) {
-    // The thread the composer's draft sends into: none for the chat's own.
     const draft = useReplyDraft();
-    const thread = draft?.thread;
-    const threadRef = useRef(thread);
-    threadRef.current = thread;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
-      focus: () => conciergeFocus(threadRef.current ?? ""),
+      focus: () => {},
       stopVoiceInput: conciergeStopVoiceInput,
     }));
     return (
@@ -471,8 +452,6 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
         data-testid="chat-composer"
         data-streaming={props.isStreaming ? "true" : "false"}
         data-chat-name={props.chatName ?? ""}
-        data-thread={thread ?? ""}
-        data-thread-title={draft?.threadTitle ?? ""}
       >
         <button
           type="button"
@@ -486,8 +465,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
                   reasoningEffort: "medium",
                   projectPath: "",
                   inputId: "11111111-1111-4111-8111-111111111111",
-                  // As the real composer does: the thread the draft sends into, and its reply.
-                  ...(thread ? { chatThread: thread } : {}),
+                  // As the real composer does: its reply.
                   ...(draft?.target ? { replyTo: draft.target } : {}),
                 },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
@@ -514,6 +492,7 @@ rs.mock("@/lib/chat-api", () => {
     ...chatApiModule,
     createSession: rs.fn(),
     deleteSession: rs.fn(),
+    renameSession: rs.fn().mockResolvedValue(undefined),
     interruptTurn: rs.fn(),
     listSessionMessages,
     // The newest page reads like the whole list unless a test says otherwise.
@@ -1040,7 +1019,8 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
-  it("marks the header avatar with the session model's vendor", () => {
+  it("names the model that answered last at the foot of the header's menu", async () => {
+    const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -1048,23 +1028,65 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    const avatar = screen.getByRole("button", { name: "navbar.sessionModel" });
-    expect(avatar.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    const caption = document.querySelector("[data-chat-header-menu-caption]");
+    expect(caption?.textContent).toBeTruthy();
+    // An ordinary chat: Outputs, then what is done to the chat; no Tasks button.
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "recentChats.rename",
+      "share.title",
+      "navbar.archive",
+      "navbar.delete",
+    ]);
+    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
   });
 
-  it("names the effort the session's last turn ran with", () => {
+  it("shows no model in the menu before the chat's first turn", async () => {
+    const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
-      model: "gpt-5.5",
-      reasoningEffort: "max",
+      model: null,
       pinnedAgentMention: null,
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(document.querySelector("[data-chat-header-menu-caption]")).toBeNull();
   });
 
-  it("shows a spinner and Loading… instead of New Chat while an existing session loads", () => {
+  it("opens a message's link to one of its files in Outputs, in an ordinary chat too", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByTestId("message-list").dataset.outputLinks).toBe("true");
+  });
+
+  it("offers the chat's project in its menu only when one was chosen", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      projectPath: "rome-releases",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    const opens = () =>
+      [...document.querySelectorAll("[data-chat-header-menu-section]")][0]!.textContent;
+    expect(opens()).toBe("concierge.menu.outputschatHeader.project");
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      projectPath: "default",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(opens()).toBe("concierge.menu.outputs");
+  });
+
+  it("shows no name, not New Chat, while an existing session loads", () => {
     mockUseSessionIdentity.mockReturnValue({
       loading: true,
       sessionName: null,
@@ -1072,8 +1094,8 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByRole("status", { name: "sidebar.loading" })).toBeTruthy();
-    expect(screen.getByText("sidebar.loading")).toBeTruthy();
+    // The name tag waits for the name rather than saying New Chat first.
+    expect(document.querySelector("[data-concierge-header-name]")?.textContent).toBe("");
     expect(screen.queryByText("sidebar.newChat")).toBeNull();
   });
 
@@ -1127,6 +1149,36 @@ describe("Chat agent identity", () => {
     renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  Atlas  " />);
 
     expect(screen.getByTestId("message-list").textContent).toBe("Atlas");
+  });
+
+  it("shows a chat's app agent in the header's badge, and the mascot otherwise", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: "/api/apps/workflow-studio/icon",
+      },
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="session-1" />);
+    const badge = document.querySelector("[data-concierge-header-badge]")!;
+    expect(badge.querySelector("[data-agent-avatar]")?.getAttribute("data-agent-avatar")).toBe(
+      "/api/apps/workflow-studio/icon",
+    );
+    expect(badge.querySelector(".rome-mascot")).toBeNull();
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the flow",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    const plain = document.querySelector("[data-concierge-header-badge]")!;
+    expect(plain.querySelector("[data-agent-avatar]")).toBeNull();
+    expect(plain.querySelector(".rome-mascot")).not.toBeNull();
   });
 
   it("keeps a session-pinned app agent ahead of the main agent display name", () => {
@@ -2147,6 +2199,57 @@ describe("Chat turn stream lifecycle", () => {
     await waitFor(() => expect(screen.queryByTestId("user-row")).toBeNull());
   });
 
+  it("says Rome may be restarting when its proxy answers a send in its place", async () => {
+    // A proxy's HTML error page reads as no message (see plainErrorText).
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, status: 502, message: "" });
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.unreachable"),
+    );
+  });
+
+  it("says Rome is updating when its proxy answers a send while this page knows of an upgrade", async () => {
+    function UpgradeUnderWay() {
+      useUpgradeUnderWay(true);
+      return null;
+    }
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, status: 502, message: "" });
+    renderChat(
+      <>
+        <UpgradeUnderWay />
+        <Chat sessionId="session-1" />
+      </>,
+    );
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.updating"),
+    );
+  });
+
+  it("says it is reconnecting when the turn's stream meets Rome's proxy", async () => {
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(new Response("<!DOCTYPE html><html></html>", { status: 522 })),
+    );
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId("stream-error").textContent).toBe("stream.errors.reconnecting"),
+      );
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
   it("keeps backing off when resumed streams keep closing right away", async () => {
     const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
     rs.mocked(listSessionTurns)
@@ -2735,7 +2838,8 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
     expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "concierge.taskList.open" })).toBeNull();
+    // No task list yet: no Tasks button.
+    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
     view.unmount();
 
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
@@ -2749,7 +2853,7 @@ describe("Chat Concierge empty state", () => {
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByTestId("user-row");
-    expect(await screen.findByRole("button", { name: "concierge.taskList.open" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "concierge.menu.tasks" })).toBeTruthy();
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -2808,11 +2912,17 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(await screen.findByText("Plan the launch")).toBeTruthy();
-    expect(document.querySelector("[data-concierge-header]")).toBeNull();
-    expect(screen.getByRole("button", { name: "navbar.more" }).className).not.toContain(
-      "rounded-full",
-    );
+    // An ordinary chat floats the same header, with its title in the tag.
+    const name = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header-name]");
+      if (!found?.textContent) throw new Error("no name");
+      return found;
+    });
+    expect(name.textContent).toBe("Plan the launch");
+    // The same mascot as the Concierge's, and no status capsule under the name.
+    expect(document.querySelector("[data-concierge-header-badge] .rome-mascot")).not.toBeNull();
+    expect(document.querySelector("[data-concierge-header-activity]")).toBeNull();
+    expect(screen.getByRole("button", { name: "navbar.more" }).className).toContain("rounded-full");
   });
 
   it("hangs the Concierge's mascot from the Mac app's title bar and puts its buttons in the bar", async () => {
@@ -2912,14 +3022,13 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from the agent's logo in a Concierge chat's header, not its menu", async () => {
+  it("opens Tasks from the header's Tasks button, and Outputs and Routines from its ⋯ menu, not from the agent's logo", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    // A topic chat with a message: a blank one shows no header.
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
       {
         id: "m-1",
@@ -2930,16 +3039,22 @@ describe("Chat Concierge empty state", () => {
       },
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    // The header settles once the chat loads; press the button it settles on.
-    await screen.findByRole("button", { name: "concierge.taskList.open" });
-    await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "concierge.taskList.open" }));
-      expect(mockOpenTaskList).toHaveBeenCalled();
-    });
+    // The header settles once the chat loads; Tasks has its own button.
+    fireEvent.click(await screen.findByRole("button", { name: "concierge.menu.tasks" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    // The logo opens nothing.
+    expect(document.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
-      "concierge.tasks.title",
-    );
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "concierge.menu.routines",
+      "recentChats.rename",
+      "share.title",
+      "navbar.archive",
+      "navbar.delete",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -2953,7 +3068,10 @@ describe("Chat Concierge empty state", () => {
       <Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />,
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    // The main chat is only shared: no Rename, Archive or Delete.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "concierge.menu.routines",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -2969,6 +3087,25 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
+  });
+
+  it("renames the chat from the header's ⋯ menu", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "recentChats.rename" }));
+    const field = await screen.findByRole("textbox", { name: "recentChats.renameLabel" });
+    expect((field as HTMLInputElement).value).toBe("Calendar");
+    await user.clear(field);
+    await user.type(field, "Trip plans{Enter}");
+    await waitFor(() =>
+      expect(rs.mocked(renameSession)).toHaveBeenCalledWith("topic-1", "Trip plans"),
+    );
   });
 
   it("offers Share chat in a common chat too", async () => {
@@ -2998,424 +3135,6 @@ describe("Chat Concierge empty state", () => {
     );
     await userEvent.click(within(row!).getByRole("button", { name: "message.share" }));
   };
-
-  describe("Chat thread in focus", () => {
-    // Two threads, each started by the owner's message and answered, so each
-    // holds more than one message. A task started in each names it.
-    const threaded = () =>
-      rs.mocked(listSessionMessages).mockResolvedValueOnce(
-        [
-          ["u-1", "user", "turn-a", "First", "Task one", "u-1"],
-          ["u-2", "user", "turn-b", "Second", "Task two", "u-2"],
-          ["ar-1", "assistant", "turn-a", "On it", "Task one", "u-1"],
-          ["ar-2", "assistant", "turn-b", "On it too", "Task two", "u-2"],
-        ].map(([id, role, turnId, text, title, thread]) => ({
-          id: id!,
-          sessionId: "session-1",
-          turnId: turnId!,
-          role: role as "user" | "assistant",
-          content: JSON.stringify([{ type: "text", content: text }]),
-          createdAt: "2026-11-10T10:00:00Z",
-          chatThreadId: thread!,
-          chatThreadTitle: title!,
-        })),
-      );
-    const concierge = () => (
-      <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
-    );
-    const composer = () => screen.getByTestId("chat-composer");
-    const back = () => document.querySelector<HTMLElement>("[data-thread-back]");
-
-    // The motion is its own tests'; here the focus switches at once.
-    beforeEach(() => {
-      rs.stubGlobal(
-        "matchMedia",
-        (query: string) =>
-          ({
-            matches: query === "(prefers-reduced-motion: reduce)",
-            media: query,
-            addEventListener: () => {},
-            removeEventListener: () => {},
-          }) as MediaQueryList,
-      );
-    });
-    it("focuses the chat on the thread: one composer that sends into it, and a back control naming the task", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      expect(back()).toBeNull();
-      expect(composer().dataset.thread).toBe("");
-
-      fireEvent.click(screen.getByTestId("open-thread"));
-
-      await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-      // The one composer and the one stream: nothing else holds the thread.
-      expect(screen.getAllByTestId("chat-composer")).toHaveLength(1);
-      expect(screen.getAllByTestId("message-list")).toHaveLength(1);
-      expect(composer().dataset.threadTitle).toBe("Task one");
-      expect(back()?.textContent).toBe("Task one");
-      expect(back()?.getAttribute("aria-label")).toBe("thread.back");
-    });
-
-    it("sends into the thread, and its row is in the thread at once", async () => {
-      threaded();
-      rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-other-thread"));
-      await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
-
-      fireEvent.click(screen.getByTestId("concierge-send-button"));
-
-      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
-      const form = rs.mocked(postSessionTurn).mock.calls[0]![1] as FormData;
-      // The reply names the thread's last message, the one its quote shows,
-      // and no thread: the server stores it as given.
-      expect(form.get("replyToMessageId")).toBe("ar-2");
-      expect(form.has("chatThread")).toBe(false);
-      // The sent row carries the thread's id, so the filter keeps it in view.
-      const sent = (await screen.findAllByTestId("user-row")).find((row) =>
-        row.textContent?.includes("sent at once"),
-      );
-      expect(sent?.dataset.chatThread).toBe("u-2");
-      // Sending leaves the thread in focus.
-      expect(composer().dataset.thread).toBe("u-2");
-    });
-
-    describe("a reply sent from the timeline", () => {
-      // u-1 started a thread that a-1 answers; u-3 is alone.
-      const replied = () =>
-        rs.mocked(listSessionMessages).mockResolvedValueOnce(
-          (
-            [
-              ["u-1", "user", null, "turn-a"],
-              ["a-1", "assistant", "u-1", "turn-a"],
-              ["u-3", "user", null, "turn-c"],
-            ] as const
-          ).map(([id, role, thread, turnId]) => ({
-            id,
-            sessionId: "session-1",
-            turnId,
-            role,
-            content: JSON.stringify([{ type: "text", content: id }]),
-            createdAt: "2026-11-10T10:00:00Z",
-            chatThreadId: thread,
-          })),
-        );
-      const sentRow = async () =>
-        (await screen.findAllByTestId("user-row")).find((row) =>
-          row.textContent?.includes("sent at once"),
-        );
-
-      it("is in its replied message's thread at once, so no label flashes before the answer", async () => {
-        replied();
-        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-        fireEvent.click(screen.getByTestId("reply-to-a-1"));
-
-        fireEvent.click(screen.getByTestId("concierge-send-button"));
-
-        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
-        expect((await sentRow())?.dataset.chatThread).toBe("u-1");
-      });
-
-      it("starts a thread at a replied message that is alone", async () => {
-        replied();
-        rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-        fireEvent.click(screen.getByTestId("reply-to-u-3"));
-
-        fireEvent.click(screen.getByTestId("concierge-send-button"));
-
-        await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
-        expect((await sentRow())?.dataset.chatThread).toBe("u-3");
-      });
-    });
-
-    it("sends to the whole chat once the focus is closed", async () => {
-      threaded();
-      rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-thread"));
-      await waitFor(() => expect(back()).toBeTruthy());
-      fireEvent.click(back()!);
-      await waitFor(() => expect(composer().dataset.thread).toBe(""));
-
-      fireEvent.click(screen.getByTestId("concierge-send-button"));
-
-      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
-      expect((rs.mocked(postSessionTurn).mock.calls[0]![1] as FormData).has("chatThread")).toBe(
-        false,
-      );
-    });
-
-    it("closes from the back control and from Esc", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      const closers = [
-        () => fireEvent.click(back()!),
-        () => fireEvent.keyDown(document.body, { key: "Escape" }),
-      ];
-      for (const close of closers) {
-        fireEvent.click(screen.getByTestId("open-thread"));
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-
-        close();
-
-        await waitFor(() => expect(composer().dataset.thread).toBe(""));
-        expect(back()).toBeNull();
-      }
-    });
-
-    it("keeps the focus on Esc that a control used, such as dropping a reply", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-thread"));
-      await waitFor(() => expect(back()).toBeTruthy());
-
-      const used = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
-      used.preventDefault();
-      document.body.dispatchEvent(used);
-
-      expect(composer().dataset.thread).toBe("u-1");
-    });
-
-    it("opens no focus for a message alone in its thread", async () => {
-      twoTurns();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-
-      fireEvent.click(screen.getByTestId("open-thread"));
-
-      expect(back()).toBeNull();
-      expect(composer().dataset.thread).toBe("");
-    });
-
-    it("puts a root the server sent with no thread into it once a reply arrives live, so it can be focused", async () => {
-      rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-      twoTurns();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      await waitFor(() => expect(chatEvents()).toBeTruthy());
-      // Alone, u-1 is in no thread, so there is nothing to focus.
-      fireEvent.click(screen.getByTestId("open-thread"));
-      expect(back()).toBeNull();
-
-      act(() => {
-        chatEvents()?.emit("message_insert", {
-          id: "u-3",
-          sessionId: "session-1",
-          turnId: "turn-c",
-          role: "user",
-          content: JSON.stringify([{ type: "text", content: "More" }]),
-          createdAt: "2026-11-10T10:05:00Z",
-          chatThreadId: "u-1",
-          chatThreadTitle: "First",
-        });
-      });
-      await waitFor(() => expect(screen.getAllByTestId("user-row")).toHaveLength(3));
-
-      // The reply carries the thread and its name; the root is in it with no event of its own.
-      fireEvent.click(screen.getByTestId("open-thread"));
-      await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-      expect(back()?.textContent).toBe("First");
-    });
-
-    describe("a jump that focuses the thread of its message", () => {
-      const originalScrollTo = Element.prototype.scrollTo;
-      beforeEach(() => {
-        Element.prototype.scrollTo = rs.fn() as typeof Element.prototype.scrollTo;
-      });
-      afterEach(() => {
-        Element.prototype.scrollTo = originalScrollTo;
-      });
-
-      it("lands on the message and focuses its thread, the way the Tasks panel's Respond asks", async () => {
-        threaded();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-
-        act(() => void requestConciergeJump("u-2", { focusThread: true }));
-
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
-        expect(back()?.textContent).toBe("Task two");
-      });
-
-      it("closes the thread in focus first when the message is in another", async () => {
-        threaded();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-        fireEvent.click(screen.getByTestId("open-thread"));
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-
-        act(() => void requestConciergeJump("u-2", { focusThread: true }));
-
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-2"));
-      });
-
-      it("keeps the thread in focus when the message is in it, and focuses nothing without the ask", async () => {
-        threaded();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-
-        act(() => void requestConciergeJump("u-2"));
-        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
-        expect(composer().dataset.thread).toBe("");
-
-        fireEvent.click(screen.getByTestId("open-thread"));
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-        act(() => void requestConciergeJump("u-1", { focusThread: true }));
-        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalledTimes(2));
-        expect(composer().dataset.thread).toBe("u-1");
-      });
-
-      it("focuses no thread for a message alone in its own", async () => {
-        twoTurns();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-
-        act(() => void requestConciergeJump("u-1", { focusThread: true }));
-
-        await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
-        expect(composer().dataset.thread).toBe("");
-      });
-    });
-
-    it("brings the whole chat back before a jump to a message the focus hides, and jumps at once to one it shows", async () => {
-      threaded();
-      const scrollTo = rs.fn();
-      const original = Element.prototype.scrollTo;
-      Element.prototype.scrollTo = scrollTo as typeof Element.prototype.scrollTo;
-      try {
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-        fireEvent.click(screen.getByTestId("open-thread"));
-        await waitFor(() => expect(back()).toBeTruthy());
-        const target = screen.getByTestId("agent-anchor");
-
-        // Shown by the focus: the focus stays.
-        fireEvent.click(screen.getByTestId("reply-jump"));
-        expect(scrollTo).toHaveBeenCalledTimes(1);
-        expect(back()).toBeTruthy();
-
-        // Hidden by it, as the transcript marks it: the focus closes, then the jump lands.
-        target.setAttribute("data-thread-out", "");
-        scrollTo.mockClear();
-        fireEvent.click(screen.getByTestId("reply-jump"));
-        expect(scrollTo).not.toHaveBeenCalled();
-        await waitFor(() => expect(back()).toBeNull());
-        target.removeAttribute("data-thread-out");
-        await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(1));
-        expect(composer().dataset.thread).toBe("");
-      } finally {
-        Element.prototype.scrollTo = original;
-      }
-    });
-
-    it("offers a quote only the messages the focus shows", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      expect(screen.getByTestId("has-u2").textContent).toBe("true");
-
-      fireEvent.click(screen.getByTestId("open-thread"));
-
-      await waitFor(() => expect(screen.getByTestId("has-u2").textContent).toBe("false"));
-    });
-
-    describe("the caret", () => {
-      beforeEach(() => {
-        conciergeFocus.mockClear();
-        touch.coarse = false;
-      });
-      afterEach(() => {
-        touch.coarse = false;
-      });
-
-      it("goes to the composer when a thread comes into focus", async () => {
-        threaded();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-        expect(conciergeFocus).not.toHaveBeenCalled();
-
-        fireEvent.click(screen.getByTestId("open-thread"));
-
-        await waitFor(() => expect(conciergeFocus).toHaveBeenLastCalledWith("u-1"));
-      });
-
-      it("stays out of the composer on a touch device, which would raise its keyboard", async () => {
-        touch.coarse = true;
-        threaded();
-        renderChat(concierge());
-        await screen.findAllByTestId("user-row");
-
-        fireEvent.click(screen.getByTestId("open-thread"));
-
-        await waitFor(() => expect(composer().dataset.thread).toBe("u-1"));
-        expect(conciergeFocus).not.toHaveBeenCalled();
-      });
-    });
-
-    it("closes the focus before share mode opens from a message's Share, so the picker shows whole turns", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-thread"));
-      await waitFor(() => expect(back()).toBeTruthy());
-
-      fireEvent.click(
-        within(screen.getAllByTestId("user-row")[1]!).getByRole("button", {
-          name: "message.share",
-        }),
-      );
-
-      expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
-      await waitFor(() => expect(back()).toBeNull());
-      expect(composer().dataset.thread).toBe("");
-    });
-
-    it("brings no thread into focus while share mode is on, whether by label or by quote", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      await userEvent.click(screen.getByRole("button", { name: "navbar.more" }));
-      await userEvent.click(screen.getByRole("menuitem", { name: "share.title" }));
-      await screen.findByTestId("share-bar");
-
-      fireEvent.click(screen.getByTestId("open-thread"));
-      fireEvent.click(screen.getByTestId("open-other-thread"));
-
-      expect(back()).toBeNull();
-      expect(composer().dataset.thread).toBe("");
-    });
-
-    it("closes the focus before share mode opens from the header menu", async () => {
-      threaded();
-      renderChat(concierge());
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-thread"));
-      await waitFor(() => expect(back()).toBeTruthy());
-
-      await userEvent.click(screen.getByRole("button", { name: "navbar.more" }));
-      await userEvent.click(screen.getByRole("menuitem", { name: "share.title" }));
-
-      expect(await screen.findByTestId("share-bar")).toBeTruthy();
-      await waitFor(() => expect(back()).toBeNull());
-    });
-
-    it("keeps no chat threads outside a Concierge chat", async () => {
-      threaded();
-      renderChat(<Chat sessionId="session-1" />);
-      await screen.findAllByTestId("user-row");
-      fireEvent.click(screen.getByTestId("open-thread"));
-      expect(back()).toBeNull();
-    });
-  });
 
   it("opens share mode from a message's Share, with only that message's turn selected", async () => {
     twoTurns();
@@ -3669,7 +3388,7 @@ describe("Chat Concierge empty state", () => {
     );
   });
 
-  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+  it("names neither the Concierge's app nor an ordinary chat's, whose tag shows its title", async () => {
     // Core agents all report "Rome" as their app, so the Concierge's label never varies.
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -3699,7 +3418,9 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(await screen.findByText("Workflow Studio")).toBeTruthy();
+    // The tag names the chat; the app is the badge's avatar.
+    expect(await screen.findByText("Plan the launch")).toBeTruthy();
+    expect(screen.queryByText("Workflow Studio")).toBeNull();
   });
 
   it("is only for Concierge: an empty normal chat keeps its message list", async () => {
@@ -3840,6 +3561,68 @@ describe("Chat Concierge jump to a message", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  describe("a click on a quote", () => {
+    // A message of the guardian's that replies to m-1.
+    const reply = (n: number) => ({
+      ...message(n),
+      content: JSON.stringify([
+        { type: "reply_to", messageId: "m-1", author: "guardian", text: "question 1" },
+        { type: "text", content: `answer ${n}` },
+      ]),
+    });
+    const quoteAnchor = () => screen.getByTestId("quote-jump");
+
+    it("scrolls to the original and tints it when it is loaded, with no toast", async () => {
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      await waitFor(() => expect(rows()).toBe(2));
+
+      fireEvent.click(quoteAnchor());
+
+      expect(scrollTo).toHaveBeenCalledOnce();
+      expect(toast.loading).not.toHaveBeenCalled();
+    });
+
+    it("loads older pages until the original is in, then goes to it, in silence", async () => {
+      rs.mocked(listSessionMessagePage)
+        .mockResolvedValueOnce({ messages: [reply(6)], nextCursor: "c1" })
+        .mockResolvedValueOnce({ messages: [message(4), message(5)], nextCursor: "c2" })
+        .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      await waitFor(() => expect(rows()).toBe(1));
+
+      fireEvent.click(quoteAnchor());
+
+      await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
+      expect(listSessionMessagePage).toHaveBeenCalledTimes(3);
+      expect(toast.loading).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("gives up after 10 older pages without a word when the original never comes", async () => {
+      // The newest page, then more pages than the search reads, none with the original.
+      const pages = Array.from({ length: 12 }, (_, n) => ({
+        messages: [message(100 + n)],
+        nextCursor: `c${n}`,
+      }));
+      const read = rs.mocked(listSessionMessagePage);
+      for (const page of pages.slice(0, 11)) read.mockResolvedValueOnce(page);
+      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      await waitFor(() => expect(rows()).toBe(1));
+
+      fireEvent.click(quoteAnchor());
+
+      await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(11));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(listSessionMessagePage).toHaveBeenCalledTimes(11);
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+  });
+
   it("is for the Concierge chat only", async () => {
     rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
       messages: [{ ...message(2), sessionId: "session-1" }],
@@ -3965,5 +3748,175 @@ describe("Chat header delete of a Concierge topic chat", () => {
 
     expect(screen.getByRole("dialog", { name: "navbar.delete" })).toBeTruthy();
     expect(workReads).toEqual([]);
+  });
+});
+
+// The header's archive and unarchive of a topic chat ask what the sidebar's ask.
+describe("Chat header archive of a Concierge topic chat", () => {
+  // What `follows-and-tasks` answers for topic-1.
+  const work = {
+    answer: { follows: [], openTasks: [] } as {
+      follows: { source: string; label: string; target: string }[];
+      openTasks: { id: string; title: string }[];
+      movedFollows?: { source: string; label: string; target: string }[];
+    },
+  };
+  const workReads: string[] = [];
+  const patches: Array<{ url: string; body: unknown }> = [];
+
+  const identity = (archivedAt: string | null) =>
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt,
+    });
+
+  beforeEach(() => {
+    work.answer = { follows: [], openTasks: [] };
+    workReads.length = 0;
+    patches.length = 0;
+    identity(null);
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/concierge/chats/topic-1/follows-and-tasks") {
+          workReads.push(url);
+          return Response.json(work.answer);
+        }
+        if (init?.method === "PATCH") {
+          patches.push({ url, body: JSON.parse(String(init.body)) });
+          return Response.json({ id: "topic-1" });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+  });
+
+  it("asks before archiving a topic chat with follows or open tasks, and stops them when asked", async () => {
+    work.answer = {
+      follows: [{ source: "github", label: "GitHub", target: "rome-os/rome" }],
+      openTasks: [{ id: "t-1", title: "Fix login redirect" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatArchiveTitle",
+    });
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(within(dialog).getByText("recentChats.topicChatDeleteTask")).toBeTruthy();
+    expect(patches).toEqual([]);
+    await user.click(within(dialog).getByRole("radio", { name: /topicChatDeleteStop/ }));
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: true, followsAndTasks: "stop" },
+        },
+      ]),
+    );
+  });
+
+  it("asks before unarchiving a topic chat whose archive moved follows, and moves them back by default", async () => {
+    identity("2026-11-01T00:00:00.000Z");
+    work.answer = {
+      follows: [],
+      openTasks: [],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "archived.unarchive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatUnarchiveTitle",
+    });
+    expect(within(dialog).getByText("recentChats.topicChatDeleteFollow")).toBeTruthy();
+    expect(
+      within(dialog)
+        .getByRole("radio", { name: /topicChatUnarchiveMoveBack/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.unarchive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: false, follows: "moveBack" },
+        },
+      ]),
+    );
+  });
+
+  it("asks before unarchiving an archived topic chat that opens as an ordinary chat", async () => {
+    // An archived topic chat is in no active list, so the chat page opens it
+    // without the Concierge variant; the session itself says what it is.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: "2026-11-01T00:00:00.000Z",
+      isConciergeSession: true,
+    });
+    work.answer = {
+      follows: [],
+      openTasks: [],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    };
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "archived.unarchive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "recentChats.topicChatUnarchiveTitle",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "recentChats.unarchive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        {
+          url: "/api/chat/sessions/topic-1/archive",
+          body: { archived: false, follows: "moveBack" },
+        },
+      ]),
+    );
+    expect(workReads).toEqual(["/api/concierge/chats/topic-1/follows-and-tasks"]);
+  });
+
+  it("never treats the main chat as a topic chat, even read from its session", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Main chat",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      isConciergeSession: true,
+    });
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="concierge" conciergeMainChatId="concierge" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        { url: "/api/chat/sessions/concierge/archive", body: { archived: true } },
+      ]),
+    );
+    expect(workReads).toEqual([]);
+  });
+
+  it("archives a chat that is not a topic chat without reading anything", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "navbar.archive" }));
+
+    await waitFor(() =>
+      expect(patches).toEqual([
+        { url: "/api/chat/sessions/session-1/archive", body: { archived: true } },
+      ]),
+    );
+    expect(workReads).toEqual([]);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

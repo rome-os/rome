@@ -2,14 +2,16 @@ import A2UICore
 import A2UIJSON
 import A2UISwiftUI
 import BasicCatalog
+import Charts
 import JSONSchema
 import SwiftUI
 
 /// Rome's A2UI catalog for chat cards, drawn with the app's own `Palette` and
 /// `romeFont`. Google's A2UI engine reads the card, resolves its paths and
 /// keeps its data, as it does for the dashboard; these views only draw. The
-/// components from A2UI's basic catalog keep its schemas; `Stat` and
-/// `Progress` are Rome's.
+/// components from A2UI's basic catalog keep its schemas; `Stat`,
+/// `Progress`, `Chart` and `Markdown` are Rome's, and `Text` and `Row` add
+/// Rome's `tone`, `icon` and `href`.
 @MainActor
 enum WidgetCatalog {
     /// The id the dashboard's catalog uses too, so a card names one catalog.
@@ -18,32 +20,63 @@ enum WidgetCatalog {
     static let catalog = Catalog<ComponentImplementation>(
         id: id,
         protocolVersion: .v09,
-        components: [text, stat, progress, image, row, column, list, button, choicePicker, textField],
+        components: [text, markdown, stat, chart, progress, image, row, column, list, button, choicePicker, textField],
         // The only functions a card may call, in its `checks`.
         functions: [TrimmedRequired(), OrFunction()]
     )
 
-    private static let text = ComponentImplementation(api: BasicCatalogComponents.text) { node in
-        WidgetText(node: node)
+    private static let text = ComponentImplementation(
+        name: "Text",
+        schema: schema(
+            ["text": "DynamicString"],
+            raw: [
+                "variant": #"{"enum":["h1","h2","h3","h4","h5","caption","body"]}"#,
+                "tone": #"{"enum":["info","warning","success"]}"#,
+                "icon": #"{"type":"string"}"#,
+                "href": #"{"type":"string"}"#,
+            ],
+            required: ["text"]
+        )
+    ) { node in
+        CardLinkRow(node: node) { WidgetText(node: node) }
+    }
+
+    /// Markdown notes, with links drawn as their text and images as their
+    /// description, so a card opens and loads nothing.
+    private static let markdown = ComponentImplementation(
+        name: "Markdown",
+        schema: schema(["text": "DynamicString"], required: ["text"])
+    ) { node in
+        MarkdownText(source: node.string(for: "text") ?? "", fontSize: CardScale.body, lineSpacing: 3, textOnly: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private static let stat = ComponentImplementation(
         name: "Stat",
-        schema: schema(["label": "DynamicString", "value": "DynamicValue", "unit": "DynamicString", "caption": "DynamicString"], required: ["label", "value"])
+        schema: schema(
+            ["label": "DynamicString", "value": "DynamicValue", "unit": "DynamicString", "caption": "DynamicString"],
+            raw: [
+                "range": #"{"type":"object","properties":{"low":{"type":"number"},"high":{"type":"number"}}}"#,
+                "icon": #"{"type":"string"}"#,
+            ],
+            required: ["label", "value"]
+        )
     ) { node in
-        VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(verbatim: shown(node, "value")).romeFont(22, .semibold, monospacedDigits: true).foregroundStyle(Palette.fg)
-                if let unit = node.string(for: "unit") {
-                    Text(verbatim: unit).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                }
-            }
-            if let caption = node.string(for: "caption") {
-                Text(verbatim: caption).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        WidgetStat(node: node)
+    }
+
+    private static let chart = ComponentImplementation(
+        name: "Chart",
+        schema: schema(
+            ["unit": "DynamicString", "caption": "DynamicString"],
+            raw: [
+                "kind": #"{"enum":["bar"]}"#,
+                "points": #"{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"value":{"type":"number"},"highlight":{"enum":["accent","warning"]}},"required":["label","value"]}}"#,
+            ],
+            required: ["kind", "points"]
+        )
+    ) { node in
+        WidgetChart(node: node)
     }
 
     private static let progress = ComponentImplementation(
@@ -57,16 +90,28 @@ enum WidgetCatalog {
         WidgetImage(node: node)
     }
 
-    private static let row = ComponentImplementation(api: BasicCatalogComponents.row) { node in
-        WidgetRow(node: node)
+    private static let row = ComponentImplementation(
+        name: "Row",
+        schema: schema(
+            ["children": "ChildList"],
+            raw: [
+                "justify": #"{"enum":["center","end","spaceAround","spaceBetween","spaceEvenly","start","stretch"]}"#,
+                "align": #"{"enum":["start","center","end","stretch"]}"#,
+                "icon": #"{"type":"string"}"#,
+                "href": #"{"type":"string"}"#,
+            ],
+            required: ["children"]
+        )
+    ) { node in
+        CardLinkRow(node: node) { WidgetRow(node: node) }
     }
 
     private static let column = ComponentImplementation(api: BasicCatalogComponents.column) { node in
-        WidgetStack(node: node, spacing: 8)
+        WidgetStack(node: node)
     }
 
     private static let list = ComponentImplementation(api: BasicCatalogComponents.list) { node in
-        WidgetStack(node: node, spacing: 4)
+        WidgetStack(node: node)
     }
 
     private static let button = ComponentImplementation(api: BasicCatalogComponents.button) { node in
@@ -149,6 +194,11 @@ struct WidgetClearsKey: EnvironmentKey {
     static let defaultValue = WidgetClears()
 }
 
+/// Set inside a grid of tiles, so each tile takes its row's height.
+private struct WidgetInTileGridKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 /// Set while a button's request runs: every button is disabled, so a press is sent once.
 struct WidgetBusyKey: EnvironmentKey {
     static let defaultValue = false
@@ -170,6 +220,11 @@ extension EnvironmentValues {
         set { self[WidgetClearsKey.self] = newValue }
     }
 
+    fileprivate var widgetInTileGrid: Bool {
+        get { self[WidgetInTileGridKey.self] }
+        set { self[WidgetInTileGridKey.self] = newValue }
+    }
+
     var widgetBusy: Bool {
         get { self[WidgetBusyKey.self] }
         set { self[WidgetBusyKey.self] = newValue }
@@ -183,9 +238,9 @@ private struct WidgetText: View {
     var body: some View {
         let variant = node.string(for: "variant")
         let (size, weight): (CGFloat, Font.Weight) = switch variant {
-        case "h1", "h2": (20, .semibold)
-        case "h3", "h4": (CardScale.title, .semibold)
-        case "h5": (CardScale.title, .medium)
+        // One type scale, two weights: headings medium, everything else regular.
+        case "h1", "h2": (20, .medium)
+        case "h3", "h4", "h5": (CardScale.title, .medium)
         case "caption": (CardScale.caption, .regular)
         default: (CardScale.body, .regular)
         }
@@ -194,24 +249,279 @@ private struct WidgetText: View {
             .fixedSize(horizontal: false, vertical: true)
         if inButton {
             label
+        } else if let tone = WidgetTone(rawValue: node.string(for: "tone") ?? "") {
+            // A callout: a tinted strip, its icon in the tone's colour.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: WidgetIcon.symbol(node.string(for: "icon")) ?? tone.symbol)
+                    .romeFont(CardScale.caption, .medium)
+                    .foregroundStyle(tone.color)
+                Text(verbatim: WidgetCatalog.shown(node, "text"))
+                    .romeFont(CardScale.body)
+                    .foregroundStyle(Palette.fg)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(tone.soft, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else if let symbol = WidgetIcon.symbol(node.string(for: "icon")) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: symbol).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
+                label.foregroundStyle(variant == "caption" ? Palette.sub : Palette.fg)
+            }
         } else {
             label.foregroundStyle(variant == "caption" ? Palette.sub : Palette.fg)
         }
     }
 }
 
+/// A callout's tone: its icon, its colour and its tint.
+private enum WidgetTone: String {
+    case info, warning, success
+
+    var symbol: String {
+        switch self {
+        case .info: "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .success: "checkmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .info: Palette.running
+        case .warning: Palette.warning
+        case .success: Palette.success
+        }
+    }
+
+    var soft: Color {
+        switch self {
+        case .info: Palette.runningSoft
+        case .warning: Palette.warnSoft
+        case .success: Palette.successSoft
+        }
+    }
+}
+
+/// The SF Symbol for each icon a card may name (`WIDGET_UI_ICONS`).
+enum WidgetIcon {
+    static func symbol(_ name: String?) -> String? {
+        switch name {
+        case "moon": "moon.fill"
+        case "heart": "heart.fill"
+        case "steps": "figure.walk"
+        case "flame": "flame.fill"
+        case "run": "figure.run"
+        case "map-pin": "mappin.and.ellipse"
+        case "clock": "clock"
+        case "calendar": "calendar"
+        case "info": "info.circle"
+        case "alert": "exclamationmark.triangle"
+        default: nil
+        }
+    }
+
+    /// A link a card may open: an `https:` page or a place in Maps (`maps://`).
+    static func link(_ href: String?) -> URL? {
+        guard let href, href.hasPrefix("https://") || href.hasPrefix("maps://") else { return nil }
+        return URL(string: href)
+    }
+}
+
+/// A Text or Row with an `href`: a press opens it, and a trailing map pin (a
+/// place) or chevron (a page) says so. It is not an event to the card's owner.
+private struct CardLinkRow<Content: View>: View {
+    let node: Node
+    @ViewBuilder let content: () -> Content
+    @Environment(\.openURL) private var openURL
+    @Environment(\.widgetInButton) private var inButton
+
+    /// A Row's own icon before its children; a Text draws its icon itself.
+    @ViewBuilder private var withIcon: some View {
+        if node.type == "Row", let symbol = WidgetIcon.symbol(node.string(for: "icon")) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
+                content()
+            }
+        } else {
+            content()
+        }
+    }
+
+    var body: some View {
+        if !inButton, let url = WidgetIcon.link(node.string(for: "href")) {
+            Button {
+                openURL(url)
+            } label: {
+                HStack(spacing: 8) {
+                    withIcon.frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: url.scheme == "maps" ? "mappin.and.ellipse" : "chevron.right")
+                        .romeFont(CardScale.label, .medium)
+                        .foregroundStyle(Palette.sub)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleStyle())
+            .accessibilityAddTraits(.isLink)
+        } else {
+            withIcon
+        }
+    }
+}
+
+/// A tile on a subtle fill: the label above, the value below it with its
+/// unit, and an optional caption such as the usual range. In a row of tiles
+/// it takes the row's height.
+private struct WidgetStat: View {
+    let node: Node
+    @Environment(\.widgetInTileGrid) private var inGrid
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                if let symbol = WidgetIcon.symbol(node.string(for: "icon")) {
+                    Image(systemName: symbol).romeFont(CardScale.label)
+                }
+                Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.label)
+            }
+            .foregroundStyle(Palette.sub)
+            .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(verbatim: WidgetCatalog.shown(node, "value")).romeFont(20, .medium, monospacedDigits: true).foregroundStyle(Palette.fg)
+                if let unit = node.string(for: "unit") {
+                    Text(verbatim: unit).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                }
+            }
+            // The value stays on one line: a long one shrinks to fit.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            if let caption = node.string(for: "caption") {
+                Text(verbatim: caption).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let range { rangeLine(range) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: inGrid ? .infinity : nil, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var range: (low: Double, high: Double)? {
+        guard let range = node.properties["range"] as? ResolvedDictionary,
+              let low = range.double(for: "low"), let high = range.double(for: "high") else { return nil }
+        return (low, high)
+    }
+
+    /// Where the value sits against its usual range, decided here, never by the
+    /// card's author: the range, then normal in green or high or low in amber.
+    @ViewBuilder private func rangeLine(_ range: (low: Double, high: Double)) -> some View {
+        let unit = node.string(for: "unit").map { " \($0)" } ?? ""
+        let span = "\(range.low.formatted())–\(range.high.formatted())\(unit)"
+        let value = node.double(for: "value")
+        // The verdict always sits on its own line under the range, so every
+        // tile reads the same.
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Usual \(span)").foregroundStyle(Palette.sub).lineLimit(2)
+            if let value { verdict(value, range) }
+        }
+        .romeFont(CardScale.label)
+    }
+
+    /// Normal in green, or high or low in amber with an arrow.
+    private func verdict(_ value: Double, _ range: (low: Double, high: Double)) -> some View {
+        let (word, symbol, color): (String, String?, Color) =
+            value < range.low ? (String(localized: "Low"), "arrow.down", Palette.warningText)
+            : value > range.high ? (String(localized: "High"), "arrow.up", Palette.warningText)
+            : (String(localized: "Normal"), nil, Palette.success)
+        return HStack(spacing: 2) {
+            if let symbol { Image(systemName: symbol) }
+            Text(verbatim: word)
+        }
+        .foregroundStyle(color)
+        .fixedSize()
+    }
+}
+
+/// Bars, each labelled under it: today (`accent`) in the primary colour, an
+/// outlier (`warning`) in amber, the rest in the card's fill.
+private struct WidgetChart: View {
+    let node: Node
+
+    private struct Point: Identifiable {
+        let index: Int
+        let label: String
+        let value: Double
+        let highlight: String?
+        var id: Int { index }
+    }
+
+    private var points: [Point] {
+        (node.array(for: "points") ?? []).enumerated().compactMap { index, element in
+            guard let point = element as? ResolvedDictionary, let value = point.double(for: "value") else { return nil }
+            return Point(index: index, label: point.string(for: "label") ?? "", value: value, highlight: point.string(for: "highlight"))
+        }
+        .prefix(14).map { $0 }
+    }
+
+    var body: some View {
+        let points = points
+        let unit = node.string(for: "unit")
+        VStack(alignment: .leading, spacing: 8) {
+            Chart(points) { point in
+                BarMark(x: .value("Label", "\(point.index)"), y: .value("Value", point.value), width: .ratio(0.6))
+                    .foregroundStyle(point.highlight == "accent" ? Palette.primary : point.highlight == "warning" ? Palette.warning : Palette.chartBar)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            }
+            .chartXAxis {
+                AxisMarks { mark in
+                    AxisValueLabel {
+                        if let index = mark.as(String.self).flatMap(Int.init), points.indices.contains(index) {
+                            Text(verbatim: points[index].label)
+                                .romeFont(CardScale.label, points[index].highlight == "accent" ? .medium : .regular)
+                                .foregroundStyle(points[index].highlight == "accent" ? Palette.fg : Palette.sub)
+                        }
+                    }
+                }
+            }
+            .chartYAxis(.hidden)
+            .frame(height: 110)
+            if let caption = node.string(for: "caption") ?? unit {
+                Text(verbatim: caption).romeFont(CardScale.label).foregroundStyle(Palette.sub)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(points.map { "\($0.label) \($0.value.formatted())\(unit.map { " \($0)" } ?? "")" }.joined(separator: ", "))
+    }
+}
+
+/// The label on the left and the share on the right, above a thin track.
 private struct WidgetProgress: View {
     let node: Node
 
     var body: some View {
         let max = node.double(for: "max").flatMap { $0 > 0 ? $0 : nil } ?? 1
-        let value = node.double(for: "value") ?? 0
-        VStack(alignment: .leading, spacing: 4) {
-            if let label = node.string(for: "label") {
-                Text(verbatim: label).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
+        let share = Swift.min(Swift.max((node.double(for: "value") ?? 0) / max, 0), 1)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(verbatim: node.string(for: "label") ?? "").romeFont(CardScale.caption).foregroundStyle(Palette.fg)
+                Spacer(minLength: 12)
+                Text(verbatim: "\(Int((share * 100).rounded()))%")
+                    .romeFont(CardScale.caption, monospacedDigits: true).foregroundStyle(Palette.sub)
             }
-            ProgressView(value: Swift.min(Swift.max(value, 0), max), total: max).tint(Palette.primary)
+            Capsule().fill(Palette.fill).frame(height: 6)
+                .overlay(alignment: .leading) {
+                    GeometryReader { proxy in
+                        Capsule().fill(Palette.primary).frame(width: proxy.size.width * share)
+                    }
+                }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(node.string(for: "label") ?? "")
+        .accessibilityValue("\(Int((share * 100).rounded()))%")
     }
 }
 
@@ -254,6 +564,24 @@ private struct WidgetRow: View {
 
     var body: some View {
         let kids = node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
+        // Numbers side by side read as an even two-column grid.
+        if kids.count > 1, kids.allSatisfy({ $0.type == "Stat" }) {
+            let rows = stride(from: 0, to: kids.count, by: 2).map { Array(kids[$0 ..< Swift.min($0 + 2, kids.count)]) }
+            // A Grid, not a lazy one, so the tiles of a row share its height.
+            Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 10) {
+                ForEach(rows, id: \.first?.id) { pair in
+                    GridRow {
+                        ForEach(pair) { kid in ComponentNodeView(node: kid).environment(\.widgetInTileGrid, true) }
+                        if pair.count == 1 { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                    }
+                }
+            }
+        } else {
+            row(kids)
+        }
+    }
+
+    @ViewBuilder private func row(_ kids: [Node]) -> some View {
         // A2UI's `justify` as spacers: before the first child, between
         // children, and after the last.
         let justify = node.string(for: "justify") ?? "start"
@@ -285,17 +613,29 @@ private struct WidgetRow: View {
 }
 
 /// A `Column`, or a `List` (vertical or horizontal), as the dashboard lays them out.
+/// A Column's children sit 12 apart, except a caption right under a heading,
+/// its subtitle, 4 under it. A List's rows have a hairline between them.
 private struct WidgetStack: View {
     let node: Node
-    let spacing: CGFloat
     @Environment(\.a2uiCatalogs) private var catalogs
     @Environment(\.a2uiDefaultCatalogID) private var defaultCatalogID
 
+    private static let headings: Set<String> = ["h1", "h2", "h3", "h4", "h5"]
+
+    private func isSubtitle(_ kids: [Node], _ index: Int) -> Bool {
+        guard index > 0 else { return false }
+        let kid = kids[index], above = kids[index - 1]
+        return kid.type == "Text" && kid.string(for: "variant") == "caption"
+            && above.type == "Text" && Self.headings.contains(above.string(for: "variant") ?? "")
+    }
+
     var body: some View {
         let kids = node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
-        let items = ForEach(kids) { kid in ComponentNodeView(node: kid) }
-        if node.type == "List" && node.string(for: "direction") == "horizontal" {
-            ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { items } }
+        let isList = node.type == "List"
+        if isList && node.string(for: "direction") == "horizontal" {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { ForEach(kids) { kid in ComponentNodeView(node: kid) } }
+            }
         } else {
             let align: HorizontalAlignment = switch node.string(for: "align") {
             case "center": .center
@@ -303,8 +643,23 @@ private struct WidgetStack: View {
             default: .leading
             }
             let frame: Alignment = align == .center ? .center : align == .trailing ? .trailing : .leading
-            VStack(alignment: align, spacing: spacing) { items }
-                .frame(maxWidth: .infinity, alignment: frame)
+            VStack(alignment: align, spacing: 0) {
+                ForEach(Array(kids.enumerated()), id: \.element.id) { index, kid in
+                    if isList {
+                        ComponentNodeView(node: kid)
+                            .frame(maxWidth: .infinity, alignment: frame)
+                            .padding(.top, index == 0 ? 0 : 10)
+                            .padding(.bottom, index == kids.count - 1 ? 0 : 10)
+                            .overlay(alignment: .bottom) {
+                                if index < kids.count - 1 { Rectangle().fill(Palette.hair).frame(height: 1) }
+                            }
+                    } else {
+                        ComponentNodeView(node: kid)
+                            .padding(.top, index == 0 ? 0 : isSubtitle(kids, index) ? 4 : 12)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: frame)
         }
     }
 }

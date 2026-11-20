@@ -7,7 +7,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { Api, DEV_JWT_SECRET } from "./api.js";
+import { Api, DEV_JWT_SECRET, type TaskDto } from "./api.js";
+import { standingRules } from "./baseline-checks.js";
+import { conclusionIn } from "./baseline-rules.js";
 import {
   BASELINE_SCENARIOS,
   BASELINE_VERSION,
@@ -20,7 +22,7 @@ import { judge, type Verdict } from "./judge.js";
 import { Stack, checkSnapshotName, sleep } from "./stack.js";
 import { type TaskPath, readSpans, taskPath } from "./task-path.js";
 import { type TimedTurn, timedTurns } from "./timing.js";
-import { transcriptOf } from "./transcript.js";
+import { textOf, transcriptOf } from "./transcript.js";
 
 const USAGE = `pnpm concierge:baseline --config <label> --model <selection id> --effort <low|high> [--runs N]
 pnpm concierge:baseline --report
@@ -29,8 +31,11 @@ pnpm concierge:baseline --rejudge id,id   score the saved runs of these scenario
 Options:
   --only id,id         play some scenarios only
   --concurrency N      scenarios played at once (default 1: timings stay clean)
+  --max-load N         wait before each scenario until the 1-minute load average is below N
   --name <snapshot>    restore this snapshot before each run (pnpm concierge:eval --snapshot)
   --no-restore         keep the stack as it is between runs
+  --keep-memory        let each scenario see the memory earlier ones saved (by default
+                       the snapshot's memory is put back before each scenario)
   --no-judge           skip the judge's scores
   --judge-model <m>    the judge's model (default claude-opus-5-5) at --judge-effort (default high)
   --container, --base-url, --user, --out, --timeout: as pnpm concierge:eval`;
@@ -47,9 +52,11 @@ const { values: args } = parseArgs({
     runs: { type: "string", default: "1" },
     only: { type: "string" },
     concurrency: { type: "string", default: "1" },
+    "max-load": { type: "string" },
     name: { type: "string", default: "frozen" },
     "no-restore": { type: "boolean" },
     "no-judge": { type: "boolean" },
+    "keep-memory": { type: "boolean" },
     "judge-model": { type: "string", default: "claude-opus-5-5" },
     "judge-effort": { type: "string", default: "high" },
     report: { type: "boolean" },
@@ -72,7 +79,21 @@ const { values: args } = parseArgs({
 
 const stack = new Stack({ container: args.container, baseUrl: args["base-url"] });
 
-/** The text parts of a message, joined. */
+/** The snapshot's memory notes the judge may hold answers against, read once. */
+let memoryNotes: string | null = null;
+function snapshotMemory(): string {
+  memoryNotes ??= (() => {
+    try {
+      const notes = stack.memoryFacts(args.name);
+      return notes.length > 12_000 ? `${notes.slice(0, 12_000)}\n…` : notes;
+    } catch {
+      return "";
+    }
+  })();
+  return memoryNotes;
+}
+
+/** The stack's log lines since `sinceIso`. */
 function logsSince(sinceIso: string): string {
   return execFileSync("docker", ["logs", "--since", sinceIso, args.container], {
     encoding: "utf8",
@@ -84,6 +105,36 @@ function logsSince(sinceIso: string): string {
 /** Where a turn's first message landed, epoch ms, from its log line's time. */
 const firstSayAt = (t: TimedTurn) =>
   t.firstSayMs === null ? null : Date.parse(t.at) - t.durationMs + t.firstSayMs;
+
+/** Waits until the machine's 1-minute load is under `--max-load`, so a busy host skews no timing. */
+async function belowMaxLoad(id: string): Promise<void> {
+  const max = Number(args["max-load"]);
+  if (!max) return;
+  let waited = 0;
+  while ((loadavg()[0] as number) >= max) {
+    if (waited % 60_000 === 0) {
+      console.log(`[${id}] waiting: load ${(loadavg()[0] as number).toFixed(1)} >= ${max}`);
+    }
+    await sleep(10_000);
+    waited += 10_000;
+  }
+  if (waited) console.log(`[${id}] load fell below ${max} after ${waited / 1000}s`);
+}
+
+/** The conclusion each ended task chat's final answer wrote, for the tasks that wrote one. */
+async function conclusionsOf(api: Api, tasks: TaskDto[]): Promise<string[]> {
+  const found: string[] = [];
+  for (const task of tasks) {
+    if (task.status !== "ended" || !task.chat?.id) continue;
+    const answers = (await api.messages(task.chat.id))
+      .filter((message) => message.role === "assistant")
+      .map(textOf)
+      .filter(Boolean);
+    const conclusion = conclusionIn(answers.at(-1) ?? "");
+    if (conclusion) found.push(conclusion);
+  }
+  return found;
+}
 
 async function playScenario(
   api: Api,
@@ -128,18 +179,41 @@ async function playScenario(
   const turns = timedTurns(logsSince(startedAtIso)).filter((t) => t.chatId === chat.id);
   const messages = await api.messages(chat.id);
 
-  const { lines: transcript, saidAfter } = transcriptOf(messages);
+  const { lines, saidAfter, cardsAfter, reactions } = transcriptOf(messages);
+  // A pasted preload would bury the answers the judge scores, so a setup
+  // message is cut short; every other line, each answer included, stays whole.
+  const setupLines = new Set(
+    scenario.steps.filter((step) => step.setup).map((step) => `OWNER: ${step.text.trim()}`),
+  );
+  const transcript = lines.map((line) =>
+    setupLines.has(line)
+      ? `${line.slice(0, 600)} …[${line.length - 600} more characters of the pasted text]`
+      : line,
+  );
   const guardian = turns.filter((t) => t.trigger === "guardian");
   const input: CheckInput = {
     steps: scenario.steps.map((_, i) => guardian[i] ?? null),
     turns,
     saidAfter,
+    cardsAfter,
+    reactions,
     said: saidAfter.flat(),
+    shown: [...saidAfter.flat(), ...cardsAfter.flat()],
     tasks: driven.tasks,
+    conclusions: await conclusionsOf(api, driven.tasks),
   };
-  const notes = scenario.check(input);
+  const notes = [...scenario.check(input), ...standingRules(scenario, input)];
+  const setupTurnIds = scenario.steps.flatMap((step, i) =>
+    step.setup && input.steps[i] ? [input.steps[i].turnId] : [],
+  );
   if (driven.timedOut) notes.push("timed out before the chat was quiet");
   if (failure) notes.push(`the driver failed: ${failure}`);
+  // A Concierge chat runs at its own effort, not the one a message asks
+  // for, so a run labelled with another effort measured something else.
+  const ranAt = [...new Set(guardian.map((t) => t.effort ?? "default"))];
+  if (ranAt.some((effort) => effort !== args.effort)) {
+    notes.push(`effort: ran at ${ranAt.join(", ")}, labelled ${args.effort}`);
+  }
 
   // The owner waits from the send for the relayed result of a task.
   const relayed = turns
@@ -151,6 +225,7 @@ async function playScenario(
   let verdict: Verdict | null = null;
   if (!args["no-judge"]) {
     verdict = await judge(scenario.rubric, transcript.join("\n\n"), {
+      memory: snapshotMemory(),
       model: args["judge-model"] as string,
       effort: args["judge-effort"] as string,
     }).catch((error: unknown) => {
@@ -170,6 +245,7 @@ async function playScenario(
   return {
     id: scenario.id,
     row: scenario.row,
+    lang: scenario.lang,
     config,
     model: args.model as string,
     effort: args.effort as string,
@@ -178,7 +254,10 @@ async function playScenario(
     seconds,
     resultMs,
     turns,
+    setupTurnIds,
     notes,
+    // Every scenario counts its cards, so the rate shows where none is expected too.
+    measures: { cards: cardsAfter.flat().length, ...scenario.measure?.(input) },
     verdict,
     transcript,
     taskPath: path,
@@ -193,7 +272,7 @@ async function taskPathOf(
 ): Promise<TaskPath | null> {
   const [tasks] = stack.query<{ session_id: string }>([
     {
-      sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL ORDER BY created_at",
+      sql: "SELECT t.session_id FROM task_chats t JOIN rome_sessions s ON s.id = t.session_id WHERE t.concierge_chat_id = ? ORDER BY s.created_at",
       params: [chatId],
     },
   ]);
@@ -249,6 +328,7 @@ async function rejudge(ids: string[]): Promise<void> {
         const scenario = BASELINE_SCENARIOS.find((s) => s.id === run.id);
         if (!scenario) continue;
         run.verdict = await judge(scenario.rubric, run.transcript.join("\n\n"), {
+          memory: snapshotMemory(),
           model: args["judge-model"] as string,
           effort: args["judge-effort"] as string,
         }).catch((error: unknown) => {
@@ -301,9 +381,15 @@ async function main(): Promise<void> {
     await api.checkGuardian();
     const loadBefore = loadavg();
     const startedAt = new Date().toISOString();
-    const results = await pool(scenarios, Number(args.concurrency), (s) =>
-      playScenario(api, s, run),
-    );
+    const results = await pool(scenarios, Number(args.concurrency), async (s) => {
+      await belowMaxLoad(s.id);
+      // Scenarios played at once share the memory, so it is put back only
+      // when they run one at a time.
+      if (!args["keep-memory"] && Number(args.concurrency) === 1) stack.restoreMemory(args.name);
+      const before = loadavg()[0] as number;
+      const played = await playScenario(api, s, run);
+      return { ...played, load: { before, after: loadavg()[0] as number } };
+    });
     writeFileSync(
       join(dir, `run-${run}.json`),
       JSON.stringify(

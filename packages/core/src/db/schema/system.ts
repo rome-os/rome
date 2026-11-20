@@ -725,119 +725,66 @@ export const chatAddresses = sqliteTable(
 );
 
 /**
- * The Concierge's own todo list (rome-os/rome#1508). Only the Concierge's
- * tools write it, and every state is its own judgement. A row links at most
- * one task chat; deleting the chat leaves the row, unlinked. Times are
- * milliseconds, so "updated after the click" and "dirty before the build" are
- * decided finer than a second.
+ * What the Concierge knows about a task chat that the chat does not: a task
+ * is its task chat (docs/domains/chats.md#task), so this table holds one row
+ * per task chat, keyed by the chat's id, and nothing the chat already says.
+ * The task's name, owner, archive state and creation time are the chat's own.
+ * Deleting the chat deletes the row. Times are milliseconds, so "updated
+ * after the click" and "dirty before the build" are decided finer than a
+ * second.
  */
-export const conciergeTasks = sqliteTable(
-  "concierge_tasks",
-  {
-    id: text("id").primaryKey(),
-    title: text("title").notNull(),
-    /**
-     * The state the Concierge wrote before Rome derived a task's status. Read
-     * only, by the migration that set the facts it stood for. Only a failed
-     * start still writes it, as dropped, beside its outcome.
-     */
-    state: text("state", {
-      enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
-    }).notNull(),
-    /** One line, the result or the current status. */
-    summary: text("summary"),
-    /** What the Concierge keeps for its later self about the task. Never shown to the owner. */
-    note: text("note"),
-    /** What a `watching` or `needs_user` row waits for. */
-    waitingOn: text("waiting_on"),
-    /** The next check of a `watching` row, or the planned time of a `next` one. */
-    dueAt: integer("due_at", { mode: "timestamp_ms" }),
-    /** Order inside Up next, decided by the Concierge. */
-    rank: integer("rank"),
-    sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
-    /**
-     * The Concierge chat the row came from, where its results go. Null is the
-     * main chat, so a row from a deleted chat reports there.
-     */
-    chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
-    /**
-     * Whose Concierge the row is: "guardian" or "visitor:<account>". Set when
-     * the row is made, from the chat it is made in, and never changed, so it
-     * outlives that chat.
-     */
-    ownerKey: text("owner_key").notNull().default("guardian"),
-    /**
-     * The Concierge chat message the row points back to, in Chats. Cleared when
-     * the message goes, and the panel then offers no jump. The text is never
-     * copied.
-     */
-    sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
-      onDelete: "set null",
-    }),
-    /**
-     * The legacy chat row the row pointed back to before the Chats switch,
-     * until the switch's backfill finds that row's message in Chats. Dropped
-     * with the legacy rows.
-     */
-    legacySourceMessageId: text("legacy_source_message_id"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-    /** Set while the state is `done` or `dropped`. */
-    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
-    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
-    /**
-     * Set when archiving the task chat archived the row too, so unarchiving
-     * the chat brings back only that row, not one archived before.
-     */
-    archivedWithChat: integer("archived_with_chat", { mode: "boolean" }).notNull().default(false),
-    /** When a task chat was first linked. A row links one task chat in its life. */
-    linkedAt: integer("linked_at", { mode: "timestamp_ms" }),
-    /**
-     * When the task was stopped, and who or what stopped it. Cleared when new
-     * words take the task up again (`resume`).
-     */
-    stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
-    stopReason: text("stop_reason", { enum: ["concierge", "guardian", "archived", "deleted"] }),
-    /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
-    lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
-    /**
-     * Set when the task chat's work ends, cleared once the Concierge reported
-     * it. Kept here so a restart still knows a result was never said.
-     */
-    outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
-    /**
-     * When the wait that ended the task for no response began, once Rome
-     * handled its expiry, so a restart never handles one wait twice.
-     */
-    expiredWaitAt: integer("expired_wait_at", { mode: "timestamp_ms" }),
-    /** Set when the task ended for no response, until a digest of its chat listed it. */
-    noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" })
-      .notNull()
-      .default(false),
-    /**
-     * When a digest of its chat listed the row as a day old with no task chat
-     * started and nothing scheduled, so the Concierge asked its owner. A row
-     * is listed so once.
-     */
-    unstartedListedAt: integer("unstarted_listed_at", { mode: "timestamp_ms" }),
-    /**
-     * Set when Rome gave up telling the Concierge the task chat's result, so
-     * its owner was never told; cleared by the next result.
-     */
-    reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
-    /**
-     * When the task's derived status ended, kept as a fact it follows from
-     * changes and cleared if it opens again. The lists age ended rows by it.
-     */
-    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
-  },
-  (table) => [
-    // A chat belongs to at most one row, so a chat event maps to exactly one row.
-    uniqueIndex("idx_concierge_tasks_session")
-      .on(table.sessionId)
-      .where(sql`${table.sessionId} is not null`),
-  ],
-);
+export const taskChats = sqliteTable("task_chats", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .references(() => romeSessions.id, { onDelete: "cascade" }),
+  /**
+   * The Concierge chat the task reports to, where its results go. Null, or a
+   * chat that is gone, is the owner's main chat.
+   */
+  conciergeChatId: text("concierge_chat_id").references(() => romeSessions.id, {
+    onDelete: "set null",
+  }),
+  /**
+   * The Concierge chat message the task points back to, in Chats. Cleared when
+   * the message goes. The text is never copied.
+   */
+  sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
+    onDelete: "set null",
+  }),
+  /** What the Concierge keeps for its later self about the task. Never shown to the owner. */
+  note: text("note"),
+  /**
+   * When the task was stopped. Cleared when new words take the task up again
+   * (`resume`).
+   */
+  stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
+  /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
+  lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
+  /**
+   * Set when the task chat's work ends, cleared once the Concierge reported
+   * it. Kept here so a restart still knows a result was never said.
+   */
+  outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
+  /**
+   * When the wait that ended the task for no response began, once Rome
+   * handled its expiry, so a restart never handles one wait twice.
+   */
+  expiredWaitAt: integer("expired_wait_at", { mode: "timestamp_ms" }),
+  /** Set when the task ended for no response, until a digest of its chat listed it. */
+  noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Set when Rome gave up telling the Concierge the task chat's result, so
+   * its owner was never told; cleared by the next result.
+   */
+  reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
+  /**
+   * When the task's derived status ended, kept as a fact it follows from
+   * changes and cleared if it opens again. The lists age ended rows by it.
+   */
+  endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  /** When Rome last wrote the row: a restart finds the task chats active since. */
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
 
 /**
  * Which Concierge turn took each guardian message of a Concierge chat, and
@@ -891,9 +838,9 @@ export const conciergeMessageTurns = sqliteTable(
 export const conciergeMessageTasks = sqliteTable(
   "concierge_message_tasks",
   {
-    taskId: text("task_id")
+    taskChatId: text("task_chat_id")
       .notNull()
-      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
+      .references(() => taskChats.sessionId, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull(),
     messageKey: text("message_key").notNull(),
     /** The order it was made in, raised each time it is made again: a task follows its highest. */
@@ -906,7 +853,7 @@ export const conciergeMessageTasks = sqliteTable(
     endedAs: text("ended_as"),
   },
   (table) => [
-    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
+    primaryKey({ columns: [table.taskChatId, table.chatId, table.messageKey] }),
     index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
@@ -1183,6 +1130,43 @@ export const romeAgentTraceBlocks = sqliteTable(
   ],
 );
 
+// A chat's outputs: the files its agent wrote or showed, one row each time it
+// did. Vocabulary: docs/domains/chats.md#outputs. Not a FK, as with the trace
+// blocks above: rows are recorded with the trace, whose session row may not
+// exist yet, and session-scoped deletes remove them explicitly.
+export const chatOutputs = sqliteTable(
+  "chat_outputs",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id"),
+    // The rome_agent_messages row that records it: the turn's trace, or the
+    // reply that links a shown file.
+    messageId: text("message_id"),
+    // What recorded it, unique within the chat, so a backfill or a replay
+    // records it once: the tool call's id, or `link:<message id>:<url>`.
+    sourceKey: text("source_key").notNull(),
+    kind: text("kind", { enum: ["written", "shown"] }).notNull(),
+    // The path written, as the tool named it, or the shown copy's asset URL.
+    path: text("path").notNull(),
+    // The local file a shown copy was made from, when known.
+    sourcePath: text("source_path"),
+    name: text("name").notNull(),
+    mimeType: text("mime_type"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_outputs_source").on(table.sessionId, table.sourceKey),
+    index("idx_chat_outputs_session_created").on(table.sessionId, table.createdAt),
+  ],
+);
+
+// The chats whose outputs from before chat_outputs existed were read back once.
+export const chatOutputBackfills = sqliteTable("chat_output_backfills", {
+  sessionId: text("session_id").primaryKey(),
+  backfilledAt: integer("backfilled_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 // UI-state mirror only — the canonical feedback record ships via OTLP logs
 // to rome-obs, since the user's SQLite never leaves their VM. The session_id
 // FK + ON DELETE CASCADE guarantees feedback can't outlive its session even
@@ -1213,14 +1197,15 @@ export const routines = sqliteTable(
     // Optional caller-assigned identity. Unique when set (SQLite treats multiple
     // NULLs as distinct, so most routines can leave it null). Lets a caller make
     // create_routine idempotent/dedup-able without overloading `name` (the human
-    // title): briefing keys its managed routines `briefing-*` and recreates them
-    // by key. A duplicate key is rejected at create time.
+    // title): an app can key its managed routines and recreate them by key. A
+    // duplicate key is rejected at create time.
     key: text("key").unique(),
-    // The app that owns and manages this routine (its appId), e.g. "briefing".
+    // The app that owns and manages this routine (its appId), e.g. "dream".
     // Null for routines a guardian or agent created directly. A managed routine is
     // the app's to maintain: users can't delete it (the dashboard/DELETE path and
     // agent's delete_routine both refuse), only the managing app can — so an app
     // can freely recreate its routines on sync without a user pruning them.
+    // Uninstalling the app deletes its routines.
     managedBy: text("managed_by"),
     enabled: integer("enabled", { mode: "boolean" }).default(true),
 
@@ -1512,12 +1497,16 @@ export const personalDataPoints = sqliteTable(
     value: real("value"),
     unit: text("unit"),
     fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
-    metadata: text("metadata", { mode: "json" }).$type<Record<string, string>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
     dedupeKey: text("dedupe_key").notNull(),
     // A hash of the stored fields: an upsert with the same hash changes nothing.
     contentHash: text("content_hash").notNull(),
     // The ingest that last wrote the row.
     ingestId: integer("ingest_id").notNull(),
+    // For a type the device sends as a snapshot of a window: the snapshot
+    // that last sent the row. Its commit deletes the window's rows any other
+    // snapshot sent. Null for a row sent any other way.
+    snapshotId: text("snapshot_id"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
@@ -1547,6 +1536,17 @@ export const personalDataTypes = sqliteTable(
     // What the device reports as complete, not the latest point: a day with no
     // steps still counts as synced.
     syncedThroughAt: integer("synced_through_at"),
+    // The last committed snapshot, for a type the device sends as one: its
+    // id, the window it holds whole, and when the device read it. Null until
+    // the first commit, and for a type sent any other way.
+    snapshotId: text("snapshot_id"),
+    snapshotStartAt: integer("snapshot_start_at"),
+    snapshotEndAt: integer("snapshot_end_at"),
+    snapshotReadAt: integer("snapshot_read_at"),
+    // The newest snapshot any batch has brought, committed or not, so a late
+    // batch of an older one changes nothing.
+    snapshotSeenId: text("snapshot_seen_id"),
+    snapshotSeenReadAt: integer("snapshot_seen_read_at"),
     pointCount: integer("point_count").notNull().default(0),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -1648,6 +1648,16 @@ export const deviceConnections = sqliteTable(
     // `apple_health`: opaque here, so a reader of that data can find the
     // connection before the first sync. Null when it syncs nothing.
     feeds: text("feeds"),
+    // What the capability lets Rome do, in English, as the device's page says.
+    // Null for an app that reports none.
+    summary: text("summary"),
+    // Its name and summary by language (`en`, `zh-CN`), as the device has
+    // them, so a connect card reads in the guardian's language.
+    labels: text("labels", { mode: "json" }).$type<
+      Record<string, { title: string; summary?: string }>
+    >(),
+    // The icon for its card, by a name the readers draw, such as `calendar`.
+    icon: text("icon"),
     // The personal-data origin of the app install that reports the row, which
     // stays the same across its sign-ins while the device id does not. Null
     // for an app that reports none.

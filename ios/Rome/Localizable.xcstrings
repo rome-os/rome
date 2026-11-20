@@ -219,6 +219,34 @@
         }
       }
     },
+    "%lld events" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld event"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld events"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个事件"
+          }
+        }
+      }
+    },
     "%lld hours ago" : {
       "localizations" : {
         "en" : {
@@ -243,6 +271,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 小时前"
+          }
+        }
+      }
+    },
+    "%lld items" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 项"
           }
         }
       }
@@ -491,6 +547,16 @@
         }
       }
     },
+    "Add it for you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮你添加"
+          }
+        }
+      }
+    },
     "Add photos" : {
       "localizations" : {
         "zh-Hans" : {
@@ -507,6 +573,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加自己的选项…"
+          }
+        }
+      }
+    },
+    "Added Lunch with Sam, Friday 12:30 to 1:30, to your calendar." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在你的日历添加「和 Sam 吃午饭」，周五 12:30 到 1:30。"
+          }
+        }
+      }
+    },
+    "Added an event" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加了事件"
+          }
+        }
+      }
+    },
+    "Admin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理员"
           }
         }
       }
@@ -537,6 +633,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "马上好了…"
+          }
+        }
+      }
+    },
+    "Am I free tomorrow afternoon?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我明天下午有空吗？"
           }
         }
       }
@@ -707,6 +813,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "归档"
+          }
+        }
+      }
+    },
+    "Archive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档“%@”？"
           }
         }
       }
@@ -901,6 +1017,26 @@
         }
       }
     },
+    "Calendar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历"
+          }
+        }
+      }
+    },
+    "Calendars" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日历列表"
+          }
+        }
+      }
+    },
     "Can't find where the new messages start" : {
       "localizations" : {
         "zh-Hans" : {
@@ -967,6 +1103,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在此连接"
+          }
+        }
+      }
+    },
+    "Changed an event" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改了事件"
           }
         }
       }
@@ -1051,16 +1197,6 @@
         }
       }
     },
-    "Check my inbox every hour and only ping me for urgent emails." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每小时看一下我的邮箱，只有紧急邮件才通知我。"
-          }
-        }
-      }
-    },
     "Check off habits every day" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1141,12 +1277,42 @@
         }
       }
     },
+    "Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代码"
+          }
+        }
+      }
+    },
     "Collapse input" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起输入框"
+          }
+        }
+      }
+    },
+    "Document" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文档"
+          }
+        }
+      }
+    },
+    "Earlier" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早"
           }
         }
       }
@@ -1167,16 +1333,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已收起"
-          }
-        }
-      }
-    },
-    "Compare the best noise-cancelling headphones under $300." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "对比一下 $300 以内最好的降噪耳机。"
           }
         }
       }
@@ -1451,6 +1607,16 @@
         }
       }
     },
+    "Couldn't read Calendar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取日历"
+          }
+        }
+      }
+    },
     "Couldn't read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1611,16 +1777,6 @@
         }
       }
     },
-    "Daily brief" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每日早报"
-          }
-        }
-      }
-    },
     "Dark" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1657,6 +1813,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除此 %@ 发送到你的 Rome 的所有 Apple 健康数据？"
+          }
+        }
+      }
+    },
+    "Delete all calendar data this %@ sent to your Rome?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这台%@发送到你的 Rome 的全部日历数据？"
           }
         }
       }
@@ -1831,12 +1997,22 @@
         }
       }
     },
-    "Every weekday at 8am, send me a brief of today's calendar and important emails." : {
+    "Events" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每个工作日早上 8 点，给我发一份今天的日程和重要邮件简报。"
+            "value" : "事件"
+          }
+        }
+      }
+    },
+    "Every morning at 8, I'll send today's schedule and what needs you first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上 8 点，我会发给你当天的日程，以及需要你先处理的事。"
           }
         }
       }
@@ -1881,6 +2057,16 @@
         }
       }
     },
+    "Failed to load outputs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载产出"
+          }
+        }
+      }
+    },
     "Failed to load tasks" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1891,12 +2077,52 @@
         }
       }
     },
+    "Failed to load the file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载文件"
+          }
+        }
+      }
+    },
     "Failed to stop the task" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止任务失败"
+          }
+        }
+      }
+    },
+    "File" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件"
+          }
+        }
+      }
+    },
+    "Files the agent writes or shows in this chat appear here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 在这个聊天里写入或展示的文件会出现在这里。"
+          }
+        }
+      }
+    },
+    "Find free time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找空闲时间"
           }
         }
       }
@@ -1937,6 +2163,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关注 %@ · %@"
+          }
+        }
+      }
+    },
+    "Free and busy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忙闲时间"
           }
         }
       }
@@ -2051,42 +2287,22 @@
         }
       }
     },
+    "High" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏高"
+          }
+        }
+      }
+    },
     "History" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "历史数据"
-          }
-        }
-      }
-    },
-    "How I slept" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "昨晚睡得怎样"
-          }
-        }
-      }
-    },
-    "How did I sleep last night?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我昨晚睡得怎么样？"
-          }
-        }
-      }
-    },
-    "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我查看了你的步数、体能训练、静息心率和体重。这是一份 12 周计划。"
           }
         }
       }
@@ -2459,22 +2675,12 @@
         }
       }
     },
-    "Make an app" : {
+    "Low" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "做个 App"
-          }
-        }
-      }
-    },
-    "Make an app to track my workouts, with a weekly chart." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "做一个记录我锻炼的 App，带每周图表。"
+            "value" : "偏低"
           }
         }
       }
@@ -2625,6 +2831,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "转到 Chat"
+          }
+        }
+      }
+    },
+    "Moved or deleted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移动或删除"
           }
         }
       }
@@ -2789,6 +3005,16 @@
         }
       }
     },
+    "No access to Calendar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无权访问日历"
+          }
+        }
+      }
+    },
     "No access to Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2859,6 +3085,16 @@
         }
       }
     },
+    "No outputs yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有产出"
+          }
+        }
+      }
+    },
     "No response" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2915,6 +3151,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂无用量数据"
+          }
+        }
+      }
+    },
+    "Normal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正常"
           }
         }
       }
@@ -3055,6 +3301,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未登录"
+          }
+        }
+      }
+    },
+    "No routines yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有定时任务"
           }
         }
       }
@@ -3379,6 +3635,26 @@
         }
       }
     },
+    "Outputs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "产出"
+          }
+        }
+      }
+    },
+    "Page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面"
+          }
+        }
+      }
+    },
     "Paused" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3419,22 +3695,12 @@
         }
       }
     },
-    "Plan fat-loss workouts" : {
+    "Picture" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "规划减脂锻炼"
-          }
-        }
-      }
-    },
-    "Plan my workouts so I lose 3 kg by March." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
+            "value" : "图片"
           }
         }
       }
@@ -3459,12 +3725,12 @@
         }
       }
     },
-    "Puts it in the message box." : {
+    "Put lunch with Sam on Friday at 12:30." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "放进输入框。"
+            "value" : "周五 12:30 加一个和 Sam 吃午饭。"
           }
         }
       }
@@ -3645,16 +3911,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "回复这个任务"
-          }
-        }
-      }
-    },
-    "Research" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "帮我调研"
           }
         }
       }
@@ -3953,12 +4209,12 @@
         }
       }
     },
-    "Running on its own" : {
+    "Routines" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "自动运行"
+            "value" : "定时任务"
           }
         }
       }
@@ -4103,6 +4359,16 @@
         }
       }
     },
+    "Brief me every morning." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上给我简报一下。"
+          }
+        }
+      }
+    },
     "Sends this message" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4159,6 +4425,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分享"
+          }
+        }
+      }
+    },
+    "Share your location?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享你的位置？"
           }
         }
       }
@@ -4223,6 +4499,16 @@
         }
       }
     },
+    "Shown" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展示"
+          }
+        }
+      }
+    },
     "Shown only on the web" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4269,6 +4555,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新登录以继续同步健康数据"
+          }
+        }
+      }
+    },
+    "Sign in again to keep syncing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新登录以继续同步"
           }
         }
       }
@@ -4453,12 +4749,32 @@
         }
       }
     },
+    "So your Rome can read the data you allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让你的 Rome 读取你允许的数据。"
+          }
+        }
+      }
+    },
     "Something went wrong" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "出了点问题"
+          }
+        }
+      }
+    },
+    "Spreadsheet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表格"
           }
         }
       }
@@ -4529,6 +4845,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "步数"
+          }
+        }
+      }
+    },
+    "Still finding earlier files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还在查找更早的文件。"
           }
         }
       }
@@ -4843,12 +5169,12 @@
         }
       }
     },
-    "Tell me when the price of ___ drops below $___." : {
+    "The app cannot be used during this update, which takes a few minutes." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "___ 的价格降到 $___ 以下时告诉我。"
+            "value" : "这次更新期间暂时无法使用，大约需要几分钟。"
           }
         }
       }
@@ -4983,12 +5309,32 @@
         }
       }
     },
+    "This chat will be archived. It has:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被归档。其中有："
+          }
+        }
+      }
+    },
     "This connection cannot start here" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在这里开始连接"
+          }
+        }
+      }
+    },
+    "This file cannot be opened here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件无法在这里打开。"
           }
         }
       }
@@ -5073,6 +5419,16 @@
         }
       }
     },
+    "This update runs in the background. Chat and the main features keep working. A few new features may not work until it finishes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次在后台更新，不影响聊天等核心功能；更新完成前，个别新功能可能暂时用不了。"
+          }
+        }
+      }
+    },
     "Tidying up context…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5109,6 +5465,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "明天 %@"
+          }
+        }
+      }
+    },
+    "Too large to open on this phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件太大，无法在手机上打开。"
           }
         }
       }
@@ -5393,6 +5759,16 @@
         }
       }
     },
+    "Update in background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在后台更新"
+          }
+        }
+      }
+    },
     "Update is taking too long" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5439,16 +5815,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已删除上传的数据"
-          }
-        }
-      }
-    },
-    "Urgent emails only" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只提醒急事"
           }
         }
       }
@@ -5501,12 +5867,12 @@
         }
       }
     },
-    "Uses" : {
+    "Usual %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用法"
+            "value" : "通常 %@"
           }
         }
       }
@@ -5537,16 +5903,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "版本"
-          }
-        }
-      }
-    },
-    "Visitor" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "访客"
           }
         }
       }
@@ -5627,16 +5983,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "步行心率"
-          }
-        }
-      }
-    },
-    "Watch a price" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "盯个价格"
           }
         }
       }
@@ -5821,6 +6167,16 @@
         }
       }
     },
+    "Written" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写入"
+          }
+        }
+      }
+    },
     "Yesterday" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5847,6 +6203,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你已经不能访问这个 Rome 了"
+          }
+        }
+      }
+    },
+    "You're free from 2 to 4. Design review runs 4 to 5." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你 2 点到 4 点有空。设计评审是 4 点到 5 点。"
           }
         }
       }
@@ -5981,6 +6347,16 @@
         }
       }
     },
+    "Your Rome reads your calendars, and adds or changes events when you ask." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 会读取你的日历，并在你要求时添加或修改事件。"
+          }
+        }
+      }
+    },
     "Your battery is at 18%. I'll remind you at 5:30, before your 6 pm train." : {
       "localizations" : {
         "zh-Hans" : {
@@ -6091,12 +6467,38 @@
         }
       }
     },
+    "from %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@"
+          }
+        }
+      }
+    },
     "just now" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚刚"
+          }
+        }
+      }
+    },
+    "locationCard.share" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share"
           }
         }
       }
@@ -6183,6 +6585,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送到你的 Rome 和你的 AI 模型，适用其条款 · 绝不出售，也不用于广告 · 随时可删除 · [隐私政策](https://romeos.cc/privacy)"
+          }
+        }
+      }
+    },
+    "Daily health summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日健康总结"
+          }
+        }
+      }
+    },
+    "Daily summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日摘要"
+          }
+        }
+      }
+    },
+    "Summarize my health daily." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我每天总结下我的健康情况"
+          }
+        }
+      }
+    },
+    "Every morning at 9, I'll send your sleep, steps and resting heart rate, and flag anything unusual." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天早上 9 点，我会把睡眠、步数和静息心率发给你，有异常会特别提醒。"
           }
         }
       }

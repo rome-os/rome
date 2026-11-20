@@ -1,6 +1,6 @@
-import { SourceLabel } from "@/components/chat/reply/chat-threads";
-import { QuotedReply, ReplyConnector } from "@/components/chat/reply/QuotedReply";
-import type { Adjacent, GroupAdjacency } from "@/components/chat/reply/adjacency";
+import { SourceLabel } from "@/components/chat/reply/SourceLabel";
+import { QuotedReply } from "@/components/chat/reply/QuotedReply";
+import type { ReplyDrawing } from "@/components/chat/reply/reply-drawing";
 import { memo, useMemo, type ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -30,20 +30,10 @@ const GUARDIAN_BUBBLE_GAP = "mt-4";
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
-  function GuardianBubble({
-    msg,
-    arrival,
-    adjacent,
-  }: {
-    msg: ChatMessage;
-    arrival?: number;
-    /** How the message is joined to what it answers, when it sits right under it. */
-    adjacent?: Adjacent;
-  }) {
+  function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const reaction = useReaction(msg);
     const status = useMessageStatus(msg);
-    const quote = parseMessageEntries(msg).find((part) => part.type === "reply_to");
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -67,16 +57,10 @@ const GuardianBubble = memo(
         anchorId={msg.id}
         arrival={arrival}
         className={GUARDIAN_BUBBLE_GAP}
-        connector={
-          adjacent && quote?.type === "reply_to" ? (
-            <ReplyConnector part={quote} hostId={msg.id} side="end" how={adjacent} />
-          ) : undefined
-        }
       >
         <UserMessageBubble
           msg={msg}
           text={text}
-          quoted={!adjacent}
           own
           badge={<ReactionBadge reaction={reaction} status={status} />}
         />
@@ -89,25 +73,24 @@ const GuardianBubble = memo(
     prev.msg.inputState === next.msg.inputState &&
     prev.msg.reaction === next.msg.reaction &&
     prev.msg.status === next.msg.status &&
-    prev.adjacent === next.adjacent &&
     prev.arrival === next.arrival,
 );
 
 // Each `say` call is its own message, so each text part is its own bubble,
 // cut with a toggle when it is tall. A forwarded report is a bubble of its own,
 // the intro that came with it is the bubble above. A message that replies to
-// another shows the quote in its first bubble. Task chat cards render as they
-// do anywhere.
+// another shows the quote in its first bubble, unless it sits under what it
+// answers. Task chat cards render as they do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
   rateable,
   arrival,
-  adjacent,
+  quoted: showQuote,
 }: {
   entry: ConciergeEntry;
-  /** How the message is joined to what it answers, when it sits right under it. */
-  adjacent?: Adjacent;
+  /** Whether the message shows the quote it carries: it does not sit under what it answers. */
+  quoted: boolean;
   actions: BlockActions;
   arrival: ArrivalProps;
   /** Whether the entry's turn is over and feedback is on. */
@@ -136,14 +119,10 @@ const AgentEntry = memo(function AgentEntry({
   return parts.map((part, index) => {
     const key = `${message.id}:${index}`;
     if (part.type === "reply_to") return null;
-    // The first bubble of a reply carries its quote on top of its content, or,
-    // under what it answers, the mark that joins it.
+    // The first bubble of a reply carries its quote on top of its content,
+    // unless the reply sits under what it answers or in a run of replies to it.
     const first = quote?.type === "reply_to" && index === firstBubble ? quote : null;
-    const quoted = first && !adjacent ? <QuotedReply part={first} hostId={message.id} /> : null;
-    const connector =
-      first && adjacent ? (
-        <ReplyConnector part={first} hostId={message.id} side="start" how={adjacent} />
-      ) : undefined;
+    const quoted = first && showQuote ? <QuotedReply part={first} /> : null;
     if (part.type === "task_chat") {
       // The card is a message of its own, so it takes the same details as a bubble.
       return (
@@ -157,9 +136,7 @@ const AgentEntry = memo(function AgentEntry({
           reply={null}
           anchorId={index === firstBubble ? message.id : undefined}
           partOf={message.id}
-          connector={connector}
         >
-          {quoted}
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
@@ -197,7 +174,6 @@ const AgentEntry = memo(function AgentEntry({
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
         partOf={message.id}
-        connector={connector}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           <CollapsibleBubbleContent>
@@ -225,9 +201,9 @@ const AgentEntry = memo(function AgentEntry({
  * click anywhere on it picks or drops the whole turn, as a common chat's row
  * does. A bubble of no turn, or of another session, is dimmed and not picked.
  *
- * Each message is one `data-thread-entry` box, so a thread in focus can fold
- * away the messages of the others one by one: `hidden` holds the ids of those
- * it hides (use-thread-focus.ts), and a group with nothing left folds whole.
+ * Each message is one box. `data-join` marks one that sits in a run of replies
+ * to the same message, which the bubbles draw closer, with tight corners where
+ * they meet (`[data-join]` in globals.css).
  */
 export const ConciergeGroup = memo(function ConciergeGroup({
   group,
@@ -237,8 +213,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   feedback,
   arrival,
   typing,
-  hidden,
-  adjacent,
+  drawings,
 }: {
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
@@ -248,19 +223,11 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   /** Marks the bubbles that arrived while the transcript is open. */
   arrival: ArrivalProps;
   typing: ReactNode;
-  /** The ids of the messages a thread in focus hides, or undefined with none in focus. */
-  hidden?: ReadonlySet<string>;
-  /** The group's replies that sit right under what they answer. */
-  adjacent?: GroupAdjacency;
+  /** How the group's messages draw their replies, by message id. */
+  drawings?: ReadonlyMap<string, ReplyDrawing>;
 }) {
-  const allHidden =
-    hidden !== undefined &&
-    !group.typing &&
-    group.entries.length > 0 &&
-    group.entries.every(({ message }) => hidden.has(message.id));
   return (
     <div
-      data-thread-out={allHidden || undefined}
       className={cn(
         // A card keeps no margin of its own here, so the line under it sits as
         // close to it as one under a bubble does.
@@ -270,11 +237,8 @@ export const ConciergeGroup = memo(function ConciergeGroup({
     >
       {group.entries.map((entry) => {
         const side = group.sender === "guardian" ? "items-end" : "items-start";
-        // A message folds on its own unless its whole group does.
-        const box = {
-          "data-thread-entry": entry.message.id,
-          "data-thread-out": (!allHidden && hidden?.has(entry.message.id)) || undefined,
-        };
+        const drawing = drawings?.get(entry.message.id);
+        const box = { "data-join": drawing?.join };
         const bubble = (
           <>
             {group.sender === "guardian" ? (
@@ -282,7 +246,6 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 key={entry.message.id}
                 msg={entry.message}
                 arrival={arrival(entry.message.id)["data-arrival"]}
-                adjacent={adjacent?.[entry.message.id]}
               />
             ) : (
               <AgentEntry
@@ -291,7 +254,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 actions={actions}
                 rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
                 arrival={arrival}
-                adjacent={adjacent?.[entry.message.id]}
+                quoted={drawing?.quote ?? false}
               />
             )}
             {entry.source ? <SourceLabel source={entry.source} /> : null}

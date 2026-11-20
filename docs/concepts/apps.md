@@ -64,7 +64,8 @@ and use qualified references.
 - The Agent local name `main` is reserved for Rome Core. Apps must choose another Agent name. This restriction does not apply to Action or Skill local names.
 - Every format version 2 reference uses `<app-id>:<local-name>`, including references to another artifact in the same app.
 - Runtime registries, authorization checks, and new durable references use canonical artifact ids.
-- A bare name is a legacy input. The compatibility resolver maps it to one stable canonical artifact id. New app definitions and references do not create bare-name behavior.
+- An action is referenced by its canonical artifact id only. A bare action name finds no action, and the error names the canonical id when exactly one installed action has that local name. An app manifest field that names the app's own action, such as the action an event source subscribes with, takes the local name, and Rome qualifies it with the app id.
+- A bare agent or skill name is a legacy input. The compatibility resolver maps it to one stable canonical artifact id. New app definitions and references do not create bare-name behavior.
 - The complete manifest app id owns the namespace. For a scoped Store app, that includes its `@handle/slug` scope.
 
 **Not to be confused with:**
@@ -325,6 +326,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 **Contracts:**
 
 - Both the data directory and the app's tables survive an install→uninstall→re-install round-trip. Only an explicit purge at uninstall wipes them.
+- The routines an app manages do not survive an uninstall. Uninstall deletes them with their run history, and the app recreates them after a reinstall. See [Routines](data.md#routines).
 - A database-backed scoped app must declare `db.tablePrefix`. The scoped app id itself is not a SQL identifier.
 
 **Not to be confused with:**

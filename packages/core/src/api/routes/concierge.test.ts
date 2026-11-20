@@ -116,263 +116,13 @@ describe("GET /concierge/session", () => {
     expect(body.unread).toBe(CONCIERGE_UNREAD_CAP);
   });
 
-  it("answers a dashboard visitor with their own main chat, and nobody else", async () => {
+  it("answers a dashboard admin with their own main chat, and nobody else", async () => {
     await expect((await app().request("/concierge/session", asAnn())).json()).resolves.toEqual({
       id: "concierge-visitor-acct-ann",
       unread: 0,
     });
     expect((await app().request("/concierge/session", appUser)).status).toBe(401);
     expect((await app().request("/concierge/session")).status).toBe(401);
-  });
-});
-
-describe("GET /concierge/tasks", () => {
-  const DAY = 86_400_000;
-  let testDb: TestDb;
-  let repo: ConciergeTasksRepository;
-
-  const app = () => {
-    const concierge = {
-      deps: { tasks: new ConciergeTasks(repo) },
-    } as unknown as ConciergeService;
-    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
-  };
-  const titles = async (query = "") =>
-    (
-      (await (await app().request(`/concierge/tasks${query}`, guardian)).json()) as {
-        tasks: Array<{ title: string }>;
-      }
-    ).tasks
-      .map((task) => task.title)
-      .sort();
-
-  beforeEach(async () => {
-    testDb = createTestDb();
-    repo = new ConciergeTasksRepository(testDb.db);
-    const old = new Date(Date.now() - 30 * DAY);
-    await repo.upsertMany([{ title: "Old needs you", state: "needs_user" }], old);
-    await repo.upsertMany([{ title: "Old watching", state: "watching" }], old);
-    const [oldDone] = await repo.upsertMany([{ title: "Old done", state: "done" }], old);
-    await repo.setLastOutcome(oldDone!.id, "succeeded", old, { reported: false });
-    await repo.keepEnded([oldDone!.id], [], old);
-    const fresh = new Date(Date.now() - DAY);
-    const [freshDropped] = await repo.upsertMany(
-      [{ title: "Fresh dropped", state: "dropped" }],
-      fresh,
-    );
-    await repo.keepEnded([freshDropped!.id], [], fresh);
-  });
-  afterEach(() => testDb.close());
-
-  it("returns open rows whatever their age and finished rows from the last 7 days", async () => {
-    expect(await titles()).toEqual(["Fresh dropped", "Old needs you", "Old watching"]);
-  });
-
-  it("widens the finished window with doneDays", async () => {
-    expect(await titles("?doneDays=60")).toEqual([
-      "Fresh dropped",
-      "Old done",
-      "Old needs you",
-      "Old watching",
-    ]);
-    expect(await titles("?doneDays=junk")).toEqual([
-      "Fresh dropped",
-      "Old needs you",
-      "Old watching",
-    ]);
-  });
-
-  it("carries the linked chat's id and current name, and leaves archived rows out", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    await chats.createSession("chat-1", "Chat one");
-    const [row] = await repo.upsertMany([{ title: "Linked", state: "doing", sessionId: "chat-1" }]);
-    await chats.updateSessionName("chat-1", "Renamed");
-    const body = (await (await app().request("/concierge/tasks", guardian)).json()) as {
-      tasks: Array<{ id: string; chat: unknown }>;
-    };
-    expect(body.tasks.find((task) => task.id === row.id)?.chat).toEqual({
-      id: "chat-1",
-      name: "Renamed",
-    });
-    await repo.upsertMany([{ id: row.id, archived: true }]);
-    expect(await titles()).not.toContain("Linked");
-  });
-
-  it("carries the source message's id while the message exists, and null after it is gone", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    await chats.createSession("concierge", "Concierge");
-    const { id } = await chats.addBackendMessage("concierge", "turn-1", [
-      { type: "text", content: "Which account?" },
-    ]);
-    const [row] = await repo.upsertMany([
-      { title: "Pay", state: "needs_user", sourceMessageId: id },
-    ]);
-    const sourceOf = async () =>
-      (
-        (await (await app().request("/concierge/tasks", guardian)).json()) as {
-          tasks: Array<{ id: string; sourceMessageId: string | null }>;
-        }
-      ).tasks.find((task) => task.id === row.id)?.sourceMessageId;
-    expect(await sourceOf()).toBe(id);
-    testDb.db.delete(chatMessages).where(eq(chatMessages.key, id)).run();
-    expect(await sourceOf()).toBeNull();
-  });
-
-  it("shows each person only the rows of their own Concierge", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    await chats.createSession(
-      "ann-main",
-      "Concierge",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "core:concierge",
-      "webchat",
-      null,
-      { ownerKey: "visitor:acct-ann" },
-    );
-    await repo.upsertMany([{ title: "Ann's", state: "next", chatId: "ann-main" }]);
-    const annTitles = (
-      (await (await app().request("/concierge/tasks", ann)).json()) as {
-        tasks: Array<{ title: string }>;
-      }
-    ).tasks.map((task) => task.title);
-    expect(annTitles).toEqual(["Ann's"]);
-    expect(await titles()).not.toContain("Ann's");
-    expect((await app().request("/concierge/tasks", appUser)).status).toBe(401);
-  });
-
-  it("answers 401 to a caller with no session, on the list and on its event stream", async () => {
-    for (const path of ["/concierge/tasks", "/concierge/tasks/events"]) {
-      const anonymous = await app().request(path);
-      expect(anonymous.status).toBe(401);
-      expect(await anonymous.json()).toEqual({ error: "Not authenticated" });
-      // A cookie that does not verify is no better than none.
-      const forged = await app().request(path, { headers: { Cookie: `${COOKIE_NAME}=forged` } });
-      expect(forged.status).toBe(401);
-    }
-  });
-
-  it("serves the list and opens the event stream for the guardian", async () => {
-    expect((await app().request("/concierge/tasks", guardian)).status).toBe(200);
-    const stream = await app().request("/concierge/tasks/events", guardian);
-    expect(stream.status).toBe(200);
-    expect(stream.headers.get("content-type")).toContain("text/event-stream");
-    await stream.body?.cancel();
-  });
-});
-
-describe("POST /concierge/tasks/:taskId/stop", () => {
-  let testDb: TestDb;
-  let repo: ConciergeTasksRepository;
-  let stopped: [string, string][];
-
-  const app = () => {
-    const concierge = {
-      deps: { tasks: new ConciergeTasks(repo) },
-      stopTask: async (taskId: string, by: string) => void stopped.push([taskId, by]),
-    } as unknown as ConciergeService;
-    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
-  };
-  const stop = (taskId: string) =>
-    app().request(`/concierge/tasks/${taskId}/stop`, { ...guardian, method: "POST" });
-
-  beforeEach(() => {
-    testDb = createTestDb();
-    repo = new ConciergeTasksRepository(testDb.db);
-    stopped = [];
-  });
-  afterEach(() => testDb.close());
-
-  it("stops the caller's own task, as its owner", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights" }]);
-    expect((await stop(row!.id)).status).toBe(200);
-    expect(stopped).toEqual([[row!.id, "guardian"]]);
-  });
-
-  it("stops no task that is not there, or is another person's", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    await chats.createSession(
-      "ann-main",
-      "Ann",
-      undefined,
-      undefined,
-      null,
-      undefined,
-      "core:concierge",
-      "webchat",
-      null,
-      { ownerKey: "visitor:acct-ann" },
-    );
-    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
-    expect((await stop("nope")).status).toBe(404);
-    expect((await stop(theirs!.id)).status).toBe(404);
-    expect(stopped).toEqual([]);
-  });
-});
-
-describe("DELETE /concierge/tasks/:taskId/checks", () => {
-  let testDb: TestDb;
-  let repo: ConciergeTasksRepository;
-  let cancelled: string[];
-  let failing: string | null = null;
-
-  const app = () => {
-    const concierge = {
-      deps: { tasks: new ConciergeTasks(repo) },
-      cancelChecksByOwner: async (taskId: string) => {
-        if (taskId === failing) throw new Error("database is locked");
-        cancelled.push(taskId);
-      },
-    } as unknown as ConciergeService;
-    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
-  };
-  const cancel = (taskId: string) =>
-    app().request(`/concierge/tasks/${taskId}/checks`, { ...guardian, method: "DELETE" });
-
-  beforeEach(() => {
-    testDb = createTestDb();
-    repo = new ConciergeTasksRepository(testDb.db);
-    cancelled = [];
-  });
-  afterEach(() => testDb.close());
-
-  it("cancels only the checks of the caller's own task, which stays", async () => {
-    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
-    expect((await cancel(row!.id)).status).toBe(200);
-    expect(cancelled).toEqual([row!.id]);
-    expect(await repo.get(row!.id)).toMatchObject({ title: "PR 42", stoppedAt: null });
-  });
-
-  it("answers a failure as one, not as cancelled", async () => {
-    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
-    failing = row!.id;
-    try {
-      expect((await cancel(row!.id)).status).toBe(500);
-    } finally {
-      failing = null;
-    }
-  });
-
-  it("cancels nothing for a task that is not there, or is another person's", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    await chats.createSession(
-      "ann-main",
-      "Ann",
-      undefined,
-      undefined,
-      null,
-      undefined,
-      "core:concierge",
-      "webchat",
-      null,
-      { ownerKey: "visitor:acct-ann" },
-    );
-    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
-    expect((await cancel("nope")).status).toBe(404);
-    expect((await cancel(theirs!.id)).status).toBe(404);
-    expect(cancelled).toEqual([]);
   });
 });
 
@@ -505,27 +255,24 @@ describe("/concierge/chats", () => {
 describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
   let testDb: TestDb;
   const asked: [string, string][] = [];
-  const chats = new Map([
-    ["concierge", { id: "concierge", name: "Concierge", main: true }],
-    ["topic-1", { id: "topic-1", name: "Calendar", main: false }],
-    ["ann-topic", { id: "ann-topic", name: "Trips", main: false }],
-  ]);
-  const owners = new Map([
-    ["concierge", "guardian"],
+  // The topic chats and their owners, archived ones included: the service
+  // answers for those as for the others.
+  const topics = new Map([
     ["topic-1", "guardian"],
+    ["archived-topic", "guardian"],
     ["ann-topic", "visitor:acct-ann"],
   ]);
   const app = () =>
     mount(
       testDb,
       {
-        conciergeChat: async (id: string) => chats.get(id) ?? null,
-        ownerOfChat: async (id: string) => owners.get(id) ?? null,
+        isTopicChatOf: async (id: string, owner: string) => topics.get(id) === owner,
         followsAndTasksOf: async (id: string, owner: string) => {
           asked.push([id, owner]);
           return {
             follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
             openTasks: [{ id: "t-1", title: "Fix login", sessionId: "task-1" }],
+            movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
           };
         },
       } as unknown as ConciergeService,
@@ -537,14 +284,24 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
   });
   afterEach(() => testDb.close());
 
-  it("answers the caller's own topic chat's follows and open tasks, without the task chat", async () => {
+  it("answers the caller's own topic chat's follows, open tasks and moved follows, without the task chat", async () => {
     const res = await app().request("/concierge/chats/topic-1/follows-and-tasks", guardian);
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       follows: [{ source: "github", label: "GitHub", target: "acme/widgets" }],
       openTasks: [{ id: "t-1", title: "Fix login" }],
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
     });
     expect(asked).toEqual([["topic-1", "guardian"]]);
+  });
+
+  it("answers for an archived topic chat, whose unarchive reads the follows its archive moved", async () => {
+    const res = await app().request("/concierge/chats/archived-topic/follows-and-tasks", guardian);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      movedFollows: [{ source: "gmail", label: "Gmail", target: "me@example.com" }],
+    });
+    expect(asked).toEqual([["archived-topic", "guardian"]]);
   });
 
   it("answers 404 for the main chat, another person's topic chat and a chat that is not there", async () => {
@@ -570,13 +327,7 @@ describe("without the Concierge service", () => {
 
   it("404s every route", async () => {
     const app = mount(testDb, undefined, new ChatsWebChatRepository(testDb.db));
-    for (const path of [
-      "/concierge/session",
-      "/concierge/chats",
-      "/concierge/tasks",
-      "/concierge/tasks/events",
-      "/concierge/connectors",
-    ]) {
+    for (const path of ["/concierge/session", "/concierge/chats", "/concierge/connectors"]) {
       expect((await app.request(path, guardian)).status, path).toBe(404);
     }
     const post = await app.request("/concierge/chats", { method: "POST", body: "{}", ...guardian });

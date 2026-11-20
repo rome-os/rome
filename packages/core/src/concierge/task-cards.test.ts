@@ -124,6 +124,34 @@ describe("cardAt", () => {
     });
   });
 
+  it("titles a request for several secrets by all its names, and keeps `names` in the preview", () => {
+    const preview = {
+      kind: "secret_access",
+      name: "GITHUB_TOKEN",
+      names: ["GITHUB_TOKEN", "STRIPE_KEY"],
+      ttlMinutes: 15,
+      reason: "Release",
+      title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+      summary: "Release",
+    };
+    const cards = {
+      questions: [],
+      approvals: [
+        {
+          id: "a10",
+          status: "pending",
+          description: "Run vault_apply",
+          payload: { actionName: "system:vault_apply", preview },
+          since: T,
+        },
+      ],
+    } as unknown as TaskChatCards;
+    expect(cardAt(cards, T + 60_000, undefined, DAY)).toMatchObject({
+      title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+      preview,
+    });
+  });
+
   it("marks a question nobody answered within its wait expired", () => {
     const row = { sessionId: "task-1", expiredWaitAt: new Date(T + 2 * DAY) } as ConciergeTaskRow;
     expect(cardAt(asked(), T + 3 * DAY, row, DAY)).toMatchObject({ id: "q2", expired: true });

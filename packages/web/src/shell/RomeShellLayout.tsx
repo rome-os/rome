@@ -19,6 +19,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
+import { Separator } from "../components/ui/separator";
 import { SlotContent, SlotOutlet, useSlotOutlet } from "../components/slot";
 import { cn } from "@/lib/utils";
 import {
@@ -353,7 +354,7 @@ export function RomeShellLayout() {
       data-rail-labelled={railNames ? "" : undefined}
     >
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center ${railNames ? (titlebar ? "justify-start px-2 pt-2" : "h-14 justify-start px-2") : `flex-col gap-1 pb-4 ${titlebar ? "pt-2" : "pt-5"}`}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -407,6 +408,9 @@ export function RomeShellLayout() {
         <RailLabelsContext.Provider value={railNames}>
           <AppGrid onSearch={openChatSearch} chatPeek={canPeek ? chatPeek.tile : undefined} />
         </RailLabelsContext.Provider>
+      </div>
+      <div className={`shrink-0 ${railNames ? "px-3" : "px-5"}`}>
+        <Separator className="bg-border-strong" />
       </div>
       <div
         className={`flex shrink-0 py-3 ${railNames ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
@@ -520,10 +524,10 @@ export function RomeShellLayout() {
         <div className="flex min-h-0 flex-1">
           {hideSidebar ? null : <aside className="flex min-h-0 shrink-0">{rail}</aside>}
           <div
-            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border-strong ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
           >
             {showChats ? (
-              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border">
+              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -533,7 +537,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border bg-background shadow-10"
+                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border-strong bg-background shadow-10"
               >
                 {peekList}
               </div>
@@ -577,7 +581,7 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border-strong pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
@@ -589,7 +593,7 @@ export function RomeShellLayout() {
                 centered tile by half of it as the list opens and closes. */}
             {rail}
             {showChats ? (
-              <div className="flex w-64 min-w-0 flex-col border-l border-border-subtle">
+              <div className="flex w-64 min-w-0 flex-col border-l border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -599,7 +603,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border-strong bg-background shadow-10"
                 style={{ left: `${railRem}rem` }}
               >
                 {peekList}
@@ -645,7 +649,7 @@ export function RomeShellLayout() {
           ) : !hideSidebar ? (
             <header
               data-mobile-header
-              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
+              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border-strong bg-background px-2 pt-safe md:hidden"
             >
               <div className="flex shrink-0 items-center">{leadingButtons()}</div>
               {/* The chat page fills this with the session's identity + app

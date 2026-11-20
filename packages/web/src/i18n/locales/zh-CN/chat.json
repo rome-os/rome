@@ -79,7 +79,7 @@
     },
     "topicEmpty": {
       "title": "开一个长期话题",
-      "description": "给反复出现的事开个专门的地方，比如日历、某个项目、一次旅行。这里的提醒和任务只出现在这个对话里。",
+      "description": "这里的提醒和任务只出现在这个对话里。",
       "starters": {
         "life": "当我的生活小助手：日程、账单、快递这些琐事都放这里",
         "work": "帮我跟进工作上的事：项目进度、PR、会议都放这里",
@@ -120,10 +120,10 @@
         "needs_you": "需要你",
         "active": "进行中",
         "later": "稍后",
-        "on_its_own": "自动运行",
+        "on_its_own": "定时任务",
         "ended": "已结束"
       },
-      "empty": "这里还没有在运行的事。",
+      "empty": "还没有任务。",
       "loading": "正在加载任务",
       "loadFailed": "任务加载失败",
       "showMore": "再显示 {{count}} 条",
@@ -132,16 +132,14 @@
         "waitingApproval": "等你批准",
         "running": "运行中",
         "checksIn": "{{when}}检查",
-        "notStarted": "未开始",
         "stopping": "正在停止…",
-        "opening": "正在打开…",
         "ended": {
           "done": "已完成",
           "failed": "失败",
           "stopped": "已停止",
           "no_response": "无回应"
         },
-        "notStartedAge": "未开始 · {{age}}创建"
+        "active": "进行中"
       },
       "schedule": {
         "daily": "每天 {{time}}",
@@ -165,24 +163,28 @@
         "fromTask": "来自 {{title}}"
       },
       "actions": {
-        "respond": "去处理",
-        "respondTo": "处理「{{title}}」",
         "stop": "停止",
-        "stopTask": "停止「{{title}}」",
-        "openChat": "打开「{{title}}」的聊天"
+        "stopTask": "停止「{{title}}」"
       },
       "failed": {
         "stop": "停止任务失败"
       },
-      "created": "创建于 {{when}}",
-      "endedAt": "结束于 {{when}}"
+      "endedAt": "结束于 {{when}}",
+      "routines": "定时任务",
+      "needsYouDot": "有任务需要你",
+      "emptyRoutines": "还没有定时任务。"
+    },
+    "menu": {
+      "tasks": "任务",
+      "routines": "定时任务",
+      "outputs": "产出",
+      "needsYouDot": "有任务需要你"
     }
   },
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
-    "jump": "跳到原消息",
-    "openThread": "打开对话串"
+    "jump": "跳到原消息"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -255,7 +257,7 @@
       "thumbsUp": "标记为有帮助",
       "thumbsDown": "标记为无帮助",
       "commentPlaceholder": "可选：哪里有问题，或哪里做得好？",
-      "submit": "提交",
+      "submit": "发送反馈",
       "submitting": "提交中…",
       "submitFailed": "提交失败",
       "recorded": "反馈已记录"
@@ -306,12 +308,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "重新连接 {{provider}}",
-      "description": "你的 {{provider}} 登录已过期或被撤销。请在 AI Tools 中重新连接，然后重新发送消息。",
+      "description": "你的 {{provider}} 登录已过期或被撤销。重新连接后再发送一次消息。",
       "action": "重新连接"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} 尚未登录",
-      "description": "请前往 AI Tools 登录 {{provider}}，然后重新发送消息。",
+      "description": "登录后再发送一次消息。",
       "action": "前往登录"
     },
     "providerQuotaExhausted": {
@@ -385,6 +387,7 @@
     },
     "secretAccess": {
       "allow": "允许 {{minutes}} 分钟",
+      "separator": "、",
       "duration": "{{minutes}} 分钟",
       "allowed": "已允许 {{name}} · {{minutes}} 分钟",
       "rejected": "已拒绝 {{name}}"
@@ -446,6 +449,12 @@
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",
     "stopGenerating": "停止生成"
   },
+  "agentCard": {
+    "usual": "通常 {{range}}",
+    "normal": "正常",
+    "high": "偏高",
+    "low": "偏低"
+  },
   "questionCard": {
     "sent": "已发送",
     "optional": "可选",
@@ -459,9 +468,14 @@
   },
   "deviceConnectCard": {
     "connected": "已连接",
-    "notConnected": "未连接"
+    "notConnected": "未连接",
+    "connect": "连接",
+    "notNow": "暂不",
+    "note": "让你的 Rome 读取你允许的数据。"
   },
   "locationCard": {
+    "title": "共享你的位置？",
+    "share": "共享",
     "shared": "已共享位置 · ±{{accuracy}}",
     "notShared": "未共享",
     "locating": "正在获取你的位置…",
@@ -642,7 +656,11 @@
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
       "stopFallback": "停止生成失败。",
-      "stopStatus": "停止失败({{status}})。"
+      "stopStatus": "停止失败({{status}})。",
+      "reconnecting": "暂时连不上 Rome，重连中…",
+      "unreachable": "暂时连不上 Rome，稍后再试。",
+      "updating": "正在升级，稍后再试。",
+      "updatingReconnecting": "正在升级，重连中…"
     }
   },
   "empty": {
@@ -666,10 +684,6 @@
       "label": "早间简报",
       "prompt": "构建一个带前端设计的早间简报应用,读取我过去 24 小时的 Gmail 邮件和即将到来的 Google 日历事件。每天上午 8:00 更新仪表盘,展示最新的优先事项、紧急邮件、重要会议、截止日期和推荐的后续行动。识别最需要我关注的事项,并在每次每日更新后通过 Telegram 给我发送简短摘要。"
     }
-  },
-  "thread": {
-    "back": "返回对话：{{title}}",
-    "replyPlaceholder": "回复：{{title}}"
   },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
@@ -759,5 +773,68 @@
     "resolved": "没有聊天在等待 {{provider}}",
     "runOn": "现在改用 {{provider}} 运行",
     "runFailed": "未能运行这些聊天"
+  },
+  "outputs": {
+    "title": "产出",
+    "close": "关闭产出",
+    "loading": "正在加载产出",
+    "loadFailed": "无法加载产出",
+    "emptyTitle": "还没有产出",
+    "emptyDescription": "Agent 在这个聊天里写入或展示的文件会出现在这里。",
+    "written": "写入",
+    "shown": "展示",
+    "from": "来自 {{name}}",
+    "missing": "已移动或删除",
+    "download": "下载",
+    "noPreview": "这个文件没有预览。",
+    "unavailable": "这个文件无法在这里打开。",
+    "previewFailed": "无法加载文件",
+    "truncated": "只显示前 {{count}} 个字符。",
+    "back": "返回产出",
+    "edit": "编辑",
+    "doneEditing": "完成",
+    "filterLabel": "显示",
+    "noneOfType": "还没有这类产出。",
+    "today": "今天",
+    "earlier": "更早",
+    "filters": {
+      "all": "全部",
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面"
+    },
+    "types": {
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面",
+      "image": "图片",
+      "code": "代码",
+      "file": "文件"
+    },
+    "indexing": "还在查找更早的文件。"
+  },
+  "memoryFile": {
+    "openPage": "在记忆页打开",
+    "close": "关闭记忆"
+  },
+  "chatHeader": {
+    "menu": "聊天菜单",
+    "project": "项目 · {{name}}",
+    "lastModel": "上次回答：{{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "需要你",
+      "active": "进行中",
+      "later": "稍后",
+      "done": "已完成",
+      "failed": "失败",
+      "stopped": "已停止",
+      "no_response": "无回应"
+    },
+    "label": "{{name}},{{status}}",
+    "untitled": "任务",
+    "mainChat": "主对话",
+    "backTo": "返回{{name}}"
   }
 }

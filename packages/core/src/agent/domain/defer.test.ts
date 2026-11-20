@@ -86,7 +86,7 @@ describe("parseDeferInput with an event", () => {
           waitingFor: " the CI run ",
           deadline: "2030-01-01T00:00:00Z",
         },
-        taskId: " task-1 ",
+        chatId: " task-1 ",
       },
       NOW,
       { taskChecks: true },
@@ -102,7 +102,7 @@ describe("parseDeferInput with an event", () => {
       expect(r.wakeUp).toMatchObject({
         waitingFor: "the CI run",
         deadlineMs: Date.UTC(2030, 0, 1),
-        taskId: "task-1",
+        chatId: "task-1",
       });
     }
   });

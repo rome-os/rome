@@ -10,7 +10,7 @@ import {
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /**
- * In-memory cache of dashboard visitor policy for the auth-edge probe.
+ * In-memory cache of dashboard admin policy for the auth-edge probe.
  *
  * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request,
  * so the probe can't afford a DB round-trip to read settings. This state

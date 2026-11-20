@@ -5,7 +5,14 @@ import {
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
 import { ownerOf } from "../../webchat/owner.js";
-import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import { chatOutputsRoutes } from "./chat-outputs.js";
+import {
+  canOpenChat,
+  type ConciergeService,
+  isConciergeChat,
+  isMainConciergeChat,
+  TASK_CHAT_TRIGGER_KIND,
+} from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
   ChatPendingChecksResponse,
@@ -154,6 +161,7 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { claimAgentCard, isShowCardTool } from "../../chats/agent-card.js";
 import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
 import {
   locationAnswerPrompt,
@@ -171,12 +179,9 @@ const log = createLogger("api:webchat");
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
-/**
- * The line that names the guardian's message to the Concierge, so an answer
- * can name it as `replyTo`, with the root of the chat thread it is in.
- */
-function chatThreadLine(messageId: string, root: string): string {
-  return `<chat_thread message_id="${messageId}" root="${root}"/>`;
+/** The line that names the guardian's message to the Concierge, so an answer can name it as `replyTo`. */
+function chatThreadLine(messageId: string): string {
+  return `<chat_thread message_id="${messageId}"/>`;
 }
 
 const isReplyToPart = (part: unknown): boolean =>
@@ -412,16 +417,24 @@ async function persistRoutineDraftCard(
 // RESULT: the agent-session executeAction shim returns
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
+//
+// A Concierge chat's card replies to the message the `ask_question` call
+// named, and to nothing when it names none.
 async function persistCard(
   webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
   turnId: string,
   part: Extract<MessagePart, { type: "pending_interaction" | "widget" }>,
+  replies?: CardReplies,
 ): Promise<void> {
   try {
     // Push live (message_insert) so the card appears in the transcript as the
     // turn streams, not only on the post-turn reload. `addMessage` is silent.
-    await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    if (replies) {
+      await replies.concierge.addCard(sessionId, turnId, part, replies.named.get(part.toolUseId));
+    } else {
+      await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    }
   } catch (err) {
     log.warn("failed to persist card", {
       sessionId,
@@ -431,6 +444,17 @@ async function persistCard(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** How a Concierge chat's cards reply: the message each `ask_question` call named, by tool-use id. */
+type CardReplies = { concierge: ConciergeService; named: Map<string, string> };
+
+/** The message an `ask_question` call names for its card to reply to, if it names one. */
+function askedReplyTo(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  const named = (msg.input as { replyTo?: unknown } | undefined)?.replyTo;
+  return typeof named === "string" && named.trim() && /(^|__)ask_question$/.test(msg.tool)
+    ? named.trim()
+    : undefined;
 }
 
 /** A suspension pulled from an action's tool_result: an inline component the
@@ -557,6 +581,21 @@ function trustedWidget(
 ): WidgetPart | PendingInteractionPart | null {
   const widget = readWidgetFromOutput(msg.output);
   if (!widget) return null;
+  // An agent card is Rome's own: stored only as the card core's `show_card`
+  // kept under the token in its output, never as the output prints it, since
+  // any tool can be named `show_card` (docs/domains/chats.md#agent-card).
+  if (widget.appId === "core") {
+    const card =
+      isShowCardTool(msg.tool) && actionName === undefined
+        ? claimAgentCard(toolOutputObject(msg.output)?.cardToken, msg.toolUseId)
+        : null;
+    if (card) return card;
+    log.warn("rejected widget: a core card core's show_card did not issue", {
+      sessionId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+    });
+    return null;
+  }
   const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
   if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
     log.warn("rejected widget: not shown by an action its app owns", {
@@ -962,7 +1001,7 @@ interface ActiveWebchatStream {
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
    * (delayed fold: keep the last block until the next one starts). Transient —
-   * the durable reply is still persisted via `send_message` on `result`.
+   * the durable reply is still persisted via `system:send_message` on `result`.
    */
   assistantText: string;
   assistantBlockIx: number;
@@ -990,12 +1029,21 @@ interface ActiveWebchatStream {
   timing?: ConciergeTurnTiming;
 }
 
-/** Whether a message's stored parts carry text: a say or a forwarded result, not a card alone. */
-function carriesText(content: string): boolean {
+/** Whether a message's stored parts say something to read: a say, a forwarded
+ *  result, or an agent card the agent composed. A card that asks or connects
+ *  something is not one. */
+function carriesWords(content: string): boolean {
   try {
     const parts = JSON.parse(content) as unknown;
     return (
-      Array.isArray(parts) && parts.some((p) => (p as { type?: unknown } | null)?.type === "text")
+      Array.isArray(parts) &&
+      parts.some((p) => {
+        const part = p as { type?: unknown; appId?: unknown; ui?: unknown } | null;
+        return (
+          part?.type === "text" ||
+          (part?.type === "widget" && part.appId === "core" && part.ui !== undefined)
+        );
+      })
     );
   } catch {
     return false;
@@ -1220,7 +1268,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (message.role !== "assistant") return;
     // A message times only the turn that said it: another turn may be queued
     // or still finishing in the same chat.
-    if (carriesText(message.content)) {
+    if (carriesWords(message.content)) {
       for (const stream of streamsOfTurn(message.sessionId, message.turnId)) {
         stream.timing?.said();
       }
@@ -1316,8 +1364,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       inserting = inserting.then(async () => {
         try {
           const [filled] = await fillTaskCards(sessionId, [message]);
-          const [named] = await attachChatThreadTitles(sessionId, [filled ?? message]);
-          emit("message_insert", named ?? message);
+          emit("message_insert", filled ?? message);
         } catch {
           emit("message_insert", message);
         }
@@ -1730,37 +1777,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
-  // A message in a Concierge chat is in the chat thread its `chatThreadId`
-  // names, the key of its root. The title of the newest task whose start
-  // message is in the thread comes with it, for clients that label the thread
-  // by it; a thread no task started in has none, and a client names it from
-  // its root's text (docs/domains/chats.md#chat-thread). Any other chat keeps
-  // no chat threads.
-  const attachChatThreadTitles = async <T extends object>(
-    sessionId: string,
-    messages: T[],
-  ): Promise<(T & { chatThreadTitle?: string })[]> => {
-    // Only a transcript line has a chat thread; a trace row has none.
-    const threadOf = (message: T) =>
-      "chatThreadId" in message && typeof message.chatThreadId === "string"
-        ? message.chatThreadId
-        : null;
-    const roots = [...new Set(messages.flatMap((message) => threadOf(message) ?? []))];
-    if (roots.length === 0) return messages;
-    const chat = await deps.webchatRepo.getSession(sessionId);
-    const concierge = chat !== undefined && chat !== null && isConciergeChat(chat);
-    const tasks = concierge
-      ? ((await deps.concierge?.deps.tasks.repo.threadTasks(sessionId, roots)) ??
-        new Map<string, { id: string; title: string }>())
-      : new Map<string, { id: string; title: string }>();
-    return messages.map((message) => {
-      const thread = threadOf(message);
-      if (!thread) return message;
-      if (!concierge) return { ...message, chatThreadId: null };
-      const title = tasks.get(thread)?.title;
-      return title ? { ...message, chatThreadTitle: title } : message;
-    });
-  };
   // The status on each guardian message that has one, which only a Concierge
   // chat's can (docs/domains/chats.md#status).
   const attachMessageStatuses = async <T extends StoredMessages[number]>(
@@ -1797,12 +1813,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return withTaskCards(deps.concierge.taskCardSources(), messages, owner);
   };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachChatThreadTitles(
+    const withTraces = await attachMessageStatuses(
       sessionId,
-      await attachMessageStatuses(
-        sessionId,
-        await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
-      ),
+      await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
@@ -1820,19 +1833,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  // `limit` and `before` page the list by turn, newest first, and wrap it as
-  // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session. `through` names a message the page must reach, so one
-  // read lands on an old message, such as the card a task's Respond opens.
+  // `limit` and `before` page the list by message, newest first, and wrap it
+  // as `{ messages, nextCursor }`; a request with neither keeps the bare array
+  // of the whole session. The trace rows of the turns a page's messages belong
+  // to ride along, uncounted. `through` names a message the page must reach, so
+  // one read lands on an old message, such as the card a task's Respond opens.
   const encodeMessageCursor = (cursor: MessagePageCursor): string =>
-    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
+    Buffer.from(JSON.stringify([cursor.at, cursor.seq])).toString("base64url");
   const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
     try {
       const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
       if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-      const [startedAt, key] = parsed;
-      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
-      return { startedAt: Number(startedAt), key };
+      const [at, seq] = parsed;
+      if (!Number.isFinite(at) || !Number.isFinite(seq)) return null;
+      return { at: Number(at), seq: Number(seq) };
     } catch {
       return null;
     }
@@ -1845,15 +1859,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
-    // One chat thread, named by any of its messages, in one page: threads are short.
-    const threadParam = c.req.query("thread");
-    if (threadParam !== undefined) {
-      if (!threadParam) return c.json({ error: "thread must name a message" }, 400);
-      const messages = await deps.webchatRepo.getChatThreadMessages(sessionId, threadParam);
-      return c.json({
-        messages: await enrichStoredMessages(sessionId, messages),
-        nextCursor: null,
-      });
+    // Builds that page a Concierge chat with `type=concierge` take this answer
+    // as "page the way any chat is paged".
+    if (c.req.query("type") === "concierge") {
+      return c.json({ error: "Not a Concierge chat", code: "not_concierge" }, 400);
     }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
@@ -2190,7 +2199,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!input.continuable) {
       try {
         const result = await deps.actionEngine.run(
-          "show_app",
+          "system:show_app",
           { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           {
             initiator: input.initiator,
@@ -2211,7 +2220,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             placement: { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           };
         }
-        log.warn("show_app did not return the fork session placement", {
+        log.warn("system:show_app did not return the fork session placement", {
           sessionId: input.session.id,
           turnId: input.turnId,
           forkSessionId,
@@ -2763,6 +2772,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
   app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
   app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
+  // After the gates: a chat's outputs are as private as the chat.
+  app.route("/", chatOutputsRoutes(deps));
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
@@ -3050,7 +3061,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // Time-ordered, so new chats sit together in the id index (RFC 9562).
     const id = uuidv7();
-    const name = body.name || "New Chat";
+    const name = body.name || "New chat";
     let project;
     try {
       project = await ensureStoredProjectSelection(
@@ -3176,10 +3187,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(sessionId),
       session.agentName ?? MAIN_AGENT,
     );
+    // A task chat names the Concierge chat it reports to, so its header links back.
+    const task =
+      session.triggerKind === TASK_CHAT_TRIGGER_KIND
+        ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
+        : null;
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
+      ...(task
+        ? {
+            taskOf: {
+              conciergeChatId: task.conciergeChat.id,
+              conciergeChatName: task.conciergeChat.name,
+              main: task.conciergeChat.main,
+            },
+          }
+        : {}),
     });
   });
 
@@ -3210,15 +3235,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // A task chat's task stops with it: its row is stopped and archived in
-    // the delete's own transaction, and the Concierge hears of it quietly.
-    let taskId: string | null = null;
-    if (deps.concierge) taskId = await deps.concierge.endTaskChat(sessionId, "deleted");
+    // A task chat's task stops with it: its running work stops, and the task
+    // goes with the chat in the delete's own transaction.
+    if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
-    if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -3239,23 +3262,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const body = await c.req
-      .json<{ archived?: unknown }>()
-      .catch(() => ({}) as { archived?: unknown });
+      .json<{ archived?: unknown; followsAndTasks?: unknown; follows?: unknown }>()
+      .catch(() => ({}) as { archived?: unknown; followsAndTasks?: unknown; follows?: unknown });
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
+    const isTopic = isConciergeChat(lookup.session);
     // A repeated archive changes nothing, so a topic chat is not retired twice.
     if (body.archived && !lookup.session.archivedAt) {
+      // `followsAndTasks: "stop"` ends a topic chat's follows and open tasks
+      // first, as a delete's does, so retireChat has nothing to move.
+      if (isTopic && body.followsAndTasks === "stop") await deps.concierge?.endChatWork(sessionId);
       // Archiving a task chat stops its task, in the archive's own transaction.
       if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "archived");
       else await deps.webchatRepo.archiveSession(sessionId);
-      if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
+      if (isTopic) await deps.concierge?.retireChat(sessionId, "archived");
     } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
       await deps.concierge?.restoreTaskChat(sessionId);
+      // `follows: "moveBack"` moves back the follows its archive moved to the main chat.
+      if (isTopic) await deps.concierge?.restoreChat(sessionId, body.follows === "moveBack");
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
@@ -3960,12 +3989,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
-    /**
-     * A message of the chat thread the composer is focused on, its root as
-     * the dashboard sends it: the message replies to the thread's last
-     * message. Only a Concierge chat keeps it.
-     */
-    chatThread?: unknown;
     automatedSource?: unknown;
     automatedActorKind?: unknown;
     threadId?: string;
@@ -4058,7 +4081,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         priority: getString("priority"),
         replyToMessageId: getString("replyToMessageId"),
         replyQuote: getString("replyQuote"),
-        chatThread: getString("chatThread"),
       };
     }
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
@@ -4306,9 +4328,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    if (body.chatThread !== undefined && typeof body.chatThread !== "string") {
-      return answer({ error: "chatThread must be a message id" }, 400);
-    }
     if (
       body.replyToMessageId !== undefined &&
       body.replyToMessageId !== "" &&
@@ -4318,16 +4337,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // The message the owner's message replies to, which puts it in that
     // message's chat thread (docs/domains/chats.md#chat-thread). The client
-    // names it, for a Reply and for a composer focused on a thread alike, so
-    // the quote it showed and the reply stored are one message. A client from
-    // before sends only `chatThread` for a focused composer: in a Concierge
-    // chat that thread's last message is the reply then.
-    const explicitReplyTo = body.replyToMessageId || undefined;
-    const repliedTo =
-      explicitReplyTo ??
-      (body.chatThread && isConciergeChat(session)
-        ? ((await deps.webchatRepo.lastInChatThread(sessionId, body.chatThread)) ?? undefined)
-        : undefined);
+    // names it, so the quote it showed and the reply stored are one message.
+    const repliedTo = body.replyToMessageId || undefined;
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;
     if (!resolution && repliedTo !== undefined) {
       if (body.replyQuote !== undefined && typeof body.replyQuote !== "string") {
@@ -4337,17 +4348,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         sessionId,
         messageId: repliedTo,
         // A selection quotes only what the owner picked on the Reply button.
-        quote:
-          explicitReplyTo === undefined || body.replyQuote === "" ? undefined : body.replyQuote,
+        quote: body.replyQuote === "" ? undefined : body.replyQuote,
         // An agent whose text is private speaks one message per tool call, so
         // each of its rows is a message of its own.
         ownRowOnly:
           resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
             .finalText === "private",
       });
-      // A focused composer replies even when the thread's last message has
-      // no text to quote: the owner chose the thread, not that message.
-      if (!resolved.ok && explicitReplyTo !== undefined) {
+      if (!resolved.ok) {
         return answer({ error: resolved.error }, 400);
       }
       if (resolved.ok) reply = resolved;
@@ -4564,9 +4572,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
+    // A task chat is named by the task that started it, so its first message
+    // does not rename it.
     const autoTitle =
-      policy.autoTitle ||
-      (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === "");
+      session.triggerKind !== TASK_CHAT_TRIGGER_KIND &&
+      (policy.autoTitle ||
+        (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === ""));
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -4594,7 +4605,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     // A card's answer from a Reply is no reply.
-    const replyTo = resolution && explicitReplyTo !== undefined ? undefined : repliedTo;
+    const replyTo = resolution ? undefined : repliedTo;
     if (said.taskInput) assertTaskInputCurrent(said.taskInput);
     if (
       !(await deps.webchatRepo.recordUserInput(
@@ -4645,15 +4656,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }),
       );
     }
-    // The Concierge reads which message this is, and the thread it is in.
+    // The Concierge reads which message this is.
     if (conciergeHeader) {
-      const root =
-        (await deps.webchatRepo.getReplyTarget(sessionId, inputId))?.chatThreadId ?? inputId;
-      const line = chatThreadLine(inputId, root);
+      const line = chatThreadLine(inputId);
       // Messages the owner stopped before an answer are named once, so this
       // turn does not pick them up from the history.
       const stopped = (await deps.concierge?.stoppedRequestLines(sessionId)) ?? "";
-      promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
+      // The headers a session sends again only when they change open the
+      // input in one run, the chat, its owner and the workspace, so the
+      // per-turn lines after them never hide an unchanged one.
+      const sticky = workspaceSection ? `${conciergeHeader}\n${workspaceSection}` : conciergeHeader;
+      const now = (await deps.concierge?.nowLine?.(sessionId)) ?? "";
+      const body = automated
+        ? `${automatedMessageNotice(automated)}\n\n${repliedPrompt}`
+        : repliedPrompt;
+      promptText = `${sticky}\n${stopped ? `${stopped}\n` : ""}${line}${now ? `\n${now}` : ""}\n\n${body}`;
     }
 
     // Whether the chat's session was still open: a turn on it starts warm.
@@ -4823,6 +4840,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // The action each `execute_action` call of this turn names, by tool
           // call id, so a widget is stored only for the app that owns it.
           const executeActionCalls = new Map<string, string>();
+          const cardReplies: CardReplies | undefined =
+            deps.concierge && isConciergeChat(session)
+              ? { concierge: deps.concierge, named: new Map() }
+              : undefined;
           const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
             persistRoutineDraftCard(
               deps.webchatRepo,
@@ -4977,6 +4998,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               if (msg.type === "tool_use") {
                 const actionName = executedActionName(msg);
                 if (actionName) executeActionCalls.set(msg.id, actionName);
+                const named = askedReplyTo(msg);
+                if (named) cardReplies?.named.set(msg.id, named);
               }
               if (
                 msg.type === "tool_use" &&
@@ -5017,7 +5040,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // there is no owning app to validate.
                   const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
-                    await persistCard(deps.webchatRepo, sessionId, turnId, card);
+                    await persistCard(deps.webchatRepo, sessionId, turnId, card, cardReplies);
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
@@ -5037,17 +5060,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       componentId: suspension.componentId,
                     });
                   } else {
-                    await persistCard(deps.webchatRepo, sessionId, turnId, {
-                      type: "pending_interaction",
-                      toolUseId: msg.toolUseId,
-                      appId: suspension.appId,
-                      render: {
-                        kind: "inline",
-                        componentId: suspension.componentId,
-                        props: suspension.props,
-                        ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                    await persistCard(
+                      deps.webchatRepo,
+                      sessionId,
+                      turnId,
+                      {
+                        type: "pending_interaction",
+                        toolUseId: msg.toolUseId,
+                        appId: suspension.appId,
+                        render: {
+                          kind: "inline",
+                          componentId: suspension.componentId,
+                          props: suspension.props,
+                          ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                        },
                       },
-                    });
+                      cardReplies,
+                    );
                   }
                 }
                 // A widget that does not wait: stored as its own part of a
@@ -5058,7 +5087,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   deps,
                   sessionId,
                 );
-                if (widget) await persistCard(deps.webchatRepo, sessionId, turnId, widget);
+                if (widget) {
+                  await persistCard(deps.webchatRepo, sessionId, turnId, widget, cardReplies);
+                }
                 // Fire-and-forget widget placement: an action that returned
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
@@ -5124,7 +5155,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     ? lastCompletedText?.blockId
                     : undefined;
               await deps.actionEngine.run(
-                "send_message",
+                "system:send_message",
                 {
                   channel: "webchat",
                   threadId: sessionId,
@@ -5393,6 +5424,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const backendCards: Array<PendingInteractionPart | WidgetPart> = [];
     // As in a foreground turn: the action each `execute_action` call names.
     const executeActionCalls = new Map<string, string>();
+    const cardReplies: CardReplies | undefined =
+      deps.concierge && isConciergeChat(session)
+        ? { concierge: deps.concierge, named: new Map() }
+        : undefined;
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -5478,6 +5513,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (msg.type === "tool_use") {
         const actionName = executedActionName(msg);
         if (actionName) executeActionCalls.set(msg.id, actionName);
+        const named = askedReplyTo(msg);
+        if (named) cardReplies?.named.set(msg.id, named);
       }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
@@ -5488,7 +5525,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (card && recorded) {
           const cardTurnId = recordedTurnId ?? syntheticTurnId;
           recordedCardWrites = recordedCardWrites.then(() =>
-            persistCard(deps.webchatRepo, sessionId, cardTurnId, card),
+            persistCard(deps.webchatRepo, sessionId, cardTurnId, card, cardReplies),
           );
         } else if (card) {
           backendCards.push(card);
@@ -5504,7 +5541,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
       for (const card of backendCards) {
-        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
+        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card, cardReplies);
       }
       // Persist + push the reply before the stream emits `done`, so a
       // late-attached subscriber's reload-on-done also sees it. The push

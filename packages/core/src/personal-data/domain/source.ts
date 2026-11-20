@@ -2,8 +2,22 @@
 // unit and a rollup rule. A source's table is data, not logic. Concept:
 // docs/personal-data.md.
 
-/** How a type's readings are stored. A source joins the store only with these. */
-export type Shape = "bucket" | "sample" | "record";
+/**
+ * How a type's items are stored. A source joins the store only with these.
+ * `entry` is a document with a time, such as a calendar event:
+ * its words are its content, it is listed and never aggregated.
+ */
+export type Shape = "bucket" | "sample" | "record" | "entry";
+
+/** The kind of one content field of an entry type. */
+export type ContentKind = "text" | "flag" | "number" | "texts";
+
+/** One content field an entry type keeps. Others are dropped. */
+export interface ContentField {
+  kind: ContentKind;
+  /** The longest text kept, longer is cut. Default 200. For `texts`, per item. */
+  maxLength?: number;
+}
 
 /** The width of a bucket. */
 export type Resolution = "hour" | "day";
@@ -36,6 +50,26 @@ export interface TypeSpec {
   conversions?: readonly UnitConversion[];
   /** A short line for the Agent. */
   note?: string;
+  /** For an entry type: the content fields it keeps, by name. */
+  content?: Readonly<Record<string, ContentField>>;
+  /**
+   * How many days past Rome's clock an item may end. Default 1, since a
+   * reading is never in the future; an entry such as a calendar event is.
+   */
+  aheadDays?: number;
+  /**
+   * How many days past each sync the device sends, for a type it sends ahead
+   * of time. A window that ends past the last sync plus this is not covered,
+   * so the Agent reads the device live. Absent, a sync covers up to itself.
+   */
+  syncedAheadDays?: number;
+  /**
+   * How many days before each sync the device reads, for a type it sends
+   * as a rolling snapshot. Only that span counts as covered: older dates
+   * were read only if every sync in between ran, which nothing records.
+   * Absent, history reaches back as far as the earliest stored item.
+   */
+  syncedBackDays?: number;
 }
 
 export interface SourceSpec {

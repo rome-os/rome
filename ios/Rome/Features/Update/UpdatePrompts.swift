@@ -56,7 +56,7 @@ struct DrawerUpdateRow: View {
             case .offered(let version):
                 Button { confirming = true } label: {
                     row {
-                        Image(systemName: "arrow.down.circle")
+                        Image(systemName: "arrow.up.circle")
                             .romeFont(16, .medium)
                             .frame(width: 22)
                         Text(verbatim: UpdateCopy.banner(name))
@@ -74,7 +74,7 @@ struct DrawerUpdateRow: View {
                 }
             case .starting, .updating:
                 row {
-                    Spinner(size: 15, lineWidth: 1.8, color: Palette.primaryText)
+                    Spinner(size: 15, lineWidth: 1.8, color: Palette.success)
                         .frame(width: 22)
                     Text(verbatim: progressLine)
                     Spacer(minLength: 4)
@@ -89,7 +89,7 @@ struct DrawerUpdateRow: View {
                         Spacer(minLength: 4)
                         Text("Retry")
                             .romeFont(14, .semibold)
-                            .foregroundStyle(Palette.primaryText)
+                            .foregroundStyle(Palette.success)
                     }
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.98))
@@ -112,10 +112,10 @@ struct DrawerUpdateRow: View {
             .romeFont(15, .medium)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
-            .foregroundStyle(Palette.primaryText)
+            .foregroundStyle(Palette.success)
             .padding(.horizontal, 12)
             .frame(height: 42)
-            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Palette.successSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
@@ -134,12 +134,19 @@ struct UpdatedNotice: View {
 
     private var updater: InstanceUpdater { model.update }
 
+    /// Whether the line shows, and so is used up: only on the chat in front,
+    /// with nothing over the whole app. A hidden composer leaves it for the
+    /// next one the guardian sees.
+    static func shows(chatInFront: Bool, pagesUncovered: Bool) -> Bool {
+        chatInFront && pagesUncovered
+    }
+
     var body: some View {
         // Part of the fixed bar with the composer: it comes and goes in place,
         // with no motion of its own, so the space under the transcript never
         // changes on its own schedule.
         Group {
-            if visible, let version = updater.updatedInBackgroundTo {
+            if Self.shows(chatInFront: visible, pagesUncovered: model.pagesUncovered), let version = updater.updatedInBackgroundTo {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle")
                         .romeFont(14, .semibold)

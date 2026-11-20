@@ -66,10 +66,32 @@ struct NodeCapabilityRegistry: Sendable {
                 permission: await capability.permission().rawValue,
                 // Live as the phone would answer now: Health whose iOS
                 // permission was never asked refuses, so it reports off.
-                live: await capability.state() == .on
+                live: await capability.state() == .on,
+                summary: Self.words(capability.summary, in: Self.languages[0].locale),
+                labels: Dictionary(uniqueKeysWithValues: Self.languages.map { language in
+                    (language.code, DeviceConnectionReport.Label(
+                        title: Self.words(capability.title, in: language.locale),
+                        summary: Self.words(capability.summary, in: language.locale)
+                    ))
+                }),
+                icon: capability.cardIcon
             ))
         }
         return list
+    }
+
+    /// The languages the app has, by the Rome's code for each, as
+    /// `LanguageSync` names them: a connect card reads in the guardian's.
+    static let languages: [(code: String, locale: Locale)] = [
+        ("en", Locale(identifier: "en")),
+        ("zh-CN", Locale(identifier: "zh-Hans")),
+    ]
+
+    /// A capability's words in one language, whatever the phone's is.
+    static func words(_ resource: LocalizedStringResource, in locale: Locale) -> String {
+        var resource = resource
+        resource.locale = locale
+        return String(localized: resource)
     }
 
     /// Settings' list: each capability with its state.

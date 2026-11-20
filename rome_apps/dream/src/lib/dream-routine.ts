@@ -25,14 +25,14 @@ export function findDreamRoutine(routines: Routine[]): Routine | undefined {
  * not, and replaces an enabled `daily-dream` routine with it. A disabled
  * `daily-dream` is the guardian's off switch, so it is left alone and no
  * `dream` routine is created. Safe to call on every start. Throws when
- * `create_routine` rejects the routine. A daily routine that cannot be deleted
+ * `system:create_routine` rejects the routine. A daily routine that cannot be deleted
  * yet stays until the next start.
  */
 export async function ensureDreamRoutine(
   appContext: Pick<RomeAppContext, "listRoutines" | "runAction">,
 ): Promise<"created" | "replaced" | "exists"> {
   // Dedup on the name alone. Matching on actionName too would let an
-  // unrelated routine that runs `dream` suppress this one.
+  // unrelated routine that runs `dream:dream` suppress this one.
   const routines = await appContext.listRoutines();
   const current = routines.find((routine) => routine.name === DREAM_ROUTINE_NAME);
   const legacy = routines.find((routine) => routine.name === LEGACY_DREAM_ROUTINE_NAME);
@@ -41,7 +41,7 @@ export async function ensureDreamRoutine(
   if (!current) {
     // The runtime stamps the calling app as the routine's manager, so a
     // guardian cannot delete it.
-    const result = await appContext.runAction("create_routine", {
+    const result = await appContext.runAction("system:create_routine", {
       name: DREAM_ROUTINE_NAME,
       trigger: {
         type: "schedule",
@@ -52,7 +52,7 @@ export async function ensureDreamRoutine(
         localTime: REVIEW_LOCAL_TIME,
         rrule: DREAM_RRULE,
       },
-      actionName: "dream",
+      actionName: "dream:dream",
       // The action defaults to DREAM_WINDOW_HOURS, so the constant stays the
       // one source of truth for routines already installed.
       args: {},
@@ -67,7 +67,7 @@ export async function ensureDreamRoutine(
 
   // Created before deleted, so a failed delete leaves dreams scheduled twice
   // rather than not at all.
-  const removed = await appContext.runAction("delete_routine", { routineId: legacy.id });
+  const removed = await appContext.runAction("system:delete_routine", { routineId: legacy.id });
   if (removed.status === "error") {
     throw new Error(`delete_routine failed for ${LEGACY_DREAM_ROUTINE_NAME}: ${removed.error}`);
   }

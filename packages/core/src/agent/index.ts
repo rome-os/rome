@@ -66,6 +66,7 @@ export {
   type Question,
   questionCardFromAnswers,
   questionCardUi,
+  REPLY_TO_PARAMETER,
 } from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
@@ -125,6 +126,7 @@ export {
   buildWorkspaceContextSection,
   FETCH_CHANNEL_HISTORY_ACTION,
   type WorkspaceContextSnapshot,
+  withoutRepeatedHeaders,
 } from "./domain/prompt.js";
 export {
   buildSlashSkillPrompt,

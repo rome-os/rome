@@ -27,7 +27,7 @@
     "more": "More actions"
   },
   "sidebar": {
-    "aiApps": "AI Apps",
+    "aiApps": "AI apps",
     "appDisabled": "Disabled",
     "hideNames": "Hide names",
     "more": "More",
@@ -49,8 +49,6 @@
     "conciergeUnreadBadge_one": "{{label}} unread message",
     "conciergeUnreadBadge_other": "{{label}} unread messages",
     "newTopic": "New topic",
-    "sectionTasks": "Tasks",
-    "tasksRunning": "Tasks, {{count}} running",
     "modeSwitch": "Chat list mode",
     "modeChat": "Chat",
     "modeConcierge": "Agent",
@@ -71,6 +69,14 @@
     "topicChatDeleteMoveHint": "Alerts and task updates go there.",
     "topicChatDeleteStop": "Stop them",
     "topicChatDeleteStopHint": "The follows end and the tasks stop.",
+    "topicChatArchiveTitle": "Archive \"{{name}}\"?",
+    "topicChatArchiveWithWork": "This chat will be archived. It has:",
+    "topicChatUnarchiveTitle": "Unarchive \"{{name}}\"?",
+    "topicChatUnarchiveMoved": "When this chat was archived, these follows moved to the main chat:",
+    "topicChatUnarchiveMoveBack": "Move them back to this chat",
+    "topicChatUnarchiveMoveBackHint": "Alerts come here again.",
+    "topicChatUnarchiveKeep": "Keep them in the main chat",
+    "topicChatUnarchiveKeepHint": "Alerts keep going there.",
     "topicChatRetireFailed": "Couldn't change the topic chat.",
     "rowStatus": {
       "waiting": "Waiting for you",
@@ -157,7 +163,7 @@
   },
   "profile": {
     "menuLabel": "Account",
-    "visitor": "Visitor",
+    "visitor": "Admin",
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."
   },
@@ -303,6 +309,7 @@
     "openToolNewTab": "Open {{name}} in new tab",
     "closeTool": "Close {{name}}",
     "tasksTab": "Tasks",
+    "routinesTab": "Routines",
     "allTools": "All open apps",
     "allToolsHidden_one": "All open apps, {{count}} more",
     "allToolsHidden_other": "All open apps, {{count}} more",
@@ -311,16 +318,6 @@
     "resizeTools": "Resize chat and apps",
     "emptyAppsTitle": "No apps open",
     "emptyAppsDescription": "Open an app to use it alongside this chat."
-  },
-  "connectChatApp": {
-    "title": "Connect your chat app",
-    "description": "Talk to your agent from Telegram, WhatsApp, Discord, or WeChat.",
-    "dismiss": "Dismiss"
-  },
-  "visitAppStore": {
-    "title": "Visit the app store",
-    "description": "Discover AI-native apps built for Rome.",
-    "dismiss": "Dismiss"
   },
   "feedback": {
     "open": "Feedback",
@@ -362,5 +359,15 @@
     "noText": "No text",
     "placeholder": "Message {{name}}",
     "loadOlderFailed": "Failed to load older messages"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "Show PIN",
+    "hide": "Hide PIN",
+    "wrong_one": "Wrong PIN. {{count}} try left.",
+    "wrong_other": "Wrong PIN. {{count}} tries left.",
+    "locked": "Locked. Try again at {{time}}.",
+    "notSet": "Set a PIN in Settings first.",
+    "signerOutdated": "The signer is too old for the vault. Upgrade the instance."
   }
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import {
   TASK_LIST_ENDED_PAGE,
+  type TaskLinksResponse,
   type TaskListFollowItem,
   type TaskListResponse,
 } from "@rome/api-types/task-list";
@@ -20,6 +21,7 @@ import {
 import { sessionActorMiddleware } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { makeTask } from "../../test/task-chats.js";
 import { buildTestDeps } from "../../test/helpers.js";
 import type { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { routinesRoutes } from "./routines.js";
@@ -51,16 +53,12 @@ describe("/chats/:chatId/tasks", () => {
   let calls: string[];
   let follows: Record<string, TaskListFollowItem[]>;
   let checks: Record<string, Array<{ id: string; at: number | null; taskId: string | null }>>;
-  let cardMessages: Record<string, Array<{ id: string; content: string; createdAt: Date }>>;
   let taskSource: ConciergeTasks | null;
-  /** The `since` each read of the chat's task chat parts asked from. */
-  let asked: Array<number | undefined>;
+  let chats: ChatsWebChatRepository;
+  /** Makes a task chat, which is a task, for the guardian unless `ownerKey` says otherwise. */
+  const task = (input: Parameters<typeof makeTask>[1]) => makeTask({ chats, repo: tasks }, input);
   /** Who listens for routine changes. */
   const routineChanges = new Set<(routineId: string) => void>();
-  /** Who listens for messages said in a chat. */
-  const inserted = new Set<
-    (message: { sessionId: string; role: string; content: string }) => void
-  >();
 
   const app = () => {
     const concierge = {
@@ -100,18 +98,6 @@ describe("/chats/:chatId/tasks", () => {
         routinesRepo: routines,
         routineRunsRepo: new RoutineRunsRepository(testDb.db),
         routineEngine,
-        webchatRepo: {
-          taskChatPartMessages: async (chatId: string, from?: Date) => {
-            asked.push(from?.getTime());
-            return cardMessages[chatId] ?? [];
-          },
-          onMessageInserted: (
-            listener: (message: { sessionId: string; role: string; content: string }) => void,
-          ) => {
-            inserted.add(listener);
-            return () => inserted.delete(listener);
-          },
-        } as unknown as ApiDeps["webchatRepo"],
       }),
     );
   };
@@ -153,10 +139,8 @@ describe("/chats/:chatId/tasks", () => {
     calls = [];
     follows = {};
     checks = {};
-    cardMessages = {};
-    asked = [];
     taskSource = null;
-    const chats = new ChatsWebChatRepository(testDb.db);
+    chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession(
       "ann-main",
       "Concierge",
@@ -172,10 +156,21 @@ describe("/chats/:chatId/tasks", () => {
   });
   afterEach(() => testDb.close());
 
-  it("lists the chat's tasks, checks, follows and routines in their groups", async () => {
-    const [flights] = await tasks.upsertMany([{ title: "Flights" }]);
+  it("lists the task chats by status on the Tasks tab, and checks, follows and routines on their own", async () => {
+    const flights = await task({ title: "Flights" });
+    await task({ title: "Hotel" });
+    const sources = new ConciergeTasks(tasks);
+    sources.attachFacts({
+      now: () => Date.now(),
+      running: (chatId) => chatId === flights.id,
+      openWaits: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async (ids) =>
+        new Map(ids.filter((id) => id === flights.id).map((id) => [id, IN_AN_HOUR])),
+    });
+    taskSource = sources;
     checks.concierge = [
-      { id: "on-flights", at: IN_AN_HOUR, taskId: flights!.id },
+      { id: "on-flights", at: IN_AN_HOUR, taskId: flights.id },
       { id: "lone", at: IN_AN_HOUR + 1000, taskId: null },
     ];
     follows.concierge = [
@@ -186,22 +181,63 @@ describe("/chats/:chatId/tasks", () => {
         target: "rome-os/rome",
         state: "active",
         digestTimes: ["09:00"],
+        nextAt: IN_AN_HOUR + 2000,
       },
     ];
     await summary("concierge", "Daily summary");
 
     const work = await read("concierge");
+    // A task chat's check shows on its own row; a check no task chat has runs on its own.
     expect(kindsIn(work)).toEqual({
-      later: ["task Flights", "check Check lone"],
-      on_its_own: ["follow rome-os/rome", "routine Daily summary"],
+      active: ["task Flights"],
+      ended: ["task Hotel"],
+      on_its_own: ["check Check lone", "follow rome-os/rome", "routine Daily summary"],
     });
-    // The task's check shows on its own row, not as a row of its own.
-    const [row] = work.groups[0]!.items;
+    const row = work.groups.find((group) => group.key === "active")!.items[0];
     expect(row).toMatchObject({
       kind: "task",
+      task: { id: flights.id, title: "Flights", chat: { id: flights.id, name: "Flights" } },
       check: { id: "on-flights", at: IN_AN_HOUR, recurring: false },
       schedule: null,
     });
+    expect(row).not.toHaveProperty("cardMessageId");
+  });
+
+  it("sorts what runs on its own by when it runs next, the rows with no time last", async () => {
+    checks.concierge = [
+      { id: "later", at: IN_AN_HOUR + 5_000, taskId: null },
+      { id: "no-deadline", at: null, taskId: null },
+    ];
+    follows.concierge = [
+      {
+        kind: "follow",
+        source: "github",
+        label: "GitHub",
+        target: "soon",
+        state: "active",
+        digestTimes: ["09:00"],
+        nextAt: IN_AN_HOUR,
+      },
+      {
+        kind: "follow",
+        source: "github",
+        label: "GitHub",
+        target: "never",
+        state: "off",
+        digestTimes: [],
+        nextAt: null,
+      },
+    ];
+    const routine = await summary("concierge", "Daily summary");
+    await routines.update(routine, { nextRunAt: new Date(IN_AN_HOUR + 1_000) });
+
+    expect(kindsIn(await read("concierge")).on_its_own).toEqual([
+      "follow soon",
+      "routine Daily summary",
+      "check Check later",
+      "check Check no-deadline",
+      "follow never",
+    ]);
   });
 
   it("gives a routine's schedule its zone, so the row can name a fixed one", async () => {
@@ -215,10 +251,12 @@ describe("/chats/:chatId/tasks", () => {
   });
 
   it("answers the newest ended rows and their count, and older ones from a cursor", async () => {
-    const made = await tasks.upsertMany(
-      Array.from({ length: TASK_LIST_ENDED_PAGE + 3 }, (_, index) => ({ title: `Old ${index}` })),
+    const made = await Promise.all(
+      Array.from({ length: TASK_LIST_ENDED_PAGE + 3 }, (_, index) =>
+        task({ title: `Old ${index}` }),
+      ),
     );
-    for (const task of made) await tasks.stop(task.id, "guardian");
+    for (const old of made) await tasks.stop(old.id);
 
     const first = (await read("concierge")).groups.find((group) => group.key === "ended")!;
     expect(first.items).toHaveLength(TASK_LIST_ENDED_PAGE);
@@ -241,17 +279,18 @@ describe("/chats/:chatId/tasks", () => {
   });
 
   it("shows a guardian and a visitor each only their own chat's work", async () => {
-    await tasks.upsertMany([{ title: "The guardian's" }]);
-    await tasks.upsertMany([{ title: "Ann's", chatId: "ann-main" }]);
+    const theirs = await task({ title: "The guardian's" });
+    const hers = await task({ title: "Ann's", chatId: "ann-main", ownerKey: "visitor:acct-ann" });
+    for (const row of [theirs, hers]) await tasks.keepEnded([], [row.id]);
     await summary("concierge", "Guardian summary");
     await summary("ann-main", "Ann summary");
 
     expect(kindsIn(await read("concierge"))).toEqual({
-      later: ["task The guardian's"],
+      ended: ["task The guardian's"],
       on_its_own: ["routine Guardian summary"],
     });
     expect(kindsIn(await read("ann-main", ann))).toEqual({
-      later: ["task Ann's"],
+      ended: ["task Ann's"],
       on_its_own: ["routine Ann summary"],
     });
     // Another person's chat does not exist to the caller.
@@ -262,28 +301,15 @@ describe("/chats/:chatId/tasks", () => {
   });
 
   it("shows a routine made in one of the chat's task chats, naming its task, and none of another owner's", async () => {
-    const chats = new ChatsWebChatRepository(testDb.db);
-    const taskChat = async (id: string, ownerKey: string) =>
-      chats.createSession(
-        id,
-        id,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        "core:main",
-        "webchat",
-        null,
-        { ownerKey },
-      );
-    await taskChat("rome-releases", "guardian");
-    await taskChat("ann-task", "visitor:acct-ann");
-    // The guardian's task, set up a routine in its chat and then ended.
-    const [releases] = await tasks.upsertMany([
-      { title: "Rome releases", sessionId: "rome-releases", state: "done" },
-    ]);
+    // The guardian's task, which set up a routine in its chat and then ended.
+    const releases = await task({ id: "rome-releases", title: "Rome releases" });
     // Ann's task, whose chat made a routine of its own.
-    await tasks.upsertMany([{ title: "Ann's digest", sessionId: "ann-task", chatId: "ann-main" }]);
+    await task({
+      id: "ann-task",
+      title: "Ann's digest",
+      chatId: "ann-main",
+      ownerKey: "visitor:acct-ann",
+    });
     await summary("rome-releases", "Summarize Rome releases");
     await summary("ann-task", "Ann's routine");
     await summary("concierge", "Daily summary");
@@ -297,7 +323,7 @@ describe("/chats/:chatId/tasks", () => {
     expect(
       items.find((item) => item.kind === "routine" && item.name === "Summarize Rome releases"),
     ).toMatchObject({
-      fromTask: { id: releases!.id, title: "Rome releases" },
+      fromTask: { id: releases.id, title: "Rome releases" },
     });
     expect(
       items.find((item) => item.kind === "routine" && item.name === "Daily summary"),
@@ -308,95 +334,66 @@ describe("/chats/:chatId/tasks", () => {
 
   it("shows an empty tab with no groups", async () => {
     expect(await read("concierge")).toEqual({ chatId: "concierge", groups: [] });
-    // Nothing needs its owner: the chat's cards are not read at all.
-    expect(asked).toEqual([]);
   });
 
   it("stops a task of the chat for its owner only", async () => {
-    const [flights] = await tasks.upsertMany([{ title: "Flights" }]);
+    const flights = await task({ title: "Flights" });
     const stop = (chatId: string, as = guardian) =>
-      app().request(`/chats/${chatId}/tasks/${flights!.id}/stop`, { ...as, method: "POST" });
+      app().request(`/chats/${chatId}/tasks/${flights.id}/stop`, { ...as, method: "POST" });
 
     expect((await stop("concierge", ann)).status).toBe(404);
     expect((await stop("ann-main", ann)).status).toBe(404);
     expect(calls).toEqual([]);
     expect((await stop("concierge")).status).toBe(200);
-    expect(calls).toEqual([`stop ${flights!.id} guardian`]);
+    expect(calls).toEqual([`stop ${flights.id} guardian`]);
   });
 
-  it("points a task that needs its owner at the message that shows the card it waits on", async () => {
-    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
-    await tasks.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
-    const part = (show?: string) =>
-      JSON.stringify([{ type: "task_chat", chatId: "task-chat", title: "Flights", show }]);
-    // The task chat waits on its owner: an approval opened a minute ago.
-    const since = Date.now() - 60_000;
-    const said = (id: string, at: number, show?: string) => ({
-      id,
-      content: part(show),
-      createdAt: new Date(at),
+  it("answers a task link for a task chat of any of the caller's own Concierge chats", async () => {
+    const flights = await task({ title: "Flights" });
+    await chats.createSession(
+      "calendar",
+      "Calendar",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+    );
+    const agenda = await task({ title: "Agenda", chatId: "calendar" });
+    const annsTask = await task({
+      title: "Ann's",
+      chatId: "ann-main",
+      ownerKey: "visitor:acct-ann",
     });
-    const tasksWith = new ConciergeTasks(tasks);
-    tasksWith.attachFacts({
-      now: () => Date.now(),
-      running: () => false,
-      openWaits: async () =>
-        new Map([["task-chat", [{ kind: "approval" as const, id: "a1", since }]]]),
-      reportPending: () => [],
-    });
-    taskSource = tasksWith;
-    const respondTo = async () => {
-      const [item] = (await read("concierge")).groups[0]!.items;
-      return item?.kind === "task" ? item.cardMessageId : undefined;
-    };
+    const links = async (chatId: string, ids: string[], as = guardian) =>
+      (await (
+        await app().request(`/chats/${chatId}/task-links?ids=${ids.join(",")}`, as)
+      ).json()) as TaskLinksResponse;
 
-    // An ask said before the wait shows an earlier question, and a task card shows none.
-    cardMessages.concierge = [
-      said("old-ask", since - 10 * 60_000),
-      said("task-card", since + 1_000, "task"),
-    ];
-    expect(await respondTo()).toBeNull();
-
-    // Stored times are whole seconds: an ask said in the wait's own second shows it.
-    cardMessages.concierge = [said("same-second-ask", Math.floor(since / 1_000) * 1_000, "ask")];
-    expect(await respondTo()).toBe("same-second-ask");
-
-    // The newest ask said since shows it.
-    cardMessages.concierge = [
-      said("old-ask", since - 10 * 60_000),
-      said("same-second-ask", Math.floor(since / 1_000) * 1_000, "ask"),
-      said("new-ask", since + 2_000),
-    ];
-    expect(await respondTo()).toBe("new-ask");
-
-    // A task card said after it is the chat's newest card, so the ask is not answerable there.
-    cardMessages.concierge.push(said("later-task-card", since + 3_000, "task"));
-    expect(await respondTo()).toBeNull();
-
-    // A card that names what it shows counts by that alone, whenever it was said.
-    const naming = (id: string, at: number, approval: string) => ({
-      id,
-      content: JSON.stringify([
+    // Its live name and status, as the link draws it.
+    await chats.updateSessionName(flights.id, "Book direct flights");
+    expect(await links("concierge", [flights.id, "no-such-chat", annsTask.id])).toEqual({
+      tasks: [
         {
-          type: "task_chat",
-          chatId: "task-chat",
-          title: "Flights",
-          show: "ask",
-          waitedOn: { kind: "approval", id: approval },
+          id: flights.id,
+          name: "Book direct flights",
+          status: "ended",
+          endReason: "done",
         },
-      ]),
-      createdAt: new Date(at),
+      ],
     });
-    cardMessages.concierge = [
-      naming("names-another", since + 1_000, "a0"),
-      naming("names-it", since + 2_000, "a1"),
-    ];
-    expect(await respondTo()).toBe("names-it");
-    // Newest naming another item: the transcript draws none answerable.
-    cardMessages.concierge.reverse();
-    expect(await respondTo()).toBeNull();
-    // It reads from a second before the wait began, not the whole chat.
-    expect(asked.at(-1)).toBe(since - 1_000);
+    // A task of another of the owner's Concierge chats draws too.
+    expect((await links("concierge", [agenda.id])).tasks).toMatchObject([
+      { id: agenda.id, name: "Agenda" },
+    ]);
+    // Another owner's task chat reads as none.
+    expect(
+      (await links("ann-main", [annsTask.id, flights.id, agenda.id], ann)).tasks.map((t) => t.id),
+    ).toEqual([annsTask.id]);
+    // Another person's chat does not exist to the caller.
+    expect((await app().request("/chats/ann-main/task-links?ids=x", guardian)).status).toBe(404);
   });
 
   it("lists a routine a draft card in the chat turned on", async () => {
@@ -451,80 +448,8 @@ describe("/chats/:chatId/tasks", () => {
     expect(kindsIn(await read("concierge"))).toEqual({});
   });
 
-  it("moves a waiting task's Respond to a new ask card said with no change to the task", async () => {
-    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
-    await tasks.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
-    const since = Date.now() - 60_000;
-    const ask = (id: string, at: number) => ({
-      id,
-      content: JSON.stringify([
-        { type: "task_chat", chatId: "task-chat", title: "Flights", show: "ask" },
-      ]),
-      createdAt: new Date(at),
-    });
-    const tasksWith = new ConciergeTasks(tasks);
-    tasksWith.attachFacts({
-      now: () => Date.now(),
-      running: () => false,
-      openWaits: async () =>
-        new Map([["task-chat", [{ kind: "approval" as const, id: "a1", since }]]]),
-      reportPending: () => [],
-    });
-    taskSource = tasksWith;
-    const respondTo = async () => {
-      const [item] = (await read("concierge")).groups[0]!.items;
-      return item?.kind === "task" ? item.cardMessageId : undefined;
-    };
-    cardMessages.concierge = [ask("first-ask", since + 1_000)];
-    expect(await respondTo()).toBe("first-ask");
-
-    const stream = await app().request("/chats/concierge/tasks/events", guardian);
-    const reader = stream.body!.getReader();
-    // The Concierge asks again: a new card, and no task row changes.
-    cardMessages.concierge.push(ask("second-ask", since + 2_000));
-    for (const listener of inserted) {
-      listener({ sessionId: "concierge", role: "assistant", content: ask("", 0).content });
-    }
-    let text = "";
-    while (!text.includes("tasks_changed")) {
-      text += new TextDecoder().decode((await reader.read()).value);
-    }
-    await reader.cancel();
-    // The list the change tells it to read points at the new card.
-    expect(await respondTo()).toBe("second-ask");
-  });
-
-  it("tells the chat's list to read again when a task card is said in it", async () => {
-    const stream = await app().request("/chats/concierge/tasks/events", guardian);
-    const reader = stream.body!.getReader();
-    const say = (sessionId: string, content: string) => {
-      for (const listener of inserted) listener({ sessionId, role: "assistant", content });
-    };
-    say("ann-main", '[{"type":"task_chat","chatId":"c1"}]');
-    say("concierge", '[{"type":"text","content":"hi"}]');
-    say("concierge", '[{"type":"task_chat","chatId":"c1"}]');
-    let text = "";
-    while (!text.includes("tasks_changed")) {
-      text += new TextDecoder().decode((await reader.read()).value);
-    }
-    expect(text).toContain('"chatId":"concierge"');
-    await reader.cancel();
-  });
-
   it("tells the chat's list to read again when a routine of one of its task chats changes", async () => {
-    await new ChatsWebChatRepository(testDb.db).createSession(
-      "rome-releases",
-      "Rome releases",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "core:main",
-      "webchat",
-      null,
-      { ownerKey: "guardian" },
-    );
-    await tasks.upsertMany([{ title: "Rome releases", sessionId: "rome-releases" }]);
+    await task({ id: "rome-releases", title: "Rome releases" });
     const made = await summary("rome-releases", "Summarize Rome releases");
     const stream = await app().request("/chats/concierge/tasks/events", guardian);
     const reader = stream.body!.getReader();

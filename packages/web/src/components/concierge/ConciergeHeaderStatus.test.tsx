@@ -44,37 +44,11 @@ describe("ConciergeHeaderStatus", () => {
     expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
   });
 
-  it("opens the task list from the badge, with a pointer, or from the name tag without a badge", () => {
-    let opened = 0;
-    const open = () => {
-      opened += 1;
-    };
-    const { container, rerender } = render(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} onOpenTasks={open} />,
-    );
-    const badge = screen.getByRole("button", { name: "Open tasks" });
-    expect(badge.hasAttribute("data-concierge-header-badge")).toBe(true);
-    expect(badge.className).toContain("cursor-pointer");
-    expect(container.querySelector(".rome-mascot")?.getAttribute("class")).toContain(
-      "cursor-pointer",
-    );
-    // Only one opener: the name tag stays a plain box beside the badge.
+  it("is no button: the badge and the name tag open nothing", () => {
+    const { container } = render(<ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(container.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     expect(container.querySelector("[data-concierge-header-name]")?.tagName).toBe("DIV");
-    fireEvent.click(badge);
-    expect(opened).toBe(1);
-
-    rerender(
-      <ConciergeHeaderStatus
-        name="Milo"
-        activity={{ kind: "idle" }}
-        badge={false}
-        onOpenTasks={open}
-      />,
-    );
-    const tag = screen.getByRole("button", { name: "Open tasks" });
-    expect(tag.hasAttribute("data-concierge-header-name")).toBe(true);
-    fireEvent.click(tag);
-    expect(opened).toBe(2);
   });
 
   it("lifts the name tag and the status a row when the badge is left out", () => {
@@ -174,5 +148,17 @@ describe("ConciergeHeaderStatus", () => {
     expect(mascot(container).hasAttribute("data-poked")).toBe(false);
     fireEvent.pointerDown(mascot(container));
     expect(mascot(container).hasAttribute("data-poked")).toBe(true);
+  });
+});
+
+describe("ConciergeHeaderStatus in an ordinary chat", () => {
+  it("shows the mascot and a longer title, with no activity capsule", () => {
+    const { container } = render(
+      <ConciergeHeaderStatus name="Plan the whole lake trip" showsActivity={false} />,
+    );
+    expect(container.querySelector("[data-concierge-header-badge] .rome-mascot")).not.toBeNull();
+    expect(container.querySelector("[data-concierge-header-activity]")).toBeNull();
+    const title = container.querySelector("[data-concierge-header-name] span")!;
+    expect(title.className).toContain("max-w-[min(16em,calc(100cqw-16rem))]");
   });
 });

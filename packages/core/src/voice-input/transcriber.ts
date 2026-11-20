@@ -45,5 +45,8 @@ export interface Transcriber {
   /** The provider's lower-case id, as Rome Cloud and usage name it, such as `soniox`. */
   readonly providerId: string;
   /** Opens one stream. Audio sent before the provider answers is held and sent in order. */
-  open(options: { sampleRate: number }, listener: TranscriptionListener): TranscriptionStream;
+  open(
+    options: { sampleRate: number; terms?: readonly string[] },
+    listener: TranscriptionListener,
+  ): TranscriptionStream;
 }

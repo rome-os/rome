@@ -24,7 +24,7 @@ export function chatReadsOf(appContext: Pick<RomeAppContext, "repositories">): C
   };
 }
 
-/** Said by a visitor on the dashboard. */
+/** Said by a dashboard admin. */
 export function byVisitor(line: ChatLine): boolean {
   return line.senderId?.startsWith("visitor:") ?? false;
 }

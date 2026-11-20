@@ -27,8 +27,8 @@ enum SettingsRoute: Hashable {
     case connection(String)
     /// One connection's live reads, by its id.
     case liveReads(String)
-    /// Apple Health → Sync history.
-    case syncHistory
+    /// A synced connection's Sync history, by its personal-data source.
+    case syncHistory(String)
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -166,11 +166,7 @@ struct MainShell: View {
             // Its own stack: a task opens inside the page, and back returns
             // to the Tasks as they were.
             NavigationStack(path: $agentPath) {
-                AgentPage(workspace: workspace, route: route, tab: $agentTab, onUse: { prompt in
-                    // Into this chat's composer, unsent, as the page closes.
-                    agentPage = nil
-                    workspace.composerPrefills[route.composerKey] = prompt
-                }, onOpenTask: { chat in
+                AgentPage(workspace: workspace, route: route, tab: $agentTab, onOpenTask: { chat in
                     agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
                 }, onClose: { agentPage = nil })
                 .toolbar(.hidden, for: .navigationBar)
@@ -315,7 +311,10 @@ struct MainShell: View {
                 if !usesSidebar { open ? openDrawer() : closeDrawer() }
             case .agent(let tab):
                 if let tab { agentTab = tab }
-                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID)
+                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
+            case .agentBlank(let tab):
+                agentTab = tab
+                agentPage = AgentRoute(tasksChatId: "", chatKey: "snapshot-blank")
             case .agentRoute(let routes):
                 agentPath = routes
             case .route(let routes):
@@ -376,6 +375,9 @@ struct MainShell: View {
         case .apps:
             show(.apps)
             path = []
+        case .chat:
+            show(.chat)
+            path = []
         case .newApp:
             show(.chat)
             path = []
@@ -425,7 +427,10 @@ struct MainShell: View {
     private func installShellActions() {
         actions.linkOpener.run = { openChatLink($0) }
         actions.toggleNavigation.run = { _ in toggleNavigation() }
-        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) }
+        actions.openAgent.run = { tab in
+            if let tab { agentTab = tab }
+            agentPage = AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
+        }
         actions.openTaskChat.run = { path.append(.taskChat(chatId: $0.chatId, title: $0.title)) }
         actions.openUsage.run = { _ in
             settingsPath = []
@@ -531,9 +536,10 @@ struct MainShell: View {
             chatId: chatId,
             draftKey: draftKey,
             onMenu: { toggleNavigation() },
-            onAgent: { id in
+            onAgent: { id, tab in
                 // A blank chat has no tasks yet; its Tasks tab shows the empty state.
-                agentPage = AgentRoute(tasksChatId: id ?? "", composerKey: id ?? draftKey)
+                if let tab { agentTab = tab }
+                agentPage = AgentRoute(tasksChatId: id ?? "", chatKey: id ?? draftKey)
             },
             onArchived: { show(.chat) },
             onCreated: { id in
@@ -591,12 +597,12 @@ struct MainShell: View {
                     ConnectionScreen(
                         id: id,
                         onActivity: { settingsPath.append(.liveReads(id)) },
-                        onHistory: { settingsPath.append(.syncHistory) }
+                        onHistory: { source in settingsPath.append(.syncHistory(source)) }
                     )
                 case .liveReads(let id):
                     NodeRequestsScreen(capability: id)
-                case .syncHistory:
-                    SyncHistoryScreen()
+                case .syncHistory(let source):
+                    SyncHistoryScreen(source: source)
                 }
             }
         }

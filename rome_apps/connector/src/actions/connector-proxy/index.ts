@@ -72,7 +72,7 @@ const inputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Omit it for Shopify too — Rome uses the connected store's '<store>.myshopify.com'. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
+      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Omit it for Shopify too — Rome uses the connected store's '<store>.myshopify.com'. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co', Freshdesk's '<domain>.freshdesk.com') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
     ),
   method: z
     .enum(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
@@ -233,11 +233,27 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
       }
 
+      if (toolkit.toLowerCase() === "gmail") {
+        const managed = await deps.appContext.runAction("core:gmail_read", {
+          path,
+          method,
+          host: new URL(endpoint).host,
+          ...(query ? { query } : {}),
+          ...(body !== undefined ? { body } : {}),
+          ...(headers !== undefined ? { headers } : {}),
+        });
+        // Only absence falls back. A broken Google grant must not silently read
+        // a different mailbox through Composio.
+        if (managed.status !== "error" || !managed.error.startsWith("gmail_not_connected:")) {
+          return managed;
+        }
+      }
+
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_proxy for "${endpoint}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_proxy for "${endpoint}".`,
         };
       }
       try {
@@ -252,7 +268,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             status: "error",
             error: isRomeManagedToolkit(toolkit)
               ? romeManagedConnectHint(toolkit)
-              : `Toolkit "${toolkit}" is not connected. Call connector_connect with toolkit "${toolkit}" first, then re-run connector_proxy.`,
+              : `Toolkit "${toolkit}" is not connected. Call connector:connector_connect with toolkit "${toolkit}" first, then re-run connector:connector_proxy.`,
           };
         }
         if (account.kind === "ambiguous") {

@@ -121,6 +121,7 @@ export const SUPPORTED_CONNECTORS: readonly SupportedConnector[] = [
   { toolkit: "neon", displayName: "Neon", apiHost: "console.neon.tech" },
   { toolkit: "hubspot", displayName: "HubSpot", apiHost: "api.hubapi.com" },
   { toolkit: "stripe", displayName: "Stripe", apiHost: "api.stripe.com" },
+  { toolkit: "freshdesk", displayName: "Freshdesk" },
   { toolkit: "shopify", displayName: "Shopify" },
   { toolkit: "otter_ai_mcp", displayName: "Otter.ai" },
 ];
@@ -243,10 +244,13 @@ export type PreviewPayload =
       fields?: { label: string; value: string }[];
     }
   | {
-      /** Time-limited use of one named secret. `title` and `summary` say the same
-       * in words, for a surface that draws only the generic card. */
+      /** Time-limited use of one or several named secrets. `title` and `summary`
+       * say the same in words, for a surface that draws only the generic card.
+       * `name` is the first of `names`. A preview stored before several names
+       * carries `name` alone. */
       kind: "secret_access";
       name: string;
+      names?: string[];
       ttlMinutes: number;
       reason: string;
       title: string;
@@ -1272,7 +1276,7 @@ export interface RunParams {
    * A streamed reply is the turn's answer in the conversation's history. The
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
-   * as `send_message` does.
+   * as `system:send_message` does.
    *
    * @deprecated The host no longer streams replies to external platforms and
    * ignores this. The caller always sends the reply.
@@ -2223,6 +2227,15 @@ export interface ChannelMessageHookDeps {
    * that passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /**
+   * @internal A test-only back door for the Inbox app. True when the Inbox
+   * app must answer no message on an account linked to `agent`, a canonical
+   * agent id, because the app that installed it runs the agent's turns
+   * itself. The host answers true only for an agent that declares
+   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
+   * for every other. Not for apps to build on.
+   */
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
@@ -3136,7 +3149,7 @@ export interface EventBusTrigger {
 /** A producer app's declaration that it can currently emit `eventType`.
  * `eventType` is the same value a routine binds to as
  * `EventBusTrigger.eventName`; `appId` is the producer that owns it. Surfaced to
- * apps discovering which events are watchable (e.g. `search_event_catalog`). */
+ * apps discovering which events are watchable (e.g. `system:search_event_catalog`). */
 export interface EventCatalogEntry {
   eventType: string;
   appId: string;

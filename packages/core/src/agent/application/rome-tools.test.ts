@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { AgentAction } from "../domain/agent-action.js";
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
@@ -28,6 +29,7 @@ function tools(overrides: Partial<RomeToolsOptions> = {}) {
       list: () => [],
       permits: () => true,
       appOf: () => undefined,
+      find: () => undefined,
       run: async () => ({ status: "ok" }),
     },
     skills: { list: () => [] },
@@ -75,6 +77,34 @@ describe("ask_question", () => {
     expect(text).toContain("- This");
     expect(text).toContain("- Next");
     expect(text).toContain("Which city?");
+  });
+
+  it("names the message its card replies to only for an agent whose cards reply", () => {
+    const properties = (overrides: Partial<RomeToolsOptions>) =>
+      Object.keys(
+        (
+          tools(overrides)
+            .listTools("ask_user")
+            .find((tool) => tool.name === "ask_question")?.inputSchema as {
+            properties: object;
+          }
+        ).properties,
+      );
+    expect(properties({})).toEqual(["questions"]);
+    expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
+  });
+
+  it("offers the reply of a card that names one, and lets it be left out or null", () => {
+    const schema = (overrides: Partial<RomeToolsOptions>) =>
+      tools(overrides)
+        .listTools("ask_user")
+        .find((tool) => tool.name === "ask_question")?.inputSchema as {
+        required: string[];
+        properties: { replyTo?: { type: unknown } };
+      };
+    expect(schema({}).required).toEqual(["questions"]);
+    expect(schema({ repliesTo: true }).required).toEqual(["questions"]);
+    expect(schema({ repliesTo: true }).properties.replyTo?.type).toEqual(["string", "null"]);
   });
 
   it("relays defaults and option descriptions as readable prose", async () => {
@@ -386,6 +416,7 @@ describe("execute_action", () => {
         list: () => [],
         permits: () => true,
         appOf: () => undefined,
+        find: () => undefined,
         run: async () => ({
           status: "place_widget",
           placement: { appId: "maps" },
@@ -405,6 +436,7 @@ describe("execute_action", () => {
         list: () => [],
         permits: () => true,
         appOf: (name) => (name === "show_today" ? "meals" : undefined),
+        find: () => undefined,
         run: async () => ({
           status: "show_widget",
           widget: { componentId: "today", text: "Showing today's meals." },
@@ -425,6 +457,7 @@ describe("execute_action", () => {
         list: () => [],
         permits: () => false,
         appOf: () => undefined,
+        find: () => undefined,
         run: async (_turn, name) => {
           throw new Error(`Unknown action: ${name}`);
         },
@@ -432,5 +465,38 @@ describe("execute_action", () => {
     }).callTool("actions", "execute_action", { action_name: "nope", json_args: {} });
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0].text).toBe("Unknown action: nope");
+  });
+
+  it("reads an action by any of its names, as running it does", async () => {
+    const send: AgentAction = {
+      name: "system:send_message",
+      description: "Send a message",
+      type: "system",
+      complexity: "simple",
+      speed: "fast",
+      reliability: "high",
+      sideEffects: "write",
+      requiresApproval: false,
+      cancellable: false,
+      inputSchema: { properties: {} },
+    };
+    const read = (name: string) =>
+      tools({
+        actions: {
+          list: () => [send],
+          permits: () => true,
+          appOf: () => undefined,
+          find: (_turn, asked) =>
+            asked === "send_message" || asked === send.name ? send : undefined,
+          run: async () => ({ status: "ok" }),
+        },
+      }).callTool("actions", "read_action", { action_name: name });
+
+    expect(JSON.parse((await read("send_message")).content[0].text)).toMatchObject({
+      name: "system:send_message",
+    });
+    const unknown = await read("nope");
+    expect(unknown).toMatchObject({ isError: true });
+    expect(unknown.content[0].text).toBe("Unknown action: nope");
   });
 });

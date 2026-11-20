@@ -39,6 +39,7 @@ export const queryInputSchema = z
         cursor: z.string().nullish(),
       })
       .optional(),
+    search: z.string().min(1).max(100).optional(),
   })
   .strict();
 
@@ -55,7 +56,10 @@ export interface StoredPoint {
   tz: string;
   value: number | null;
   fields: Record<string, number> | null;
-  metadata: Record<string, string> | null;
+  /** A reading's metadata, or an entry's content. */
+  metadata: Record<string, unknown> | null;
+  /** The device's key, read for an entry, which a live edit names. */
+  key?: string;
 }
 
 export interface QueryPlan {
@@ -67,6 +71,8 @@ export interface QueryPlan {
   aggregate?: Aggregate;
   unit?: string;
   records?: { limit: number; after?: { startAt: number; id: number } };
+  /** For entries: only those whose content holds this text, any case. */
+  search?: string;
 }
 
 /** Turns an input into a plan, or names what is wrong with it in words the Agent can act on. */
@@ -135,10 +141,25 @@ export function planQuery(
     }
   }
 
+  const entries = types.filter((spec) => spec.shape === "entry");
+  if (entries.length > 0) {
+    // An entry is listed, never added up: records is implied.
+    if (types.length !== 1) return { error: "Entries are listed one type at a time: send type." };
+    if (input.interval || input.aggregate || input.unit) {
+      return {
+        error: `${types[0].type} is listed, not aggregated: leave out interval, aggregate and unit.`,
+      };
+    }
+  } else if (input.search) {
+    return { error: "search fits only a type of entries, such as calendar events." };
+  }
+
   const plan: QueryPlan = { types, start, end, tz, interval };
   if (input.aggregate) plan.aggregate = input.aggregate;
   if (input.unit) plan.unit = input.unit;
-  if (input.records) {
+  if (input.search) plan.search = input.search;
+  const records: QueryInput["records"] = input.records ?? (entries.length > 0 ? {} : undefined);
+  if (records) {
     if (types.length !== 1) return { error: "records lists one type at a time: send type." };
     if (types[0].shape === "bucket") {
       return {
@@ -146,12 +167,12 @@ export function planQuery(
       };
     }
     let after: { startAt: number; id: number } | undefined;
-    if (input.records.cursor) {
-      after = decodeCursor(input.records.cursor);
+    if (records.cursor) {
+      after = decodeCursor(records.cursor);
       if (!after) return { error: "records.cursor is not a cursor this query returned." };
     }
     plan.records = {
-      limit: input.records.limit ?? DEFAULT_RECORD_LIMIT,
+      limit: records.limit ?? DEFAULT_RECORD_LIMIT,
       ...(after ? { after } : {}),
     };
   }
@@ -478,6 +499,14 @@ function round(value: number): number {
 
 /** One record of a sample or record type, as a listing returns it. */
 export function listedRecord(spec: TypeSpec, plan: QueryPlan, point: StoredPoint) {
+  if (spec.shape === "entry") {
+    return {
+      key: point.key,
+      startISO: isoInZone(point.startAt, plan.tz),
+      endISO: isoInZone(point.endAt, plan.tz),
+      ...(point.metadata ?? {}),
+    };
+  }
   const convert = converter(spec, plan.unit);
   return {
     startISO: isoInZone(point.startAt, plan.tz),

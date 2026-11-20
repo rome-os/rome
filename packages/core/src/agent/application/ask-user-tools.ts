@@ -2,7 +2,11 @@
 // `defer`, and the session's own tools after them.
 
 import type { AgentPolicy } from "../domain/agent-policy.js";
-import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
+import {
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  REPLY_TO_PARAMETER,
+} from "../domain/ask-question.js";
 import { parseDeferInput, type WakeUp } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
@@ -27,7 +31,7 @@ const DEFER_DESCRIPTION =
 
 /** Only an agent that can read the event catalog is sent to it. */
 const DEFER_EVENT_CATALOG =
-  "Look up the event name and payload fields with the search_event_catalog action first. ";
+  "Look up the event name and payload fields with the system:search_event_catalog action first. ";
 
 const DEFER_EVENTS =
   "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
@@ -93,10 +97,10 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
         },
         ...(defer.taskChecks
           ? {
-              taskId: {
+              chatId: {
                 type: "string",
                 description:
-                  "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
+                  "Optional: the task chat this check is for, from chat_list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
               },
             }
           : {}),
@@ -110,7 +114,7 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
             eventName: {
               type: "string",
               description:
-                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+                "The exact event type, from system:search_event_catalog, e.g. provider:event:github.workflow_run.",
             },
             sourcePattern: {
               type: "string",
@@ -168,9 +172,11 @@ export function askUserTools(input: {
   widgetsShow: boolean;
   defer?: DeferTool;
   sessionTools?: readonly RomeTool[];
+  /** The card says which message it replies to (the Concierge's). */
+  repliesTo?: boolean;
   run: RomeToolRunner;
 }): RomeTool[] {
-  const { turn, widgetsShow, defer, sessionTools = [], run } = input;
+  const { turn, widgetsShow, defer, sessionTools = [], repliesTo, run } = input;
   // `ask_question` is served everywhere: where no widget shows, the handler
   // relays the questions as a plain message, so the model routes clarifying
   // questions through it wherever it runs.
@@ -242,6 +248,7 @@ export function askUserTools(input: {
               },
             },
           },
+          ...(repliesTo ? { replyTo: REPLY_TO_PARAMETER } : {}),
         },
       },
       handler: (input) =>

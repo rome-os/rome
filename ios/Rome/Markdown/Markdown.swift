@@ -6,7 +6,8 @@ import SwiftUI
 enum MarkdownBlock: Hashable {
     case paragraph(String)
     case heading(level: Int, text: String)
-    case list(ordered: Bool, start: Int, items: [String])
+    /// A list. An item's `children` hold the lists nested under it.
+    case list(ordered: Bool, start: Int, items: [ListItem])
     case quote(String)
     case code(language: String?, text: String)
     case rule
@@ -17,6 +18,12 @@ enum MarkdownBlock: Hashable {
     case table(header: [String], alignments: [TableAlignment], rows: [[String]])
     /// A ```` ```pictures ```` fence: one picture per line, laid out as a grid or a list.
     case pictures(layout: PictureLayout, items: [PictureItem])
+}
+
+/// One item of a list: its text, and the lists indented under it.
+struct ListItem: Hashable {
+    var text: String
+    var children: [MarkdownBlock] = []
 }
 
 /// How a `pictures` fence lays its pictures out: `pictures list` is a list,
@@ -52,9 +59,15 @@ enum MarkdownParser {
         PerfProbe.count("markdownParse")
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
-        var listItems: [String] = []
-        var listOrdered = false
-        var listStart = 1
+        // The lists open at this point, outermost first. A list ends up in
+        // the block list, or under the last item of the list before it.
+        struct OpenList {
+            let ordered: Bool
+            let start: Int
+            let indent: Int
+            var items: [ListItem] = []
+        }
+        var lists: [OpenList] = []
         var quote: [String] = []
         var code: [String]?
         var codeLanguage: String?
@@ -65,10 +78,29 @@ enum MarkdownParser {
                 paragraph = []
             }
         }
+        func closeList() {
+            let list = lists.removeLast()
+            let block = MarkdownBlock.list(ordered: list.ordered, start: list.start, items: list.items)
+            if lists.isEmpty {
+                blocks.append(block)
+            } else {
+                lists[lists.count - 1].items[lists[lists.count - 1].items.count - 1].children.append(block)
+            }
+        }
         func flushList() {
-            if !listItems.isEmpty {
-                blocks.append(.list(ordered: listOrdered, start: listStart, items: listItems))
-                listItems = []
+            while !lists.isEmpty { closeList() }
+        }
+        // An item at `indent`: a sibling in the open list at that indent, or
+        // the first item of a list nested under the last item when it is
+        // indented past that item's marker. A marker of the other kind at the
+        // same indent starts a new list.
+        func addItem(_ text: String, ordered: Bool, number: Int, indent: Int) {
+            while let last = lists.last, indent < last.indent, lists.count > 1 { closeList() }
+            if let last = lists.last, indent <= last.indent, last.ordered != ordered { closeList() }
+            if let last = lists.last, indent <= last.indent {
+                lists[lists.count - 1].items.append(ListItem(text: text))
+            } else {
+                lists.append(OpenList(ordered: ordered, start: number, indent: indent, items: [ListItem(text: text)]))
             }
         }
         func flushQuote() {
@@ -118,6 +150,14 @@ enum MarkdownParser {
                 trimmed = line.trimmingCharacters(in: .whitespaces)
             }
             if trimmed.isEmpty {
+                // A blank line between items, or before an indented line,
+                // keeps the list open, so a nested list after it still nests.
+                if !lists.isEmpty, let following = lines[next...].first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+                   following.hasPrefix(" ") || following.hasPrefix("\t") || isListItem(following.trimmingCharacters(in: .whitespaces)) {
+                    flushParagraph()
+                    flushQuote()
+                    continue
+                }
                 flushAll()
                 continue
             }
@@ -158,23 +198,19 @@ enum MarkdownParser {
             if let bullet = bulletItem(trimmed) {
                 flushParagraph()
                 flushQuote()
-                if !listItems.isEmpty && listOrdered { flushList() }
-                listOrdered = false
-                listItems.append(bullet)
+                addItem(bullet, ordered: false, number: 1, indent: indentation(line))
                 continue
             }
             if let numbered = orderedItem(trimmed) {
                 flushParagraph()
                 flushQuote()
-                if !listItems.isEmpty && !listOrdered { flushList() }
-                if listItems.isEmpty { listStart = numbered.number }
-                listOrdered = true
-                listItems.append(numbered.text)
+                addItem(numbered.text, ordered: true, number: numbered.number, indent: indentation(line))
                 continue
             }
-            if !listItems.isEmpty, line.hasPrefix("  ") || line.hasPrefix("\t") {
-                // A continuation line of the last list item.
-                listItems[listItems.count - 1] += " " + trimmed
+            if !lists.isEmpty, line.hasPrefix("  ") || line.hasPrefix("\t") {
+                // A continuation line of the innermost open item.
+                let last = lists.count - 1
+                lists[last].items[lists[last].items.count - 1].text += " " + trimmed
                 continue
             }
             flushList()
@@ -330,6 +366,19 @@ enum MarkdownParser {
         return (level, String(line.dropFirst(level + 1)))
     }
 
+    /// The width of a line's leading whitespace, a tab counting as four spaces.
+    private static func indentation(_ line: String) -> Int {
+        var width = 0
+        for character in line {
+            if character == " " { width += 1 } else if character == "\t" { width += 4 } else { break }
+        }
+        return width
+    }
+
+    private static func isListItem(_ line: String) -> Bool {
+        bulletItem(line) != nil || orderedItem(line) != nil
+    }
+
     private static func bulletItem(_ line: String) -> String? {
         for marker in ["- ", "* ", "+ ", "• "] where line.hasPrefix(marker) {
             return String(line.dropFirst(marker.count))
@@ -348,6 +397,90 @@ enum MarkdownParser {
     /// Inline Markdown (bold, italics, code, links) as styled text.
     static func inline(_ text: String) -> AttributedString {
         inlineCache.value(for: text, styledInline)
+    }
+
+    /// Inline Markdown with each link drawn as its text, which opens nothing.
+    static func inline(_ text: String, linksAsText: Bool) -> AttributedString {
+        guard linksAsText else { return inline(text) }
+        var result = inline(text)
+        for run in result.runs where run.link != nil {
+            result[run.range].link = nil
+            result[run.range].foregroundColor = nil
+        }
+        return result
+    }
+
+    /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
+    /// is a chip: the task chat's status mark and its current name on one
+    /// rounded faint fill (`Palette.taskChip`), the link's text only while the
+    /// name is unknown. A task chat the chat does not know reads as plain text
+    /// (docs/domains/chats.md#task-link). The text's own background can neither
+    /// round nor hold an image, so `TaskChipRenderer` draws the fill behind the
+    /// chip's runs; on iOS 17, which has no text renderer, the mark sits just
+    /// before the tinted name.
+    @MainActor
+    static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?, marks: TaskMarkStyle) -> Text {
+        let styled = inline(source, linksAsText: linksAsText)
+        guard !linksAsText, let tasks, source.contains(TaskLink.prefix) else { return Text(styled) }
+        var out: Text?
+        var plain = AttributedString()
+        // The last character drawn: a chip takes a space before it only after text.
+        var previous: Character?
+        func flush() {
+            guard !plain.characters.isEmpty else { return }
+            previous = plain.characters.last
+            out = out.map { $0 + Text(plain) } ?? Text(plain)
+            plain = AttributedString()
+        }
+        for run in styled.runs {
+            guard let url = run.link, let id = TaskLink.chatId(of: url) else {
+                plain.append(styled[run.range])
+                continue
+            }
+            flush()
+            let written = String(styled[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
+            let chip = chip(id: id, written: written, tasks: tasks, marks: marks, spaced: TaskLink.spacesChip(after: previous))
+            previous = "\u{00A0}"
+            out = out.map { $0 + chip } ?? chip
+        }
+        flush()
+        return out ?? Text(styled)
+    }
+
+    @MainActor
+    private static func chip(id: String, written: String, tasks: TaskLinkStore, marks: TaskMarkStyle, spaced: Bool) -> Text {
+        guard let info = tasks.info[id] else {
+            // Not read yet, or none of this chat's: the link's own text.
+            return Text(AttributedString(written.isEmpty ? String(localized: "Task") : written))
+        }
+        var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
+        name.foregroundColor = Palette.fg
+        name.link = TaskLink.url(chatId: id)
+        let chip: Text
+        if #available(iOS 18.0, *) {
+            // A no-break space before the mark pads the fill as the one after the name does.
+            chip = (Text(verbatim: "\u{00A0}") + marks.mark(info) + Text(name)).customAttribute(TaskChipRun(id: id))
+        } else {
+            name.backgroundColor = Palette.taskChip
+            chip = marks.mark(info) + Text(name)
+        }
+        return spaced ? Text(verbatim: " ") + chip : chip
+    }
+
+    /// The blocks with each image and picture set drawn as its description,
+    /// so nothing is loaded.
+    static func withoutImages(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+        blocks.compactMap { block in
+            switch block {
+            case .image(let alt, _):
+                return alt.isEmpty ? nil : .paragraph(alt)
+            case .pictures(_, let items):
+                let alts = items.map(\.alt).filter { !$0.isEmpty }
+                return alts.isEmpty ? nil : .paragraph(alts.joined(separator: "\n"))
+            default:
+                return block
+            }
+        }
     }
 
     private static func styledInline(_ text: String) -> AttributedString {
@@ -552,12 +685,20 @@ struct MarkdownText: View {
     var fontSize: CGFloat = 16
     var lineSpacing: CGFloat = 5
     var color: Color = Palette.fg
+    /// Draws links as their text and images as their description, so the
+    /// Markdown opens and loads nothing, as a chat card's must not.
+    var textOnly = false
 
-    private var blocks: [MarkdownBlock] { MarkdownParser.parse(source) }
+    private var blocks: [MarkdownBlock] {
+        let parsed = MarkdownParser.parse(source)
+        return textOnly ? MarkdownParser.withoutImages(parsed) : parsed
+    }
     @State private var showViewer = false
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
     @Environment(\.chatLinkOpener) private var linkOpener
+    @Environment(\.taskLinks) private var taskLinks
+    @Environment(\.openTaskChat) private var openTaskChat
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -592,7 +733,21 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in linkOpener?.run(url) ?? .systemAction })
+        .environment(\.openURL, OpenURLAction { url in
+            if textOnly { return .discarded }
+            // A chip for a task chat opens it; the Concierge's link to one is no page.
+            if let id = TaskLink.chatId(of: url) {
+                openTaskChat?.run((chatId: id, title: taskLinks?.info[id]?.name ?? ""))
+                return .handled
+            }
+            return linkOpener?.run(url) ?? .systemAction
+        })
+        // The task chats this text names are read for their chips.
+        .task(id: source) {
+            guard let taskLinks else { return }
+            let ids = TaskLink.ids(in: source)
+            if !ids.isEmpty { taskLinks.register(ids) }
+        }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
@@ -602,35 +757,19 @@ struct MarkdownText: View {
     private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(MarkdownParser.inline(text))
-                .romeFont(fontSize)
-                .lineSpacing(lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            MarkdownParagraph(source: text, linksAsText: textOnly, tasks: taskLinks, fontSize: fontSize, lineSpacing: lineSpacing)
         case .heading(let level, let text):
-            Text(MarkdownParser.inline(text))
+            Text(MarkdownParser.inline(text, linksAsText: textOnly))
                 .romeFont(level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), .semibold)
                 .lineSpacing(3)
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(verbatim: ordered ? "\(start + index)." : "•")
-                            .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
-                            .foregroundStyle(Palette.sub)
-                            .frame(minWidth: 12, alignment: .trailing)
-                        Text(MarkdownParser.inline(item))
-                            .romeFont(fontSize)
-                            .lineSpacing(lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly, tasks: taskLinks)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
-                Text(MarkdownParser.inline(text))
+                Text(MarkdownParser.inline(text, linksAsText: textOnly))
                     .romeFont(fontSize)
                     .foregroundStyle(Palette.sub)
                     .lineSpacing(lineSpacing)
@@ -654,7 +793,7 @@ struct MarkdownText: View {
                 showViewer = true
             }
         case .table(let header, let alignments, let rows):
-            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1)
+            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1, linksAsText: textOnly)
         case .pictures(let layout, let items):
             MarkdownPictureSet(layout: layout, items: items, fontSize: fontSize) { index in
                 viewerStart = gallery.firstIndex { $0.matches(position: Self.pictureKey(block: position, item: index)) } ?? 0
@@ -664,6 +803,89 @@ struct MarkdownText: View {
     }
 }
 
+/// A paragraph of Markdown text with its task link chips. While a chip in it
+/// is active, the paragraph is drawn again for each frame of the running ring;
+/// with none active, off screen or under Reduce Motion, it is drawn once and
+/// the ring stands still.
+struct MarkdownParagraph: View {
+    let source: String
+    let linksAsText: Bool
+    let tasks: TaskLinkStore?
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.offScreen) private var offScreen
+
+    var body: some View {
+        if spins {
+            TimelineView(.animation(minimumInterval: TaskMarkRing.frameInterval, paused: offScreen)) { context in
+                let _ = PerfProbe.count("taskRingTick")
+                paragraph(frame: TaskMarkRing.frame(at: context.date))
+            }
+        } else {
+            paragraph(frame: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func paragraph(frame: Int) -> some View {
+        let marks = TaskMarkStyle.forText(fontSize, dynamicTypeSize, frame: frame)
+        let text = MarkdownParser.text(source, linksAsText: linksAsText, tasks: tasks, marks: marks)
+            .romeFont(fontSize)
+            .lineSpacing(lineSpacing)
+            .fixedSize(horizontal: false, vertical: true)
+        if #available(iOS 18.0, *), hasChips {
+            text.textRenderer(TaskChipRenderer())
+        } else {
+            text
+        }
+    }
+
+    /// Whether this paragraph may draw a chip; the rest keep the plain text drawing.
+    private var hasChips: Bool {
+        !linksAsText && tasks != nil && source.contains(TaskLink.prefix)
+    }
+
+    /// Whether a chip in this paragraph is active and its ring may turn.
+    private var spins: Bool {
+        guard !linksAsText, !reduceMotion, let tasks else { return false }
+        return TaskLink.ids(in: source).contains { tasks.info[$0]?.tone == .running }
+    }
+}
+
+/// A list in the bubble. A nested list sits under its item's text, so each
+/// level steps in by one marker's width. Every level uses the same filled dot.
+struct MarkdownList: View {
+    let ordered: Bool
+    let start: Int
+    let items: [ListItem]
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    var linksAsText = false
+    var tasks: TaskLinkStore?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(verbatim: ordered ? "\(start + index)." : "•")
+                        .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
+                        .foregroundStyle(Palette.sub)
+                        .frame(minWidth: 12, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: 4) {
+                        MarkdownParagraph(source: item.text, linksAsText: linksAsText, tasks: tasks, fontSize: fontSize, lineSpacing: lineSpacing)
+                        ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
+                            if case .list(let ordered, let start, let items) = child {
+                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText, tasks: tasks)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }}
+
 /// A Markdown table in the bubble: the header in medium weight, hairlines
 /// between rows, no borders or fills. Wider than the bubble, it scrolls
 /// sideways inside it; a cell wraps past `maxColumn`.
@@ -672,6 +894,7 @@ struct MarkdownTable: View {
     let alignments: [TableAlignment]
     let rows: [[String]]
     var fontSize: CGFloat = 15
+    var linksAsText = false
 
     /// The widest a column grows before its cells wrap.
     static let maxColumn: CGFloat = 220
@@ -709,7 +932,7 @@ struct MarkdownTable: View {
         let alignment = column < alignments.count ? alignments[column] : .leading
         let frame: Alignment = alignment == .center ? .center : alignment == .trailing ? .trailing : .leading
         return CappedWidth(max: Self.maxColumn) {
-            Text(MarkdownParser.inline(text))
+            Text(MarkdownParser.inline(text, linksAsText: linksAsText))
                 .romeFont(fontSize, weight)
                 .lineSpacing(3)
                 .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)

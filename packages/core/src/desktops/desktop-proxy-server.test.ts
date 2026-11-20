@@ -4,6 +4,7 @@ import { type AddressInfo, connect } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { attachDesktopProxy, desktopUpstream } from "./desktop-proxy-server.js";
 import { createSession } from "../access/auth.js";
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { createTestDb } from "../test/db.js";
 
 afterEach(() => {
@@ -69,7 +70,7 @@ describe("desktopUpstream", () => {
 async function upgradeStatus(path: string): Promise<string> {
   const testDb = createTestDb();
   const server = createServer();
-  const proxy = attachDesktopProxy(server, testDb.db);
+  const proxy = attachDesktopProxy(server, testDb.db, new DashboardAccessState());
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
@@ -102,7 +103,7 @@ describe("attachDesktopProxy", () => {
     rs.stubEnv("WECHAT_USER_DISPLAY", "");
     const testDb = createTestDb();
     const server = createServer();
-    const proxy = attachDesktopProxy(server, testDb.db);
+    const proxy = attachDesktopProxy(server, testDb.db, new DashboardAccessState());
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     try {

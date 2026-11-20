@@ -11,6 +11,9 @@ afterEach(() => {
   while (cleanups.length) cleanups.pop()?.();
 });
 
+const PIN = "123456";
+
+/** A signer whose vault already has a PIN. */
 async function startVault() {
   const dir = mkdtempSync(join(tmpdir(), "vault-cli-"));
   const socketPath = join(dir, "signer.sock");
@@ -24,6 +27,7 @@ async function startVault() {
     server.close();
     rmSync(dir, { recursive: true, force: true });
   });
+  await signer(socketPath, "POST", "/v1/pin", { pin: PIN });
   return socketPath;
 }
 
@@ -56,9 +60,14 @@ describe("vault search", () => {
     await signer(socketPath, "PUT", "/v1/secrets/GITHUB_TOKEN", {
       value: "ghp_topsecret",
       description: "CI token",
+      pin: PIN,
     });
-    await signer(socketPath, "PUT", "/v1/secrets/STRIPE_KEY", { value: "sk_live_x" });
-    await signer(socketPath, "POST", "/v1/grants", { name: "GITHUB_TOKEN", ttlSeconds: 60 });
+    await signer(socketPath, "PUT", "/v1/secrets/STRIPE_KEY", { value: "sk_live_x", pin: PIN });
+    await signer(socketPath, "POST", "/v1/grants", {
+      name: "GITHUB_TOKEN",
+      ttlSeconds: 60,
+      pin: PIN,
+    });
     const env = { ROME_SIGNER_SOCKET: socketPath };
 
     const all = await run(["search"], env);
@@ -82,8 +91,8 @@ describe("vault load", () => {
       ["FIRST_KEY", "value-one-1234"],
       ["SECOND_KEY", "value-two-5678"],
     ]) {
-      await signer(socketPath, "PUT", `/v1/secrets/${name}`, { value });
-      await signer(socketPath, "POST", "/v1/grants", { name, ttlSeconds: 60 });
+      await signer(socketPath, "PUT", `/v1/secrets/${name}`, { value, pin: PIN });
+      await signer(socketPath, "POST", "/v1/grants", { name, ttlSeconds: 60, pin: PIN });
     }
     const script =
       "console.log(process.env.FIRST_KEY, process.env.SECOND_KEY);" +
@@ -99,7 +108,7 @@ describe("vault load", () => {
 
   it("tells the agent to ask for a grant when there is none", async () => {
     const socketPath = await startVault();
-    await signer(socketPath, "PUT", "/v1/secrets/FIRST_KEY", { value: "v" });
+    await signer(socketPath, "PUT", "/v1/secrets/FIRST_KEY", { value: "v", pin: PIN });
     const result = await run(["load", "FIRST_KEY", ...node("console.log('ran')")], {
       ROME_SIGNER_SOCKET: socketPath,
     });

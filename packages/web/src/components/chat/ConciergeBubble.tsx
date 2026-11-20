@@ -61,7 +61,6 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   partOf,
   arrival,
   className,
-  connector,
   children,
 }: {
   side: "start" | "end";
@@ -73,8 +72,6 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   partOf?: string;
   arrival?: number;
   className?: string;
-  /** The mark joining a reply to what it answers, placed against the bubble's top edge. The toolbar steps aside for it. */
-  connector?: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -96,8 +93,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
 
   return (
     <div
-      // Every bubble, a message's later ones included: the thread view
-      // counts a press on one as on its content.
+      // Every bubble, a message's later ones included.
       data-concierge-bubble-part
       data-timeline-anchor={anchorId}
       data-message-part={partOf}
@@ -120,7 +116,6 @@ export const ConciergeBubble = memo(function ConciergeBubble({
         ref={boxRef}
       >
         {children}
-        {connector}
         {touch ? (
           // Not drawn: anchored inside the bubble so its 44px box cannot
           // widen the transcript.
@@ -144,14 +139,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
             data-bubble-toolbar
             className={cn(
               "absolute bottom-full flex w-max translate-y-2 items-center rounded-8 border border-border bg-surface shadow-4",
-              // A connector stands at 20px to 52px in from the outer edge.
-              side === "start"
-                ? connector
-                  ? "left-14"
-                  : "left-0"
-                : connector
-                  ? "right-14"
-                  : "right-0",
+              side === "start" ? "left-0" : "right-0",
               "pointer-events-none opacity-0 transition-opacity group-focus-within/bubble:pointer-events-auto group-focus-within/bubble:opacity-100 group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100 motion-reduce:transition-none",
             )}
           >

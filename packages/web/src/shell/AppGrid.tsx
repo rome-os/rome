@@ -1,4 +1,13 @@
-import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
+import {
+  AppWindow,
+  ExternalLink,
+  Info,
+  MessageCircle,
+  MessageSquare,
+  Pin,
+  PinOff,
+  Search,
+} from "lucide-react";
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -10,6 +19,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat-list-mode";
@@ -137,13 +147,14 @@ function writeLocalApps(apps: InstalledAppCard[]): void {
 }
 
 function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
+  const Icon = entry.id === "chat" ? MessageSquare : entry.Icon;
   return (
     <span
-      className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+      className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-foreground transition-colors"
       data-motion={entry.sidebarIconMotion}
       aria-hidden
     >
-      <entry.Icon className="h-4 w-4 shrink-0" aria-hidden />
+      <Icon className="h-4 w-4 shrink-0" aria-hidden />
     </span>
   );
 }
@@ -400,6 +411,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
               <Link
                 to={entryHref(entry)}
                 aria-label={label}
+                aria-current={active ? "page" : undefined}
                 onPointerEnter={chatPeek.onPointerEnter}
                 onPointerLeave={chatPeek.onPointerLeave}
                 className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
@@ -419,6 +431,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
               <Link
                 to={entryHref(entry)}
                 aria-label={label}
+                aria-current={active ? "page" : undefined}
                 className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
               >
                 {renderBuiltinIcon(entry)}
@@ -442,6 +455,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             <Link
               to={app.href}
               aria-label={app.displayName}
+              aria-current={active ? "page" : undefined}
               className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
             >
               <RailAppIcon app={app} />
@@ -469,7 +483,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     // Without hoverable content, leaving the trigger closes the tooltip.
     <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
-        className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
+        className={`flex shrink-0 flex-col gap-[var(--row-gap)] pb-2 ${labelled ? "items-stretch px-2 pt-2" : "items-center px-3"}`}
       >
         {onSearch ? (
           <Tooltip>
@@ -478,15 +492,17 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 type="button"
                 onClick={onSearch}
                 aria-label={t("recentChats.search")}
-                className={`${tileClass} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                className={`${labelled ? "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-full bg-surface-muted px-[var(--row-px)] text-left text-ui font-normal transition outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 hover:bg-surface-hover" : `${tileClass} ${IDLE_CLASS}`} mb-[var(--row-py-md)] text-muted-foreground hover:text-foreground`}
               >
-                <Search className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                  <Search className="h-4 w-4 shrink-0" />
+                </span>
                 {labelled ? (
                   <>
                     <RailLabel>{t("sidebar.search")}</RailLabel>
-                    <kbd className="shrink-0 font-sans text-aux text-subtle-foreground max-md:hidden">
-                      {chatSearchShortcutForPlatform()}
-                    </kbd>
+                    <span className="flex shrink-0 border-l border-border pl-3 max-md:hidden">
+                      <Kbd variant="ghost">{chatSearchShortcutForPlatform()}</Kbd>
+                    </span>
                   </>
                 ) : null}
               </button>
@@ -495,7 +511,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
           </Tooltip>
         ) : null}
         {pins.slice(0, fixedCount).map(renderPin)}
-        {pins.length > fixedCount ? <Separator className={labelled ? "my-1" : "my-1 w-6"} /> : null}
+        {pins.length > fixedCount ? (
+          <Separator
+            className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
+          />
+        ) : null}
         {pins.slice(fixedCount).map(renderPin)}
         <RecentAppsRail
           apps={recentApps}

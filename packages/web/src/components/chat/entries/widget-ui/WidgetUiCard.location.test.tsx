@@ -190,8 +190,22 @@ describe("the share-location card where the browser already decided", () => {
       />,
     );
     expect(screen.getByText("Location shared · ±9 m")).toBeTruthy();
+    // The centered line a model switch is, across the transcript, not a bubble.
+    const note = screen.getByRole("note");
+    expect(note.textContent).toBe("Location shared · ±9 m");
+    expect(note.className).toContain("text-center");
+    expect(note.className).toContain("w-full");
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByText("Share your location?")).toBeNull();
+  });
+
+  it("asks in Rome's own words, as the connect card does", async () => {
+    render(
+      <WidgetUiCard widgetId="ask-1" toolUseId="l1" appId="core" ui={ui} text="" waiting={{}} />,
+    );
+    expect(await screen.findByText("Share your location?")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
   });
 
   it("says the browser refuses, and keeps Not now", async () => {

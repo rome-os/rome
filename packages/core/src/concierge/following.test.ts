@@ -189,6 +189,8 @@ function setup(
     triage?: Record<string, "important" | "digest" | "ignore">;
     triageLine?: string;
     catalog?: ProviderSources;
+    /** Holds every read of the sources until it settles, as a slow provider does. */
+    sourcesHeld?: Promise<void>;
   } = {},
 ) {
   /** The Concierge chats that exist and are not archived; "calendar" is a topic chat. */
@@ -200,7 +202,7 @@ function setup(
   const chatOwners = new Map<string, string>();
   /** The task notes each chat's digest would list, until a digest that lists them runs to its end. */
   const taskNotes = new Map<string, DigestTaskNotes>();
-  /** Visitors dropped from the dashboard allow-list. */
+  /** Dashboard admins dropped from the allow-list. */
   const dropped = new Set<string>();
   /** The chat whose turn calls the follow actions. */
   const calling = { chat: null as string | null };
@@ -313,6 +315,7 @@ function setup(
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
+        await options.sourcesHeld;
         return {
           status: "ok",
           data: options.catalog ?? sources(options.gmailStatus, options.gmailUndelivered),
@@ -1504,7 +1507,6 @@ describe("follows in several Concierge chats", () => {
       text: `<task_review>\n<ended_no_response task="${id}" title="Flights"/>\n</task_review>`,
       passive: [],
       noResponse: [id],
-      unstarted: [],
     });
 
     it("gives a chat with only task notes a digest turn that lists them", async () => {
@@ -1639,6 +1641,81 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("marks the follows an archive moves, until they move again, and moves them back on restore", async () => {
+    const s = setup();
+    s.liveChats.set("trips", { id: "trips", name: "Trips", main: false });
+    s.calling.chat = "calendar";
+    for (const target of ["acme/widgets", "acme/gadgets", "acme/gizmos"]) {
+      await s.following().follow({ source: "github", target });
+    }
+    s.calling.chat = null;
+    // A delete's move marks nothing; an archive's marks each follow it moves.
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(3);
+    s.liveChats.delete("calendar");
+    const moved = async () =>
+      (await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).map((f) => f.target);
+    expect(await moved()).toEqual(["acme/widgets", "acme/gadgets", "acme/gizmos"]);
+    // Another owner has none of them.
+    expect(await s.following().followsMovedFrom("calendar", null, "visitor:acct-ann")).toEqual([]);
+    // Ended in the main chat, moved to another chat, or changed where it is: only the last stays.
+    await s.following().unfollow("github", "acme/gizmos", GUARDIAN_OWNER);
+    await s.following().configure({ source: "github", target: "acme/gadgets", chatId: "trips" });
+    await s.following().configure({
+      source: "github",
+      target: "acme/widgets",
+      chatId: "concierge",
+      preference: "only failures",
+    });
+    expect(await moved()).toEqual(["acme/widgets"]);
+
+    s.liveChats.set("calendar", { id: "calendar", name: "Calendar", main: false });
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, true)).toBe(1);
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
+    expect(await chatOf(s, "acme/gadgets")).toMatchObject({ id: "trips" });
+    expect(await moved()).toEqual([]);
+    s.stop();
+  });
+
+  it("lists what an archive moved or would move without holding up a follow change behind a slow source", async () => {
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(1);
+    // Past the sources' TTL, a provider that does not answer yet.
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(Date.now() + 31_000);
+    let answer = () => {};
+    options.sourcesHeld = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const moved = s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER);
+    const inChat = s.following().followsOfChat("concierge", GUARDIAN_OWNER);
+    // The unarchive's own change goes through while those lists still wait.
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, false)).toBe(0);
+    answer();
+    expect(await moved).toEqual([{ source: "github", label: "GitHub", target: "acme/widgets" }]);
+    await inChat;
+    s.stop();
+  });
+
+  it("keeps an archive's follows in the main chat when the restore says so, and forgets they moved", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    expect(await s.following().moveToMainChat("calendar", null)).toBe(1);
+    // Moved by a delete: nothing to move back.
+    expect(await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).toEqual([]);
+    await s.following().configure({ source: "github", target: "acme/widgets", chatId: "calendar" });
+    expect(await s.following().moveToMainChat("calendar", null, true)).toBe(1);
+    expect(await s.following().restoreToChat("calendar", null, GUARDIAN_OWNER, false)).toBe(0);
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "concierge", main: true });
+    expect(await s.following().followsMovedFrom("calendar", null, GUARDIAN_OWNER)).toEqual([]);
+    s.stop();
+  });
+
   it("lists only one chat's follows of one owner, and ending them keeps another person's routines", async () => {
     const s = setup();
     const ann = "visitor:acct-ann";
@@ -1680,7 +1757,7 @@ describe("follows in several Concierge chats", () => {
 
   const ANN = "visitor:acct-ann";
   const annMain = mainChatIdOf(ANN);
-  /** Ann, a dashboard visitor, with her own main Concierge chat. */
+  /** Ann, a dashboard admin, with her own main Concierge chat. */
   const withAnn = (s: ReturnType<typeof setup>) => {
     s.liveChats.set(annMain, { id: annMain, name: "Concierge", main: true });
     s.chatOwners.set(annMain, ANN);

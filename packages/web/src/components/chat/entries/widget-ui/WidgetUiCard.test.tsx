@@ -101,6 +101,60 @@ describe("a widget described as data", () => {
     expect(fetch.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(2);
   });
 
+  it("draws Markdown that opens and loads nothing: links, images, raw HTML and diagrams", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch");
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                {
+                  type: "widget",
+                  toolUseId: "w-md",
+                  appId: "core",
+                  text: "Sleep was good.",
+                  ui: {
+                    components: [
+                      {
+                        id: "root",
+                        component: "Markdown",
+                        text: [
+                          "**Sleep** was good. See [the CDC](https://www.cdc.gov/sleep/).",
+                          "![a chart](https://example.com/chart.png)",
+                          '<img src="https://example.com/raw.png" alt="raw"> <a href="https://example.com/raw">raw link</a>',
+                          "```mermaid",
+                          'flowchart LR\n  A@{ img: "https://example.com/p.png" }\n  click A "https://example.com/open"',
+                          "```",
+                          "| Day | Hours |\n| --- | --- |\n| Mon | 7h |",
+                          "```\nconst x = 1;\n```",
+                        ].join("\n\n"),
+                      },
+                    ],
+                  },
+                },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+    const bold = await screen.findByText("Sleep");
+    expect(bold.getAttribute("data-streamdown")).toBe("strong");
+    expect(screen.getByText("the CDC").closest("a")).toBeNull();
+    expect(screen.getByText("a chart")).toBeTruthy();
+    // The diagram stays its source, so it draws no SVG with links or images.
+    expect(await screen.findByText(/click A/)).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.querySelector("img, image, svg a, a[href]")).toBeNull();
+    // Tables and code get no copy, download or fullscreen buttons.
+    expect(screen.getByText("Mon")).toBeTruthy();
+    expect(document.querySelector("button")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps a widget part with neither a component nor a description out of the transcript", () => {
     expect(
       parseEntries(JSON.stringify([{ type: "widget", toolUseId: "w", appId: "meals", text: "x" }])),
@@ -262,5 +316,179 @@ describe("a widget described as data", () => {
     await waitFor(() => expect(pending).toHaveLength(2));
     pending[1](Response.json({ calories: 1, goal: 2, meals: [{ name: "Newest" }] }));
     expect(await screen.findByText("Newest")).toBeTruthy();
+  });
+
+  it("draws a stat against its range, a bar chart, a callout and rows that open links", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch");
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                {
+                  type: "widget",
+                  toolUseId: "w-health",
+                  appId: "core",
+                  text: "Resting HR 64, over 56–60.",
+                  ui: {
+                    components: [
+                      {
+                        id: "root",
+                        component: "Column",
+                        children: ["rhr", "sleep", "week", "tip", "stop", "page"],
+                      },
+                      {
+                        id: "rhr",
+                        component: "Stat",
+                        label: "Resting HR",
+                        value: 64,
+                        unit: "bpm",
+                        range: { low: 56, high: 60 },
+                        icon: "heart",
+                      },
+                      {
+                        id: "sleep",
+                        component: "Stat",
+                        label: "Sleep",
+                        value: 7.2,
+                        unit: "h",
+                        range: { low: 7, high: 7.7 },
+                      },
+                      {
+                        id: "week",
+                        component: "Chart",
+                        kind: "bar",
+                        points: [
+                          { label: "Mon", value: 8100 },
+                          { label: "Today", value: 4210, highlight: "accent" },
+                        ],
+                        unit: "steps",
+                      },
+                      { id: "tip", component: "Text", text: "Rest tonight.", tone: "info" },
+                      {
+                        id: "stop",
+                        component: "Row",
+                        children: ["stop-name"],
+                        href: "maps://?q=Belem+Tower",
+                      },
+                      { id: "stop-name", component: "Text", text: "Belém Tower" },
+                      {
+                        id: "page",
+                        component: "Text",
+                        text: "Opening hours",
+                        href: "https://example.com/hours",
+                      },
+                    ],
+                  },
+                },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+    // The reader, not the card, says where each value sits.
+    expect(await screen.findByText("Usual 56–60 bpm")).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText("Normal")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Mon 8,100 steps, Today 4,210 steps" })).toBeTruthy();
+    expect(screen.getByText("Rest tonight.")).toBeTruthy();
+    // A place opens in Apple Maps, a page as itself; neither is an event.
+    expect(screen.getByRole("link", { name: "Belém Tower" }).getAttribute("href")).toBe(
+      "https://maps.apple.com/?q=Belem+Tower",
+    );
+    expect(screen.getByRole("link", { name: "Opening hours" }).getAttribute("href")).toBe(
+      "https://example.com/hours",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  const drawCard = (components: unknown[]) =>
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                { type: "widget", toolUseId: "w-x", appId: "core", text: "x", ui: { components } },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+  it("keeps a link on a callout and on a row of stat tiles", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      { id: "root", component: "Column", children: ["tip", "tiles"] },
+      {
+        id: "tip",
+        component: "Text",
+        text: "Read more",
+        tone: "info",
+        href: "https://example.com/tip",
+      },
+      { id: "tiles", component: "Row", children: ["a", "b"], href: "https://example.com/day" },
+      { id: "a", component: "Stat", label: "Sleep", value: 7 },
+      { id: "b", component: "Stat", label: "Steps", value: 8000 },
+    ]);
+    expect((await screen.findByRole("link", { name: "Read more" })).getAttribute("href")).toBe(
+      "https://example.com/tip",
+    );
+    expect(screen.getByRole("link", { name: /Sleep.*Steps/ }).getAttribute("href")).toBe(
+      "https://example.com/day",
+    );
+  });
+
+  it("draws negative bars below a zero line, each as long as its value", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      {
+        id: "root",
+        component: "Chart",
+        kind: "bar",
+        points: [
+          { label: "Mon", value: -10 },
+          { label: "Tue", value: -100 },
+          { label: "Wed", value: 50 },
+        ],
+      },
+    ]);
+    const chart = await screen.findByRole("img", { name: "Mon -10, Tue -100, Wed 50" });
+    const bars = [...chart.querySelectorAll("rect")].map((r) => ({
+      y: Number(r.getAttribute("y")),
+      h: Number(r.getAttribute("height")),
+    }));
+    const zero = Number(chart.querySelector("line")?.getAttribute("y1"));
+    // Negative bars start at the zero line and go down; the positive one ends there.
+    expect(bars[0]?.y).toBeCloseTo(zero);
+    expect(bars[1]?.y).toBeCloseTo(zero);
+    expect(bars[2]?.y + bars[2]?.h).toBeCloseTo(zero);
+    // Sizes keep their ratio: -100 is ten times -10, and twice 50.
+    expect(bars[1]?.h).toBeCloseTo(bars[0]!.h * 10);
+    expect(bars[1]?.h).toBeCloseTo(bars[2]!.h * 2);
+  });
+
+  it("draws a chart of all zeros as flat bars on the baseline", async () => {
+    rs.spyOn(globalThis, "fetch");
+    drawCard([
+      {
+        id: "root",
+        component: "Chart",
+        kind: "bar",
+        points: [
+          { label: "Mon", value: 0 },
+          { label: "Tue", value: 0 },
+        ],
+      },
+    ]);
+    const chart = await screen.findByRole("img", { name: "Mon 0, Tue 0" });
+    for (const rect of chart.querySelectorAll("rect")) {
+      expect(Number(rect.getAttribute("y"))).toBeGreaterThanOrEqual(0);
+    }
   });
 });

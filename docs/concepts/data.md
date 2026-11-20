@@ -45,6 +45,7 @@ A file shown in a dashboard chat is a copy in the profile's `assets` folder unde
 - An attached file's message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
 - `core:show_file` takes an absolute path to a regular file of at most 100 MB under the projects, memory or assets folder, with links resolved first. It refuses keys, credentials, `.env` files, databases and the insides of `.git`, `.ssh` and similar folders. It returns the URL and the Markdown that shows the file.
 - Only images, audio, video, and PDFs open in the browser. Every other type downloads.
+- A chat's [outputs](../domains/chats.md#outputs) read a file the agent wrote where it lies, not from a copy. They serve it only from the projects, memory or assets folder, with the same refusals as `core:show_file`, so an output can list a file it cannot open.
 - In chat, pictures show as thumbnails that zoom, video and audio play in place (a file the browser cannot play becomes a chip), and other files appear as a chip that saves the file under its own name. The server sends no file name, so the name the chat asks for is the one used.
 
 ## Routines
@@ -60,7 +61,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 - Creating a routine fails when its stored arguments do not satisfy the bound action's input schema, so no routine is saved with arguments that fail on every fire.
 - A routine with an active run (executing, or parked awaiting [guardian approval](messaging.md#approvals)) cannot be deleted out from under it. The active-run check and the delete are atomic.
 - A run still executing when Rome stops is recorded as an error at the next start, so it does not block a delete. A run awaiting approval stays active.
-- An app-managed routine can only be deleted by the managing app, never by a user.
+- An app-managed routine can only be deleted by the managing app, never by a user. Uninstalling the app deletes its routines and their history. Disabling it only pauses the ones that fire its actions.
 - A schedule trigger states its timezone binding explicitly. *Floating* resolves against the guardian's current timezone, so the routine follows them when it changes. *Fixed* pins the stored zone forever.
 - A schedule that repeats every N days fires N calendar days apart, across month and year ends. The count starts on the routine's creation day, read in the zone the schedule fires in. A floating schedule reads that day in the guardian's current zone, so the first gap after the guardian changes zone can be shorter or longer than N days.
 
@@ -76,14 +77,14 @@ Personal data is data about the guardian that only they should see, which their 
 
 - **Source**: where personal data comes from, such as `apple_health`. Each source declares its types in core.
 - **Origin**: the device that sent a source's data, such as the guardian's iPhone. A query reads one origin per source.
-- **Type**: one kind of reading inside a source, such as `stepCount`, with one unit and one shape: bucket, sample or record.
+- **Type**: one kind of reading or entry inside a source, such as `stepCount` or calendar `events`, with one shape: bucket, sample, record or entry.
 - **Sync**: one run on the device that reads changes and sends them.
 - **Ingest**: one batch as the server received it.
 - **Personal-data action**: an action that reads the store. It runs only in a private turn, and is refused in a shared one.
 
 **Contracts:**
 
-- A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, is not personal data.
+- A source joins the store when each item is a reading, with a time range and a numeric value that a query aggregates, or an entry, a document with a time, such as a calendar event, that a query lists. Document data with no time, such as contacts or notes, is not personal data.
 - An ingest is idempotent per batch and per item, so a device may resend a batch after a lost answer.
 - Rome keeps personal data until the guardian deletes it. Deleting an origin removes its readings and keeps the ingest log, which holds counts and never a value.
 - Facts an agent already wrote into memory or a chat are not personal data anymore, and nothing checks where they go next.

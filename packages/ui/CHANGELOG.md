@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.13](https://github.com/rome-os/rome/compare/ui-v0.3.12...ui-v0.3.13) (2026-11-19)
+
+
+### Features
+
+* **app-runtime:** add a Markdown widget component ([#2316](https://github.com/rome-os/rome/issues/2316)) ([78f3467](https://github.com/rome-os/rome/commit/78f3467fab2793d11142b0c939c43cd43a02f34c))
+* **chats:** list what a chat's agent produced in an Outputs tab ([#2340](https://github.com/rome-os/rome/issues/2340)) ([62f0935](https://github.com/rome-os/rome/commit/62f0935023843368deea20c0f473444b354cd8cf))
+* **vault:** require a guardian PIN, checked by the signer, for grants and secret writes ([#2309](https://github.com/rome-os/rome/issues/2309)) ([fd79e29](https://github.com/rome-os/rome/commit/fd79e29e65dc1f909488cec0ebcccd8cf9785dab))
+
+## [0.3.12](https://github.com/rome-os/rome/compare/ui-v0.3.11...ui-v0.3.12) (2026-11-17)
+
+
+### Features
+
+* **ui:** add progressive blur to web chat chrome ([#2287](https://github.com/rome-os/rome/issues/2287)) ([f044239](https://github.com/rome-os/rome/commit/f044239cc9847cbe9191347d5ce38f4102007a12))
+* **ui:** leave Enter and Escape to an input method while it composes ([#2251](https://github.com/rome-os/rome/issues/2251)) ([4b73e01](https://github.com/rome-os/rome/commit/4b73e0121b9da641b60a0ab34537184916d0ac51))
+
+
+### Bug Fixes
+
+* **ui:** stop a long first cell from taking a Markdown table's width ([#2235](https://github.com/rome-os/rome/issues/2235)) ([1820656](https://github.com/rome-os/rome/commit/1820656c7068b12f8b897c62180a89741b4d8311))
+
 ## [0.3.11](https://github.com/rome-os/rome/compare/ui-v0.3.10...ui-v0.3.11) (2026-11-15)
 
 

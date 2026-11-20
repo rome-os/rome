@@ -22,6 +22,7 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { didYouMean } from "./registry.js";
 import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
@@ -146,15 +147,20 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // roots, outside this action's context.
   "system:publish_event",
   "core:set_agent_name",
-  // Reads a person and their notes (people/read-person.ts), which only main
+  // Reads a person and their notes (people/actions/read-person.ts), which only main
   // registers.
   "core:read_person",
+  // Lists the phone book (people/phone-book/actions/list-people.ts), which only
+  // main registers.
+  "core:list_people",
   "core:show_file",
   // Reads of the personal-data store (personal-data/actions.ts).
   "core:personal_data_catalog",
   "core:personal_data_query",
   // The device actions (connections/device/actions.ts). The node client that
   // calls a device lives in main.
+  "core:gmail_read",
+  "core:gmail_send",
   "core:device_describe",
   "core:device_run",
   "core:app_connection_read",
@@ -426,8 +432,8 @@ interface ActionWorkerProcess {
  * Typed so the app-facing invocation port can map it to `code: "not_found"`
  * without matching on the message. */
 export class ActionNotFoundError extends Error {
-  constructor(actionName: string) {
-    super(`Action "${actionName}" not found`);
+  constructor(actionName: string, hint = "") {
+    super(`Action "${actionName}" not found${hint}`);
     this.name = "ActionNotFoundError";
   }
 }
@@ -567,7 +573,7 @@ export class ActionEngine {
   ): Promise<ActionResult> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name);
+      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
     }
     if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
       log.info("personal-data action refused outside a private turn", {
@@ -620,7 +626,7 @@ export class ActionEngine {
   ): Promise<ActionDispatchReceipt> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name);
+      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
     }
     const store = replayContext.getStore();
     if (store?.coordinationRoot) {
@@ -809,7 +815,7 @@ export class ActionEngine {
       return { status: "pending_approval", approval: pending };
     }
 
-    // For the `summon` action, stamp the child agent name as an attribute
+    // For the `system:summon` action, stamp the child agent name as an attribute
     // so the summon-tree CLI can reconstruct parent/child agent relationships
     // without needing a separate `summon:{child}` span.
     const summonAttrs: Record<string, string> =
@@ -1353,7 +1359,10 @@ export class ActionEngine {
       throw new Error("Only the main ActionEngine can accept detached actions");
     }
     if (!this.registry.get(payload.actionName)) {
-      throw new ActionNotFoundError(payload.actionName);
+      throw new ActionNotFoundError(
+        payload.actionName,
+        didYouMean(this.registry, payload.actionName),
+      );
     }
     const executionId = payload.context.executionId;
     if (!executionId || payload.context.rootExecutionId !== executionId) {
@@ -2224,6 +2233,11 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
+        // The replay reads as the turn that asked: without them a chatless
+        // turn's replay reads as outside any turn (app-host chat-calls). A
+        // nested call's own context names no turn, so the caller's is read.
+        turnId: context?.turnId ?? actionExecutionContext.getStore()?.turnId,
+        audience: context?.audience ?? actionExecutionContext.getStore()?.audience,
         preview,
       },
     });

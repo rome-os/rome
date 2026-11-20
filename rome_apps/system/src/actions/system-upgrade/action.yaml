@@ -1,6 +1,6 @@
 name: system_upgrade
 type: system
-description: Nightly upgrade probe — asks Rome Cloud whether a release is pending and, if so, opens the consent countdown. Fired by the system_upgrade routine; not agent-callable.
+description: Nightly upgrade probe — asks Rome Cloud whether a release is pending and, if so, opens the consent countdown. Fired by the system:system_upgrade routine; not agent-callable.
 complexity: simple
 speed: moderate
 reliability: high

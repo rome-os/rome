@@ -1,4 +1,4 @@
-import type { RomeTool } from "../agent/index.js";
+import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import type { ThreadContext } from "./types.js";
 
@@ -10,6 +10,8 @@ export interface SessionToolContext {
   /** Runtime session id. */
   sessionId: string;
   isSubagent: boolean;
+  /** How the session's place draws widgets: as cards, or as plain text. */
+  widgets: WidgetDrawing;
   /** The running turn's id, or undefined between turns. */
   getTurnId(): string | undefined;
   /** The running turn's thread, else the session's. */

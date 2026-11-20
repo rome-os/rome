@@ -49,36 +49,42 @@ import Testing
         let meter = VoiceLevelMeter()
         let bars = VoiceInputWaveform.Bars()
         meter.take(tone(0, samples: 1600))
-        bars.advance(to: Date(), meter: meter, steps: 1)
-        bars.advance(to: Date().addingTimeInterval(0.05), meter: meter, steps: 1)
+        bars.advance(to: Date(), meter: meter, steps: 1, keeping: 100)
+        bars.advance(to: Date().addingTimeInterval(0.05), meter: meter, steps: 1, keeping: 100)
         #expect(bars.values == [0, 0])
         // A quiet room is silence too.
         meter.take(tone(0.0008, samples: 800))
-        bars.advance(to: Date().addingTimeInterval(0.1), meter: meter, steps: 1)
+        bars.advance(to: Date().addingTimeInterval(0.1), meter: meter, steps: 1, keeping: 100)
         #expect(bars.values == [0, 0, 0])
         meter.take(tone(0.2, samples: 800))
-        bars.advance(to: Date().addingTimeInterval(0.15), meter: meter, steps: 1)
+        bars.advance(to: Date().addingTimeInterval(0.15), meter: meter, steps: 1, keeping: 100)
         #expect(bars.values.count == 4 && bars.values[3] > 0.5)
         // No audio, no step: the waveform holds.
-        bars.advance(to: Date().addingTimeInterval(0.2), meter: meter, steps: 1)
+        bars.advance(to: Date().addingTimeInterval(0.2), meter: meter, steps: 1, keeping: 100)
         #expect(bars.values.count == 4)
     }
 
-    @Test func reduceMotionKeepsFiveSecondsToo() {
+    @Test func keepsAsManyBarsAsTheRowHolds() {
         let meter = VoiceLevelMeter()
         let bars = VoiceInputWaveform.Bars()
         var now = Date()
         meter.take(tone(0.2, samples: 3200))
-        bars.advance(to: now, meter: meter, steps: 4)
+        bars.advance(to: now, meter: meter, steps: 4, keeping: 40)
         #expect(bars.values.first ?? 0 > 0.5)
-        // Five seconds of silence, 200 ms a step.
-        for _ in 0..<25 {
+        // Ten seconds of silence, 200 ms a step: 50 steps, more than the row holds.
+        for _ in 0..<50 {
             now = now.addingTimeInterval(0.2)
             meter.take(tone(0, samples: 3200))
-            bars.advance(to: now, meter: meter, steps: 4)
+            bars.advance(to: now, meter: meter, steps: 4, keeping: 40)
         }
-        #expect(bars.values.count == 25)
+        #expect(bars.values.count == 40)
         #expect(bars.values.allSatisfy { $0 == 0 })
+    }
+
+    @Test func aWideRowHoldsMoreThanFiveSeconds() {
+        // An iPad in landscape: about 230 steps, well over the 100 of 5 s.
+        #expect(VoiceInputWaveform.capacity(width: 1366) > 100)
+        #expect(VoiceInputWaveform.capacity(width: 0) == 1)
     }
 
     @Test func thirtyFramesASecondStillTakesTwentyStepsASecond() {
@@ -89,7 +95,7 @@ import Testing
         for frame in 0..<30 {
             let now = start.addingTimeInterval(Double(frame) / 30)
             if frame % 3 == 0 { meter.take(tone(0.2, samples: 1600)) }
-            bars.advance(to: now, meter: meter, steps: 1)
+            bars.advance(to: now, meter: meter, steps: 1, keeping: 100)
         }
         #expect(bars.values.count == 20)
     }
@@ -99,8 +105,8 @@ import Testing
         let bars = VoiceInputWaveform.Bars()
         let start = Date()
         meter.take(tone(0.2, samples: 3200))
-        bars.advance(to: start, meter: meter, steps: 1)
-        bars.advance(to: start.addingTimeInterval(0.15), meter: meter, steps: 1)
+        bars.advance(to: start, meter: meter, steps: 1, keeping: 100)
+        bars.advance(to: start.addingTimeInterval(0.15), meter: meter, steps: 1, keeping: 100)
         #expect(bars.values.count == 4)
     }
 }

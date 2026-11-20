@@ -1,19 +1,60 @@
 import Foundation
 import Observation
 
-/// An instance below `minimumInstanceVersion` lacks an API the app calls:
-/// the update page covers the app until it is updated. A newer release for
-/// an instance at or above it is only offered, in the drawer, and updates in
-/// the background.
+/// The app has two minimum instance versions. Below `blockingMinimumInstanceVersion`
+/// Chat itself lacks an API, and the update page covers the app until the
+/// instance is updated. Below `minimumInstanceVersion` only some newer
+/// features lack one: the page asks once to update, and the upgrade runs in
+/// the background like one started from the drawer. A newer release for an
+/// instance at or above both is only offered, in the drawer.
 /// These are the rules, kept free of state so tests can read them.
 enum UpdateGate {
-    /// The oldest instance release with every API the app calls. Raise it
-    /// only when the app starts calling an API a newer release brought.
-    static let minimumInstanceVersion = "1.1.196"
+    // Only ios/Tools/bump-minimum.mjs changes the two minimums, from the
+    // entries in ios/Config/pending-minimum.json (ios/README.md says when).
 
-    /// Whether the app works with an instance on `version`. An unknown or
-    /// unreadable version is never held against it.
-    static func isSupported(_ version: String?, minimum: String = minimumInstanceVersion) -> Bool {
+    /// The oldest instance release whose API Chat itself works with. A
+    /// `blocking` entry raises it: one where sending, reading or streaming a
+    /// chat calls an API a newer release brought. The app cannot be used
+    /// during that update.
+    static let blockingMinimumInstanceVersion = "1.1.196"
+
+    /// The oldest instance release with every API the app calls. Every entry
+    /// raises it; the update it asks for runs in the background. Never below
+    /// `blockingMinimumInstanceVersion`.
+    static let minimumInstanceVersion = "1.1.213"
+
+    /// The first release with each feature's API, for a feature that checks
+    /// the instance's version itself. A feature never checks against the
+    /// minimums: the app runs below the background one while it updates.
+    /// Share links (#1976).
+    static let shareLinksInstanceVersion = "1.1.191"
+
+    /// The two minimums an updater goes by; tests and snapshot runs pass others.
+    struct Minimums: Equatable {
+        var blocking = UpdateGate.blockingMinimumInstanceVersion
+        var background = UpdateGate.minimumInstanceVersion
+    }
+
+    /// How far below the app's needs an instance is.
+    enum Tier: Equatable {
+        /// At or above both minimums: a newer release is only offered.
+        case supported
+        /// Below the background minimum only: updated in the background.
+        case background
+        /// Below the blocking minimum: Chat cannot work until it is updated.
+        case blocking
+    }
+
+    static func tier(_ version: String?, minimums: Minimums = Minimums()) -> Tier {
+        if !isSupported(version, minimum: minimums.blocking) { return .blocking }
+        if !isSupported(version, minimum: minimums.background) { return .background }
+        return .supported
+    }
+
+    /// Whether an instance on `version` is at or above `minimum`: one of the
+    /// two minimums, or a feature's own release. An unknown or unreadable
+    /// version is never held against it.
+    static func isSupported(_ version: String?, minimum: String) -> Bool {
         guard let version, let have = numbers(version), let need = numbers(minimum) else { return true }
         for index in 0..<max(have.count, need.count) {
             let a = index < have.count ? have[index] : 0, b = index < need.count ? need[index] : 0
@@ -197,19 +238,26 @@ struct PendingUpgrade: Codable, Equatable {
     }
 }
 
-/// The latest release whose banner the guardian closed, per instance: a
-/// newer release shows the banner again.
+/// Per instance, the releases the guardian already answered an update
+/// prompt for: the latest release whose banner they closed (a newer release
+/// shows the banner again), and the release the background page handed to
+/// the drawer (the page does not ask for it again, after a relaunch or a
+/// switch to another instance and back too).
 struct UpdateBannerStore {
     var defaults: UserDefaults = .standard
 
-    func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: key(instanceID)) }
-    func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: key(instanceID)) }
-    private func key(_ instanceID: String) -> String { Self.prefix + instanceID }
+    func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: Self.prefix + instanceID) }
+    func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: Self.prefix + instanceID) }
     static let prefix = "updateBannerDismissed."
 
-    /// Sign-out, or another account: the banner was that guardian's to close.
+    func handedOver(_ instanceID: String) -> String? { defaults.string(forKey: Self.handedOverPrefix + instanceID) }
+    func handOver(_ version: String, for instanceID: String) { defaults.set(version, forKey: Self.handedOverPrefix + instanceID) }
+    static let handedOverPrefix = "updateHandedOver."
+
+    /// Sign-out, or another account: the prompts were that guardian's to answer.
     static func removeAll(defaults: UserDefaults = .standard) {
         defaults.removeKeys(prefix: prefix)
+        defaults.removeKeys(prefix: handedOverPrefix)
     }
 }
 
@@ -233,9 +281,10 @@ struct PendingUpgradeStore {
 
 /// Whether the open instance is on its latest release, and the upgrade that
 /// brings it there. While `blocking`, the update page covers the app: always
-/// below the minimum version, and while an upgrade started from the page
-/// runs. An upgrade started from the drawer runs in the background, its
-/// progress in the drawer's row.
+/// below the blocking minimum, and while an upgrade started from the page
+/// runs. Below the background minimum the page asks once, then hands the
+/// upgrade to the drawer. An upgrade started from the drawer runs in the
+/// background, its progress in the drawer's row.
 @MainActor
 @Observable
 final class InstanceUpdater {
@@ -271,6 +320,15 @@ final class InstanceUpdater {
     }
 
     /// What the drawer's update row shows.
+    /// Which update page asks for a release the app needs.
+    enum PageVariant: Equatable {
+        /// Below the blocking minimum: the app waits for the update.
+        case blocking
+        /// Below the background minimum only: one button hands the upgrade
+        /// to the drawer.
+        case background
+    }
+
     enum RowState: Equatable {
         /// A release the instance can do without: confirm, then update.
         case offered(String)
@@ -294,27 +352,49 @@ final class InstanceUpdater {
     private(set) var runsInBackground = false
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
+    /// The release the background page handed to the drawer on this
+    /// instance, kept in `banners`: the page does not ask for it again, a
+    /// failure, its Retry and a relaunch included.
+    private var handedOver: String?
+    /// The minimum versions this updater goes by.
+    var minimums: UpdateGate.Minimums
     /// The release the open instance runs, as its last check answered.
     private(set) var runningVersion: String?
 
     var blocking: Bool {
         switch state {
         // `behindOn` is the release the upgrade started from.
-        case .starting, .updating: return presented || !UpdateGate.isSupported(behindOn)
-        case .required, .failed: return belowMinimum || presented
+        case .starting, .updating: return presented || tier == .blocking
+        case .required: return presented || pageVariant != nil
+        case .failed: return presented || belowMinimum
         case .idle, .upToDate, .unknown: return false
         }
     }
 
-    /// Behind and missing an API the app calls: no way past the page.
+    /// How far below the app's needs the release the instance was behind on is.
+    private var tier: UpdateGate.Tier { UpdateGate.tier(behindOn, minimums: minimums) }
+
+    /// Behind and missing an API Chat calls: no way past the page.
     var belowMinimum: Bool {
         switch state {
-        case .required, .failed: return !UpdateGate.isSupported(behindOn)
+        case .required, .failed: return tier == .blocking
         default: return false
         }
     }
 
-    /// A newer release this instance can do without: offered, never forced.
+    /// The page that asks for a release the app needs, or nil when nothing
+    /// is asked: the release is only offered, or was handed to the drawer.
+    var pageVariant: PageVariant? {
+        guard case .required(_, let latest, _) = state else { return nil }
+        switch tier {
+        case .blocking: return .blocking
+        case .background: return handedOver == latest ? nil : .background
+        case .supported: return nil
+        }
+    }
+
+    /// A newer release that can update in the background. Behind the
+    /// background minimum the page asks for it first.
     var offered: String? {
         guard case .required(_, let latest, _) = state, !belowMinimum else { return nil }
         return latest
@@ -342,7 +422,8 @@ final class InstanceUpdater {
     /// The page can be closed: it was only offered, and nothing is running.
     var canClose: Bool {
         switch state {
-        case .required, .failed: return !belowMinimum
+        case .required: return !belowMinimum && pageVariant == nil
+        case .failed: return !belowMinimum
         default: return false
         }
     }
@@ -406,8 +487,9 @@ final class InstanceUpdater {
     /// The time now; tests move it on instead of waiting.
     private let now: () -> Date
 
-    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore(), pollInterval: Duration = UpdateGate.pollInterval, now: @escaping () -> Date = { .now }) {
+    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore(), minimums: UpdateGate.Minimums = UpdateGate.Minimums(), pollInterval: Duration = UpdateGate.pollInterval, now: @escaping () -> Date = { .now }) {
         self.store = store
+        self.minimums = minimums
         self.banners = banners
         self.pollInterval = pollInterval
         self.now = now
@@ -456,6 +538,7 @@ final class InstanceUpdater {
         self.backend = backend
         self.instanceID = instanceID
         dismissedVersion = banners.dismissed(instanceID)
+        handedOver = banners.handedOver(instanceID)
         if justUpdated?.instanceID != instanceID { justUpdated = nil }
         await check()
     }
@@ -493,6 +576,7 @@ final class InstanceUpdater {
         runsInBackground = false
         dismissedVersion = nil
         behindOn = nil
+        handedOver = nil
         runningVersion = nil
     }
 
@@ -583,6 +667,15 @@ final class InstanceUpdater {
     func updateInBackground() async {
         guard offered != nil else { return }
         await start(background: true)
+    }
+
+    /// From the background page: the page closes, and the upgrade runs as
+    /// one started from the drawer.
+    func updateFromBackgroundPage() async {
+        guard pageVariant == .background, case .required(_, let latest, _) = state, let instanceID else { return }
+        handedOver = latest
+        banners.handOver(latest, for: instanceID)
+        await updateInBackground()
     }
 
     private func start(background: Bool) async {

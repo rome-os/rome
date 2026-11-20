@@ -50,6 +50,24 @@ export class ChatApiError extends Error {
   }
 }
 
+/**
+ * A non-JSON error body as text the chat can show, or "" for a web page. While
+ * Rome restarts, the proxy in front of it answers with its own HTML error page,
+ * and its markup is not a message.
+ */
+export function plainErrorText(raw: string): string {
+  const text = raw.trim();
+  return text.startsWith("<") ? "" : text.slice(0, 200);
+}
+
+/**
+ * The statuses a proxy answers with when Rome behind it does not, as during a
+ * restart: bad gateway, unavailable, gateway timeout, and Cloudflare's 52x.
+ */
+export function isUnreachableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 530);
+}
+
 async function readErrorPayload(res: Response): Promise<unknown> {
   try {
     const raw = (await res.text()).trim();
@@ -57,7 +75,8 @@ async function readErrorPayload(res: Response): Promise<unknown> {
     try {
       return JSON.parse(raw);
     } catch {
-      return { error: raw.slice(0, 200) };
+      const text = plainErrorText(raw);
+      return text ? { error: text } : null;
     }
   } catch {
     return null;
@@ -103,13 +122,28 @@ export async function searchChatMessages(query: string): Promise<ChatSearchMessa
   return jsonOrThrow<ChatSearchMessageMatch[]>(res);
 }
 
+/**
+ * What archiving or unarchiving a topic chat does with its follows and open
+ * tasks. `followsAndTasks: "stop"` ends them when it is archived; without it
+ * they move to the main chat. `follows: "moveBack"` moves the follows its
+ * archive moved back to it when it is unarchived; without it they stay.
+ */
+export interface ArchiveSessionOptions {
+  followsAndTasks?: "stop";
+  follows?: "moveBack";
+}
+
 /** Archive (soft-hide) or unarchive a top-level webchat session. */
-export async function archiveSession(sessionId: string, archived: boolean): Promise<ChatSession> {
+export async function archiveSession(
+  sessionId: string,
+  archived: boolean,
+  options: ArchiveSessionOptions = {},
+): Promise<ChatSession> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/archive`, {
     method: "PATCH",
     credentials: "include",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ archived }),
+    body: JSON.stringify({ archived, ...options }),
   });
   return jsonOrThrow<ChatSession>(res);
 }
@@ -178,10 +212,10 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   return jsonOrThrow<ChatMessage[]>(res);
 }
 
-/** One page of a session's history: whole turns, oldest first within the page. */
+/** One page of a session's history: messages in the order they were said, with the trace rows of their turns. */
 export interface ChatMessagePage {
   messages: ChatMessage[];
-  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  /** Pass as `before` for the page of older messages; null when this page reaches the start. */
   nextCursor: string | null;
   /**
    * The session's saved workspace layout, as `GET /layout` returns it. Sent on
@@ -192,8 +226,8 @@ export interface ChatMessagePage {
 }
 
 /**
- * The newest `limit` turns of a session, or the `limit` turns before `before`.
- * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ * The newest `limit` messages of a session, or the `limit` messages before
+ * `before`, with the trace rows of their turns. `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  */
 export async function listSessionMessagePage(
   sessionId: string,
@@ -579,7 +613,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
       provider = payload.provider;
       reason = payload.reason;
     } catch {
-      message = trimmed.slice(0, 200);
+      message = plainErrorText(trimmed);
     }
   }
   return {

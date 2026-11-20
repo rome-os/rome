@@ -1,5 +1,9 @@
 import { describe, it, expect } from "@rstest/core";
-import { parseSkillFrontmatter, parseSkillFrontmatterResult } from "./skill-frontmatter.js";
+import {
+  parseSkillFrontmatter,
+  parseSkillFrontmatterResult,
+  parseSkillNameResult,
+} from "./skill-frontmatter.js";
 
 describe("parseSkillFrontmatter", () => {
   it("parses a kebab-case name", () => {
@@ -136,5 +140,34 @@ body`;
       expect(result.reason).toBe("name-has-whitespace");
       expect(result.message).toContain("Mystery Dinner — Story Authoring");
     }
+  });
+});
+
+describe("parseSkillNameResult", () => {
+  it("reads the name without requiring a description", () => {
+    expect(parseSkillNameResult(`---\nname: calendar_help\n---`)).toEqual({
+      ok: true,
+      name: "calendar_help",
+    });
+  });
+
+  it("reports a missing frontmatter block or name", () => {
+    const noBlock = parseSkillNameResult("no frontmatter here");
+    expect(noBlock.ok).toBe(false);
+    if (!noBlock.ok) expect(noBlock.reason).toBe("missing-frontmatter");
+
+    const noName = parseSkillNameResult(`---\ndescription: A skill.\n---`);
+    expect(noName.ok).toBe(false);
+    if (!noName.ok) expect(noName.reason).toBe("missing-name");
+  });
+
+  it("rejects a name with whitespace or the namespace separator", () => {
+    const spaced = parseSkillNameResult(`---\nname: deep research\n---`);
+    expect(spaced.ok).toBe(false);
+    if (!spaced.ok) expect(spaced.reason).toBe("name-has-whitespace");
+
+    const namespaced = parseSkillNameResult(`---\nname: app:skill\n---`);
+    expect(namespaced.ok).toBe(false);
+    if (!namespaced.ok) expect(namespaced.reason).toBe("name-has-reserved-separator");
   });
 });

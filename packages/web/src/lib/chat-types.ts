@@ -36,6 +36,11 @@ export interface ChatSession {
   parentSessionId?: string | null;
   /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
   triggerKind?: string | null;
+  /**
+   * Present on `GET /chat/sessions/:id` for a task chat: the Concierge chat it
+   * reports to, which its header links back to.
+   */
+  taskOf?: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */
@@ -175,15 +180,6 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
-  /** The chat thread the message is in, in a Concierge chat: the key of its
-   *  root, the first message of the reply chain. The server sends it only for
-   *  a message in a thread of more than one, and not again for a root that
-   *  gains its first reply: a root's own id names its thread then. Absent or
-   *  null for a message alone in its thread. */
-  chatThreadId?: string | null;
-  /** The thread's name, on every message of a thread of more than one: its
-   *  newest task's title, else the start of its root's text. */
-  chatThreadTitle?: string | null;
   /** The emoji the Concierge reacted to a guardian message of its chat with.
    *  Absent when it has none, and from servers before it. */
   reaction?: string | null;

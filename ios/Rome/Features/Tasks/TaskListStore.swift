@@ -1,3 +1,4 @@
+import SwiftUI
 import Foundation
 import Observation
 import OSLog
@@ -104,6 +105,27 @@ final class TaskListStore {
             loaded = false
         }
         Task { await load() }
+    }
+
+    /// Whether a task waits on the guardian: the dot on a header's Tasks.
+    var needsYou: Bool {
+        groups.contains { $0.key == .needsYou && !$0.items.isEmpty }
+    }
+
+    /// How many views read the list live: the Agent page and the header of
+    /// the chat on screen. It is listened to while one does.
+    @ObservationIgnored private var holds = 0
+
+    /// A view starts reading the list live: it is read now, and listened to.
+    func hold() {
+        holds += 1
+        open()
+    }
+
+    /// A view stops reading it; the last one stops the listening.
+    func release() {
+        holds = max(holds - 1, 0)
+        if holds == 0 { stop() }
     }
 
     /// Listens for changes; `open` reads.
@@ -300,8 +322,7 @@ enum TaskListWords {
             }
             if let repeats { return repeats }
             if let at = task.laterAt { return String(localized: "Checks \(time(at, now: now))") }
-            // Not started: its age, so a stale one stands out.
-            return String(localized: "Not started · Created \(age(task.createdAt, now: now))")
+            return ""
         case "ended":
             let how: String
             switch task.endReason {
@@ -312,7 +333,8 @@ enum TaskListWords {
             }
             return line(how, time(task.completedAt ?? task.updatedAt, now: now))
         default:
-            return line(repeats, String(localized: "Running"))
+            // Active, with how long ago it began.
+            return line(repeats, String(localized: "Active"), time(task.updatedAt, now: now))
         }
     }
 
@@ -324,7 +346,7 @@ enum TaskListWords {
         return when.map { String(localized: "Checks \($0)") } ?? ""
     }
 
-    static func follow(_ item: TaskListItem.Follow) -> String {
+    static func follow(_ item: TaskListItem.Follow, now: Date = .now) -> String {
         let state: String?
         switch item.state {
         case "unavailable": state = String(localized: "Not available")
@@ -332,7 +354,7 @@ enum TaskListWords {
         default: state = nil
         }
         let digest = item.digestTimes.isEmpty ? nil : String(localized: "Digest daily at \(list(item.digestTimes.map(clock)))")
-        return line(item.label, state, digest)
+        return line(item.label, state, digest, item.nextAt.map { time($0, now: now) })
     }
 
     static func routine(_ item: TaskListItem.Routine, now: Date) -> String {
@@ -462,5 +484,32 @@ enum TaskListWords {
         let formatter = ListFormatter()
         formatter.locale = RelativeTime.locale
         return formatter.string(from: items) ?? items.joined(separator: ", ")
+    }
+}
+
+extension View {
+    /// Reads `store` live while this view shows (`TaskListStore.hold`), and
+    /// moves to another store when it changes.
+    func holdsTaskList(_ store: TaskListStore?) -> some View {
+        modifier(HoldsTaskList(store: store))
+    }
+}
+
+private struct HoldsTaskList: ViewModifier {
+    let store: TaskListStore?
+    @State private var held: TaskListStore?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { take(store) }
+            .onDisappear { take(nil) }
+            .onChange(of: store.map(ObjectIdentifier.init)) { take(store) }
+    }
+
+    private func take(_ next: TaskListStore?) {
+        guard next !== held else { return }
+        held?.release()
+        held = next
+        next?.hold()
     }
 }

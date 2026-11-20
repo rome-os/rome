@@ -10,6 +10,7 @@ import {
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { makeTask } from "../test/task-chats.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ConciergeTasks } from "./tasks.js";
 
@@ -23,7 +24,6 @@ const facts = (extra: Partial<ConciergeTaskFacts> = {}): ConciergeTaskFacts => (
   reportPending: false,
   laterAt: null,
   lastOutcome: null,
-  started: true,
   ...extra,
 });
 
@@ -55,13 +55,9 @@ describe("taskStatus", () => {
     });
   });
 
-  it("is later, with no time, while no task chat was started for it", () => {
-    expect(taskStatus(facts({ started: false }), NOW)).toEqual({
-      status: "later",
-      endReason: null,
-    });
-    // Stopping it ends it, before its chat ever started.
-    expect(taskStatus(facts({ started: false, stoppedAt: NOW }), NOW)).toEqual({
+  it("is never later without a check: a task is its task chat, so there is no unstarted one", () => {
+    expect(taskStatus(facts(), NOW)).toEqual({ status: "ended", endReason: "done" });
+    expect(taskStatus(facts({ stoppedAt: NOW }), NOW)).toEqual({
       status: "ended",
       endReason: "stopped",
     });
@@ -117,11 +113,13 @@ describe("messageStatus", () => {
     expect(messageStatus({ ...answered, tasks: [task("later"), task("active")] })).toBe("working");
   });
 
-  it("works while a task made for it waits on its owner until the card shows", () => {
+  it("clears while a task made for it waits on its owner, and works again once it runs", () => {
     const answered = { ...turn, answered: true };
-    const waiting = (cardShown: boolean) => ({ ...task("needs_you"), cardShown });
-    expect(messageStatus({ ...answered, tasks: [waiting(false)] })).toBe("working");
-    expect(messageStatus({ ...answered, tasks: [waiting(true)] })).toBeNull();
+    expect(messageStatus({ ...answered, tasks: [task("active")] })).toBe("working");
+    expect(messageStatus({ ...answered, tasks: [task("needs_you")] })).toBeNull();
+    // Its turn working keeps it working whatever its task waits on.
+    expect(messageStatus({ ...turn, working: true, tasks: [task("needs_you")] })).toBe("working");
+    expect(messageStatus({ ...answered, tasks: [task("active")] })).toBe("working");
   });
 
   it("never works on a message the Concierge reacted to", () => {
@@ -183,16 +181,21 @@ describe("ConciergeTasks status", () => {
   let testDb: TestDb;
   let repo: ConciergeTasksRepository;
   let tasks: ConciergeTasks;
+  let chats: ChatsWebChatRepository;
   const running = new Set<string>();
   const waiting = new Map<string, number>();
+  const checks = new Map<string, number>();
   let told: ConciergeTaskDto[];
+  const make = (title = "Flights", id = "task-chat") => makeTask({ chats, repo }, { id, title });
 
   beforeEach(async () => {
     testDb = createTestDb();
     repo = new ConciergeTasksRepository(testDb.db);
+    chats = new ChatsWebChatRepository(testDb.db);
     tasks = new ConciergeTasks(repo, 24 * HOUR);
     running.clear();
     waiting.clear();
+    checks.clear();
     tasks.attachFacts({
       now: () => NOW,
       running: (chatId) => running.has(chatId),
@@ -201,22 +204,59 @@ describe("ConciergeTasks status", () => {
           new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
         ),
       reportPending: () => [],
+      laterOf: async () => new Map(checks),
     });
     told = [];
-    tasks.subscribe((event, payload) => {
-      if (event === "task_upsert") told.push((payload as { task: ConciergeTaskDto }).task);
+    // What the task list and the push hear: each announced row, read with its status.
+    repo.onChange((task) => {
+      void tasks.toDtos([task]).then(([read]) => told.push(read!));
     });
-    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
   });
   afterEach(() => testDb.close());
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const statusOf = async (id = "task-chat") =>
+    (await tasks.statusOf([(await repo.get(id))!])).get(id);
 
-  it("sends each row with its status, and the old state mapped from it", async () => {
-    await repo.upsertMany([{ title: "Flights", state: "next", sessionId: "task-chat" }]);
+  it("reads a task's status from its task chat's facts and its row alone, for each status and end reason", async () => {
+    await make();
+    // Needs you: a wait on its owner, ahead of a running turn.
+    waiting.set("task-chat", NOW - HOUR);
+    running.add("task-chat");
+    expect(await statusOf()).toMatchObject({ status: "needs_you", endReason: null });
+    // Active: a turn runs.
+    waiting.clear();
+    expect(await statusOf()).toMatchObject({ status: "active", endReason: null });
+    // Later: a check is scheduled and nothing runs.
+    running.clear();
+    checks.set("task-chat", NOW + HOUR);
+    expect(await statusOf()).toMatchObject({
+      status: "later",
+      endReason: null,
+      laterAt: NOW + HOUR,
+    });
+    checks.clear();
+    // Ended·done: nothing holds it, and its last turn succeeded.
+    await repo.setLastOutcome("task-chat", "succeeded", new Date(NOW), { reported: false });
+    expect(await statusOf()).toMatchObject({ status: "ended", endReason: "done" });
+    // Ended·failed.
+    await repo.setLastOutcome("task-chat", "failed", new Date(NOW), { reported: false });
+    expect(await statusOf()).toMatchObject({ status: "ended", endReason: "failed" });
+    // Ended·no response: a wait Rome ended.
+    await repo.markWaitExpired("task-chat", new Date(NOW - 25 * HOUR));
+    expect(await statusOf()).toMatchObject({ status: "ended", endReason: "no_response" });
+    await repo.clearWaitExpired("task-chat");
+    // Ended·stopped: whoever stopped it, whatever else holds.
+    await repo.stop("task-chat");
+    running.add("task-chat");
+    expect(await statusOf()).toMatchObject({ status: "ended", endReason: "stopped" });
+  });
+
+  it("sends each row with its status, the chat's name, and the old state mapped from it", async () => {
+    await make();
     running.add("task-chat");
     expect(await tasks.listForPanel()).toMatchObject([
-      { title: "Flights", status: "active", endReason: null, state: "doing" },
+      { id: "task-chat", title: "Flights", status: "active", endReason: null, state: "doing" },
     ]);
     running.delete("task-chat");
     waiting.set("task-chat", NOW - HOUR);
@@ -225,71 +265,54 @@ describe("ConciergeTasks status", () => {
     ]);
   });
 
-  it("reads a row with no task chat as later until its chat starts, and ended·stopped once stopped", async () => {
-    const [row] = await repo.upsertMany([{ title: "Follow the launch" }]);
+  it("names a task by its chat, so a rename is the task's", async () => {
+    await make();
+    await chats.updateSessionName("task-chat", "Book direct flights");
     expect(await tasks.listForPanel()).toMatchObject([
-      { status: "later", endReason: null, laterAt: null },
+      {
+        id: "task-chat",
+        title: "Book direct flights",
+        chat: { id: "task-chat", name: "Book direct flights" },
+      },
     ]);
-
-    await repo.upsertMany([{ id: row!.id, sessionId: "task-chat" }]);
-    running.add("task-chat");
-    expect(await tasks.listForPanel()).toMatchObject([{ status: "active" }]);
-
-    const [other] = await repo.upsertMany([{ title: "Watch the price" }]);
-    await repo.stop(other!.id, "concierge");
-    expect((await tasks.statusOf([(await repo.get(other!.id))!])).get(other!.id)).toMatchObject({
-      status: "ended",
-      endReason: "stopped",
-    });
   });
 
   it("keeps a task running while its ended turn's outcome is written, so its status does not flicker", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await make();
     const release = tasks.holdRunning("task-chat");
-    expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("active");
+    expect((await statusOf())?.status).toBe("active");
     release();
     release();
-    expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("ended");
+    expect((await statusOf())?.status).toBe("ended");
   });
 
   it("writes nothing when it reads a status, so when a task ended never depends on when it was read", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await make();
     await flush();
-    await repo.keepEnded([], [row!.id]);
-    await tasks.statusOf([(await repo.get(row!.id))!]);
-    expect((await repo.get(row!.id))?.endedAt).toBeNull();
+    await repo.keepEnded([], ["task-chat"]);
+    await statusOf();
+    expect((await repo.get("task-chat"))?.endedAt).toBeNull();
   });
 
   it("keeps when a task ended as its facts change, and forgets it when the task opens again", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await make();
     await tasks.chatChanged("task-chat");
-    expect((await repo.get(row!.id))?.endedAt).toEqual(new Date(NOW));
-    await repo.markWaitExpired(row!.id, new Date(NOW - HOUR));
+    expect((await repo.get("task-chat"))?.endedAt).toEqual(new Date(NOW));
+    await repo.markWaitExpired("task-chat", new Date(NOW - HOUR));
     running.add("task-chat");
     await tasks.chatChanged("task-chat");
     // Open for a while, as while Rome's own turn after a turned-down approval
     // runs: its no-response note stays for the next digest.
-    expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: true });
+    expect(await repo.get("task-chat")).toMatchObject({ endedAt: null, noResponseUnlisted: true });
     running.delete("task-chat");
-    expect((await tasks.statusOf([(await repo.get(row!.id))!])).get(row!.id)).toMatchObject({
-      status: "ended",
-      endReason: "no_response",
-    });
+    expect(await statusOf()).toMatchObject({ status: "ended", endReason: "no_response" });
     // Someone writing to it ends the no-response, note and all.
-    await repo.clearWaitExpired(row!.id);
-    expect((await repo.get(row!.id))?.noResponseUnlisted).toBe(false);
-  });
-
-  it("tells a task's changes in the order they happened", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
-    await repo.upsertMany([{ id: row.id, summary: "one" }]);
-    await repo.upsertMany([{ id: row.id, summary: "two" }]);
-    await flush();
-    expect(told.map((task) => task.summary)).toEqual([null, "one", "two"]);
+    await repo.clearWaitExpired("task-chat");
+    expect((await repo.get("task-chat"))?.noResponseUnlisted).toBe(false);
   });
 
   it("tells a task's new status even when a read saw it first", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await make();
     await flush();
     told = [];
     running.add("task-chat");
@@ -297,29 +320,58 @@ describe("ConciergeTasks status", () => {
     await tasks.listForPanel();
     await tasks.chatChanged("task-chat");
     await flush();
-    expect(told.map((task) => [task.id, task.status])).toEqual([[row.id, "active"]]);
+    expect(told.map((task) => [task.id, task.status])).toEqual([["task-chat", "active"]]);
   });
 
   it("tells a task again when a fact of its chat changes its status, and only then", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await make();
     await flush();
     told = [];
     running.add("task-chat");
     await tasks.chatChanged("task-chat");
     await flush();
-    expect(told.map((task) => [task.id, task.status])).toEqual([[row.id, "active"]]);
+    expect(told.map((task) => [task.id, task.status])).toEqual([["task-chat", "active"]]);
     // A change that leaves the status as it was tells nothing.
     await tasks.chatChanged("task-chat");
     await flush();
     expect(told).toHaveLength(1);
 
     running.delete("task-chat");
-    await repo.setLastOutcome(row.id, "failed");
+    await repo.setLastOutcome("task-chat", "failed");
     // Active until the Concierge reports the result.
     await flush();
     expect(told.at(-1)).toMatchObject({ status: "active" });
-    await repo.markReported([row.id]);
+    await repo.markReported(["task-chat"]);
     await flush();
     expect(told.at(-1)).toMatchObject({ status: "ended", endReason: "failed", state: "dropped" });
+  });
+
+  it("shows a message working while its task chat is active, clears while it needs its owner, and settles once the result is told", async () => {
+    await make();
+    const target = { chatId: "concierge", messageKey: "m1" };
+    await repo.takeMessage("turn-1", target);
+    await repo.answerMessage(target.chatId, target.messageKey);
+    await repo.linkMessage("task-chat", target);
+    const statusOfMessage = async () =>
+      (await tasks.messageStatusesOf(target.chatId, [target.messageKey])).get(target.messageKey) ??
+      null;
+    // The task chat runs: the message works for it.
+    running.add("task-chat");
+    expect(await statusOfMessage()).toBe("working");
+    // It asks its owner a question: no longer working, whether or not any card shows.
+    waiting.set("task-chat", NOW - HOUR);
+    expect(await statusOfMessage()).toBeNull();
+    // Its owner answers and it runs again.
+    waiting.clear();
+    expect(await statusOfMessage()).toBe("working");
+    // It finishes, and the result waits to be told: still the message's work.
+    running.clear();
+    await repo.setLastOutcome("task-chat", "succeeded");
+    expect(await statusOfMessage()).toBe("working");
+    // Saying the result settles the message for good: a later run leaves it alone.
+    await tasks.resultSaid("task-chat");
+    expect(await statusOfMessage()).toBeNull();
+    running.add("task-chat");
+    expect(await statusOfMessage()).toBeNull();
   });
 });

@@ -38,7 +38,7 @@ for (const width of [320, 390]) {
         page.getByText("Claude", { exact: true }),
         ...statuses,
       ];
-      const buttons = ["Browser", "Device code", "API Key", "Log Out"].map((name) =>
+      const buttons = ["Browser", "Device code", "API key", "Log out"].map((name) =>
         page.getByRole("button", { name, exact: true }),
       );
       for (const label of labels) {

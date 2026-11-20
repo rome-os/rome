@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     /// The Agent page on a tab, opened from the main Chat; nil closes it.
     case agent(AgentTab?)
+    /// The Agent page on a tab, opened from a blank topic chat.
+    case agentBlank(AgentTab)
     /// Pages pushed inside the open Agent page.
     case agentRoute([Route])
     case route([Route])
@@ -77,6 +79,38 @@ enum HealthDemo {
     }
 }
 
+/// Calendar's demo: syncs, and a read and a change an Agent made.
+enum CalendarDemo {
+    static func history(now: Date) -> [SyncLogEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ trigger: SyncTrigger, events: Int) -> SyncLogEntry {
+            let time = now.addingTimeInterval(-minutesAgo * 60)
+            var entry = SyncLogEntry(seq: seq, time: time, trigger: trigger, outcome: .ok)
+            if events > 0 { entry.types["events"] = SyncTypeCount(items: events, start: time.addingTimeInterval(-7 * 86_400), end: time.addingTimeInterval(30 * 86_400)) }
+            entry.inserted = events
+            return entry
+        }
+        return [
+            entry(4, minutesAgo: 6, .manual, events: 1),
+            entry(3, minutesAgo: 40, .foreground, events: 3),
+            entry(2, minutesAgo: 60 * 5, .observer, events: 1),
+            entry(1, minutesAgo: 60 * 26, .manual, events: 48),
+        ]
+    }
+
+    static func liveReads(now: Date) -> [NodeAuditEntry] {
+        func entry(_ seq: Int, minutesAgo: Double, _ action: String, _ args: String, count: Int? = nil) -> NodeAuditEntry {
+            NodeAuditEntry(
+                seq: seq, time: now.addingTimeInterval(-minutesAgo * 60), from: "rome", action: action, args: args,
+                outcome: .ok, errorCode: nil, count: count, windowStart: nil, windowEnd: nil, durationMs: 90
+            )
+        }
+        return [
+            entry(2, minutesAgo: 6, "calendar.create_event", #"{"title":"Lunch with Sam","start":"2026-11-20T12:30"}"#, count: 1),
+            entry(1, minutesAgo: 8, "calendar.free_busy", #"{"start":"2026-11-18T12:00","end":"2026-11-18T18:00"}"#, count: 1),
+        ]
+    }
+}
+
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
 /// walks every screen in light and dark, and writes a PNG of each. It lets the
 /// UI be reviewed where no simulator runs (Mac Catalyst).
@@ -125,24 +159,14 @@ enum SnapshotRunner {
                     workspace.topics.setActivity(.working, for: main)
                 }
                 workspace.debugSetAgentName("Milo")
-                // A task's thread view over a busy chat: its header names the task.
-                await capture("57e-header-thread-open", style: styleName, in: directory, wait: 1.5) {
-                    workspace.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: main)
-                    workspace.concierge.openThread(at: "c-price")
-                }
-                workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
-            // A task's thread view, opened from a label: the task's title,
-            // "Open task chat", and the message it opened from tinted.
-            await capture("04c-chat-thread-open", style: styleName, in: directory, wait: 1.5) {
-                guard let chat = model.workspace?.concierge,
-                      let said = chat.messages.last(where: { !$0.isUser && $0.chatThreadId == "c-site" && $0.parts.contains { $0.textContent != nil } })
-                else { return }
-                chat.openThread(at: said.id)
+            // Replies in order: two replies to one message grouped, a reply
+            // to an earlier message with its quote, the guardian's own quote.
+            await capture("04c-chat-replies", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.concierge.jump(to: "c-site")
             }
-            model.workspace?.concierge.closeThread()
-            // The settled login task: its question and approval folded, labelled.
+            // The settled login task: its question and approval folded, and the Concierge's answer quoting what the guardian asked.
             await capture("04d-chat-settled-cards", style: styleName, in: directory, wait: 2) {
                 model.workspace?.concierge.jump(to: "c-login")
             }
@@ -196,7 +220,10 @@ enum SnapshotRunner {
             }
             model.debugCommand = .agentRoute([])
             try? await Task.sleep(for: .seconds(0.8))
-            await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
+            await capture("57-agent-outputs", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.outputs) }
+            model.debugCommand = .agent(nil)
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("57b-agent-outputs-empty", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agentBlank(.outputs) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {
@@ -250,7 +277,7 @@ enum SnapshotRunner {
             await capture("13d-live-reads", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .liveReads(health)]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
-            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory]) }
+            await capture("17-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(health), .syncHistory(HealthSettings.sourceId)]) }
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
             // The expired session: the status line offers a sign-in.
@@ -282,6 +309,26 @@ enum SnapshotRunner {
             await capture("13f-connection-device-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
             model.debugHealthScroll = nil
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // Calendar: not connected, then connected with Sync on,
+            // a read and a change it made, and its Sync history.
+            let calendar = CalendarCapability.id
+            model.calendarSync.showDemo([], enabled: false)
+            await capture("13g-connection-calendar", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.calendarSync.showDemo(CalendarDemo.history(now: .now))
+            model.connections.showDemo(authorized: [health: true, calendar: true])
+            model.node.showDemo(live: [calendar: true], recent: CalendarDemo.liveReads(now: .now))
+            await capture("13h-connection-calendar-on", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar)]) }
+            await capture("13i-connection-calendar-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13j-calendar-sync-history", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.connections, .connection(calendar), .syncHistory(CalendarSync.sourceId)]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.connections.showDemo(authorized: [health: true])
             model.node.showDemo(live: [:], recent: [])
             model.health.showDemo(HealthDemo.history(now: .now))
             // A second command in the same pass would hide this one from the shell.
@@ -302,9 +349,12 @@ enum SnapshotRunner {
             await capture("43c-connect-sheet-health", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet(health) }
             await capture("43d-connect-sheet-device", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .connectSheet("device") }
             model.debugCommand = .connectSheet(nil)
+            // The next command in the same pass would hide this one from the
+            // shell, and the sheet would stay over every later screen.
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
-            // A task's chat thread: its labels, and a reply's quote.
-            await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // A reply's quote.
+            await capture("50-topic-quote", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
             // Share mode on the last two turns, then the chat's links.
             await capture("61-share-select", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .section(.topic("topic-trip"))
@@ -342,44 +392,15 @@ enum SnapshotRunner {
                 workspace.topicStore("topic-trip").share.showsLinks = false
                 workspace.concierge.share.showsLinks = false
             }
-            // A long chat thread: every answer carries its label.
-            await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
+            // A long chat, to scroll far from the bottom.
+            await capture("53-topic-long-chat", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
             await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
-            model.debugCommand = .section(.topic("topic-trip"))
-            try? await Task.sleep(for: .seconds(1.5))
-            await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topicStore("topic-trip").openThread(at: "k1")
-            }
-            // Reply inside the thread view: the bar names the task, quoting nothing.
-            await capture("51b-thread-reply", style: styleName, in: directory, wait: 1.5) {
-                let store = model.workspace?.topicStore("topic-trip")
-                if store?.thread == nil { store?.openThread(at: "k1") }
-                store?.reply(to: "k5")
-            }
-            model.workspace?.topicStore("topic-trip").closeThread()
-            try? await Task.sleep(for: .seconds(0.4))
-            // A thread taller than the screen, opened near its foot: the
-            // header above the rows, the last answer just above the composer.
-            model.debugCommand = .section(.topic("topic-books"))
-            try? await Task.sleep(for: .seconds(1.5))
-            await capture("54-long-thread-open", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topicStore("topic-books").openThread(at: "b23")
-            }
-            model.workspace?.topicStore("topic-books").closeThread()
-            try? await Task.sleep(for: .seconds(0.4))
-            // The same long thread while the chat runs a task: rows scroll under the status.
-            await capture("54b-long-thread-busy", style: styleName, in: directory, wait: 1.5) {
-                model.workspace?.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: "topic-books")
-                model.workspace?.topicStore("topic-books").openThread(at: "b23")
-            }
-            model.workspace?.topicStore("topic-books").closeThread()
-            model.workspace?.topics.setActivity(nil, for: "topic-books")
-            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
             await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
+            await capture("59-markdown-lists", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-lists")) }
             await capture("58-error-states", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-errors")) }
             // The load-error bar: Retry, then its spinner while an attempt runs.
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
@@ -394,6 +415,12 @@ enum SnapshotRunner {
                 store.retryHold = .seconds(1)
             }
             await capture("57-widget-ui-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-meals")) }
+            // Cards the Concierge composed itself, with no `bind`.
+            await capture("57-agent-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-cards")) }
+            // An itinerary whose stops open in Maps.
+            await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
+            // Task links in each status: running, needs you, done, failed, stopped, no response, later.
+            await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.
@@ -474,7 +501,7 @@ enum SnapshotRunner {
                 }
             }
             model.dynamicTypeOverride = nil
-            // A dashboard visitor of the shared Rome: the drawer footer, Settings and the instance list.
+            // A dashboard admin of the shared Rome: the drawer footer, Settings and the instance list.
             model.openDemo(.visitor)
             try? await Task.sleep(for: .seconds(2))
             await capture("45-visitor-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
@@ -509,8 +536,29 @@ enum SnapshotRunner {
             model.dynamicTypeOverride = .accessibility3
             await capture("35-login-ax3", style: styleName, in: directory, wait: 1) { model.debugSetPhase(.signedOut) }
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("36b-update-background-ax3", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
+            // The largest text before the accessibility sizes: the page's own
+            // layout, which must keep clear of the button.
+            model.dynamicTypeOverride = .xxxLarge
+            await capture("37-update-required-xxxl", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("37b-update-background-xxxl", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            // Behind the background minimum only: the page asks once, then the
+            // upgrade runs in the background.
+            await capture("20b-update-background", style: styleName, in: directory, wait: 2) {
+                model.demoMinimums = .init(blocking: DemoBackend.offeredFromVersion, background: DemoBackend.releasedVersion)
+                model.openDemo(.updateOffered)
+            }
+            model.demoMinimums = .demo
             // Behind but new enough: Chat, and the drawer's line.
             await capture("48-update-pill", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
             await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
@@ -548,6 +596,8 @@ enum SnapshotRunner {
                     model.update.debugShowUpdated(target)
                 }
             }
+            // Said once: the dark pass's Chat would show it again otherwise.
+            model.update.clearUpdated()
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }

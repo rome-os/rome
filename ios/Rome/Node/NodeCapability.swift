@@ -73,6 +73,9 @@ protocol NodeCapability: Sendable {
     var title: LocalizedStringResource { get }
     /// An SF Symbol.
     var symbol: String { get }
+    /// The icon its chat card shows, by a name every reader draws
+    /// (`WIDGET_UI_ICONS`), such as `heart`; nil for none.
+    var cardIcon: String? { get }
     /// What the connection lets the Rome do, in one line, for its page and
     /// the authorization step.
     var summary: LocalizedStringResource { get }
@@ -132,6 +135,8 @@ extension NodeCapability {
     }
 
     func activityDetail(_ entry: NodeAuditEntry, formatter: NodeActivityFormatter) -> String? { nil }
+
+    var cardIcon: String? { nil }
 
     func requestPermission() async {}
 

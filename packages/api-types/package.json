@@ -8,7 +8,10 @@
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
+    "./release-notes": "./src/release-notes.ts",
     "./task-list": "./src/task-list.ts",
+    "./task-link": "./src/task-link.ts",
+    "./chat-outputs": "./src/chat-outputs.ts",
     "./concierge": "./src/concierge.ts",
     "./concierge-activity": "./src/concierge-activity.ts",
     "./concierge-task-status": "./src/concierge-task-status.ts",
@@ -43,7 +46,8 @@
     "./live-events": "./src/live-events.ts",
     "./app-connection-access": "./src/app-connection-access.ts",
     "./question-card": "./src/question-card.ts",
-    "./location-card": "./src/location-card.ts"
+    "./location-card": "./src/location-card.ts",
+    "./prompt-card": "./src/prompt-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -11,9 +11,8 @@ import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import { ProviderOutageNotice } from "@/components/chat/ProviderOutageNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
-import { buildConciergeItems, focusHidden, showsTyping } from "@/components/chat/concierge-groups";
-import { useGroupAdjacency } from "@/components/chat/reply/adjacency";
-import { useChatThreads } from "@/components/chat/reply/chat-threads";
+import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
+import { useGroupDrawings } from "@/components/chat/reply/reply-drawing";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 import { useSimulatedTyping } from "@/components/chat/use-simulated-typing";
 
@@ -41,10 +40,8 @@ const TYPING_BUBBLE = <TypingBubble />;
  * The Concierge chat's transcript: the guardian's bubbles, the agent's
  * messages, and a typing indicator while a turn runs. It shows no trace, turn
  * summary, live activity, or live text: the agent's text is private, and what
- * it says arrives as messages. While a chat thread is in focus
- * (`useChatThreads().focus`), it marks what is outside the thread for
- * use-thread-focus.ts to fold away, and CSS hides it, except in share
- * selection.
+ * it says arrives as messages, in the order they were said. Each draws what
+ * it replies to by what sits above it (reply-drawing.ts).
  */
 export function ConciergeTranscript({
   rows: allRows,
@@ -74,20 +71,12 @@ export function ConciergeTranscript({
     () => buildConciergeItems(rows, { typing, unreadFrom }),
     [rows, typing, unreadFrom],
   );
-  const threads = useChatThreads();
-  const hidden = useMemo(
-    // Share selection picks whole turns, which can hold messages of other
-    // threads: nothing is hidden while it runs, whatever is in focus.
-    () =>
-      threads?.focus && !selection ? focusHidden(items, threads.focus, threads.roots) : undefined,
-    [items, threads, selection],
-  );
   const messageIds = useMemo(
     () =>
       items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
     [items],
   );
-  const adjacent = useGroupAdjacency(items, hidden);
+  const drawings = useGroupDrawings(items);
   const latestTaskChats = useMemo(() => {
     const latestTaskChats = new Map<string, ChatEntry>();
     for (const item of items) {
@@ -118,15 +107,8 @@ export function ConciergeTranscript({
         >
           {items.map((item) => {
             if (item.kind === "separator")
-              return (
-                <ConciergeTimeSeparator
-                  key={item.key}
-                  at={item.at}
-                  hidden={hidden?.has(item.key)}
-                />
-              );
-            if (item.kind === "unread")
-              return <ConciergeUnreadDivider key={item.key} hidden={hidden?.has(item.key)} />;
+              return <ConciergeTimeSeparator key={item.key} at={item.at} />;
+            if (item.kind === "unread") return <ConciergeUnreadDivider key={item.key} />;
             if (item.kind === "notice" && item.outage)
               return <ProviderOutageNotice key={item.key} part={item.outage} className="mb-0" />;
             if (item.kind === "notice")
@@ -149,8 +131,7 @@ export function ConciergeTranscript({
                 feedback={feedback}
                 arrival={arrival}
                 typing={TYPING_BUBBLE}
-                hidden={hidden}
-                adjacent={adjacent.get(item.key)}
+                drawings={drawings.get(item.key)}
               />
             );
           })}

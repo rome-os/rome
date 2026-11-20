@@ -5,6 +5,21 @@ import UIKit
 @testable import Rome
 
 @Suite struct MarkdownTests {
+    // A chat card's Markdown opens and loads nothing.
+    @Test func textOnlyDropsLinksAndImages() {
+        let blocks = MarkdownParser.withoutImages(MarkdownParser.parse("""
+        Read [the CDC](https://cdc.gov).
+
+        ![a chart](https://example.com/a.png)
+
+        ![](https://example.com/b.png)
+        """))
+        #expect(blocks == [.paragraph("Read [the CDC](https://cdc.gov)."), .paragraph("a chart")])
+        let line = MarkdownParser.inline("Read [the CDC](https://cdc.gov).", linksAsText: true)
+        #expect(String(line.characters) == "Read the CDC.")
+        #expect(line.runs.allSatisfy { $0.link == nil })
+    }
+
     @Test func parsesBlocks() {
         let blocks = MarkdownParser.parse("""
         # Title
@@ -33,6 +48,103 @@ import UIKit
             .quote("quoted"),
             .code(language: "swift", text: "let a = 1"),
             .rule,
+        ])
+    }
+
+    @Test func aNestedBulletSitsUnderItsItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - a1
+          - a2
+        - b
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["a1", "a2"])]),
+                "b",
+            ]),
+        ])
+    }
+
+    @Test func listsNestThreeLevelsAndStepBackOut() {
+        let blocks = MarkdownParser.parse("""
+        - a
+            - b
+                - c
+            - d
+        - e
+        """)
+        let c = ListItem(text: "b", children: [.list(ordered: false, start: 1, items: ["c"])])
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: [c, "d"])]),
+                "e",
+            ]),
+        ])
+    }
+
+    @Test func orderedAndBulletListsNestInEachOther() {
+        let blocks = MarkdownParser.parse("""
+        1. Pack
+           - passport
+           - charger
+        2. Leave
+           3. taxi
+           4. train
+        """)
+        #expect(blocks == [
+            .list(ordered: true, start: 1, items: [
+                ListItem(text: "Pack", children: [.list(ordered: false, start: 1, items: ["passport", "charger"])]),
+                ListItem(text: "Leave", children: [.list(ordered: true, start: 3, items: ["taxi", "train"])]),
+            ]),
+        ])
+    }
+
+    @Test func aTabNestsAnItem() {
+        #expect(MarkdownParser.parse("- a\n\t- b") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])])]),
+        ])
+    }
+
+    @Test func theOtherMarkerUnderAnItemStartsASecondNestedList() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+          1. c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [
+                    .list(ordered: false, start: 1, items: ["b"]),
+                    .list(ordered: true, start: 1, items: ["c"]),
+                ]),
+            ]),
+        ])
+    }
+
+    @Test func aContinuationJoinsTheInnermostItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+            more
+        - c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b more"])]),
+                "c",
+            ]),
+        ])
+    }
+
+    @Test func aListThatStartsIndentedStaysOneLevel() {
+        #expect(MarkdownParser.parse("  - a\n  - b") == [.list(ordered: false, start: 1, items: ["a", "b"])])
+    }
+
+    @Test func blankLinesBetweenItemsKeepTheListAndItsNesting() {
+        #expect(MarkdownParser.parse("- a\n\n  - b\n\n- c\n\nAfter") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])]), "c"]),
+            .paragraph("After"),
         ])
     }
 
@@ -724,6 +836,35 @@ final class StubBackend: RomeBackend {
         #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)
     }
 
+    @Test func shortcutsKeepPickedOrderAlongsideApps() {
+        let chosen = WidgetSlots.choose(
+            picked: [WidgetShortcut.chat.rawValue, "c", WidgetShortcut.apps.rawValue],
+            recent: ["e", "a"], apps: Self.list
+        )
+        #expect(chosen == [.shortcut(.chat), .app(Self.app("c")), .shortcut(.apps), .app(Self.app("e"))])
+    }
+
+    @Test func shortcutsAndAppsAreDedupedAndCapped() {
+        let picked = [WidgetShortcut.apps.rawValue, "b", WidgetShortcut.apps.rawValue, "gone", WidgetShortcut.chat.rawValue, "b", "c"]
+        let chosen = WidgetSlots.choose(picked: picked, recent: ["b", "a"], apps: Self.list)
+        #expect(chosen == [.shortcut(.apps), .app(Self.app("b")), .shortcut(.chat), .app(Self.app("c"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: ["a"], apps: Self.list, limit: 2) == [.shortcut(.apps), .app(Self.app("b"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: [], apps: Self.list, limit: 0).isEmpty)
+    }
+
+    @Test func shortcutsNeedNoShelfAppsAndNeverFillAutomatically() {
+        #expect(WidgetSlots.choose(picked: ["gone", WidgetShortcut.apps.rawValue, WidgetShortcut.chat.rawValue], recent: [], apps: []) == [.shortcut(.apps), .shortcut(.chat)])
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: []).isEmpty)
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: Self.list).map(\.id) == ["a", "b", "c", "d"])
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: []).isEmpty)
+    }
+
+    @Test func scopedAndShortcutIdsStayDistinct() {
+        let apps = [Self.app("chat"), Self.app("apps"), Self.app("@rome/chat")]
+        let chosen = WidgetSlots.choose(picked: [WidgetShortcut.chat.rawValue, "chat", "@rome/chat"], recent: ["apps"], apps: apps)
+        #expect(chosen == [.shortcut(.chat), .app(apps[0]), .app(apps[2]), .app(apps[1])])
+    }
+
     /// Opening an app puts it first among the recent ones, once.
     @Test func recentOpensComeFirst() throws {
         let suite = "rome-tests-\(UUID().uuidString)"
@@ -762,6 +903,18 @@ final class StubBackend: RomeBackend {
         #expect(WidgetLink(url: odd.url(scheme: "rome")) == odd)
     }
 
+    @Test func theChatPageRoundTrips() throws {
+        #expect(WidgetLink.chat.instanceId == nil)
+        for scheme in ["rome", "rome-dev"] {
+            let url = WidgetLink.chat.url(scheme: scheme)
+            #expect(url.absoluteString == "\(scheme)://chat")
+            #expect(url.host == "chat")
+            #expect(url.path.isEmpty)
+            #expect(WidgetLink(url: url) == .chat)
+        }
+        #expect(WidgetLink(url: try #require(URL(string: "rome://chat/x"))) == nil)
+    }
+
     @Test func theAppsPageAndNewApp() throws {
         #expect(WidgetLink(url: try #require(URL(string: "rome://apps"))) == .apps)
         #expect(WidgetLink(url: try #require(URL(string: "rome-dev://new-app"))) == .newApp)
@@ -770,7 +923,7 @@ final class StubBackend: RomeBackend {
 
     /// Anything else is not a widget link.
     @Test func otherURLsAreRefused() throws {
-        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat", "other://app/a/b"] {
+        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat/", "rome://chat/x", "other://app/a/b"] {
             #expect(WidgetLink(url: try #require(URL(string: text))) == nil, "\(text)")
         }
     }
@@ -902,5 +1055,11 @@ final class StubBackend: RomeBackend {
         // The top-left pixel, drawn into a 1×1 context.
         context.draw(cgImage, in: CGRect(x: 0, y: -CGFloat(cgImage.height - 1), width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
         #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[3] > 200, "top-left pixel \(pixel)")
+    }
+}
+
+extension ListItem: ExpressibleByStringLiteral {
+    public init(stringLiteral text: String) {
+        self.init(text: text)
     }
 }

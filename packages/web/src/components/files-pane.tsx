@@ -312,8 +312,7 @@ export function FilesPane({ className, searchPlaceholder, contextMenuActions }: 
         </div>
       ) : sorted.length === 0 ? (
         <div className="mt-2 rounded-8 border border-dashed border-border p-6 text-center text-ui text-subtle-foreground">
-          <div className="mb-1 text-muted-foreground">{t("pane.emptyTitle")}</div>
-          <div>{t("pane.emptyDescription")}</div>
+          <div className="text-muted-foreground">{t("pane.emptyTitle")}</div>
         </div>
       ) : view === "grid" ? (
         <div className="grid flex-1 grid-cols-[repeat(auto-fill,minmax(96px,1fr))] content-start gap-1 overflow-auto px-1 py-1">

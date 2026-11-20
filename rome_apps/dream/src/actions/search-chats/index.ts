@@ -105,7 +105,7 @@ function formatHit(chat: ChatHit, wordCount: number, now: number): string {
   return [
     `### ${chat.name}`,
     `${isoDate(chat.firstAt)} to ${isoDate(chat.lastAt)}, ${chat.score} of ${wordCount} words in one request`,
-    `Open: get_webchat_conversations { "sessionId": ${JSON.stringify(chat.sessionId)}, "windowHours": ${windowHours} }`,
+    `Open: dream:get_webchat_conversations { "sessionId": ${JSON.stringify(chat.sessionId)}, "windowHours": ${windowHours} }`,
     "",
     ...quotes,
   ].join("\n");
@@ -193,7 +193,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         returned: lines.length,
         content:
           lines.length > 0
-            ? `${header}\n\nMost recently active first. Open one by passing its arguments to get_webchat_conversations.\n\n${lines.join("\n")}`
+            ? `${header}\n\nMost recently active first. Open one by passing its arguments to dream:get_webchat_conversations.\n\n${lines.join("\n")}`
             : `${header}\n\n(No chat with a guardian request in the period.)`,
       },
     };

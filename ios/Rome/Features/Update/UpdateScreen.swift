@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The update page. Below the app's minimum version it covers the app with no
-/// way past it but updating; switching instance and signing out stay. A
-/// release the instance can do without opens it from the banner or the
-/// drawer, and it closes again.
+/// The update page. Below the app's blocking minimum it covers the app with no
+/// way past it but updating; switching instance and signing out stay. Below
+/// the background minimum only, it asks once and hands the upgrade to the
+/// drawer, which shows how it goes. A release the instance can do without
+/// opens it from the banner or the drawer, and it closes again.
 struct UpdateScreen: View {
     @Environment(AppModel.self) private var model
     @State private var showInstances = false
@@ -43,32 +44,35 @@ struct UpdateScreen: View {
                         .background(Palette.bg)
                 }
             } else {
-                ZStack {
-                    Palette.bg
-                    // The mascot stays exactly where the opening screen has it; the
-                    // text hangs below it.
-                    Mascot(alive: isWaiting)
-                        .frame(width: Mascot.width)
-                        .overlay(alignment: .top) {
-                            center
-                                .frame(width: 320)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
-                        }
-                }
-                .ignoresSafeArea()
-                .overlay(alignment: .top) {
+                VStack(spacing: 0) {
                     topBar
                         .padding(.horizontal, 16)
                         .padding(.top, 4)
-                }
-                .overlay(alignment: .bottom) {
+                    // The mascot and its text sit a little above the middle of
+                    // the room between the bar and the button, and scroll
+                    // rather than reach the button when larger text fills it.
+                    GeometryReader { room in
+                        ScrollView {
+                            AboveCenter(minHeight: room.size.height) {
+                                VStack(spacing: 20) {
+                                    Mascot(alive: isWaiting).frame(width: Mascot.width)
+                                    center
+                                        .frame(maxWidth: 320)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 16)
+                            }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    }
                     bottom
                         .frame(maxWidth: Metrics.buttonWidth)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }
+                .background(Palette.bg.ignoresSafeArea())
             }
         }
         // VoiceOver hears each step of the update as it comes.
@@ -200,17 +204,27 @@ struct UpdateScreen: View {
                         .foregroundStyle(Palette.primaryText)
                 }
                 if let release {
-                    Group {
-                        if updater.belowMinimum {
-                            if let current = release.current {
-                                Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                    VStack(spacing: 12) {
+                        Group {
+                            if updater.belowMinimum {
+                                if let current = release.current {
+                                    Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                                } else {
+                                    Text("The latest is \(release.latest). This app needs a newer Rome.")
+                                }
+                            } else if let current = release.current {
+                                Text("Your Rome is on \(current). The latest is \(release.latest).")
                             } else {
-                                Text("The latest is \(release.latest). This app needs a newer Rome.")
+                                Text("The latest is \(release.latest).")
                             }
-                        } else if let current = release.current {
-                            Text("Your Rome is on \(current). The latest is \(release.latest).")
-                        } else {
-                            Text("The latest is \(release.latest).")
+                        }
+                        switch updater.pageVariant {
+                        case .blocking:
+                            Text("The app cannot be used during this update, which takes a few minutes.")
+                        case .background:
+                            Text("This update runs in the background. Chat and the main features keep working. A few new features may not work until it finishes.")
+                        case nil:
+                            EmptyView()
                         }
                     }
                     .romeFont(16)
@@ -227,8 +241,14 @@ struct UpdateScreen: View {
     private var bottom: some View {
         switch updater.state {
         case .required:
-            PrimaryButton(title: "Update now") {
-                Task { await updater.updateNow() }
+            if updater.pageVariant == .background {
+                PrimaryButton(title: "Update in background") {
+                    Task { await updater.updateFromBackgroundPage() }
+                }
+            } else {
+                PrimaryButton(title: "Update now") {
+                    Task { await updater.updateNow() }
+                }
             }
         case .failed:
             PrimaryButton(title: "Try again") {
@@ -267,5 +287,25 @@ struct UpdateScreen: View {
         case .starting, .updating: return true
         default: return false
         }
+    }
+}
+
+/// Places its one view at 45% of the room left around it, from the top: a
+/// little above the middle, which reads as balanced. Never shorter than
+/// `minHeight`, and as tall as the view when the view needs more.
+private struct AboveCenter: Layout {
+    var minHeight: CGFloat
+    var fraction: CGFloat = 0.45
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let content = subviews.first?.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) ?? .zero
+        return CGSize(width: proposal.width ?? content.width, height: max(minHeight, content.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let view = subviews.first else { return }
+        let content = view.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let top = bounds.minY + max(0, (bounds.height - content.height) * fraction)
+        view.place(at: CGPoint(x: bounds.midX, y: top), anchor: .top, proposal: ProposedViewSize(width: bounds.width, height: content.height))
     }
 }

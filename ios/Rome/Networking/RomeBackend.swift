@@ -33,22 +33,22 @@ protocol RomeBackend: AnyObject, Sendable {
     func renameChat(_ id: String, to name: String) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
+    /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
+    /// instead of moving them to the main chat.
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
     /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
     /// tasks instead of moving them to the main chat.
     func deleteChat(_ id: String, stoppingWork: Bool) async throws
-    /// The follows and open tasks that deleting topic chat `chatId` would move.
+    /// The follows and open tasks that archiving or deleting topic chat `chatId` would move.
     func chatWork(chatId: String) async throws -> ConciergeChatWork
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
-    /// A send from a chat thread: it lands in that thread.
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
-    /// Every message of the chat thread `messageId` is in, oldest first.
-    /// Only an instance with chat threads answers it.
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage]
+    /// A send that replies to a message (`replyToMessageId`).
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// The same file shrunk to `width` (600 or 900) by an instance that can, and
@@ -75,8 +75,17 @@ protocol RomeBackend: AnyObject, Sendable {
     func taskList(chatId: String) async throws -> TaskListResponse
     /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
+    /// `GET /chats/:chatId/task-links?ids=`: the task chats among `ids` of this
+    /// Concierge chat's owner, from any of their Concierge chats, as a task
+    /// link draws them.
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
+    /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
+    /// wrote or showed, a Concierge chat's task chats' included, newest first.
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
+    /// An output's bytes, from its `contentUrl` (the path after `/api`).
+    func chatOutputFile(path: String) async throws -> Data
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -167,6 +176,13 @@ final class LiveBackend: RomeBackend {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
     }
 
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws {
+        // Without the option, the server moves them, as it always has.
+        var body: [String: JSONValue] = ["archived": .bool(true)]
+        if stoppingWork { body["followsAndTasks"] = .string("stop") }
+        try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
+    }
+
     func deleteChat(_ id: String) async throws {
         try await client.delete("/chat/sessions/\(escape(id))")
     }
@@ -183,11 +199,6 @@ final class LiveBackend: RomeBackend {
         try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
-        let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: root)])
-        return page.messages
-    }
-
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
@@ -201,12 +212,12 @@ final class LiveBackend: RomeBackend {
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, reply: nil)
     }
 
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
         var body: [String: JSONValue] = ["text": .string(text), "inputId": .string(inputId), "priority": .string(priority.rawValue)]
-        if let thread { body.merge(thread.body) { _, new in new } }
+        if let reply { body.merge(reply.body) { _, new in new } }
         if !files.isEmpty {
             body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
         }
@@ -268,8 +279,21 @@ final class LiveBackend: RomeBackend {
         try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
     }
 
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await client.get("/chats/\(escape(chatId))/task-links", query: [URLQueryItem(name: "ids", value: ids.joined(separator: ","))])
+    }
+
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
+    }
+
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
+        try await client.get("/chat/sessions/\(escape(chatId))/outputs")
+    }
+
+    func chatOutputFile(path: String) async throws -> Data {
+        // Sent as written: the server already encoded the ids in it.
+        try await client.getFile(apiPath: path, percentEncodedQuery: nil, limit: APIClient.outputLimit, accept: "*/*")
     }
 
     func pendingApprovals() async throws -> [PendingApproval] {
@@ -458,6 +482,7 @@ enum ToolCallExtractor {
 
 extension RomeBackend {
     /// Demo data and test doubles move a chat's work, as an older instance does.
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
@@ -466,7 +491,10 @@ extension RomeBackend {
     }
     func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse { TaskLinksResponse(tasks: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
+    func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
+    func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.
@@ -477,10 +505,9 @@ extension RomeBackend {
     func connectors() async throws -> [ConnectorState] { [] }
     func agentName() async -> String? { nil }
     func pendingApprovals() async throws -> [PendingApproval] { [] }
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}

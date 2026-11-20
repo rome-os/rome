@@ -80,7 +80,10 @@ struct InteractionRow: View {
             }, press: { name, context in
                 try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
             }, waiting: part.waits ? .init(answered: answered) : nil)
-            .bubbleWidth()
+            // An agent card, Rome's own card the agent composed, takes the
+            // chat's width as on the web; an app's card and a card the agent
+            // waits on keep a bubble's (docs/domains/chats.md#agent-card).
+            .bubbleWidth(full: part.appId == "core" && !part.waits)
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
                 .bubbleWidth()

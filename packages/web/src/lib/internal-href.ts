@@ -31,6 +31,19 @@ export function toInternalPath(href: string): string {
   }
 }
 
+const API_PATH = /^\/api(?:\/|$)/;
+
+/**
+ * Whether an href addresses the server's HTTP API rather than a dashboard
+ * route. The dashboard has no `/api` page, so routing one through the SPA
+ * reaches the catch-all and replaces the current view.
+ */
+export function isApiHref(href: string | undefined): boolean {
+  if (!isInternalHref(href)) return false;
+  const path = toInternalPath(href).split(/[?#]/, 1)[0] ?? "";
+  return API_PATH.test(path);
+}
+
 /**
  * The raw path, query and hash of an href `isInternalHref` accepted, without
  * the canonicalization `new URL().pathname` applies. A leading `/`, `#` or `?`

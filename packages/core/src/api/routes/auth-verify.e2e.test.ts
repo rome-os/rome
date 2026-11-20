@@ -470,7 +470,7 @@ describe("/api/auth/verify", () => {
     expect(body.bootstrap?.caller?.kind).toBe("guardian");
   });
 
-  it("marks cloud-email app manifest access allowed with dashboard visitor access", async () => {
+  it("marks cloud-email app manifest access allowed with dashboard admin access", async () => {
     const host = buildHost(
       await stubDeps([buildResolvedApp("restricted", false, { web: true })], {
         cloudEmailAccess: { restricted: ["lin@example.com"] },

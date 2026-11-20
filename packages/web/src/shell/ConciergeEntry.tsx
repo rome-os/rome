@@ -1,11 +1,12 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import {
   DropdownMenu,
@@ -107,34 +108,34 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="flex items-center">
+    <div className="mb-[var(--row-gap)] flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0
             ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
             : undefined
         }
       >
-        <span
-          className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-          aria-hidden
-        >
-          <RomeLogo className="size-4 shrink-0" aria-hidden />
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary-hover px-[var(--row-count-px)] font-normal tabular-nums"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <RomeLogo className="size-4 shrink-0" aria-hidden />
+          )}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
     </div>
   );
@@ -191,7 +192,7 @@ export function ConciergeChats({
     rootMargin: "0px 0px 160px 0px",
   });
   return (
-    <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
+    <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
       {statusFilter === "archived" ? null : (
         <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
@@ -235,11 +236,14 @@ function ConciergeTopicEntry({
       emitSessionsChanged();
     },
   });
-  const retire = async (how: "archive" | "unarchive" | "delete", stopWork = false) => {
+  // `choice` stops the follows and open tasks of a delete or an archive, and
+  // moves an unarchived chat's follows back.
+  const retire = async (how: "archive" | "unarchive" | "delete", choice = false) => {
     try {
-      if (how === "delete")
-        await deleteSession(chat.id, stopWork ? { followsAndTasks: "stop" } : {});
-      else await archiveSession(chat.id, how === "archive");
+      if (how === "delete") await deleteSession(chat.id, choice ? { followsAndTasks: "stop" } : {});
+      else if (how === "archive")
+        await archiveSession(chat.id, true, choice ? { followsAndTasks: "stop" } : {});
+      else await archiveSession(chat.id, false, choice ? { follows: "moveBack" } : {});
     } catch {
       toast.error(t("recentChats.topicChatRetireFailed"));
     }
@@ -248,6 +252,13 @@ function ConciergeTopicEntry({
     // An unarchived chat stays open where it is.
     if (how !== "unarchive") onGone();
   };
+  const archiving = useTopicChatArchive({
+    chatId: chat.id,
+    name,
+    topic: true,
+    onArchive: (stopWork) => void retire("archive", stopWork),
+    onUnarchive: (moveBack) => void retire("unarchive", moveBack),
+  });
   if (rename.editingId === chat.id) {
     return (
       <input
@@ -258,34 +269,41 @@ function ConciergeTopicEntry({
     );
   }
   return (
-    <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
+    <div
+      className="group/topic relative mb-[var(--row-gap)] flex items-center"
+      data-concierge-topic={chat.id}
+    >
       <Link
         to={`/chat/${chat.id}`}
-        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-4`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
+        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {count > 0 ? (
+            <Badge
+              variant="brand"
+              shape="pill"
+              className="h-4 min-w-4 shrink-0 justify-center bg-primary-hover px-[var(--row-count-px)] font-normal tabular-nums"
+              data-concierge-unread
+              role="img"
+              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+            >
+              {label}
+            </Badge>
+          ) : (
+            <Hash aria-hidden className="size-4 shrink-0" />
+          )}
+        </span>
         {/* The menu button floats over the row's end, so the name keeps clear
-            of it: the badge holds that room when there is one. */}
+            of it. */}
         <span
-          className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""} ${
-            count > 0 ? "" : "pr-[var(--control-h-sm)]"
-          }`}
+          className={`flex-1 truncate pr-[var(--control-h-sm)] ${chat.archived ? "text-subtle-foreground" : ""}`}
         >
           {name}
         </span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums group-hover/topic:invisible"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -293,7 +311,7 @@ function ConciergeTopicEntry({
             size="sm"
             label={t("recentChats.topicChatActions", { name })}
             icon={<Ellipsis aria-hidden />}
-            className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
+            className="touch-show absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -307,12 +325,12 @@ function ConciergeTopicEntry({
             {t("recentChats.rename")}
           </DropdownMenuItem>
           {chat.archived ? (
-            <DropdownMenuItem onSelect={() => void retire("unarchive")}>
+            <DropdownMenuItem onSelect={() => void archiving.unarchive()}>
               <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.unarchive")}
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem onSelect={() => void retire("archive")}>
+            <DropdownMenuItem onSelect={() => void archiving.archive()}>
               <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.archive")}
             </DropdownMenuItem>
@@ -334,6 +352,7 @@ function ConciergeTopicEntry({
           void retire("delete", stopWork);
         }}
       />
+      {archiving.dialog}
     </div>
   );
 }

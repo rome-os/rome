@@ -25,5 +25,31 @@ describe("transcriptOf", () => {
       message("user", "thanks", "🙏"),
     ]);
     expect(t.saidAfter).toEqual([["Morning!"], []]);
+    expect(t.reactions).toEqual([null, "🙏"]);
+  });
+
+  it("keeps a card the Concierge composed apart from its text, by its plain-text line", () => {
+    const card: ChatMessage = {
+      id: "card",
+      role: "assistant",
+      content: JSON.stringify([
+        {
+          type: "widget",
+          toolUseId: "t",
+          appId: "core",
+          text: "9:00 Belém, 13:00 lunch",
+          ui: { components: [{ id: "root", component: "Text", text: "Saturday" }] },
+        },
+      ]),
+      createdAt: "",
+    };
+    const t = transcriptOf([
+      message("user", "plan Saturday"),
+      card,
+      message("assistant", "Enjoy!"),
+    ]);
+    expect(t.saidAfter).toEqual([["Enjoy!"]]);
+    expect(t.cardsAfter).toEqual([["9:00 Belém, 13:00 lunch"]]);
+    expect(t.lines[1]).toContain("showed a card");
   });
 });

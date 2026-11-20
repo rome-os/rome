@@ -11,6 +11,7 @@ import {
 } from "@/components/chat/entries/SettledCard";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { SecretAccessCard } from "./SecretAccessCard";
+import { secretNames } from "./secret-names";
 import { useApprovalCard } from "./use-approval-card";
 
 /** The action whose approval draws as a key card. */
@@ -107,7 +108,18 @@ export function ApprovalCard({
         failure={status === "failed" ? record?.executionError : null}
         submitting={submitting}
         submitError={submitError}
-        submit={submit}
+        submit={(intent, pin) =>
+          submit(
+            intent,
+            pin === undefined
+              ? undefined
+              : {
+                  names: secretNames(secretAccess),
+                  ttlMinutes: secretAccess.ttlMinutes,
+                  pin,
+                },
+          )
+        }
       />
     );
   }

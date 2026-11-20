@@ -3,6 +3,7 @@
 // card and fills in the device's position when Share is pressed.
 
 import type { WidgetUi } from "@rome-os/app-runtime";
+import { promptCardUi } from "./prompt-card.js";
 
 /** The kind of the share-location card among core's own widgets. */
 export const LOCATION_CARD_ID = "location-card";
@@ -43,38 +44,23 @@ export type LocationAnswer =
   | { status: "declined"; dismissed: true };
 
 /**
- * The card described as data: a title, the agent's reason, and Not now and
- * Share. `autoShare` marks a card a client may answer by itself where the
- * device already allows the position; core sets it only for a turn the
- * guardian's own message started, and a card without it always waits for
+ * The card described as data, built as the device connect card is: the
+ * map-pin and "Share your location?", the agent's reason under it, then Not
+ * now and Share, its fixed words Rome strings each reader shows in the
+ * guardian's language. `autoShare` marks a card a client may answer by itself
+ * where the device already allows the position; core sets it only for a turn
+ * the guardian's own message started, and a card without it always waits for
  * Share.
  */
 export function locationCardUi(reason: string, autoShare = false): WidgetUi {
-  return {
+  return promptCardUi({
+    icon: "map-pin",
+    title: { rome: "shareLocationTitle", english: "Share your location?" },
+    note: reason,
+    dismiss: { label: { rome: "notNow", english: "Not now" }, event: DECLINE_LOCATION_EVENT },
+    confirm: { label: { rome: "share", english: "Share" }, event: SHARE_LOCATION_EVENT },
     ...(autoShare ? { data: { autoShare: true } } : {}),
-    components: [
-      { id: "root", component: "Column", children: ["title", "reason", "actions"] },
-      { id: "title", component: "Text", text: "Share your location?", variant: "h5" },
-      { id: "reason", component: "Text", text: reason },
-      { id: "actions", component: "Row", children: ["decline", "share"], justify: "end" },
-      {
-        id: "decline",
-        component: "Button",
-        child: "decline-label",
-        variant: "borderless",
-        action: { event: { name: DECLINE_LOCATION_EVENT } },
-      },
-      { id: "decline-label", component: "Text", text: "Not now" },
-      {
-        id: "share",
-        component: "Button",
-        child: "share-label",
-        variant: "primary",
-        action: { event: { name: SHARE_LOCATION_EVENT } },
-      },
-      { id: "share-label", component: "Text", text: "Share" },
-    ],
-  };
+  });
 }
 
 /** Whether a share-location card may answer by itself: core marked it so. */

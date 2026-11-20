@@ -31,7 +31,7 @@ final class CloudStatusBox {
         let backend = offered()
         let defaults = defaults()
         let store = PendingUpgradeStore(defaults: defaults)
-        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5))
         var finishedInBackground: Bool?
         updater.onFinished = { finishedInBackground = $0 }
         await updater.attach(backend: backend, instanceID: "i1")
@@ -55,11 +55,43 @@ final class CloudStatusBox {
         #expect(updater.updatedInBackgroundTo == nil)
     }
 
+    /// Only a composer the guardian sees uses the "updated" line up: Chat kept
+    /// mounted under Apps, Search or a topic chat, a chat under the drawer or a
+    /// sheet, and every chat while the app is away leave it for later.
+    @Test func onlyAVisibleComposerUsesUpTheUpdatedLine() {
+        let model = AppModel()
+        func shows(_ chat: String, in section: MainSection, covered: Bool = false) -> Bool {
+            let inFront = MainShell.visibleChat(section: section, path: [], covered: covered) == chat
+            return UpdatedNotice.shows(chatInFront: inFront, pagesUncovered: model.pagesUncovered)
+        }
+        #expect(shows(conciergeChatID, in: .chat))
+        #expect(!shows(conciergeChatID, in: .apps))
+        #expect(!shows(conciergeChatID, in: .search))
+        // A topic chat in front: its composer says it, Chat's under it does not.
+        #expect(shows("topic-1", in: .topic("topic-1")))
+        #expect(!shows(conciergeChatID, in: .topic("topic-1")))
+        // The drawer or a sheet over the chat.
+        #expect(!shows(conciergeChatID, in: .chat, covered: true))
+        #expect(!shows("topic-1", in: .topic("topic-1"), covered: true))
+
+        // The stacking game over the whole app.
+        model.stackGame = StackGameLaunch()
+        #expect(!model.pagesUncovered)
+        #expect(!shows(conciergeChatID, in: .chat))
+        model.stackGame = nil
+        #expect(shows(conciergeChatID, in: .chat))
+
+        // The app in the background.
+        model.appDidEnterBackground()
+        #expect(!model.pagesUncovered)
+        #expect(!shows(conciergeChatID, in: .chat))
+    }
+
     /// The page's own upgrade keeps the page and reopens; the composer says nothing.
     @Test func anUpgradeFromThePageStaysOnThePage() async throws {
         let backend = offered()
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5))
         var finishedInBackground: Bool?
         updater.onFinished = { finishedInBackground = $0 }
         await updater.attach(backend: backend, instanceID: "i1")
@@ -79,7 +111,7 @@ final class CloudStatusBox {
         let backend = FakeBackend()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.100"), latest: .init(version: "1.1.198"), upgradeAvailable: true))
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(updater.blocking)
         #expect(updater.rowState == nil)
@@ -99,7 +131,7 @@ final class CloudStatusBox {
         store.save(PendingUpgrade(target: "1.1.198", since: .now, from: "1.1.197", background: true), for: "i1")
         let backend = FakeBackend()
         backend.check = .failure(APIError.network)
-        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5))
         #expect(updater.backgroundUpgradePending(for: "i1"))
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
@@ -122,7 +154,7 @@ final class CloudStatusBox {
         let backend = offered()
         let defaults = defaults()
         let store = PendingUpgradeStore(defaults: defaults)
-        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5))
         let cloud = CloudStatusBox()
         cloud.status = "upgrading"
         updater.cloudStatus = { _ in cloud.reads += 1; return cloud.status }
@@ -168,7 +200,7 @@ final class CloudStatusBox {
         let backend = offered()
         backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         await updater.updateInBackground()
         guard case .failed(.start) = updater.state else { Issue.record("\(updater.state)"); return }
@@ -188,7 +220,7 @@ final class CloudStatusBox {
         let backend = offered()
         backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         await updater.updateInBackground()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.197"), latest: .init(version: "1.1.199"), upgradeAvailable: true))
@@ -203,7 +235,7 @@ final class CloudStatusBox {
         let first = offered()
         first.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         await updater.attach(backend: first, instanceID: "a")
         await updater.updateInBackground()
         first.checkDelay = .milliseconds(200)
@@ -224,7 +256,7 @@ final class CloudStatusBox {
         let backend = offered()
         backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let defaults = defaults()
-        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         await updater.attach(backend: backend, instanceID: "i1")
         await updater.updateInBackground()
         backend.check = .failure(APIError.network)
@@ -245,7 +277,7 @@ final class CloudStatusBox {
         store.save(PendingUpgrade(target: "1.1.198", since: .now, from: "1.1.197", background: true), for: "i1")
         let backend = FakeBackend()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.199"), latest: .init(version: "1.1.199"), upgradeAvailable: false))
-        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo)
         var finished: Bool?
         updater.onFinished = { finished = $0 }
         await updater.attach(backend: backend, instanceID: "i1")
@@ -263,7 +295,7 @@ final class CloudStatusBox {
         let backend = FakeBackend()
         backend.buildVersion = "1.1.198"
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.198"), latest: .init(version: "1.1.198"), upgradeAvailable: false))
-        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5))
+        let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), minimums: .demo, pollInterval: .milliseconds(5))
         var finishes: [Bool] = []
         updater.onFinished = { finishes.append($0) }
         await updater.attach(backend: backend, instanceID: "i1")

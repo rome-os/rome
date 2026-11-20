@@ -28,12 +28,14 @@ export interface ReplySource {
 }
 
 /**
- * Quoted markdown as plain reading text for a chip or a quote block: heading,
- * list, and quote markers, emphasis, and code ticks are dropped and lines
- * run together. The stored quote keeps the source text.
+ * Quoted markdown as plain reading text for a chip or a quote block: a link
+ * reads as its text, and heading, list, and quote markers, emphasis, and code
+ * ticks are dropped and lines run together. The stored quote keeps the source
+ * text.
  */
 export function plainQuote(markdown: string): string {
   return markdown
+    .replace(/(?<!!)\[([^\]]*)\]\([^)\s]*\)/g, "$1")
     .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/gm, "")
     .replace(/\*\*|__|`/g, "")
     .replace(/\s*\n\s*/g, " ")

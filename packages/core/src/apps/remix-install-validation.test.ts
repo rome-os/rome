@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
@@ -32,10 +32,33 @@ function actionYaml(name: string): string {
   ].join("\n");
 }
 
+function agentYaml(name: string, options: { legacyOutputSchema?: boolean } = {}): string {
+  return [
+    `name: ${name}`,
+    "description: Remix isolation test agent",
+    "tier: large",
+    "systemPromptPrefix: Remix isolation test.",
+    "tools: []",
+    "permissionMode: default",
+    ...(options.legacyOutputSchema
+      ? [
+          "outputSchema:",
+          "  type: object",
+          "  properties:",
+          "    ok:",
+          "      type: boolean",
+          "  required: [ok]",
+        ]
+      : []),
+    "",
+  ].join("\n");
+}
+
 async function writeRemixSource(
   root: string,
   options: {
     actionName?: string;
+    agentName?: string;
     skillName?: string;
     tablePrefix?: string;
     migrationSql?: string;
@@ -51,7 +74,7 @@ async function writeRemixSource(
     "  listing: '@alice/calendar'",
     "  version: 1.2.3",
     ...(options.actionName ? ["actions:", "  - actions/calendar-lookup"] : ["actions: []"]),
-    "agents: []",
+    ...(options.agentName ? ["agents:", "  - agents/calendar-helper/agent.yaml"] : ["agents: []"]),
     ...(options.skillName ? ["skills:", "  - skills/calendar-help"] : ["skills: []"]),
     "hooks: []",
     ...(options.tablePrefix
@@ -66,6 +89,13 @@ async function writeRemixSource(
     await writeFile(
       join(root, "actions", "calendar-lookup", "action.yaml"),
       actionYaml(options.actionName),
+    );
+  }
+  if (options.agentName) {
+    await mkdir(join(root, "agents", "calendar-helper"), { recursive: true });
+    await writeFile(
+      join(root, "agents", "calendar-helper", "agent.yaml"),
+      agentYaml(options.agentName),
     );
   }
   if (options.skillName) {
@@ -93,11 +123,22 @@ async function writeRemixSource(
   }
 }
 
-async function sourceApp(root: string, options: { skillName?: string } = {}): Promise<ResolvedApp> {
+async function sourceApp(
+  root: string,
+  options: { agentName?: string; legacyAgent?: boolean; skillName?: string } = {},
+): Promise<ResolvedApp> {
   const actionRoot = join(root, "installed-action");
+  const agentPath = join(root, "installed-agent", "agent.yaml");
   const skillRoot = join(root, "installed-skill");
   await mkdir(actionRoot, { recursive: true });
   await writeFile(join(actionRoot, "action.yaml"), actionYaml("calendar_lookup"));
+  if (options.agentName) {
+    await mkdir(dirname(agentPath), { recursive: true });
+    await writeFile(
+      agentPath,
+      agentYaml(options.agentName, { legacyOutputSchema: options.legacyAgent }),
+    );
+  }
   if (options.skillName) {
     await mkdir(skillRoot, { recursive: true });
     await writeFile(
@@ -140,7 +181,18 @@ async function sourceApp(root: string, options: { skillName?: string } = {}): Pr
           absolutePath: actionRoot,
         },
       ],
-      agent: [],
+      agent: options.agentName
+        ? [
+            {
+              kind: "agent",
+              publicName: options.agentName,
+              aliases: [],
+              ownerType: "app",
+              ownerId: "calendar",
+              absolutePath: agentPath,
+            },
+          ]
+        : [],
       skill: options.skillName
         ? [
             {
@@ -304,6 +356,118 @@ describe("validateRemixInstallIsolation", () => {
         unusedInstaller,
       ),
     ).rejects.toThrow(/REMIX_DB_MIGRATIONS_NOT_ISOLATED.*calendar.*ray_calendar/);
+  });
+
+  it("ignores an unrelated installed agent whose legacy output schema no longer validates", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(await sourceApp(root, { agentName: "synthesizer", legacyAgent: true })),
+        unusedInstaller,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores a legacy installed agent when its app is disabled", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+    const deps = disabledCatalogAndInstaller(
+      await sourceApp(root, { agentName: "synthesizer", legacyAgent: true }),
+    );
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        deps.catalog,
+        deps.installer,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores an unrelated installed action whose config no longer validates", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+    const installed = await sourceApp(root);
+    await writeFile(
+      join(root, "installed-action", "action.yaml"),
+      `${actionYaml("calendar_lookup")}legacyField: true\n`,
+    );
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(installed),
+        unusedInstaller,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores an unrelated installed skill that has no description", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+    const installed = await sourceApp(root, { skillName: "calendar_help" });
+    await writeFile(join(root, "installed-skill", "SKILL.md"), "---\nname: calendar_help\n---\n");
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(installed),
+        unusedInstaller,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still rejects an installed agent whose name collides with the remixed target", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { agentName: "calendar_helper" });
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(await sourceApp(root, { agentName: "calendar_helper" })),
+        unusedInstaller,
+      ),
+    ).rejects.toThrow(/REMIX_ARTIFACT_CONFLICT.*calendar_helper.*calendar/);
+  });
+
+  it("still fails when an installed agent's YAML cannot be read", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+    const installed = await sourceApp(root, { agentName: "synthesizer" });
+    await writeFile(join(root, "installed-agent", "agent.yaml"), "name: [unclosed\n");
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(installed),
+        unusedInstaller,
+      ),
+    ).rejects.toThrow(/Cannot read installed agent name/);
+  });
+
+  it("still fails when an installed agent's name cannot be used", async () => {
+    const root = await tempRoot();
+    const remixRoot = join(root, "remix");
+    await writeRemixSource(remixRoot, { actionName: "ray_calendar__calendar_lookup" });
+    const installed = await sourceApp(root, { agentName: "synthesizer" });
+    await writeFile(join(root, "installed-agent", "agent.yaml"), agentYaml("bad:name"));
+
+    await expect(
+      validateRemixInstallIsolation(
+        { mode: "source", path: remixRoot },
+        catalogWith(installed),
+        unusedInstaller,
+      ),
+    ).rejects.toThrow(/Cannot read installed agent name/);
   });
 
   it("accepts namespaced artifacts and a fresh target database baseline", async () => {

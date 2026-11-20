@@ -86,13 +86,12 @@ private struct WidgetCardBody: View {
         // keep one task while the branch inside changes.
         VStack(spacing: 0) {
             if let answered = autoShared ?? surface.autoSent {
-                // In the thread label's style: a quiet line, not a card. Until
-                // the stored answer arrives, the share just sent says it.
-                Text(verbatim: LocationCard.outcome(answered))
-                    .romeFont(12)
-                    .foregroundStyle(Palette.sub.opacity(0.75))
-                    .padding(.horizontal, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // A quiet centered line, not a card. Until the stored answer
+                // arrives, the share just sent says it.
+                // The row keeps the card's right inset, so the same inset on
+                // the left centers the line across the full transcript width.
+                NoticeLine(text: LocationCard.outcome(answered))
+                    .padding(.leading, Metrics.bubbleInset)
             } else if surface.autoSharing, !surface.sendFailed, LocationCard.isLocationCard(part) {
                 // While the card shares by itself, nothing shows.
                 Color.clear.frame(height: 0)
@@ -170,7 +169,8 @@ private struct WidgetCardBody: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardPadding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)
@@ -262,6 +262,7 @@ final class WidgetSurface: ObservableObject, ActionHandling {
         ]) && (part.data.object ?? [:]).allSatisfy { key, value in
             // A key is one JSON Pointer token: `~` and `/` are escaped.
             let token = key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+            let value = key == Self.romeStringsKey ? Self.withRomeWords(value) : value
             return send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(token)"), "value": value])
         }
         viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
@@ -289,6 +290,21 @@ final class WidgetSurface: ObservableObject, ActionHandling {
               answers.allSatisfy({ $0["questionId"] == nil && $0["values"] != nil })
         else { return nil }
         return .array(answers)
+    }
+
+    /// Where a card keeps Rome's own words with their English, in its data
+    /// model (`/romeStrings/<name>`), as `promptCardUi` writes them.
+    static let romeStringsKey = "romeStrings"
+
+    /// Rome's own words in the guardian's language where this app knows the
+    /// name, else the English the card carries. An older app, which knows
+    /// no such key, draws the English.
+    static func withRomeWords(_ value: Rome.JSONValue) -> Rome.JSONValue {
+        guard case .object(let words) = value else { return value }
+        return .object(Dictionary(uniqueKeysWithValues: words.map { name, english in
+            let word = WidgetPaths.hostString(name)
+            return (name, word.isEmpty ? english : .string(word))
+        }))
     }
 
     /// The card's components with each `{ string }` replaced by Rome's own

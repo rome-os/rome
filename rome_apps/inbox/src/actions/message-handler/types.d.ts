@@ -83,6 +83,11 @@ export interface MessageHandlerInput {
   /** @deprecated The name `accountAgentName` had in actions queued before it.
    *  Read only when `accountAgentName` is absent. */
   linkedAgentName?: string;
+  /** The wake gate's answer, which the channel-message hook passes when it
+   *  asked the gate itself. Only that hook sets it: a caller that passes it
+   *  skips the gate, policy blocks and the chat's on/off switch included.
+   *  Absent, the handler asks the gate. */
+  wake?: "wake" | "review";
 }
 
 export interface MessageHandlerOutput {

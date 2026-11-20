@@ -183,6 +183,52 @@ describe("Approvals API", () => {
     });
   });
 
+  describe("a vault_apply approval", () => {
+    const askForSecret = (actionName = "system:vault_apply") =>
+      new ApprovalsRepository(testDb.db).create({
+        type: "action_execution",
+        requestedBy: "agent",
+        description: "Use GITHUB_TOKEN",
+        payload: { actionName, args: { name: "GITHUB_TOKEN", reason: "r" } },
+      });
+    const send = (id: string, route: string, body?: string) =>
+      app.request(`/approvals/${id}/${route}`, {
+        method: "POST",
+        headers: { "sec-fetch-site": "same-origin", "Content-Type": "application/json" },
+        body,
+      });
+
+    it.each([
+      ["approve", "approve", undefined],
+      ["resolve", "resolve", JSON.stringify({ action: "approve" })],
+    ])("answers 422 to %s without resolving it", async (_label, route, body) => {
+      const id = await askForSecret();
+      const res = await send(id, route, body);
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({
+        error: "Approve this with your PIN in the dashboard.",
+        code: "pin_required",
+      });
+      expect((await new ApprovalsRepository(testDb.db).findById(id))?.status).toBe("pending");
+      expect(approvalHandler.onApproved).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["reject", undefined],
+      ["resolve", JSON.stringify({ action: "reject" })],
+    ])("still rejects through %s", async (route, body) => {
+      const id = await askForSecret();
+      const res = await send(id, route, body);
+      expect(res.status).toBe(202);
+      expect((await new ApprovalsRepository(testDb.db).findById(id))?.status).toBe("rejected");
+    });
+
+    it("leaves other actions on the generic approve", async () => {
+      const id = await askForSecret("system:vault_search");
+      expect((await send(id, "approve")).status).toBe(202);
+    });
+  });
+
   describe("chat affirmation does not auto-approve a pending approval", () => {
     it("hitting approval-adjacent routes (GET, list) leaves the pending approval unchanged", async () => {
       const id = baseline.approvals.pendingId;

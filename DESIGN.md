@@ -259,14 +259,14 @@ components:
   sidebar-row:
     textColor: "{colors.ink}"
     typography: "{typography.ui}"
-    rounded: "{rounded.8}"
-    height: "32px"
+    rounded: "{rounded.12}"
+    height: "36px"
   sidebar-row-active:
     backgroundColor: "{colors.warm-paper}"
     textColor: "{colors.ink}"
     typography: "{typography.ui}"
-    rounded: "{rounded.8}"
-    height: "32px"
+    rounded: "{rounded.12}"
+    height: "36px"
 ---
 
 # Design System: Rome
@@ -373,9 +373,11 @@ The grid is 4px. Spacing comes from one scale of fifteen steps (0, 4, 8, 12, 16,
 
 The guardian shell is a sidebar plus a content column. On desktop (768px and up) the sidebar is sticky and 256px wide, collapsing to a 64px rail. Below 768px it becomes a fixed slide-over, and a 48px mobile header (plus the safe-area inset) sits at the top of the content column. Chat is the home screen. A swipe right anywhere drags the sidebar out under the finger, and the page slides right with it under the scrim, so the sidebar pushes the page rather than covering it. On release it settles open past a third of its width or on a flick. A swipe left or a tap on the dimmed page closes it, and the header's menu button stays as the visible way in. A swipe gives way to a sideways scroller that is not at its start, to a surface that handles its own touch (`touch-action: none`, such as a diagram's pan), and to text fields. Mobile Safari keeps the screen's left edge for its back gesture, so there a swipe starts a little way in. The file browser switches from two panes to a compact single pane below a 1024px container width. Apps mount inside the content column in a Shadow DOM and inherit the theme layer.
 
-Density is operational but not cramped. Cards carry 16px inner padding, tiles 12px, menu items 4px by 8px. Controls sit on three heights: 28px (`sm`), 32px (`md`, the default), and 44px (`lg`, square icon buttons only, for touch). Badges are 22px. Avatars are 24, 32, and 40px. When a control shares a row with loose text, the row takes the taller of the two, and the air around the text inside a control is never more than the text's own line box.
+Density is operational but not cramped. Cards carry 16px inner padding, tiles 12px, menu items 4px by 8px. Controls share `sm` at 28px and `md` at 32px. The Button family also offers `xs` at 24px for small inline actions and `lg` at 44px for standalone actions. Badges are 22px. Avatars are 24, 32, and 40px. A row with a control and loose text takes the taller of the two. Use the [air ratio](docs/ui/composition.md#the-ratio-bound) to choose sizes for mixed rows.
 
-In the large platform scale, controls on the shared scale and menu options take a visible 44px floor. Both shared steps and the `xs` step rise to it, square icon buttons and calendar days are 44px squares, chips, tabs and page-nav entries are 44px tall, and the switch is 48 by 28 at both sizes, with a hit area 44px tall. A control is a visible 44px box rather than a small box with a hidden hit area. A hidden hit area that reaches past its own box can land on a neighbour's box and take taps meant for it, and no stacking order can prevent that. The one exception stays inside its own composite: a segmented control's 36px segments reach over their own track's padding, which belongs to no other control. Row floors follow the control step to 52px.
+In the large platform scale, standard controls and menu options take a visible 44px floor. Square icon buttons and calendar days are 44px squares. Chips, tabs, and page-nav entries are 44px tall. The switch is 48 by 28 at both scales, with a 44px tall target. A segmented control's 36px segments extend their targets into their own track's padding. Row floors follow the control step to 52px.
+
+Labeled Buttons in dense surfaces can opt into `compact` at `xs`, `sm`, and `md`. The button paints at its selected height and keeps a touch target at least 44px high and wide. The kit reserves the space above and below the button with protected block margins, so adjacent targets stay separate. Put any additional spacing on the parent.
 
 Selection controls keep their glyph geometry inside accessible labels or their composite hit areas. Hover-only disclosure is never the only path to an action.
 
@@ -383,11 +385,11 @@ Selection controls keep their glyph geometry inside accessible labels or their c
 
 Rome is flat at rest. Two context canvases sit beneath three content depths: a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). Chat uses `chat-canvas`; compact app UI uses the brighter `app-canvas`; dashboard pages without a dedicated context use `background`. A canvas and card may share a fill, so the card's hairline border must still carry its boundary. In dark mode the distinct steps lighten as they rise, which is why depth names describe position rather than lightness.
 
-Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else in the kit casts. A dashboard page that paints `shadow-1` on a resting card is unfinished migration, not a pattern.
+Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment takes `shadow-1`, and the active sidebar row takes `shadow-4` with one outer edge. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else in the kit casts. A dashboard page that paints `shadow-1` on a resting card is unfinished migration, not a pattern.
 
 ### Shadow Vocabulary
-- **Rest lift** (`box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)`): `shadow-1`, on the checked segment of a segmented control and the active chat row.
-- **Hover lift** (`box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)`): `shadow-4`, on card hover, menus, popovers, selects, and toasts.
+- **Rest lift** (`box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)`): `shadow-1`, on the checked segment of a segmented control.
+- **Hover lift** (`box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)`): `shadow-4`, on card hover, the active sidebar row, menus, popovers, selects, and toasts.
 - **Submenu** (`box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)`): `shadow-10`, on a submenu that opens beside a menu, and on the dashboard's floating composer chrome.
 - **Modal** (`box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25)`): `shadow-25`, on dialogs and sheets.
 
@@ -416,7 +418,7 @@ Borders are 1px hairlines in `border`. A control that can paint a border declare
 Components are precise and restrained. Each one declares its own typography role and reads only semantic tokens, so a call site never sets a type utility, a color, or a per-theme class on it.
 
 ### Buttons
-- **Shape:** Height 32px, radius 10px, horizontal padding 14px for centered content and 12px for start-aligned content. Small is 28px with 8px radius and 10px padding. Icon-only buttons are square on the same heights, plus a 44px large step with 12px radius.
+- **Shape.** Medium is 32px tall with a 10px radius and horizontal padding of 14px for centered content or 12px for start-aligned content. Small is 28px tall with an 8px radius and 10px padding. Extra-small is 24px tall with the small radius. Large is 44px tall with a 12px radius. Icon-only buttons are square at each height.
 - **Primary:** Coral Ember fill, white label at weight 500. Hover is the same fill at 80% alpha (`hover:bg-primary/80`), not the `primary-hover` token. Under Ash the fill is the deeper coral and under Slate it is ink.
 - **Outline:** Canvas fill, hairline border, ink label. Hover switches to the recessed fill. Dark mode uses a 30% input tint.
 - **Ghost:** No fill or border at rest. Hover takes the recessed fill.
@@ -450,7 +452,7 @@ Components are precise and restrained. Each one declares its own typography role
 - **Switch:** A pill track that fills coral when checked. The thumb follows its context canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
 
 ### Navigation
-- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
+- **Sidebar:** Canvas fill with 1px region boundaries in `border-strong`. Navigation groups and the footer use the shared Separator with `border-strong`; shell columns and the Tasks card use the same token for their edges. Footer and topic-menu action glyphs follow their control's size, 14px at the small step and 16px at the medium step. Navigation rows, chat rows outside the Tasks card, and the search pill use `--row-h` (36px), with 12px corners and regular-weight `text-ui`. Both columns use the medium row inset for 12px of content padding and a matching 12px icon gap. A 16px icon slot starts at x=20 and text at x=48 within each column. Bordered links subtract their border from that inset. Project children and the Tasks card derive their text insets from the same column offset. Project chats keep the tree guide and selected marker; selection does not increase their weight. The New chat row has no separator above it, and its shortcut uses a square muted Badge rendered as `kbd`. The chat-list header aligns with the rail header. Its mode switch uses the shared outer inset and the SegmentedControl padding, independent of the row icon column. New-chat and main-chat rows share the navigation rhythm. Topic rows show a `#` in the same icon slot as the main chat so their text starts on the same vertical line. An unread count is a 16px circle with compact 11px/16px type from the host-owned `--row-count-*` tokens, expanding to a pill for wider counts. It uses `primary/15` for the fill and a 60% `primary` mix with `foreground` in OKLab for the numeral, matching the upgrade row's contrast-safe accent ink. Its border is transparent in light mode and `primary/50` in dark mode. It occupies the icon slot until the count clears and stays visible when the row menu appears. Lists and the Tasks card share an 8px outer inset, and the Tasks heading uses the same row height. The navigation rail's search trigger is a borderless pill with a `surface-muted` fill. The medium row vertical inset separates it from the navigation group. Navigation, list glyphs, and app artwork are 16px. The Projects and Chat glyphs share a stroke width. The Apps, Chat, and Projects glyphs tilt during hover or keyboard focus. Filled artwork reads slightly larger than outline glyphs within the same fixed slots, and names stay aligned. Hover takes `surface-hover`. The selected row takes `surface`, `shadow-4`, a single 1px outer edge in `border` at 70% alpha, regular-weight text, and a `primary` glyph; dark mode uses `surface-hover`. App artwork keeps its own colors. Rows inside the Tasks card use 8px corners, matching its heading and the concentric corner rule. A selected task uses the hover fill without another shadow. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
 - **Mobile header:** 48px plus the safe-area inset, hairline bottom border, hidden from 768px up.
 - **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path. A leading `@` turns the field into an agent picker, and a picked agent pins as a composer chip before the text. From then on the field holds a message, and Enter starts a new chat with that agent in the default project. Backspace in the empty field unpins the agent.
 

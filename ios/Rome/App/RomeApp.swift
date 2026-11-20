@@ -1,3 +1,4 @@
+import BackgroundTasks
 import Combine
 import SwiftUI
 import UserNotifications
@@ -36,7 +37,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // HealthKit may have launched the app in the background to deliver:
         // its observers must be listening before this returns.
         model.health.launch()
+        model.calendarSync.launch()
+        registerCalendarRefresh()
         return true
+    }
+
+    /// iOS's background app refresh for Calendar: registered before launch
+    /// ends, as BackgroundTasks requires. Each run syncs once, then asks for
+    /// the next.
+    private func registerCalendarRefresh() {
+        let model = model
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: CalendarSync.refreshTaskId, using: .main) { task in
+            // Called on the main queue, and only this closure touches it.
+            nonisolated(unsafe) let task = task
+            CalendarSync.scheduleRefresh()
+            let work = Task { @MainActor in
+                await model.calendarSync.backgroundRefresh()
+                task.setTaskCompleted(success: !Task.isCancelled)
+            }
+            task.expirationHandler = { work.cancel() }
+        }
     }
 
     /// UIKit's own notifications, not SwiftUI's scene phase: every trip away

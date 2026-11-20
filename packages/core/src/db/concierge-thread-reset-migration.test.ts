@@ -1,0 +1,67 @@
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import { describe, expect, it } from "@rstest/core";
+
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
+const TAG = "0144_message_read_at";
+
+function migrationSql(tag: string): string[] {
+  return readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8")
+    .split("--> statement-breakpoint")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+describe("the migration that resets Concierge chat threads", () => {
+  it("leaves every message of a Concierge chat its own chat thread, and keeps the roots of every other chat", () => {
+    const journal = JSON.parse(
+      readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8"),
+    ) as { entries: { tag: string }[] };
+    const tags = journal.entries.map((entry) => entry.tag);
+    const sqlite = new Database(":memory:");
+    for (const tag of tags.slice(0, tags.indexOf(TAG))) {
+      for (const statement of migrationSql(tag)) sqlite.exec(statement);
+    }
+    // 1: the main chat. 2: a topic chat. 3: a Telegram chat that Concierge-named
+    // session stands in. 4: a task chat. 5: an ordinary dashboard chat.
+    sqlite.exec(`INSERT INTO chats (platform, key, kind, started_at) VALUES
+      ('webchat', 'concierge', 'dm', 1), ('webchat', 'topic', 'dm', 1), ('telegram', 'tg', 'dm', 1),
+      ('webchat', 'task', 'dm', 1), ('webchat', 'plain', 'dm', 1)`);
+    const session = sqlite.prepare(
+      "INSERT INTO rome_sessions (id, name, type, agent_name, trigger_kind, created_at, activity_at, chat_id) VALUES (?, ?, 'webchat', ?, ?, 1, 1, ?)",
+    );
+    session.run("concierge", "Concierge", null, null, 1);
+    session.run("topic-session", "Topic", "core:concierge", null, 2);
+    session.run("tg-session", "Telegram", "concierge", null, 3);
+    session.run("task-session", "Task", "main", "concierge-task", 4);
+    session.run("plain-session", "Plain", "main", null, 5);
+    // Each chat holds a root (id n) and a reply to it (id n + 5) with its root set.
+    const insert = sqlite.prepare(
+      "INSERT INTO chat_messages (id, chat_id, key, text, parts, reply_to_message_id, root_message_id, said_at) VALUES (?, ?, ?, 'x', '[]', ?, ?, 100)",
+    );
+    for (let chat = 1; chat <= 5; chat++) {
+      insert.run(chat, chat, `root${chat}`, null, null);
+      insert.run(chat + 5, chat, `reply${chat}`, chat, chat);
+    }
+
+    for (const statement of migrationSql(TAG)) sqlite.exec(statement);
+
+    const rootOf = (id: number) =>
+      (
+        sqlite
+          .prepare("SELECT root_message_id AS root FROM chat_messages WHERE id = ?")
+          .get(id) as {
+          root: number | null;
+        }
+      ).root;
+    // The main chat and the topic chat start over, and keep what they reply to.
+    expect([rootOf(6), rootOf(7)]).toEqual([null, null]);
+    expect(
+      sqlite.prepare("SELECT reply_to_message_id AS r FROM chat_messages WHERE id = 6").get(),
+    ).toEqual({ r: 1 });
+    // A Telegram chat, a task chat and an ordinary dashboard chat keep their reply chains.
+    expect([rootOf(8), rootOf(9), rootOf(10)]).toEqual([3, 4, 5]);
+  });
+});

@@ -101,8 +101,6 @@ export interface ChatComposerSnapshot {
   // The message this turn replies to, sent as `replyToMessageId` (and
   // `replyQuote` for a selection).
   replyTo?: ReplyTarget;
-  // The root of the chat thread the chat is focused on, sent as `chatThread`.
-  chatThread?: string;
 }
 
 export interface ChatComposerSendControls {
@@ -791,7 +789,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         );
       }
       if (clearsOptimistically) {
-        setInputText(persistNewChatDraft ? rawText : text);
+        // Text typed while the send was pending survives a failure; only an
+        // empty field takes the failed text back.
+        setInputText((current) =>
+          current === "" ? (persistNewChatDraft ? rawText : text) : current,
+        );
         setPendingUploads(uploads);
         setDraftSkill(skill);
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
@@ -1217,7 +1219,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
-            {isStreaming && onStop && (
+            {/* Hidden while voice input is on, so its square is never mistaken for voice input's. */}
+            {isStreaming && onStop && !voice.active && (
               <Button
                 type="button"
                 variant="outline"

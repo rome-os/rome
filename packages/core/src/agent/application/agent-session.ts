@@ -157,7 +157,7 @@ export interface SessionOpening {
   sharedContext?: Record<string, unknown>;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
-   * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
+   * the worker→main RPC — i.e. an action spawning an agent (blocking `system:summon`),
    * which is a nested subagent run by construction. Used only for the
    * `rome.session.acquire` metric's `is_subagent` label; it does NOT change
    * session behavior (login-notice gating, defer, etc. still key off the
@@ -1122,6 +1122,7 @@ function sessionSetupOf(
       log: deps.log,
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,
+      repliesTo: policy.delegatesWork,
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {

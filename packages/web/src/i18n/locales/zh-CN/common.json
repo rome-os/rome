@@ -49,8 +49,6 @@
     "conciergeUnreadBadge_one": "{{label}} 条未读消息",
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
     "newTopic": "新话题",
-    "sectionTasks": "任务",
-    "tasksRunning": "任务，{{count}} 个运行中",
     "modeSwitch": "对话列表模式",
     "modeChat": "对话",
     "modeConcierge": "Agent",
@@ -71,6 +69,14 @@
     "topicChatDeleteMoveHint": "提醒和任务更新会发到主对话。",
     "topicChatDeleteStop": "停止它们",
     "topicChatDeleteStopHint": "关注会结束，任务会停止。",
+    "topicChatArchiveTitle": "归档“{{name}}”？",
+    "topicChatArchiveWithWork": "这个对话会被归档。其中有：",
+    "topicChatUnarchiveTitle": "取消归档“{{name}}”？",
+    "topicChatUnarchiveMoved": "这个对话归档时，以下关注转到了主对话：",
+    "topicChatUnarchiveMoveBack": "挪回这个对话",
+    "topicChatUnarchiveMoveBackHint": "提醒会重新发到这个对话。",
+    "topicChatUnarchiveKeep": "留在主对话",
+    "topicChatUnarchiveKeepHint": "提醒继续发到主对话。",
     "topicChatRetireFailed": "没能修改这个话题对话。",
     "rowStatus": {
       "waiting": "等你处理",
@@ -157,7 +163,7 @@
   },
   "profile": {
     "menuLabel": "账户",
-    "visitor": "访客",
+    "visitor": "管理员",
     "signOut": "退出登录",
     "signOutError": "退出登录失败，请重试。"
   },
@@ -303,6 +309,7 @@
     "openToolNewTab": "在新标签页中打开{{name}}",
     "closeTool": "关闭{{name}}",
     "tasksTab": "任务",
+    "routinesTab": "定时任务",
     "allTools": "所有已打开应用",
     "allToolsHidden_one": "所有已打开应用，另有 {{count}} 个",
     "allToolsHidden_other": "所有已打开应用，另有 {{count}} 个",
@@ -311,16 +318,6 @@
     "resizeTools": "调整聊天与应用区宽度",
     "emptyAppsTitle": "尚未打开应用",
     "emptyAppsDescription": "打开一个应用，在聊天时查看和使用它。"
-  },
-  "connectChatApp": {
-    "title": "连接你的聊天应用",
-    "description": "通过 Telegram、WhatsApp、Discord 或微信跟你的智能体聊天。",
-    "dismiss": "关闭"
-  },
-  "visitAppStore": {
-    "title": "去应用商店看看",
-    "description": "发现为 Rome 打造的 AI 原生应用。",
-    "dismiss": "关闭"
   },
   "feedback": {
     "open": "反馈",
@@ -362,5 +359,15 @@
     "noText": "无文本",
     "placeholder": "发消息给 {{name}}",
     "loadOlderFailed": "更早的消息加载失败"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "显示 PIN",
+    "hide": "隐藏 PIN",
+    "wrong_one": "PIN 不对，还剩 {{count}} 次",
+    "wrong_other": "PIN 不对，还剩 {{count}} 次",
+    "locked": "已锁定，{{time}} 后再试",
+    "notSet": "请先在设置里设置 PIN",
+    "signerOutdated": "Signer 版本太旧，升级实例后才能使用密码箱"
   }
 }

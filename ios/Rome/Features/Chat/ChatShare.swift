@@ -104,11 +104,9 @@ final class ChatShareFlow {
         chat.map { ShareTurns(messages: $0.messages, rows: $0.rows) }
     }
 
-    /// Share mode, with `turn` picked. An open chat thread leaves the screen:
-    /// share mode works on the main timeline. A quoted reply and its draft
-    /// stay as they are.
+    /// Share mode, with `turn` picked. A quoted reply and its draft stay as
+    /// they are.
     func begin(turn: String?) {
-        if chat?.thread != nil { chat?.hideThread() }
         selection = turn.map { [$0] } ?? []
         error = nil
     }
@@ -196,10 +194,11 @@ final class ChatShareFlow {
         }
     }
 
-    /// A version known to be at or above the app's minimum.
+    /// A version known to be at or above the release that brought share
+    /// links, whatever the app's minimums are.
     static func sharesLinks(version: String?) -> Bool {
         guard let version, UpdateGate.isVersion(version) else { return false }
-        return UpdateGate.isSupported(version)
+        return UpdateGate.isSupported(version, minimum: UpdateGate.shareLinksInstanceVersion)
     }
 
     /// The Shared links sheet or the share sheet is up over the chat.

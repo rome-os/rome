@@ -22,8 +22,10 @@ import {
 
 const STRANGER_PERSON_ID = "__STRANGER__";
 
+type WakeSender = { person: { id: string; bondLevel: string } | null };
+
 const actionConfig: ActionConfig = {
-  name: "message_handler",
+  name: "inbox:message_handler",
   type: "system",
   description: "Handle incoming messages",
   complexity: "moderate",
@@ -108,6 +110,10 @@ function createMessageHandlerDeps(
   const sentMessages: Record<string, unknown>[] = [];
   const approvals: Record<string, unknown>[] = [];
   const settings = overrides.settings ?? {};
+  const wake: { policyAction: string; asked: { message: unknown; sender: WakeSender }[] } = {
+    policyAction: "allow",
+    asked: [],
+  };
   const conversations = {
     ensureChannelChat: rs.fn(async (input: Record<string, unknown>) => ({
       id: `channel:${String(input.channel)}:${String(input.threadId)}`,
@@ -120,6 +126,9 @@ function createMessageHandlerDeps(
 
   const deps = {
     agentRunner,
+    // Answers as Core's guardedSend does, which an app test cannot import.
+    sendGate: ({ recipient }: { recipient: { bondLevel: string } | null }) =>
+      recipient?.bondLevel === "guardian" ? "send" : "check",
     personMappingRepo: {
       findByChannelUser: rs.fn(async () => null),
       findByName: rs.fn(async () => []),
@@ -140,9 +149,18 @@ function createMessageHandlerDeps(
         return "approval-1";
       }),
     },
-    policyEngine: {
-      evaluate: rs.fn(async () => ({ action: "allow" as const })),
-    },
+    // Answers as Core's chatSettingsWake does, which an app test cannot
+    // import, with the policy answering `wake.policyAction`.
+    wakeGateFor: rs.fn(async () => (message: unknown, sender: WakeSender) => {
+      wake.asked.push({ message, sender });
+      const bondLevel = sender.person?.bondLevel ?? "other";
+      const trusted = (settings.trustedBondLevels as string[] | undefined) ?? ["guardian"];
+      const replyTo = (settings.replyToBondLevels as string[] | undefined) ?? ["guardian"];
+      if (wake.policyAction === "block") return "block";
+      if (!replyTo.includes(bondLevel)) return "quiet";
+      if (trusted.includes(bondLevel) || wake.policyAction === "allow") return "wake";
+      return "review";
+    }),
     appContext: {
       app: { id: "inbox", version: "0.1.0", description: "Inbox" },
       controller: {},
@@ -165,7 +183,7 @@ function createMessageHandlerDeps(
     strangerPersonId: STRANGER_PERSON_ID,
   } as unknown as Parameters<typeof createAction>[1];
 
-  return { deps, agentRunner, sentMessages, approvals, conversations };
+  return { deps, agentRunner, sentMessages, approvals, conversations, wake };
 }
 
 describe("buildMessageContext", () => {
@@ -532,16 +550,14 @@ describe("message reply bond-level settings", () => {
     const findByNameFuzzy = rs.fn(async () => guardian);
     const addChannelMapping = rs.fn(async () => undefined);
 
-    const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, approvals, wake } = createMessageHandlerDeps({
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => null),
         findByNameFuzzy,
         addChannelMapping,
       },
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "sentinel_review",
-    });
+    wake.policyAction = "sentinel_review";
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute({
@@ -558,9 +574,7 @@ describe("message reply bond-level settings", () => {
       status: "ok",
       data: { action: "ignored_by_reply_settings", bondLevel: "other" },
     });
-    expect(deps.policyEngine.evaluate).toHaveBeenCalledWith(
-      expect.objectContaining({ sender: null, bondLevel: "other" }),
-    );
+    expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
     expect(findByNameFuzzy).not.toHaveBeenCalled();
     expect(addChannelMapping).not.toHaveBeenCalled();
     expect(approvals).toEqual([]);
@@ -777,7 +791,7 @@ describe("message reply bond-level settings", () => {
       profilePath: null,
     };
 
-    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => mappedPerson),
@@ -793,9 +807,7 @@ describe("message reply bond-level settings", () => {
         [envoyAnswer("approve", "Fine to send.")],
       ],
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "sentinel_review",
-    });
+    wake.policyAction = "sentinel_review";
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute({
@@ -1120,7 +1132,7 @@ describe("per-channel agent routing (trusted path)", () => {
       profilePath: null,
     };
 
-    const { deps, agentRunner } = createMessageHandlerDeps({
+    const { deps, agentRunner, wake } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => strangerPerson) },
       knownAgents: ["main", "sentinel", "envoy", "pm-assistant"],
       // Allow replies to "other" so the untrusted branch actually runs (the
@@ -1130,9 +1142,7 @@ describe("per-channel agent routing (trusted path)", () => {
     });
     // Force untrusted: bond level "other" isn't in the default trustedBondLevels
     // and policy.action !== "allow" → falls into handleUntrustedMessage.
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "monitor",
-    });
+    wake.policyAction = "monitor";
 
     const action = createAction(actionConfig, deps);
 
@@ -1449,7 +1459,7 @@ describe("sendAnswer", () => {
       .fn()
       .mockRejectedValueOnce(
         new ActionInvocationError(
-          "send_message",
+          "system:send_message",
           "handler_error",
           "no quote",
           "reply_unaddressable",
@@ -1462,15 +1472,15 @@ describe("sendAnswer", () => {
       replyToMessageId: "m-1",
     });
 
-    expect(runAction).toHaveBeenNthCalledWith(1, "send_message", {
+    expect(runAction).toHaveBeenNthCalledWith(1, "system:send_message", {
       text: "hi",
       replyToMessageId: "m-1",
     });
-    expect(runAction).toHaveBeenNthCalledWith(2, "send_message", { text: "hi" });
+    expect(runAction).toHaveBeenNthCalledWith(2, "system:send_message", { text: "hi" });
   });
 
   it("lets any other failure through", async () => {
-    const failure = new ActionInvocationError("send_message", "handler_error", "boom");
+    const failure = new ActionInvocationError("system:send_message", "handler_error", "boom");
     const runAction = rs.fn().mockRejectedValue(failure);
 
     await expect(

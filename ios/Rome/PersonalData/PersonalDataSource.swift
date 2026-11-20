@@ -15,6 +15,18 @@ struct SyncChunk: Sendable {
         case reconcile
         /// A month of history, newest first.
         case backfill
+        /// Everything in a window, which the Rome takes in place of what it held there.
+        case snapshot
+    }
+
+    /// A snapshot's id, when the phone read it, and the window of each type
+    /// it holds whole. Every batch carries the id; the last commits the windows.
+    struct Snapshot: Sendable {
+        let id: String
+        let readAt: Date
+        let windows: [String: DateInterval]
+        /// What the snapshot holds, window included, to keep once committed.
+        var digest: String?
     }
 
     let kind: Kind
@@ -26,10 +38,18 @@ struct SyncChunk: Sendable {
     var counts: [String: SyncTypeCount] = [:]
     /// The month a history chunk reads, for "Syncing history · Aug 2026".
     var historyMonth: Date?
+    /// Set when the chunk is a snapshot of a window.
+    var snapshot: Snapshot?
     /// The progress to keep once the Rome has the whole chunk.
     var commit: SyncProgress
 
     var itemCount: Int { upserts.count + deletes.count }
+}
+
+/// A source could not read the phone, with the code its sync history shows,
+/// such as `calendar_denied`.
+struct SourceReadFailure: Error, Equatable {
+    let code: String
 }
 
 protocol PersonalDataSource: Sendable {
@@ -43,7 +63,8 @@ protocol PersonalDataSource: Sendable {
     func nextChunk() async throws -> SyncChunk?
     /// The Rome has the chunk: its progress is kept. Types the Rome refused
     /// as unknown keep their old anchors and are left out from now on.
-    func confirm(_ chunk: SyncChunk, unsupported: Set<String>) async
+    /// `committed` holds the types whose snapshot window the Rome committed.
+    func confirm(_ chunk: SyncChunk, unsupported: Set<String>, committed: Set<String>) async
     /// Forgets all progress: the next run starts a new backfill.
     func reset() async
     /// The backfill's cursor while history is still being sent, else nil.
@@ -59,10 +80,23 @@ enum WireTime {
         return formatter
     }()
 
+    nonisolated(unsafe) private static let precise: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
     private static let lock = NSLock()
 
     static func string(_ date: Date) -> String {
         lock.withLock { formatter.string(from: date) }
+    }
+
+    /// With milliseconds, for an order that two reads in one second must
+    /// keep, such as a snapshot's `readAt`. Never for a key.
+    static func precise(_ date: Date) -> String {
+        lock.withLock { precise.string(from: date) }
     }
 
     /// `YYYY-MM-DD` in the calendar's zone.

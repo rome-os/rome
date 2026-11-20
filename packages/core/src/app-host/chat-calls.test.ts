@@ -212,3 +212,158 @@ describe("channels.send into a Concierge chat", () => {
     }
   });
 });
+
+describe("channels.query from a turn that is not the guardian's", () => {
+  const visitorOn = (threadId: string) => ({
+    callerActionContext: {
+      audience: "shared" as const,
+      channelContext: {
+        channel: "telegram",
+        threadId,
+        threadType: "private" as const,
+        senderBondLevel: "other",
+      },
+    },
+  });
+
+  it("reads the chat the turn is in", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-a" }, visitorOn("chat-a"));
+
+    expect(query).toHaveBeenCalledWith("telegram", { chatId: "chat-a" });
+  });
+
+  it("reads no other chat, nor every chat at once", async () => {
+    const query = rs.fn(async () => [{ text: "the guardian's own words" }]);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+
+    await expect(
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    await expect(
+      calls["channels.query"]({ channel: "whatsapp", chatId: "chat-a" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    await expect(
+      calls["channels.query"]({ channel: "telegram" }, visitorOn("chat-a")),
+    ).rejects.toThrow("reads only the chat it is in");
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("reads its own chat when it names the chat by its account", async () => {
+    const query = rs.fn(async () => []);
+    const account = { platform: "telegram", id: "rome-bot" };
+    const calls = makeCalls({
+      channelsService: {
+        list: rs.fn(async () => [
+          { name: "whatsapp", account: { platform: "whatsapp", id: "rome-wa" } },
+          { name: "telegram", account },
+        ]),
+        send: rs.fn(),
+        query,
+      } as never,
+    });
+
+    await calls["channels.query"]({ channel: account, chatId: "chat-a" }, visitorOn("chat-a"));
+    expect(query).toHaveBeenCalledWith(account, { chatId: "chat-a" });
+    await expect(
+      calls["channels.query"](
+        { channel: { platform: "whatsapp", id: "rome-wa" }, chatId: "chat-a" },
+        visitorOn("chat-a"),
+      ),
+    ).rejects.toThrow("reads only the chat it is in");
+  });
+
+  it("reads the chat around a native thread the turn is in", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+    const inThread = visitorOn("thread-1");
+    const turn = {
+      callerActionContext: {
+        ...inThread.callerActionContext,
+        channelContext: {
+          ...inThread.callerActionContext.channelContext,
+          parentThreadId: "chat-a",
+        },
+      },
+    };
+
+    await calls["channels.query"]({ channel: "telegram", chatId: "thread-1" }, turn);
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-a" }, turn);
+    expect(query).toHaveBeenCalledTimes(2);
+    await expect(
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, turn),
+    ).rejects.toThrow("reads only the chat it is in");
+  });
+
+  it("reads no chat from an agent turn with no chat of its own that others read", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query } as never,
+    });
+    const read = (callerActionContext: object) =>
+      calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {
+        callerActionContext,
+      } as never);
+    const guardian = { kind: "guardian" };
+
+    // An agent a group turn summoned: the guardian acts, others read, and
+    // there is no chat to read.
+    await expect(read({ actor: guardian, audience: "shared", turnId: "t1" })).rejects.toThrow(
+      "reads only the chat it is in",
+    );
+    // A third-party action in that turn carries no audience, and reads none.
+    await expect(read({ actor: guardian, turnId: "t1" })).rejects.toThrow(
+      "reads only the chat it is in",
+    );
+    // A private one reads any chat, and so does a routine's fire, which runs
+    // outside any agent turn, and a call outside any action.
+    await read({ actor: guardian, audience: "private", turnId: "t1" });
+    await read({ actor: guardian, audience: "shared" });
+    await calls["channels.query"]({ channel: "telegram", chatId: "chat-b" }, {});
+    expect(query).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads any chat only from a turn whose audience is private", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(async () => []), send: rs.fn(), query } as never,
+    });
+    const guardianIn = (channel: string, audience?: "private" | "shared") => ({
+      callerActionContext: {
+        ...(audience ? { audience } : {}),
+        channelContext: {
+          channel,
+          threadId: "here",
+          threadType: "private" as const,
+          senderBondLevel: "guardian",
+        },
+      },
+    });
+
+    await calls["channels.query"](
+      { channel: "whatsapp", chatId: "else" },
+      guardianIn("telegram", "private"),
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    // The guardian's own email thread, or a dashboard chat visitors can open,
+    // is read by others: the host reads its audience as shared.
+    for (const turn of [guardianIn("email", "shared"), guardianIn("webchat", "shared")]) {
+      await expect(
+        calls["channels.query"]({ channel: "whatsapp", chatId: "else" }, turn),
+      ).rejects.toThrow("reads only the chat it is in");
+    }
+    // An action with no audience is not the host's own, and reads as shared.
+    await expect(
+      calls["channels.query"]({ channel: "whatsapp", chatId: "else" }, guardianIn("telegram")),
+    ).rejects.toThrow("reads only the chat it is in");
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+});

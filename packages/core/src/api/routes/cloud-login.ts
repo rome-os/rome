@@ -25,7 +25,7 @@ import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../people/guardian-profile.js";
+} from "../../people/guardian-profile/index.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,
@@ -399,7 +399,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         if (deps.dashboardAccessState.hasCloudEmailAccess()) {
           const authorizeUrl = beginDashboardVisitorFlow();
           if (authorizeUrl) {
-            log.info("cloud login not-owner; dispatching to dashboard visitor flow");
+            log.info("cloud login not-owner; dispatching to dashboard admin flow");
             return c.redirect(authorizeUrl);
           }
         }

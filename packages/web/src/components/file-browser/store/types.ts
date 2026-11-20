@@ -89,7 +89,6 @@ export type NameDialogState =
   | {
       confirmLabel: string;
       currentName: string;
-      description: string;
       error?: string | null;
       initialValue: string;
       inputLabel: string;
@@ -139,6 +138,8 @@ export interface FileBrowserConfig {
   getRouteSnapshot: () => { pathname: string; search: string; hash: string };
   t: TFunction;
   embedded: boolean;
+  /** Shows one file the host chose, so a Markdown file opens in the editor, not the preview. */
+  singleFile?: boolean;
   getDeleteDescription?: DeleteDescriptionResolver;
   onPathsDeleted?: (paths: string[]) => void;
   /** Fired after a folder is created. Lets a host (e.g. the projects page) act on

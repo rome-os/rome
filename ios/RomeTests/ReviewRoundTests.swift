@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import Rome
 
-private func message(_ id: String, role: String = "assistant", turn: String? = nil, text: String = "hi", at seconds: TimeInterval, sender: MessageSender? = nil, trace: TraceSummary? = nil, thread: String? = nil) -> ChatMessage {
+private func message(_ id: String, role: String = "assistant", turn: String? = nil, text: String = "hi", at seconds: TimeInterval, sender: MessageSender? = nil, trace: TraceSummary? = nil) -> ChatMessage {
     let content = String(data: try! JSONSerialization.data(withJSONObject: [["type": "text", "content": text]]), encoding: .utf8)!
-    var message = ChatMessage(id: id, sessionId: "concierge", turnId: turn, role: role, content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), traceSummary: trace, chatThreadId: thread, knowsThreads: thread != nil)
+    var message = ChatMessage(id: id, sessionId: "concierge", turnId: turn, role: role, content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), traceSummary: trace)
     message.sender = sender
     return message
 }
@@ -12,28 +12,6 @@ private func message(_ id: String, role: String = "assistant", turn: String? = n
 /// The review round on the iOS error-states PR.
 @MainActor
 @Suite struct ReviewRoundTests {
-    /// A reply to a thread-only draft goes back to the thread, with no reply to a message.
-    @Test func aRestoredThreadOnlyDraftStaysThreadOnly() async {
-        let backend = FakeBackend()
-        var anchor = message("a1", turn: "t", at: 0, thread: "a1")
-        anchor.chatThreadTitle = "Task"
-        backend.stored = [anchor]
-        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
-        await store.reload()
-        store.openThread(at: "a1")
-        let saved = try? #require(store.composerThread)
-        store.closeThread()
-        #expect(store.composerThread == nil)
-
-        // After a relaunch the draft's target comes back.
-        let fresh = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
-        await fresh.reload()
-        fresh.reopenThread(saved!)
-        #expect(fresh.composerThread?.bare == true)
-        #expect(fresh.composerThread?.body["replyToMessageId"] == nil)
-        #expect(fresh.composerThread?.body["chatThread"] == .string("a1"))
-    }
-
     /// A routine's trace on a turn that took the guardian's own message is not an unprompted reply.
     @Test func aTurnThatTookTheGuardiansMessageIsNeverUnprompted() {
         let source = TraceSummary.InputSource(type: "routine", name: "Daily summary")

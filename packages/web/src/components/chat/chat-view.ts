@@ -1,7 +1,6 @@
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
-import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: per-session message lists → one renderable view. No React,
@@ -103,10 +102,10 @@ export function buildChatView(
   mainSessionId: string,
   mainIdentity: AgentIdentity,
 ): ChatView {
-  // Trace placement needs no reorder: rows are grouped by turn and a turn's
-  // trace is looked up by id and shown as its subtitle, so its position in the
-  // list doesn't matter.
-  const displayMessages = orderChatMessages(messages.get(mainSessionId) ?? []);
+  // Messages stand in the order the server sent them, which is the order they
+  // were said. A turn's trace is looked up by its turn id and shown as its
+  // subtitle, so its position in the list doesn't matter.
+  const displayMessages = messages.get(mainSessionId) ?? [];
   return {
     displayMessages,
     identityBySession: new Map([[mainSessionId, mainIdentity]]),
@@ -327,11 +326,11 @@ export function buildRows(
       );
       continue;
     }
-    // Group a whole turn under one header: gather this turn's assistant
-    // messages, stepping over a same-turn trace (it's rendered once as the
-    // turn's subtitle via tracesByTurn, so its position in the list is
-    // irrelevant — grouping keys on turnId, not raw adjacency). A different
-    // turn/session, or a user message, ends the turn.
+    // Group a turn's run of assistant messages under one header: gather the
+    // ones that follow this one, stepping over a same-turn trace (it's
+    // rendered once as the turn's subtitle via tracesByTurn, so its position
+    // in the list is irrelevant). A message of a different turn or session, or
+    // a user message, ends the run.
     const group = [msg];
     let j = i + 1;
     while (

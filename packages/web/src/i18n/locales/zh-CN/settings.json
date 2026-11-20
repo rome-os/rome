@@ -326,6 +326,8 @@
       "nameHint": "大写字母、数字和下划线。",
       "valueField": "秘密值",
       "valueHint": "Rome 不会再次显示该值。若要修改，请重新输入。",
+      "showValue": "显示值",
+      "hideValue": "隐藏值",
       "valueRequired": "请输入秘密值。",
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
@@ -356,7 +358,7 @@
     "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
     "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。",
     "summary": "应用可以读取的密钥，比如数据库密码或 API Key。",
-    "manage": "管理"
+    "manage": "编辑密钥"
   },
   "vault": {
     "title": "密码箱",
@@ -380,7 +382,22 @@
       "save": "保存",
       "inputMethod": "添加密钥的方式",
       "singleKey": "单个密钥",
-      "back": "返回密码箱"
+      "back": "返回密码箱",
+      "pin": "PIN",
+      "confirmPin": "确认 PIN",
+      "newPin": "新 PIN",
+      "pinMismatch": "两次输入的 PIN 不一致"
+    },
+    "pinStep": {
+      "setTitle": "设置 PIN",
+      "enterTitle": "输入 PIN",
+      "continue": "继续"
+    },
+    "forgotPin": "忘记 PIN？",
+    "reset": {
+      "title_one": "删除全部 {{count}} 个密钥？此操作无法撤销。",
+      "title_other": "删除全部 {{count}} 个密钥？此操作无法撤销。",
+      "confirm": "重置"
     },
     "saved": "已保存 {{name}}。",
     "batchSaved_one": "已保存 {{count}} 个密钥。",
@@ -398,7 +415,7 @@
     },
     "replyToLevels": {
       "title": "回复消息",
-      "description": "Rome 只回复来自这些关系层级的传入消息。发送者映射会先于此规则运行。"
+      "description": "Rome 只回复来自这些关系层级的传入消息。"
     },
     "levels": {
       "guardian": "守护者",
@@ -573,7 +590,7 @@
   "publicAccess": {
     "title": "访问与隐私",
     "dashboardEmails": {
-      "title": "允许的邮箱",
+      "title": "管理员",
       "description": "这些账号可以使用完整仪表盘。",
       "accountCount_one": "{{count}} 个账号",
       "accountCount_other": "{{count}} 个账号",
@@ -583,8 +600,8 @@
       "empty": "还没有账号。添加账号之前，共享仪表盘访问保持关闭。",
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
-      "savedFlash": "允许的邮箱已保存",
-      "saveFailedFallback": "保存允许的邮箱失败。",
+      "savedFlash": "管理员已保存",
+      "saveFailedFallback": "保存管理员失败。",
       "tooMany": "最多允许 {{limit}} 个邮箱",
       "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }
@@ -601,7 +618,7 @@
       "manageCredits": "查看 ChatGPT 使用情况",
       "settingsButton": "设置",
       "label": "允许使用额度",
-      "description": "订阅配额耗尽时，允许使用 ChatGPT / Codex 账户中的可用积分。开启后，Rome 会自动继续符合恢复条件、此前因配额耗尽而暂停的对话，可能立即消耗积分；不会自动购买积分。",
+      "description": "订阅额度用完时使用 ChatGPT 积分。开启后，因额度用尽而暂停的对话会继续，可能立即消耗积分。不会自动购买积分。",
       "saveFailed": "无法读取或保存积分设置，请重试。"
     },
     "title": "AI 工具",
@@ -952,6 +969,22 @@
     "targetChanged": "期间发布了更新的版本（{{version}}）— 请再次确认以升级到该版本。",
     "upgradeFailed": "升级请求失败：{{message}}",
     "upgradeFailedFallback": "升级请求失败。",
+    "notesSingle": "{{version}} 的新内容",
+    "notesRange_one": "新内容：{{from}} → {{to}}（{{count}} 个版本）",
+    "notesRange_other": "新内容：{{from}} → {{to}}（{{count}} 个版本）",
+    "notesRangePending": "新内容：{{from}} → {{to}}",
+    "notesUpTo_one": "截至 {{to}} 的新内容（{{count}} 个版本）",
+    "notesUpTo_other": "截至 {{to}} 的新内容（{{count}} 个版本）",
+    "notesReleased": "发布于 {{date}}",
+    "notesLoading": "正在加载新内容",
+    "notesFailed": "无法加载新内容",
+    "notesMissing": "{{version}} 的发行说明暂不可用。",
+    "notesOnGitHub": "在 GitHub 查看发行说明",
+    "notesPartial": "{{version}} 之前版本的说明不可用，所以这里只列出了本次升级的一部分。",
+    "notesPartialUnknown": "更早版本的说明不可用，所以这里只列出了本次升级的一部分。",
+    "notesShowAll": "显示全部 {{count}} 项",
+    "notesShowFewer": "收起",
+    "notesSeeFull": "在 GitHub 查看完整变更",
     "restartingBody": "正在升级到 {{version}}。",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",
@@ -979,7 +1012,6 @@
   },
   "devices": {
     "title": "设备",
-    "description": "Rome 账户关联的设备。",
     "loadFailed": "设备加载失败",
     "connectionLabel": "Rome 连接",
     "connection": {
@@ -1005,7 +1037,7 @@
     "startFailed": "设备服务启动失败",
     "setup": {
       "title": "连接电脑",
-      "description": "设备服务运行在 Rome 实例上。每台需要使用的电脑都要单独建立连接。",
+      "description": "每台电脑需要单独连接。",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

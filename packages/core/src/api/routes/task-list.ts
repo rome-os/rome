@@ -1,6 +1,7 @@
 import {
   TASK_LIST_CHANGED_EVENT,
   type TaskListChangedEvent,
+  type TaskLinksResponse,
   type TaskListResponse,
 } from "@rome/api-types/task-list";
 import type { Context } from "hono";
@@ -13,12 +14,7 @@ import { conciergeCallerOwner, streamEvents } from "./concierge.js";
 
 type TaskListApiDeps = Pick<
   ApiDeps,
-  | "concierge"
-  | "dashboardAccessState"
-  | "routinesRepo"
-  | "routineRunsRepo"
-  | "routineEngine"
-  | "webchatRepo"
+  "concierge" | "dashboardAccessState" | "routinesRepo" | "routineRunsRepo" | "routineEngine"
 >;
 
 const lists = new WeakMap<ConciergeService, ChatTaskList>();
@@ -43,13 +39,6 @@ export function chatTaskListOf(deps: TaskListApiDeps): ChatTaskList | null {
       routines: deps.routinesRepo,
       routineRuns: deps.routineRunsRepo,
       routineEngine: deps.routineEngine,
-      taskChatPartMessages: (chatId, since) => deps.webchatRepo.taskChatPartMessages(chatId, since),
-      onTaskCardMessage: (listener) =>
-        deps.webchatRepo.onMessageInserted((message) => {
-          if (message.role === "assistant" && message.content.includes('"task_chat"')) {
-            listener(message.sessionId);
-          }
-        }),
     });
     lists.set(concierge, list);
   }
@@ -89,8 +78,8 @@ export function subscribeChatTasks(
 }
 
 /**
- * A Concierge chat's task list, the Tasks panel: everything that runs for the
- * chat, and Stop for a task at work. Every route is its owner's only: another
+ * A Concierge chat's Tasks view: its task chats and what runs for it on its
+ * own, and Stop for a task chat at work. Every route is its owner's only: another
  * caller's chat, or an archived one, is not found. docs/domains/chats.md#task-list
  */
 export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
@@ -131,7 +120,35 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     return streamEvents(c, (emit) => subscribeChatTasks(deps, at.chatId, at.owner, emit));
   });
 
-  // Stops one of the chat's tasks at once, as its card's Stop does.
+  // The task chats among `ids` of this chat's owner, from any of their
+  // Concierge chats, as a task link draws them.
+  app.get("/chats/:chatId/task-links", async (c) => {
+    const at = await gate(c);
+    if (at instanceof Response) return at;
+    const ids = [
+      ...new Set(
+        (c.req.query("ids") ?? "")
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 100);
+    const { tasks } = at.concierge.deps;
+    const found = (await Promise.all(ids.map((id) => tasks.repo.getWithChat(id)))).flatMap(
+      (task) => (task && task.owner === at.owner ? [task] : []),
+    );
+    const status = await tasks.statusOf(found.map((task) => task.row));
+    return c.json({
+      tasks: found.flatMap((task) => {
+        const of = status.get(task.row.id);
+        return of
+          ? [{ id: task.chat.id, name: task.chat.name, status: of.status, endReason: of.endReason }]
+          : [];
+      }),
+    } satisfies TaskLinksResponse);
+  });
+
+  // Stops one of the chat's tasks at once, as its row's Stop does.
   app.post("/chats/:chatId/tasks/:taskId/stop", async (c) => {
     const at = await gate(c);
     if (at instanceof Response) return at;

@@ -6,15 +6,16 @@ How stored data and live reads fit together: [Device connection](domains/connect
 
 ## Scope
 
-A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Health readings fit, and so would location samples or screen time. Calendar events, reminders, contacts and notes do not: they have titles and people, change in place, and are searched by text. A document source gets its own design, with the same personal-data mark, audience rule, origin and ingest log, and never goes into a reading's `fields`.
+A source joins the store when each item is either a reading or an entry. A reading has a time range and a numeric value, and a query over a window aggregates it: Health readings fit, and so would location samples or screen time. An entry is a document with a time, such as a calendar event: it has words and people, changes in place, is listed over a window it overlaps and found by its words, and is never aggregated. Entries keep the same personal-data mark, audience rule, origin and ingest log as readings, and never go into a reading's `fields`. Contacts and notes have no time, so neither shape fits them.
 
-Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts).
+Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. An entry type declares instead the content fields it keeps, each a text, a flag, a number or a list of texts, and how far past Rome's clock an entry may end. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts), and the iPhone's calendar is [`sources/apple-calendar.ts`](../packages/core/src/personal-data/sources/apple-calendar.ts).
 
 | Shape | What one reading is | Example |
 | --- | --- | --- |
 | `bucket` | An hour or a day, with a sum or an average and its `min` and `max` | `stepCount`, `heartRate` |
 | `sample` | One reading at a time | `bodyMass`, `restingHeartRate` |
 | `record` | One span with what goes with it | `sleep` (one night), `workouts` |
+| `entry` | A document with a time, and its `content` as the type declares it | `events` |
 
 A new type or source needs a core release before a device sends it, because an ingest refuses a type it does not know.
 
@@ -46,7 +47,10 @@ A state change or a delete for an origin Rome never heard from answers 404.
       "resolution": "hour", "start": "2026-11-13T08:00:00Z", "end": "2026-11-13T09:00:00Z",
       "tz": "Asia/Shanghai", "value": 812, "unit": "count" }
   ],
-  "deletes": [{ "key": "workouts:3A9D…" }]
+  "deletes": [{ "key": "workouts:3A9D…" }],
+  // A snapshot of a window, for calendar events. Windows only on the last batch.
+  "snapshot": { "id": "<uuid>", "readAt": "2026-11-13T09:00:00Z",
+    "windows": [{ "type": "events", "start": "2026-11-05T16:00:00Z", "end": "2026-11-28T16:00:00Z" }] }
 }
 ```
 
@@ -59,6 +63,11 @@ A state change or a delete for an origin Rome never heard from answers 404.
 - `connectionId` is still accepted and stored for older apps, but nothing reads it: the device's report names its origin, which links the data to its install ([live](#live)). `null` clears it, and an envelope without it leaves it as it is.
 - `syncedThrough` is how far the device reports a type complete, which is not the latest reading: a day with no steps still counts as synced. It only moves forward, and a value more than a day ahead of Rome's clock is ignored.
 - The metadata keys a source allows are kept, and others are dropped.
+- An entry carries `content` and no `value`, `unit` or `fields`. Content fields its type does not declare, or of the wrong kind, are dropped, and a text is cut at its declared length. An entry may end up to its type's horizon past Rome's clock (400 days for calendar events) and last up to 366 days.
+- A device may send a type it reads as a rolling window (calendar events) as a snapshot: every entry in the window, in one or more batches that carry the same `snapshot.id`, which stamps each row they send. The last batch adds `snapshot.windows`, and the store then deletes the origin's rows of that type that lie strictly inside the window and were not sent by this snapshot. A row that only touches an edge stays. The device sends every entry that touches the window, edges included, so the commit never deletes one it still has.
+- A run cut off before its last batch deletes nothing, and the rows it sent stay, stamped. The next commit cleans them up. A commit retried with the same `snapshot.id` changes nothing and answers the type in `committed` again. A batch of a snapshot read before the newest one the origin has sent for the type (`snapshot.readAt`, to the millisecond), or read at the same time under another id, changes nothing: its items are neither written nor stamped, and its window does not commit. So a late batch of an older run cannot bring back an event the phone removed. A window further back or ahead of `readAt` than the type reads, give or take two days, does not commit either. Nor does a type with a refused item in the same batch. The device leaves out the window of a type refused in an earlier batch.
+- A snapshot may hold more rows than the type cap allows while it replaces the window: as many past it as the rows its commit may delete. So a calendar at the cap can still be replaced.
+- A batch without `snapshot` applies its upserts and deletes as they are. An older app sends calendar events this way: what changed, and a delete for each event gone from the phone.
 
 | Code | Why the item is refused |
 | --- | --- |
@@ -73,6 +82,8 @@ A state change or a delete for an origin Rome never heard from answers 404.
 { "batchId": "…", "status": "ok", "inserted": 12, "updated": 3, "unchanged": 140,
   "deleted": 1, "rejected": [], "receivedAt": "2026-11-13T09:04:11Z" }
 ```
+
+`committed` lists the types whose snapshot the batch committed, now or on an earlier try. It is absent when it committed none.
 
 The ingest log keeps 90 days of rows with counts, ranges and codes, and never a value.
 
@@ -103,7 +114,8 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
   "interval": "day",                           // total | hour | day | week | month, at most 1000 buckets
   "aggregate": "sum",                          // default sum for summed types, avg for the rest
   "unit": "km",                                // optional conversion
-  "records": { "limit": 100, "cursor": null }  // one sample or record type: list instead of aggregate
+  "records": { "limit": 100, "cursor": null }, // one sample or record type: list instead of aggregate
+  "search": "review"                           // entries only: words the content holds, any case
 }
 ```
 
@@ -115,8 +127,10 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 - A bucket with no value is left out, never 0.
 - A batch that refuses a reading of a type does not mark that type synced.
 - `latest` for a bucket type reads the last hour, not a day's average.
+- A type of entries is always listed, one type per query, and takes no `interval`, `aggregate` or `unit`. It lists every entry that overlaps the window, such as a holiday that began before it, with its `key`, `startISO`, `endISO` and content.
 - `freshness` says a type covers the window only when its earliest stored reading reaches back to the window's start and the device reports it synced up to the end. A query that reads only hours (`hour`, a window that starts mid-day, `latest`) reaches back only to `hourlyFrom`, the earliest hour bucket. Otherwise `missingFrom` says where coverage is not known.
-- Each type is read from one origin: one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
+- A type the device sends as a rolling snapshot, such as calendar events, covers only the window its last committed snapshot read, whatever older entries the store holds. Dates between two syncs far apart were never read, a date past the window's end was never sent, and an empty calendar the phone synced is covered. Before an origin's first commit, the span its type declares around the last sync (`syncedBackDays`, `syncedAheadDays`) stands in for the window.
+- Each type is read from one origin. An origin whose committed snapshot holds the whole window comes first, an empty one too, and among those the one read last, by its snapshot or a later mark that found nothing new. After those comes one whose readings reach back to the window's start, and among those the one that reports the type synced furthest. When none reaches back, the one synced furthest answers. An origin set off is never read. A second device, or a new origin after a sign-in, takes over a window once its backfill reaches it.
 
 ```json
 {

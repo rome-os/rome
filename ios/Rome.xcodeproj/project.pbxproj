@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000072 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* Typography.swift */; };
 		A10000000000000000000071 /* RomeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* RomeWidget.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000611 /* A2UISwiftCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000601 /* A2UISwiftCore */; };
 		A10000000000000000000612 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000602 /* A2UISwiftUI */; };
@@ -53,6 +54,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000017 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rome/Design/Typography.swift; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000011 /* Rome.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Rome.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000012 /* RomeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RomeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000013 /* Config */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Config; sourceTree = "<group>"; };
@@ -152,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* Base.xcconfig */,
+				A10000000000000000000017 /* Typography.swift */,
 				A10000000000000000000021 /* Rome */,
 				A10000000000000000000024 /* Shared */,
 				A10000000000000000000025 /* RomeWidget */,
@@ -179,6 +182,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000401 /* Build configuration list for PBXNativeTarget "Rome" */;
 			buildPhases = (
+				A10000000000000000000073 /* Check pending minimums */,
 				A10000000000000000000041 /* Sources */,
 				A10000000000000000000031 /* Frameworks */,
 				A10000000000000000000051 /* Resources */,
@@ -357,6 +361,31 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		A10000000000000000000073 /* Check pending minimums */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Config/pending-minimum.json",
+				"$(SRCROOT)/Tools/bump-minimum.mjs",
+			);
+			name = "Check pending minimums";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# A Release archive (ACTION is install) never ships with a minimum it was\n# meant to raise. Builds, tests and CI's Release build are not affected.\nif [ \"$ACTION\" != \"install\" ] || [ \"$CONFIGURATION\" != \"Release\" ]; then exit 0; fi\n# Xcode's own PATH has no node; look where it is usually installed.\nexport PATH=\"$PATH:$HOME/.local/share/fnm/aliases/default/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin\"\nif ! command -v node >/dev/null 2>&1; then\n  echo \"error: node not found: it checks Config/pending-minimum.json before an archive. Put node on the PATH and archive again.\"\n  exit 1\nfi\nif ! out=$(node \"$SCRIPT_INPUT_FILE_1\" --check --pending \"$SCRIPT_INPUT_FILE_0\" 2>&1); then\n  printf '%s\\n' \"$out\" | sed 's/^/error: /'\n  exit 1\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		A10000000000000000000044 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -383,6 +412,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000072 /* Typography.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

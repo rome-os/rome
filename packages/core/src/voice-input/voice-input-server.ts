@@ -20,8 +20,10 @@ import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
+import { createFillerFilter } from "./filler-words.js";
 import type { TranscriptionFailure, TranscriptionStream } from "./transcriber.js";
 import type { ListeningSource, VoiceInputSource } from "./voice-input-source.js";
+import { readVoiceTerms } from "./voice-terms.js";
 
 const log = createLogger("voice-input");
 
@@ -62,6 +64,7 @@ export function attachVoiceInputServer(
   source: VoiceInputSource,
   usage: TranscriptionUsageSink | null,
   dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  voiceTerms: () => Promise<string[]> = readVoiceTerms,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
 
@@ -76,7 +79,7 @@ export function attachVoiceInputServer(
     void gateUpgrade(req, socket, db, dashboardAccess)
       .then((caller) => {
         if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { source, usage }));
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { source, usage, voiceTerms }));
       })
       .catch((err) => {
         log.error("voice input upgrade failed", {
@@ -95,6 +98,7 @@ export function attachVoiceInputServer(
 }
 
 export interface ServeOptions {
+  voiceTerms?: () => Promise<string[]>;
   source: Pick<VoiceInputSource, "open">;
   usage?: TranscriptionUsageSink | null;
   maxDictationMs?: number;
@@ -199,7 +203,15 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
 
   async function begin(sampleRate: number) {
     starting = true;
-    const opened = await options.source.open();
+    const [opened, terms] = await Promise.all([
+      options.source.open(),
+      Promise.resolve()
+        .then(() => (options.voiceTerms ?? readVoiceTerms)())
+        .catch(() => {
+          log.warn("could not read voice terms; continuing without terms");
+          return [];
+        }),
+    ]);
     starting = false;
     if (opening) clearTimeout(opening);
     if (closed) return;
@@ -214,9 +226,15 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
       provider: transcriber.place.provider,
       sessionId: opened.source.romeCloudSessionId,
       sampleRate,
+      termCount: terms.length,
     });
+    const fillers = createFillerFilter();
+    const showLast = () => {
+      const last = fillers.finish();
+      if (last && !closed) reply({ type: "text", ...last });
+    };
     stream = transcriber.open(
-      { sampleRate },
+      { sampleRate, ...(terms.length ? { terms } : {}) },
       {
         onText: (settled, pending, spokeUntilMs) => {
           if (closed) return;
@@ -227,11 +245,15 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
             audioArrived();
           }
           lastPending = pending;
-          reply({ type: "text", settled, pending });
+          reply({ type: "text", ...fillers.update(settled, pending) });
         },
-        onEnd: () => close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" }),
+        onEnd: () => {
+          showLast();
+          close(stoppedFor ? { type: "error", reason: stoppedFor } : { type: "ended" });
+        },
         onFailure: (failure, detail) => {
           log.warn("voice input provider failed", { failure, detail });
+          showLast();
           close({ type: "error", reason: STOP_REASON[failure] });
         },
       },

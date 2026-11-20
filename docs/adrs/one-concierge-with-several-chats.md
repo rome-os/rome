@@ -7,7 +7,7 @@
 
 The guardian wants Concierge topics, such as the calendar or one project, to live apart from the main Concierge chat, so recurring alerts on one topic do not flood the rest.
 
-The Concierge triages followed events once per batch with a small model, stores what it owes the digest keyed by event, and arms one subscription at the source per followed thing. Its memory is the instance's one memory, and its digest times and quiet hours are one setting. A dashboard visitor on the allow-list already reads and edits that memory, those settings and every chat, so nothing inside one Rome is private from a visitor today.
+The Concierge triages followed events once per batch with a small model, stores what it owes the digest keyed by event, and arms one subscription at the source per followed thing. Its memory is the instance's one memory, and its digest times and quiet hours are one setting. A dashboard admin already reads and edits that memory, those settings and every chat, so nothing inside one Rome is private from a visitor today.
 
 Products in the same space split two ways. Muse, Claude Duet and Dots run one assistant with shared memory over several chats or channels. Grok Bot runs several bots, each with one job and its own memory. Muse's users name three failures of its model: they forget which task reports where, nothing from a side chat reaches the main chat, and archiving or deleting a side chat leaves its tasks in an unclear place.
 
@@ -35,7 +35,7 @@ Future diffs must respect:
 
 - Triage runs once per batch for each owner, whatever number of chats that owner has.
 - A follow has one chat. Its alerts go there, or to the main chat when that chat is archived or gone.
-- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to its owner's main chat and says so there. Deleting a topic chat stops them instead when its owner chooses so. The main chat cannot be archived or deleted.
+- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to its owner's main chat and says so there. Archiving or deleting a topic chat stops them instead when its owner chooses so, and unarchiving it can move the follows its archive moved back. The main chat cannot be archived or deleted.
 - Follows, tasks and kept events record their owner, which never changes. No owner means the guardian.
 - A rule for "the Concierge chat" applies to every Concierge chat, unless it names the main chat.
 
