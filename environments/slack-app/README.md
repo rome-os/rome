@@ -88,3 +88,19 @@ All under `/_control`, JSON in and out.
 | `POST /reset {installs?, history?}` | Clears the records. Keeps installs and tokens unless `installs` is true, and what was said unless `history` is true. |
 
 Every record carries a `seq` from one counter, and each list answers with the current `seq`, so a test reads "everything since" by passing the `seq` it saw before acting.
+
+## Live mode (real Slack, on the devbox)
+
+`live.sh` runs Rome Cloud and one Rome instance against the real Slack, apart from everything above: its own compose project (`slackenv-live`, `live/compose.yml`), state folder (`.state-live`), image tag (`slackenv-live-rome:<sha>`) and no published port. Nothing in it changes how `up.sh` runs.
+
+```sh
+environments/slack-app/live.sh up --rome origin/<branch> --rome-cloud origin/<branch> [--slug slack] [--guardian <email>]
+environments/slack-app/live.sh check   # Slack's signed URL challenge, through Traefik and through the public name
+environments/slack-app/live.sh down    # containers, volumes, state and scratch worktrees; --images removes the image too
+```
+
+- Names. Rome Cloud is `https://<slug>-pantheon.romeos.dev` and the instance's dashboard `https://<slug>.romeos.dev` (default slug `slack`). The devbox's tunnel and Caddy shim send those as `pantheon.<slug>.rome.localhost` and `<slug>.rome.localhost` to the singleton `rome-traefik` on `127.0.0.1:3000`, and Traefik finds the two containers by their labels on the `rome-edge` network. `up` refuses a slug another stack already routes, or one the shim reserves.
+- Inside the network, the same names answer through `tools/tls-proxy.mjs` with the environment's own certificate, so the instance's calls to Rome Cloud and Rome Cloud's calls back never pass Cloudflare Access.
+- Rome's Slack app comes from `SLACK_APP_CLIENT_ID`, `SLACK_APP_CLIENT_SECRET` and `SLACK_APP_SIGNING_SECRET` in the environment, or else `~/.config/rome/slack-app.env`. They reach only Rome Cloud's container, through compose's interpolation when it is created, and no file this environment writes. `SLACK_APP_BASE_URL` is unset, so Rome Cloud talks to slack.com.
+- Sign-in. Rome Cloud runs its dev sign-in, behind Cloudflare Access. `up` enrolls the instance as the guardian account (`--guardian`, default `guardian@slackenv.test`) and prints the sign-in link for that account.
+- Cloudflare. Slack posts events without an Access login, so the Access app needs a Bypass policy for `<slug>-pantheon.romeos.dev/api/slack/events`. The OAuth callback is a browser redirect and needs none. `check` says which leg fails: Traefik, the signature, or Access.
