@@ -300,24 +300,18 @@ struct ConciergeRow: View, Equatable {
         openTaskChat?.run((chatId: chatId, title: title))
     }
 
-    /// Only the Agent's text can be replied to: never a card of any kind
-    /// (task, question, approval, open or folded), nor the guardian's own.
-    static func offersReply(_ row: TranscriptRow) -> Bool {
-        if case .agentText = row { return true }
-        return false
-    }
-
     /// The tap of the quote a reply carries: it goes to the original.
     private func quoteAction() -> (() -> Void)? {
         let actions = store.actions
         return info.quote.map { quote in { actions.quote(original: quote.messageId) } }
     }
 
-    /// The message's time, and Reply on the Agent's messages: the reply bar.
-    private func menu(reply: Bool) -> BubbleMenu {
+    /// The message's time, and Reply where the message takes one
+    /// (`RowInfo.canReply`): the reply bar.
+    private var menu: BubbleMenu {
         let actions = store.actions
-        let onReply: (() -> Void)? = reply
-            ? row.messageId.map { id in { actions.reply(to: id) } }
+        let onReply: (() -> Void)? = info.canReply
+            ? row.messageId.map { [rowId = row.id] id in { actions.reply(to: id, row: rowId) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
         let onShare: (() -> Void)? = !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
@@ -336,11 +330,11 @@ struct ConciergeRow: View, Equatable {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu,
                        mark: info.mark,
                        quote: info.quote, onQuote: quoteAction())
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu,
                         quote: info.quote, onQuote: quoteAction())
         case .sourceLabel(_, let text):
             SourceLabelLine(text: text)

@@ -579,10 +579,6 @@
     "feishu": {
       "title": "Feishu",
       "guardianLinked": "Your Feishu account is linked as guardian."
-    },
-    "wechatUser": {
-      "fallbackName": "WeChat account",
-      "disconnectFailedFallback": "Failed to disconnect the WeChat account."
     }
   },
   "favors": {

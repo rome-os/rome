@@ -15,6 +15,7 @@ import type {
   WakeMessage,
 } from "../../participation/wake-gate/index.js";
 import { chatSettingsWake } from "../../participation/wake-gate/index.js";
+import { addressing } from "../../participation/addressing.js";
 import { channelMessageOf } from "./channel-message.js";
 
 const ME = "rome-1";
@@ -213,6 +214,20 @@ describe("channelMessageOf", () => {
       }
     }
     expect(differ).toEqual([]);
+  });
+
+  it("reads a reply to someone else as others, where the gate still reads it as nobody until ZHA-229", () => {
+    const facts: Facts = {
+      kind: "group",
+      mentions: [],
+      repliesTo: "ann",
+      threadStartedBy: undefined,
+      isBot: false,
+    };
+    const message = messageOf(facts);
+    const forApps = channelMessageOf(message, "discord");
+    expect(addressing(message, ME)).toBe("others");
+    expect([forApps.addressing, forApps.mentionsOthers]).toEqual(["ambient", undefined]);
   });
 
   it("reads one message in a group differently for each of Rome's accounts that heard it", () => {

@@ -151,6 +151,10 @@
 .voice-input-char-in {
   animation: voice-input-char-in 280ms ease-out both;
 }
+/* The copy drawn over the field shows its text while voice input is on. */
+.voice-input-previewing::placeholder {
+  color: transparent;
+}
 @media (prefers-reduced-motion: reduce) {
   .voice-input-char-in {
     animation: none;

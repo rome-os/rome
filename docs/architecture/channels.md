@@ -154,22 +154,6 @@ Every channel delivers every sender. Rome never asks a sender to pair or to do a
 - Pairing requests stored before this rule are history. Activity shows them as expired, and none can be approved.
 - Provider-owned device linking, such as WhatsApp's, keeps its provider-specific proof of control.
 
-## WeChat personal account
-
-WeChat has two connections. The `wechat` service is Tencent's official bot service: it sends and receives as an account made for the agent. The `wechat_user` service is the guardian's own account, read through the official desktop client Rome runs in its own container, on the desktop it serves at `/desktop`.
-
-The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in. The container carries the capability the debugger needs (`SYS_ADMIN`, AppArmor unconfined) and gdb traces a child it launched, so the runtime runs wechat-bridge's `init` inside the container: it launches the client under gdb, catches the key the first login derives, and stores only the per-database keys. No host-root script or namespace crossing is involved. The client, debugger, and reader run as `rome` in the default `multi` mode. Enabling the connection does not change the Rome service user. The client, the store, and the reads are all local to the container.
-
-### Invariants
-
-- The personal account is read-only. Rome answers what a chat contains and has no way to post to the account. A surface that could post would be a different connection.
-- A personal account's history is never delivered as inbound turns. An archive of every chat the guardian has ever had is something to consult, not something to answer.
-- Recovering the store key is the only privileged step, and it produces database keys, not standing access. The ledger records where the authority lives, never the key itself.
-- Recovery launches the client under gdb rather than attaching to a running one. The key is derived once, at the first login, so owning the client from its first instruction lets a single login both sign the guardian in and yield the key — attaching after it is up would miss that derivation and demand a second login.
-- A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
-- One bridge process reads the client's store at a time. A history read never waits behind People's lookups for every contact. Those background lookups hold only a couple of places in the bridge's line, and a history read takes its turn between them.
-- A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.
-
 ## Chats storage
 
 Chats records each chat once, keyed by an integer, with the adapter's key beside it (see [Chats](../domains/chats.md#chat)). The chats, their messages, the turn links that tie a message to an agent's turn, and the adapters' addresses (`chat_addresses`) each have a table of their own. The 0105 migration adds them empty, along with the speaker columns on `rome_sessions` (see [Speaker](../domains/participation.md#speaker)). The legacy chat rows stay the only record until the switch release, which fills the new tables from them in one migration and moves every reader and writer onto Chats together.
