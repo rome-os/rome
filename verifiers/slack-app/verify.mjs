@@ -81,6 +81,13 @@ const ctx = {
   bound: { a: null, b: null },
 };
 
+// VERIFIER_ONLY (run.sh --only) scores a subset: rule ids, or phase1 to
+// phase3. R1 and the second binding still run, since every later rule needs
+// their connections; R3 runs when R1 does, as in the full order.
+const only = selection(process.env.VERIFIER_ONLY);
+const minFreeMiB = Number(process.env.VERIFIER_MIN_FREE_GB || 0) * 1024;
+const memoryWaitMs = Number(process.env.VERIFIER_MEMORY_WAIT_SECONDS || 1800) * 1000;
+
 const startedAt = new Date().toISOString();
 const results = {};
 const setup = {};
@@ -102,6 +109,33 @@ for (const step of ORDER) {
     continue;
   }
   const rule = RULES.find((r) => r.id === step);
+  if (only && !only.has(rule.id) && rule.id !== "R1") {
+    results[rule.id] = { result: "not checked", reason: `not selected (--only ${process.env.VERIFIER_ONLY})`, seconds: 0 };
+    continue;
+  }
+  // Below the free-memory line, the rule waits for the machine rather than
+  // start in a spell when Rome holds its turns.
+  if (minFreeMiB) {
+    const waitStarted = Date.now();
+    let m = hostMemory();
+    if (m && m.availableMiB < minFreeMiB) log(`${rule.id} waits: ${m.availableMiB} MiB free, line ${minFreeMiB} MiB`);
+    while (m && m.availableMiB < minFreeMiB && Date.now() - waitStarted < memoryWaitMs) {
+      await new Promise((r) => setTimeout(r, 15_000));
+      m = hostMemory();
+    }
+    if (m && m.availableMiB < minFreeMiB) {
+      results[rule.id] = {
+        result: "not checked",
+        reason: `machine short on memory before the rule: ${m.availableMiB} MiB free after waiting ${Math.round(memoryWaitMs / 1000)} s, under the ${minFreeMiB} MiB line`,
+        memory: { atStart: m, waitedSeconds: Math.round((Date.now() - waitStarted) / 1000) },
+        seconds: Math.round((Date.now() - started) / 1000),
+      };
+      log(`${rule.id}: ${results[rule.id].result} (${results[rule.id].reason})`);
+      continue;
+    }
+    setup.memoryWaits ??= {};
+    if (Date.now() - waitStarted > 1000) setup.memoryWaits[rule.id] = Math.round((Date.now() - waitStarted) / 1000);
+  }
   log(`${rule.id} ${rule.title} ...`);
   resetTrail();
   const memoryAtStart = hostMemory();
@@ -143,6 +177,8 @@ const report = {
   model: env.model,
   differences: env.differences ?? null,
   setup,
+  only: only ? [...only] : null,
+  minFreeGB: minFreeMiB ? minFreeMiB / 1024 : null,
   rules: RULES.map((r) => ({
     id: r.id,
     title: r.title,
@@ -179,6 +215,20 @@ function crashed(err) {
     reason: `the check crashed${trail.phase ? ` during "${trail.phase}"` : ""}: ${err.message}`,
     evidence: { stack: err.stack, causes, phase: trail.phase, lastRequests: trail.requests },
   };
+}
+
+/** The rule ids `spec` names ("R14,R9", "phase3"), or null for every rule. */
+function selection(spec) {
+  if (!spec) return null;
+  const ids = new Set();
+  for (const part of spec.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const ph = part.match(/^phase:?([123])$/i);
+    if (ph) for (const r of RULES.filter((x) => x.phase === Number(ph[1]))) ids.add(r.id);
+    else if (RULES.some((r) => r.id === part.toUpperCase())) ids.add(part.toUpperCase());
+    else throw new Error(`--only: no rule or phase named ${part}`);
+  }
+  if (ids.has("R1")) ids.add("R3");
+  return ids;
 }
 
 function log(msg) {

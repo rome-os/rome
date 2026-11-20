@@ -638,19 +638,30 @@ async function answerMention(conn, ev) {
  */
 async function threadContext(conn, ev) {
   if (!ev.thread_ts || ev.thread_ts === ev.ts || breaks.has("R14-no-thread")) return null;
+  // Broken R14-says-unread never reads a thread and says so.
+  if (breaks.has("R14-says-unread")) return "I could not read this thread just now.";
   const key = `${conn.team}/${ev.channel}/${ev.thread_ts}`;
   db.threads ??= {};
-  if (!db.threads[key] || breaks.has("R14-replies-each")) {
-    // Slack paces this method (one a minute per workspace): wait out a 429
-    // once, as the product does, for up to 90 s.
-    let r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
-    if (r.error === "ratelimited" && !breaks.has("R14-no-wait")) {
-      await new Promise((ok) => setTimeout(ok, Math.min(90, (r.retryAfter ?? 60) + 1) * 1000));
-      r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
-    }
-    if (!r.ok && r.error === "ratelimited") return "I could not read this thread just now, Slack asked me to slow down.";
-    if (!r.ok) return breaks.has("R14-old-error") ? `I could not read this thread: ${r.error}.` : null;
-    db.threads[key] = r.messages.slice(0, 15).map((m) => ({ ts: m.ts, text: m.text, bot: Boolean(m.bot_id) }));
+  const cached = db.threads[key];
+  // A thread read once is read again only from its newest message seen, so
+  // what was said in between arrives. Broken R14-replies-each reads it whole
+  // every time; R14-reread-old reads again from the thread's top.
+  const params = { channel: ev.channel, ts: ev.thread_ts, limit: 15 };
+  if (cached && !breaks.has("R14-replies-each"))
+    params.oldest = breaks.has("R14-reread-old") ? ev.thread_ts : cached.at(-1).ts;
+  // Slack paces this method (one a minute per workspace): wait out a 429
+  // once, as the product does, for up to 90 s.
+  let r = await api(conn.botToken, "conversations.replies", params);
+  if (r.error === "ratelimited" && !breaks.has("R14-no-wait")) {
+    await new Promise((ok) => setTimeout(ok, Math.min(90, (r.retryAfter ?? 60) + 1) * 1000));
+    r = await api(conn.botToken, "conversations.replies", params);
+  }
+  if (!r.ok && r.error === "ratelimited" && !cached) return "I could not read this thread just now, Slack asked me to slow down.";
+  if (!r.ok && !cached) return breaks.has("R14-old-error") ? `I could not read this thread: ${r.error}.` : null;
+  if (r.ok) {
+    const got = r.messages.slice(0, 15).map((m) => ({ ts: m.ts, text: m.text, bot: Boolean(m.bot_id) }));
+    const merged = new Map([...(params.oldest ? cached : []), ...got].map((m) => [m.ts, m]));
+    db.threads[key] = [...merged.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
     save();
   }
   const earlier = db.threads[key].filter((m) => !m.bot && Number(m.ts) < Number(ev.ts)).map((m) => m.text);

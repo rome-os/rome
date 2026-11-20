@@ -195,7 +195,13 @@ const CASES = [
     result: "pass",
     what: "the instance comes back 15 s after the wipe returns; requests ride it out",
   },
-  { name: "R14-no-wait", breaks: "R14-no-wait", rule: "R14", what: "a thread read refused by Slack's pace is not waited out; the reply says the thread could not be read" },
+  { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
+  { name: "memory-line", breaks: "", rule: "R14", result: "not checked", env: { VERIFIER_ONLY: "R14", VERIFIER_MIN_FREE_GB: "100000", VERIFIER_MEMORY_WAIT_SECONDS: "20" }, what: "under the free-memory line R14 waits, then is not checked" },
+  { name: "R14-reread-old", breaks: "R14-reread-old", rule: "R14", what: "a later mention in a thread reads it again from its top" },
+  // The verifier spaces thread mentions by Slack's pace, so a product that
+  // never waits out a 429 is not caught by this schedule, and need not be.
+  { name: "R14-no-wait", breaks: "R14-no-wait", rule: "R14", result: "pass", what: "a thread read refused by Slack's pace is not waited out; the paced schedule never causes a 429" },
+  { name: "R14-says-unread", breaks: "R14-says-unread", rule: "R14", what: "every thread mention is answered that the thread could not be read" },
   {
     name: "R13-short-memory",
     breaks: "R13-short-memory",

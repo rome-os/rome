@@ -96,6 +96,7 @@ async function threadReplies(ctx, team, channel, threadTs, since) {
  * control call's answer, the reply posts and the replies calls it caused.
  */
 async function mentionInThread(ctx, ws, { user, channel, text, threadTs }) {
+  const paced = await paceWait(ctx, ws);
   const since = await ctx.slack.seq();
   const at = now();
   const sent = await ctx.slack.mention(ws.id, user, text, channel, { thread_ts: threadTs });
@@ -113,10 +114,59 @@ async function mentionInThread(ctx, ws, { user, channel, text, threadTs }) {
     at,
     control: sent,
     waitedUpToSeconds: budget,
-    replies: replies.map((p) => ({ seq: p.seq, text: p.text?.slice(0, 300) })),
+    pacedSeconds: paced,
+    replies: replies.map((p) => ({ seq: p.seq, ts: p.ts, text: p.text?.slice(0, 300) })),
     repliesCalls: repliesCalls.length,
     repliesCallResults: repliesCalls.map((c) => (c.ok ? "ok" : c.error ?? "refused")),
+    calls: repliesCalls.map((c) => ({ seq: c.seq, at: c.at, ok: c.ok, oldest: c.args?.oldest ?? null, error: c.error ?? null })),
     since,
+  };
+}
+
+// Slack lets one conversations.replies call through a minute per workspace.
+const PACE_SECONDS = 62;
+
+/**
+ * Waits until a minute (and a little) has passed since the last
+ * conversations.replies call Slack let through in `ws`, so each mention is
+ * sent when a correct product may read its thread at once: the check then
+ * measures thread context, not the queue at the product's own gate. Returns
+ * the seconds waited.
+ */
+async function paceWait(ctx, ws) {
+  const calls = await ctx.slack.calls({ team: ws.id, method: "conversations.replies", since: ctx.r14Since ?? 0 });
+  const last = calls.filter((c) => c.ok).at(-1);
+  if (!last?.at) return 0;
+  const wait = Date.parse(last.at) + PACE_SECONDS * 1000 - Date.now();
+  if (wait <= 0) return 0;
+  await sleep(wait);
+  return Math.round(wait / 1000);
+}
+
+/**
+ * Two mentions in one thread: the first read of the thread may be whole;
+ * any later read must start (`oldest`) at or after the newest message the
+ * first read could return, so it fetches only what was said in between.
+ * `known` lists the thread's messages with the fake's sequence number just
+ * before each was posted (0 for those seeded before the run).
+ */
+function rereadVerdict(calls, known, laterMentions) {
+  const reads = calls.filter((c) => c.ok).sort((x, y) => x.seq - y.seq);
+  if (!reads.length) return { result: "not checked", why: "no conversations.replies call for the thread went through", reads };
+  const first = reads[0];
+  const newest = known.filter((m) => m.seq < first.seq).reduce((a, m) => (Number(m.ts) > Number(a) ? m.ts : a), "0");
+  const later = reads.slice(1);
+  const full = later.filter((c) => c.oldest === null || c.oldest === "" || Number(c.oldest) < Number(newest));
+  const ok = !full.length && later.length <= laterMentions;
+  return {
+    result: ok ? "pass" : "fail",
+    why: ok
+      ? `the first read took the thread; ${later.length} later read(s), each from oldest ${later.map((c) => c.oldest).join(", ") || "-"}, at or after ${newest}, the newest message the first read could return`
+      : full.length
+        ? `${full.length} later read(s) took the thread again from before ${newest} (oldest ${full.map((c) => c.oldest ?? "none").join(", ")}), a second full read`
+        : `${later.length} later reads for ${laterMentions} later mention(s)`,
+    newestAtFirstRead: newest,
+    reads,
   };
 }
 
@@ -241,13 +291,19 @@ async function inGroups(ctx, timeline) {
     threads.push({ root: root.ts, facts: [f] });
   }
   const answers = [];
-  const twoMentions = { root: seededRoot ?? null, repliesCalls: 0 };
+  const twoMentions = { root: seededRoot ?? null, calls: [], mentions: 0 };
+  // The seeded thread's messages, each with the sequence number before it.
+  const known = (news.seed_messages ?? [])
+    .filter((m) => seededRoot && (m.ts === seededRoot || m.thread_ts === seededRoot))
+    .map((m) => ({ ts: m.ts, seq: 0 }));
   // Slack's pace on thread reads is on for the mentions, as in production
   // for an app outside the Marketplace; the rest of R14 runs without it.
   await ctx.slack.config({ history_limit: true });
   for (const t of threads) {
     for (const f of t.facts) {
+      const seq = await ctx.slack.seq();
       const c = await ctx.slack.groupMessage(ws.id, member, f.fact, g.news, { thread_ts: t.root });
+      if (t.seeded) known.push({ ts: c.ts, seq });
       timeline.push({ at: now(), step: "fact in a thread", thread: t.root, text: f.fact, control: c });
     }
     for (const f of t.facts) {
@@ -263,7 +319,12 @@ async function inGroups(ctx, timeline) {
         ...(unread && !right ? { saidThreadUnread: unread.text } : {}),
         repliesCalls: m.repliesCallResults,
       });
-      if (t.seeded) twoMentions.repliesCalls += m.repliesCalls;
+      if (t.seeded) {
+        twoMentions.mentions++;
+        twoMentions.calls.push(...m.calls);
+        known.push({ ts: m.control.ts, seq: m.since });
+        for (const r of m.replies) if (r.ts) known.push({ ts: r.ts, seq: r.seq });
+      }
     }
   }
   await ctx.slack.config({ history_limit: false });
@@ -286,14 +347,10 @@ async function inGroups(ctx, timeline) {
       .join("; "),
     answers,
   });
-  if (seededRoot)
-    ops.push({
-      op: "thread read once for two mentions",
-      result: twoMentions.repliesCalls <= 1 ? "pass" : "fail",
-      why: `${twoMentions.repliesCalls} conversations.replies call(s) for thread ${seededRoot} across 2 mentions in it`,
-      tries: [],
-    });
-  else ops.push({ op: "thread read once for two mentions", result: "not checked", why: "the environment seeds no thread in #news", tries: [] });
+  if (seededRoot) {
+    const v = rereadVerdict(twoMentions.calls, known, twoMentions.mentions - 1);
+    ops.push({ op: "no second full read for two mentions in a thread", result: v.result, why: v.why, reads: v.reads, newestAtFirstRead: v.newestAtFirstRead ?? null, tries: [] });
+  } else ops.push({ op: "no second full read for two mentions in a thread", result: "not checked", why: "the environment seeds no thread in #news", tries: [] });
 
   phase("R14: plain message in #news");
   // Only direct messages and mentions are heard: a plain message in #news,
@@ -431,6 +488,7 @@ export async function r14(ctx) {
     };
   const timeline = [];
   const startSeq = await ctx.slack.seq();
+  ctx.r14Since = startSeq;
   ctx.dashboardReplies = [];
   const state = await ctx.slack.state();
   const limitWas = state.history_limit?.on ?? true;
