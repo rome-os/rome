@@ -364,7 +364,9 @@ export function makeOAuthProviderDescriptor(
   if (setupDeps) scheme.setup = makeOAuthProviderSetup(provider, setupDeps);
   return {
     connectionKind: provider,
-    label: OAUTH_PROVIDER_DESCRIPTORS[provider].label,
+    // The Slack OAuth connection is named apart from Rome's own Slack app,
+    // also labelled Slack, so a reader of both can tell which one is connected.
+    label: provider === "slack" ? "Slack sign-in" : OAUTH_PROVIDER_DESCRIPTORS[provider].label,
     grant: OAUTH_PROVIDER_GRANTS[provider],
     // Rome's own Slack app replaces the Slack OAuth connection; existing ones
     // keep working until the guardian disconnects them.

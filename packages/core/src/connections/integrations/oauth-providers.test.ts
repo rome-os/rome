@@ -66,12 +66,13 @@ const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
 ];
 
 describe("OAuth connection kinds' display labels", () => {
+  // The Slack sign-in is named apart from Rome's Slack app, labelled Slack.
   it("name each kind as a person reads it, not by its id", () => {
     expect(
       (["github", "google", "slack", "shopify"] as const).map(
         (provider) => makeOAuthProviderDescriptor(provider).label,
       ),
-    ).toEqual(["GitHub", "Google", "Slack", "Shopify"]);
+    ).toEqual(["GitHub", "Google", "Slack sign-in", "Shopify"]);
   });
 });
 

@@ -19,6 +19,7 @@ import {
 } from "../../api/shopify-proxy.js";
 import {
   SLACK_APP_CONNECT_HINT,
+  SLACK_APP_NOT_CONNECTED,
   SLACK_BOTH_ON_APP,
   SLACK_NO_SIGN_IN,
   SLACK_APP_NOT_READY,
@@ -191,7 +192,10 @@ export function createAction(
         const route = via ?? (app ? "app" : "sign_in");
         if (route === "app") {
           if (!channels || !app) {
-            return { status: "error", error: SLACK_APP_CONNECT_HINT };
+            return {
+              status: "error",
+              error: tokens ? SLACK_APP_NOT_CONNECTED : SLACK_APP_CONNECT_HINT,
+            };
           }
           const account = app.account;
           if (!account) {
