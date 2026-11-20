@@ -403,10 +403,11 @@ export class TelegramAdapter {
 }
 
 /**
- * The accounts a message's entities mention, by Telegram user id. A text
- * mention names its user. An `@handle`, alone or ending a bot command, names
- * the bot's own account when it is the bot's handle: Telegram gives no id for
- * another handle, so that one is left out.
+ * The accounts a message's entities mention. A text mention names its user
+ * by Telegram user id. An `@handle`, alone or ending a bot command, names the
+ * bot's own account by its id when it is the bot's handle. Telegram gives no
+ * id for another `@handle`, so that account is listed as its handle, which
+ * no user id can equal.
  */
 export function telegramMentions(
   entities: readonly MessageEntity[],
@@ -426,6 +427,8 @@ export function telegramMentions(
       (entity.type === "bot_command" && said.endsWith(handle))
     ) {
       mentioned.add(String(me.id));
+    } else if (entity.type === "mention") {
+      mentioned.add(said);
     }
   }
   return [...mentioned];

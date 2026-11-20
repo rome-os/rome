@@ -189,6 +189,32 @@ describe("channelMessageOf", () => {
     expect(changed.every((row) => row.includes("/ignore: quiet → wake"))).toBe(true);
   });
 
+  it("wakes the agent as before on Telegram and Feishu, which never reported mentions of others", () => {
+    // Neither kind offers the bot or mentions-of-others rules, so a chat on it
+    // wakes on any bot and on mentions of others, and the new mentionsOthers
+    // changes nothing (participation/wake-gate/load.ts).
+    const differ: string[] = [];
+    for (const facts of allFacts()) {
+      if (facts.mentions === undefined) continue;
+      for (const replyRule of ["mention", "all"] as const) {
+        const settings: ChatWakeSettings = {
+          ...(allSettings().next().value as ChatWakeSettings),
+          replyRule,
+          botMessages: "all",
+          whenOthersMentioned: "respond",
+        };
+        const { mentionsOthers: _never, ...before } = oldDiscord(facts);
+        const now = chatSettingsWake(settings)(
+          wakeMessageOf(channelMessageOf(messageOf(facts), "telegram"), facts.kind),
+          GUARDIAN,
+        );
+        const was = chatSettingsWake(settings)(wakeMessageOf(before, facts.kind), GUARDIAN);
+        if (now !== was) differ.push(`${JSON.stringify(facts)} ${replyRule}: ${was} → ${now}`);
+      }
+    }
+    expect(differ).toEqual([]);
+  });
+
   it("reads one message in a group differently for each of Rome's accounts that heard it", () => {
     const settings = allSettings().next().value as ChatWakeSettings; // mention / ignore / ignore
     const facts: Facts = {

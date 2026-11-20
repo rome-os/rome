@@ -60,8 +60,9 @@ type DeliveredBy<T> = T extends {
 holds<Equals<Extract<DeepKeys<Message>, Decided>, never>>();
 holds<Equals<Extract<DeepKeys<ChatsMessage>, Decided>, never>>();
 
-// (f) The connection's message holds platform facts only: strings, the time,
-// and flags, with no Chats or People type such as a place, a ref or a person.
+// (f) The connection's message holds platform facts only: every value at the
+// end of its fields is a string, the time or a flag, and no field is named
+// for a Chats or People type such as a place, a ref or a person.
 holds<Equals<Leaves<Message> extends string | boolean | Date ? true : false, true>>();
 holds<Equals<Extract<DeepKeys<Message>, "place" | "ref" | "chatRef" | "messageRef">, never>>();
 

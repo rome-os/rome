@@ -3,7 +3,7 @@
 // Vocabulary: docs/domains/connections.md#message,
 // docs/domains/participation.md#addressed.
 //
-// Only connection-ports.ts imports this, which the import rules check
+// Outside tests, only connection-ports.ts imports this, which the import rules check
 // (lint/rules/contexts.ts): what an app receives is built here and nowhere else.
 
 import type { ChannelMessage, MessageAddressing } from "@rome-os/app-runtime";

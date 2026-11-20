@@ -38,6 +38,7 @@ Whom a message addresses, as one of Rome's accounts reads it: Rome's account, ot
 - Otherwise a message that mentions or replies to someone else addresses others, and any other message addresses nobody.
 - A reply to Rome's account that also mentions someone else addresses Rome's account (Ouou, 2026-11-20). So does a message in a thread the account started that mentions someone else, by the same rule.
 - Two of Rome's accounts in one chat can read one message differently: it can address one and not the other.
+- Until the wake is decided for each account from the connection's message (ZHA-229), the wake gate reads addressing from the fields apps pass on. Those carry no reply to someone else, so the gate reads such a reply as addressing nobody.
 
 ## Projection
 
