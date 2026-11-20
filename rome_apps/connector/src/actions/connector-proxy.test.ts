@@ -730,6 +730,32 @@ describe("Rome-managed Outlook routing", () => {
     expect(await run(input)).toMatchObject({ status: "error" });
     expect(loadConnectorClient).not.toHaveBeenCalled();
   });
+  it("routes every mail path to core, including case and /beta variants", async () => {
+    runAction.mockResolvedValue({ status: "error", error: "Only Outlook mail GETs are allowed." });
+    for (const path of [
+      "/v1.0/me",
+      "/v1.0/me/sendMail",
+      "/v1.0/me/MailFolders/inbox/messages",
+      "/beta/me/messages",
+    ]) {
+      runAction.mockClear();
+      await run({ ...input, path });
+      expect(runAction).toHaveBeenCalledWith(
+        "core:outlook_read",
+        expect.objectContaining({ path }),
+      );
+    }
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("leaves calendar, contacts and other Graph calls on Composio", async () => {
+    for (const path of ["/v1.0/me/events", "/v1.0/me/contacts", "/v1.0/me/messagesExtra"]) {
+      loadConnectorClient.mockResolvedValueOnce(
+        clientWithProxy(async () => ({ status: 200, data: { value: [] }, headers: {} })),
+      );
+      expect(await run({ ...input, path })).toMatchObject({ status: "ok" });
+    }
+    expect(runAction).not.toHaveBeenCalledWith("core:outlook_read", expect.anything());
+  });
   it("preserves the Composio path when no Microsoft connection exists", async () => {
     runAction.mockResolvedValueOnce({
       status: "error",

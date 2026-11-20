@@ -3,7 +3,10 @@
 Outlook proxy calls prefer the Microsoft connection held by core, the same way
 Gmail prefers the Google connection. Only absence, or a grant without
 `Mail.Read`, falls back to Composio. A broken Microsoft grant does not switch
-mailboxes. Composio connections, tools and events remain available.
+mailboxes. Only Graph mail paths go to core: calendar, contacts and the rest
+of Graph stay on Composio's Outlook connection, as do its tools and events.
+The Microsoft card is opt-in under `SHOW_MICROSOFT_OAUTH` until a live consent,
+read and send are verified.
 
 Rome Cloud brokers the connection through Rome's Microsoft app with
 `offline_access`, `User.Read`, `Mail.Read` and `Mail.Send`. Sign-in with

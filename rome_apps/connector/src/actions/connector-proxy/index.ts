@@ -32,6 +32,10 @@ const log = createAppLogger("connector_proxy");
 const GITHUB_TOOLKIT = "github";
 const SLACK_TOOLKIT = "slack";
 const SHOPIFY_TOOLKIT = "shopify";
+// Graph mail paths, which a Rome-managed Microsoft connection answers. Graph
+// paths are case-insensitive, and `/beta` mail must not slip past core either.
+const OUTLOOK_MAIL_PATH =
+  /^\/(?:v1\.0|beta)\/me(?:\/(?:messages|mailFolders|sendMail)(?:\/.*)?)?$/i;
 
 /**
  * Map a verbatim upstream response to an ActionResult, fail-closed. The proxy
@@ -249,7 +253,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
       }
 
-      if (toolkit.toLowerCase() === "outlook") {
+      // Only mail goes to core. Calendar, contacts and the rest of Graph stay on
+      // Composio's Outlook connection.
+      if (toolkit.toLowerCase() === "outlook" && OUTLOOK_MAIL_PATH.test(path)) {
         const managed = await deps.appContext.runAction("core:outlook_read", {
           path,
           method,

@@ -38,7 +38,7 @@ export function registerOutlookActions(
       name: OUTLOOK_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). If outlook_not_connected, Outlook can still be used through Composio. Connect Microsoft in Settings → Connections.",
+        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). Calendar, contacts and other Graph APIs stay on Composio. If outlook_not_connected, Outlook mail can still be used through Composio. Connect Microsoft in Settings → Connections (SHOW_MICROSOFT_OAUTH is opt-in until verified).",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -69,11 +69,12 @@ export function registerOutlookActions(
           status: "error",
           error: "outlook_not_connected: No Rome-managed Microsoft connection.",
         };
-      if (found.length !== 1 || !found[0].act)
+      if (found.length !== 1)
         return {
           status: "error",
-          error: "Outlook connection is unavailable. Fix Microsoft in Settings → Connections.",
+          error: "Outlook connection is ambiguous. Fix Microsoft in Settings → Connections.",
         };
+      // A grant that never had mail access leaves Outlook on Composio, even when broken.
       const scopes = (await connections.grantOf(found[0].id))?.profile?.scopes;
       if (!hasScope(scopes, "Mail.Read")) {
         return {
@@ -82,6 +83,11 @@ export function registerOutlookActions(
             "outlook_not_connected: Microsoft has no Outlook read permission. Reconnect Microsoft to grant it, or use Composio.",
         };
       }
+      if (!found[0].act)
+        return {
+          status: "error",
+          error: "Outlook connection is unavailable. Fix Microsoft in Settings → Connections.",
+        };
       const parsed = outlookReadSchema.safeParse(args);
       if (!parsed.success)
         return {

@@ -99,8 +99,17 @@ export function showGoogleOAuth(): boolean {
   return envFlagEnabled(process.env.SHOW_GOOGLE_OAUTH);
 }
 
+/** Opt-in until a real Microsoft consent, read and send have been verified. */
+export function showMicrosoftOAuth(): boolean {
+  return envFlagEnabled(process.env.SHOW_MICROSOFT_OAUTH);
+}
+
 export function getEnabledOAuthProviders(): OAuthProvider[] {
-  return OAUTH_PROVIDERS.filter((provider) => provider !== "google" || showGoogleOAuth());
+  return OAUTH_PROVIDERS.filter(
+    (provider) =>
+      (provider !== "google" || showGoogleOAuth()) &&
+      (provider !== "microsoft" || showMicrosoftOAuth()),
+  );
 }
 
 export function isEnabledOAuthProvider(value: string): value is OAuthProvider {

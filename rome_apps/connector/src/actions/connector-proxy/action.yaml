@@ -45,7 +45,8 @@ description: |
   core:outlook_send with that connectionId and /v1.0/me's address as From:
   every exact message requires the guardian's approval card. No managed
   Microsoft connection means the existing Composio Outlook path remains
-  available; a broken grant never silently switches to Composio.
+  available; a broken grant never silently switches to Composio. Calendar,
+  contacts and other Graph paths stay on Composio.
 
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never

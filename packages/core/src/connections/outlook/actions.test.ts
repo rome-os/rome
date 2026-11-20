@@ -77,6 +77,14 @@ describe("Outlook actions", () => {
     });
   });
 
+  it("leaves a broken identity-only grant on Composio", async () => {
+    const broken = [{ id: "broken", state: () => "broken", act: null }];
+    expect(await read(harness(broken, ["openid", "email", "profile"]).actions)).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("outlook_not_connected:"),
+    });
+  });
+
   it("accepts Graph scopes with or without the resource prefix", async () => {
     const prefixed = SCOPES.map((scope) => `https://graph.microsoft.com/${scope}`);
     const { actions } = harness(undefined, prefixed);
