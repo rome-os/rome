@@ -361,6 +361,7 @@ describe("the Concierge agent", () => {
       "`archived: true`",
       "ask which in one bubble",
       "A `<task_events>` batch needs no write",
+      "when `<task_review>` lists a check you postponed three times or more (`<check_postponed>`)",
     ])
       expect(tasks).toContain(text);
     expect(tasks).not.toContain('`Stop "Title"`');
