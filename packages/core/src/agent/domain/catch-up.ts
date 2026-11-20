@@ -79,6 +79,10 @@ export function catchUpPrompt(
     /** The thread's latest replies before the turn's message are not among
      *  {@link inThread}: more was said than one read holds. */
     inThreadCut?: boolean;
+    /** The platform thread's earlier messages were to be read this turn and
+     *  could not be: the model is told, so it does not answer as if the
+     *  thread held nothing. */
+    inThreadUnread?: boolean;
   },
 ): string {
   const { unseen } = facts;
@@ -117,7 +121,13 @@ export function catchUpPrompt(
       "</conversation_context>",
     );
   }
-  if (facts.inThread?.length) {
+  if (facts.inThreadUnread) {
+    sections.push(
+      "<thread_messages>",
+      "[the earlier messages of this thread could not be read; say so rather than answer as if the thread held nothing]",
+      "</thread_messages>",
+    );
+  } else if (facts.inThread?.length) {
     sections.push(
       "<thread_messages>",
       ...facts.inThread.map((message) => contextLine(contextMessage(message))),
