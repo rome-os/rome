@@ -518,14 +518,16 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     if (initialAgentMention && !agentMentionLocked) setDraftAgentMention(initialAgentMention);
   }, [initialAgentMention, agentMentionLocked]);
 
+  const previewText = voice.preview?.value;
   useEffect(() => {
     if (!persistNewChatDraft || sessionCreatedRef.current) return;
     if (skipNextDraftSaveRef.current) {
       skipNextDraftSaveRef.current = false;
       return;
     }
-    saveNewChatDraft(newChatDraft(inputText), authEpoch);
-  }, [persistNewChatDraft, authEpoch, inputText, newChatDraft]);
+    // While voice input is on, the draft's text is the field's with the heard words in.
+    saveNewChatDraft(newChatDraft(previewText ?? inputText), authEpoch);
+  }, [persistNewChatDraft, authEpoch, inputText, previewText, newChatDraft]);
 
   useLayoutEffect(() => {
     if (!persistNewChatDraft) return;
@@ -771,11 +773,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       failedSendRef.current = { inputId, text, uploads, skill };
       // Before the returns below: the field may be gone, but the chat keeps it.
       if (clearsOptimistically) sendEnded(persistNewChatDraft ? rawText : text, false);
-      if (
-        persistNewChatDraft &&
-        (!textareaRef.current || (clearsOptimistically && textareaRef.current.value))
-      )
-        return;
+      // Words dictated while the send was pending are newer than what failed,
+      // though they are not in the field's value until listening ends.
+      const newer = Boolean(textareaRef.current?.value) || voiceActiveRef.current;
+      if (persistNewChatDraft && (!textareaRef.current || (clearsOptimistically && newer))) return;
       // A failed turn in an adopted session belongs there, not in New chat.
       if (persistNewChatDraft && !sessionCreatedRef.current) {
         saveNewChatDraft(
@@ -795,7 +796,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         // Text typed while the send was pending survives a failure; only an
         // empty field takes the failed text back.
         setInputText((current) =>
-          current === "" ? (persistNewChatDraft ? rawText : text) : current,
+          current === "" && !voiceActiveRef.current
+            ? persistNewChatDraft
+              ? rawText
+              : text
+            : current,
         );
         setPendingUploads(uploads);
         setDraftSkill(skill);

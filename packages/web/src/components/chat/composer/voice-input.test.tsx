@@ -111,6 +111,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   microphone.refuse = false;
   microphone.pending = false;
   microphone.answer = null;
@@ -848,6 +849,34 @@ describe.each(["chat", "concierge"] as const)("the %s draft while voice input li
     expect(loadChatDraft("chat-a")?.text).toBe("hello the");
   });
 
+  it("keeps the words dictated while an earlier send was pending when that send fails", async () => {
+    const { onSend, field } = renderComposer(kind, SONIOX, "chat-a");
+    let fail: (error: Error) => void = () => {};
+    onSend.mockImplementation(
+      () =>
+        new Promise<void>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "first" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(field().value).toBe(""));
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "second", pending: "" });
+    await act(async () => fail(new Error("send failed")));
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text).toBe("second");
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+    expect(field().value).toBe("second");
+  });
+
   it("goes back to the field's text when the words heard are withdrawn", async () => {
     const { field } = renderComposer(kind, SONIOX, "chat-a");
     const socket = await startListening();
@@ -866,16 +895,27 @@ describe("voice input in the new chat message field", () => {
   function renderNewChat() {
     mockFetch(SONIOX);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const handle = createRef<ChatComposerHandle>();
     const view = render(
       <MemoryRouter>
         <QueryClientProvider client={client}>
-          <ChatComposer persistNewChatDraft onSend={rs.fn()} />
+          <ChatComposer ref={handle} persistNewChatDraft onSend={rs.fn()} />
         </QueryClientProvider>
       </MemoryRouter>,
     );
     const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
-    return { field, leave: view.unmount };
+    return { field, handle, leave: view.unmount };
   }
+
+  it("keeps the words heard in the draft when the rest of the draft changes", async () => {
+    const { handle } = renderNewChat();
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => handle.current?.setSkillSelection({ name: "summarize" }));
+
+    expect(loadNewChatDraft()?.skill?.name).toBe("summarize");
+    expect(loadNewChatDraft()?.text).toBe("hello");
+  });
 
   it("keeps the words heard after leaving mid-message", async () => {
     const first = renderNewChat();

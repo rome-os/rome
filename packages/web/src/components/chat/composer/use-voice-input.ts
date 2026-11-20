@@ -239,6 +239,8 @@ export function useVoiceInput({
             start: anchor.before.length,
             end: anchor.before.length + insertion.length,
           };
+          // `leave` can run before this renders, and must save these words.
+          previewRef.current = next;
           setPreview(next);
           keepDraftRef.current(next.value);
         },

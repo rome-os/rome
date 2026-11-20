@@ -261,8 +261,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       } catch {
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
-          // Text typed while the send was pending is newer than what failed.
-          setInputText((current) => (current === "" ? text : current));
+          // Text typed or dictated while the send was pending is newer than
+          // what failed. Dictated words are not in the field until listening ends.
+          setInputText((current) => (current === "" && !voiceActiveRef.current ? text : current));
           sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
