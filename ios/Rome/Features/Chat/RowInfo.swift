@@ -33,6 +33,7 @@ struct RowInfo: Hashable {
         var byID: [String: ChatMessage] = [:]
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
+        let pendingReplies = Dictionary(pending.compactMap { send in send.reply.map { (send.id, $0.messageId) } }) { first, _ in first }
         var infos: [String: RowInfo] = [:]
         for (index, row) in rows.enumerated() {
             var info = RowInfo()
@@ -55,6 +56,9 @@ struct RowInfo: Hashable {
                 if let quote = Self.quote(of: message, row: row), Self.drawsQuote(message, row: row, previous: Self.messageAbove(index, rows: rows, byID: byID)) {
                     info.quote = quote
                 }
+            } else if let original = pendingReplies[row.id].flatMap({ byID[$0] }) {
+                // A send not stored yet quotes the held message it replies to.
+                info.quote = MessagePart.ReplyQuote(of: original)
             }
             infos[row.id] = info
         }
