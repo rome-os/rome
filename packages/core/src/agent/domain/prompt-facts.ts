@@ -14,15 +14,15 @@ export interface PromptMessage {
   readonly at: Date;
 }
 
-/** A message the session has not seen, with the message it quotes. */
-/** A platform thread's messages as a later read finds them: `cut` when more
- *  was said up to the turn's message than one read holds, so the latest
- *  replies before it are not among them. */
+/** A platform thread's messages as a later read finds them: `cut` when the
+ *  read did not reach the turn's message, so the latest replies before it
+ *  are not among them. */
 export interface ThreadRead {
   messages: UnseenMessage[];
   cut: boolean;
 }
 
+/** A message the session has not seen, with the message it quotes. */
 export interface UnseenMessage extends PromptMessage {
   readonly fromRome: boolean;
   readonly quoted: PromptMessage | null;

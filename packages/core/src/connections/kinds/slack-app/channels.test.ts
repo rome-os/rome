@@ -28,4 +28,14 @@ describe("SlackMemberChannels", () => {
     expect(resolved).toBe("C_OPS");
     expect(memberChannels).toHaveBeenCalledTimes(2);
   });
+
+  it("refuses a listing longer than it reads, rather than taking a part of it as whole", async () => {
+    const memberChannels = rs.fn(async () => ({ channels: [NEWS], nextCursor: "more" }));
+    const listing = new SlackMemberChannels({ api: { memberChannels }, botToken: "xoxb" });
+
+    await expect(listing.list()).rejects.toThrow(/too many to list: name a channel by its id/);
+    await expect(listing.resolve("#ops")).rejects.toThrow(/too many to list/);
+    // A channel named by its id needs no listing.
+    expect(await listing.resolve("C_OPS")).toBe("C_OPS");
+  });
 });

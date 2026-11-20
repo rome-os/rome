@@ -218,6 +218,21 @@ describe("chatPromptFacts earlier messages", () => {
     );
   });
 
+  it("says a later thread read stops short when its page does not reach the turn's message, however short the page", async () => {
+    const group = { channel: "slack_app", threadId: "C1", threadType: "group" as const };
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+    // Fourteen replies since the mention shown last (m5), newest first: the
+    // connection left out the thread's root, which Slack puts on every page,
+    // and more replies come before the turn's mention (m29).
+    const page = Array.from({ length: 14 }, (_, i) => message(19 - i));
+    const since = earlierFacts(page, true, { 41: "m5", 42: "m29" });
+
+    const later = await since.promptFacts.thread?.(group, "C1:root", before, 42, 41);
+
+    expect(later?.messages).toHaveLength(14);
+    expect(later?.cut).toBe(true);
+  });
+
   it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
     const { promptFacts, latest } = earlierFacts([message(1)]);
     const before = new Date(Date.UTC(2026, 7, 3, 8, 20));
