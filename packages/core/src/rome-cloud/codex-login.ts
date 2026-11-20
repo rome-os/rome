@@ -27,6 +27,8 @@ function canSpend(view: RomeCreditsView | null): boolean {
  * never brings them in: the chat shows a card instead.
  * Credits need a linked instance and credits that can be spent. Otherwise the
  * answer is `subscription`, and availability says whether it can run.
+ * This login only makes credits reachable: an ask spends them only when the
+ * guardian made them the default or moved its chat onto them (resolveModel).
  */
 export function codexLoginFor(input: {
   openai: ModelAccountReport | undefined;

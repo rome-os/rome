@@ -4,7 +4,12 @@ import { reportOf } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import { createChatProviders } from "./chat-providers.js";
 
-async function setup() {
+async function setup(
+  options: {
+    lastModel?: Record<string, { providerId: string; model: string }>;
+    tier?: "large" | "medium" | "small";
+  } = {},
+) {
   const testDb = createTestDb();
   const webchatRepo = new ChatsWebChatRepository(testDb.db);
   const said = async (id: string) =>
@@ -27,16 +32,26 @@ async function setup() {
   // Never said anything.
   await webchatRepo.createSession("empty", "Empty");
   const selected: Array<[string, string]> = [];
+  const credits: Array<[string, boolean | undefined]> = [];
+  // The plain chat last ran Opus.
+  const lastModel = options.lastModel ?? {
+    plain: { providerId: "anthropic", model: "claude-opus-5-5[1m]" },
+  };
   const providers = createChatProviders({
     webchatRepo,
     accounts: { read: () => ({ openai: reportOf("available"), anthropic: reportOf("available") }) },
-    selectModel: (chatId, _agentName, selection) => selected.push([chatId, selection]),
+    selectModel: (chatId, _agentName, selection, onCredits) => {
+      selected.push([chatId, selection]);
+      credits.push([chatId, onCredits]);
+    },
+    lastModel: async (chatId) => lastModel[chatId] ?? null,
+    agentTier: () => options.tier,
   });
   const row = async (id: string) => {
     const chat = await webchatRepo.getSession(id);
     return { selection: chat?.largeModelSelection, by: chat?.largeModelSelectionBy };
   };
-  return { providers, row, selected, webchatRepo };
+  return { providers, row, selected, credits, webchatRepo };
 }
 
 describe("which provider a chat that follows the default runs on", () => {
@@ -89,6 +104,51 @@ describe("which provider a chat that follows the default runs on", () => {
     expect(await providers.keep("picked", "openai")).toBeNull();
     await providers.follow("fast");
     expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
+  });
+});
+
+describe("the model a kept chat stays on", () => {
+  it("is the model its session last ran, on the old provider or at its strength on another", async () => {
+    const { providers, row } = await setup({
+      lastModel: { plain: { providerId: "openai", model: "gpt-6-luna" } },
+    });
+    await providers.beforeDefaultChange({
+      from: "anthropic",
+      to: "openai",
+      by: "guardian",
+      moveExisting: false,
+    });
+    // It ran the fast model, so it stays fast: never "strong" because it was kept.
+    expect(await row("plain")).toEqual({ selection: "claude-sonnet", by: "kept" });
+  });
+
+  it("is its agent's tier when the session never ran a model", async () => {
+    const fast = await setup({ lastModel: {}, tier: "medium" });
+    expect(await fast.providers.keep("plain", "anthropic")).toBe("claude-sonnet");
+    const strong = await setup({ lastModel: {}, tier: "large" });
+    expect(await strong.providers.keep("plain", "anthropic")).toBe("claude-opus-5-5");
+  });
+});
+
+describe("a chat kept on Rome credits", () => {
+  it("is marked as spending them until it follows the default again", async () => {
+    const { providers, row, credits, webchatRepo } = await setup();
+    expect(await providers.keep("fast", "rome_credits")).toBe("gpt-6-luna");
+    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "credits" });
+    expect(credits.at(-1)).toEqual(["fast", true]);
+    await providers.follow("fast");
+    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
+    expect(credits.at(-1)).toEqual(["fast", false]);
+    // Moving every chat with a default change releases one on credits too.
+    await providers.keep("fast", "rome_credits");
+    await providers.beforeDefaultChange({
+      from: "rome_credits",
+      to: "anthropic",
+      by: "guardian",
+      moveExisting: true,
+    });
+    expect((await webchatRepo.getSession("fast"))?.largeModelSelectionBy).toBe("auto");
+    expect(credits.at(-1)).toEqual(["fast", false]);
   });
 });
 

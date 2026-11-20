@@ -135,7 +135,9 @@ describe("codexLoginFor", () => {
 });
 
 describe("startCodexLoginChoice", () => {
-  it("moves to Rome credits when ChatGPT disconnects and back when it returns", async () => {
+  // The login only makes credits reachable: an ask spends them only when the
+  // guardian chose them (model-resolution.test.ts, "does not spend Rome credits…").
+  it("readies the Rome credits login when ChatGPT disconnects and leaves it when it returns", async () => {
     const c = choice();
     await c.authorization("usage_limit_reached");
     expect(c.used).toEqual([]);

@@ -2069,6 +2069,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
+          credits: input.session.largeModelSelectionBy === "credits",
           // The source session stays live for the chat's next message, and
           // Claude fixes effort at open, so it opens at the chat's own.
           reasoningEffort: await chatReasoningEffort(input.session, undefined),
@@ -4704,6 +4705,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // Null clears a selection an open session still holds, so a chat
           // switched back to Auto follows its pin again.
           selectionId: modelSelection?.id ?? null,
+          // A chat moved onto Rome credits spends them; no other chat does.
+          credits:
+            (await deps.webchatRepo.getSession(sessionId))?.largeModelSelectionBy === "credits",
           reasoningEffort,
         },
       );
@@ -4748,6 +4752,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           JSON.stringify([errorPart, ...(card ? [card] : [])]),
           turnId,
         );
+        // A card that settled while this message was being written takes its settled form.
+        if (card) {
+          await deps.providerFailures?.written(messageId).catch(() => undefined);
+        }
         // Keep this as a real failed turn on the standard trace wire. The
         // stream remains replayable for 30 seconds after completion and the
         // persisted trace renders on reload even if navigation finishes later.
@@ -5704,6 +5712,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id ?? null,
+          credits: session.largeModelSelectionBy === "credits",
         },
       );
       // Only its id is wanted: no turn follows, so the session is let go.

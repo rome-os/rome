@@ -168,6 +168,8 @@ export function aiToolsRoutes(
         kind: "provider",
         provider: value.provider,
         makeDefault: value.makeDefault === true,
+        // As in Settings; a client that sends none moved them, as before.
+        moveExisting: value.moveExisting !== false,
       };
     }
     return null;

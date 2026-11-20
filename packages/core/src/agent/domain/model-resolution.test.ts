@@ -300,6 +300,36 @@ describe("resolveModel on the default provider", () => {
     expect(resolveModel(large, given)).toMatchObject({ ok: true, providerId: "openai" });
   });
 
+  it("does not spend Rome credits for a chat that follows ChatGPT after its login went", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "openai",
+    });
+    expect(resolveModel(large, given)).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai", availability: "unauthorized" },
+    });
+    // An exact model the chat was kept on is no different.
+    expect(
+      resolveModel({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol" }, given),
+    ).toMatchObject({ ok: false, failure: { kind: "provider_unavailable" } });
+  });
+
+  it("spends Rome credits for an ask whose chat was moved onto them", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "openai",
+    });
+    expect(
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6.1-sol", credits: true },
+        given,
+      ),
+    ).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
   it("finds none usable with no default and nothing signed in", () => {
     const given = facts({ reports: reports(unauthorized, unauthorized), defaultProvider: null });
     expect(resolveModel(large, given)).toMatchObject({

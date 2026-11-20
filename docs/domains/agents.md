@@ -111,7 +111,7 @@ Whether the guardian's own account is authorized, expired or absent, and whether
 
 ## Model provider availability
 
-Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
+Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available for a turn that may spend them, whatever the guardian's account says. Any other turn reads the guardian's own account, so it shows the account card.
 
 - The resolver is its one reader. A reader that asks about the guardian's own account reads the [account status](#model-provider-account-status) instead.
 - In code it is `providerAvailability` in [`packages/core/src/agent/domain/provider-availability.ts`](../../packages/core/src/agent/domain/provider-availability.ts), a pure function over the account's report and the login.
@@ -122,7 +122,8 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 
 - The provider reports what the login allows, the models and whether it is usage limited. Who is billed follows from the login. A model session reports the kind of login each turn ran on, unset when Rome cannot tell.
 - Getting a login and using one are two acts. The guardian authorizes a ChatGPT login. Rome's setup picks which login Codex runs on.
-- For Codex, Rome credits are used only while the guardian is logged in to no AI account: no ChatGPT login and no Claude login. A login that expired or was revoked still counts as logged in, so a lost login or a usage limit never brings them in. The instance must be linked to Rome Cloud, and the credits must be spendable. It is one choice for the whole instance ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
+- For Codex, the Rome credits login is in effect only while the guardian is logged in to no AI account: no ChatGPT login and no Claude login. A login that expired or was revoked still counts as logged in, so a lost login or a usage limit never brings them in. The instance must be linked to Rome Cloud, and the credits must be spendable. It is one choice for the whole instance ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
+- A turn spends Rome credits only when the guardian chose them: they are the [default](#default-provider), or its chat was moved onto them from a card. A chat that follows ChatGPT after its login went shows the account card, with "Use Rome credits".
 - For Claude, Rome's setup picks nothing. A stored credential wins over an environment credential, which wins over the Claude CLI's login, so the guardian chooses by what they store. Where Rome found a credential is a detail of the login, not a kind.
 - In code the logins and their ports are in [`packages/core/src/agent/domain/model-login.ts`](../../packages/core/src/agent/domain/model-login.ts). `CodexLogins` logs Rome in to and out of Codex and runs Codex on the login it is told to use. `ClaudeLogins` keeps the credential Rome stores for Claude and logs the CLI out, since the guardian signs in to Claude outside Rome. `claudeLogin` holds Claude's order. `ModelProviderLogins` is the revoke both adapters share. Rome's setup choice is [`packages/core/src/rome-cloud/codex-login.ts`](../../packages/core/src/rome-cloud/codex-login.ts), outside the agent context.
 
@@ -142,7 +143,9 @@ The provider every chat that follows the default runs on: Claude, Codex on the g
 
 A chat that follows the default but stays on another provider: the guardian switched only this chat from a card, or changed the default without moving the chats already there. Rome made the choice, so a model limit may still move it within its provider, but a change of the default does not move it. A later change that moves existing chats lets it follow again.
 
-- In code the chat's selection is stored as made by Rome, `kept`, in [`packages/core/src/webchat/chat-providers.ts`](../../packages/core/src/webchat/chat-providers.ts).
+- A kept chat stays on the model it last ran, or on its strength on the other provider. One that never ran a model takes its agent's tier.
+- A chat kept on Rome credits spends them, and no other chat does.
+- In code the chat's selection is stored as made by Rome, `kept` (or `credits` for Rome credits), in [`packages/core/src/webchat/chat-providers.ts`](../../packages/core/src/webchat/chat-providers.ts).
 
 ## Provider failure
 
@@ -158,7 +161,7 @@ Anything else shows one of three **cards**, by what the guardian has to do:
 2. **Account**: the login expired or is missing, Rome credits are used up, or a spending limit is reached. It offers "Log in", and "Switch to {other account}" or, with no account logged in and a balance left, "Use Rome credits".
 3. **Model**: the model the owner picked is not in the plan, or the provider stopped offering it. It offers "Switch to {model}" on the same provider.
 
-A card's switch moves this chat only (it becomes [kept](#kept-provider)), unless the guardian ticks "Also make default", which changes the default and moves every chat that follows it. When the card settles, by a switch, a login or the provider running again, it collapses to one line ("Switched to X, continued" or "Recovered, continued") and the stopped turn runs again by itself. The provider's own error stays behind "Details".
+A card's switch asks in a dialog. It moves this chat only (it becomes [kept](#kept-provider)), unless the guardian ticks "Also make default". That changes the default as AI Tools does, with the same "Move existing chats too", checked. Checked, every existing chat moves, kept ones included. Unchecked, the other chats stay where they run. A switch to Rome credits asks the same, and names the balance. Two ways out of one card (two clicks, the provider coming back) run its turn once. When the card settles, by a switch, a login or the provider running again, it collapses to one line ("Switched to X, continued" or "Recovered, continued") and the stopped turn runs again by itself. The provider's own error stays behind "Details".
 
 An unattended chat (a task chat, a scheduled run, a routine) gets its card too, and the owner's Concierge main chat gets one **notice** per incident, with one push and links to the stopped tasks. Its buttons are the card's, and one click applies to every task. When the provider runs again, the tasks resume and the notice reads "Recovered".
 

@@ -34,7 +34,7 @@ import { followingSelection } from "./model-strength.js";
  * `override` runs this one ask on another provider (the guardian's "run them
  * on {other} now").
  */
-export type ModelResolutionRequest =
+export type ModelResolutionRequest = (
   | {
       kind: "tier";
       tier: ModelTier;
@@ -42,7 +42,14 @@ export type ModelResolutionRequest =
       pin?: { providerId: ProviderId; model: string };
       override?: AccountedProviderId;
     }
-  | { kind: "exact"; providerId: ProviderId; model: string };
+  | { kind: "exact"; providerId: ProviderId; model: string }
+) & {
+  /**
+   * The ask may spend Rome credits: its chat was moved onto them. Without it,
+   * only a default of Rome credits spends them.
+   */
+  credits?: boolean;
+};
 
 /** The guardian's choice of model for each tier and provider. */
 export type TierModels = Partial<Record<AccountedProviderId, Partial<Record<ModelTier, string>>>>;
@@ -176,7 +183,17 @@ export function resolveModel(
   facts: ModelResolutionFacts,
 ): ModelResolutionOutcome {
   const { reports } = facts;
-  const login = facts.logins.openai;
+  // A Rome credits login serves Codex only for an ask that may spend credits:
+  // the guardian made them the default or moved this chat onto them. Any
+  // other ask reads the guardian's own ChatGPT account, which shows its card.
+  const spendsCredits =
+    request.credits === true ||
+    facts.defaultProvider === "rome_credits" ||
+    facts.defaultProvider === undefined;
+  const login =
+    facts.logins.openai?.kind === "rome_credits" && !spendsCredits
+      ? undefined
+      : facts.logins.openai;
   const credits = login?.kind === "rome_credits";
   const served =
     login?.kind === "rome_credits" && login.modelsServed ? new Set(login.modelsServed) : null;
@@ -282,10 +299,22 @@ export function resolveModel(
  * The ask: the chat's exact selection, else the agent's exact model, else its
  * tier. A tier that names no provider follows the default provider and keeps
  * the session's pin while the pin is on that provider. `override` runs this
- * one ask on another provider. Throws on an agent with neither a tier nor a
- * provider and model, or with a model beside a tier.
+ * one ask on another provider, and `credits` lets it spend Rome credits.
+ * Throws on an agent with neither a tier nor a provider and model, or with a
+ * model beside a tier.
  */
 export function modelResolutionRequest(
+  selectionId: ModelSelectionId | undefined,
+  pin: { providerId: ProviderId; model: string } | undefined,
+  agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
+  override?: AccountedProviderId,
+  credits?: boolean,
+): ModelResolutionRequest {
+  const request = modelAsk(selectionId, pin, agent, override);
+  return credits ? { ...request, credits: true } : request;
+}
+
+function modelAsk(
   selectionId: ModelSelectionId | undefined,
   pin: { providerId: ProviderId; model: string } | undefined,
   agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },

@@ -355,6 +355,29 @@ describe("continuation notice through Sessions", () => {
     expect(prompt).not.toContain("<handoff>");
   });
 
+  it("carries what the latest turns did when the old model's handoff fails", async () => {
+    const manager = createManager({
+      handoffs: (resolver) => ({
+        ...handoffsOver("- send_email(to: a@b.c, subject: Rent)")(resolver),
+        fallback: async () => {
+          throw new Error("The fallback handoff timed out");
+        },
+      }),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    // The old provider still runs, but its private handoff turn fails.
+    anthropic.failing.next = 1;
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Did that go out?");
+
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(anthropic.calls.at(-1)?.prompt).toContain("<handoff_request>");
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
+    expect(prompt).not.toContain("<handoff>");
+  });
+
   it("has no position to branch at until a turn runs on the new provider's thread", async () => {
     const manager = createManager();
     const session = await acquire(manager, "claude-sonnet");

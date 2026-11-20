@@ -231,6 +231,44 @@ describe("the executed-actions list", () => {
     expect(list).not.toContain("secret id 42");
   });
 
+  it("carries no credentials: secret-named arguments are left out, credential-like values masked", () => {
+    const list =
+      executedActionsOf([
+        trace("t1", [
+          {
+            type: "tool_use",
+            tool: "http_request",
+            id: "a",
+            input: {
+              url: "https://api.example.com/v1/items",
+              apiKey: "abc",
+              password: "hunter2",
+              access_token: "tok",
+              Cookie: "sid=1",
+              headers: { Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig" },
+              note: "use sk-proj-ABCDEFGHIJKLMNOP1234 here",
+              digest: "0123456789abcdef0123456789abcdef01234567",
+              blob: "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVoxMjM0NTY3ODkw",
+            },
+          },
+        ]),
+      ]) ?? "";
+    expect(list).toContain("url: https://api.example.com/v1/items");
+    for (const leaked of [
+      "abc",
+      "hunter2",
+      "tok",
+      "sid=1",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "sk-proj-ABCDEFGHIJKLMNOP1234",
+      "0123456789abcdef0123456789abcdef01234567",
+      "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVoxMjM0NTY3ODkw",
+    ]) {
+      expect(list).not.toContain(leaked);
+    }
+    expect(list).toContain("[redacted]");
+  });
+
   it("reads only the last five turns, and nothing when no tool ran", () => {
     const rows = ["t1", "t2", "t3", "t4", "t5", "t6"].map((turnId) =>
       trace(turnId, [{ type: "tool_use", tool: `tool_${turnId}`, input: {} }]),

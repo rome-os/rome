@@ -1927,13 +1927,22 @@ export class WebChatRepository {
       );
   }
 
-  /** Lets every kept chat follow the default again, from its next run. */
-  async releaseKeptChats(): Promise<number> {
-    const result = await this.db
+  /**
+   * Lets every kept chat follow the default again, from its next run, those
+   * kept on Rome credits too. Returns the ids it released.
+   */
+  async releaseKeptChats(): Promise<
+    Array<{ id: string; agentName: string | null; largeModelSelection: string | null }>
+  > {
+    return await this.db
       .update(romeSessions)
       .set({ largeModelSelectionBy: "auto" })
-      .where(eq(romeSessions.largeModelSelectionBy, "kept"));
-    return result.changes;
+      .where(inArray(romeSessions.largeModelSelectionBy, ["kept", "credits"]))
+      .returning({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+      });
   }
 
   /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */

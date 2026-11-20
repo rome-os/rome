@@ -142,14 +142,31 @@ const ACTION_TURNS = 5;
 const ACTION_LINES = 40;
 const ACTION_LINE_CHARS = 240;
 
-/** The arguments a tool call is known by: short values whole, long ones cut. */
-function keyArguments(input: unknown): string {
+/** Argument names whose values are credentials: left out of the list. */
+const SECRET_KEY = /pass|secret|token|key|auth|cookie|credential/i;
+/**
+ * Values that read as credentials wherever they appear: a bearer token, an API
+ * key, a long hex run, or a long run of letters and digits as base64 is.
+ */
+const SECRET_VALUE =
+  /\bBearer\s+[\w.~+/=-]+|\b(?:sk|pk|rk|ghp|gho|ghs|xox[abpors])[-_][\w-]{8,}|\b[0-9a-f]{32,}\b|(?=[\w+/-]*\d)(?=[\w+/-]*[A-Za-z])[\w+/-]{40,}={0,2}/gi;
+
+/** A value as it may be shown: whatever reads as a credential is masked. */
+function masked(text: string): string {
+  return text.replace(SECRET_VALUE, "[redacted]");
+}
+
+/**
+ * The arguments a tool call is known by: short values whole, long ones cut.
+ * A list carried to another provider holds no credentials.
+ */
+export function keyArguments(input: unknown): string {
   if (input === undefined || input === null) return "";
-  if (typeof input !== "object") return String(input);
+  if (typeof input !== "object") return masked(String(input));
   const parts: string[] = [];
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (value === undefined || value === null || value === "") continue;
-    const text = typeof value === "string" ? value : JSON.stringify(value);
+    if (value === undefined || value === null || value === "" || SECRET_KEY.test(key)) continue;
+    const text = masked(typeof value === "string" ? value : JSON.stringify(value));
     parts.push(`${key}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`);
   }
   return parts.join(", ");

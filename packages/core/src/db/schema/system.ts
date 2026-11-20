@@ -23,7 +23,7 @@ import {
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
 /** Who chose a chat's stored model. docs/domains/agents.md#kept-provider */
-export type ModelSelectionBy = "owner" | "auto" | "kept";
+export type ModelSelectionBy = "owner" | "auto" | "kept" | "credits";
 
 export const sessions = sqliteTable(
   "sessions",

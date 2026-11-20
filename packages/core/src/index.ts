@@ -1454,10 +1454,18 @@ async function main() {
   chatProviders = createChatProviders({
     webchatRepo,
     accounts: modelAccounts,
-    selectModel: (chatId, agentName, selection) =>
+    selectModel: (chatId, agentName, selection, credits) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
-        ?.selectModel(selection),
+        ?.selectModel(selection, { credits }),
+    lastModel: async (chatId, agentName) => {
+      const agent = agentLoader.find(agentName ?? "main")?.name ?? agentName ?? "main";
+      const session = await sessionRepository.current(webchatSessionKey(chatId), agent);
+      return session?.provider && session.model
+        ? { providerId: session.provider, model: session.model }
+        : null;
+    },
+    agentTier: (agentName) => agentLoader.find(agentName ?? "main")?.definition.tier,
   });
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
@@ -1548,11 +1556,16 @@ async function main() {
   // A provider that cannot run shows a card in the chat, and for unattended
   // chats one notice per incident in the Concierge main chat. Nothing moves a
   // chat to another provider on its own.
-  const selectChatModel = (chatId: string, agentName: string | null, selection: string) => {
+  const selectChatModel = (
+    chatId: string,
+    agentName: string | null,
+    selection: string,
+    credits?: boolean,
+  ) => {
     if (!isModelSelectionId(selection)) return;
     agentSessionManager
       .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
-      ?.selectModel(selection);
+      ?.selectModel(selection, { credits });
   };
   const providerFailures = createProviderFailures({
     accounts: modelAccounts,
