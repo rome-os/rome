@@ -337,7 +337,9 @@ function handle(req, res) {
       refreshToken(res, body);
       return;
     }
-    const which = req.url.startsWith("/backend-api") ? "chatgpt" : "claude";
+    // A local Rome Cloud's inference gateway reaches "Azure" here, for Rome credits.
+    const which =
+      req.url.startsWith("/backend-api") || req.url.startsWith("/openai/v1") ? "chatgpt" : "claude";
     // What a provider switch carried, so a walk-through can check it.
     const carried = ["<handoff_request>", "<handoff>", "<executed_actions>", "<continuation"]
       .filter((marker) =>

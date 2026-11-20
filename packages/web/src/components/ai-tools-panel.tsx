@@ -1647,9 +1647,15 @@ export function AiToolsPanel({
             title={t("aiTools.otherProviders.removeConfirm.title", {
               providerName: configuredAnthropicProvider.providerName,
             })}
-            description={t("aiTools.otherProviders.removeConfirm.description", {
-              providerName: configuredAnthropicProvider.providerName,
-            })}
+            description={[
+              t("aiTools.otherProviders.removeConfirm.description", {
+                providerName: configuredAnthropicProvider.providerName,
+              }),
+              // Removing the key logs Claude out, as Log out does.
+              logoutOutcome("claude", defaultProvider, providerName, t),
+            ]
+              .filter(Boolean)
+              .join(" ")}
             confirmLabel={t("common.remove")}
             destructive
             confirmDisabled={savingAnthropicProvider}

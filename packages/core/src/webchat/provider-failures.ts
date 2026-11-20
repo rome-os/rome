@@ -415,7 +415,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       (isModelSelectionId(chat.largeModelSelection)
         ? MODEL_SELECTIONS[chat.largeModelSelection].model
         : undefined);
-    const credits = card === "account" && creditsOffered();
+    // Rome credits are no way out of their own failure.
+    const credits =
+      card === "account" &&
+      failed.reason !== "credits_used_up" &&
+      named(failed.provider) !== "rome_credits" &&
+      creditsOffered();
     return {
       type: "provider_failure",
       provider: named(failed.provider),

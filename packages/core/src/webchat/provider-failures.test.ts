@@ -347,6 +347,7 @@ describe("automatic recovery, the same in every chat", () => {
       provider: "rome_credits",
       alternatives: [],
     });
+    expect(h.cardIn("chat")?.credits).toBeUndefined();
   });
 });
 
