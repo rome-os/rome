@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { fullIdsByUniqueLocalName } from "../../apps/actions/registry.js";
 import { RoutinesRepository } from "./routines.js";
 
 const DAILY = {
@@ -35,5 +36,21 @@ describe("routines saved under an action's old bare name", () => {
     expect((await repo.findById(bare))?.actionName).toBe("system:system_upgrade");
     expect((await repo.findById(full))?.actionName).toBe("system:send_message");
     expect((await repo.findById(unknown))?.actionName).toBe("gone_action");
+  });
+
+  it("fire by the registered action's full ID on a profile that stored no old-name map", async () => {
+    const bare = await repo.create({
+      name: "upgrade",
+      trigger: DAILY,
+      actionName: "system_upgrade",
+      args: {},
+    });
+
+    const renamed = await repo.deprecatedQualifyActionNames(
+      fullIdsByUniqueLocalName(["system:system_upgrade", "system:send_message"]),
+    );
+
+    expect(renamed).toBe(1);
+    expect((await repo.findById(bare))?.actionName).toBe("system:system_upgrade");
   });
 });

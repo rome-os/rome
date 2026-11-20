@@ -1,21 +1,52 @@
 import type { Action, ActionRegistry } from "./types.js";
 import type { ArtifactMetadata } from "../types.js";
 import { validateActionArgs } from "./validate-action-args.js";
+import { createLogger } from "../../logger.js";
 import {
   artifactLocalName,
   formatArtifactId,
   type ArtifactIdentityContext,
 } from "../artifact-id.js";
 
+const log = createLogger("action-registry");
+
 /** What an unknown-action error ends with when `name` is an action's name
- *  without its app: the full ID to call instead, or nothing. */
-export function didYouMean(registry: Pick<ActionRegistry, "suggest">, name: string): string {
+ *  without its app: the full ID to call instead, or nothing. `permitted` keeps
+ *  the hint to actions the caller may call, so it names nothing else. */
+export function didYouMean(
+  registry: Pick<ActionRegistry, "suggest">,
+  name: string,
+  permitted: (id: string) => boolean = () => true,
+): string {
   const suggestion = registry.suggest?.(name);
-  return suggestion ? `. Did you mean "${suggestion}"?` : "";
+  return suggestion && permitted(suggestion) ? `. Did you mean "${suggestion}"?` : "";
+}
+
+/** The one full ID among `ids` whose name without its app is `name`, or
+ *  undefined when none or several are. */
+export function suggestFullId(ids: Iterable<string>, name: string): string | undefined {
+  if (name.includes(":")) return undefined;
+  const matches = [...ids].filter((id) => id !== name && artifactLocalName(id) === name);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** Full IDs keyed by their name without the app, for names exactly one of
+ *  `ids` has. */
+export function fullIdsByUniqueLocalName(ids: Iterable<string>): Record<string, string> {
+  const byName = new Map<string, string[]>();
+  for (const id of ids) {
+    if (!id.includes(":")) continue;
+    const name = artifactLocalName(id);
+    byName.set(name, [...(byName.get(name) ?? []), id]);
+  }
+  return Object.fromEntries(
+    [...byName].filter(([, matches]) => matches.length === 1).map(([name, [id]]) => [name, id]),
+  );
 }
 
 export class ActionRegistryImpl implements ActionRegistry {
   private actions = new Map<string, Action>();
+  private warnedAllowListNames = new Set<string>();
   private metadata = new Map<string, ArtifactMetadata>();
 
   constructor(private readonly identity?: ArtifactIdentityContext) {}
@@ -89,9 +120,7 @@ export class ActionRegistryImpl implements ActionRegistry {
   }
 
   suggest(name: string): string | undefined {
-    if (name.includes(":")) return undefined;
-    const matches = this.list().filter((id) => id !== name && artifactLocalName(id) === name);
-    return matches.length === 1 ? matches[0] : undefined;
+    return suggestFullId(this.actions.keys(), name);
   }
 
   list(): string[] {
@@ -129,11 +158,21 @@ export class ActionRegistryImpl implements ActionRegistry {
 
     for (const name of new Set(names.filter((name) => name !== "*"))) {
       const action = this.get(name);
+      if (!action) this.warnBareAllowListName(name);
       if (action && action.inputSchema && !included.has(action.config.name)) {
         result.push(action);
         included.add(action.config.name);
       }
     }
     return result;
+  }
+
+  // An allow-list written before actions were named by full ID grants nothing
+  // for its bare entries; the log names the ID to write instead, once each.
+  private warnBareAllowListName(name: string): void {
+    const suggestion = this.suggest(name);
+    if (!suggestion || this.warnedAllowListNames.has(name)) return;
+    this.warnedAllowListNames.add(name);
+    log.warn("agent allow-list names an action without its app", { name, fullId: suggestion });
   }
 }

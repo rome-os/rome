@@ -124,6 +124,7 @@ function makeServer(
     appStore,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
     isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
+    suggestAction: rs.fn(() => undefined),
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },

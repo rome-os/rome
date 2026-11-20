@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { ActionRegistryImpl } from "./registry.js";
+import { ActionRegistryImpl, fullIdsByUniqueLocalName } from "./registry.js";
 import type { Action } from "./types.js";
 import {
   claimLegacyArtifactName,
@@ -92,6 +92,17 @@ describe("ActionRegistryImpl", () => {
     expect(registry.get("review")).toBeUndefined();
     // Two actions share the name, so neither is suggested.
     expect(registry.suggest("review")).toBeUndefined();
+  });
+
+  it("maps a name without its app to the full ID only when one action has it", () => {
+    expect(
+      fullIdsByUniqueLocalName([
+        "system:system_upgrade",
+        "review-one:review",
+        "review-two:review",
+        "bare",
+      ]),
+    ).toEqual({ system_upgrade: "system:system_upgrade" });
   });
 
   it("returns all agent-callable actions when names includes '*'", () => {

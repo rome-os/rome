@@ -17,7 +17,11 @@ import type { RomeToolRunner } from "./rome-tool-runner.js";
 function requireAction(actionCatalog: readonly AgentAction[], actionName: string): AgentAction {
   const action = actionCatalog.find((entry) => entry.name === actionName);
   if (!action) {
-    throw new Error(`Unknown action: ${actionName}`);
+    // The catalog holds only actions this agent may call, so the hint names
+    // nothing it could not already list.
+    const named = actionCatalog.filter((entry) => entry.name.endsWith(`:${actionName}`));
+    const hint = named.length === 1 ? `. Did you mean "${named[0]?.name}"?` : "";
+    throw new Error(`Unknown action: ${actionName}${hint}`);
   }
   return action;
 }

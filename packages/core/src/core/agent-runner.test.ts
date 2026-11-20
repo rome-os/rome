@@ -8567,7 +8567,7 @@ describe("AgentRunner", () => {
       ).rejects.toThrow(/Unknown action: send_message/);
     });
 
-    it("executeAction refuses an action's bare name and names its full ID", async () => {
+    it("executeAction refuses an action's bare name, and names no action the agent lacks", async () => {
       const legacyBindings = createEmptyLegacyArtifactBindings();
       actionRegistry = new ActionRegistryImpl({ legacyBindings });
       actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
@@ -8621,11 +8621,12 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      // test-main allows `demo_action`, which names no action now.
+      // test-main allows `demo_action`, which names no action now, so the
+      // agent holds no action to suggest.
       expect(await listActionNames(captured[0].tools)).toEqual([]);
       await expect(
         executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
-      ).rejects.toThrow('Did you mean "review-app:demo_action"?');
+      ).rejects.toThrow(/^Unknown action: demo_action$/);
       expect(executed).toEqual([]);
     });
 

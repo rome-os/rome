@@ -90,6 +90,14 @@ describe("romeToolPorts actions", () => {
     );
   });
 
+  it("names no full ID the turn's agent may not call", async () => {
+    const { actions } = ports();
+    const denied = turn({ actions: ["system:create_routine"] });
+    await expect(actions.run(denied, "send_message", { text: "hi" })).rejects.toThrow(
+      /^Unknown action: send_message$/,
+    );
+  });
+
   it("runs a permitted action attributed to the turn, and refuses any other", async () => {
     const { actions, run } = ports();
     await actions.run(turn(), "system:send_message", { text: "hi" });

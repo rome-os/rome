@@ -119,6 +119,8 @@ export interface ActionExistenceChecker {
   has(name: string): boolean | Promise<boolean>;
   /** True when the action is `visibility: explicit`. */
   isExplicit(name: string): boolean | Promise<boolean>;
+  /** The full ID of the one action whose name without its app is `name`. */
+  suggest?(name: string): string | undefined | Promise<string | undefined>;
   /** An error message when `args` fail the action's input schema, else null. */
   validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
 }
@@ -127,14 +129,28 @@ export interface ActionExistenceChecker {
  * the remedy so the agent routes correctly instead of guessing again: build the
  * missing automation as a workflow (which registers a `<appId>_run` action),
  * or fall back to the always-available `system:summon` / `system:send_message`. */
-export function unknownActionError(actionName: string): string {
+export function unknownActionError(actionName: string, suggestion?: string): string {
   return (
     `actionName "${actionName}" is not a registered action. ` +
+    (suggestion ? `Did you mean "${suggestion}"? ` : "") +
     `To run multi-step work that doesn't exist yet, build it first with the ` +
     `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
     `routine to that action. For one-shot judgement or a notification, use the ` +
     `built-in "system:summon" or "system:send_message".`
   );
+}
+
+// An agent's hint names only an action it holds, so it learns of nothing more.
+async function suggestFor(
+  deps: CreateRoutineDeps,
+  actionName: string,
+  agentName: string | undefined,
+): Promise<string | undefined> {
+  const suggestion = await deps.actionRegistry.suggest?.(actionName);
+  if (!suggestion || !agentName) return suggestion;
+  return (await deps.agentRunner?.hasAction?.(agentName, suggestion)) === true
+    ? suggestion
+    : undefined;
 }
 
 const LOCAL_TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
@@ -418,14 +434,17 @@ export async function createRoutine(
   // Fail closed: a routine bound to a non-existent action would persist and
   // error on every fire (actionEngine.run throws "Action not found"). Reject at
   // create time with a remedy the agent can act on.
-  if (!(await deps.actionRegistry.has(actionName))) {
-    return { status: "error", error: unknownActionError(actionName) };
-  }
   // A routine fires its action outside the agent tool gate, so an explicit
   // target needs a principal that may call it: the app code that owns the call
   // (callerAppId), or an agent that holds the action. Unattributed calls, such
   // as one fired by another routine, a webhook or a favor, fail closed.
   const context = getCurrentActionContext();
+  if (!(await deps.actionRegistry.has(actionName))) {
+    return {
+      status: "error",
+      error: unknownActionError(actionName, await suggestFor(deps, actionName, context?.agentName)),
+    };
+  }
   if (!context?.callerAppId && (await deps.actionRegistry.isExplicit(actionName))) {
     const agentName = context?.agentName;
     if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {

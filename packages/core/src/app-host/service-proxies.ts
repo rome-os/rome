@@ -174,6 +174,11 @@ export class ActionRegistryProxy {
     return result.explicit;
   }
 
+  async suggest(actionName: string): Promise<string | undefined> {
+    const result = await callMain<{ suggestion: string | null }>("actions.suggest", { actionName });
+    return result.suggestion ?? undefined;
+  }
+
   /** Returns an error message when args fail the action's input schema, else null. */
   async validateArgs(actionName: string, args: Record<string, unknown>): Promise<string | null> {
     const result = await callMain<{ error: string | null }>("actions.validateArgs", {

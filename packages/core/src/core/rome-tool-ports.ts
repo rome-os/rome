@@ -90,12 +90,20 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
     if (!requestedAction) {
-      throw new Error(`Unknown action: ${name}${didYouMean(actionRegistry, name)}`);
+      throw new Error(`Unknown action: ${name}${permittedHint(turn, name)}`);
     }
-    return actionRegistry
-      .getForAgent([...turn.actions])
-      .find((action) => action.config.name === requestedAction.config.name);
+    return permitted(turn, requestedAction);
   };
+  const permitted = (turn: TurnFacts, requested: Action): Action | undefined =>
+    actionRegistry
+      .getForAgent([...turn.actions])
+      .find((action) => action.config.name === requested.config.name);
+  // Names only an action the agent may call, so the hint reveals nothing more.
+  const permittedHint = (turn: TurnFacts, name: string): string =>
+    didYouMean(actionRegistry, name, (id) => {
+      const action = actionRegistry.get(id);
+      return action !== undefined && permitted(turn, action) !== undefined;
+    });
 
   const actions: AgentActions = {
     list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
@@ -190,6 +198,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     canCallAction: (name) => {
       if (!actionRegistry.get(name)) return "unknown";
       return findPermittedAction(turn, name) ? "permitted" : "denied";
+    },
+    suggestAction: (name) => {
+      const suggestion = actionRegistry.suggest?.(name);
+      const action = suggestion ? actionRegistry.get(suggestion) : undefined;
+      return action && permitted(turn, action) ? suggestion : undefined;
     },
     validateArgs: (actionName, args) => {
       const action = actionRegistry.get(actionName);

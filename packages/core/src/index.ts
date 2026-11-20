@@ -188,7 +188,7 @@ import { AppTurnHooks, inOneHookChain } from "./app-host/app-turn-hooks.js";
 import { AppTurnMiddleware } from "./app-host/app-turn-middleware.js";
 import { TurnUsageReporter } from "./app-host/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
-import { ActionRegistryImpl } from "./apps/actions/registry.js";
+import { ActionRegistryImpl, fullIdsByUniqueLocalName } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
 import { readMemoryHeadroom } from "./instance/memory-headroom.js";
@@ -2190,6 +2190,7 @@ async function main() {
       appStore,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
+      suggestAction: (name) => actionRegistry.suggest(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -2449,6 +2450,16 @@ async function main() {
     actionEngine,
     canSync: () => isInstanceLinked(),
   });
+
+  // A profile from before the old-name map was stored has routines with bare
+  // action names the map cannot rename; a name one registered action has is
+  // that action's.
+  const renamedByRegistry = await routinesRepo.deprecatedQualifyActionNames(
+    fullIdsByUniqueLocalName(actionRegistry.list()),
+  );
+  if (renamedByRegistry > 0) {
+    appsLog.info("old action names on routines renamed", { routines: renamedByRegistry });
+  }
 
   await routineEngine.start();
 
