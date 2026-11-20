@@ -1591,6 +1591,7 @@ async function main() {
     },
     // A request a card stopped runs again only as a continuation would: in a
     // chat nobody has written in since, not archived, within a day.
+    chatOpen: (chatId) => !webchatRepo.chatClosed(chatId),
     continues: (chatId, since) =>
       !webchatRepo.chatMovedOnSince(chatId, since) && isRecentActivity(since, Date.now()),
     selectModel: selectChatModel,
@@ -1658,7 +1659,14 @@ async function main() {
       const thread = event.turn.threadContext;
       if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
       if (event.status === "completed") {
-        void providerFailures.succeeded(thread.threadId).catch(() => undefined);
+        // Only a turn that answered a person, not a system or backend turn,
+        // supersedes a recovery still waiting to run.
+        const answers =
+          webchatRepo.getTurnPromptSenders({
+            sessionId: thread.threadId,
+            turnId: event.turn.turnId,
+          }).length > 0;
+        void providerFailures.succeeded(thread.threadId, answers).catch(() => undefined);
         return;
       }
       if (event.status !== "error" || !event.output.failure) return;

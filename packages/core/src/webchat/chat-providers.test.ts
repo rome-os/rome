@@ -264,5 +264,7 @@ describe("a chat that moved on since a request", () => {
     expect(webchatRepo.chatMovedOnSince("plain", before)).toBe(true);
     expect(webchatRepo.chatMovedOnSince("plain", Date.now() + 60_000)).toBe(false);
     expect(webchatRepo.chatMovedOnSince("gone", before)).toBe(true);
+    expect(webchatRepo.chatClosed("plain")).toBe(false);
+    expect(webchatRepo.chatClosed("gone")).toBe(true);
   });
 });

@@ -402,6 +402,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return true;
   }
 
+  /** Whether dashboard chat `sessionId` is gone or archived. */
+  chatClosed(sessionId: string): boolean {
+    const chat = this.db.get<{ archived: number }>(sql`
+      SELECT (archived_at IS NOT NULL) AS archived FROM ${romeSessions} WHERE id = ${sessionId}
+    `);
+    return !chat || chat.archived === 1;
+  }
+
   /**
    * Whether dashboard chat `sessionId` moved on after `sinceMs`: a person
    * wrote in it, it was archived, or it is gone. A request a card stopped

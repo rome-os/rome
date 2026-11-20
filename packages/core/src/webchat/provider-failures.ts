@@ -60,6 +60,8 @@ const RECOVERY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 30 * 60_000];
 /** How long after a quota's reset time its card tries the stopped turn again. */
 const QUOTA_RESET_SLACK_MS = 30_000;
 const RETRY_MARKER = "<provider_retry>";
+/** How many starts may try to dispatch a resume a restart left before it is given up. */
+const MAX_RESUME_TRIES = 3;
 
 const PROVIDER_NAMES: Record<DefaultModelProvider, string> = {
   anthropic: "Claude",
@@ -120,6 +122,12 @@ interface PendingResume {
   /** The card's message and when its stopped request was made. */
   cardId?: string;
   since?: string;
+  /** A switch the guardian clicked asked for it. */
+  explicit?: boolean;
+  /** The card's settled content, which drops "continued" if the turn does not run. */
+  settled?: string;
+  /** How many starts tried to dispatch it. */
+  tries?: number;
 }
 
 /** The card a resumed turn runs for: its own checks at dispatch read it. */
@@ -127,6 +135,11 @@ interface ResumeOrigin {
   cardId?: string;
   /** When the stopped request was made, as an ISO time. */
   since?: string;
+  /**
+   * The guardian's switch asked for it: the click is the request, so only a
+   * chat that is gone or archived, or a newer turn or card, stops it.
+   */
+  explicit?: boolean;
 }
 
 /** One incident that stopped unattended chats, as stored. */
@@ -203,6 +216,8 @@ export interface ProviderFailuresDeps {
    * when the turn is dispatched.
    */
   continues?: (chatId: string, since: number) => boolean;
+  /** Whether the chat is still there and not archived. Absent, it is. */
+  chatOpen?: (chatId: string) => boolean;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   creditsUsable?: () => boolean;
   /** Who a recovery turn acts for: the chat's owner. Absent, no one. */
@@ -246,8 +261,12 @@ export interface ProviderFailures {
     messageId: string,
     beside: unknown[],
   ): Promise<ProviderFailurePart | null>;
-  /** A turn in the chat ran: its open card, if any, has recovered. */
-  succeeded(chatId: string): Promise<void>;
+  /**
+   * A turn in the chat ran: its open card, if any, has recovered. `answers`
+   * says the turn answered a person's request: only such a turn supersedes a
+   * recovery still waiting to run.
+   */
+  succeeded(chatId: string, answers?: boolean): Promise<void>;
   /** A card's switch: this chat moves, its card settles, and the stopped turn runs again. */
   switchCard(messageId: string, change: ProviderSwitch): Promise<void>;
   /**
@@ -283,6 +302,24 @@ function retryPrompt(provider: string): string {
     "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it." +
     "</provider_retry>"
   );
+}
+
+/** A settled card's content with its "continued" taken back. */
+function withoutContinued(content: string): string {
+  try {
+    const parts = JSON.parse(content) as unknown[];
+    return JSON.stringify(
+      parts.map((part) => {
+        if (!isRecord(part) || part.type !== "provider_failure" || !isRecord(part.resolved)) {
+          return part;
+        }
+        const { continued: _continued, ...resolved } = part.resolved;
+        return { ...part, resolved };
+      }),
+    );
+  } catch {
+    return content;
+  }
 }
 
 function clock(time: string): string {
@@ -519,11 +556,33 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     if ((ranAt.get(chatId) ?? 0) > asked) return false;
     const open = openCardOf.get(chatId);
     if (origin?.cardId && open && open !== origin.cardId) return false;
+    if (origin?.explicit) return deps.chatOpen?.(chatId) ?? true;
     if (origin?.since && deps.continues) {
       const since = Date.parse(origin.since);
       if (!Number.isNaN(since) && !deps.continues(chatId, since)) return false;
     }
     return true;
+  };
+
+  // A switch's settled card, until its turn is dispatched: if it never runs,
+  // the card stops saying it continued.
+  const settledContent = new Map<string, string>();
+
+  /** A resumed turn will not run: its card says so, settled or not. */
+  const notContinued = async (origin: ResumeOrigin | undefined) => {
+    if (!origin?.cardId) return;
+    const cardId = origin.cardId;
+    const ended = await settle(
+      (card) => card.messageId === cardId,
+      () => ({ at: now().toISOString(), by: "recovered" }),
+    );
+    if (ended.length > 0) return;
+    const settled = settledContent.get(cardId);
+    settledContent.delete(cardId);
+    if (!settled) return;
+    await deps.webchatRepo
+      .updateMessageContent(cardId, withoutContinued(settled))
+      .catch(() => false);
   };
 
   /**
@@ -538,8 +597,14 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     origin?: ResumeOrigin,
   ): Promise<void> => {
     const asked = now().getTime();
-    const sessionId = await deps.runtimeOf(chatId, agentName);
-    if (!sessionId) throw new Error("This chat has no session to run in");
+    const sessionId = await deps.runtimeOf(chatId, agentName).catch(() => null);
+    if (!sessionId) {
+      // Nothing can run it, now or after a restart: the promise goes, and the card says so.
+      log.warn("provider recovery has no session to run in", { chatId });
+      await dropResume(chatId).catch(() => undefined);
+      await notContinued(origin).catch(() => undefined);
+      return;
+    }
     const actor = await deps.actorOf?.(chatId).catch(() => undefined);
     await deps.runner.runAndReport(
       {
@@ -554,7 +619,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         ...(actor ? { actor } : {}),
         shouldRun: () => {
           void dropResume(chatId).catch(() => undefined);
-          return stillWanted(chatId, asked, origin);
+          const wanted = stillWanted(chatId, asked, origin);
+          if (wanted) {
+            if (origin?.cardId) settledContent.delete(origin.cardId);
+          } else {
+            void notContinued(origin).catch(() => undefined);
+          }
+          return wanted;
         },
       },
     );
@@ -834,6 +905,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
      * that could not run it. Recorded before the cards settle.
      */
     resumeAs?: (card: OpenProviderCard) => string,
+    /** The guardian's switch asked for the turns: the click is the request. */
+    explicit = false,
   ) =>
     serial(async () => {
       const cards = await readCards();
@@ -847,6 +920,11 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
             name: resumeAs(card),
             cardId: card.messageId,
             since: card.origin ?? card.since,
+            ...(explicit ? { explicit: true } : {}),
+            settled: content({
+              ...card,
+              part: { ...card.part, resolved: resolution(card) },
+            }),
           })),
         );
       }
@@ -857,6 +935,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         scheduled.delete(card.chatId);
         card.part = { ...card.part, resolved: resolution(card) };
         const settled = content(card);
+        if (resumeAs !== undefined) settledContent.set(card.messageId, settled);
         const wrote = await deps.webchatRepo
           .updateMessageContent(card.messageId, settled)
           .catch(() => false);
@@ -903,7 +982,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     }
     // This chat alone moves onto Rome credits: only it spends them, and its
     // model and who chose it stay as they are.
-    if (change.provider === "rome_credits" && !change.makeDefault) {
+    // A model its owner picked stays theirs on Rome credits, made the default or not.
+    if (change.provider === "rome_credits" && (!change.makeDefault || ownerPicked(chat))) {
       await deps.chats.keep(chatId, "rome_credits");
       return;
     }
@@ -1085,11 +1165,31 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
    * runs. Each resume's marker stays until the queue reaches its turn.
    */
   const startAfterBoot = async () => {
-    const resumes = await serial(readResumes);
+    // A resume that several starts could not dispatch is given up, with a log line.
+    const resumes = await serial(async () => {
+      const pending = (await readResumes()).map((resume) => ({
+        ...resume,
+        tries: (resume.tries ?? 0) + 1,
+      }));
+      const kept = pending.filter((resume) => resume.tries <= MAX_RESUME_TRIES);
+      for (const dropped of pending.filter((resume) => resume.tries > MAX_RESUME_TRIES)) {
+        log.warn("provider recovery given up after restarts", { chatId: dropped.chatId });
+        // Its card stops saying it continued.
+        if (dropped.cardId && dropped.settled) {
+          await deps.webchatRepo
+            .updateMessageContent(dropped.cardId, withoutContinued(dropped.settled))
+            .catch(() => false);
+        }
+      }
+      await deps.settings.set(PROVIDER_RESUMES_SETTING_KEY, kept);
+      return kept;
+    });
     for (const pending of resumes) {
+      if (pending.cardId && pending.settled) settledContent.set(pending.cardId, pending.settled);
       resume(pending.chatId, pending.agentName, pending.name, {
         ...(pending.cardId ? { cardId: pending.cardId } : {}),
         ...(pending.since ? { since: pending.since } : {}),
+        ...(pending.explicit ? { explicit: true } : {}),
       });
     }
     const cards = await readCards();
@@ -1138,15 +1238,16 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       // Nothing of the turn reads as failed while its one retry waits: a
       // quiet card stands in for the error.
       const quiet = await cardPart(turn.chatId, turn.agentName, classified);
-      if (quiet) {
-        await writeCard(
-          turn,
-          { ...quiet, retrying: true },
-          classified.provider,
-          undefined,
-          retried,
-        );
-      }
+      // The retry runs for the quiet card's request, under the same checks as any recovery.
+      const quietCard = quiet
+        ? await writeCard(
+            turn,
+            { ...quiet, retrying: true },
+            classified.provider,
+            undefined,
+            retried,
+          )
+        : undefined;
       if (conciergeRecovers("temporary")) return null;
       const sessionId = turn.sessionId ?? (await deps.runtimeOf(turn.chatId, turn.agentName));
       if (!sessionId) return null;
@@ -1161,7 +1262,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
           if (stopped || retries.get(turn.chatId) !== token) return undefined;
           token.started = true;
           retries.delete(turn.chatId);
-          return run(turn.chatId, turn.agentName, "the provider");
+          return run(
+            turn.chatId,
+            turn.agentName,
+            "the provider",
+            quietCard ? originOf(quietCard) : undefined,
+          );
         })
         .catch((error: unknown) =>
           log.warn("provider retry failed", { chatId: turn.chatId, error: String(error) }),
@@ -1187,16 +1293,21 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         swapped.add(turn.chatId);
         // The move's own note says what happened: the failed turn stays quiet.
         const quiet = await cardPart(turn.chatId, turn.agentName, classified);
-        if (quiet) {
-          await writeCard(
-            turn,
-            { ...quiet, retrying: true },
-            classified.provider,
-            undefined,
-            retried,
-          );
-        }
-        resumeAfter(turn.chatId, turn.agentName, providerName(named(classified.provider, chat)));
+        const quietCard = quiet
+          ? await writeCard(
+              turn,
+              { ...quiet, retrying: true },
+              classified.provider,
+              undefined,
+              retried,
+            )
+          : undefined;
+        resumeAfter(
+          turn.chatId,
+          turn.agentName,
+          providerName(named(classified.provider, chat)),
+          quietCard ? originOf(quietCard) : undefined,
+        );
         return null;
       }
     }
@@ -1247,8 +1358,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (decided.unattended) await groupIn(turn, decided.part, decided.runsOn);
       return decided.part;
     },
-    async succeeded(chatId) {
-      ranAt.set(chatId, now().getTime());
+    async succeeded(chatId, answers = true) {
+      if (answers) ranAt.set(chatId, now().getTime());
       swapped.delete(chatId);
       // A turn ran: the retry that waited for the provider is not needed.
       dropRetry(chatId);
@@ -1281,6 +1392,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
           (candidate) => candidate.messageId === messageId,
           () => switchResolution(change),
           failedName,
+          true,
         );
       } finally {
         switching.delete(card.chatId);
@@ -1289,7 +1401,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       // Only the switch that settled the card runs its turn.
       if (
         ended.length > 0 &&
-        !resume(card.chatId, card.agentName, failedName(card), originOf(card))
+        !resume(card.chatId, card.agentName, failedName(card), {
+          ...originOf(card),
+          explicit: true,
+        })
       ) {
         await dropResume(card.chatId);
       }
@@ -1345,6 +1460,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
           (card) => ownCards.has(card.messageId),
           () => switchResolution(change),
           failedName,
+          true,
         );
         // A chat whose card was already gone settles with the notice all the same.
         await serial(async () => {
@@ -1363,7 +1479,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         // Only the chats whose card this switch settled run again: one that
         // recovered meanwhile already ran.
         for (const card of ended) {
-          if (!resume(card.chatId, card.agentName, failedName(card), originOf(card))) {
+          if (
+            !resume(card.chatId, card.agentName, failedName(card), {
+              ...originOf(card),
+              explicit: true,
+            })
+          ) {
             await dropResume(card.chatId);
           }
         }
