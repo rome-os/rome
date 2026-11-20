@@ -1,7 +1,9 @@
 // The chat rules: what a guardian can set on one chat, the value each takes
 // when nobody set it, and how Core works out the value a chat runs on. Core
 // owns the set. A kind of connection only says which rules its chats offer,
-// and which values it fixes for the rest. Vocabulary:
+// and which values it fixes for the rest; the kinds' declarations live in
+// @rome/api-types/chat-rules so the dashboard's mock mode reads the same
+// ones. Vocabulary:
 // docs/domains/chats.md#chat-rule.
 
 import {
@@ -11,44 +13,25 @@ import {
   type ChatSettingsOverrides,
   type ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
+import {
+  type ChatRuleName,
+  type ChatRules,
+  type KindChatRules,
+  SESSION_RESET_ONLY_CHAT_RULES,
+  WAKES_ON_EVERY_MESSAGE,
+} from "@rome/api-types/chat-rules";
 import { DEFAULT_PROVIDER_SESSION_RESET_POLICY } from "./reset-policy.js";
 
-/** The value of each chat rule, by its name. The names are the stored
- *  fields of `ChatSettings`, so storage and the app SDK keep their shape. */
-export interface ChatRules {
-  /** The chat is switched on. */
-  enabled: boolean;
-  /** The reply rule: wake only on a message addressed to Rome's account
-   *  (`mention`), or on every message (`all`). */
-  "activation.mode": ChatSettings["activation"]["mode"];
-  /** Whether another bot's message wakes the agent: never, only when
-   *  addressed to Rome's account, or as anyone's would. */
-  "activation.botMessages": ChatSettings["activation"]["botMessages"];
-  /** Whether a message addressed only to others wakes the agent. */
-  "activation.whenOthersMentioned": ChatSettings["activation"]["whenOthersMentioned"];
-  /** Whether a reply opens a thread or goes inline. */
-  "replies.placement": ChatSettings["replies"]["placement"];
-  /** The agent that answers, or null for the account's agent. */
-  "routing.agentName": string | null;
-  /** When the chat's session starts afresh. */
-  "session.reset": ProviderSessionResetPolicy;
-}
-
-export type ChatRuleName = keyof ChatRules;
+export {
+  type ChatRuleName,
+  type ChatRules,
+  type KindChatRules,
+  WAKES_ON_EVERY_MESSAGE,
+} from "@rome/api-types/chat-rules";
 
 /** Every chat rule, in the order the dashboard lists them: the stored
  *  fields, in the order the app SDK declares them. */
 export const CHAT_RULE_NAMES: readonly ChatRuleName[] = CONVERSATION_SETTING_FIELDS;
-
-/** What a kind of connection declares about its chats' rules. A rule it
- *  neither offers nor fixes runs at {@link CHAT_RULE_DEFAULTS}. No rule is
- *  both offered and fixed. */
-export interface KindChatRules {
-  /** The rules a guardian may set on the kind's chats. */
-  readonly offers: readonly ChatRuleName[];
-  /** The values the kind's chats always run on, for rules it does not offer. */
-  readonly fixed?: Readonly<Partial<ChatRules>>;
-}
 
 /** The value of each rule nobody set and no kind fixed. */
 export function chatRuleDefaults(): ChatRules {
@@ -63,23 +46,11 @@ export function chatRuleDefaults(): ChatRules {
   };
 }
 
-/** The values for a kind whose chats wake the agent on every message the
- *  platform delivers, whoever it addresses and whoever sent it. Kinds that
- *  offer none of the three state this as `fixed`. */
-export const WAKES_ON_EVERY_MESSAGE = {
-  "activation.mode": "all",
-  "activation.botMessages": "all",
-  "activation.whenOthersMentioned": "respond",
-} as const satisfies Partial<ChatRules>;
-
 /** The rules of a chat whose kind Rome has not registered or that declares
  *  none, such as Rome's own webchat: only the session reset, waking on every
  *  message, as every kind outside the old table ran before kinds declared
  *  their rules. Every kind that hears messages declares its own. */
-export const UNDECLARED_CHAT_RULES: KindChatRules = {
-  offers: ["session.reset"],
-  fixed: WAKES_ON_EVERY_MESSAGE,
-};
+export const UNDECLARED_CHAT_RULES: KindChatRules = SESSION_RESET_ONLY_CHAT_RULES;
 
 /** The rules a kind's group chats offer the guardian, in the order the
  *  dashboard lists them. */

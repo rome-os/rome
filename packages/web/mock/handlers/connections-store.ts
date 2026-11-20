@@ -1,24 +1,20 @@
 import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import {
+  DISCORD_CHAT_RULES,
+  FEISHU_CHAT_RULES,
+  SESSION_RESET_ONLY_CHAT_RULES,
+  WECHAT_CHAT_RULES,
+} from "@rome/api-types/chat-rules";
 import type { ChatSettingField } from "@rome/api-types/chat-settings";
 
-// What each kind of connection offers, as core's kind declarations report it
-// (each kind's `chatRules` in packages/core/src/connections). Keep in step by
-// hand: a kind that changes its rules there changes them here too.
+// What each kind of connection offers: the declarations core runs on.
 const CHAT_RULES: Record<string, ChatSettingField[]> = {
-  discord: [
-    "enabled",
-    "activation.mode",
-    "activation.botMessages",
-    "activation.whenOthersMentioned",
-    "replies.placement",
-    "routing.agentName",
-    "session.reset",
-  ],
-  feishu: ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
-  wechat: ["enabled", "routing.agentName", "session.reset"],
-  telegram: ["session.reset"],
-  email: ["session.reset"],
+  discord: [...DISCORD_CHAT_RULES.offers],
+  feishu: [...FEISHU_CHAT_RULES.offers],
+  wechat: [...WECHAT_CHAT_RULES.offers],
+  telegram: [...SESSION_RESET_ONLY_CHAT_RULES.offers],
+  email: [...SESSION_RESET_ONLY_CHAT_RULES.offers],
 };
 
 // The connection ledger. In its own module because two surfaces read it and one

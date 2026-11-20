@@ -18,9 +18,11 @@ import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "./rules.js";
-import { DISCORD_CHAT_RULES } from "../connections/integrations/discord.js";
-import { WECHAT_CHAT_RULES } from "../connections/integrations/wechat.js";
-import { FEISHU_CHAT_RULES } from "../connections/kinds/feishu/descriptor.js";
+import {
+  DISCORD_CHAT_RULES,
+  FEISHU_CHAT_RULES,
+  WECHAT_CHAT_RULES,
+} from "@rome/api-types/chat-rules";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 /** The rules each kind declares, as its descriptor does. */
