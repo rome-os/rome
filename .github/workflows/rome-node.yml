@@ -122,4 +122,7 @@ jobs:
             --file infra/rome-node/Dockerfile \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --metadata-file "$RUNNER_TEMP/rome-node-build.json" \
             --tag "$image" --push .
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/rome-node-build.json")
+          printf 'After verifying anonymous pulls on amd64 and arm64, set `ROME_NODE_DOCKER_IMAGE=%s@%s`.\n' "${image%:*}" "$digest" >> "$GITHUB_STEP_SUMMARY"

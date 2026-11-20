@@ -94,7 +94,8 @@ with the Rome Cloud account that owns the instance. Download the Compose file an
 
 The file contains a long-lived device token. Recreating the container with the same
 file keeps the device identity. To revoke access, choose **Remove** on its device card.
-If you lose the file, remove the device and generate a new one.
+If you lose the file or close setup after approval before saving it, remove
+the device and generate a new one.
 
 The container opens an outbound connection to the account Gateway and appears on the
 ordinary device list. Authorized callers can run programs and access files as the
@@ -120,8 +121,8 @@ Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
 The workflow checks amd64 and arm64 before publishing both under the source commit
 SHA. A package admin sets the package to public and verifies anonymous pulls on
 both architectures. Set `ROME_NODE_DOCKER_IMAGE` in the instance environment to
-`ghcr.io/rome-os/rome-node@sha256:<manifest-digest>` using the manifest digest of
-that release, then redeploy the instance. Docker Compose setup is disabled until
+the value in the workflow summary, then redeploy the instance. The summary uses
+the digest of the multi-platform manifest. Docker Compose setup is disabled until
 this setting is provided.
 
 ## Chat device folders
