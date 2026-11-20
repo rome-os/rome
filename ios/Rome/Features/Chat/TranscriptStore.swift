@@ -32,6 +32,16 @@ final class TranscriptStore {
     /// The least time a retry's spinner shows, so an attempt that fails at
     /// once is still seen.
     @ObservationIgnored var retryHold: Duration = .seconds(1)
+    /// Reads of the newest page that failed in a row, a read made while a
+    /// retry waits not counted. One failure is often a blip, such as the
+    /// network waking after the lock screen, so only the second in a row
+    /// shows its bar: the automatic retry failed too.
+    @ObservationIgnored private var failedLoads = 0
+    /// How long the first try after a failed read waits; each next one waits
+    /// twice as long, at most `autoRetryMost`.
+    @ObservationIgnored var autoRetryFirst: Duration = .seconds(1)
+    static let autoRetryMost: Duration = .seconds(30)
+    @ObservationIgnored private var autoRetry: Task<Void, Never>?
     private(set) var loadingOlder = false
     private(set) var hasOlder = false
     /// The chat is running a turn.
@@ -281,6 +291,8 @@ final class TranscriptStore {
         runningPoll = nil
         resyncWork?.cancel()
         resyncWork = nil
+        autoRetry?.cancel()
+        autoRetry = nil
         // Off the screen nothing waits, so a return replays no dots. The
         // turn's writing state stays: the server says it once, and a return
         // mid-turn shows the dots it still means; the turn's end clears it.
@@ -330,7 +342,7 @@ final class TranscriptStore {
             }
             loaded = true
             readOnce = true
-            loadError = nil
+            loadWorked()
             needsFetch = false
             if openRead != nil, !openFetched {
                 openFetched = true
@@ -339,9 +351,41 @@ final class TranscriptStore {
             }
             await refreshRunning()
         } catch let error as APIError {
+            readFailed(error)
+        } catch {}
+    }
+
+    private func loadWorked() {
+        loadError = nil
+        failedLoads = 0
+        autoRetry?.cancel()
+        autoRetry = nil
+    }
+
+    /// A failed read of the newest page shows only when the one before it
+    /// failed too; until then a chat that never loaded keeps its spinner.
+    /// While a screen runs the store, the read is tried again by itself
+    /// after 1, 2, 4… seconds, at most 30, until one works.
+    private func readFailed(_ error: APIError) {
+        // A read that fails while a retry waits is part of the same blip:
+        // coming back in front reads once at once and once more as the
+        // socket confirms, and both meet the same network.
+        if autoRetry == nil { failedLoads += 1 }
+        // A lost session or Chat turned off is no blip: it shows at once, and
+        // the session's own renewal, not a retry, deals with it.
+        let retries = error != .unauthorized && error != .conciergeOff
+        if !retries || failedLoads >= 2 {
             loadError = error
             loaded = true
-        } catch {}
+        }
+        guard retries, !tokens.isEmpty, autoRetry == nil else { return }
+        let wait = min(autoRetryFirst * (1 << min(failedLoads - 1, 5)), Self.autoRetryMost)
+        autoRetry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self else { return }
+            self.autoRetry = nil
+            self.resync()
+        }
     }
 
     /// Fetches the newest page without touching paging state.
@@ -349,7 +393,7 @@ final class TranscriptStore {
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         mergeLatest(page)
-        loadError = nil
+        loadWorked()
         readOnce = true
         return true
     }

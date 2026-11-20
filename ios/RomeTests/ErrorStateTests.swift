@@ -328,6 +328,7 @@ private func message(
         backend.messagesError = .server(status: 500, message: nil)
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
+        await store.reload()
         #expect(store.loadFailed)
         backend.messagesError = .offline
         await store.reload()
@@ -338,6 +339,7 @@ private func message(
         let backend = FakeBackend()
         backend.messagesError = .server(status: 500, message: nil)
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
         await store.reload()
         #expect(store.loadFailed)
         backend.messagesError = nil
