@@ -5,11 +5,10 @@
 
 import { SlackApiError, type SlackBotIdentity, type SlackUserName } from "../slack/slack.js";
 import type { SlackWireMessage } from "./message.js";
+import { SlackTooSoonError } from "./read-gate.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
-/** A read Slack paces once a minute may be asked to wait out that minute. */
-const SLACK_READ_RATE_LIMIT_MAX_WAIT_MS = 60_000;
 /** Slack's answers for a token it no longer takes. */
 const ALREADY_REFUSED = new Set([
   "invalid_auth",
@@ -141,25 +140,16 @@ export function createSlackAppWebApi(
     query: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<SlackApiResponse> {
-    let retried = false;
-    for (;;) {
-      const response = await fetchImpl(
-        `${origin}/api/${method}?${new URLSearchParams(query).toString()}`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: timeout(signal) },
-      );
-      // A refusal as too soon is the one failure waiting is known to cure.
-      if (response.status === 429 && !retried) {
-        await response.body?.cancel().catch(() => {});
-        retried = true;
-        const waitMs = retryAfterMs(response);
-        if (waitMs > SLACK_READ_RATE_LIMIT_MAX_WAIT_MS) {
-          throw new SlackApiError("ratelimited", `Slack asked Rome to wait ${waitMs}ms.`);
-        }
-        await delay(waitMs, signal);
-        continue;
-      }
-      return read(response);
+    const response = await fetchImpl(
+      `${origin}/api/${method}?${new URLSearchParams(query).toString()}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: timeout(signal) },
+    );
+    // The read gate waits out a refusal as too soon, within the read's limit.
+    if (response.status === 429) {
+      await response.body?.cancel().catch(() => {});
+      throw new SlackTooSoonError(retryAfterMs(response));
     }
+    return read(response);
   }
 
   async function read(response: Response): Promise<SlackApiResponse> {
