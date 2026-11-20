@@ -381,6 +381,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
         // whole chat, and from Slack where it does not (slack-app/timeline.ts).
         reads: true,
         searches: true,
+        // A task chat sends, reads and searches Slack through the connector's
+        // proxy, which makes its calls through this talker.
+        acts: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;

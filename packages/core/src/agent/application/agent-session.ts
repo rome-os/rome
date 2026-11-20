@@ -217,6 +217,10 @@ export type ResumeOpening = Omit<SessionOpening, "resetPolicy">;
  *  session it names by id, if any. */
 type OpenRequest = SessionOpening & { resumeSessionId?: string };
 
+/** The platform threads a model thread was shown, by the chat id a read of
+ *  each takes, each with the id of the last message there it was shown. */
+type ThreadsRead = ReadonlyMap<string, number | undefined>;
+
 export interface AgentTurnInput {
   inputId?: string;
   prompt: string;
@@ -553,12 +557,20 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   // reopen that resumes the thread does not send them again. In memory: a
   // restart sends them once more.
   const sentHeaders = new Map<string, SentHeaders>();
+  // Likewise the platform threads each closed session's thread was shown, so
+  // a reopen that resumes it reads a thread only from the last message shown.
+  const threadsRead = new Map<string, ThreadsRead>();
   const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
     const k = keyOf(sess.key);
     // A late close must not evict a newer live session under the same key.
     if (sessions.get(k) !== sess) return;
     sessions.delete(k);
+    if (sess.readThreads.size === 0) threadsRead.delete(sess.sessionId);
+    else {
+      if (threadsRead.size >= 1_000) threadsRead.clear();
+      threadsRead.set(sess.sessionId, sess.readThreads);
+    }
     // A thread that read none, such as one just compacted, must send them all
     // on its reopen, so an earlier snapshot of the same session goes too.
     if (sess.readHeaders.size === 0) {
@@ -782,6 +794,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         onClosed: onSessionClosed,
         onContextFull,
         sentHeaders,
+        threadsRead,
         writtenHandoffs,
         isSubagent,
         turns,
@@ -894,6 +907,8 @@ interface OpenOptions {
   onContextFull?: (s: AgentSessionImpl) => void;
   /** The header blocks each session's thread had read when it last closed, by session id. */
   sentHeaders?: ReadonlyMap<string, SentHeaders>;
+  /** The platform threads each session's thread had been shown when it last closed, by session id. */
+  threadsRead?: ReadonlyMap<string, ThreadsRead>;
   /**
    * Handoffs written for a renewal whose fresh session has not opened yet, by
    * the retired session's id, so a retry after a failed open reuses one.
@@ -2117,6 +2132,7 @@ async function openSession(
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
     // A thread this open resumes already read what it read before the close.
     sentHeaders: threadResumed ? opts.sentHeaders?.get(sessionId) : undefined,
+    threadsRead: threadResumed ? opts.threadsRead?.get(sessionId) : undefined,
   });
 
   impl.startModelSessionEvents();
@@ -2195,6 +2211,8 @@ interface ImplArgs {
   onContextFull?: () => void;
   /** The header blocks the resumed thread already read. */
   sentHeaders?: SentHeaders;
+  /** The platform threads the resumed thread was already shown. */
+  threadsRead?: ThreadsRead;
 }
 
 interface TurnSink {
@@ -2553,6 +2571,7 @@ class AgentSessionImpl implements AgentSession {
     this.contextLimitTokens = args.contextLimitTokens;
     this.onContextFull = args.onContextFull;
     if (args.sentHeaders) this.sentHeaders = args.sentHeaders;
+    if (args.threadsRead) this.threadsRead = new Map(args.threadsRead);
     // A resumed thread is where its row's last turn left it.
     if (args.threadResumed) this.lastContextTokens = args.session.contextTokens ?? undefined;
   }
@@ -2577,6 +2596,11 @@ class AgentSessionImpl implements AgentSession {
 
   get readHeaders(): SentHeaders {
     return this.sentHeaders;
+  }
+
+  /** The platform threads the current model thread was shown. */
+  get readThreads(): ThreadsRead {
+    return this.threadsRead;
   }
 
   /** The chat the session serves, when it serves one. */
