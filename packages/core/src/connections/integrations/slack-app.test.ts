@@ -224,6 +224,7 @@ describe("the Slack app's channels in chat settings", () => {
     memberChannels: () => Promise<{ channels: { id: string; name: string; isPrivate: boolean }[] }>,
   ) {
     const descriptor = makeSlackAppDescriptor({
+      listens: () => true,
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
         postMessage: async () => ({ ts: "3.0" }),
