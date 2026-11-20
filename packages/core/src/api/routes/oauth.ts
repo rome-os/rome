@@ -202,7 +202,10 @@ export function oauthRoutes(deps: ApiDeps): Hono {
           ? "/"
           : "/onboard";
 
-      if (!connecting || existingSession?.userId !== guardian.userId)
+      // Cloud browser login signs the bound account ID even on a seat created with a password.
+      const sessionOwnerId =
+        existingSession?.entry === "cloud-browser" ? guardian.accountId : guardian.userId;
+      if (!connecting || existingSession?.userId !== sessionOwnerId)
         issueGuardianSession(c, guardian.userId);
       if (!connecting) deps.loginUsage.recordLogin("oauth");
 

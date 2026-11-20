@@ -46,13 +46,9 @@ rs.mock("../../access/guardian-auth-state.js", () => ({
   getGuardianAuthState: rs.fn(async () => ({
     exists: true,
     userId: "guardian-1",
+    accountId: "bound-cloud-account",
     onboardingComplete: true,
   })),
-}));
-rs.mock("../../access/auth.js", () => ({
-  COOKIE_NAME: "rome_session",
-  verifySession: rs.fn(() => null),
-  issueGuardianSession: rs.fn(),
 }));
 rs.mock("../../access/guardian-session.js", () => ({ resolveGuardianSession }));
 rs.mock("../../connections/oauth/oauth-providers.js", () => ({
@@ -71,7 +67,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
-import { issueGuardianSession, verifySession } from "../../access/auth.js";
+import { COOKIE_NAME, createSession, verifySession } from "../../access/auth.js";
 import { oauthRoutes } from "./oauth.js";
 
 // A fresh drizzle-backed connections repository per test;
@@ -101,11 +97,14 @@ function makeDeps(registry?: ConnectionRegistry): ApiDeps {
   } as unknown as ApiDeps;
 }
 
-async function postRedeem(deps: ApiDeps) {
+async function postRedeem(deps: ApiDeps, token?: string) {
   const app = new Hono().route("/", oauthRoutes(deps));
   return app.request("/oauth/redeem", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(token && { cookie: `${COOKIE_NAME}=${token}` }),
+    },
     body: JSON.stringify({ handoff: "h", state: "s" }),
   });
 }
@@ -119,8 +118,11 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     while (openDbs.length) openDbs.pop()?.();
   });
 
-  it("keeps the signed-in guardian's browser cookie when connecting a provider", async () => {
-    rs.mocked(verifySession).mockReturnValueOnce({ userId: "guardian-1", entry: "cloud-browser" });
+  it.each([
+    ["cloud-browser", "bound-cloud-account", true],
+    ["local-password", "guardian-1", true],
+    ["cloud-browser", "guardian-1", false],
+  ] as const)("connects with a %s cookie for %s (preserve = %s)", async (entry, userId, preserve) => {
     redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
       provider: "github",
       profile: { login: "octocat" },
@@ -128,8 +130,15 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       metadata: null,
       intent: "connect",
     });
-    expect((await postRedeem(makeDeps(makeRegistry()))).status).toBe(200);
-    expect(issueGuardianSession).not.toHaveBeenCalled();
+    const res = await postRedeem(makeDeps(makeRegistry()), createSession(userId, entry));
+    expect(res.status).toBe(200);
+    expect(res.headers.has("set-cookie")).toBe(!preserve);
+    if (!preserve) {
+      const cookie = res.headers.get("set-cookie")?.split(";")[0];
+      expect(verifySession(cookie?.slice(COOKIE_NAME.length + 1) ?? "")).toEqual({
+        userId: "guardian-1",
+      });
+    }
   });
 
   it("github: writes the ledger only; grant authorized with profile; custody materializes off the transition", async () => {
@@ -275,7 +284,6 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const [first] = registry.find("github");
 
     // Another tab signed in while this attempt, started signed out, was away.
-    rs.mocked(verifySession).mockReturnValueOnce({ userId: "guardian-1" } as never);
     redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
       provider: "github",
       profile: { subject: "99" },
@@ -283,7 +291,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       metadata: null,
       intent: "sign-in",
     });
-    const res = await postRedeem(makeDeps(registry));
+    const res = await postRedeem(makeDeps(registry), createSession("guardian-1"));
 
     expect(res.status).toBe(200);
     expect(await res.json()).not.toHaveProperty("ended");
