@@ -1402,7 +1402,8 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
           displayName: "Ray",
           containerName: undefined,
         },
-        supportedFields: ["enabled", "session.reset"],
+        // A direct message offers only the session reset.
+        supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
           session: { reset: { mode: "daily", atHour: 4 } },

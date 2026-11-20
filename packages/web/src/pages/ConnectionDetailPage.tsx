@@ -13,18 +13,7 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import {
-  Measure,
-  Page,
-  Section,
-  SectionDescription,
-  SectionHeader,
-  SectionHeading,
-  SectionTitle,
-} from "@rome-os/ui/page";
-import { useId } from "react";
-import { useTranslation } from "react-i18next";
-import { ChatRulesSection } from "@/components/connections/chat-rules-section";
+import { Measure, Page, Section } from "@rome-os/ui/page";
 
 /**
  * Per-account Connection detail page (`/settings/connections/:serviceId`).
@@ -158,20 +147,6 @@ export default function ConnectionDetailPage() {
   const shopToConnect =
     installedShop && SHOPIFY_SHOP_DOMAIN.test(installedShop) ? installedShop : null;
 
-  // Each of the card's accounts whose kind offers chat rules shows them here.
-  // A core that predates `chatRules` lists them for every account with chats.
-  const slotIds = new Set(
-    card.slots.flatMap((slot) => (slot.connectionId ? [slot.connectionId] : [])),
-  );
-  const chatRuleConnections = (connectionsQuery.data ?? []).flatMap((connection) =>
-    connection.id !== null &&
-    slotIds.has(connection.id) &&
-    connection.capabilities.chat?.state !== "unsupported" &&
-    (connection.chatRules === undefined || connection.chatRules.length > 0)
-      ? [{ id: connection.id, label: connection.label }]
-      : [],
-  );
-
   return (
     <Page>
       <DetailPane
@@ -202,45 +177,8 @@ export default function ConnectionDetailPage() {
           onFlash={flash}
           onOpenAccount={openAccount}
         />
-        {chatRuleConnections.map((connection) => (
-          <ConnectionChatRules
-            key={connection.id}
-            connectionId={connection.id}
-            title={chatRuleConnections.length > 1 ? connection.label : null}
-          />
-        ))}
       </DetailPane>
     </Page>
-  );
-}
-
-/** One account's chat rules, under a heading of its own. */
-function ConnectionChatRules({
-  connectionId,
-  title,
-}: {
-  connectionId: string;
-  /** The account's name, where the card holds more than one. */
-  title: string | null;
-}) {
-  const { t } = useTranslation("settings");
-  const headingId = useId();
-  return (
-    <Section aria-labelledby={headingId}>
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle id={headingId}>
-            {title
-              ? `${t("channels.conversationSettings.chatRules.title")} · ${title}`
-              : t("channels.conversationSettings.chatRules.title")}
-          </SectionTitle>
-          <SectionDescription>
-            {t("channels.conversationSettings.chatRules.description")}
-          </SectionDescription>
-        </SectionHeading>
-      </SectionHeader>
-      <ChatRulesSection connectionId={connectionId} />
-    </Section>
   );
 }
 

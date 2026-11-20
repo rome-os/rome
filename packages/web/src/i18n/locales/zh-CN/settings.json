@@ -425,7 +425,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "searchPlaceholder": "搜索提供商、工作区或聊天",
+      "searchPlaceholder": "搜索聊天",
       "anyStatus": "所有状态",
       "statusFilterAria": "按状态筛选",
       "status": {

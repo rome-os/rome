@@ -425,7 +425,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "searchPlaceholder": "Search provider, workspace, or chat",
+      "searchPlaceholder": "Search chats",
       "anyStatus": "Any status",
       "statusFilterAria": "Filter by status",
       "status": {
