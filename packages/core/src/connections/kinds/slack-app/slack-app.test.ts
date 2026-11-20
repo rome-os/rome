@@ -1514,8 +1514,8 @@ describe("Slack app reads a direct message (R13)", () => {
     });
     const { adapter: a } = adapter(mailbox, api, testCopy(), undefined, openGate());
     await a.start();
-    await expect(a.readHistory("C_TEAM" as never, { limit: 5 })).rejects.toThrow(
-      /may not read chat C_TEAM/,
+    await expect(a.readHistory("D_GONE" as never, { limit: 5 })).rejects.toThrow(
+      /may not read chat D_GONE \(missing_scope\)/,
     );
   });
 });
