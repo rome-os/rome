@@ -4136,6 +4136,9 @@ class AgentSessionImpl implements AgentSession {
         this.sentHeaders = new Map();
       }
       let unseenMessageIds: number[] = [];
+      // The thread this turn shows the model, with the last message shown,
+      // noted as read once the model has taken the input.
+      let threadShown: { thread: string; last: number | undefined } | undefined;
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       // The prompt facts answer null where it catches up on nothing.
@@ -4193,9 +4196,12 @@ class AgentSessionImpl implements AgentSession {
                 )
                 .catch(() => null)
             : null;
-        // A read that failed is tried again, from the same point, on the
-        // thread's next message.
-        if (thread && threadRead && !threadRead.unread) this.threadsRead.set(thread, current?.id);
+        // A read that failed, or a turn stopped before the model took its
+        // input, is tried again from the same point on the thread's next
+        // message.
+        if (thread && threadRead && !threadRead.unread) {
+          threadShown = { thread, last: current?.id };
+        }
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
@@ -4367,6 +4373,7 @@ class AgentSessionImpl implements AgentSession {
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
+            if (threadShown) this.threadsRead.set(threadShown.thread, threadShown.last);
             if (this.deps.promptFacts && unseenMessageIds.length > 0) {
               try {
                 this.deps.promptFacts.seen(unseenMessageIds, sink.romeSessionId, sink.turnId);

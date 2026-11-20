@@ -6985,6 +6985,84 @@ describe("AgentRunner", () => {
       expect(third).not.toContain("Hollyfold");
     });
 
+    it("reads a platform thread again when the turn that read it failed before the model took its input", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const latest = rs.fn(
+        async () =>
+          [
+            {
+              channel: "slack_app",
+              chatId: "C_NEWS",
+              messageId: "root:m1",
+              direction: "inbound",
+              senderId: "T_A/U_SAM",
+              senderDisplayName: "Sam",
+              text: "picnic on Saturday?",
+              attachments: [],
+              timestamp: new Date(Date.UTC(2026, 7, 3, 8, 1)),
+            },
+          ] as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      let sends = 0;
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          const session = await makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          })(params);
+          const send = session.sendUserInput.bind(session);
+          // A thread the provider named, so a failed turn leaves it standing.
+          Object.assign(session, { modelThreadId: "thread-1" });
+          // The second input fails before the model takes it.
+          session.sendUserInput = async (input) => {
+            sends += 1;
+            if (sends === 2) throw new Error("transport closed");
+            return send(input);
+          };
+          return session;
+        },
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const [prompt, inThread] of [
+        ["hello", undefined],
+        ["where is the picnic?", "C_NEWS:root"],
+        ["where is the picnic, again?", "C_NEWS:root"],
+      ] as const) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            ...(inThread ? { inThread: inThread as ChatId } : {}),
+          }),
+        );
+      }
+
+      expect(latest).toHaveBeenCalledTimes(2);
+      expect(providerPrompts.at(-1)).toContain("picnic on Saturday?");
+    });
+
     it("brings each thread's own earlier messages to mentions in two threads of one group, waiting for a slow second read, and says when a read fails", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
