@@ -125,14 +125,6 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     guardianLinkedKey: "channels.wechat.guardianLinked",
     conversationSettings: true,
   },
-  wechat_user: {
-    service: "wechat_user",
-    copyService: "wechat",
-    defaultGrant: "session",
-    icon: <PersonalAccountIcon />,
-    identityFallbackKey: "channels.wechatUser.fallbackName",
-    disconnectFailedKey: "channels.wechatUser.disconnectFailedFallback",
-  },
   feishu: {
     service: "feishu",
     defaultGrant: "app",

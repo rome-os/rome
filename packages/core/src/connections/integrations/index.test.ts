@@ -7,8 +7,6 @@ import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
 import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
-import { wechatUser } from "../kinds/wechat-user/index.js";
-import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
@@ -25,7 +23,6 @@ function registerEveryKind(registry: ConnectionRegistry): void {
   const mounted = [
     feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
     linkedin({} as unknown as LinkedInDescriptorDeps),
-    wechatUser({ runtime: {} as WechatUserRuntime, guardianOnly: (_c, next) => next() }),
   ];
   for (const kind of mounted) {
     if (kind.descriptor) registry.register(kind.descriptor);
