@@ -120,12 +120,6 @@ const configSchema = z.object({
   // Observability
   otelExporterEndpoint: z.string().optional(),
 
-  // Webhook relay drainer. Absent unless explicitly configured. When present, a
-  // persistent WS client drains buffered webhooks from the Cloudflare relay and
-  // replays them into the target app handler. Core stays app-neutral: this holds
-  // only the mailbox credential — the delivery target is resolved at runtime
-  // from whichever installed app declares `api.relayWebhook` (see
-  // resolveRelayTarget in relay/settings.ts), never named here.
   // Slack's origin for Rome's own Slack app connection (`slack_app`): its Web
   // API calls go to `<origin>/api/<method>`. A test environment points it at a
   // stand-in Slack. The guardian-made Slack bot (`slack_bot`) does not read it.
@@ -135,6 +129,12 @@ const configSchema = z.object({
     .default("https://slack.com")
     .transform((value) => new URL(value).origin),
 
+  // Webhook relay drainer. Absent unless explicitly configured. When present, a
+  // persistent WS client drains buffered webhooks from the Cloudflare relay and
+  // replays them into the target app handler. Core stays app-neutral: this holds
+  // only the mailbox credential — the delivery target is resolved at runtime
+  // from whichever installed app declares `api.relayWebhook` (see
+  // resolveRelayTarget in relay/settings.ts), never named here.
   relay: z
     .object({
       drainUrl: z
