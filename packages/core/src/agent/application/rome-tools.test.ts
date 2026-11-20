@@ -79,7 +79,7 @@ describe("ask_question", () => {
     expect(text).toContain("Which city?");
   });
 
-  it("names the message its card replies to only for an agent whose cards reply", () => {
+  it("names the message its card replies to, and the task it asks for, only for an agent whose cards reply", () => {
     const properties = (overrides: Partial<RomeToolsOptions>) =>
       Object.keys(
         (
@@ -91,7 +91,7 @@ describe("ask_question", () => {
         ).properties,
       );
     expect(properties({})).toEqual(["questions"]);
-    expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
+    expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo", "task"]);
   });
 
   it("offers the reply of a card that names one, and lets it be left out or null", () => {
