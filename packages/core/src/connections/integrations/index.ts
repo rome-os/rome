@@ -52,8 +52,6 @@ export interface BuiltinConnectionDeps {
   /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
-  /** The platform ids of all of Rome's Discord accounts. */
-  romeAccountIds?: () => ReadonlySet<string>;
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
   onWhatsAppGuardianConnected: (selfJid: string) => void;
@@ -88,7 +86,6 @@ export function registerBuiltinConnections(
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
-      romeAccountIds: deps.romeAccountIds,
     }),
   );
   registry.register(makeTelegramUserDescriptor());

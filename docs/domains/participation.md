@@ -27,6 +27,7 @@ The check that decides whether a message wakes the agent. It looks at where the 
 - Another bot's message never stops a turn.
 - A message that wakes nobody shows no typing, and stays in the record: a message the reply rule, the bot rule or a mention of others keeps quiet is recorded like any other. A chat switched off is not heard at all, and none of its messages are recorded.
 - An agent whose own app runs its turns has no wake gate. On an account linked to it, every message reaches the app, and the app decides what wakes the agent. Only first-party apps may run their agents' turns.
+- When two of Rome's accounts hear a message, the wake is decided once for each of them, on that account's settings and on how the message addressed it. A message addressed to neither can wake both agents, if both chats wake on every message.
 - The wake gate calls no model, sends nothing and stores nothing, so the same message from the same sender always gets the same answer. It reads the guardian's settings as they are when the message arrives.
 
 ## Projection

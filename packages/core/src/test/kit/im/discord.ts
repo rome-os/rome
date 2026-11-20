@@ -144,7 +144,6 @@ export class DiscordPeer implements Peer {
     return new DiscordAdapter({
       botToken: token,
       rest: this.restOptions(),
-      romeAccountIds: () => new Set([...BOTS.values()].map((bot) => bot.id)),
     });
   }
 
