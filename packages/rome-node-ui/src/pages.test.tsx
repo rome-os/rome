@@ -320,23 +320,71 @@ describe("NodeDevices", () => {
 
   it("waits for the host's devices", async () => {
     serve([]);
+    const setup = {
+      action: <button type="button">Custom link</button>,
+      empty: <p>No devices yet</p>,
+    };
     const { rerender } = render(
-      <NodeDevices url="ws://rome.test/ws/node" devices={[]} navigation={navigation()} loading />,
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={[]}
+        navigation={navigation()}
+        setup={setup}
+        loading
+      />,
     );
     await waitFor(() => expect(FakeSocket.instances[0]?.sent.length).toBeGreaterThan(1));
-    expect(screen.queryByText("No computers are linked to this account.")).toBeNull();
+    expect(screen.queryByText("No devices yet")).toBeNull();
     rerender(
-      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        setup={setup}
+      />,
     );
     expect(await screen.findByText("Workstation")).toBeTruthy();
   });
 
-  it("opens the link instructions", async () => {
+  it("uses the host's setup slot for empty state and header actions", () => {
     serve([]);
-    render(<NodeDevices url="ws://rome.test/ws/node" devices={[]} navigation={navigation()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Link device" }));
-    expect(await screen.findByRole("dialog", { name: "Link a computer" })).toBeTruthy();
-    expect(screen.getByText("rome-node connect")).toBeTruthy();
+    const setup = {
+      action: <button type="button">Custom link</button>,
+      empty: <section aria-label="Custom setup">Setup cards</section>,
+    };
+    const { rerender } = render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={[]}
+        navigation={navigation()}
+        setup={setup}
+        loading
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Custom link" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Custom setup" })).toBeNull();
+
+    rerender(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={[]}
+        navigation={navigation()}
+        setup={setup}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Custom setup" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Custom link" })).toBeNull();
+
+    rerender(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        setup={setup}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Custom link" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Custom setup" })).toBeNull();
   });
 });
 
