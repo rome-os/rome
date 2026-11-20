@@ -171,6 +171,11 @@ const JOINED = {
  * change listeners, which push the row to the Tasks view and settle the task
  * events the Concierge owed for it.
  */
+/** The task's last outcome with its owner's mark of done taken off: a mark ends only the stop it came with. */
+const notMarkedDone = sql<
+  TaskChatRow["lastOutcome"]
+>`CASE WHEN ${taskChats.lastOutcome} = 'done_by_owner' THEN NULL ELSE ${taskChats.lastOutcome} END`;
+
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
   private messageListeners = new Set<(target: MessageTarget) => void>();
@@ -240,7 +245,12 @@ export class ConciergeTasksRepository {
       const own = found && ownerOf({ ownerKey: found.ownerKey }) === owner ? found : null;
       if (own) {
         tx.update(taskChats)
-          .set({ stoppedAt: own.task.stoppedAt ?? (stop ? now : null), updatedAt: now })
+          .set({
+            stoppedAt: own.task.stoppedAt ?? (stop ? now : null),
+            // Stopped by the archive here, it ends stopped, never as marked done.
+            ...(own.task.stoppedAt === null && stop ? { lastOutcome: notMarkedDone } : {}),
+            updatedAt: now,
+          })
           .where(eq(taskChats.sessionId, chatId))
           .run();
       }
@@ -325,11 +335,14 @@ export class ConciergeTasksRepository {
     return marked.length > 0;
   }
 
-  /** Task `id` was stopped by `by`. A stop is kept: a later one changes nothing. */
+  /**
+   * Task `id` was stopped by `by`. A stop is kept: a later one changes
+   * nothing. A stop is no mark of done, so it never ends one done.
+   */
   async stop(id: string, now = new Date()): Promise<void> {
     const stopped = await this.db
       .update(taskChats)
-      .set({ stoppedAt: now, updatedAt: now })
+      .set({ stoppedAt: now, lastOutcome: notMarkedDone, updatedAt: now })
       .where(and(eq(taskChats.sessionId, id), isNull(taskChats.stoppedAt)))
       .returning({ id: taskChats.sessionId });
     if (stopped.length > 0) await this.announce(id, "refresh");
@@ -338,12 +351,13 @@ export class ConciergeTasksRepository {
   /**
    * Task `id`, stopped, takes new work: it is stopped no more. A task whose
    * chat is archived stays stopped, since nothing runs in an archived chat.
-   * Answers whether it was resumed.
+   * One its owner marked done is marked no more: the new work ends as it
+   * ends. Answers whether it was resumed.
    */
   async resume(id: string, now = new Date()): Promise<boolean> {
     const resumed = await this.db
       .update(taskChats)
-      .set({ stoppedAt: null, updatedAt: now })
+      .set({ stoppedAt: null, lastOutcome: notMarkedDone, updatedAt: now })
       .where(
         and(
           eq(taskChats.sessionId, id),
