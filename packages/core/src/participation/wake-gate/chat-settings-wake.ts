@@ -23,9 +23,11 @@ export interface ChatWakeSettings extends PolicyInput {
  * off stays quiet, so does another bot's message the chat does not take, a
  * message that mentions only others where the chat ignores those, and one
  * addressed to nobody in a chat that wakes only on a mention. Then a policy
- * block blocks, a sender below the reply-to levels
- * stays quiet, a trusted sender or a policy allow wakes the agent, and anyone
- * else goes to review. A stranger reads as bond level `other`.
+ * block blocks. A sender below the reply-to levels stays quiet, unless the
+ * connection marks them a member it is open to: then they go to member review,
+ * before trust or a policy allow can wake the agent. A trusted sender or a
+ * policy allow wakes the agent, and anyone else goes to review. A stranger
+ * reads as bond level `other`.
  */
 export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
   return (message, sender) => {
@@ -45,7 +47,9 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
       threadType: message.place === "direct" ? "private" : "group",
     });
     if (policy.action === "block") return "block";
-    if (!settings.replyToLevels.includes(bondLevel)) return "quiet";
+    if (!settings.replyToLevels.includes(bondLevel)) {
+      return message.openToMembers ? "member_review" : "quiet";
+    }
     if (settings.trustedLevels.includes(bondLevel) || policy.action === "allow") return "wake";
     return "review";
   };

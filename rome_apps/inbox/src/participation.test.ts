@@ -49,7 +49,9 @@ interface Setup {
   /** What Core's wake gate answers, `wake` when absent. */
   wake?: ReturnType<WakeGate>;
   /** The hook's decision passed on with the message, so Inbox asks no gate. */
-  decidedByHook?: "wake" | "review";
+  decidedByHook?: "wake" | "review" | "member_review";
+  /** The connection marked the sender a member it is open to. */
+  openToMembers?: boolean;
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
   /** What Core's send gate answers. Its own table is guarded-send.test.ts in
@@ -156,6 +158,7 @@ async function handle(setup: Setup) {
     messageId: "message-1",
     ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
     ...(setup.decidedByHook ? { wake: setup.decidedByHook } : {}),
+    ...(setup.openToMembers ? { openToMembers: true } : {}),
   });
 
   return { outcome, runs, stored, promoted, sent, approvals, wakeRequests, gateRequests };
@@ -180,8 +183,9 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     { wake: "quiet", outcome: "quiet" },
     { wake: "block", outcome: "blocked" },
     { wake: "review", outcome: "reviewed" },
+    { wake: "member_review", outcome: "reviewed" },
   ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
-    const answers = wake === "review" ? [[result("IGNORE")]] : [];
+    const answers = wake === "review" || wake === "member_review" ? [[result("IGNORE")]] : [];
     const handled = await handle({ sender: "inner-circle", wake, answers });
     expect(wakeOf(handled)).toBe(outcome);
   });
@@ -288,6 +292,71 @@ describe("wake: what review decides", () => {
 
     expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel", "main"]);
     expect(handled.promoted).toEqual(["message-1"]);
+  });
+});
+
+// A member a connection let in only by its switch: the sentinel triages them,
+// and only its own ESCALATE reaches the agent. Each row is a security fix from
+// the Slack app's member replies, kept where the decision now lives.
+describe("wake: what member review decides", () => {
+  const member: Setup = { sender: "stranger", wake: "member_review" };
+
+  it.each([
+    { sentinel: "IGNORE", action: "sentinel_ignored", agents: ["sentinel"] },
+    { sentinel: "REPLY: Hi there", action: "sentinel_replied", agents: ["sentinel"] },
+    { sentinel: "ESCALATE", action: "no_response", agents: ["sentinel", "main"] },
+    { sentinel: "Decision: ESCALATE", action: "no_response", agents: ["sentinel", "main"] },
+    // Unreadable or empty output answers nothing, where review wakes the agent.
+    { sentinel: "", action: "sentinel_ignored", agents: ["sentinel"] },
+    {
+      sentinel: "I am not sure what to do with this.",
+      action: "sentinel_ignored",
+      agents: ["sentinel"],
+    },
+    // An ESCALATE another line contradicts is not the sentinel's own.
+    {
+      sentinel: "Decision: ESCALATE\nDecision: IGNORE",
+      action: "sentinel_ignored",
+      agents: ["sentinel"],
+    },
+  ])("Sentinel answers '$sentinel' → $action", async ({ sentinel, action, agents }) => {
+    const handled = await handle({ ...member, answers: [[result(sentinel)]] });
+
+    expect(handled.outcome.data).toMatchObject({ action });
+    expect(handled.runs.map((run) => run.agentName)).toEqual(agents);
+    expect(handled.promoted).toEqual(agents.includes("main") ? ["message-1"] : []);
+  });
+
+  it("answers nothing when Sentinel fails", async () => {
+    const handled = await handle({
+      ...member,
+      answers: [[{ type: "error", error: "model down" } as AgentMessage]],
+    });
+
+    expect(handled.outcome.data).toMatchObject({ action: "sentinel_ignored" });
+    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel"]);
+    expect(handled.promoted).toEqual([]);
+    expect(handled.sent).toEqual([]);
+  });
+
+  it("reviews as strictly when the hook decided member review", async () => {
+    const handled = await handle({
+      sender: "stranger",
+      wake: "wake",
+      decidedByHook: "member_review",
+      answers: [[result("")]],
+    });
+
+    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel"]);
+    expect(handled.wakeRequests).toEqual([]);
+  });
+
+  it("asks the gate with the connection's mark", async () => {
+    const marked = await handle({ sender: "stranger", openToMembers: true });
+    const unmarked = await handle({ sender: "stranger" });
+
+    expect(marked.wakeRequests[0]?.[0]).toMatchObject({ openToMembers: true });
+    expect(unmarked.wakeRequests[0]?.[0]).not.toHaveProperty("openToMembers");
   });
 });
 

@@ -25,6 +25,7 @@ function decide(row: {
   addressing?: WakeMessage["addressing"];
   fromBot?: boolean;
   mentionsOthers?: boolean;
+  openToMembers?: boolean;
   botMessages?: ChatWakeSettings["botMessages"];
   whenOthersMentioned?: ChatWakeSettings["whenOthersMentioned"];
   trusted?: readonly string[];
@@ -46,6 +47,7 @@ function decide(row: {
     ...(row.addressing ? { addressing: row.addressing } : {}),
     ...(row.fromBot ? { fromBot: true } : {}),
     ...(row.mentionsOthers ? { mentionsOthers: true } : {}),
+    ...(row.openToMembers ? { openToMembers: true } : {}),
   };
   return chatSettingsWake(settings)({ ...message, ...facts }, { person });
 }
@@ -200,6 +202,49 @@ describe("chatSettingsWake", () => {
     expect(gate([blockAlice])(message, { person: null })).toBe("review");
     expect(gate([blockDevChat])(message, { person: null })).toBe("block");
     expect(gate([blockDevChat])({ ...message, place: "direct" }, { person: null })).toBe("review");
+  });
+
+  // A connection that opened its account to its workspace's members marks a
+  // member's message. Below the reply-to levels, the mark is all that lets
+  // them in, so the sentinel always triages them first.
+  it.each([
+    {
+      name: "a marked stranger goes to member review",
+      row: { sender: "stranger" },
+      wake: "member_review",
+    },
+    {
+      name: "the same stranger unmarked stays quiet",
+      row: { sender: "stranger", openToMembers: false },
+      wake: "quiet",
+    },
+    {
+      name: "a trusted bond level does not skip member review",
+      row: { sender: "other", trusted: ["guardian", "other"] },
+      wake: "member_review",
+    },
+    {
+      name: "a policy allow does not skip member review",
+      row: { sender: "acquaintance", policy: "allow" },
+      wake: "member_review",
+    },
+    {
+      name: "a policy block still blocks",
+      row: { sender: "stranger", policy: "block" },
+      wake: "block",
+    },
+    {
+      name: "the chat's own rules still keep them quiet",
+      row: { sender: "stranger", addressing: "ambient", replyRule: "mention" },
+      wake: "quiet",
+    },
+    {
+      name: "a sender the instance replies to is decided as without the mark",
+      row: { sender: "acquaintance", replyTo: ["guardian", "acquaintance"], policy: "allow" },
+      wake: "wake",
+    },
+  ] as const)("$name", ({ row, wake }) => {
+    expect(decide({ addressing: "direct", openToMembers: true, ...row })).toBe(wake);
   });
 
   it("answers the same message from the same sender the same way every time", () => {

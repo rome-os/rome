@@ -21,6 +21,9 @@ export interface WakeMessage {
   fromBot?: boolean;
   /** It mentions someone, and none of them is Rome's account. */
   mentionsOthers?: boolean;
+  /** The connection opened its account to its workspace's other members, and
+   *  the sender is one, as the connection reports it. */
+  openToMembers?: boolean;
 }
 
 /** People's answer for the account that said the message. */
@@ -34,8 +37,11 @@ export interface WakeSender {
  * - `quiet`: the message stays in the record and wakes nobody.
  * - `block`: the same, because a policy blocks the sender or chat.
  * - `review`: the caller runs the sentinel, which ignores, replies or wakes the agent.
+ * - `member_review`: the same, for a sender answered only because their
+ *   connection is open to its members. Only the sentinel's own ESCALATE wakes
+ *   the agent, and a sentinel that fails or cannot be read answers nothing.
  */
-export type WakeDecision = "wake" | "quiet" | "block" | "review";
+export type WakeDecision = "wake" | "quiet" | "block" | "review" | "member_review";
 
 /** Pure: no model call, no send, no storage. The same message from the same
  *  sender always gets the same decision. */

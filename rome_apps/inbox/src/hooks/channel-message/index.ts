@@ -229,7 +229,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     // gate decides here, before typing shows. Without
     // it, `inbox:message_handler` asks the gate once it has looked the sender up.
     const sender = "sender" in event ? event.sender : undefined;
-    let wake: "wake" | "review" | undefined;
+    let wake: "wake" | "review" | "member_review" | undefined;
     if (sender && this.options.wakeGateFor) {
       const gate = await this.options.wakeGateFor({ chat: ref });
       const decision = gate(
@@ -319,7 +319,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName: string | undefined;
       accountAgentName: string | undefined;
       recordedMessageId?: string;
-      wake?: "wake" | "review";
+      wake?: "wake" | "review" | "member_review";
     },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
@@ -466,10 +466,11 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
 /** How the message addressed Rome's account, as its connection reported it. */
 function addressedBy(
   message: InboundEvent["message"],
-): Pick<InboundEvent["message"], "addressing" | "fromBot" | "mentionsOthers"> {
+): Pick<InboundEvent["message"], "addressing" | "fromBot" | "mentionsOthers" | "openToMembers"> {
   return {
     ...(message.addressing ? { addressing: message.addressing } : {}),
     ...(message.fromBot ? { fromBot: true } : {}),
     ...(message.mentionsOthers ? { mentionsOthers: true } : {}),
+    ...(message.openToMembers ? { openToMembers: true } : {}),
   };
 }

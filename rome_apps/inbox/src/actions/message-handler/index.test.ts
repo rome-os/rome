@@ -157,7 +157,9 @@ function createMessageHandlerDeps(
       const trusted = (settings.trustedBondLevels as string[] | undefined) ?? ["guardian"];
       const replyTo = (settings.replyToBondLevels as string[] | undefined) ?? ["guardian"];
       if (wake.policyAction === "block") return "block";
-      if (!replyTo.includes(bondLevel)) return "quiet";
+      if (!replyTo.includes(bondLevel)) {
+        return (message as { openToMembers?: boolean }).openToMembers ? "member_review" : "quiet";
+      }
       if (trusted.includes(bondLevel) || wake.policyAction === "allow") return "wake";
       return "review";
     }),
@@ -803,13 +805,11 @@ describe("message reply bond-level settings", () => {
   });
 
   it("answers nothing when the sentinel fails for a member let in only by their connection's switch", async () => {
-    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       agentResponses: [[{ type: "error", error: "model unavailable" }]],
     });
-    // The policy engine neither blocks nor allows them: the sentinel triages.
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "monitor",
-    });
+    // The policy neither blocks nor allows them: the sentinel triages.
+    wake.policyAction = "monitor";
 
     const result = await createAction(actionConfig, deps).execute({
       channel: "slack_app",
@@ -832,12 +832,10 @@ describe("message reply bond-level settings", () => {
     ["output with no decision", "I am not sure what to do with this."],
     ["contradictory decisions", "Decision: ESCALATE\nDecision: IGNORE"],
   ])("answers nothing when the sentinel gives %s for a member let in only by their connection's switch", async (_case, content) => {
-    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       agentResponses: [[{ type: "result", content }]],
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "monitor",
-    });
+    wake.policyAction = "monitor";
 
     const result = await createAction(actionConfig, deps).execute({
       channel: "slack_app",
@@ -859,13 +857,11 @@ describe("message reply bond-level settings", () => {
     ["a trusted bond level", { trustedBondLevels: ["other"] }, "monitor"],
     ["a policy that allows them", {}, "allow"],
   ])("runs the sentinel first for a member let in only by the switch, whatever %s says", async (_case, settings, policyAction) => {
-    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       settings,
       agentResponses: [[{ type: "result", content: "IGNORE" }]],
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: policyAction,
-    });
+    wake.policyAction = policyAction;
 
     const result = await createAction(actionConfig, deps).execute({
       channel: "slack_app",
@@ -884,16 +880,14 @@ describe("message reply bond-level settings", () => {
   });
 
   it("hands a member let in only by the switch to the agent when the sentinel says ESCALATE", async () => {
-    const { deps, agentRunner } = createMessageHandlerDeps({
+    const { deps, agentRunner, wake } = createMessageHandlerDeps({
       agentResponses: [
         [{ type: "result", content: "Decision: ESCALATE" }],
         [{ type: "result", content: "On it." }],
         [envoyAnswer("approve", "Fine to send.")],
       ],
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
-      action: "monitor",
-    });
+    wake.policyAction = "monitor";
 
     await createAction(actionConfig, deps).execute({
       channel: "slack_app",

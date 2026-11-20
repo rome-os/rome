@@ -53,9 +53,10 @@ export type WakeGate = (
     addressing?: MessageAddressing;
     fromBot?: boolean;
     mentionsOthers?: boolean;
+    openToMembers?: boolean;
   },
   sender: { person: { id: string; bondLevel: BondLevel } | null },
-) => "wake" | "quiet" | "block" | "review";
+) => "wake" | "quiet" | "block" | "review" | "member_review";
 
 /** The wake gate for a chat, built from its current settings. */
 export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
@@ -809,7 +810,7 @@ export function createMessageHandlerAction(
         // The hook asked the wake gate already when the host recorded the
         // message with People's answer; otherwise ask it here.
         const wake =
-          args.wake === "wake" || args.wake === "review"
+          args.wake === "wake" || args.wake === "review" || args.wake === "member_review"
             ? args.wake
             : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
                 {
@@ -986,7 +987,7 @@ export function createMessageHandlerAction(
             resolveProfilePath: deps.resolveProfilePath,
             strangerPersonId: deps.strangerPersonId,
           }),
-          false,
+          wake === "member_review",
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1026,12 +1027,13 @@ export async function sendAnswer(
 /** How the message addressed Rome's account, as far as the hook passed it. */
 function addressedBy(
   args: Record<string, unknown>,
-): Pick<Parameters<WakeGate>[0], "addressing" | "fromBot" | "mentionsOthers"> {
+): Pick<Parameters<WakeGate>[0], "addressing" | "fromBot" | "mentionsOthers" | "openToMembers"> {
   return {
     ...(typeof args.addressing === "string"
       ? { addressing: args.addressing as MessageAddressing }
       : {}),
     ...(args.fromBot === true ? { fromBot: true } : {}),
     ...(args.mentionsOthers === true ? { mentionsOthers: true } : {}),
+    ...(args.openToMembers === true ? { openToMembers: true } : {}),
   };
 }

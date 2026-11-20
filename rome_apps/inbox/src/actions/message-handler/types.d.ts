@@ -99,7 +99,7 @@ export interface MessageHandlerInput {
    *  asked the gate itself. Only that hook sets it: a caller that passes it
    *  skips the gate, policy blocks and the chat's on/off switch included.
    *  Absent, the handler asks the gate. */
-  wake?: "wake" | "review";
+  wake?: "wake" | "review" | "member_review";
 }
 
 export interface MessageHandlerOutput {
