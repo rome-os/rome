@@ -386,7 +386,8 @@ export class DiscordAdapter {
     /** Whether an agent is loaded, aliases included. Absent, every agent
      *  counts as loaded. */
     hasAgent?: (name: string) => boolean;
-    /** The platform ids of all of Rome's Discord accounts, this one included. */
+    /** The platform ids of the Discord accounts Rome listens to, this one
+     *  included. */
     romeAccountIds?: () => ReadonlySet<string>;
     resolveDiscordPerson?: (
       channelUserId: string,
