@@ -398,6 +398,10 @@ struct ChatHeader: View {
     var tasks: TaskListStore? = nil
     /// A topic chat's options in the "…" menu; the main Chat has none.
     var onRename: (() -> Void)? = nil
+    /// Whether the topic chat is pinned, for Pin or Unpin.
+    var pinned = false
+    /// Pin (true) or unpin (false) a topic chat.
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
@@ -412,7 +416,7 @@ struct ChatHeader: View {
             // As wide as the capsule on the right, so the identity stays in the middle.
             .frame(width: ChatHeaderButtons.width, alignment: .leading)
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
-            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, onArchive: onArchive, onDelete: onDelete)
+            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -652,8 +656,8 @@ enum MenuTitle {
 /// Tasks opens the Agent page on its Tasks tab, with a dot while a task needs
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
 /// alone, as the web does. "…" holds what else the Agent page shows (Outputs,
-/// Routines), then what is done to the chat: a topic chat's Rename, then
-/// Share and Shared links, then Archive and Delete. The main Chat is only
+/// Routines), then what is done to the chat: a topic chat's Rename and Pin
+/// or Unpin, then Share and Shared links, then Archive and Delete. The main Chat is only
 /// shared. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
 struct ChatHeaderButtons: View {
@@ -664,6 +668,8 @@ struct ChatHeaderButtons: View {
     let tasks: TaskListStore?
     let onAgent: (AgentTab?) -> Void
     var onRename: (() -> Void)? = nil
+    var pinned = false
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
@@ -697,6 +703,9 @@ struct ChatHeaderButtons: View {
                 Section {
                     if let onRename {
                         Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                    }
+                    if let onPin {
+                        TopicPinButton(pinned: pinned) { onPin(!pinned) }
                     }
                     if let share {
                         // Share mode with nothing picked yet, as the web's Share chat.

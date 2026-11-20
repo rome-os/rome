@@ -106,6 +106,16 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    var pinFails = false
+    /// Pins as the server does: on the chat list's row.
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        calls.append(pinned ? "pin \(id)" : "unpin \(id)")
+        if pinFails { throw APIError.network }
+        if let index = sessionRows.firstIndex(where: { $0.id == id }) {
+            sessionRows[index].pinnedAt = pinned ? RomeDate.string(.now) : nil
+        }
+    }
+
     func deleteChat(_ id: String) async throws {
         calls.append("delete \(id)")
         topicChats.removeAll { $0.id == id }
