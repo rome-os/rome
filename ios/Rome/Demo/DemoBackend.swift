@@ -53,6 +53,8 @@ final class DemoBackend: RomeBackend {
     private var topicChats: [ConciergeChat] = []
     /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
     private var topicActivity: [String: Date] = [:]
+    /// When each pinned topic chat was pinned. None is pinned at first.
+    private var topicPins: [String: Date] = [:]
     /// Files sent with messages, by their asset path.
     private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
@@ -222,6 +224,11 @@ final class DemoBackend: RomeBackend {
         bus.emit(LiveTopic.chat(id), .sessionName(sessionId: id, name: name))
     }
 
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await pause(0.2)
+        topicPins[id] = pinned ? .now : nil
+    }
+
     func archiveChat(_ id: String) async throws {
         try await pause(0.2)
         topicChats.removeAll { $0.id == id }
@@ -370,7 +377,7 @@ final class DemoBackend: RomeBackend {
 
     func sessions() async throws -> [ChatSession] {
         Array(chats.values) + topicChats.map { chat in
-            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string))
+            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: topicPins[chat.id].map(RomeDate.string))
         }
     }
 

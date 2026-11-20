@@ -1,8 +1,9 @@
 import Foundation
 import Observation
 
-/// The guardian's Concierge topic chats, for the drawer, latest activity
-/// first. It refetches when the drawer opens, after a chat is started here,
+/// The guardian's Concierge topic chats, for the drawer: the pinned ones
+/// first, the latest pinned on top, then the rest, latest activity first.
+/// It refetches when the drawer opens, after a chat is started here,
 /// when events may have been missed, and when a turn starts or ends in a
 /// topic chat. Names follow each chat's
 /// `session_name` events, so an untitled chat shows its name once the server
@@ -28,6 +29,9 @@ final class TopicChatsStore {
     /// Only the server's time moves a chat, so a replayed status never does.
     /// A chat missing here counts as newest.
     private var lastActive: [String: Date] = [:]
+    /// When each pinned chat was pinned, from the same chat list. A chat
+    /// missing here is not pinned.
+    private(set) var pinnedAt: [String: Date] = [:]
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
     /// Whether the drawer folds the list away, kept on this phone per instance.
@@ -87,9 +91,12 @@ final class TopicChatsStore {
                 // Off or unreachable: keep what is held.
                 let all = try? await backend.conciergeChats()
                 if let sessions = await listed {
+                    var pins: [String: Date] = [:]
                     for session in sessions {
                         if let at = RomeDate.parse(session.activityAt) { lastActive[session.id] = at }
+                        if let at = session.pinnedAt.flatMap(RomeDate.parse) { pins[session.id] = at }
                     }
+                    pinnedAt = pins
                 }
                 if let all {
                     mainChatId = all.first { $0.main }?.id
@@ -97,7 +104,7 @@ final class TopicChatsStore {
                     for chat in all where chat.activity != nil && (activityHeard[chat.id] ?? .distantPast) < asked {
                         setActivity(chat.activity, for: chat.id)
                     }
-                    apply(Self.ordered(Self.topics(in: all), lastActive: lastActive))
+                    apply(Self.ordered(Self.topics(in: all), lastActive: lastActive, pinnedAt: pinnedAt))
                 }
             } while refreshAgain
             refreshWork = nil
@@ -135,6 +142,19 @@ final class TopicChatsStore {
     func add(_ chat: ConciergeChat) {
         guard !chat.main, !chats.contains(where: { $0.id == chat.id }) else { return }
         apply([chat] + chats)
+        refresh()
+    }
+
+    /// Whether the chat is pinned atop the list.
+    func isPinned(_ id: String) -> Bool {
+        pinnedAt[id] != nil
+    }
+
+    /// A pin this app made or took off: the list moves now, ahead of the next
+    /// refetch, which then brings the server's time.
+    func setPinned(_ id: String, _ pinned: Bool) {
+        pinnedAt[id] = pinned ? .now : nil
+        apply(chats)
         refresh()
     }
 
@@ -177,19 +197,22 @@ final class TopicChatsStore {
         String(localized: "Message in \(name)")
     }
 
-    /// The topic chats latest activity first, as the web lists them. The
+    /// The topic chats as the web lists them: the pinned ones first, the
+    /// latest pinned on top, then the rest, latest activity first. The
     /// Concierge lists them oldest first; walking it backwards leaves the
     /// newest first among those with no time yet, which count as newest.
-    nonisolated static func ordered(_ oldestFirst: [ConciergeChat], lastActive: [String: Date]) -> [ConciergeChat] {
-        resorted(oldestFirst.reversed(), lastActive: lastActive)
+    nonisolated static func ordered(_ oldestFirst: [ConciergeChat], lastActive: [String: Date], pinnedAt: [String: Date] = [:]) -> [ConciergeChat] {
+        resorted(oldestFirst.reversed(), lastActive: lastActive, pinnedAt: pinnedAt)
     }
 
-    /// A list already latest first, sorted again after a time changed; chats
-    /// with the same time keep their places.
-    nonisolated static func resorted(_ list: [ConciergeChat], lastActive: [String: Date]) -> [ConciergeChat] {
+    /// A list already in order, sorted again after a time or a pin changed;
+    /// chats with the same times keep their places.
+    nonisolated static func resorted(_ list: [ConciergeChat], lastActive: [String: Date], pinnedAt: [String: Date] = [:]) -> [ConciergeChat] {
+        let pins = list.map { pinnedAt[$0.id] ?? Date.distantPast }
         let times = list.map { lastActive[$0.id] ?? Date.distantFuture }
         let order = list.indices.sorted { a, b in
-            times[a] != times[b] ? times[a] > times[b] : a < b
+            if pins[a] != pins[b] { return pins[a] > pins[b] }
+            return times[a] != times[b] ? times[a] > times[b] : a < b
         }
         return order.map { list[$0] }
     }
@@ -224,14 +247,14 @@ final class TopicChatsStore {
     /// read again.
     nonisolated static let liveNameLimit = 20
 
-    /// The chats whose renames the drawer hears live: the list is latest first.
+    /// The chats whose renames the drawer hears live: the first ones of the list.
     nonisolated static func liveIDs(_ list: [ConciergeChat]) -> Set<String> {
         Set(list.prefix(liveNameLimit).map(\.id))
     }
 
-    /// Takes a list latest first.
+    /// Takes a list in the drawer's order, or close to it.
     private func apply(_ list: [ConciergeChat]) {
-        let list = Self.resorted(list, lastActive: lastActive)
+        let list = Self.resorted(list, lastActive: lastActive, pinnedAt: pinnedAt)
         if list != chats { chats = list }
         loaded = true
         let ids = Self.liveIDs(list)
