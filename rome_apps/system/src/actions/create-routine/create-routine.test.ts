@@ -94,6 +94,30 @@ describe("create_routine — engine activation", () => {
     expect(engine.activated[0]).toMatchObject({ id: routineId, name: "daily-dream" });
   });
 
+  it("saves the action's full ID when asked by its bare name", async () => {
+    const result = await createRoutine(
+      {
+        name: "nightly",
+        trigger: { type: "manual" },
+        actionName: "system_upgrade",
+        args: {},
+      },
+      {
+        routinesRepo: repo,
+        actionRegistry: {
+          ...allActions,
+          getCanonicalName: (name: string) => `system:${name}`,
+        },
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
+    );
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const row = await repo.findById((result.data as { routineId: string }).routineId);
+    expect(row?.actionName).toBe("system:system_upgrade");
+  });
+
   it("auto-attributes managedBy to the app that invoked the action", async () => {
     const engine = makeFakeEngine();
 

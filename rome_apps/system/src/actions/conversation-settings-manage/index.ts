@@ -24,7 +24,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   const settings = (deps.chatSettings ?? deps.conversationSettings) as
     | ChatSettingsControl
     | undefined;
-  if (!settings) throw new Error("conversation_settings_manage requires chatSettings");
+  if (!settings) throw new Error("system:conversation_settings_manage requires chatSettings");
 
   return {
     config,

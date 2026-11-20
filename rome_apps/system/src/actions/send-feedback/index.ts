@@ -104,7 +104,7 @@ export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbac
 
 export function createAction(config: ActionConfig, deps: SendFeedbackDeps): Action {
   if (typeof deps.feedback?.send !== "function") {
-    throw new Error("send_feedback requires a feedback capability with a send() method");
+    throw new Error("system:send_feedback requires a feedback capability with a send() method");
   }
   return createSendFeedbackAction(config, deps);
 }

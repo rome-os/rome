@@ -927,7 +927,7 @@ export async function sendAnswer(
   input: Record<string, unknown> & { replyToMessageId?: string },
 ): Promise<void> {
   try {
-    await deps.appContext.runAction("send_message", input);
+    await deps.appContext.runAction("system:send_message", input);
   } catch (err) {
     // Matched by its fields, not its class, as `isSendRefused` matches, so a
     // copy of the SDK other than the host's still recognizes it.
@@ -937,6 +937,6 @@ export async function sendAnswer(
       (err as { refusal?: unknown }).refusal === "reply_unaddressable";
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
-    await deps.appContext.runAction("send_message", unquoted);
+    await deps.appContext.runAction("system:send_message", unquoted);
   }
 }

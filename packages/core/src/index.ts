@@ -959,6 +959,13 @@ async function main() {
   if (renamedAgents.sessions + renamedAgents.chats > 0) {
     appsLog.info("old agent names renamed", renamedAgents);
   }
+  // Routines saved before action names carried their app fire by the full ID.
+  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
+    artifactIdentity.legacyBindings.action,
+  );
+  if (renamedRoutines > 0) {
+    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
+  }
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
@@ -1172,7 +1179,7 @@ async function main() {
 
   // Graceful upgrades: owns the consent countdown (hub + timers, main-process
   // only) and runs the nightly probe + Rome Cloud-relayed cutover. The
-  // `system_upgrade` action reaches it directly here and over WorkerRPC from a
+  // `system:system_upgrade` action reaches it directly here and over WorkerRPC from a
   // worker; the API routes mount the hub for SSE status + the now/defer verbs.
   const systemUpgradeService = new SystemUpgradeService({
     countdownMs: config.systemUpgradeCountdownMinutes * 60_000,
@@ -1441,7 +1448,7 @@ async function main() {
           // No person asked for the review, so it runs outside the finished
           // turn's request scope and carries no actor.
           withoutSessionActor(() =>
-            actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
+            actionEngine.run("dream:skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
           ).catch((err) => {
             log.warn("skill review failed", { error: String(err) });
           });
@@ -1624,10 +1631,10 @@ async function main() {
     appStore,
     appManager: appLifecycle,
     // Real service in the main process; the worker injects SystemUpgradeServiceProxy
-    // so the routine-fired `system_upgrade` action reaches the same hub either way.
+    // so the routine-fired `system:system_upgrade` action reaches the same hub either way.
     systemUpgrade: systemUpgradeService,
     // Inbound email entry point. Resolved per call (the email channel can be
-    // enabled at runtime) so `email_inbound` reaches the live port whether it
+    // enabled at runtime) so `system:email_inbound` reaches the live port whether it
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
@@ -1644,7 +1651,7 @@ async function main() {
     emitAgentMessage,
     resolveProfilePath: resolveProfileMemoryPath,
     strangerPersonId: STRANGER_PERSON_ID,
-    // The `resume_session` action's orchestrator. Real runner in main;
+    // The `system:resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
     // Real push sender in main, to the person the calling chat serves; the
@@ -1854,15 +1861,15 @@ async function main() {
     appStartedDispatcher.flush(appCatalog);
   });
 
-  /** The app that declares `message_handler`: Inbox. */
+  /** The app that declares `inbox:message_handler`: Inbox. */
   const messageHandlerOwner = () =>
     appCatalog.listArtifacts("action").find((artifact) => artifact.publicName === "message_handler")
       ?.ownerId ?? "inbox";
-  if (!actionRegistry.has("message_handler")) {
+  if (!actionRegistry.has("inbox:message_handler")) {
     markAppFailed(
       "message-handler:missing",
       messageHandlerOwner(),
-      'Required action "message_handler" is not registered',
+      'Required action "inbox:message_handler" is not registered',
     );
     log.warn("message_handler action is unavailable; inbound channel messages will be ignored");
   }
@@ -2015,7 +2022,7 @@ async function main() {
   });
   const hookChatStop = legacyChatIdStop(chatStop);
   // Every app that declares a channel-message hook hears through its own,
-  // each created with the same deps. The app that owns `message_handler`
+  // each created with the same deps. The app that owns `inbox:message_handler`
   // (Inbox) loads its hook only while that action is registered, as its hook
   // dispatches turns to it.
   const clearHookFailure = (appId: string) => {
@@ -2035,7 +2042,8 @@ async function main() {
       linkedAgentOf: hookAgentOf,
       unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
     },
-    mayLoad: (appId) => appId !== messageHandlerOwner() || actionRegistry.has("message_handler"),
+    mayLoad: (appId) =>
+      appId !== messageHandlerOwner() || actionRegistry.has("inbox:message_handler"),
     onFailed: (appId, error) => markAppFailed(`channel-message:init:${appId}`, appId, error),
     onLoaded: (appId) => clearHookFailure(appId),
     onReset: (appId) => clearHookFailure(appId),
@@ -2050,7 +2058,7 @@ async function main() {
   }
   // Installing, removing, enabling or disabling an app starts or stops its
   // hook alone. Runs after the action loader's subscriber, so Inbox's
-  // `message_handler` is registered by the time its hook asks.
+  // `inbox:message_handler` is registered by the time its hook asks.
   // The status file was written earlier in the same change, so what a hook
   // change reports is written after it.
   const persistHookStatus = async () => {
@@ -2182,6 +2190,7 @@ async function main() {
       appStore,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
+      canonicalActionName: (name) => actionRegistry.getCanonicalName(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -2486,12 +2495,12 @@ async function main() {
   // scheduler ignores it for floating and uses the live guardian zone.
   // Idempotent: a disabled routine still suppresses a duplicate on the next boot.
   const existingRoutines = await routinesRepo.findAll();
-  const hasSystemUpgrade = existingRoutines.some((r) => r.actionName === "system_upgrade");
+  const hasSystemUpgrade = existingRoutines.some((r) => r.actionName === "system:system_upgrade");
   if (!hasSystemUpgrade) {
     const tzid = await resolveGuardianTimezone(settingsRepo);
     try {
       const result = await actionEngine.run(
-        "create_routine",
+        "system:create_routine",
         {
           name: "system_upgrade",
           trigger: {
@@ -2501,7 +2510,7 @@ async function main() {
             localTime: "03:00",
             rrule: "FREQ=DAILY",
           },
-          actionName: "system_upgrade",
+          actionName: "system:system_upgrade",
           args: {},
         },
         { initiator: "startup:system-events" },
@@ -2510,7 +2519,7 @@ async function main() {
         throw new Error(result.error);
       }
       if (result.status === "pending_approval") {
-        throw new Error('Action "create_routine" unexpectedly requested approval');
+        throw new Error('Action "system:create_routine" unexpectedly requested approval');
       }
       log.info("system upgrade probe scheduled daily at 03:00", { tzid });
     } catch (err) {

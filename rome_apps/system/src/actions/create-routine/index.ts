@@ -41,7 +41,10 @@ const scheduleTriggerSchema = z.object({
 
 const eventBusTriggerSchema = z.object({
   type: z.literal("event-bus"),
-  eventName: z.string().min(1).describe("Watchable event type (find it with search_event_catalog)"),
+  eventName: z
+    .string()
+    .min(1)
+    .describe("Watchable event type (find it with system:search_event_catalog)"),
   sourcePattern: z.string().optional(),
   filter: z
     .array(z.object({ field: z.string().min(1), equals: z.string() }))
@@ -118,19 +121,21 @@ export interface ActionExistenceChecker {
   isExplicit(name: string): boolean | Promise<boolean>;
   /** An error message when `args` fail the action's input schema, else null. */
   validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
+  /** The action's full ID, for a routine saved under the name it was asked by. */
+  getCanonicalName?(name: string): string | undefined | Promise<string | undefined>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
  * the remedy so the agent routes correctly instead of guessing again: build the
  * missing automation as a workflow (which registers a `<appId>_run` action),
- * or fall back to the always-available `summon` / `send_message`. */
+ * or fall back to the always-available `system:summon` / `system:send_message`. */
 export function unknownActionError(actionName: string): string {
   return (
     `actionName "${actionName}" is not a registered action. ` +
     `To run multi-step work that doesn't exist yet, build it first with the ` +
     `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
     `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "summon" or "send_message".`
+    `built-in "system:summon" or "system:send_message".`
   );
 }
 
@@ -351,7 +356,7 @@ function validateTrigger(trigger: Trigger): string | null {
     // name can never fire. Validate here too (not only in the Zod schema) so a
     // direct/programmatic call is fail-closed regardless of how it was built.
     if (!trigger.eventName.trim()) {
-      return "trigger.eventName must be a non-empty event type (find one with search_event_catalog)";
+      return "trigger.eventName must be a non-empty event type (find one with system:search_event_catalog)";
     }
     // A blank sourcePattern is falsy to EventBusTriggerProvider, which widens
     // the routine to every source — the opposite of what a caller who bothered
@@ -407,11 +412,12 @@ export async function createRoutine(
   }
 
   // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
-  // every fire; reject and persist the trimmed canonical form.
-  const actionName = input.actionName.trim();
-  if (!actionName) {
+  // every fire; reject and persist the trimmed full ID.
+  const askedName = input.actionName.trim();
+  if (!askedName) {
     return { status: "error", error: "actionName must be a non-empty action name" };
   }
+  const actionName = (await deps.actionRegistry.getCanonicalName?.(askedName)) ?? askedName;
   // Fail closed: a routine bound to a non-existent action would persist and
   // error on every fire (actionEngine.run throws "Action not found"). Reject at
   // create time with a remedy the agent can act on.
@@ -520,10 +526,10 @@ export function createAction(
   // action load at boot, not surface as a runtime TypeError (or worse, a
   // zombie routine) on first invocation.
   if (!deps.routineEngine) {
-    throw new Error("create_routine requires a routineEngine dep");
+    throw new Error("system:create_routine requires a routineEngine dep");
   }
   if (!deps.routinesRepo) {
-    throw new Error("create_routine requires a routinesRepo dep");
+    throw new Error("system:create_routine requires a routinesRepo dep");
   }
   if (
     typeof deps.actionRegistry?.has !== "function" ||
@@ -531,14 +537,14 @@ export function createAction(
     typeof deps.actionRegistry.validateArgs !== "function"
   ) {
     throw new Error(
-      "create_routine requires an actionRegistry dep with has(), isExplicit() and validateArgs()",
+      "system:create_routine requires an actionRegistry dep with has(), isExplicit() and validateArgs()",
     );
   }
   if (!deps.agentRunner) {
-    throw new Error("create_routine requires an agentRunner dep");
+    throw new Error("system:create_routine requires an agentRunner dep");
   }
   if (typeof deps.resolveOneOffDate !== "function") {
-    throw new Error("create_routine requires a resolveOneOffDate dep");
+    throw new Error("system:create_routine requires a resolveOneOffDate dep");
   }
   return createCreateRoutineAction(config, deps);
 }

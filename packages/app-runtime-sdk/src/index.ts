@@ -1276,7 +1276,7 @@ export interface RunParams {
    * A streamed reply is the turn's answer in the conversation's history. The
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
-   * as `send_message` does.
+   * as `system:send_message` does.
    *
    * @deprecated The host no longer streams replies to external platforms and
    * ignores this. The caller always sends the reply.
@@ -3149,7 +3149,7 @@ export interface EventBusTrigger {
 /** A producer app's declaration that it can currently emit `eventType`.
  * `eventType` is the same value a routine binds to as
  * `EventBusTrigger.eventName`; `appId` is the producer that owns it. Surfaced to
- * apps discovering which events are watchable (e.g. `search_event_catalog`). */
+ * apps discovering which events are watchable (e.g. `system:search_event_catalog`). */
 export interface EventCatalogEntry {
   eventType: string;
   appId: string;

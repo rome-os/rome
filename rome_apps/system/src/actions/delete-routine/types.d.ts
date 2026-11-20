@@ -12,7 +12,7 @@
  * yet supported, so the agent should wait for it to finish or cancel it first.
  *
  * @example
- * await callAction("delete_routine", { routineId: "abc-123" });
+ * await callAction("system:delete_routine", { routineId: "abc-123" });
  * // → { deleted: true, routineId: "abc-123", name: "water reminder" }
  */
 

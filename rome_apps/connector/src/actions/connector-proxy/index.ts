@@ -253,7 +253,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_proxy for "${endpoint}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_proxy for "${endpoint}".`,
         };
       }
       try {
@@ -268,7 +268,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             status: "error",
             error: isRomeManagedToolkit(toolkit)
               ? romeManagedConnectHint(toolkit)
-              : `Toolkit "${toolkit}" is not connected. Call connector_connect with toolkit "${toolkit}" first, then re-run connector_proxy.`,
+              : `Toolkit "${toolkit}" is not connected. Call connector:connector_connect with toolkit "${toolkit}" first, then re-run connector:connector_proxy.`,
           };
         }
         if (account.kind === "ambiguous") {

@@ -18,13 +18,14 @@ function action(name: string): Action {
   } as unknown as Action;
 }
 
-const ACTIONS = [action("send_message"), action("create_routine"), action("secret")];
+const ACTIONS = [action("system:send_message"), action("system:create_routine"), action("secret")];
 
 const registry: ActionRegistry = {
   register: () => {},
-  get: (name) => ACTIONS.find((a) => a.config.name === (name === "send" ? "send_message" : name)),
+  get: (name) =>
+    ACTIONS.find((a) => a.config.name === (name === "send" ? "system:send_message" : name)),
   has: (name) => ACTIONS.some((a) => a.config.name === name),
-  getCanonicalName: (name) => (name === "send" ? "send_message" : name),
+  getCanonicalName: (name) => (name === "send" ? "system:send_message" : name),
   list: () => ACTIONS.map((a) => a.config.name),
   getForAgent: (names) =>
     names.includes("*") ? ACTIONS : ACTIONS.filter((a) => names.includes(a.config.name)),
@@ -36,7 +37,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     continuityKey: "webchat:chat-1",
     sessionId: "session-1",
     isSubagent: false,
-    actions: ["send_message", "create_routine"],
+    actions: ["system:send_message", "system:create_routine"],
     widgets: "card",
     turnId: () => "turn-1",
     live: () => true,
@@ -74,24 +75,27 @@ function ports(
 describe("romeToolPorts actions", () => {
   it("lists and permits only what the turn's agent may call, under any of its names", () => {
     const { actions } = ports();
-    expect(actions.list(turn()).map((a) => a.name)).toEqual(["send_message", "create_routine"]);
+    expect(actions.list(turn()).map((a) => a.name)).toEqual([
+      "system:send_message",
+      "system:create_routine",
+    ]);
     expect(actions.permits(turn(), "send")).toBe(true);
     expect(actions.permits(turn(), "secret")).toBe(false);
   });
 
   it("finds an action the turn's agent may call under any of its names, and no other", () => {
     const { actions } = ports();
-    expect(actions.find(turn(), "send")?.name).toBe("send_message");
-    expect(actions.find(turn(), "send_message")?.name).toBe("send_message");
+    expect(actions.find(turn(), "send")?.name).toBe("system:send_message");
+    expect(actions.find(turn(), "system:send_message")?.name).toBe("system:send_message");
     expect(actions.find(turn(), "secret")).toBeUndefined();
     expect(actions.find(turn(), "missing")).toBeUndefined();
   });
 
   it("runs a permitted action attributed to the turn, and refuses any other", async () => {
     const { actions, run } = ports();
-    await actions.run(turn(), "send_message", { text: "hi" });
+    await actions.run(turn(), "system:send_message", { text: "hi" });
     expect(run).toHaveBeenCalledWith(
-      "send_message",
+      "system:send_message",
       { text: "hi" },
       expect.objectContaining({
         initiator: "agent:core:main",
@@ -118,10 +122,10 @@ describe("romeToolPorts actions run as the turn's actor", () => {
     });
     // The model's callback lands in the guardian's scope, for the visitor's turn.
     await runWithSessionActor(guardian, () =>
-      actions.run(turn({ actor: () => visitor }), "send_message", { text: "hi" }),
+      actions.run(turn({ actor: () => visitor }), "system:send_message", { text: "hi" }),
     );
     expect(run).toHaveBeenCalledWith(
-      "send_message",
+      "system:send_message",
       { text: "hi" },
       expect.objectContaining({ actor: visitor }),
     );
@@ -135,7 +139,9 @@ describe("romeToolPorts actions run as the turn's actor", () => {
       ambient.push(await currentSessionActor());
       return { status: "ok" as const, data: { routineId: "r1" } };
     });
-    await runWithSessionActor(visitor, () => actions.run(turn(), "send_message", { text: "hi" }));
+    await runWithSessionActor(visitor, () =>
+      actions.run(turn(), "system:send_message", { text: "hi" }),
+    );
     expect((run.mock.calls[0] as unknown[])[2]).not.toHaveProperty("actor");
     expect(ambient).toEqual([undefined]);
   });
@@ -151,7 +157,7 @@ describe("romeToolPorts actions run as the turn's actor", () => {
       }),
     );
     expect(run).toHaveBeenCalledWith(
-      "create_routine",
+      "system:create_routine",
       expect.anything(),
       expect.objectContaining({ actor: visitor }),
     );
@@ -169,7 +175,7 @@ describe("romeToolPorts defer", () => {
     });
     expect(getSession).toHaveBeenCalledWith("chat-1");
     expect(run).toHaveBeenCalledWith(
-      "create_routine",
+      "system:create_routine",
       expect.anything(),
       expect.objectContaining({ sessionId: "session-1", turnId: "turn-1" }),
     );
@@ -188,7 +194,7 @@ describe("romeToolPorts defer for a task chat", () => {
   it("schedules a check for a task of the chat's own owner", async () => {
     const { defer, run } = ports(undefined, async (id) => (id === "mine" ? "guardian" : null));
     await defer.schedule(turn(), wake("mine"));
-    expect(run).toHaveBeenCalledWith("create_routine", expect.anything(), expect.anything());
+    expect(run).toHaveBeenCalledWith("system:create_routine", expect.anything(), expect.anything());
   });
 
   it("refuses a task that is not there, or is another owner's, and schedules nothing", async () => {
@@ -313,7 +319,7 @@ describe("romeToolPorts actions carry the turn's audience", () => {
 
   it("hands a private turn in a private chat on as private", async () => {
     const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "private" }), "send_message", {});
+    await actions.run(turn({ audience: () => "private" }), "system:send_message", {});
     expect(audienceOfRun(run)).toBe("private");
   });
 
@@ -324,7 +330,7 @@ describe("romeToolPorts actions carry the turn's audience", () => {
         audience: () => "private",
         threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
       }),
-      "send_message",
+      "system:send_message",
       {},
     );
     expect(audienceOfRun(run)).toBe("shared");
@@ -335,13 +341,13 @@ describe("romeToolPorts actions carry the turn's audience", () => {
     // A summoned agent: its turn's audience is the summoning turn's.
     await actions.run(
       turn({ audience: () => "private", threadContext: () => undefined }),
-      "send_message",
+      "system:send_message",
       {},
     );
     expect(audienceOfRun(run)).toBe("private");
     await actions.run(
       turn({ audience: () => "shared", threadContext: () => undefined }),
-      "send_message",
+      "system:send_message",
       {},
     );
     expect(audienceOfRun(run)).toBe("shared");
@@ -349,7 +355,7 @@ describe("romeToolPorts actions carry the turn's audience", () => {
 
   it("never widens a shared turn", async () => {
     const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "shared" }), "send_message", {});
+    await actions.run(turn({ audience: () => "shared" }), "system:send_message", {});
     expect(audienceOfRun(run)).toBe("shared");
   });
 });
@@ -435,12 +441,12 @@ describe("task input actor through the session tool port", () => {
         const claim = claimTaskInputActor("target", body, speaker)!;
         const actor = await taskInputActor(claim, repo as never, async () => "source");
         await admitTaskInput(claim, () =>
-          built.actions.run(turn({ actor: () => actor }), "send_message", {}),
+          built.actions.run(turn({ actor: () => actor }), "system:send_message", {}),
         );
       }),
     );
     expect(built.run).toHaveBeenCalledWith(
-      "send_message",
+      "system:send_message",
       {},
       expect.objectContaining({ actor: visitor }),
     );
@@ -598,9 +604,9 @@ describe("task input source capture precedes asynchronous setup", () => {
     await expect(sender("target", { text: "stopped" }, send)).rejects.toThrow();
     expect(send).not.toHaveBeenCalled();
     expect(() => context.captureTaskInput!()).toThrow("not live");
-    await built.actions.run(facts, "send_message", {});
+    await built.actions.run(facts, "system:send_message", {});
     expect(built.run).toHaveBeenCalledWith(
-      "send_message",
+      "system:send_message",
       {},
       expect.objectContaining({ actor: visitor }),
     );

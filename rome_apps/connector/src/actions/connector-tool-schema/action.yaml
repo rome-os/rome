@@ -4,9 +4,9 @@ description: |
   Fetch one Composio tool's full input and output JSON Schemas by slug, so you
   can write code that calls it correctly. Returns the tool's normalized name and
   description plus `input` (the arguments schema) and `output` (the return-value
-  schema). Use connector_search first to find the slug, then this to learn its
-  exact I/O before calling connector_tool_execute. Requires being signed in to
-  Composio (call connector_login once if not). Pass the owning toolkit slug
+  schema). Use connector:connector_search first to find the slug, then this to learn its
+  exact I/O before calling connector:connector_tool_execute. Requires being signed in to
+  Composio (call connector:connector_login once if not). Pass the owning toolkit slug
   (e.g. 'gmail') and the tool slug (e.g. 'GMAIL_SEND_EMAIL'). Note: the
   granularity of `output.data` is upstream-dependent — some toolkits model it
   fully, others leave it an opaque object, so confirm against a live response

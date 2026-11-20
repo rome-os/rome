@@ -814,7 +814,7 @@ export class ActionEngine {
       return { status: "pending_approval", approval: pending };
     }
 
-    // For the `summon` action, stamp the child agent name as an attribute
+    // For the `system:summon` action, stamp the child agent name as an attribute
     // so the summon-tree CLI can reconstruct parent/child agent relationships
     // without needing a separate `summon:{child}` span.
     const summonAttrs: Record<string, string> =

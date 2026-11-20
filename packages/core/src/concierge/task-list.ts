@@ -40,7 +40,6 @@ const CHANGE_SETTLE_MS = 150;
 /** The routines a chat's list shows apart, or never: checks, task schedules, follows and digests. */
 const NOT_A_CHAT_ROUTINE = new Set([
   RESUME_SESSION_ACTION,
-  `system:${RESUME_SESSION_ACTION}`,
   CONCIERGE_TASK_RUN_ACTION,
   CONCIERGE_FOLLOW_ACTION,
   CONCIERGE_DIGEST_ACTION,

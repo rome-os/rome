@@ -23,7 +23,7 @@ import {
 const STRANGER_PERSON_ID = "__STRANGER__";
 
 const actionConfig: ActionConfig = {
-  name: "message_handler",
+  name: "inbox:message_handler",
   type: "system",
   description: "Handle incoming messages",
   complexity: "moderate",
@@ -1449,7 +1449,7 @@ describe("sendAnswer", () => {
       .fn()
       .mockRejectedValueOnce(
         new ActionInvocationError(
-          "send_message",
+          "system:send_message",
           "handler_error",
           "no quote",
           "reply_unaddressable",
@@ -1462,15 +1462,15 @@ describe("sendAnswer", () => {
       replyToMessageId: "m-1",
     });
 
-    expect(runAction).toHaveBeenNthCalledWith(1, "send_message", {
+    expect(runAction).toHaveBeenNthCalledWith(1, "system:send_message", {
       text: "hi",
       replyToMessageId: "m-1",
     });
-    expect(runAction).toHaveBeenNthCalledWith(2, "send_message", { text: "hi" });
+    expect(runAction).toHaveBeenNthCalledWith(2, "system:send_message", { text: "hi" });
   });
 
   it("lets any other failure through", async () => {
-    const failure = new ActionInvocationError("send_message", "handler_error", "boom");
+    const failure = new ActionInvocationError("system:send_message", "handler_error", "boom");
     const runAction = rs.fn().mockRejectedValue(failure);
 
     await expect(

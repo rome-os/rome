@@ -885,7 +885,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Rome Mail rides the same relay/webhook transport but is not a
     // Composio webhook. Rome Cloud stamps `x-rome-mail-source: agentmail` on the
     // deposit (the relay strips only `x-rome-internal-*`, so this marker
-    // survives replay). Route those straight into core's `email_inbound` action,
+    // survives replay). Route those straight into core's `system:email_inbound` action,
     // which verifies the per-inbox HMAC before trusting the body — this branch
     // is pure transport and never authenticates anything itself.
     if (rawHeader(request.headers, "x-rome-mail-source") === "agentmail") {
@@ -895,7 +895,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Rome's own GitHub webhook (no Composio): GitHub stamps `X-GitHub-Event` on
     // every delivery. This rides the same relay/`/webhook` transport as Composio
     // (custom headers survive replay, like `x-rome-mail-source`), but verifies
-    // GitHub's own HMAC scheme against the secret `connector_github_subscribe`
+    // GitHub's own HMAC scheme against the secret `connector:connector_github_subscribe`
     // registered — never Composio's.
     if (rawHeader(request.headers, GITHUB_EVENT_HEADER)) {
       return await this.handleGithubWebhook(request);
@@ -975,7 +975,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
   /**
    * Ingest a verified GitHub webhook delivery — Rome's own GitHub event path,
    * zero Composio. Verifies the `X-Hub-Signature-256` HMAC against the secret
-   * `connector_github_subscribe` minted and registered on the hook, then emits
+   * `connector:connector_github_subscribe` minted and registered on the hook, then emits
    * `provider:event:github.<event>` onto the bus (deduped on GitHub's delivery
    * GUID) so a routine's event-bus trigger fires. A `ping` (GitHub's creation
    * test delivery) is acked without emitting.
@@ -1039,8 +1039,8 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   // Transport-only bridge for inbound Rome Mail: hand the raw deposit body and
-  // its HMAC to core's `email_inbound` action. We never verify or interpret the
-  // mail here — `email_inbound`/EmailAdapter own the per-inbox HMAC check and
+  // its HMAC to core's `system:email_inbound` action. We never verify or interpret the
+  // mail here — `system:email_inbound`/EmailAdapter own the per-inbox HMAC check and
   // all email semantics. Always ACK 200: a missing/disabled email channel or a
   // bad signature is handled (and dropped) downstream, and a relay retry would
   // not change the outcome.
@@ -1048,9 +1048,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const signature = rawHeader(request.headers, "x-rome-mail-signature") ?? "";
     const rawBody = new TextDecoder().decode(request.body ?? new Uint8Array(0));
     try {
-      await this.ctx.runAction("email_inbound", { rawBody, signature });
+      await this.ctx.runAction("system:email_inbound", { rawBody, signature });
     } catch (err) {
-      this.ctx.log.error("email_inbound transport failed", {
+      this.ctx.log.error("system:email_inbound transport failed", {
         error: err instanceof Error ? err.message : String(err),
       });
     }

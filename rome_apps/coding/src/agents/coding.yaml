@@ -29,4 +29,4 @@ systemPromptPrefix: |
   - Any other new app: `app_creation`.
   The skills link to `AUTHORING.md`, the source of truth for app code shape.
 
-  A task is done only when the `app_management` install succeeds.
+  A task is done only when the `system:app_management` install succeeds.

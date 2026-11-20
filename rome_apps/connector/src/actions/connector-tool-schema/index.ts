@@ -19,7 +19,9 @@ const inputSchema = z.object({
   slug: z
     .string()
     .min(1)
-    .describe("Tool slug to fetch the schema for, e.g. 'GMAIL_SEND_EMAIL' (from connector_search)"),
+    .describe(
+      "Tool slug to fetch the schema for, e.g. 'GMAIL_SEND_EMAIL' (from connector:connector_search)",
+    ),
 });
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
@@ -31,7 +33,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_tool_schema for "${slug}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_tool_schema for "${slug}".`,
         };
       }
       try {

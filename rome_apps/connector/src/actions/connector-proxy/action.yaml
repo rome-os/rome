@@ -23,8 +23,8 @@ description: |
   string-building it into the path — interpolating an untrusted value into the
   query string is query-param injection; `query` is escaped for you. (For a
   dynamic PATH segment, which `query` can't carry, encodeURIComponent it before
-  interpolating.) Requires being signed in (connector_login) and the toolkit
-  connected (connector_connect) first. On a 2xx response, returns { status, data,
+  interpolating.) Requires being signed in (connector:connector_login) and the toolkit
+  connected (connector:connector_connect) first. On a 2xx response, returns { status, data,
   headers } as `data`.
 
   With a Rome-managed Google connection, Gmail is restricted to GETs for

@@ -142,7 +142,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    * then dispatch the turn and settle. The channel holds this conversation
    * until the handler settles (rule R4 of `ChannelInbound`), so waiting for
    * the whole turn would hold a `/stop` in the same chat behind the turn it is
-   * meant to stop. Once dispatched, the order is best-effort: `message_handler`
+   * meant to stop. Once dispatched, the order is best-effort: `inbox:message_handler`
    * awaits a person lookup, a policy check and a store before its turn reaches
    * the agent session's queue, so two quick messages can reach the session in
    * either order, as they could before the channel ordered its handlers.
@@ -163,7 +163,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     // A program sends on `agents`, not a person, so `/stop` there is text for
-    // the model, and `message_handler` decides whether Rome answers it.
+    // the model, and `inbox:message_handler` decides whether Rome answers it.
     if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
@@ -294,7 +294,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     slow.unref?.();
     try {
       await this.actionEngine.run(
-        "message_handler",
+        "inbox:message_handler",
         {
           connectionId,
           channel: service,
@@ -335,7 +335,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         );
     } catch (err) {
       void activity.then((session) => session?.finish("error")).catch(() => {});
-      log.error("message_handler action failed", {
+      log.error("inbox:message_handler action failed", {
         service,
         messageId: message.messageId,
         senderId: message.senderId,

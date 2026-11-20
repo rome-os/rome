@@ -6,7 +6,7 @@ import type { SubscriptionEvent } from "./normalize.js";
  * Rome's OWN GitHub webhook ingest — no Composio. GitHub signs each delivery
  * with HMAC-SHA256 of the raw body under the hook's shared secret and sends it
  * as `X-Hub-Signature-256: sha256=<hex>`. We verify that here with the secret
- * `connector_github_subscribe` registered on the hook, so a forged delivery to
+ * `connector:connector_github_subscribe` registered on the hook, so a forged delivery to
  * the public webhook URL can never inject an event onto Rome's bus.
  *
  * The mirror of `ComposioClient.verifyWebhook` for the GitHub path; kept separate
@@ -54,7 +54,7 @@ export const GITHUB_DELIVERY_HEADER = "x-github-delivery";
 
 /**
  * GitHub's first delivery on hook creation. It carries no domain event, so the
- * ingest acks it without emitting — the agent's `connector_github_subscribe`
+ * ingest acks it without emitting — the agent's `connector:connector_github_subscribe`
  * already returned success, this just confirms reachability.
  */
 export const GITHUB_PING_EVENT = "ping";

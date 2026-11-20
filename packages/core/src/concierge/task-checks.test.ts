@@ -50,7 +50,7 @@ describe("TaskChecks", () => {
         localTime: "09:00",
         date: "2026-11-12",
       },
-      actionName: "resume_session",
+      actionName: "system:resume_session",
       args: { channel: "webchat", threadId: chatId, sessionId: "s", ...extra },
       nextRunAt: new Date(at),
     });
@@ -59,7 +59,7 @@ describe("TaskChecks", () => {
     routines.create({
       name: `wait ${chatId}`,
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
-      actionName: "resume_session",
+      actionName: "system:resume_session",
       args: {
         channel: "webchat",
         threadId: chatId,
@@ -154,7 +154,7 @@ describe("TaskChecks", () => {
     const old = await routines.create({
       name: "old wait",
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
-      actionName: "resume_session",
+      actionName: "system:resume_session",
       args: { channel: "webchat", threadId: "chat-1", sessionId: "s", chatId: "task-1" },
     });
     expect(await checks.laterOf(["task-1"])).toEqual(new Map([["task-1", Infinity]]));

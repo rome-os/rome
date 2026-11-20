@@ -84,7 +84,7 @@ const CHAT_ARG_OF_ACTION: Record<string, string> = {
 
 /**
  * The chat a routine works for: the chat its args send into (`threadId` of
- * `resume_session` and `send_message`, `sessionId` of `send_user_message`),
+ * `system:resume_session` and `system:send_message`, `sessionId` of `system:send_user_message`),
  * else the chat it was made in: `madeIn`, or the webchat chat whose turn
  * creates it. Null when neither names one. Migration 0134 fills older rows by
  * their args alone, as nothing on them says where they were made.
@@ -125,6 +125,25 @@ export class RoutinesRepository {
     private db: DrizzleDb,
     private placeAudience?: RoutinePlaceAudience,
   ) {}
+
+  /**
+   * @deprecated Renames the action of every routine saved under an action's
+   * old bare name, such as `send_message`, to its full ID, such as
+   * `system:send_message`. Goes once no instance has a routine saved under an
+   * old name.
+   */
+  async deprecatedQualifyActionNames(fullIdOf: Readonly<Record<string, string>>): Promise<number> {
+    let renamed = 0;
+    for (const [oldName, fullId] of Object.entries(fullIdOf)) {
+      const updated = await this.db
+        .update(routines)
+        .set({ actionName: fullId })
+        .where(eq(routines.actionName, oldName))
+        .returning({ id: routines.id });
+      renamed += updated.length;
+    }
+    return renamed;
+  }
 
   /**
    * Who can read what a routine's fires say: its chat's audience, and shared
