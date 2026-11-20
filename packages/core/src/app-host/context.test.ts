@@ -518,16 +518,12 @@ export function createAction(config, deps) {
     const action = registry.get("lazy_action");
     expect(action?.config.name).toBe("lazy_action");
     const emitted: unknown[] = [];
-    await expect(
-      action?.execute(
-        {},
-        {
-          emitActionEvent(event) {
-            emitted.push(event);
-          },
-        },
-      ),
-    ).resolves.toEqual({ status: "ok" });
+    const emit = (event: unknown) => {
+      emitted.push(event);
+    };
+    await expect(action?.execute({}, { emit, emitActionEvent: emit })).resolves.toEqual({
+      status: "ok",
+    });
     expect(emitted).toEqual([{ type: "lazy_started" }]);
     expect((globalThis as RuntimeContextGlobal).__lazyActionEvents).toEqual([
       "module",
@@ -951,24 +947,16 @@ describe("runAction invocation port", () => {
     });
   });
 
-  it("answers the run in progress as ctx.run, and streams its events to the caller", async () => {
-    const callee = createRomeAppContext(resolvedApp("callee-app"), {
-      catalog: catalogFor(resolvedApp("callee-app")),
-      db: {} as RomeAppRuntimeServices["db"],
-      actionEngine: {} as ActionEngine,
-      repositories: createRepositories(),
-    });
+  it("hands execute the run in progress, which streams its events to the caller", async () => {
     let seen: { actionName?: string; executionId?: string } | undefined;
     const context = contextWithActions([
-      probeAction("run_probe", async () => {
-        const run = callee.run;
+      probeAction("run_probe", async (_args, run) => {
         seen = { actionName: run?.actionName, executionId: run?.executionId };
         run?.emit({ type: "started" });
         return { status: "ok", data: null };
       }),
     ]);
 
-    expect(callee.run).toBeUndefined();
     const invocation = context.invokeAction("run_probe", {});
     const events: unknown[] = [];
     for await (const event of invocation.events) events.push(event);

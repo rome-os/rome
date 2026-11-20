@@ -1,12 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext, currentActionRun } from "./actions/context.js";
+import { actionExecutionContext } from "./actions/context.js";
 import {
   type ActionDispatchReceipt,
   ActionInvocationError,
   ActionInvocationEventOverflowError,
   type ActionEvent,
   type ActionInvocation,
-  type ActionRun,
   type AppConnectionsCapability,
   type AppFavorCapability,
   type AppRuntimeRepositories,
@@ -61,8 +60,6 @@ export interface RomeAppContext {
     args: Record<string, unknown>,
   ): ActionInvocation<TEvent, TOutput>;
   listRoutines(): Promise<Routine[]>;
-  /** The action run in progress, or absent outside one. */
-  readonly run?: ActionRun;
 }
 
 export interface RomeAppRuntimeServices {
@@ -387,10 +384,6 @@ export function createRomeAppContext(
 
       const rows = await services.routinesRepo.findAll();
       return rows.map(toRoutine);
-    },
-    // A getter: one context serves every run of the app's actions.
-    get run() {
-      return currentActionRun();
     },
   };
 }

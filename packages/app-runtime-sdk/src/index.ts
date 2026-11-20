@@ -175,10 +175,23 @@ export interface ActionEvent {
   readonly type: string;
 }
 
-/** @deprecated Emit through {@link RomeAppContext.run}: `ctx.run.emit(event)`. */
-export interface ActionExecutionContext {
+/**
+ * One run of an action, as its `execute(input, run)` receives it: who started
+ * it and for what, and the events it streams to whoever started it. It lasts
+ * for the one call, unlike the app's {@link RomeAppContext}, which every run
+ * shares. A host that predates `emit` passes only `emitActionEvent`;
+ * {@link defineAction} fills in the rest.
+ */
+export interface ActionRun extends CurrentActionContext {
+  /** Stream `event` to whoever started this run. An event emitted after the
+   *  run settled is dropped. */
+  emit<TEvent extends ActionEvent>(event: TEvent): void;
+  /** @deprecated Use {@link ActionRun.emit}, which does the same. */
   emitActionEvent<TEvent extends ActionEvent>(event: TEvent): void;
 }
+
+/** @deprecated Use {@link ActionRun}, which is the same object. */
+export type ActionExecutionContext = ActionRun;
 
 export interface ActionInvocation<TEvent extends ActionEvent = ActionEvent, TOutput = unknown> {
   readonly events: AsyncIterable<TEvent>;
@@ -220,7 +233,7 @@ export interface Action {
    * app keys, or the environment.
    */
   inputSchema?: Record<string, unknown>;
-  execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
+  execute(args: Record<string, unknown>, run?: ActionRun): Promise<ActionResult>;
   /**
    * Optional preview renderer. Returns a structured payload describing what
    * the action would do, used to build approval cards shown to the guardian.
@@ -432,7 +445,7 @@ const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
 export function defineAction<S extends z.ZodType>(spec: {
   config: ActionConfig;
   schema: S;
-  execute: (input: z.infer<S>, context: ActionExecutionContext) => Promise<ActionResult>;
+  execute: (input: z.infer<S>, run: ActionRun) => Promise<ActionResult>;
   preview?: (input: z.infer<S>) => PreviewPayload;
 }): Action {
   const { $schema: _schema, ...inputSchema } = z.toJSONSchema(spec.schema) as Record<
@@ -462,12 +475,12 @@ export function defineAction<S extends z.ZodType>(spec: {
   return {
     config: spec.config,
     inputSchema,
-    execute: async (args, context) => {
+    execute: async (args, run) => {
       const parsed = parse(args);
       if (!parsed.success) {
         return { status: "error", error: invalidInputMessage(parsed.error) };
       }
-      return spec.execute(parsed.data, context ?? NOOP_ACTION_EXECUTION_CONTEXT);
+      return spec.execute(parsed.data, actionRunOf(run));
     },
     ...(previewFn && {
       preview: (args: Record<string, unknown>): PreviewPayload => {
@@ -485,12 +498,13 @@ export function defineAction<S extends z.ZodType>(spec: {
   };
 }
 
-const NOOP_ACTION_EXECUTION_CONTEXT: ActionExecutionContext = {
-  emitActionEvent() {
-    // Direct calls to action.execute() in tests and local helpers have no
-    // invocation observer. The real ActionEngine always supplies a context.
-  },
-};
+/** The run a host passed, with `emit` filled in where a host that predates
+ *  it passed only `emitActionEvent`. Direct calls to `execute()` in tests and
+ *  local helpers pass none, and their events go nowhere. */
+function actionRunOf(run: Partial<ActionRun> | undefined): ActionRun {
+  const emit = run?.emit ?? run?.emitActionEvent ?? (() => {});
+  return { ...run, emit, emitActionEvent: emit };
+}
 
 export interface Logger {
   debug(message: string, data?: Record<string, unknown>): void;
@@ -2333,8 +2347,8 @@ export function setCurrentActionContextResolver(
   registry[CURRENT_ACTION_CONTEXT_RESOLVER] = resolver ?? undefined;
 }
 
-/** @deprecated Read {@link RomeAppContext.run}, which answers the same and
- *  emits the run's events. */
+/** @deprecated Read the {@link ActionRun} an action's `execute(input, run)`
+ *  receives, which answers the same and emits the run's events. */
 export function getCurrentActionContext(): CurrentActionContext | undefined {
   const registry = globalThis as GlobalActionContextRegistry;
   return registry[CURRENT_ACTION_CONTEXT_RESOLVER]?.();
@@ -2733,19 +2747,10 @@ export interface AppConnectionsCapability {
 }
 
 /**
- * The action run in progress, as {@link RomeAppContext.run} answers it: who
- * started it and for what, and the events it streams to whoever started it.
- */
-export interface ActionRun extends CurrentActionContext {
-  /** Stream `event` to whoever started this run. An event emitted after the
-   *  run settled is dropped. */
-  emit<TEvent extends ActionEvent>(event: TEvent): void;
-}
-
-/**
  * Everything Rome offers an app, in one object. An action's `createAction`,
  * a hook's `createHook` and an API's `createApiHandler` each receive it. Rome
- * builds one per app, and it lasts as long as the app is loaded.
+ * builds one per app, and it lasts as long as the app is loaded. What belongs
+ * to one action run is the {@link ActionRun} its `execute` receives.
  */
 export interface RomeAppContext {
   app: RomeAppDefinition;
@@ -2770,10 +2775,6 @@ export interface RomeAppContext {
     args: Record<string, unknown>,
   ): ActionInvocation<TEvent, TOutput>;
   listRoutines(): Promise<Routine[]>;
-  /** The action run in progress, or absent outside one, such as in an API
-   *  request or a hook. Read it when the code runs, not when the app loads:
-   *  the same context serves every run. Absent from a host that predates it. */
-  readonly run?: ActionRun;
 }
 
 export type ActionInvocationErrorCode =
