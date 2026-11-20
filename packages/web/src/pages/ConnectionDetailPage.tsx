@@ -70,9 +70,10 @@ export default function ConnectionDetailPage() {
   // after a failed load, so Escape steps back in those states too.
   useSettingsBack(backToList);
 
-  const refresh = () => {
-    void connectionsQuery.refetch();
-    void composioQuery.refetch();
+  // Resolves once both lists are in: the members switch shows its own setting
+  // until then. react-query's refetch does not throw.
+  const refresh = async () => {
+    await Promise.all([connectionsQuery.refetch(), composioQuery.refetch()]);
   };
   const flash = (message: string) => toast(message);
   // A freshly added account has no card until the list refetches; navigating
