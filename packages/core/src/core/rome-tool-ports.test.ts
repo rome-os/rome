@@ -16,6 +16,7 @@ import {
   admitTaskInput,
 } from "../webchat/task-input-actor.js";
 import type { SessionToolContext } from "./session-tools.js";
+import { computerUseTool } from "./computer-use-tool.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 
 function action(name: string): Action {
@@ -678,6 +679,7 @@ describe("Computer Use in a private chat", () => {
     const verifier = new ComputerRequestVerifier(device, peer, publicKey);
     let actor: TurnActor | undefined = { kind: "guardian", [browserChatInput]: "instance" };
     let contract: unknown = signedComputerRequest;
+    let auditState = "ok";
     let onDiscovery: (() => void) | undefined;
     let executions = 0;
     const run = rs.fn(
@@ -689,7 +691,7 @@ describe("Computer Use in a private chat", () => {
             ok: true as const,
             result: {
               actions: ["system.info", "computer.status"],
-              audit: { state: "ok" },
+              audit: { state: auditState },
               computerUsePilot: { epoch: verifier.epoch, signedRequest: contract },
             },
           };
@@ -741,6 +743,10 @@ describe("Computer Use in a private chat", () => {
       "computer_protocol_unsupported",
     );
     contract = signedComputerRequest;
+    auditState = "unavailable";
+    expect((await call("computer.status")).content[0].text).toContain("audit_unavailable");
+    expect(executions).toBe(2);
+    auditState = "ok";
     onDiscovery = () => {
       actor = { kind: "guardian" };
     };
@@ -753,5 +759,53 @@ describe("Computer Use in a private chat", () => {
     ).toBe(true);
     expect(run).toHaveBeenCalledTimes(sent);
     expect(executions).toBe(2);
+  });
+
+  it.each([
+    "local",
+    "remote",
+  ])("withholds the %s result when the chat becomes shared during the operation", async (location) => {
+    const device = randomUUID();
+    const actor: TurnActor = { kind: "guardian", [browserChatInput]: "local" };
+    let privateChat = true;
+    const execute = rs.fn(async () => {
+      privateChat = false;
+      return "private result";
+    });
+    const tool = computerUseTool(
+      {
+        grants: {
+          local: true,
+          instance: {
+            peer: randomUUID(),
+            key: generateKeyPairSync("ed25519").privateKey,
+            targets: { [device]: ["computer.status"] },
+          },
+        },
+        localStatus: execute,
+        run: async (_target, action) => ({
+          ok: true,
+          result:
+            action === "system.info"
+              ? {
+                  actions: ["computer.status"],
+                  audit: { state: "ok" },
+                  computerUsePilot: { epoch: randomUUID(), signedRequest: signedComputerRequest },
+                }
+              : await execute(),
+        }),
+      },
+      turn({ actor: () => actor, audience: () => "private" }),
+      true,
+      async () => privateChat,
+    );
+    const result = await tool.handler({
+      target: location === "local" ? "local" : device,
+      operation: "computer.status",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("computer_result_withheld");
+    expect(result.content[0].text).not.toContain("private result");
   });
 });

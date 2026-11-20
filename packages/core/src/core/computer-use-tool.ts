@@ -54,7 +54,7 @@ interface ComputerToolOptions {
 
 const report = z.object({
   actions: z.array(z.string()).max(128),
-  audit: z.object({ state: z.literal("ok") }),
+  audit: z.object({ state: z.enum(["ok", "unavailable"]) }),
   computerUsePilot: z.object({
     epoch: deviceId,
     signedRequest: z.object({
@@ -115,6 +115,13 @@ export function computerUseTool(
         !!source &&
         turn.actor() === actor;
       const authorized = () => current() && privateTurn?.(turn);
+      const reportResult = async (result: DeviceRunResult) => {
+        if (!(await authorized()) || !current())
+          return denied(
+            "computer_result_withheld: This turn lost access to the result. The operation may already have run. Do not retry it.",
+          );
+        return result.ok ? answer(result.result) : denied(result.code);
+      };
       const refusal = () =>
         denied(
           "computer_origin_required: This operation requires a private message from the guardian's signed-in browser.",
@@ -142,8 +149,7 @@ export function computerUseTool(
         if (!operation) return answer({ actions: ["computer.status"] });
         if (operation !== "computer.status")
           return denied("unsupported_action: The local computer does not offer this operation.");
-        const status = await options.localStatus();
-        return (await authorized()) && current() ? answer(status) : refusal();
+        return reportResult({ ok: true, result: await options.localStatus() });
       }
       if (source === "local-password") return refusal();
       if (!instance) return denied("computer_target_unapproved");
@@ -155,6 +161,8 @@ export function computerUseTool(
         return denied(
           "computer_protocol_unsupported: The target did not advertise the signed request protocol.",
         );
+      if (advertised.data.audit.state === "unavailable")
+        return denied("audit_unavailable: The target cannot record Computer Use requests.");
       const actions = advertised.data.actions.filter((action) =>
         instance.targets[target].includes(action),
       );
@@ -168,9 +176,7 @@ export function computerUseTool(
         action: operation,
         args,
       });
-      const result = await options.run(target, operation, args, proof);
-      if (!(await authorized()) || !current()) return refusal();
-      return result.ok ? answer(result.result) : denied(result.code);
+      return reportResult(await options.run(target, operation, args, proof));
     },
   };
 }

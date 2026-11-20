@@ -997,7 +997,8 @@ A same-origin send in a private Guardian chat carries the verified entry into
 the turn. A checked Concierge handoff can carry it into its task chat. Input
 from another entry removes the authority from a mixed turn. The tool refuses
 forks and background turns. The target requires a signature for each
-`computer.*` action.
+`computer.*` action. If the turn loses access after making the request, the
+tool returns `computer_result_withheld`. The operation may already have run.
 
 ### Grant a target
 
@@ -1013,7 +1014,9 @@ dashboard origin and can send a private chat message using the Guardian's
 browser session. Core cannot tell whether the Guardian typed that message.
 
 The owner sets `ROME_COMPUTER_USE_GRANTS_FILE` to an absolute path on the
-instance. Each target needs its own entry. Use an instance-specific
+instance. Core stops at startup if it cannot load the configured grants.
+Leave the setting unset to start Core without the `computer_use` chat tool.
+Each target needs its own entry. Use an instance-specific
 `ROME_JWT_SECRET` of at least 32 characters. Keep signing material and grants
 under the owner's control, outside directories that untrusted workloads can
 read or edit.
