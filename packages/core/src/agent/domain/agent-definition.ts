@@ -31,6 +31,13 @@ export interface AgentDefinition {
   /** A test-only back door, honoured only for the apps in `INBOX_BYPASS_APPS`: the Inbox app answers no message on an account linked to this agent. */
   unsafeTestOnlyBypassInbox?: boolean;
   policy?: Partial<AgentPolicy>;
+  /** Which wake gate and send gate the agent takes part in chats under. Each
+   *  absent provider is the default: the chat's settings decide the wake, and
+   *  a message to anyone but the guardian is checked before it goes out. */
+  participation?: {
+    wake?: "chatSettingsWake" | "alwaysWake";
+    send?: "guardedSend" | "alwaysSend";
+  };
   /**
    * On a cold resume, the model a chat saved replaces the model the session is
    * pinned to. Rome gives it to the agents it names when it loads the catalog.

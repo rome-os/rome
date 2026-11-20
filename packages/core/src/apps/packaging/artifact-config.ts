@@ -128,6 +128,15 @@ export const AgentConfigSchema = z
     // A test-only back door: Rome honours it only for the apps in
     // INBOX_BYPASS_APPS (app-host/inbox-bypass.ts).
     unsafeTestOnlyBypassInbox: z.boolean().optional(),
+    // The wake gate and send gate providers (participation/). Each omitted
+    // provider is the default.
+    participation: z
+      .object({
+        wake: z.enum(["chatSettingsWake", "alwaysWake"]).optional(),
+        send: z.enum(["guardedSend", "alwaysSend"]).optional(),
+      })
+      .strict()
+      .optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
     policy: z

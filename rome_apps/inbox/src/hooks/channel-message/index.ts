@@ -17,7 +17,6 @@ import type {
   MessagesSaid,
 } from "@rome-os/app-runtime";
 
-import type { WakeGateFor } from "../../actions/message-handler/index.js";
 
 const log = createAppLogger("channel-message-hook");
 
@@ -54,7 +53,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
       unsafeTestOnlyBypassesInbox?: ChannelMessageHookDeps["unsafeTestOnlyBypassesInbox"];
       messagesSaid?: MessagesSaid;
-      wakeGateFor?: WakeGateFor;
+      wakeGateFor?: ChannelMessageHookDeps["wakeGateFor"];
     } = {},
   ) {}
 
@@ -230,7 +229,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     const sender = "sender" in event ? event.sender : undefined;
     let wake: "wake" | "review" | undefined;
     if (sender && this.options.wakeGateFor) {
-      const gate = await this.options.wakeGateFor({ chat: ref });
+      const gate = await this.options.wakeGateFor({ chat: ref, agent: accountAgent });
       const decision = gate(
         {
           connectionId,
@@ -419,13 +418,6 @@ function byChannelName(
   return (target) => (typeof target === "string" ? linkedAgentOf(target) : undefined);
 }
 
-/** Core's wake gate, passed beside the hook deps the SDK describes. A host
- *  that predates it passes none. */
-function wakeGateForOf(deps: ChannelMessageHookDeps): WakeGateFor | undefined {
-  const candidate = (deps as { wakeGateFor?: unknown }).wakeGateFor;
-  return typeof candidate === "function" ? (candidate as WakeGateFor) : undefined;
-}
-
 /** A host handed the hook no `channels`, so it would hear nothing. */
 export class MissingChannelsError extends Error {
   constructor() {
@@ -451,7 +443,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
         ? { unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox }
         : {}),
       ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
-      ...(wakeGateForOf(deps) ? { wakeGateFor: wakeGateForOf(deps) } : {}),
+      ...(deps.wakeGateFor ? { wakeGateFor: deps.wakeGateFor } : {}),
     },
   );
 }

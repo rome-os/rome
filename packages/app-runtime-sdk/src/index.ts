@@ -2,12 +2,14 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
+import type { WakeGateFor } from "./participation.js";
 import type { ChatReads, MessageRef, Place } from "./chats.js";
 import type { WidgetUi } from "./widget-ui.js";
 
 export { z };
 export type { JSONSchema };
 export * from "./chat-settings.js";
+export * from "./participation.js";
 export * from "./widget-ui.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
@@ -2197,6 +2199,9 @@ export interface MessagesSaid {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** The wake gate, asked once a recorded message names its sender. A host
+   *  that predates it passes none. */
+  wakeGateFor?: WakeGateFor;
   /** Hearing messages said to Rome once they are on record. A hook that subscribes here
    *  hears every channel through it, the ones added later included, and does
    *  not store the message itself. A host that predates it passes none, and a
@@ -3043,6 +3048,7 @@ export interface ApprovalRecord {
   createdAt: Date;
 }
 
+/** @deprecated Ask the wake gate or the send gate ({@link ParticipationDeps}). */
 export interface ApprovalsRepository {
   create(data: {
     type: ApprovalType;
@@ -3064,6 +3070,7 @@ export interface SentinelLogEntry {
   createdAt: Date;
 }
 
+/** @deprecated Ask the wake gate or the send gate ({@link ParticipationDeps}). */
 export interface SentinelLogRepository {
   create(data: {
     messageId: string;
@@ -3098,6 +3105,7 @@ export interface PolicyContext {
   threadType?: string;
 }
 
+/** @deprecated Ask the wake gate or the send gate ({@link ParticipationDeps}). */
 export interface PolicyEngine {
   evaluate(context: PolicyContext): Promise<PolicyRule>;
 }

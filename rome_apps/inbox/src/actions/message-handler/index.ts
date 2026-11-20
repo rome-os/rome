@@ -12,12 +12,14 @@ import type {
   ChatRecord,
   ChatRef,
   ChatRepository,
+  SendGate,
   EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
   SentinelLogRepository,
   StreamAgentMessage,
+  WakeGateFor,
 } from "@rome-os/app-runtime";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -27,34 +29,6 @@ const log = createAppLogger("message-handler");
 // ---------------------------------------------------------------------------
 // Dependencies injected via factory
 // ---------------------------------------------------------------------------
-
-/** Core's send gate, which the SDK does not describe yet. */
-export type SendGate = (request: {
-  destination: {
-    connectionId: string;
-    chatId: string;
-    place: "direct" | "group";
-    sameChatAsWake: boolean;
-    onlyGuardianReads: boolean;
-  };
-  recipient: { bondLevel: BondLevel } | null;
-  author: { agentName: string };
-}) => "send" | "check" | "ask_guardian" | "refuse";
-
-/** Core's wake gate, which the SDK does not describe yet. */
-export type WakeGate = (
-  message: {
-    connectionId: string;
-    chatId: string;
-    channel: string;
-    place: "direct" | "group";
-    threadName?: string;
-  },
-  sender: { person: { id: string; bondLevel: BondLevel } | null },
-) => "wake" | "quiet" | "block" | "review";
-
-/** The wake gate for a chat, built from its current settings. */
-export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
 
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
@@ -773,7 +747,12 @@ export function createMessageHandlerAction(
         const wake =
           args.wake === "wake" || args.wake === "review"
             ? args.wake
-            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
+            : (
+                await deps.wakeGateFor({
+                  chat: { connectionId, chatId: threadId as ChatId },
+                  agent: accountAgent,
+                })
+              )(
                 {
                   connectionId,
                   chatId: threadId,

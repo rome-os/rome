@@ -25,7 +25,7 @@ import type {
   RunParams,
   SaidInboundEvent,
 } from "@rome-os/app-runtime";
-import type { SendGate, WakeGate } from "./actions/message-handler/index.js";
+import type { SendGate, WakeGate } from "@rome-os/app-runtime";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
 

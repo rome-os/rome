@@ -315,7 +315,7 @@ import { ApprovalHandler, executionRequester } from "./apps/actions/approval-han
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
-import { guardedSend } from "./participation/send-gate/index.js";
+import { sendGateByAuthor } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
@@ -1588,7 +1588,11 @@ async function main() {
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
+    providerOf: (agent) => agentLoader.find(agent)?.definition.participation?.wake,
   });
+  const sendGate = sendGateByAuthor(
+    (agent) => agentLoader.find(agent)?.definition.participation?.send,
+  );
   // Only the Concierge writes in a Concierge chat. An app's action sending
   // there, as a task chat's agent or a routine may, wakes the Concierge with
   // a quiet system turn instead (docs/architecture/concierge.md).
@@ -1628,7 +1632,7 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: guardedSend,
+    sendGate,
     wakeGateFor,
     routinesRepo,
     routineEngine,
