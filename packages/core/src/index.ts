@@ -81,7 +81,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
@@ -1353,15 +1353,11 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
-        // A new session reads the chat's latest messages from where the chat
-        // lives, and only from a platform that answers them live, bounded at
-        // `until`. A store a personal account syncs, such as WhatsApp's, also
-        // holds what the guardian said before Rome was connected. The query
-        // here has neither a live read nor an upper bound yet, so it reads
-        // nothing.
-        latest: async () => {
-          throw new Error("No channel here reads a chat live from its platform");
-        },
+        // No `latest`: a new session reads the chat's latest messages only
+        // from a platform that answers them live, bounded at `until`, and no
+        // channel here does yet. A store a personal account syncs, such as
+        // WhatsApp's, also holds what the guardian said before Rome was
+        // connected.
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>
