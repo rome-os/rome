@@ -28,7 +28,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   apps: ["access", "instance"],
   chats: ["access", "agent", "apps", "connections", "participation", "people"],
   concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
-  connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
+  connections: ["apps", "desktops", "instance"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
@@ -38,6 +38,19 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   routines: ["access", "agent", "apps"],
   webchat: ["access", "agent", "apps", "chats", "participation"],
 };
+
+/**
+ * Contexts a context's tests may import beyond ALLOWED_IMPORTS. A connection's
+ * test drives it end to end, through the Chats port that admits its messages
+ * and the People repository its setup reads.
+ */
+const TEST_ALLOWED_IMPORTS: Record<string, readonly string[]> = {
+  connections: ["chats", "participation", "people"],
+};
+
+function isTest(path: string): boolean {
+  return /\.test\.tsx?$/.test(path);
+}
 
 /** Why a context never imports another, where the model says more than the graph. */
 const REASONS: Record<string, string> = {
@@ -55,6 +68,12 @@ const REASONS: Record<string, string> = {
     "A favor request never names a connection, so no file in favors/ imports connections/.",
   "favors-never-imports-people":
     "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
+  "connections-never-imports-chats":
+    "A connection only translates what the platform says into its own Message. Chats records it and decides who said it, so no file in connections/ imports chats/.",
+  "connections-never-imports-people":
+    "A connection names a sender by the platform's account id. People decides who that is, so no file in connections/ imports people/.",
+  "connections-never-imports-participation":
+    "A connection never decides whom a message addresses or whether Rome answers it. Participation does, for each of Rome's accounts, so no file in connections/ imports participation/.",
   "connections-never-imports-webchat":
     "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":
@@ -123,13 +142,171 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
         name,
         description: describe(from, to, name),
         rejects: (imp) =>
-          imp.kind === "file" && contextOf(imp.from) === from && contextOf(imp.to) === to,
+          imp.kind === "file" &&
+          contextOf(imp.from) === from &&
+          contextOf(imp.to) === to &&
+          !(isTest(imp.from) && TEST_ALLOWED_IMPORTS[from]?.includes(to)),
       } satisfies ImportRule;
     }),
 );
 
+const CHANNEL_MESSAGE = "chats/connected-accounts/channel-message.ts";
+
+/** Rules inside contexts, where one module is the only way through. */
+export const contextEntryRules: ImportRule[] = [
+  {
+    name: "channel-message-built-in-one-place",
+    description:
+      "What an app receives is built from a connection's Message at one point, so only chats/connected-accounts/connection-ports.ts imports channel-message.ts. Tests and the test kit in test/ may convert too.",
+    rejects: (imp) =>
+      imp.kind === "file" &&
+      imp.to === CHANNEL_MESSAGE &&
+      imp.from !== "chats/connected-accounts/connection-ports.ts" &&
+      !isTest(imp.from) &&
+      !imp.from.startsWith("test/"),
+  },
+  {
+    name: "connections-declare-chat-rules-only",
+    description:
+      "Core owns the chat rules: it stores them and the wake gate runs them. A kind of connection only declares which rules its chats offer, so a file in connections/ imports nothing of chat-settings/ but rules.ts. Tests may, to drive the service. Vocabulary: docs/domains/chats.md#chat-rule.",
+    rejects: (imp) =>
+      imp.kind === "file" &&
+      imp.from.startsWith("connections/") &&
+      imp.to.startsWith("chat-settings/") &&
+      imp.to !== "chat-settings/rules.ts" &&
+      !isTest(imp.from),
+  },
+];
+
+/**
+ * Files in connections/ that still import Chats, People or Participation,
+ * with the files they import there, until ZHA-230 moves the work out.
+ */
+const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; why: string }> = [
+  {
+    from: "connections/app-chats.ts",
+    to: [
+      "chats/storage/message.ts",
+      "chats/connected-accounts/connected-account.ts",
+      "chats/storage/chat.ts",
+      "chats/storage/chat-repository.ts",
+      "chats/storage/message-repository.ts",
+      "chats/storage/place.ts",
+    ],
+    why: "Listing an app's chats reads Chats' storage, until it moves to Chats.",
+  },
+  {
+    from: "connections/channel-chat.ts",
+    to: ["chats/storage/chat-repository.ts", "chats/storage/place.ts"],
+    why: "Finding a connection's chat reads Chats' storage, until it moves to Chats.",
+  },
+  {
+    from: "connections/chat-adapter.ts",
+    to: ["chats/storage/chat.ts", "participation/conversation-buffer.ts", "chats/storage/place.ts"],
+    why: "The chat adapter reads Chats' storage and Participation's buffer, until it moves to Chats.",
+  },
+  {
+    from: "connections/inbound-recording.ts",
+    to: [
+      "chats/storage/chat-repository.ts",
+      "chats/storage/events.ts",
+      "chats/storage/message.ts",
+      "chats/storage/message-repository.ts",
+      "chats/storage/place.ts",
+    ],
+    why: "Recording a message heard is Chats' work, until it moves to Chats.",
+  },
+  {
+    from: "connections/recorded-sends.ts",
+    to: [
+      "chats/connected-accounts/connected-account.ts",
+      "chats/storage/chat-repository.ts",
+      "chats/storage/message-repository.ts",
+      "chats/storage/place.ts",
+      "chats/storage/message.ts",
+    ],
+    why: "Recording a message sent is Chats' work, until it moves to Chats.",
+  },
+  {
+    from: "connections/send.ts",
+    to: [
+      "chats/connected-accounts/connected-account.ts",
+      "chats/send.ts",
+      "chats/place.ts",
+      "chats/storage/chat-repository.ts",
+      "chats/storage/message-repository.ts",
+      "chats/storage/place.ts",
+    ],
+    why: "Sending records the message in its chat, until recording moves to Chats.",
+  },
+  {
+    from: "connections/speaker-messages.ts",
+    to: ["chats/storage/message.ts", "chats/storage/message-repository.ts"],
+    why: "Reading who spoke reads Chats' storage, until it moves to Chats.",
+  },
+  {
+    from: "connections/outbound/send-refusals.ts",
+    to: ["chats/widget-text.ts"],
+    why: "A refused widget is sent as text written by Chats, until the fallback moves to Chats.",
+  },
+  {
+    from: "connections/integrations/discord.ts",
+    to: ["people/model/people-repository.ts"],
+    why: "The Discord wiring hands the People repository to the kind, until it gets a port.",
+  },
+  {
+    from: "connections/integrations/email.ts",
+    to: ["people/model/people-repository.ts"],
+    why: "The email wiring hands the People repository to the kind, until it gets a port.",
+  },
+  {
+    from: "connections/integrations/index.ts",
+    to: ["people/model/people-repository.ts"],
+    why: "The wiring hands the People repository to the kinds, until they get a port.",
+  },
+  {
+    from: "connections/kinds/discord/discord.ts",
+    to: ["chats/connected-accounts/account-agents.ts", "people/link-code/index.ts"],
+    why: "Discord still checks whether a chat is switched off and reads link codes, until those move up.",
+  },
+  {
+    from: "connections/kinds/email/email.ts",
+    to: ["people/model/people-repository.ts", "people/guardian-mapping.ts"],
+    why: "Email reads the guardian's address from People, until it gets a port.",
+  },
+  {
+    from: "connections/kinds/feishu/descriptor.ts",
+    to: ["people/model/people-repository.ts"],
+    why: "Feishu's descriptor hands the People repository to the kind, until it gets a port.",
+  },
+  {
+    from: "connections/kinds/feishu/feishu.ts",
+    to: [
+      "chats/connected-accounts/account-agents.ts",
+      "participation/mention-only.ts",
+      "people/link-code/index.ts",
+      "people/model/people-repository.ts",
+    ],
+    why: "Feishu still checks whether a chat is switched off, its mention-only rule and link codes, until those move up.",
+  },
+  {
+    from: "connections/setup/manager.ts",
+    to: ["people/model/people-repository.ts", "people/guardian-mapping.ts"],
+    why: "Setting up a connection reads the guardian from People, until it gets a port.",
+  },
+];
+
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
+  ...CONNECTIONS_PENDING.flatMap(({ from, to, why }) =>
+    to.map((target) => ({
+      rule: `connections-never-imports-${contextOf(target)}`,
+      from,
+      to: target,
+      ticket: "ZHA-230",
+      why,
+    })),
+  ),
   {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",

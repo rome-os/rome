@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Agent } from "../agent/index.js";
-import { runsOwnTurns } from "./runs-own-turns.js";
+import { deprecatedRunsOwnTurns } from "./deprecated-runs-own-turns.js";
 
 function agent(
   ownerId: string,
@@ -18,21 +18,21 @@ function agent(
       systemPromptPrefix: "",
       tools: [],
       permissionMode: "default",
-      ...(runs === undefined ? {} : { runsOwnTurns: runs }),
+      ...(runs === undefined ? {} : { deprecatedRunsOwnTurns: runs }),
     },
   };
 }
 
-describe("runsOwnTurns", () => {
+describe("deprecatedRunsOwnTurns", () => {
   it("lets the chief of staff's agent run its own turns", () => {
-    expect(runsOwnTurns(agent("chief-of-staff", true))).toBe(true);
+    expect(deprecatedRunsOwnTurns(agent("chief-of-staff", true))).toBe(true);
   });
 
   it("refuses every other app, core, and an agent that does not ask", () => {
-    expect(runsOwnTurns(agent("sales", true))).toBe(false);
-    expect(runsOwnTurns(agent("chief-of-staff", true, "core"))).toBe(false);
-    expect(runsOwnTurns(agent("chief-of-staff", false))).toBe(false);
-    expect(runsOwnTurns(agent("chief-of-staff", undefined))).toBe(false);
-    expect(runsOwnTurns(undefined)).toBe(false);
+    expect(deprecatedRunsOwnTurns(agent("sales", true))).toBe(false);
+    expect(deprecatedRunsOwnTurns(agent("chief-of-staff", true, "core"))).toBe(false);
+    expect(deprecatedRunsOwnTurns(agent("chief-of-staff", false))).toBe(false);
+    expect(deprecatedRunsOwnTurns(agent("chief-of-staff", undefined))).toBe(false);
+    expect(deprecatedRunsOwnTurns(undefined)).toBe(false);
   });
 });

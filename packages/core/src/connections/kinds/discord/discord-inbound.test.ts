@@ -1,9 +1,10 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChannelType, MessageReferenceType, MessageType, type Message } from "discord.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ChatId, MessageAddressing } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
 
 // The gateway filters run before dispatchMessage. These tests call it directly
@@ -17,26 +18,23 @@ function adapterCapturing(): { adapter: DiscordAdapter; captured: ChannelMessage
   Object.assign(adapter, { client: { user: BOT } });
   const captured: ChannelMessage[] = [];
   adapter.onInbound(async (msg) => {
-    captured.push(msg);
+    captured.push(channelMessageOf(msg, "discord"));
   });
   return { adapter, captured };
 }
 
+/** Hands `message` over as the gateway handler does. Whom it addresses is
+ *  worked out from its facts where apps receive it, so the cases name none. */
 async function dispatch(
   adapter: DiscordAdapter,
   message: Message,
-  flags: { isDm: boolean; isThread: boolean; addressing: MessageAddressing },
+  flags: { isDm: boolean; isThread: boolean },
 ): Promise<void> {
   await (
     adapter as unknown as {
-      dispatchMessage(
-        message: Message,
-        isDm: boolean,
-        isThread: boolean,
-        addressing: MessageAddressing,
-      ): Promise<void>;
+      dispatchMessage(message: Message, isDm: boolean, isThread: boolean): Promise<void>;
     }
-  ).dispatchMessage(message, flags.isDm, flags.isThread, flags.addressing);
+  ).dispatchMessage(message, flags.isDm, flags.isThread);
 }
 
 describe("DiscordAdapter inbound messages", () => {
@@ -78,7 +76,7 @@ describe("DiscordAdapter inbound messages", () => {
       ]),
     } as unknown as Message;
 
-    await dispatch(adapter, message, { isDm: false, isThread: true, addressing: "mention" });
+    await dispatch(adapter, message, { isDm: false, isThread: true });
 
     expect(captured).toStrictEqual([
       {
@@ -120,10 +118,11 @@ describe("DiscordAdapter inbound messages", () => {
       member: null,
       guild: null,
       channel: { type: ChannelType.DM, isThread: () => false },
+      mentions: { users: new Map() },
       attachments: new Map(),
     } as unknown as Message;
 
-    await dispatch(adapter, message, { isDm: true, isThread: false, addressing: "direct" });
+    await dispatch(adapter, message, { isDm: true, isThread: false });
 
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
@@ -150,10 +149,11 @@ describe("DiscordAdapter inbound messages", () => {
       member: { displayName: "Alice Smith" },
       guild: { members: { me: { displayName: "Rome" } } },
       channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+      mentions: { users: new Map() },
       attachments: new Map(),
     } as unknown as Message;
 
-    await dispatch(adapter, message, { isDm: false, isThread: false, addressing: "ambient" });
+    await dispatch(adapter, message, { isDm: false, isThread: false });
 
     expect(captured[0].thread).toStrictEqual({ kind: "group", name: "general" });
     expect(captured[0]).not.toHaveProperty("parentChatId");
@@ -252,7 +252,7 @@ async function startedAdapter(
   });
   const captured: ChannelMessage[] = [];
   adapter.onInbound(async (msg) => {
-    captured.push(msg);
+    captured.push(channelMessageOf(msg, "discord"));
   });
   await adapter.start();
   return { say: (message) => handlers.get("messageCreate")!(message), captured };
@@ -291,6 +291,49 @@ function guildMessage(
     attachments: new Map(),
   } as unknown as Message;
 }
+
+describe("DiscordAdapter gateway order", () => {
+  it("hands over a chat's messages in the order they arrived, however slow a reply's lookup", async () => {
+    const { say, captured } = await startedAdapter({
+      connectionId: "conn-1",
+      chatSettings: chatSettingsOf(true),
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reply = guildMessage("first", `<@${BOT.id}> stop that`, { mentions: [BOT.id] });
+    Object.assign(reply, {
+      type: MessageType.Reply,
+      reference: {
+        channelId: "channel-1",
+        guildId: "guild-1",
+        messageId: "earlier",
+        type: MessageReferenceType.Default,
+      },
+      channel: {
+        type: ChannelType.GuildText,
+        name: "general",
+        isThread: () => false,
+        messages: {
+          fetch: async () => {
+            await held;
+            return { author: { id: BOT.id } };
+          },
+        },
+      },
+    });
+
+    const first = say(reply);
+    const second = say(guildMessage("second", "/stop"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(captured.map((message) => message.messageId)).toEqual([]);
+    release();
+    await Promise.all([first, second]);
+
+    expect(captured.map((message) => message.messageId)).toEqual(["first", "second"]);
+  });
+});
 
 describe("DiscordAdapter gateway filters", () => {
   it("hears nothing in a chat switched off but a link code and a stop said to Rome", async () => {

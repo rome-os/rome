@@ -10,6 +10,25 @@ import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.j
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
+import type {
+  ChatSettingField,
+  ChatSettingsOverrides,
+  ChatSettingsSnapshot,
+} from "@rome-os/app-runtime";
+import {
+  asChatSettings,
+  CHAT_RULE_NAMES,
+  type ChatRuleName,
+  type ChatRules,
+  chatRuleDefaults,
+  chatRulesOf,
+  effectiveChatRules,
+} from "../../chat-settings/rules.js";
+import {
+  chatRules,
+  chatSettingsWake,
+  type WakeMessage,
+} from "../../participation/wake-gate/index.js";
 
 /**
  * Registers what boot registers: the built-in kinds, then each kind the wiring
@@ -150,5 +169,270 @@ describe("registerBuiltinConnections", () => {
       .filter((descriptor) => !descriptor.accountIdOf)
       .map((descriptor) => descriptor.connectionKind);
     expect(unnamed).toEqual([]);
+  });
+});
+
+// ── Chat rules ──────────────────────────────────────────────────────────────
+// Core owns the rules; each kind only declares which it offers and fixes the
+// values of the rest (docs/domains/chats.md#chat-rule).
+
+/** Every registered kind, by its id. */
+function everyKind(): Map<string, ConnectionDescriptor> {
+  const registered = new Map<string, ConnectionDescriptor>();
+  registerEveryKind({
+    register: (descriptor: ConnectionDescriptor) =>
+      registered.set(descriptor.connectionKind, descriptor),
+  } as unknown as ConnectionRegistry);
+  return registered;
+}
+
+/** The rules each kind offered, and how the wake gate read the others, before
+ *  kinds declared their rules: the table in chat-settings/support.ts and
+ *  `chatRules` in participation/wake-gate/load.ts as they stood. */
+const BEFORE_OFFERED = new Map<string, readonly ChatSettingField[]>([
+  [
+    "discord",
+    [
+      "enabled",
+      "activation.mode",
+      "activation.botMessages",
+      "activation.whenOthersMentioned",
+      "replies.placement",
+      "routing.agentName",
+      "session.reset",
+    ],
+  ],
+  [
+    "feishu",
+    ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
+  ],
+  ["wechat", ["enabled", "routing.agentName", "session.reset"]],
+]);
+const BEFORE_CORE: readonly ChatSettingField[] = ["session.reset"];
+
+function beforeOffered(kind: string, place: "direct" | "group"): readonly ChatSettingField[] {
+  return place === "direct" ? BEFORE_CORE : (BEFORE_OFFERED.get(kind) ?? BEFORE_CORE);
+}
+
+/** The effective settings and wake rules as the old path worked them out: the
+ *  stored values over the defaults, then the gate skipping a rule not offered. */
+function before(kind: string, place: "direct" | "group", stored: ChatSettingsOverrides) {
+  const offered = beforeOffered(kind, place);
+  const effective = asChatSettings(effectiveChatRules({ offers: CHAT_RULE_NAMES }, stored));
+  const has = (field: ChatSettingField) => offered.includes(field);
+  return {
+    offered,
+    effective,
+    wake: {
+      enabled: effective.enabled,
+      replyRule: has("activation.mode") ? effective.activation.mode : "all",
+      botMessages: has("activation.botMessages") ? effective.activation.botMessages : "all",
+      whenOthersMentioned: has("activation.whenOthersMentioned")
+        ? effective.activation.whenOthersMentioned
+        : "respond",
+    },
+  };
+}
+
+/** Every value each rule can be stored as. */
+const VALUES: { [R in ChatRuleName]: readonly ChatRules[R][] } = {
+  enabled: [true, false],
+  "activation.mode": ["mention", "all"],
+  "activation.botMessages": ["ignore", "mentions", "all"],
+  "activation.whenOthersMentioned": ["ignore", "respond"],
+  "replies.placement": ["thread", "inline"],
+  "routing.agentName": [null, "helper"],
+  "session.reset": [{ mode: "none" }, { mode: "idle", idleMinutes: 30 }],
+};
+
+/** `values` as the overrides a guardian's choices store. */
+function storedOf(values: Partial<ChatRules>): ChatSettingsOverrides {
+  const stored: ChatSettingsOverrides = {};
+  for (const [rule, value] of Object.entries(values) as [ChatRuleName, unknown][]) {
+    if (rule === "enabled") {
+      stored.enabled = value as boolean;
+      continue;
+    }
+    const [group, field] = rule.split(".") as [
+      "activation" | "replies" | "routing" | "session",
+      string,
+    ];
+    ((stored as Record<string, Record<string, unknown>>)[group] ??= {})[field] = value;
+  }
+  return stored;
+}
+
+/** Each combination of stored values over `rules`, one rule unset or set to each of its values. */
+function storedCombinations(rules: readonly ChatRuleName[]): ChatSettingsOverrides[] {
+  let combos: Partial<ChatRules>[] = [{}];
+  for (const rule of rules) {
+    const next: Partial<ChatRules>[] = [];
+    for (const combo of combos) {
+      next.push(combo);
+      for (const value of VALUES[rule]) next.push({ ...combo, [rule]: value });
+    }
+    combos = next;
+  }
+  return combos.map(storedOf);
+}
+
+const HEARS_MESSAGES = (descriptor: ConnectionDescriptor) =>
+  descriptor.capabilities.talker !== undefined;
+
+describe("chat rules", () => {
+  it("each kind that hears messages declares its chat rules", () => {
+    const undeclared = [...everyKind().values()]
+      .filter((descriptor) => HEARS_MESSAGES(descriptor) && !descriptor.chatRules)
+      .map((descriptor) => descriptor.connectionKind);
+    expect(undeclared).toEqual([]);
+  });
+
+  it("no kind both offers and fixes a rule, or names one twice", () => {
+    for (const descriptor of everyKind().values()) {
+      const rules = descriptor.chatRules;
+      if (!rules) continue;
+      const fixed = Object.keys(rules.fixed ?? {});
+      expect({
+        kind: descriptor.connectionKind,
+        both: rules.offers.filter((r) => fixed.includes(r)),
+      }).toEqual({ kind: descriptor.connectionKind, both: [] });
+      expect(new Set(rules.offers).size).toBe(rules.offers.length);
+    }
+  });
+
+  // The kinds that existed before declarations offer what they did, and
+  // every chat runs on the same values, for every value a guardian could
+  // store through the dashboard or an in-chat command.
+  it.each(["direct", "group"] as const)("keeps every kind's %s chats as they were", (place) => {
+    for (const descriptor of everyKind().values()) {
+      if (!HEARS_MESSAGES(descriptor) || !descriptor.chatRules) continue;
+      const kind = descriptor.connectionKind;
+      const rules = chatRulesOf(descriptor.chatRules, place);
+      expect({ kind, offers: [...rules.offers].sort() }).toEqual({
+        kind,
+        offers: [...beforeOffered(kind, place)].sort(),
+      });
+      for (const stored of storedCombinations(rules.offers)) {
+        const old = before(kind, place, stored);
+        const effective = asChatSettings(effectiveChatRules(rules, stored));
+        const snapshot = { effective } as ChatSettingsSnapshot;
+        expect({ kind, stored, wake: chatRules(snapshot) }).toEqual({
+          kind,
+          stored,
+          wake: old.wake,
+        });
+        // The rules outside the wake gate run on what was stored, where offered.
+        for (const rule of rules.offers) {
+          expect({ kind, rule, value: effectiveChatRules(rules, stored)[rule] }).toEqual({
+            kind,
+            rule,
+            value: effectiveChatRules({ offers: CHAT_RULE_NAMES }, stored)[rule],
+          });
+        }
+        expect(effective.replies).toEqual(old.effective.replies);
+      }
+    }
+  });
+});
+
+/** A rule's conformance case: the value stored for it, the message, and what
+ *  the wake gate decides for the guardian, whatever else the kind sets. */
+interface RuleCase<R extends ChatRuleName> {
+  value: ChatRules[R];
+  message?: Pick<WakeMessage, "addressing" | "fromBot" | "mentionsOthers">;
+  wake?: "wake" | "quiet";
+}
+
+const RULE_CASES: { [R in ChatRuleName]: readonly RuleCase<R>[] } = {
+  enabled: [
+    { value: false, message: { addressing: "mention" }, wake: "quiet" },
+    { value: true, message: { addressing: "mention" }, wake: "wake" },
+  ],
+  "activation.mode": [
+    { value: "mention", message: { addressing: "ambient" }, wake: "quiet" },
+    { value: "mention", message: { addressing: "mention" }, wake: "wake" },
+    { value: "all", message: { addressing: "ambient" }, wake: "wake" },
+  ],
+  "activation.botMessages": [
+    { value: "ignore", message: { addressing: "mention", fromBot: true }, wake: "quiet" },
+    { value: "mentions", message: { addressing: "mention", fromBot: true }, wake: "wake" },
+    { value: "mentions", message: { addressing: "ambient", fromBot: true }, wake: "quiet" },
+    { value: "all", message: { addressing: "mention", fromBot: true }, wake: "wake" },
+  ],
+  "activation.whenOthersMentioned": [
+    { value: "ignore", message: { addressing: "ambient", mentionsOthers: true }, wake: "quiet" },
+    { value: "respond", message: { mentionsOthers: true }, wake: "wake" },
+  ],
+  "replies.placement": [{ value: "inline" }, { value: "thread" }],
+  "routing.agentName": [{ value: "helper" }, { value: null }],
+  "session.reset": [{ value: { mode: "none" } }, { value: { mode: "daily", atHour: 4 } }],
+};
+
+describe("chat rule conformance", () => {
+  // A kind that offers a rule runs it as Core does for every other kind.
+  for (const descriptor of everyKind().values()) {
+    const offers = descriptor.chatRules?.offers ?? [];
+    for (const rule of offers) {
+      it(`${descriptor.connectionKind} runs ${rule} as stored`, () => {
+        const rules = chatRulesOf(descriptor.chatRules ?? { offers: [] }, "group");
+        for (const c of RULE_CASES[rule] as readonly RuleCase<typeof rule>[]) {
+          const stored = storedOf({ [rule]: c.value });
+          const effective = effectiveChatRules(rules, stored);
+          expect(effective[rule]).toEqual(c.value);
+          if (!c.message) continue;
+          const gate = chatSettingsWake({
+            ...chatRules({ effective: asChatSettings(effective) } as ChatSettingsSnapshot),
+            trustedLevels: ["guardian"],
+            replyToLevels: ["guardian"],
+            policies: [],
+            connectionKindOf: () => descriptor.connectionKind,
+          });
+          const decision = gate(
+            {
+              connectionId: "c1",
+              chatId: "chat-1",
+              channel: descriptor.connectionKind,
+              place: "group",
+              ...c.message,
+            },
+            { person: { id: "guardian", bondLevel: "guardian" } },
+          );
+          expect({ rule, value: c.value, message: c.message, decision }).toEqual({
+            rule,
+            value: c.value,
+            message: c.message,
+            decision: c.wake,
+          });
+        }
+      });
+    }
+  }
+});
+
+describe("chat rule resolution", () => {
+  // Older data can hold a value for a rule a kind does not offer, such as a
+  // Telegram group's session agent. The chat runs on the default or the
+  // kind's fixed value, never on it.
+  it("ignores a value stored for a rule the kind does not offer", () => {
+    const stored = storedOf({
+      enabled: false,
+      "activation.mode": "mention",
+      "routing.agentName": "helper",
+    });
+    const telegram = effectiveChatRules(
+      { offers: ["session.reset"], fixed: { "activation.mode": "all" } },
+      stored,
+    );
+    expect(telegram).toMatchObject({
+      enabled: true,
+      "activation.mode": "all",
+      "routing.agentName": null,
+    });
+  });
+
+  it("runs every rule at its default for a kind that offers none, as an official app", () => {
+    const stored = storedOf({ enabled: false, "routing.agentName": "helper" });
+    expect(effectiveChatRules({ offers: [] }, stored)).toEqual(chatRuleDefaults());
+    expect(chatRulesOf({ offers: [] }, "direct").offers).toEqual([]);
   });
 });

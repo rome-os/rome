@@ -187,28 +187,31 @@ describe("the Concierge agent", () => {
     expect(rule).toContain("writes its conclusion in the language of its brief");
   });
 
-  it("tells the guardian once, with the task link, that a task waits on them, and copies no card", () => {
-    const rule = concierge.systemPromptPrefix
-      .split("\n")
-      .find((line) => line.startsWith("- `turn_end:completed question` or `approval`"));
+  it("forwards a task's question card itself, and tells an approval in one line with the task link", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const question = lines.find((line) => line.startsWith("- `turn_end:completed question`")) ?? "";
     for (const text of [
-      "turn_end:completed question",
-      "`approval`",
-      "the task waits for the guardian",
+      "Send its `card id=` with `card_forward`, and nothing else",
+      "it is the same card, answered here or in the task chat",
+      "the answer comes back as the task's next turn",
+      "If they answer in words here instead, pass their words on with `chat_send`",
+    ])
+      expect(question).toContain(text);
+    const approval = lines.find((line) => line.startsWith("- `approval`")) ?? "";
+    for (const text of [
       "Say so once, in one short line, with the task's link",
       "they decide it in the task chat",
-      "pass their words on with `chat_send`",
-      "an approval is decided only in its task chat",
+      "it is decided only in its task chat",
     ])
-      expect(rule).toContain(text);
-    // The Concierge shows no card for a task: its tool is gone, and so are the old words.
+      expect(approval).toContain(text);
+    // The Concierge shows no task card of its own: that tool is gone.
     expect(concierge.systemPromptPrefix).not.toContain("chat_card");
+    expect(concierge.systemPromptPrefix).not.toContain("ask it in plain words");
     // Rome keeps the status; the prompt never asks for one by hand.
     expect(concierge.systemPromptPrefix).not.toContain("needs_user");
     const tasks = concierge.systemPromptPrefix.split("# Tasks\n")[1];
     expect(tasks).toContain("You never set a status");
-    // The Concierge's own question goes in a card; a task asks in its own chat.
-    expect(tasks).toContain("with a question card or an approval");
+    expect(tasks).toContain("with a question card, which you send with `card_forward`");
     expect(tasks).toContain("never in plain text");
   });
 
