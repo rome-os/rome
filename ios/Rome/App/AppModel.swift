@@ -361,7 +361,8 @@ final class Workspace {
     @discardableResult
     func pinTopic(_ chatId: String, pinned: Bool) async -> Bool {
         guard (try? await backend.pinChat(chatId, pinned: pinned)) != nil else { return false }
-        topics.setPinned(chatId, pinned)
+        // The row slides to its new place, and the others make room.
+        withAnimation(.snappy) { topics.setPinned(chatId, pinned) }
         return true
     }
 

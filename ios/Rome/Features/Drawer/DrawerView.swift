@@ -30,6 +30,9 @@ struct DrawerView: View {
         return unread > 0 ? Text("Collapsed") + Text(verbatim: ", ") + Text("\(unread) unread") : Text("Collapsed")
     }
 
+    /// How long a row's swipe takes to close after one of its actions.
+    static let swipeCloseDelay = 0.6
+
     private func pin(_ id: String, _ pinned: Bool) {
         Task { await workspace.pinTopic(id, pinned: pinned) }
     }
@@ -133,11 +136,17 @@ struct DrawerView: View {
                     TopicItem(chat: chat, selected: section == .topic(chat.id), pinned: pinned) {
                         onSection(.topic(chat.id))
                     }
+                    // Above its neighbours, whose opaque rows would cover its shadow.
+                    .zIndex(section == .topic(chat.id) ? 1 : 0)
                     .drawerRow()
-                    // Right: pin or unpin, all the way across too.
+                    // Right: pin or unpin, all the way across too. The row
+                    // moves once its swipe has closed: moved while it is
+                    // still closing, the list fades the row out and in.
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        TopicPinButton(pinned: pinned) { pin(chat.id, !pinned) }
-                            .tint(Palette.primary)
+                        TopicPinButton(pinned: pinned) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + Self.swipeCloseDelay) { pin(chat.id, !pinned) }
+                        }
+                        .tint(Palette.primary)
                     }
                     // Left: Archive, which a full swipe takes, then Delete,
                     // which only a tap takes and which always asks. Not the
@@ -299,6 +308,10 @@ private struct TopicItem: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Palette.elevated)
                         .softElevation(radius: 14)
+                } else {
+                    // In the drawer's own color: a row moving past another hides it.
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Palette.drawer)
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
