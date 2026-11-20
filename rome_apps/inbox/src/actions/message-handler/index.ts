@@ -505,7 +505,7 @@ async function handleTrustedMessage(
   const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
   const decision = deps.sendGate({
     destination: { connectionId, chatId: threadId },
-    recipient: senderPerson ? { bondLevel: bondLevel as BondLevel } : null,
+    recipient: typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null,
     author: { agentName: targetAgent },
   });
   log.info("send gate decision", { decision, channel, channelUserId });

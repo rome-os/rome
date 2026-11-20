@@ -42,10 +42,10 @@ What the agent says back after a wake, through the account it was woken on.
 
 ## Send gate
 
-The check that decides whether a message an agent wrote may go out. It looks at where the message goes, who reads it there and which agent wrote it, never at the text, and answers *send*, *check*, *ask the guardian* or *refuse*. On *check*, a checking agent reads the message and sends it, refuses it, or holds it for the guardian in Approvals.
+The check that decides whether a message an agent wrote may go out. It looks at where the message goes, who sent the message it answers and which agent wrote it, never at the text, and answers *send*, *check*, *ask the guardian* or *refuse*. On *check*, a checking agent reads the message and sends it, refuses it, or holds it for the guardian in Approvals.
 
 - A message to the guardian goes out, and a message to anyone else is checked first.
-- The send gate calls no model, sends nothing and stores nothing, so the same message to the same reader always gets the same answer.
+- The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
 - The sentinel's own reply to a message it triaged does not pass the send gate.
 
 ## Audience

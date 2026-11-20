@@ -7,7 +7,8 @@ import type { BondLevel } from "@rome-os/app-runtime";
 export interface SendRequest {
   /** The chat the message goes to. */
   destination: { connectionId: string; chatId: string };
-  /** People's answer for whoever reads it there, or null when it is nobody. */
+  /** People's answer for the sender of the message this one answers, or null
+   *  when it is nobody. Others in the chat may read it too: the gate is not told. */
   recipient: { bondLevel: BondLevel } | null;
   /** The agent that wrote the message. */
   author: { agentName: string };
