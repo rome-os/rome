@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
+import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 import { sql } from "drizzle-orm";
 import { noRomeTools } from "./tool-calls.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
@@ -145,11 +146,11 @@ describe("Test Helpers", () => {
       expect(transport.sentMessages).toEqual([{ chatId: "thread-1", message: { text: "Hi" } }]);
     });
 
-    it("delivers a received message, named for its channel, to every listener", async () => {
+    it("delivers a received message to every listener, as apps receive it on its channel", async () => {
       const transport = new FakeTransport("discord");
       const received: ChannelMessage[] = [];
       transport.listen(async (msg) => {
-        received.push(msg);
+        received.push(channelMessageOf(msg, transport.channel));
       });
 
       const msg = await transport.receive({ text: "ping" });

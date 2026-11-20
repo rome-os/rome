@@ -13,6 +13,7 @@ export type ChatBubbleTone = "sent" | "received" | "muted";
  * column, so wide content such as a table or code scrolls inside it. A bubble whose text
  * holds a heading, a list, a table or a code block takes roomier padding (see
  * `[data-chat-bubble]` in globals.css); short plain text keeps the tight one.
+ * A bubble that holds a quote is at least 14rem wide.
  *
  * A `sent` bubble re-maps the markdown color tokens inside it (see
  * `.rome-bubble-on-primary` in globals.css), so links, list markers, and inline
@@ -28,6 +29,9 @@ export const ChatBubble = forwardRef<
       data-chat-bubble
       className={cn(
         "w-fit min-w-0 max-w-[min(100%,var(--container-2xl))] break-words rounded-16 border border-transparent px-3 py-2",
+        // A quote sits in the bubble without widening it, so a short reply
+        // keeps a width in which some of the quote shows (QuotedReply).
+        "has-[[data-reply-quote]]:min-w-56",
         tone === "sent" && "rome-bubble-on-primary bg-primary text-primary-foreground",
         tone === "received" && "bg-surface-muted text-foreground",
         tone === "muted" && "bg-surface-muted text-foreground",

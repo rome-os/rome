@@ -1,4 +1,4 @@
-// Where a Concierge message replies when it names no message.
+// The guardian messages a Concierge turn answers.
 // docs/domains/chats.md#chat-thread
 
 import type { ConciergeService } from "./service.js";
@@ -24,20 +24,4 @@ export async function turnPrompts(source: TurnSource, chatId: string, turnId: st
   const own = (await ownPrompts(source, chatId, turnId)).map((row) => row.id);
   const handedOn = source.promptsHandedOn(chatId).filter((id) => !own.includes(id));
   return [...handedOn, ...own];
-}
-
-/**
- * The message a Concierge message that names none replies to: the turn's
- * latest guardian message when every one the turn took was said inside one
- * chat thread, a reply there and not the thread's root. Otherwise none.
- */
-export async function defaultReplyTarget(source: TurnSource, chatId: string, turnId: string) {
-  const prompts = await turnPrompts(source, chatId, turnId);
-  const threads = new Set<string>();
-  for (const key of prompts) {
-    const thread = (await source.deps.webchatRepo.getReplyTarget(chatId, key))?.chatThreadId;
-    if (!thread || thread === key) return undefined;
-    threads.add(thread);
-  }
-  return threads.size === 1 ? prompts.at(-1) : undefined;
 }

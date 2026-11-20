@@ -48,9 +48,8 @@ describe("conciergeOpenTasks", () => {
     );
     expect(open).toBe(
       [
-        "- t1 · Flights · needs_you · task chat chat-t1",
-        "- t2 · Hotels · later · check due 2026-11-12T10:00:00.000Z · task chat chat-t2",
-        "  Two options left",
+        "- t1 · Flights · needs_you",
+        "- t2 · Hotels · later · check due 2026-11-12T10:00:00.000Z",
       ].join("\n"),
     );
   });

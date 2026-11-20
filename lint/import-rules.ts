@@ -10,8 +10,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { contextCrossings, contextRules } from "./rules/contexts.js";
+import { contextCrossings, contextEntryRules, contextRules } from "./rules/contexts.js";
 import { featureCrossings, featureRules } from "./rules/features.js";
+import { kindCrossings, kindRules } from "./rules/kinds.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 import { wiringCrossings, wiringRules } from "./rules/wiring.js";
@@ -247,10 +248,19 @@ function toPosix(path: string): string {
 /** Checks packages/core/src against every rule set and prints each violation. Returns the exit code. */
 export function runCli(): number {
   const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
-  const rules = [...layerRules, ...featureRules, ...contextRules, ...libraryRules, ...wiringRules];
+  const rules = [
+    ...layerRules,
+    ...featureRules,
+    ...kindRules,
+    ...contextRules,
+    ...contextEntryRules,
+    ...libraryRules,
+    ...wiringRules,
+  ];
   const crossings = [
     ...listedCrossings,
     ...featureCrossings,
+    ...kindCrossings,
     ...contextCrossings,
     ...wiringCrossings,
   ];

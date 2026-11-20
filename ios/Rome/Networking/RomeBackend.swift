@@ -31,6 +31,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Starts an untitled topic chat, which its first message names.
     func startTopicChat() async throws -> ConciergeChat
     func renameChat(_ id: String, to name: String) async throws
+    /// Pins or unpins a topic chat, which keeps it atop the drawer's list.
+    func pinChat(_ id: String, pinned: Bool) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
     /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
@@ -46,26 +48,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
-    /// A page of a Concierge chat by its main-line messages (`type=concierge`):
-    /// the newest without `before`, else the one before the cursor the last page
-    /// gave. `through` is a message the page must reach, a reply too: it holds
-    /// every main-line message down to its thread's root and two older ones.
-    /// `concierge` of the answer is set when the instance answered in that mode.
-    /// An instance before it answers a turn page, and a chat that is not a Concierge
-    /// chat is read by turns, `limit` of them: both come back with it nil.
-    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage
-    /// One chat thread whole (`type=concierge&thread=`), named by any message of it:
-    /// its root and every reply, in a page whose `concierge` has the root. An
-    /// instance before the mode answers without it, and the caller reads the
-    /// thread the old way (`thread(sessionId:root:)`). A thread the chat does
-    /// not hold comes back with no messages.
-    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
-    /// A send from a chat thread: it lands in that thread.
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
-    /// Every message of the chat thread `messageId` is in, oldest first.
-    /// Only an instance with chat threads answers it.
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage]
+    /// A send that replies to a message (`replyToMessageId`).
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// The same file shrunk to `width` (600 or 900) by an instance that can, and
@@ -81,13 +66,6 @@ protocol RomeBackend: AnyObject, Sendable {
     /// and the question card by answering the agent.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply
     func markRead(sessionId: String) async
-    /// The owner has seen these messages of the chat, such as the ones of a
-    /// thread they opened (`POST /chat/sessions/:id/messages/read`). It never
-    /// throws: it says whether the instance took the mark. An instance before
-    /// the route (a 404) or a network that fails leaves the messages as they
-    /// were, and the instance's flags win: the next time they are seen they are marked again.
-    @discardableResult
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool
     /// The chat's read mark, `lastSeenActivityAt`: an ISO time, or nil when
     /// the chat has none or it cannot be read.
     func readMark(sessionId: String) async -> String?
@@ -99,6 +77,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func taskList(chatId: String) async throws -> TaskListResponse
     /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
+    /// `GET /chats/:chatId/task-links?ids=`: the task chats among `ids` of this
+    /// Concierge chat's owner, from any of their Concierge chats, as a task
+    /// link draws them.
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
     /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
@@ -192,6 +174,10 @@ final class LiveBackend: RomeBackend {
         try await client.patch("/chat/sessions/\(escape(id))/name", json: .object(["name": .string(name)]))
     }
 
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await client.patch("/chat/sessions/\(escape(id))/pin", json: .object(["pinned": .bool(pinned)]))
+    }
+
     func archiveChat(_ id: String) async throws {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
     }
@@ -219,11 +205,6 @@ final class LiveBackend: RomeBackend {
         try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
-        let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: root)])
-        return page.messages
-    }
-
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
@@ -236,39 +217,13 @@ final class LiveBackend: RomeBackend {
         return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
     }
 
-    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
-        var query = [URLQueryItem(name: "type", value: "concierge"), URLQueryItem(name: "limit", value: String(limit))]
-        if let before { query.append(URLQueryItem(name: "before", value: before)) }
-        if let through { query.append(URLQueryItem(name: "through", value: through)) }
-        let data: Data
-        do {
-            data = try await client.getData("/chat/sessions/\(escape(sessionId))/messages", query: query)
-        } catch let error as APIError where error.isNotConcierge {
-            // Not a Concierge chat: it pages by turns.
-            if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
-            return try await messages(sessionId: sessionId, before: nil, limit: limit)
-        }
-        // An instance before the mode ignores `type` and answers a turn page.
-        if let wire = try? JSONDecoder().decode(ConciergeWirePage.self, from: data) { return wire.page() }
-        guard let page = try? JSONDecoder().decode(MessagePage.self, from: data) else { throw APIError.decoding }
-        return page
-    }
-
-    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
-        let query = [URLQueryItem(name: "type", value: "concierge"), URLQueryItem(name: "thread", value: key)]
-        let data = try await client.getData("/chat/sessions/\(escape(sessionId))/messages", query: query)
-        if let wire = try? JSONDecoder().decode(ConciergeWirePage.self, from: data) { return wire.page(thread: true) }
-        guard let page = try? JSONDecoder().decode(MessagePage.self, from: data) else { throw APIError.decoding }
-        return page
-    }
-
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, reply: nil)
     }
 
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
         var body: [String: JSONValue] = ["text": .string(text), "inputId": .string(inputId), "priority": .string(priority.rawValue)]
-        if let thread { body.merge(thread.body) { _, new in new } }
+        if let reply { body.merge(reply.body) { _, new in new } }
         if !files.isEmpty {
             body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
         }
@@ -305,12 +260,6 @@ final class LiveBackend: RomeBackend {
         _ = try? await client.post("/chat/sessions/\(escape(sessionId))/read")
     }
 
-    @discardableResult
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool {
-        guard !ids.isEmpty else { return true }
-        return (try? await client.post("/chat/sessions/\(escape(sessionId))/messages/read", json: .object(["ids": .array(ids.map { .string($0) })]))) != nil
-    }
-
     func readMark(sessionId: String) async -> String? {
         let session: SessionReadMark? = try? await client.get("/chat/sessions/\(escape(sessionId))")
         return session?.lastSeenActivityAt
@@ -334,6 +283,10 @@ final class LiveBackend: RomeBackend {
 
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
         try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
+    }
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await client.get("/chats/\(escape(chatId))/task-links", query: [URLQueryItem(name: "ids", value: ids.joined(separator: ","))])
     }
 
     func stopListedTask(chatId: String, taskId: String) async throws {
@@ -538,12 +491,15 @@ extension RomeBackend {
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Test doubles keep no pins.
+    func pinChat(_ id: String, pinned: Bool) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
         try await messages(sessionId: sessionId, before: nil, limit: limit)
     }
     func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse { TaskLinksResponse(tasks: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
     func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
@@ -557,23 +513,12 @@ extension RomeBackend {
     func connectors() async throws -> [ConnectorState] { [] }
     func agentName() async -> String? { nil }
     func pendingApprovals() async throws -> [PendingApproval] { [] }
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     func reportDeviceConnections(_ report: DeviceConnectionReport) async throws {}
-    /// Demo data and test doubles page by turns, as an instance before the mode does.
-    func conciergeMessages(sessionId: String, before: String?, limit: Int, through: String?) async throws -> MessagePage {
-        if let through { return try await messages(sessionId: sessionId, through: through, limit: limit) }
-        return try await messages(sessionId: sessionId, before: before, limit: limit)
-    }
-    func conciergeThread(sessionId: String, key: String) async throws -> MessagePage {
-        MessagePage(messages: try await thread(sessionId: sessionId, root: key), nextCursor: nil)
-    }
-    /// Demo data and test doubles keep no read marks of messages.
-    func markMessagesRead(sessionId: String, ids: [String]) async -> Bool { true }
     /// Demo data and test doubles have no read mark: no unread line.
     func readMark(sessionId: String) async -> String? { nil }
     /// Stand-ins (demo, tests) are no guardian of a real instance.

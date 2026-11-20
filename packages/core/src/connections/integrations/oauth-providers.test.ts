@@ -1,11 +1,10 @@
 // The Rome Cloud-OAuth connection-state descriptors (github/slack/
 // google/shopify), exercised over a REAL ConnectionRegistry + drizzle grant ledger. This
-// phase migrates ONLY the connection state (no Actor/Watcher — capabilities are
-// deliberately empty), so the contracts under test are:
+// descriptors own grant state and Google's Core-only Gmail Actor. The contracts under test are:
 //
 //   1. Shape: one grant per provider (github/google `user`, slack `workspace`,
 //      shopify `store`),
-//      no capabilities (act/talk/watch all unsupported).
+//      Gmail Act for Google, with other providers using their token-file paths.
 //   2. Grant lifecycle: import → authorized; revoke → unauthorized.
 //   3. Boot rehydration: a fresh registry over the same ledger rehydrates the
 //      authorized grant on load().
@@ -180,20 +179,23 @@ describe.each(
     while (openDbs.length) openDbs.pop()?.();
   });
 
-  it(`declares one \`${grant}\` grant and no capabilities (state-only phase)`, async () => {
+  it(`declares one \`${grant}\` grant and a Core-only Gmail Actor for Google`, async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
     expect(conn.connectionKind).toBe(provider);
     expect(conn.auth.grants()).toEqual({ [grant]: "unauthorized" });
-    // No Actor in this phase — connector_proxy keeps its legacy token path.
+    // Google builds its Actor only after authorization.
     expect(conn.act).toBeNull();
     expect(conn.isUnlocked("chat")).toBe(false);
     expect(conn.watch).toBeNull();
     expect(conn.status()).toEqual({
       chat: { state: "unsupported" },
-      act: { state: "unsupported" },
+      act:
+        provider === "google"
+          ? { state: "needs-auth", missingGrants: [grant] }
+          : { state: "unsupported" },
       watch: { state: "unsupported" },
     });
   });
@@ -327,7 +329,11 @@ describe("OAuth setup", () => {
   });
 });
 
-describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
+describe.each([
+  "shopify",
+  "google",
+] as const)("expiring OAuth grant renewal [%s, drizzle ledger]", (provider) => {
+  const grant = provider === "google" ? "user" : "store";
   afterEach(() => {
     rs.restoreAllMocks();
     while (openDbs.length) openDbs.pop()?.();
@@ -352,9 +358,9 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     expiresInMs: number,
   ) {
     const registry = new ConnectionRegistry({ repository: ledger });
-    registry.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
-    const conn = await registry.connect("shopify");
-    await registry.giveGrant(conn.connectionKind, conn.id, "store", {
+    registry.register(makeOAuthProviderDescriptor(provider, setupDeps(refresh)));
+    const conn = await registry.connect(provider);
+    await registry.giveGrant(conn.connectionKind, conn.id, grant, {
       material: { accessToken: "shpat_old", refreshToken: "shprt_old" },
       expiresAt: new Date(Date.now() + expiresInMs),
     });
@@ -373,11 +379,11 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const { conn } = await connectedRegistry(ledger, refresh, -60_000);
 
     const registry2 = new ConnectionRegistry({ repository: ledger });
-    registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
+    registry2.register(makeOAuthProviderDescriptor(provider, setupDeps(refresh)));
     await registry2.load();
 
     expect(refresh).toHaveBeenCalledWith("shprt_old");
-    expect(registry2.find("shopify")[0].auth.grants().store).toBe("authorized");
+    expect(registry2.find(provider)[0].auth.grants()[grant]).toBe("authorized");
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
   });
 
@@ -391,7 +397,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
 
     await registry.renewExpiring(10 * 60_000);
     expect(refresh).toHaveBeenCalledWith("shprt_old");
-    expect(conn.auth.grants().store).toBe("authorized");
+    expect(conn.auth.grants()[grant]).toBe("authorized");
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
   });
 
@@ -405,7 +411,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     await registry.renewExpiring(10 * 60_000);
 
     expect(refresh).toHaveBeenCalled();
-    expect(conn.auth.grants().store).toBe("authorized");
+    expect(conn.auth.grants()[grant]).toBe("authorized");
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_old");
   });
 
@@ -417,11 +423,11 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
 
     await registry.renewExpiring(10 * 60_000);
-    expect(conn.auth.grants().store).toBe("authorized");
+    expect(conn.auth.grants()[grant]).toBe("authorized");
 
     refresh.mockImplementation(async () => renewed());
     await registry.renewExpiring(10 * 60_000);
-    expect(conn.auth.grants().store).toBe("authorized");
+    expect(conn.auth.grants()[grant]).toBe("authorized");
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
   });
 
@@ -437,7 +443,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
 
     await registry.renewExpiring(10 * 60_000);
     await registry.renewExpiring(10 * 60_000);
-    expect(conn.auth.grants().store).toBe("authorized");
+    expect(conn.auth.grants()[grant]).toBe("authorized");
 
     refresh.mockImplementation(async () => renewed());
     await registry.renewExpiring(10 * 60_000);
@@ -452,10 +458,10 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     await connectedRegistry(ledger, unavailable, -60_000);
 
     const registry2 = new ConnectionRegistry({ repository: ledger });
-    registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(unavailable)));
+    registry2.register(makeOAuthProviderDescriptor(provider, setupDeps(unavailable)));
     await registry2.load();
 
-    expect(registry2.find("shopify")[0].auth.grants().store).toBe("authorized");
+    expect(registry2.find(provider)[0].auth.grants()[grant]).toBe("authorized");
   });
 
   it("never lets a renewal in flight overwrite a reconnect that lands meanwhile", async () => {
@@ -474,9 +480,9 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     await rs.waitFor(() => expect(refresh).toHaveBeenCalled());
     // ...and the guardian reconnects in the meantime.
     const reconnect = registry.giveGrant(
-      "shopify",
+      provider,
       conn.id,
-      "store",
+      grant,
       {
         material: { accessToken: "shpat_reconnected", refreshToken: "shprt_reconnected" },
         expiresAt: new Date(Date.now() + 60 * 60_000),
@@ -498,6 +504,6 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
 
     await registry.renewExpiring(10 * 60_000);
 
-    expect(conn.auth.grants().store).toBe("degraded");
+    expect(conn.auth.grants()[grant]).toBe("degraded");
   });
 });

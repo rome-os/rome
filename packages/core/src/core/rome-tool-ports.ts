@@ -8,6 +8,7 @@ import type { PlaceAudience } from "./place-audience.js";
 import {
   type AgentAction,
   type AgentActions,
+  type Audience,
   narrowerAudience,
   type DeferTool,
   type RomeTool,
@@ -15,6 +16,7 @@ import {
   type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
+import { didYouMean } from "../apps/actions/registry.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
 import { validateActionArgs } from "../apps/actions/validate-action-args.js";
 import type { WebChatRepository } from "../webchat/repository.js";
@@ -48,10 +50,10 @@ export interface RomeToolPortsDeps {
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
-   * Whose task `taskId` is, or null when there is none, so a check names only
-   * a task of its own chat's owner. When absent, no check names a task.
+   * Whose task chat `chatId` is, or null when it is none, so a check names
+   * only a task chat of its own chat's owner. When absent, no check names one.
    */
-  taskOwner?: (taskId: string) => Promise<string | null>;
+  taskOwner?: (chatId: string) => Promise<string | null>;
   /** The device kinds `connect_account` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
@@ -84,27 +86,33 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // agent may call: its allow-list, or everything for "*". Both the
   // model-facing catalog and the execution gate derive from it, so they can't
   // disagree. It's consulted per request, so an action installed
-  // mid-conversation by `app_management` is callable in the same session.
+  // mid-conversation by `system:app_management` is callable in the same session.
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
-    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
-    return actionRegistry
-      .getForAgent([...turn.actions])
-      .find((action) => action.config.name === requestedAction.config.name);
+    if (!requestedAction) {
+      throw new Error(`Unknown action: ${name}${permittedHint(turn, name)}`);
+    }
+    return permitted(turn, requestedAction);
   };
+  const permitted = (turn: TurnFacts, requested: Action): Action | undefined =>
+    actionRegistry
+      .getForAgent([...turn.actions])
+      .find((action) => action.config.name === requested.config.name);
+  // Names only an action the agent may call, so the hint reveals nothing more.
+  const permittedHint = (turn: TurnFacts, name: string): string =>
+    didYouMean(actionRegistry, name, (id) => {
+      const action = actionRegistry.get(id);
+      return action !== undefined && permitted(turn, action) !== undefined;
+    });
 
   const actions: AgentActions = {
     list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
+    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
-    permits: (turn, name) => {
-      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return actionRegistry
-        .getForAgent([...turn.actions])
-        .some((action) => action.config.name === canonical);
-    },
+    permits: (turn, name) => actions.find(turn, name) !== undefined,
     run: (turn, name, input) =>
       turn.inTurn(() =>
         asTurnActor(turn, async (actor) => {
@@ -115,12 +123,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
-            // Read again on each call, so a chat that opens to visitors after
-            // the turn started reads no personal data.
-            audience: narrowerAudience(
-              turn.audience(),
-              (await deps.placeAudience?.(turn.threadContext())) ?? "shared",
-            ),
+            audience: await callAudience(turn, deps.placeAudience),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -142,18 +145,18 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     turnId: turn.turnId(),
   });
 
-  // `defer` creates its one-off through `create_routine` directly, not through
+  // `defer` creates its one-off through `system:create_routine` directly, not through
   // the agent's action allow-list: `defer` is a built-in.
   const defer: Pick<DeferTool, "schedule"> = {
     schedule: (turn, wakeUp) =>
       turn.inTurn(() =>
         asTurnActor(turn, async () => {
           const ownerKey = await dashboardChatOwner(deps.webchatRepo, turn.threadContext());
-          // A check names only a task of the owner whose chat schedules it.
-          if (wakeUp.taskId) {
-            const owner = (await deps.taskOwner?.(wakeUp.taskId)) ?? null;
+          // A check names only a task chat of the owner whose chat schedules it.
+          if (wakeUp.chatId) {
+            const owner = (await deps.taskOwner?.(wakeUp.chatId)) ?? null;
             if (owner === null || owner !== (ownerKey ?? "guardian")) {
-              throw new Error(`No task ${wakeUp.taskId}. Use task_list to find it.`);
+              throw new Error(`No task chat ${wakeUp.chatId}. Use chat_list to find it.`);
             }
           }
           return runDefer(wakeUp, {
@@ -167,7 +170,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             },
             createRoutine: async (createArgs) => {
               const result = await actionEngine.run(
-                "create_routine",
+                "system:create_routine",
                 createArgs,
                 agentRunContext(turn),
               );
@@ -189,12 +192,17 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   };
 
   // `propose_routine` auto-enables only a routine the agent could already
-  // create with `create_routine` itself (the same check, non-throwing), with
+  // create with `system:create_routine` itself (the same check, non-throwing), with
   // args that fit the target action's schema.
   const routineActivation = (turn: TurnFacts): RoutineActivationGate => ({
     canCallAction: (name) => {
       if (!actionRegistry.get(name)) return "unknown";
       return findPermittedAction(turn, name) ? "permitted" : "denied";
+    },
+    suggestAction: (name) => {
+      const suggestion = actionRegistry.suggest?.(name);
+      const action = suggestion ? actionRegistry.get(suggestion) : undefined;
+      return action && permitted(turn, action) ? suggestion : undefined;
     },
     validateArgs: (actionName, args) => {
       const action = actionRegistry.get(actionName);
@@ -340,4 +348,18 @@ async function dashboardChatOwner(
   if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
   const chat = await webchatRepo.getSession(thread.threadId);
   return chat ? (chat.ownerKey ?? "guardian") : undefined;
+}
+
+/** The audience an agent's action call runs with: the turn's, read again
+ *  against its chat on each call so a chat that opens to visitors after the
+ *  turn started reads no personal data. A turn with no chat of its own, such
+ *  as a summoned agent's, has only the audience of the turn that started it,
+ *  which its own already holds. Domain: docs/domains/participation.md#audience. */
+async function callAudience(
+  turn: Pick<TurnFacts, "audience" | "threadContext">,
+  placeAudience: PlaceAudience | undefined,
+): Promise<Audience> {
+  const place = turn.threadContext();
+  if (!place) return turn.audience();
+  return narrowerAudience(turn.audience(), (await placeAudience?.(place)) ?? "shared");
 }

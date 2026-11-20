@@ -101,10 +101,7 @@ enum MessagePart: Hashable, Sendable {
         /// The line a quote shows: the first line of the quoted message with
         /// words in it, as plain reading text. A fence line holds none, so the
         /// first line inside it counts. The rest of the message is not quoted.
-        var line: String { Self.firstLine(of: text) }
-
-        /// The first line of `text` with words in it, as plain reading text.
-        static func firstLine(of text: String) -> String {
+        var line: String {
             for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
                 let trimmed = raw.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { continue }
@@ -455,4 +452,15 @@ func displayActionName(_ name: String?) -> String {
     guard let name, !name.isEmpty else { return String(localized: "Run action") }
     let local = name.split(separator: ":").last.map(String.init) ?? name
     return local.replacingOccurrences(of: "_", with: " ")
+}
+
+extension MessagePart.ReplyQuote {
+    /// The quote of a held message, as the server snapshots it when a reply to
+    /// it is stored; nil when it has no text.
+    init?(of message: ChatMessage) {
+        let text = message.parts.compactMap(\.textContent).joined(separator: "\n\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let automated = message.isUser && message.sender?.kind == "automated"
+        self.init(messageId: message.id, author: message.isUser ? (automated ? "automated" : "guardian") : "agent", name: automated ? message.sender?.name : nil, text: text)
+    }
 }

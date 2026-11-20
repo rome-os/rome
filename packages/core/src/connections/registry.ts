@@ -1,6 +1,5 @@
 // Connection lifecycle registry. Vocabulary: docs/domains/connections.md.
 
-import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
@@ -24,6 +23,7 @@ import {
 } from "./connection.js";
 import type { ConnectionEventHandler } from "./events.js";
 import type { ConnectionRecord, ConnectionsRepository } from "./repository.js";
+import type { Message } from "./message.js";
 import {
   AccountAlreadyConnectedError,
   CredentialRejected,
@@ -146,7 +146,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: Message) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 
@@ -1011,7 +1011,7 @@ class ConnectionImpl implements Connection {
     return answer;
   }
 
-  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
+  hearTalker(handler: (message: Message) => Promise<void>): (() => void) | null {
     const slot = this.slots.get("chat");
     if (!slot || !slot.epoch) return null;
     slot.messageHandlers.push(handler);
@@ -1533,7 +1533,7 @@ class ConnectionImpl implements Connection {
     return promise;
   }
 
-  /** Attempt a renewal; on success persist + rebuild, on "needs-fix"/throw degrade.
+  /** Attempt renewal. An unavailable answer stays retryable; a refusal degrades.
    *
    *  Store first on the success branch (the store is authoritative).
    *  If the durable write throws, the renewal is NOT applied: the mirror is
@@ -1556,6 +1556,17 @@ class ConnectionImpl implements Connection {
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
+      if (err instanceof RenewalUnavailable) {
+        // No renewal answer means no authority to mark the grant broken or
+        // consume its one fault-driven renewal attempt.
+        if (stillCurrent()) this.renewedSinceGranted.delete(grant);
+        this.log.warn("fault-driven renewal unavailable; will retry", {
+          connectionId: this.id,
+          grant,
+          error: errMsg(err),
+        });
+        return;
+      }
       await this.degradeGrant(grant, `renew threw (${reason}): ${errMsg(err)}`, stillCurrent);
       return;
     }

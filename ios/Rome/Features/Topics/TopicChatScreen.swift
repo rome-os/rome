@@ -9,8 +9,9 @@ struct TopicChatScreen: View {
     /// Whose draft the composer keeps: the chat, or the blank chat until it exists.
     let draftKey: String
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: (String?) -> Void
+    /// The Agent page for this chat: on a tab from the header's buttons, or
+    /// as it was last from the mascot (nil).
+    let onAgent: (String?, AgentTab?) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
@@ -25,13 +26,8 @@ struct TopicChatScreen: View {
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
-    /// The delete alert, once the chat's follows and open tasks are read.
-    @State private var deleting: TopicDeletePrompt?
-    /// The archive alert, once the chat's follows and open tasks are read
-    /// and there is something to ask about.
-    @State private var archiving: TopicArchivePrompt?
-    /// Set while that read runs, so a second tap on Delete or Archive starts no other.
-    @State private var readingWork = false
+    /// Archive or Delete from the header, while it is read and asked.
+    @State private var retiring: TopicRetireRequest?
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -49,8 +45,6 @@ struct TopicChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Under an open thread, VoiceOver reads the thread, not what it covers.
-        .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
             // The title and the status are read by the header itself, so a
             // change in them never redraws the transcript.
@@ -64,26 +58,23 @@ struct TopicChatScreen: View {
                     composerFocused = false
                     onMenu()
                 },
-                onAgent: { onAgent(chatId) },
+                onAgent: { onAgent(chatId, $0) },
                 onRename: { title in
                     newName = title
                     renaming = true
                 },
-                onArchive: { title in askToArchive(title) },
-                onDelete: { title in askToDelete(title) }
+                onPin: { pinned in
+                    guard let chatId else { return }
+                    Task { await workspace.pinTopic(chatId, pinned: pinned) }
+                },
+                onArchive: { title in retire(.archive, title) },
+                onDelete: { title in retire(.delete, title) }
             )
-            .accessibilityHidden(store?.thread != nil)
         }
         .overlay(alignment: .top) {
             if let store { TranscriptBanners(store: store).padding(.top, 70) }
         }
-        // Over the header and the transcript; the composer below stays in place.
-        .overlay {
-            if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.taskChats, name: workspace.agentDisplayName, activity: { workspace.topics.activity(for: chatId) }, onClose: { store.closeThread() })
-            }
-        }
-        // Reply brings the keyboard up; a label opens the thread for reading.
+        // Reply brings the keyboard up.
         .onChange(of: store?.replies) { composerFocused = true }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
@@ -94,14 +85,10 @@ struct TopicChatScreen: View {
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
         }
-        .deleteTopicChatAlert($deleting) { id, stoppingWork in
-            Task { if await workspace.deleteTopic(id, stoppingWork: stoppingWork) { onArchived() } }
-        }
-        .archiveTopicChatAlert($archiving) { id, stoppingWork in
-            archive(id, stoppingWork: stoppingWork)
-        }
+        .topicRetire($retiring, workspace: workspace) { _ in onArchived() }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
+        .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
         )) { composerFocused = true }
@@ -110,10 +97,8 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
-                // One pill for each thread with replies the guardian has not seen.
-                if let store { ThreadPills(store: store) }
                 if let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
@@ -125,7 +110,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                TopicComposer(workspace: workspace, chatId: chatId, replying: store?.composerThread != nil, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
+                TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -144,24 +129,11 @@ struct TopicChatScreen: View {
         }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
-        // The chat is seen only while it is the one on screen: a thread kept open under another
-        // page reads nothing, and is read when this one comes back.
-        .onChange(of: "\(store?.sessionId ?? "")|\(visibleChat ?? "")", initial: true) { updateOnScreen() }
         .onDisappear {
-            store?.viewed = false
-            store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
         }
-    }
-
-    /// Tells the store whether the guardian sees the chat.
-    private func updateOnScreen() {
-        guard let store else { return }
-        // Only what is seen: this screen opens and reads the chat itself (`markRead`), so the
-        // store's own opening, which the main Chat relies on, is not asked twice.
-        store.viewed = visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId)
     }
 
     /// Read only while it is the chat on screen: never under an instance
@@ -178,7 +150,7 @@ struct TopicChatScreen: View {
     private var content: some View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
+                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
@@ -213,37 +185,11 @@ struct TopicChatScreen: View {
         }
     }
 
-    /// Reads what the delete would move, then asks.
-    private func askToDelete(_ name: String) {
-        guard let chatId, !readingWork else { return }
-        readingWork = true
-        Task {
-            let work = await workspace.topicWork(chatId)
-            readingWork = false
-            deleting = TopicDeletePrompt(id: chatId, name: name, work: work)
-        }
-    }
-
-    /// Reads what the archive would move, then asks; with nothing to ask
-    /// about, or when it cannot be read, it archives at once, as before.
-    private func askToArchive(_ name: String) {
-        guard let chatId, !readingWork else { return }
-        readingWork = true
-        Task {
-            let work = await workspace.topicWork(chatId)
-            readingWork = false
-            if let work, !work.isEmpty {
-                archiving = TopicArchivePrompt(id: chatId, name: name, work: work)
-            } else {
-                archive(chatId)
-            }
-        }
-    }
-
-    private func archive(_ id: String, stoppingWork: Bool = false) {
-        Task {
-            if await workspace.archiveTopic(id, stoppingWork: stoppingWork) { onArchived() }
-        }
+    /// Archive or Delete from the header: a second tap while the first is
+    /// read starts no other.
+    private func retire(_ action: TopicRetireRequest.Action, _ name: String) {
+        guard let chatId, retiring == nil else { return }
+        retiring = TopicRetireRequest(chatId: chatId, name: name, action: action)
     }
 
     /// Sends the draft with the composer's photos.
@@ -251,11 +197,10 @@ struct TopicChatScreen: View {
         guard !attachments.isPreparing else { return }
         let images = attachments.images
         if let store {
-            // While a chat thread is open, the composer sends into it.
-            if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
+            if store.send(draft, images: images, fromComposer: true, reply: store.composerReply) {
                 draft = ""
                 _ = attachments.take()
-                store.composerSent()
+                store.cancelQuote()
             }
             return
         }
@@ -296,7 +241,6 @@ struct TopicChatScreen: View {
 private struct TopicComposer: View {
     let workspace: Workspace
     let chatId: String?
-    let replying: Bool
     @Binding var draft: String
     @Binding var focused: Bool
     let attachments: ComposerAttachments
@@ -312,9 +256,9 @@ private struct TopicComposer: View {
 
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
-        // Only "Message in <name>" is fitted; a reply keeps "Reply".
-        let name = replying ? nil : TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat, replying: replying), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: replying ? .thread : .topicChat, onScreen: onScreen, onSend: onSend)
+        // Only "Message in <name>" is fitted.
+        let name = TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, onSend: onSend)
     }
 }
 
@@ -326,33 +270,45 @@ private struct TopicChatHeader: View {
     let draftKey: String
     let share: ChatShareFlow?
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: () -> Void
+    /// The Agent page for this chat, on a tab or as it was last.
+    let onAgent: (AgentTab?) -> Void
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
+    /// Pin (true) or unpin (false).
+    let onPin: (Bool) -> Void
     /// Archive, with the chat's current title.
     let onArchive: (String) -> Void
     /// Delete, with the chat's current title.
     let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        let activity = workspace.topics.activity(for: chatId)
         ChatHeader(
             // The Concierge's name, as in the main chat; the topic's own
             // title stays in the "…" menu.
             name: workspace.agentDisplayName,
             menuTitle: title,
-            activity: workspace.topics.activity(for: chatId),
+            activity: activity,
             announces: chatId != nil && model.visibleChat == chatId,
             onMenu: onMenu,
             onAgent: onAgent,
             zoomSource: AgentZoom.source(chatId ?? draftKey),
-            // A blank chat has nothing to rename, archive or delete yet.
+            tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
+            // A blank chat has nothing to rename, pin, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
+            pinned: chatId.map(workspace.topics.isPinned) ?? false,
+            onPin: chatId == nil ? nil : onPin,
             onArchive: chatId == nil ? nil : { onArchive(title) },
             onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)
+        // Rows blur under the header as in the main Chat, past the status
+        // capsule while one hangs below the row.
+        .background(alignment: .top) {
+            ChatHeaderBlur(reach: ChatHeaderBlur.reach(statusShows: activity?.statusLine != nil, dynamicTypeSize))
+        }
     }
 }

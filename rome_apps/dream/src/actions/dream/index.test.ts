@@ -173,7 +173,9 @@ describe("dream", () => {
     await createAction(actionConfig, deps).execute({ windowHours: 6 });
 
     const prompt = run.mock.calls[0]?.[0]?.prompt ?? "";
-    expect(prompt).toContain("windowHours: 6 to get_webchat_conversations, get_account_chats,");
+    expect(prompt).toContain(
+      "windowHours: 6 to dream:get_webchat_conversations, dream:get_account_chats,",
+    );
     expect(prompt).not.toContain("fetch_channel_history");
     expect(prompt.toLowerCase()).not.toContain("discord");
   });
@@ -241,9 +243,9 @@ describe("dream", () => {
       input: { action_name: name, json_args: args },
     });
     const deps = makeDeps([
-      call("ok", "write_memory_file", { path: "/p/memory/topics/a.md", content: "fact" }),
+      call("ok", "dream:write_memory_file", { path: "/p/memory/topics/a.md", content: "fact" }),
       { type: "tool_result", toolUseId: "ok", tool: "execute_action", output: '{"status":"ok"}' },
-      call("no", "edit_memory_file", {
+      call("no", "dream:edit_memory_file", {
         path: "/p/memory/MEMORY.md",
         old_string: "x",
         new_string: "y",
@@ -578,11 +580,15 @@ describe("dream skills", () => {
     expect(runner.agents).toEqual(["dream", "dream-practice"]);
     const journal = /Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/;
     const [memory = "", practice = ""] = runner.prompts;
-    expect(memory).toContain("windowHours: 6 to get_webchat_conversations, get_account_chats,");
+    expect(memory).toContain(
+      "windowHours: 6 to dream:get_webchat_conversations, dream:get_account_chats,",
+    );
     expect(memory).toContain("Memory directory: /p/memory");
     expect(memory).toMatch(journal);
     expect(memory).not.toContain("apps directory");
-    expect(practice).toContain("windowHours: 6 to get_webchat_conversations and get_action_logs");
+    expect(practice).toContain(
+      "windowHours: 6 to dream:get_webchat_conversations and dream:get_action_logs",
+    );
     expect(practice).not.toContain("get_account_chats");
     expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
     expect(practice).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
@@ -820,7 +826,7 @@ describe("dream skills", () => {
     });
     expect(readFileSync(join(carrierDir, "skills/rename-invoices/SKILL.md"), "utf8")).toBe(SKILL);
     expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain("skills/rename-invoices");
-    expect(runAction).toHaveBeenCalledWith("app_management", {
+    expect(runAction).toHaveBeenCalledWith("system:app_management", {
       op: "install",
       source: { mode: "source", path: carrierDir },
     });

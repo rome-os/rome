@@ -576,10 +576,6 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
-    },
-    "wechatUser": {
-      "fallbackName": "微信账号",
-      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {
@@ -1025,8 +1021,17 @@
     "starting": "正在启动…",
     "startFailed": "设备服务启动失败",
     "setup": {
-      "title": "连接电脑",
-      "description": "每台电脑需要单独连接。",
+      "title": "连接设备",
+      "linkDevice": "关联设备",
+      "methods": {
+        "desktop": "应用",
+        "cli": "Rome Node CLI",
+        "container": "Rome Node 容器"
+      },
+      "desktopHelp": "使用同一个 Rome Cloud 账户登录 Rome 应用。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
+      "desktopDownload": "下载 Rome",
+      "comingSoon": "即将推出",
+      "containerHelp": "使用 Docker Compose 在容器中运行 Rome Node。",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

@@ -441,9 +441,6 @@ importers:
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
-      wechat-bridge:
-        specifier: 0.2.1
-        version: 0.2.1
       ws:
         specifier: ^8.18.0
         version: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -1075,49 +1072,6 @@ importers:
         version: 5.9.3
 
   rome_apps/assistant: {}
-
-  rome_apps/briefing:
-    dependencies:
-      '@rome-os/app-runtime':
-        specifier: ^0.9.0
-        version: link:../../packages/app-runtime-sdk
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
-    devDependencies:
-      '@radix-ui/react-slot':
-        specifier: ^1.1.2
-        version: 1.2.5(@types/react@19.2.15)(react@19.2.6)
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      '@rome-os/ui':
-        specifier: ^0.3.0
-        version: link:../../packages/ui
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
-      class-variance-authority:
-        specifier: ^0.7.1
-        version: 0.7.1
-      drizzle-kit:
-        specifier: ^0.31.9
-        version: 0.31.9(supports-color@8.1.1)
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.6)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
 
   rome_apps/browser-automation:
     dependencies:
@@ -12141,10 +12095,6 @@ packages:
   websocket@1.0.35:
     resolution: {integrity: sha512-/REy6amwPZl44DDzvRCkaI1q1bIiQB0mEFQLUrhz3z2EK91cp3n72rAjUlrTP0zV22HJIUOVHQGPxhFRjxjt+Q==}
     engines: {node: '>=4.0.0'}
-
-  wechat-bridge@0.2.1:
-    resolution: {integrity: sha512-7qxFSTDOJ6yJswQl00oijrFeoRrCCbVuuK9ZWMcpBwyvGwsNVkU3JZj41e+T7B2+GCfHDL7UngjbYouMGAarzg==}
-    hasBin: true
 
   whatwg-encoding@2.0.0:
     resolution: {integrity: sha512-p41ogyeMUrw3jWclHWTQg1k05DSVXPLcVxRTYsXUk+ZooOCZLcoYgPZ/HL/D/N+uQPOtcp1me1WhBEaX02mhWg==}
@@ -23861,8 +23811,6 @@ snapshots:
       yaeti: 0.0.6
     transitivePeerDependencies:
       - supports-color
-
-  wechat-bridge@0.2.1: {}
 
   whatwg-encoding@2.0.0:
     dependencies:

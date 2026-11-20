@@ -1,8 +1,8 @@
 // Import rules for domains laid out as `<domain>/<feature>` under
 // packages/core/src. The domain root, meaning the files directly in it plus
 // model/ and infrastructure/, is the service the domain provides. Each feature
-// is a subfolder with an index.ts, and leaving a feature out is skipping its
-// route mount. rules/layers.ts holds a feature to entering through index.ts. The layout: DEVELOPMENT.md, "Established patterns".
+// is a subfolder with an index.ts, and leaving a feature out is deleting its
+// entry in the wiring's features list. rules/layers.ts holds a feature to entering through index.ts. The layout: DEVELOPMENT.md, "Established patterns".
 
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
@@ -23,7 +23,7 @@ const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> =
   },
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
-    why: "an assistant's page sends to an account the way a person's page does, through directPlace",
+    why: "an assistant's page sends to an account the way a person's page does, through directPlace, and answers with the same respondToSend so the dashboard reads one shape",
   },
   "people/guardian-profile": {
     files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],
@@ -49,14 +49,19 @@ function placeOf(path: string): Place | null {
   return { domain, feature: next, index: /^index\.tsx?$/.test(after) };
 }
 
+/** Which folder of a feature a path sits in: application/, http/, actions/, or another. */
+function adapterSide(path: string): { feature: string; side: string } | null {
+  const place = placeOf(path);
+  if (place?.feature == null) return null;
+  return { feature: `${place.domain}/${place.feature}`, side: path.split("/")[2] };
+}
+
 export function isTest(path: string): boolean {
   return /\.test\.tsx?$/.test(path);
 }
 
-/** Whether `from` is the feature's own routes, the wiring, a test, or a listed user of the feature. */
+/** Whether `from` is the wiring, a test, or a listed user of the feature. */
 function mayUse(from: string, domain: string, feature: string): boolean {
-  if (from.startsWith(`api/routes/${domain}/${feature}/`)) return true;
-  if (from === `api/routes/${domain}/${feature}.ts`) return true;
   if (WIRING_FILES.includes(from) || WIRING_FOLDERS.includes(from.split("/")[0])) return true;
   if (isTest(from)) return true;
   return FEATURE_USERS[`${domain}/${feature}`]?.files.includes(from) ?? false;
@@ -104,12 +109,37 @@ export const featureRules: ImportRule[] = [
   },
   {
     name: "features-used-from-wiring",
-    description: `Leaving a feature out is skipping its route mount, so outside its domain only the feature's own routes (api/routes/<domain>/<feature>), the wiring and tests use it. The listed exceptions: ${usersList()}.`,
+    description: `Leaving a feature out is deleting its entry in the wiring's features list, so outside its domain only the wiring and tests use it. The listed exceptions: ${usersList()}.`,
     rejects: (imp) => {
       const found = featureImport(imp);
       if (found === null || found.from?.domain === found.to.domain) return false;
       return !mayUse(imp.from, found.to.domain, found.to.feature);
     },
+  },
+  {
+    name: "adapters-import-inward",
+    description:
+      "A feature's use cases in application/ serve apps through http/ and agents through actions/, so application/ imports neither adapter, and neither adapter imports the other.",
+    rejects: (imp) => {
+      if (imp.kind !== "file") return false;
+      const from = adapterSide(imp.from);
+      const to = adapterSide(imp.to);
+      if (from === null || to === null || from.feature !== to.feature) return false;
+      const sides = ["application", "http", "actions"];
+      if (!sides.includes(from.side) || (to.side !== "http" && to.side !== "actions")) return false;
+      return from.side !== to.side;
+    },
+  },
+  {
+    name: "hono-stays-in-http",
+    description:
+      "A feature serves apps through http/ and agents through actions/, both over the same use cases, so in a featured domain only a file in an http/ folder imports hono. Tests may, to mount routes.",
+    rejects: (imp) =>
+      imp.kind === "package" &&
+      (imp.specifier === "hono" || imp.specifier.startsWith("hono/")) &&
+      FEATURED_DOMAINS[imp.from.split("/")[0]] !== undefined &&
+      !imp.from.split("/").includes("http") &&
+      !isTest(imp.from),
   },
 ];
 
@@ -117,7 +147,7 @@ export const featureRules: ImportRule[] = [
 export const featureCrossings: ListedCrossing[] = [
   {
     rule: "features-import-no-sibling",
-    from: "people/phone-book/resource.ts",
+    from: "people/phone-book/application/resource.ts",
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
     why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",

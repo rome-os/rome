@@ -20,16 +20,22 @@ struct MarkdownPictureSet: View {
         }
     }
 
+    /// Not lazy: in a folded bubble a lazy grid made only the tiles above the
+    /// fold, so each unfold made the rest again and they loaded anew.
     private var grid: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: items.count == 1 ? 1 : 2),
-            alignment: .leading,
-            spacing: 16
-        ) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                VStack(alignment: .leading, spacing: 6) {
-                    PictureTile(source: ImageSource(src: item.src, origin: origin), alt: item.alt, aspect: 4.0 / 3.0) { onOpen(index) }
-                    caption(item, lines: 2)
+        let columns = items.count == 1 ? 1 : 2
+        return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 16) {
+            ForEach(Array(stride(from: 0, to: items.count, by: columns)), id: \.self) { start in
+                GridRow(alignment: .top) {
+                    ForEach(start..<min(start + columns, items.count), id: \.self) { index in
+                        let item = items[index]
+                        VStack(alignment: .leading, spacing: 6) {
+                            let source = ImageSource(src: item.src, origin: origin)
+                            PictureTile(source: source, alt: item.alt, aspect: 4.0 / 3.0) { onOpen(index) }
+                            caption(item, lines: 2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
@@ -85,6 +91,15 @@ struct PictureTile: View {
     /// viewer fetches the original.
     nonisolated static let pixels: CGFloat = 600
 
+    init(source: ImageSource, alt: String, aspect: CGFloat, onOpen: @escaping () -> Void) {
+        self.source = source
+        self.alt = alt
+        self.aspect = aspect
+        self.onOpen = onOpen
+        // Already in memory, it shows in the first frame, with no spinner.
+        _image = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key("pic|\(source)")))
+    }
+
     /// The host of an outside picture without a leading `www.`.
     nonisolated static func hostLabel(_ host: String) -> String {
         host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -129,26 +144,20 @@ struct PictureTile: View {
     }
 
     private func load() async {
-        let key = StoredImageCache.shared.key("pic|\(source)")
-        if let cached = StoredImageCache.shared.image(key) {
-            image = cached
-            return
-        }
         do {
-            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels))
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: Self.pixels)
-            }.value
-            guard let decoded else {
-                imageLog.error("picture set image is not an image: \(String(describing: source), privacy: .public), \(data.count) bytes")
-                throw APIError.decoding
+            image = try await StoredImageCache.shared.load(
+                "pic|\(source)", maxPixel: Self.pixels, onDisk: source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels)
+                )
             }
-            StoredImageCache.shared.store(decoded, for: key)
-            image = decoded
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled {
-                if (error as? APIError) != .decoding {
+                if (error as? APIError) == .decoding {
+                    imageLog.error("picture set image is not an image: \(String(describing: source), privacy: .public)")
+                } else {
                     imageLog.error("picture set image failed: \(String(describing: source), privacy: .public): \(String(describing: error), privacy: .public)")
                 }
                 failed = true

@@ -9,7 +9,7 @@
  * `bundle` = an already-packed artifact installed as-is, `appstore` = fetch
  * from the Rome App Store. For Store installs, omit `version` to install the
  * latest live version, or pass a specific live historical version from
- * `app_store_search` listing detail. The daemon installs runtime deps before
+ * `system:app_store_search` listing detail. The daemon installs runtime deps before
  * activating the bundle in every mode. Install is an awaited completion
  * barrier: it returns only after the built bundle is active and the runtime
  * catalog has reloaded it, so callers do not need to poll deployment state.
@@ -22,7 +22,7 @@
  * `set_enabled` is the only lifecycle control that applies to them.
  *
  * @example
- *   await callAction("app_management", {
+ *   await callAction("system:app_management", {
  *     op: "create",
  *     appId: "notes",
  *     rootPath: "/absolute/path/to/dev/working/tree",
@@ -30,7 +30,7 @@
  *   });
  *   // Edit the scaffold, then a single install builds + packs + installs.
  *   // No appId — the daemon derives it from the source and returns it:
- *   await callAction("app_management", {
+ *   await callAction("system:app_management", {
  *     op: "install",
  *     source: {
  *       mode: "source",

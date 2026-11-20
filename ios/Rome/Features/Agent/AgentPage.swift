@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// The Agent page's tabs; it opens on Tasks.
-enum AgentTab: Hashable { case tasks, outputs }
+enum AgentTab: Hashable { case tasks, routines, outputs }
 
 /// The Agent page as opened from one chat's header: which chat's tasks and
 /// outputs it lists, and the avatar it grows out of.
@@ -19,7 +19,7 @@ struct AgentRoute: Identifiable, Equatable {
 }
 
 /// Opened from the mascot in a chat's header: the Agent, big, with its name;
-/// then what it is doing in this chat (Tasks) and the files it made (Outputs).
+/// then what it is doing in this chat (Tasks), what runs on its own (Routines) and the files it made (Outputs).
 struct AgentPage: View {
     let workspace: Workspace
     let route: AgentRoute
@@ -48,27 +48,27 @@ struct AgentPage: View {
             header
             Picker(selection: $tab) {
                 Text("Tasks").tag(AgentTab.tasks)
+                Text("Routines").tag(AgentTab.routines)
                 Text("Outputs").tag(AgentTab.outputs)
             } label: {
                 EmptyView()
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
+            .frame(maxWidth: 360)
             .padding(.horizontal, Metrics.pagePadding)
-            .padding(.top, 18)
+            .padding(.top, 14)
             .padding(.bottom, 12)
             switch tab {
             case .outputs:
                 AgentOutputsView(store: outputs, backend: workspace.backend, onOpenChat: onOpenTask)
             case .tasks:
-                TaskListView(store: taskList, onOpenChat: onOpenTask)
+                TaskListView(store: taskList, mode: .tasks, onOpenChat: onOpenTask)
+            case .routines:
+                TaskListView(store: taskList, mode: .routines, onOpenChat: onOpenTask)
             }
         }
-        .task(id: route.tasksChatId) {
-            // The list as it was last read shows at once, and is read again.
-            taskList?.open()
-        }
-        .onDisappear { taskList?.stop() }
+        // The list as it was last read shows at once, and is read again.
+        .holdsTaskList(taskList)
         .readableColumn()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.bg.ignoresSafeArea())
@@ -88,7 +88,7 @@ struct AgentPage: View {
 
 
     private var header: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // A tap pokes it; ten quick ones open the stacking game.
             // The header avatar's disc, grown: the mascot keeps its share.
             Mascot(blinks: !reduceMotion, pokes: pokes)
@@ -115,7 +115,9 @@ struct AgentPage: View {
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
         }
-        .padding(.top, 56)
+        // The disc's top is level with the close button's, in its row: the
+        // disc is centred, so the two never meet, even on the narrowest phone.
+        .padding(.top, 4)
     }
 }
 

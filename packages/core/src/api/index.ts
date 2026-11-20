@@ -23,7 +23,6 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
-import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
@@ -53,9 +52,6 @@ import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { linkCodeRoutes } from "./routes/people/link-code.js";
-import { personHistoryRoutes } from "./routes/people/person-history.js";
-import { phoneBookRoutes } from "./routes/people/phone-book/index.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -167,7 +163,9 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  api.route("/", wechatAppRoutes(deps));
+  for (const kind of deps.connectionKinds) {
+    if (kind.routes) api.route("/", kind.routes);
+  }
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
@@ -211,9 +209,7 @@ export function buildApp(
   api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", linkCodeRoutes(deps));
-  api.route("/", phoneBookRoutes(deps));
-  api.route("/", personHistoryRoutes(deps));
+  for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));

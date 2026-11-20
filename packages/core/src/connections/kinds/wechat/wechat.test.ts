@@ -4,13 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import {
   isWechatAuthError,
   normalizeWechatBaseUrl,
-  normalizeWechatMessage,
+  normalizeWechatMessage as normalizeToConnectionsMessage,
   WechatAdapter,
   type WechatMessage,
 } from "./wechat.js";
+
+/** An iLink event as apps receive it, which is what these cases pin. */
+function normalizeWechatMessage(event: WechatMessage) {
+  const message = normalizeToConnectionsMessage(event);
+  return message && channelMessageOf(message, "wechat");
+}
 
 const profileDirs = rs.hoisted(() => ({ profileDir: "", memoryDir: "" }));
 const loggerMocks = rs.hoisted(() => ({

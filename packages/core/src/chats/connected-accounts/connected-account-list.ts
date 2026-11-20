@@ -11,12 +11,6 @@ import type { Accounts } from "../accounts/accounts.js";
 import type { Channel, Channels } from "./connected-account.js";
 import { type ChannelOf, connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
 import { linkedInMessages } from "../history/linkedin-messages.js";
-import type { WechatUserReader } from "../../connections/kinds/wechat-user/wechat-user.js";
-import {
-  WECHAT_USER_CHANNEL,
-  wechatUserAccounts,
-  wechatUserMessages,
-} from "../history/wechat-user-messages.js";
 import { whatsAppMessages } from "../history/whatsapp-messages.js";
 
 /**
@@ -45,10 +39,6 @@ export function channelList(deps: {
   db: DrizzleDb;
   whatsAppAccounts: Accounts;
   linkedInAccounts: Accounts;
-  /** The personal WeChat reader, present only when that connection is enabled.
-   *  It contributes a live store and an address book of the guardian's own
-   *  contacts, read straight from the client's database rather than a sync. */
-  wechatUserReader?: WechatUserReader;
   /** The Connections that back `send`, `inbound` and `directory`. Every
    *  registered connection kind with a Talk contributes a channel; absent, no
    *  channel has those ports. */
@@ -66,15 +56,6 @@ export function channelList(deps: {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
     { name: "linkedin", accounts: deps.linkedInAccounts, messages: linkedInMessages(deps.db) },
-    ...(deps.wechatUserReader
-      ? [
-          {
-            name: WECHAT_USER_CHANNEL,
-            accounts: wechatUserAccounts(deps.wechatUserReader),
-            messages: wechatUserMessages(deps.wechatUserReader),
-          },
-        ]
-      : []),
   ];
   const connections = deps.connections;
   const ports = new Map(

@@ -8,8 +8,8 @@ import type {
   SentMessage,
   TimelinePage,
 } from "@rome/api-types/people";
-import { peopleRoutes } from "./phone-book/people.js";
-import { personHistoryRoutes } from "./person-history.js";
+import { phoneBookRoutes } from "../../../people/phone-book/index.js";
+import { personHistoryRoutes } from "../../../people/person-history/index.js";
 import {
   createTestConnections,
   createTestDb,
@@ -50,7 +50,7 @@ describe("People send API", () => {
     ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", [
       { channel: "telegram", platform: "telegram" },
     ]);
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
 
     personId = await deps.peopleRepo.create({
       displayName: "Send Target",
@@ -115,7 +115,7 @@ describe("People send API", () => {
     }));
     const readOnly = { ...deps, connections, channels: testChannels(deps, connections) };
     const readOnlyApp = new Hono()
-      .route("/", peopleRoutes(readOnly))
+      .route("/", phoneBookRoutes(readOnly))
       .route("/", personHistoryRoutes(readOnly));
 
     const res = await readOnlyApp.request(`/people/${personId}/messages`, {
@@ -235,7 +235,7 @@ describe("People send API — after the channel answers", () => {
     const throwing = { ...deps, connections, channels: testChannels(deps, connections) };
 
     const res = await new Hono()
-      .route("/", peopleRoutes(throwing))
+      .route("/", phoneBookRoutes(throwing))
       .route("/", personHistoryRoutes(throwing))
       .request(`/people/${personId}/messages`, {
         method: "POST",
@@ -303,7 +303,7 @@ describe("People on an account whose channel id is opaque", () => {
         laterChannels: [{ name: OPAQUE, connectionKind: "telegram" }],
       }),
     };
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
 
     personId = await deps.peopleRepo.create({
       displayName: "Ada",
@@ -419,7 +419,9 @@ describe("People on an account whose channel id is opaque", () => {
         linkedInAccounts: deps.linkedInAccounts,
       }),
     };
-    app = new Hono().route("/", peopleRoutes(rebooted)).route("/", personHistoryRoutes(rebooted));
+    app = new Hono()
+      .route("/", phoneBookRoutes(rebooted))
+      .route("/", personHistoryRoutes(rebooted));
 
     expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
   });

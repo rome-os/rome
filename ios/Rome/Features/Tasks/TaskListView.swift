@@ -1,14 +1,16 @@
 import SwiftUI
 
-/// The Agent page's Tasks tab: what runs for one Concierge chat, grouped as
-/// Needs you, Active, Later, Running on its own and Ended. Each row is its
-/// title and one line of state and time. A row does nothing when tapped: a
-/// small icon after the title opens the task chat, and Stop and Open task
-/// chat are in the long-press menu (docs/domains/chats.md#task-list).
+/// The Agent page's Tasks and Routines tabs: what runs for one Concierge chat.
+/// Tasks lists its task chats, grouped as Needs you, Active, Later and Ended;
+/// Routines lists what is no task chat, in one list by the time each runs
+/// next. A task chat's row is its name and one line of state and time, opens
+/// the chat when tapped, and has Stop in its long-press menu
+/// (docs/domains/chats.md#task-list).
 struct TaskListView: View {
+    enum Mode { case tasks, routines }
     let store: TaskListStore?
+    let mode: Mode
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
-
     @State private var endedOpen = false
 
     var body: some View {
@@ -47,25 +49,54 @@ struct TaskListView: View {
                     .foregroundStyle(Palette.sub)
                 Spacer()
             }
-        } else if let store, !store.groups.isEmpty {
-            ScrollView {
-                // Leading: a folded group, its header alone, keeps to the left
-                // edge instead of centering on its own line.
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(store.groups) { group in
-                        section(group, store: store, now: now)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let store {
+            let tasks = store.groups.filter { $0.key != .onItsOwn }
+            let onItsOwn = store.groups.first { $0.key == .onItsOwn }?.items ?? []
+            VStack(spacing: 0) {
+                ScrollView {
+                    // Leading: a folded group, its header alone, keeps to the left
+                    // edge instead of centering on its own line.
+                    VStack(alignment: .leading, spacing: 18) {
+                        if mode == .routines {
+                            if onItsOwn.isEmpty {
+                                emptyLine("No routines yet")
+                            } else {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(onItsOwn.enumerated()), id: \.element.id) { index, item in
+                                        row(item, store: store, now: now, last: index == onItsOwn.count - 1)
+                                    }
+                                }
+                                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                                .hairline(radius: Metrics.groupRadius)
+                            }
+                        } else if tasks.isEmpty {
+                            emptyLine("No tasks yet")
+                        } else {
+                            ForEach(tasks) { group in
+                                section(group, store: store, now: now)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 24)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.88), value: store.groups)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 24)
-                .animation(.spring(response: 0.4, dampingFraction: 0.88), value: store.groups)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         } else {
             empty
         }
+    }
+
+    private func emptyLine(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .romeFont(15)
+            .foregroundStyle(Palette.sub)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
     }
 
     private var empty: some View {
@@ -95,7 +126,7 @@ struct TaskListView: View {
         case .needsYou: return "Needs you"
         case .active: return "Active"
         case .later: return "Later"
-        case .onItsOwn: return "Running on its own"
+        case .onItsOwn: return "Routines"
         case .ended: return "Ended"
         }
     }
@@ -181,7 +212,7 @@ struct TaskListView: View {
             TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), created: item.createdAt, last: last)
         case .follow(let listed):
             let follow = store.shown(listed)
-            TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow), created: item.createdAt, dimmed: follow.state != "active", last: last)
+            TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow, now: now), created: item.createdAt, dimmed: follow.state != "active", last: last)
         case .routine(let routine):
             TaskListPlainRow(
                 title: routine.name,
@@ -230,9 +261,9 @@ struct TaskListPlainRow: View {
     }
 }
 
-/// A task's row: its title with a small way into its task chat, and its
-/// line. Stop and Open task chat are in the long-press menu; nothing asks to
-/// confirm, and a press shows at once.
+/// A task chat's row: its status mark, its name and one line of state and
+/// time. Tapping it opens the task chat; Stop is in the long-press menu, and
+/// nothing asks to confirm.
 struct TaskListRow: View {
     let item: TaskListItem.Task
 
@@ -248,47 +279,33 @@ struct TaskListRow: View {
     private var stops: Bool { status != "ended" && !stopping }
 
     var body: some View {
-        TaskListRowFrame(last: last) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Button { onOpenChat?() } label: {
+            TaskListRowFrame(last: last) {
+                HStack(spacing: 10) {
+                    TaskStatusMark(task: item.task)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(verbatim: item.task.title)
                             .romeFont(16, .medium)
                             .tracking(-0.3)
                             .foregroundStyle(status == "ended" ? Palette.sub : Palette.fg)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        if let onOpenChat {
-                            Button(action: onOpenChat) {
-                                Image(systemName: "bubble.left")
-                                    .romeFont(12)
-                                    .foregroundStyle(Palette.sub)
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.vertical, -8)
-                            .accessibilityLabel(Text("Open task chat"))
-                        }
+                        Text(verbatim: TaskListWords.task(item, now: now, stopping: stopping))
+                            .romeFont(13)
+                            .foregroundStyle(status == "needs_you" && !stopping ? Palette.warningText : Palette.sub)
+                            .lineLimit(1)
                     }
-                    Text(verbatim: TaskListWords.task(item, now: now, stopping: stopping))
-                        .romeFont(13)
-                        .foregroundStyle(status == "needs_you" && !stopping ? Palette.warningText : Palette.sub)
-                        .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .buttonStyle(RowPressStyle())
+        .disabled(onOpenChat == nil)
         // Titled with when the task was made, as a message's menu is with its time.
         .contextMenu {
-            if stops || onOpenChat != nil {
+            if stops {
                 Section {
-                    if stops {
-                        Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.circle") }
-                    }
-                    if let onOpenChat {
-                        Button(action: onOpenChat) { Label("Open task chat", systemImage: "bubble.left") }
-                    }
+                    Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.circle") }
                 } header: {
                     if let created { Text(verbatim: TaskListWords.created(created)) }
                 }
@@ -296,7 +313,29 @@ struct TaskListRow: View {
                 Text(verbatim: TaskListWords.created(created))
             }
         }
-        .accessibilityElement(children: .contain)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The mark of a task's status at a row's leading edge, the set and colours
+/// the task link chip uses: needs you an alert, active the running ring, later
+/// a clock, and done, failed, stopped and no response each a circle of their own.
+struct TaskStatusMark: View {
+    let task: ConciergeTask
+
+    var body: some View {
+        let info = TaskLinkInfo(id: task.id, name: task.title, status: TaskListWords.status(task), endReason: task.endReason)
+        Group {
+            if info.tone == .running {
+                Spinner(size: 16, color: info.tone.color)
+            } else {
+                Image(systemName: info.symbol)
+                    .romeFont(16)
+                    .foregroundStyle(info.tone.color)
+            }
+        }
+        .frame(width: 20, height: 20)
+        .accessibilityHidden(true)
     }
 }
 

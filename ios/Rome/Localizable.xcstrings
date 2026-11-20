@@ -359,62 +359,6 @@
         }
       }
     },
-    "%lld new replies" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld new reply"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld new replies"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条新回复"
-          }
-        }
-      }
-    },
-    "%lld replies" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld reply"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld replies"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条"
-          }
-        }
-      }
-    },
     "%lld readings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1633,16 +1577,6 @@
         }
       }
     },
-    "Couldn't load the chat to share" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法载入要分享的对话"
-          }
-        }
-      }
-    },
     "Couldn't load the links." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1719,16 +1653,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没能发送你的决定"
-          }
-        }
-      }
-    },
-    "Couldn't open the thread" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法打开话题"
           }
         }
       }
@@ -3041,16 +2965,6 @@
         }
       }
     },
-    "New replies in \"%@\"" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「%@」有新回复"
-          }
-        }
-      }
-    },
     "New topic chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3391,6 +3305,16 @@
         }
       }
     },
+    "No routines yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有定时任务"
+          }
+        }
+      }
+    },
     "Not started · Created %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3641,16 +3565,6 @@
         }
       }
     },
-    "Open the thread, newest: %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开话题，最新一条：%@"
-          }
-        }
-      }
-    },
     "Opened Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3787,6 +3701,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图片"
+          }
+        }
+      }
+    },
+    "Pin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置顶"
+          }
+        }
+      }
+    },
+    "Pinned" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已置顶"
           }
         }
       }
@@ -4295,12 +4229,12 @@
         }
       }
     },
-    "Running on its own" : {
+    "Routines" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "自动运行"
+            "value" : "定时任务"
           }
         }
       }
@@ -5515,16 +5449,6 @@
         }
       }
     },
-    "Thread" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "话题"
-          }
-        }
-      }
-    },
     "Tidying up context…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5791,6 +5715,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "了解你的睡眠"
+          }
+        }
+      }
+    },
+    "Unpin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消置顶"
           }
         }
       }

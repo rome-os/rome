@@ -1,7 +1,7 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// transport core — gateway lifecycle, the inbound `Message`, slash
 // commands, send formatting — is `DiscordAdapter`
 // (packages/core/src/connections/kinds/discord/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
@@ -19,13 +19,14 @@ import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rom
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
 import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+import type { ChatSettingsPort } from "../types.js";
+import type { KindChatRules } from "../../chat-settings/rules.js";
 
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
@@ -42,6 +43,19 @@ export const discordGrantProfileSchema = z
   })
   .strict();
 export type DiscordGrantProfile = z.infer<typeof discordGrantProfileSchema>;
+
+/** A self-created Discord bot offers every chat rule. */
+export const DISCORD_CHAT_RULES: KindChatRules = {
+  offers: [
+    "enabled",
+    "activation.mode",
+    "activation.botMessages",
+    "activation.whenOthersMentioned",
+    "replies.placement",
+    "routing.agentName",
+    "session.reset",
+  ],
+};
 
 /** Pure display projection: the bot username reads as the handle. `botId` stays
  *  owner-side and never widens the display surface. */
@@ -105,17 +119,13 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop?: ChatStopHandler;
   peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** A test-only back door: whether an agent keeps the Inbox app off the
-   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
-   *  every message, whatever its chats' settings say. */
-  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
@@ -249,6 +259,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     link: "own_account",
     grant: "bot",
+    chatRules: DISCORD_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {
@@ -264,12 +275,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
-            unsafeTestOnlyHearEveryMessage: () => {
-              const agent = deps.accountAgentOf?.(kit.connectionId);
-              return (
-                typeof agent === "string" && deps.unsafeTestOnlyBypassesInbox?.(agent) === true
-              );
-            },
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
               deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
