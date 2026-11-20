@@ -1832,6 +1832,12 @@ export interface ChannelMessage {
    *  conversation and a thread is read apart from it. Absent where the
    *  message is in no thread, or `chatId` already names the thread. */
   inThread?: ChatId;
+  /** True when the guardian opened the account this message arrived on to the
+   *  other members of its workspace, and the sender is one: a full member, not
+   *  a guest or someone from another workspace. Set by the connection when the
+   *  message arrives, so a message already on its way keeps what it was given.
+   *  Absent otherwise. */
+  openToMembers?: true;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
