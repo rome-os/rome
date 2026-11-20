@@ -4,11 +4,12 @@
 // and which values it fixes for the rest. Vocabulary:
 // docs/domains/chats.md#chat-rule.
 
-import type {
-  ChatSettingField,
-  ChatSettings,
-  ChatSettingsOverrides,
-  ProviderSessionResetPolicy,
+import {
+  CONVERSATION_SETTING_FIELDS,
+  type ChatSettingField,
+  type ChatSettings,
+  type ChatSettingsOverrides,
+  type ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { DEFAULT_PROVIDER_SESSION_RESET_POLICY } from "./reset-policy.js";
 
@@ -35,16 +36,9 @@ export interface ChatRules {
 
 export type ChatRuleName = keyof ChatRules;
 
-/** Every chat rule, in the order the dashboard lists them. */
-export const CHAT_RULE_NAMES = [
-  "enabled",
-  "activation.mode",
-  "activation.botMessages",
-  "activation.whenOthersMentioned",
-  "replies.placement",
-  "routing.agentName",
-  "session.reset",
-] as const satisfies readonly ChatRuleName[];
+/** Every chat rule, in the order the dashboard lists them: the stored
+ *  fields, in the order the app SDK declares them. */
+export const CHAT_RULE_NAMES: readonly ChatRuleName[] = CONVERSATION_SETTING_FIELDS;
 
 /** What a kind of connection declares about its chats' rules. A rule it
  *  neither offers nor fixes runs at {@link CHAT_RULE_DEFAULTS}. No rule is
@@ -127,7 +121,7 @@ export function effectiveChatRules(rules: KindChatRules, stored: ChatSettingsOve
     if (fixed !== undefined) {
       set(rule, fixed);
     } else if (rules.offers.includes(rule)) {
-      set(rule, storedValue(stored, rule));
+      set(rule, storedRuleValue(stored, rule));
     }
   }
   return effective;
@@ -148,7 +142,8 @@ export function asChatSettings(rules: ChatRules): ChatSettings {
   };
 }
 
-function storedValue<R extends ChatRuleName>(
+/** The value `stored` holds for `rule`, or undefined where it holds none. */
+export function storedRuleValue<R extends ChatRuleName>(
   stored: ChatSettingsOverrides,
   rule: R,
 ): ChatRules[R] | undefined {

@@ -29,6 +29,7 @@ import {
   asChatSettings,
   chatRulesOf,
   effectiveChatRules,
+  storedRuleValue,
   type KindChatRules,
   UNDECLARED_CHAT_RULES,
 } from "./rules.js";
@@ -36,24 +37,8 @@ import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
 const log = createLogger("chat-settings");
 
-function fieldValue(settings: ChatSettingsOverrides, field: ChatSettingField) {
-  switch (field) {
-    case "enabled":
-      return settings.enabled;
-    case "activation.mode":
-      return settings.activation?.mode;
-    case "activation.botMessages":
-      return settings.activation?.botMessages;
-    case "activation.whenOthersMentioned":
-      return settings.activation?.whenOthersMentioned;
-    case "replies.placement":
-      return settings.replies?.placement;
-    case "routing.agentName":
-      return settings.routing?.agentName;
-    case "session.reset":
-      return settings.session?.reset;
-  }
-}
+/** The value a stored or requested set of overrides holds for `field`. */
+const fieldValue = storedRuleValue;
 
 function setField(settings: ChatSettingsOverrides, field: ChatSettingField, value: unknown): void {
   switch (field) {
