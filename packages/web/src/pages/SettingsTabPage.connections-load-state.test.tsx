@@ -112,7 +112,11 @@ describe("Settings connections request states", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("keeps the members switch as its change left it when an older poll answers after the change's refresh", async () => {
+  it.each([
+    ["lands", false],
+    ["fails", true],
+  ])("keeps the members switch as its change left it when an older poll answers after the change's refresh %s", async (_refresh, refreshFails) => {
+    rs.spyOn(console, "error").mockImplementation(() => {});
     const feishu = (answerMembers: boolean) => ({
       connections: [
         {
@@ -155,6 +159,7 @@ describe("Settings connections request states", () => {
       if (url === "/api/connections") {
         loads += 1;
         if (loads === 2) return new Promise<Response>((resolve) => (answerPoll = resolve));
+        if (loads > 2 && refreshFails) return failed(503, "Connections service unavailable");
         return ok(feishu(loads > 2));
       }
       return ok({});

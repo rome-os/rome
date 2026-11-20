@@ -187,7 +187,8 @@ export default function SettingsPage() {
   // Composio account status for the broker card.
   // Loads overlap: a poll can start before a change and answer after the
   // refresh that change asked for. Only an answer to a load started after
-  // the one shown last is taken, so an older state never replaces a newer.
+  // the last one answered is taken, so an older state never replaces a
+  // newer, nor follows a refresh that failed.
   const loadsStarted = useRef(0);
   const loadShown = useRef(0);
   const loadConnections = useCallback(
@@ -216,6 +217,7 @@ export default function SettingsPage() {
       } catch (err) {
         console.error("Failed to load connections data", err);
         if (load < loadShown.current) return null;
+        loadShown.current = load;
         setConnectionsError(
           err instanceof Error ? err.message : t("connections.loadFailedFallback"),
         );
