@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { VoiceInputPreview } from "./use-voice-input";
 
 // Spoken text arrives in bursts. It is shown a character at a time at a
@@ -78,14 +78,9 @@ const COPIED_STYLES = [
   "tabSize",
 ] as const;
 
-/**
- * Scrolls the copy to the field's scroll position, or further when the newest
- * spoken character would sit below the copy's box, as the caret would keep it
- * in view in the field.
- */
-function follow(el: HTMLTextAreaElement, overlay: HTMLElement, last: HTMLElement | null) {
-  const below = last ? last.offsetTop + last.offsetHeight - overlay.clientHeight : 0;
-  overlay.scrollTop = Math.max(el.scrollTop, below);
+/** How far the copy must scroll for the newest spoken character to show. */
+function newestInView(overlay: HTMLElement, last: HTMLElement | null): number {
+  return last ? last.offsetTop + last.offsetHeight - overlay.clientHeight : 0;
 }
 
 /**
@@ -117,6 +112,23 @@ function SpokenOverlay({
   const overlayRef = useRef<HTMLDivElement>(null);
   const lastRef = useRef<HTMLSpanElement>(null);
   const shown = useReveal(value.slice(start, end));
+  // The copy keeps the newest words in view, as the caret would in the field,
+  // until the guardian scrolls back to read; scrolling to the newest words
+  // again follows them again. The copy scrolls itself, since the field's own
+  // text is shorter than the copy's.
+  const followingRef = useRef(true);
+  // Where `follow` last scrolled to. A scroll there is at the newest words,
+  // even when more have arrived before its event, which would otherwise read
+  // as the guardian scrolling back.
+  const followedToRef = useRef<number | null>(null);
+  const follow = useCallback(() => {
+    const overlay = overlayRef.current;
+    if (!overlay || !followingRef.current) return;
+    const below = newestInView(overlay, lastRef.current);
+    if (below <= overlay.scrollTop) return;
+    overlay.scrollTop = below;
+    followedToRef.current = overlay.scrollTop;
+  }, []);
 
   // The field's own text and placeholder go invisible under the copy, and the
   // field's height is the copy's while it shows. All come back when the copy
@@ -136,7 +148,7 @@ function SpokenOverlay({
   }, [textareaRef]);
 
   // Covers the field's box, less its scrollbar, so the copy wraps where the
-  // field's text does, and follows the field's scroll position.
+  // field's text does, and starts at the field's scroll position.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     const overlay = overlayRef.current;
@@ -154,19 +166,28 @@ function SpokenOverlay({
         Number.parseFloat(computed.borderLeftWidth) + Number.parseFloat(computed.borderRightWidth);
       overlay.style.width = `${el.clientWidth + borders}px`;
       overlay.style.height = `${el.offsetHeight}px`;
-      follow(el, overlay, lastRef.current);
+      follow();
     };
-    const scrolled = () => follow(el, overlay, lastRef.current);
+    overlay.scrollTop = el.scrollTop;
     place();
+    // Within a line of the newest words counts as at them: more can arrive
+    // while a scroll back down to them is still moving.
+    const lineHeight =
+      Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) || 0;
+    const scrolled = () => {
+      followingRef.current =
+        overlay.scrollTop === followedToRef.current ||
+        newestInView(overlay, lastRef.current) <= overlay.scrollTop + lineHeight;
+    };
     const resized = new ResizeObserver(place);
     resized.observe(el);
     resized.observe(parent);
-    el.addEventListener("scroll", scrolled);
+    overlay.addEventListener("scroll", scrolled);
     return () => {
       resized.disconnect();
-      el.removeEventListener("scroll", scrolled);
+      overlay.removeEventListener("scroll", scrolled);
     };
-  }, [textareaRef]);
+  }, [textareaRef, follow]);
 
   // Each revealed character can make the copy taller. The field grows with
   // it up to its max height, and past that the copy scrolls to keep the
@@ -180,8 +201,8 @@ function SpokenOverlay({
       Number.parseFloat(computed.borderTopWidth) + Number.parseFloat(computed.borderBottomWidth);
     const content = overlay.scrollHeight + borders;
     if (content > el.offsetHeight) el.style.height = `${content}px`;
-    follow(el, overlay, lastRef.current);
-  }, [textareaRef, shown]);
+    follow();
+  }, [textareaRef, shown, follow]);
 
   const chars = Array.from(shown);
   return (
@@ -189,7 +210,7 @@ function SpokenOverlay({
       ref={overlayRef}
       aria-hidden
       data-voice-input-spoken-text
-      className="pointer-events-none absolute overflow-hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
+      className="absolute overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
     >
       {value.slice(0, start)}
       {chars.map((char, i) => (
