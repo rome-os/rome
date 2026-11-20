@@ -643,7 +643,9 @@ export class SlackAppAdapter {
         !this.posting.has(channelId),
       fetchPage: (channelId, bounds) =>
         this.readGate.run(
-          `${channelId}:${bounds.latest ?? ""}`,
+          // History and a thread's replies each name their own kind of call,
+          // so a page ending at a thread's root never takes the thread's answer.
+          `history:${channelId}:${bounds.latest ?? ""}`,
           () => this.fetchPage(channelId, bounds.latest),
           this.abort.signal,
         ),
@@ -792,7 +794,7 @@ export class SlackAppAdapter {
     read: TalkHistoryRead,
   ): Promise<ChannelMessage[]> {
     const page = await this.readGate.run(
-      `${channelId}:${threadTs}`,
+      `replies:${channelId}:${threadTs}`,
       () =>
         this.config.api.conversationReplies(
           this.config.botToken,
