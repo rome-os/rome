@@ -1,6 +1,6 @@
 name: delete_routine
 type: system
-description: Permanently delete a routine by its id and tear down its live schedule. Refuses if the routine has in-flight runs (running or awaiting approval). Identify the routine first with search_routine, and confirm with the user when several could match
+description: Permanently delete a routine by its id and tear down its live schedule. Refuses if the routine has in-flight runs (running or awaiting approval). Identify the routine first with system:search_routine, and confirm with the user when several could match
 complexity: simple
 speed: fast
 reliability: high

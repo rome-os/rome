@@ -1,9 +1,9 @@
-// A Concierge chat's task list, the Tasks panel: everything that runs for the
-// chat, gathered from the reads that already decide it. Tasks bring their
-// derived status, checks and schedules come from the routines the Concierge
-// made, follows from the owner's following, and routines from their
-// `chat_id`: those of the chat and those of its task chats. Nothing here
-// decides a status.
+// A Concierge chat's Tasks view: everything that runs for the chat, gathered
+// from the reads that already decide it. Task chats bring their derived
+// status, checks and schedules come from the routines the Concierge made,
+// follows from the owner's following, and routines from their `chat_id`:
+// those of the chat and those of its task chats. Nothing here decides a
+// status.
 // docs/domains/chats.md#task-list
 
 import {
@@ -23,7 +23,6 @@ import { RESUME_SESSION_ACTION } from "../routines/defer.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { Routine } from "../routines/types.js";
 import { createLogger } from "../logger.js";
-import { cardMessagesOf } from "./task-cards.js";
 import {
   CONCIERGE_DIGEST_ACTION,
   CONCIERGE_FOLLOW_ACTION,
@@ -35,16 +34,12 @@ import type { ConciergeOwner } from "../webchat/owner.js";
 
 const log = createLogger("concierge-task-list");
 
-/** Stored message times are whole seconds. */
-const SAME_SECOND_MS = 1_000;
-
 /** How long changes are gathered before the list is told, so a burst tells it once. */
 const CHANGE_SETTLE_MS = 150;
 
 /** The routines a chat's list shows apart, or never: checks, task schedules, follows and digests. */
 const NOT_A_CHAT_ROUTINE = new Set([
   RESUME_SESSION_ACTION,
-  `system:${RESUME_SESSION_ACTION}`,
   CONCIERGE_TASK_RUN_ACTION,
   CONCIERGE_FOLLOW_ACTION,
   CONCIERGE_DIGEST_ACTION,
@@ -71,17 +66,6 @@ export interface ChatTaskListDeps {
   routines: Pick<RoutinesRepository, "findWithChat" | "listRoutines" | "findById">;
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
-  /**
-   * Calls `listener` with a chat's id when a message holding a task chat part
-   * is said in it, which can move a task's Respond. Returns the unsubscribe.
-   */
-  onTaskCardMessage?: (listener: (chatId: string) => void) => () => void;
-  /** The assistant messages of a chat that hold a task chat part, in the order said. */
-  /** From `since` on, when given. */
-  taskChatPartMessages: (
-    chatId: string,
-    since?: Date,
-  ) => Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
 /** A routine's trigger as its row says it. */
@@ -126,10 +110,7 @@ export class ChatTaskList {
       this.followsIn(chatId, owner),
       this.routinesIn(chatId, owner),
     ]);
-    const [schedules, cards] = await Promise.all([
-      this.schedulesOf(mine.map((task) => task.id)),
-      this.cardMessagesOf(chatId, mine),
-    ]);
+    const schedules = await this.schedulesOf(mine.map((task) => task.id));
     const taskIds = new Set(mine.map((task) => task.id));
     const taskItems: TaskListTaskItem[] = mine.map((task) => {
       // Checks come soonest first, so the first is the one the row shows.
@@ -139,7 +120,6 @@ export class ChatTaskList {
         task,
         schedule: schedules.get(task.id) ?? null,
         check: check ? { id: check.id, at: check.at, recurring: check.recurring === true } : null,
-        cardMessageId: (task.chat && cards.get(task.chat.id)) ?? null,
       };
     });
     const checkItems: TaskListCheckItem[] = checks
@@ -152,31 +132,6 @@ export class ChatTaskList {
         page.endedBefore,
       ),
     };
-  }
-
-  /**
-   * For each task that needs its owner, the message of chat `chatId` that
-   * shows the card of the wait it now holds, by its task chat. Read only
-   * while one does.
-   */
-  private async cardMessagesOf(
-    chatId: string,
-    tasks: readonly ConciergeTaskDto[],
-  ): Promise<Map<string, string>> {
-    const waits = new Map(
-      tasks.flatMap((task) =>
-        task.status === "needs_you" && task.chat && task.openWait
-          ? [[task.chat.id, task.openWait] as const]
-          : [],
-      ),
-    );
-    if (waits.size === 0) return new Map();
-    // A card that shows a wait is said once the wait began: read from the
-    // oldest one's second on, not the whole chat.
-    const since = new Date(
-      Math.min(...[...waits.values()].map((wait) => wait.since)) - SAME_SECOND_MS,
-    );
-    return cardMessagesOf(await this.deps.taskChatPartMessages(chatId, since), waits);
   }
 
   private async followsIn(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]> {
@@ -304,10 +259,6 @@ export class ChatTaskList {
       this.deps.following?.()?.onChange?.(() => {
         follows = true;
         tell();
-      }) ?? (() => {}),
-      // A new card may be the one a waiting task's Respond goes to now.
-      this.deps.onTaskCardMessage?.((cardChat) => {
-        if (cardChat === chatId) tell();
       }) ?? (() => {}),
     ];
     return () => {

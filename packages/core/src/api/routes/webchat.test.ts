@@ -46,9 +46,9 @@ import { ModelResolutionError } from "../../agent/index.js";
 import {
   chatMessages,
   conciergeMessageTurns,
-  conciergeTasks,
   guardianAuth,
   romeSessions,
+  taskChats,
   webchatProjects,
 } from "../../db/schema.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
@@ -3533,7 +3533,7 @@ describe("Webchat API", () => {
 
       // The final reply goes through send_message with the result content.
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({ text: "Final answer" }),
         expect.anything(),
       );
@@ -3563,7 +3563,7 @@ describe("Webchat API", () => {
                 name: "Inbox check",
                 watchLabel: "Run on demand",
                 thenSummary: "check the inbox",
-                actionName: "summon",
+                actionName: "system:summon",
                 args: { agentName: "main", prompt: "Check the inbox." },
               },
             };
@@ -3601,7 +3601,7 @@ describe("Webchat API", () => {
 
       // send_message carries only the final answer; commentary is its own message.
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "It's sunny.", turnPhase: "final", blockIx: 1 }],
         }),
@@ -3685,7 +3685,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).not.toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.anything(),
         expect.anything(),
       );
@@ -3714,7 +3714,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3754,7 +3754,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3781,7 +3781,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3822,7 +3822,7 @@ describe("Webchat API", () => {
       );
       expect(assistantTexts(events)).toContainEqual({ blockIx: 0, text: "Whole block" });
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Whole block", turnPhase: "final", blockIx: 0 }],
         }),
@@ -3840,7 +3840,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Same text", turnPhase: "final", blockIx: 1 }],
         }),
@@ -3857,7 +3857,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Result only", turnPhase: "final", blockIx: 0 }],
         }),
@@ -4196,7 +4196,7 @@ describe("Webchat API", () => {
       const stream = await h.finish();
       expect(stream).toContain('"stopped":true');
       expect(h.sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({ text: "Already changed the file" }),
         expect.anything(),
       );
@@ -6440,7 +6440,7 @@ describe("Webchat API", () => {
         tzid: "America/Los_Angeles",
         localTime: "09:00",
         rrule: "FREQ=HOURLY;INTERVAL=12",
-        actionName: "summon",
+        actionName: "system:summon",
         args: { agentName: "main", prompt: "Check feedback." },
       };
 
@@ -6513,7 +6513,7 @@ describe("Webchat API", () => {
         expect(cards[0]).toMatchObject({
           toolUseId: "tu-routine",
           routineKey: expect.stringMatching(/^chat-routine:[^:]+:tu-routine$/),
-          draft: { name: "Feedback triage", actionName: "summon" },
+          draft: { name: "Feedback triage", actionName: "system:summon" },
         });
         expect(cards[0].routineId).toBeUndefined();
       });
@@ -6883,7 +6883,7 @@ describe("Webchat API", () => {
       expect(capturedFork?.prompt).not.toContain("Now tell me about Rome.");
       expect(capturedFork?.prompt).not.toContain("Rome is the capital of Italy.");
       expect(showApp).toHaveBeenCalledWith(
-        "show_app",
+        "system:show_app",
         { appId: "sessions", route: "feedback-fork-session" },
         expect.objectContaining({
           initiator: "system:turn-feedback",
@@ -8081,11 +8081,10 @@ describe("Webchat API", () => {
 
     describe("a task chat's row", () => {
       let repo: ConciergeTasksRepository;
-      let deleted: string[];
       let upserts: Array<{ id: string; archivedAt: number | null }>;
       let app: ReturnType<typeof createWebchatRuntime>["routes"];
 
-      /** A chat the Concierge of `ownerKey` started, linked to a row of its own. */
+      /** A chat the Concierge of `ownerKey` started, with the task it is. */
       const taskChat = async (id: string, ownerKey = "guardian") => {
         await deps.webchatRepo.createSession(
           id,
@@ -8103,9 +8102,7 @@ describe("Webchat API", () => {
           triggerKind: TASK_CHAT_TRIGGER_KIND,
           triggerName: "Fix flaky test",
         });
-        const [row] = await repo.upsertMany([
-          { title: `Task of ${id}`, state: "doing", sessionId: id },
-        ]);
+        const row = await repo.create(id);
         // Let the row's own change notice land before the test starts listening.
         await new Promise((resolve) => setTimeout(resolve, 0));
         return row;
@@ -8136,8 +8133,6 @@ describe("Webchat API", () => {
           webchatRepo: deps.webchatRepo,
           tasks,
         } as unknown as ConciergeDeps);
-        deleted = [];
-        service.chatDeleted = (taskId: string) => void deleted.push(taskId);
         deps.concierge = service;
         upserts = [];
         repo.onChange(({ row }) => {
@@ -8148,49 +8143,36 @@ describe("Webchat API", () => {
 
       it("stops the task and takes it off the task list when its chat is archived, and lists it again unarchived", async () => {
         const row = await taskChat("task-chat");
-        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(await panel()).toEqual(["Fix flaky test"]);
         upserts = [];
 
         expect((await archive("task-chat")).status).toBe(200);
         expect(await panel()).toEqual([]);
         expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
-        expect(await repo.get(row.id)).toMatchObject({ stopReason: "archived" });
+        expect(await repo.get(row.id)).toMatchObject({ stoppedAt: expect.any(Date) });
         // A repeated archive changes nothing, so the row still comes back.
         expect((await archive("task-chat")).status).toBe(200);
 
         expect((await archive("task-chat", false)).status).toBe(200);
-        expect(await panel()).toEqual(["Task of task-chat"]);
-        expect(upserts.at(-1)).toEqual({ id: row.id, archivedAt: null });
+        expect(await panel()).toEqual(["Fix flaky test"]);
         // Back on the list, the task stays stopped.
         expect(await repo.get(row.id)).toMatchObject({
+          archivedAt: null,
           stoppedAt: expect.any(Date),
-          stopReason: "archived",
         });
       });
 
-      it("keeps a row the Concierge archived before its chat was archived", async () => {
-        const row = await taskChat("task-chat");
-        await repo.upsertMany([{ id: row.id, archived: true }]);
-        expect((await archive("task-chat")).status).toBe(200);
-        expect((await archive("task-chat", false)).status).toBe(200);
-        expect((await repo.get(row.id))?.archivedAt).not.toBeNull();
-      });
-
-      it("leaves the task list for good when the chat is deleted, and tells the Concierge", async () => {
+      it("takes the task with its chat when the chat is deleted", async () => {
         const row = await taskChat("task-chat");
         upserts = [];
         expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
           200,
         );
         expect(await panel()).toEqual([]);
-        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
-        expect(deleted).toEqual([row.id]);
-        expect(await repo.get(row.id)).toMatchObject({
-          sessionId: null,
-          stopReason: "deleted",
-          stoppedAt: expect.any(Date),
-          archivedAt: expect.any(Date),
-        });
+        // The Tasks view is told once, and the task is gone.
+        expect(upserts).toHaveLength(1);
+        expect(await repo.get(row.id)).toBeNull();
+        expect(testDb.db.select().from(taskChats).all()).toEqual([]);
       });
 
       it("leaves the rows alone when a common chat is archived or deleted", async () => {
@@ -8202,21 +8184,20 @@ describe("Webchat API", () => {
         expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
           200,
         );
-        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(await panel()).toEqual(["Fix flaky test"]);
         expect(upserts).toEqual([]);
-        expect(deleted).toEqual([]);
       });
 
-      it("never archives a row of another owner that links the chat", async () => {
-        const row = await taskChat("task-chat");
-        // A row that links the chat but is another owner's, as no write makes it.
-        testDb.db
-          .update(conciergeTasks)
-          .set({ ownerKey: "visitor:a" })
-          .where(eq(conciergeTasks.id, row.id))
-          .run();
-        expect((await archive("task-chat")).status).toBe(200);
-        expect(await repo.get(row.id)).toMatchObject({ archivedAt: null, stoppedAt: null });
+      it("names the Concierge chat a task chat reports to when it is read", async () => {
+        await taskChat("task-chat");
+        const read = await app.request("/chat/sessions/task-chat");
+        expect(await read.json()).toMatchObject({
+          taskOf: { conciergeChatId: expect.any(String), main: true },
+        });
+        await deps.webchatRepo.createSession("plain-chat", "Plain");
+        expect(await (await app.request("/chat/sessions/plain-chat")).json()).not.toHaveProperty(
+          "taskOf",
+        );
       });
     });
 
@@ -9196,7 +9177,7 @@ describe("Webchat API", () => {
     // its description from the connection kind, so no tool can supply one.
     it.each([
       ["persists", "connect_account", true],
-      ["rejects", "connector_connect", false],
+      ["rejects", "connector:connector_connect", false],
     ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
       const sessionId = `sess-connect-${tool}`;
       await deps.webchatRepo.createSession(sessionId, "Connect card");

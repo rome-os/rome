@@ -27,23 +27,17 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  CalendarClock,
   Cpu,
   FileOutput,
   FolderOpen,
-  ListChecks,
-  MoreHorizontal,
   PanelRightOpen,
+  Pencil,
   Share2,
   Trash2,
 } from "lucide-react";
 import { z } from "zod";
 import type { MessageWritingEvent } from "@rome/api-types/concierge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -61,6 +55,7 @@ import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
+import { TaskLinksScope } from "@/components/chat/task-link/task-links";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -141,12 +136,18 @@ import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
+  BackToConciergeChat,
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
+import {
+  ChatHeaderActions,
   type HeaderMenu,
   type HeaderMenuItem,
-} from "@/components/concierge/ConciergeHeaderStatus";
+} from "@/components/concierge/ChatHeaderActions";
+import { RomeInputDialog } from "@/components/rome-input-dialog";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { useChatTaskList } from "@/components/concierge/TaskList";
 import { useTaskList } from "@/components/concierge/TaskListPane";
 import { useOutputsPane } from "./outputs/OutputsPane";
 import {
@@ -199,9 +200,10 @@ import {
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  renameSession,
   updateSessionModel,
 } from "@/lib/chat-api";
-import { useArchiveSession } from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   snapshotWorkspaceForSend,
@@ -563,6 +565,8 @@ export function Chat({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // The header's Rename asks for the new name in a dialog.
+  const [renameOpen, setRenameOpen] = useState(false);
   // Reactions live events changed since the messages loaded. A
   // reconnect reloads the messages, which then say how each stands.
   const [liveReactions, setLiveReactions] = useState<LiveReactions>(new Map());
@@ -612,6 +616,7 @@ export function Chat({
     archivedAt,
     forkable,
     isTaskChat,
+    taskOf,
     projectPath,
     isConciergeSession,
   } = useSessionIdentity(mainSessionId);
@@ -2401,15 +2406,17 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The agent's logo in the header opens the chat's task list: what runs for it.
+  // The header's Tasks button and ⋯ menu open the chat's lists: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // A dot on the header's Tasks button says a task chat needs its owner.
+  const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
   // On a narrow screen the task list's sheet covers the composer.
   useEffect(() => {
     if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [taskList.sheetOpen, composerRef]);
   // The files the chat's agent produced, opened from the header's button or
   // from a message's link to one of them. docs/domains/chats.md#outputs
-  // Every chat has them, from the menu on its header's badge.
+  // Every chat has them, from its header's ⋯ menu.
   const outputsChatId = mainSessionId ?? null;
   const outputsPane = useOutputsPane(outputsChatId, { taskChats: concierge });
   useEffect(() => {
@@ -2456,8 +2463,8 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  // A blank topic chat, before its first message, shows nothing in the
-  // header: its empty state speaks for it, and it has no tasks yet.
+  // A topic chat before its first message. It has no tasks yet, and its
+  // header's status capsule welcomes the guardian instead of staying hidden.
   const blankTopicChat = conciergeEmpty && !isMainChat;
   // A chat started in a project the guardian chose names it in the menu. The
   // default project is where a chat goes when none was chosen.
@@ -2473,67 +2480,108 @@ export function Chat({
     workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
     workspaceStore?.set("followTargetPath", logical);
   };
-  // The badge's menu: what opens in the side pane, and the model that answered
-  // last at its foot. No counts or marks.
-  const menuItems: HeaderMenuItem[] = mainSessionId
-    ? [
-        ...(concierge
-          ? [
-              {
-                key: "tasks",
-                icon: <ListChecks />,
-                label: t("concierge.menu.tasks"),
-                run: taskList.open,
+  // The header's ⋯ menu, in three parts: what opens in the side pane (Outputs,
+  // a Concierge chat's Routines, the chosen project), what is done to the
+  // chat (the main chat is only shared), and the model that answered last.
+  // Its Tasks have a button of their own beside it.
+  const opens: HeaderMenuItem[] = [
+    {
+      key: "outputs",
+      icon: <FileOutput />,
+      label: t("concierge.menu.outputs"),
+      run: () => outputsPane.open(),
+    },
+    ...(concierge
+      ? [
+          {
+            key: "routines",
+            icon: <CalendarClock />,
+            label: t("concierge.menu.routines"),
+            run: () => taskList.open("routines"),
+          },
+        ]
+      : []),
+    ...(chosenProject
+      ? [
+          {
+            key: "project",
+            icon: <FolderOpen />,
+            label: t("chatHeader.project", {
+              name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
+            }),
+            run: () => openProject(chosenProject),
+          },
+        ]
+      : []),
+  ];
+  const actions: HeaderMenuItem[] = [
+    ...(isMainChat
+      ? []
+      : [
+          {
+            key: "rename",
+            icon: <Pencil />,
+            label: t("recentChats.rename", { ns: "common" }),
+            run: () => setRenameOpen(true),
+          },
+        ]),
+    {
+      key: "share",
+      icon: <Share2 />,
+      label: t("share.title", "Share chat"),
+      run: () => enterShareMode(),
+    },
+    ...(isMainChat
+      ? []
+      : [
+          isArchived
+            ? {
+                key: "unarchive",
+                icon: <ArchiveRestore />,
+                label: t("navbar.unarchive"),
+                run: () => void topicArchive.unarchive(),
+              }
+            : {
+                key: "archive",
+                icon: <Archive />,
+                label: t("navbar.archive"),
+                run: () => void topicArchive.archive(),
               },
-            ]
-          : []),
-        {
-          key: "outputs",
-          icon: <FileOutput />,
-          label: t("concierge.menu.outputs"),
-          run: () => outputsPane.open(),
-        },
-        ...(chosenProject
-          ? [
-              {
-                key: "project",
-                icon: <FolderOpen />,
-                label: t("chatHeader.project", {
-                  name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
-                }),
-                run: () => openProject(chosenProject),
-              },
-            ]
-          : []),
-      ]
-    : [];
-  const headerMenu: HeaderMenu | undefined =
-    menuItems.length > 0
-      ? {
-          items: menuItems,
-          caption: model ? (
-            <span
-              className="flex min-w-0 items-center gap-2"
-              title={t("chatHeader.lastModel", { model })}
-            >
-              <Cpu aria-hidden />
-              <span className="truncate">{modelDisplayName(model)}</span>
-            </span>
-          ) : undefined,
-        }
-      : undefined;
+          {
+            key: "delete",
+            icon: <Trash2 />,
+            label: t("navbar.delete"),
+            destructive: true,
+            run: () => setDeleteConfirmOpen(true),
+          },
+        ]),
+  ];
+  const headerMenu: HeaderMenu = {
+    sections: [opens, actions],
+    caption: model ? (
+      <span
+        className="flex min-w-0 items-center gap-2"
+        title={t("chatHeader.lastModel", { model })}
+      >
+        <Cpu aria-hidden />
+        <span className="truncate">{modelDisplayName(model)}</span>
+      </span>
+    ) : undefined,
+  };
   const headerBadge = concierge ? (
-    blankTopicChat ? null : (
-      <ConciergeHeaderStatus
-        // Every Concierge chat, main or topic, goes by the Concierge's name
-        // here; a topic chat's own name is in the chat list.
-        name={conciergeDisplayName}
-        activity={conciergeActivity}
-        // A chat with no messages yet draws its own large mascot.
-        badge={!conciergeEmpty}
-        menu={headerMenu}
-      />
-    )
+    // One header for a blank topic chat and the chat its first send makes, so
+    // the badge, the name and the capsule stay put as the first message lands.
+    <ConciergeHeaderStatus
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeDisplayName}
+      activity={conciergeActivity}
+      // The main chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty || blankTopicChat}
+      // Until its first message, a topic chat's capsule asks what's on the
+      // guardian's mind; any activity, and then idle, take over from there.
+      idleText={blankTopicChat ? t("concierge.topicEmpty.welcome") : undefined}
+    />
   ) : (
     <ConciergeHeaderStatus
       // Nothing while the chat's name loads, so "New chat" never flashes first.
@@ -2549,7 +2597,6 @@ export function Chat({
           />
         ) : undefined
       }
-      menu={headerMenu}
       showsActivity={false}
     />
   );
@@ -2557,39 +2604,17 @@ export function Chat({
   const navbarActions = (
     <>
       {mainSessionId && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size={floating ? "md" : "sm"}
-              label={t("navbar.more")}
-              icon={<MoreHorizontal />}
-              className={actionBadge}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => enterShareMode()}>
-              <Share2 className="size-4" />
-              {t("share.title", "Share chat")}
-            </DropdownMenuItem>
-            {isMainChat ? null : isArchived ? (
-              <DropdownMenuItem onSelect={() => void topicArchive.unarchive()}>
-                <ArchiveRestore className="size-4" />
-                {t("navbar.unarchive")}
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onSelect={() => void topicArchive.archive()}>
-                <Archive className="size-4" />
-                {t("navbar.archive")}
-              </DropdownMenuItem>
-            )}
-            {isMainChat ? null : (
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-                <Trash2 className="size-4" />
-                {t("navbar.delete")}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ChatHeaderActions
+          floating={floating}
+          // A Concierge chat's tasks; an ordinary chat, or a topic chat before
+          // its first message, has none.
+          tasks={
+            concierge && !blankTopicChat
+              ? { needsYou: tasksNeedYou, open: () => taskList.open("tasks") }
+              : undefined
+          }
+          menu={headerMenu}
+        />
       )}
       {!toolTrace.paneOpen && (
         <IconButton
@@ -2629,7 +2654,14 @@ export function Chat({
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. */}
-      {paneCoversChat ? null : (
+      {taskOf ? (
+        // A task chat names the Concierge chat it reports to, and goes back
+        // there. On the phone it takes the place of the chat list's button.
+        <BackToConciergeChat
+          to={taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`}
+          name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
+        />
+      ) : paneCoversChat ? null : (
         <SlotOutlet
           name={CONCIERGE_LEADING_SLOT}
           className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
@@ -2736,9 +2768,9 @@ export function Chat({
                       onPick={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   ) : (
-                    // A topic chat: its starters send themselves as its first message.
+                    // A topic chat: a suggestion goes into the composer, unsent.
                     <ConciergeTopicEmptyState
-                      onStart={(prompt) => composerRef.current?.submit(prompt)}
+                      onStart={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   )
                 ) : mainSessionId ? (
@@ -2746,42 +2778,44 @@ export function Chat({
                     {hasOlder(mainSessionId) ? (
                       <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                     ) : null}
-                    <TaskChatContext.Provider value={isTaskChat}>
-                      <MessageList
-                        rows={rows}
-                        live={{
-                          isStreaming: displayedStreaming,
-                          runningTurnId,
-                          quiet: activeSessionStream?.quiet,
-                          writing: liveWriting.get(activeSessionId) ?? null,
-                          snapshot: currentSnapshot,
-                          textStore: liveTextStore,
-                          blockIx: activeSessionStream?.assistantBlockIx,
-                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                          identity: mainIdentity,
-                        }}
-                        selection={
-                          shareMode
-                            ? {
-                                selectedTurns: selectedShareTurns,
-                                selectableSessionId: mainSessionId,
-                                onToggleTurn: toggleShareTurn,
-                              }
-                            : undefined
-                        }
-                        contentRef={attachContent}
-                        onOpenLiveTrace={openLiveTraceDrawer}
-                        onOpenStoredTrace={openStoredTraceDrawer}
-                        onOpenSubagentTrace={openSubagentTraceDrawer}
-                        activeTraceTarget={traceDrawerTarget}
-                        subagentIconByName={subagentIconByName}
-                        actions={blockActions}
-                        feedback
-                        fork={forkable}
-                        variant={variant}
-                        unreadFrom={unread?.firstId ?? null}
-                      />
-                    </TaskChatContext.Provider>
+                    <TaskLinksScope chatId={concierge ? mainSessionId : null}>
+                      <TaskChatContext.Provider value={isTaskChat}>
+                        <MessageList
+                          rows={rows}
+                          live={{
+                            isStreaming: displayedStreaming,
+                            runningTurnId,
+                            quiet: activeSessionStream?.quiet,
+                            writing: liveWriting.get(activeSessionId) ?? null,
+                            snapshot: currentSnapshot,
+                            textStore: liveTextStore,
+                            blockIx: activeSessionStream?.assistantBlockIx,
+                            textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                            identity: mainIdentity,
+                          }}
+                          selection={
+                            shareMode
+                              ? {
+                                  selectedTurns: selectedShareTurns,
+                                  selectableSessionId: mainSessionId,
+                                  onToggleTurn: toggleShareTurn,
+                                }
+                              : undefined
+                          }
+                          contentRef={attachContent}
+                          onOpenLiveTrace={openLiveTraceDrawer}
+                          onOpenStoredTrace={openStoredTraceDrawer}
+                          onOpenSubagentTrace={openSubagentTraceDrawer}
+                          activeTraceTarget={traceDrawerTarget}
+                          subagentIconByName={subagentIconByName}
+                          actions={blockActions}
+                          feedback
+                          fork={forkable}
+                          variant={variant}
+                          unreadFrom={unread?.firstId ?? null}
+                        />
+                      </TaskChatContext.Provider>
+                    </TaskLinksScope>
                   </>
                 ) : (
                   emptyState
@@ -2999,6 +3033,25 @@ export function Chat({
             }
           />
           {topicArchive.dialog}
+          {mainSessionId && !isMainChat ? (
+            <RomeInputDialog
+              open={renameOpen}
+              title={t("recentChats.rename", { ns: "common" })}
+              inputLabel={t("recentChats.renameLabel", { ns: "common" })}
+              confirmLabel={t("recentChats.rename", { ns: "common" })}
+              initialValue={sessionName?.trim() ?? ""}
+              onCancel={() => setRenameOpen(false)}
+              onConfirm={(value) => {
+                setRenameOpen(false);
+                const name = value.trim();
+                if (!name || name === sessionName?.trim()) return;
+                // The chat list and this header read the name again.
+                void renameSession(mainSessionId, name)
+                  .catch(() => undefined)
+                  .then(emitSessionsChanged);
+              }}
+            />
+          ) : null}
           {/* A topic chat asks, as the sidebar does, what becomes of its
               follows and open tasks. */}
           {concierge && mainSessionId && !isMainChat ? (

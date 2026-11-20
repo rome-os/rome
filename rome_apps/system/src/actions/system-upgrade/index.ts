@@ -37,7 +37,7 @@ export function createAction(config: ActionConfig, deps: SystemUpgradeDeps): Act
   // Fail the action load at boot if the dep is missing, rather than surfacing a
   // TypeError on the first 3am fire.
   if (typeof deps.systemUpgrade?.checkAndOffer !== "function") {
-    throw new Error("system_upgrade requires a systemUpgrade dep with checkAndOffer()");
+    throw new Error("system:system_upgrade requires a systemUpgrade dep with checkAndOffer()");
   }
   return createSystemUpgradeAction(config, deps);
 }

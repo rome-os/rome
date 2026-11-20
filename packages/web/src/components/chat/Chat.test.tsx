@@ -45,6 +45,7 @@ import {
   markSessionRead,
   openTurnStream,
   postSessionTurn,
+  renameSession,
 } from "@/lib/chat-api";
 
 let agentRoleLabel = enChat.roles.agent;
@@ -491,6 +492,7 @@ rs.mock("@/lib/chat-api", () => {
     ...chatApiModule,
     createSession: rs.fn(),
     deleteSession: rs.fn(),
+    renameSession: rs.fn().mockResolvedValue(undefined),
     interruptTurn: rs.fn(),
     listSessionMessages,
     // The newest page reads like the whole list unless a test says otherwise.
@@ -1026,12 +1028,18 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-    const caption = document.querySelector("[data-concierge-menu-caption]");
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    const caption = document.querySelector("[data-chat-header-menu-caption]");
     expect(caption?.textContent).toBeTruthy();
+    // An ordinary chat: Outputs, then what is done to the chat; no Tasks button.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
+      "recentChats.rename",
+      "share.title",
+      "navbar.archive",
+      "navbar.delete",
     ]);
+    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
   });
 
   it("shows no model in the menu before the chat's first turn", async () => {
@@ -1043,8 +1051,8 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-    expect(document.querySelector("[data-concierge-menu-caption]")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(document.querySelector("[data-chat-header-menu-caption]")).toBeNull();
   });
 
   it("opens a message's link to one of its files in Outputs, in an ordinary chat too", () => {
@@ -1061,11 +1069,10 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "concierge.menu.outputs",
-      "chatHeader.project",
-    ]);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    const opens = () =>
+      [...document.querySelectorAll("[data-chat-header-menu-section]")][0]!.textContent;
+    expect(opens()).toBe("concierge.menu.outputschatHeader.project");
     view.unmount();
 
     mockUseSessionIdentity.mockReturnValue({
@@ -1075,10 +1082,8 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "concierge.menu.outputs",
-    ]);
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    expect(opens()).toBe("concierge.menu.outputs");
   });
 
   it("shows no name, not New Chat, while an existing session loads", () => {
@@ -2816,7 +2821,7 @@ describe("Chat Concierge empty state", () => {
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
-  it("shows neither the mascot nor the name in a blank topic chat, and both once it has a message", async () => {
+  it("shows the mascot, the name and a welcome in a blank topic chat's capsule, which leaves it for the status once it has a message", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "",
       pinnedAgentMention: null,
@@ -2831,9 +2836,19 @@ describe("Chat Concierge empty state", () => {
       return found;
     });
     await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
-    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
-    expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "chatHeader.menu" })).toBeNull();
+    // The header a chat with messages has: the badge, then the name tag under it.
+    await waitFor(() =>
+      expect(header.querySelector("[data-concierge-header-badge]")).not.toBeNull(),
+    );
+    const name = header.querySelector<HTMLElement>("[data-concierge-header-name]")!;
+    expect(name.className).toContain("row-start-2");
+    expect(within(name).getByText("Rome")).toBeTruthy();
+    // Idle, the capsule is drawn anyway, with the welcome.
+    const capsule = header.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(capsule.className).not.toContain("sr-only");
+    expect(capsule.textContent).toBe("concierge.topicEmpty.welcome");
+    // No task list yet: no Tasks button.
+    expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
     view.unmount();
 
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
@@ -2847,7 +2862,11 @@ describe("Chat Concierge empty state", () => {
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByTestId("user-row");
-    expect(await screen.findByRole("button", { name: "chatHeader.menu" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "concierge.menu.tasks" })).toBeTruthy();
+    // Idle with a message, the capsule is read but not drawn, as in any chat.
+    const idle = document.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(idle.className).toContain("sr-only");
+    expect(idle.textContent).toBe("concierge.activity.idle");
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -3016,14 +3035,13 @@ describe("Chat Concierge empty state", () => {
     ).toContain("sr-only");
   });
 
-  it("opens the task list from the menu on the agent's logo in a Concierge chat's header, not its ··· menu", async () => {
+  it("opens Tasks from the header's Tasks button, and Outputs and Routines from its ⋯ menu, not from the agent's logo", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Calendar",
       pinnedAgentMention: null,
       archivedAt: null,
     });
-    // A topic chat with a message: a blank one shows no header.
     rs.mocked(listSessionMessages).mockResolvedValueOnce([
       {
         id: "m-1",
@@ -3034,17 +3052,22 @@ describe("Chat Concierge empty state", () => {
       },
     ]);
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
-    // The header settles once the chat loads; its menu holds Tasks.
-    await screen.findByRole("button", { name: "chatHeader.menu" });
-    await waitFor(() => {
-      fireEvent.click(screen.getByRole("button", { name: "chatHeader.menu" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "concierge.menu.tasks" }));
-      expect(mockOpenTaskList).toHaveBeenCalled();
-    });
+    // The header settles once the chat loads; Tasks has its own button.
+    fireEvent.click(await screen.findByRole("button", { name: "concierge.menu.tasks" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    // The logo opens nothing.
+    expect(document.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain(
-      "concierge.tasks.title",
-    );
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "concierge.menu.routines",
+      "recentChats.rename",
+      "share.title",
+      "navbar.archive",
+      "navbar.delete",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
+    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -3058,7 +3081,10 @@ describe("Chat Concierge empty state", () => {
       <Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />,
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    // The main chat is only shared: no Rename, Archive or Delete.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "concierge.menu.routines",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -3074,6 +3100,25 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
+  });
+
+  it("renames the chat from the header's ⋯ menu", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "recentChats.rename" }));
+    const field = await screen.findByRole("textbox", { name: "recentChats.renameLabel" });
+    expect((field as HTMLInputElement).value).toBe("Calendar");
+    await user.clear(field);
+    await user.type(field, "Trip plans{Enter}");
+    await waitFor(() =>
+      expect(rs.mocked(renameSession)).toHaveBeenCalledWith("topic-1", "Trip plans"),
+    );
   });
 
   it("offers Share chat in a common chat too", async () => {

@@ -78,15 +78,22 @@
       }
     },
     "topicEmpty": {
-      "title": "Start an ongoing topic",
-      "description": "Alerts and tasks here show up only in this chat.",
+      "welcome": "What's on your mind?",
+      "label": "Suggestions",
       "starters": {
-        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
-        "work": "Keep track of work here: project progress, PRs and meetings",
-        "trip": "Help me plan next month's trip, and keep everything about it here"
-      },
-      "justAsk": "Just asking a question?",
-      "backToMain": "Ask in the main chat →"
+        "life": {
+          "label": "Keep my bills and errands here",
+          "text": "Keep my bills, deliveries and other errands here, and remind me before anything is due"
+        },
+        "work": {
+          "label": "Track my work and meetings",
+          "text": "Track my work here: project progress, PRs and meetings"
+        },
+        "trip": {
+          "label": "Plan next month's trip",
+          "text": "Help me plan next month's trip, and keep everything about it here"
+        }
+      }
     },
     "activity": {
       "idle": "Idle",
@@ -120,10 +127,10 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Running on its own",
+        "on_its_own": "Routines",
         "ended": "Ended"
       },
-      "empty": "Nothing runs here yet.",
+      "empty": "No tasks yet.",
       "loading": "Loading tasks",
       "loadFailed": "Failed to load tasks",
       "showMore": "Show {{count}} more",
@@ -132,16 +139,14 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "notStarted": "Not started",
         "stopping": "Stopping…",
-        "opening": "Opening…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
           "stopped": "Stopped",
           "no_response": "No response"
         },
-        "notStartedAge": "Not started · Created {{age}}"
+        "active": "Active"
       },
       "schedule": {
         "daily": "Daily at {{time}}",
@@ -165,21 +170,22 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
-        "respond": "Respond",
-        "respondTo": "Respond to {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}",
-        "openChat": "Open the chat for {{title}}"
+        "stopTask": "Stop {{title}}"
       },
       "failed": {
         "stop": "Failed to stop the task"
       },
-      "created": "Created {{when}}",
-      "endedAt": "Ended {{when}}"
+      "endedAt": "Ended {{when}}",
+      "routines": "Routines",
+      "needsYouDot": "A task needs you",
+      "emptyRoutines": "No routines yet."
     },
     "menu": {
       "tasks": "Tasks",
-      "outputs": "Outputs"
+      "routines": "Routines",
+      "outputs": "Outputs",
+      "needsYouDot": "A task needs you"
     }
   },
   "reply": {
@@ -198,7 +204,7 @@
   },
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
-    "newChat": "New Chat",
+    "newChat": "New chat",
     "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
@@ -795,5 +801,20 @@
     "menu": "Chat menu",
     "project": "Project · {{name}}",
     "lastModel": "Last answered by {{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "Needs you",
+      "active": "Active",
+      "later": "Later",
+      "done": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "no_response": "No response"
+    },
+    "label": "{{name}}, {{status}}",
+    "untitled": "Task",
+    "mainChat": "Main chat",
+    "backTo": "Back to {{name}}"
   }
 }

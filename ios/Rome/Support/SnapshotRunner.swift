@@ -406,6 +406,8 @@ enum SnapshotRunner {
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
                let demo = model.workspace?.backend as? DemoBackend, let store = model.workspace?.topicStore("topic-errors") {
                 demo.unreadableChats.insert("topic-errors")
+                // The bar shows on the second failure in a row.
+                await store.reload()
                 await store.reload()
                 await capture("58b-load-failed", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-errors")) }
                 store.retryHold = .seconds(4)
@@ -419,6 +421,8 @@ enum SnapshotRunner {
             await capture("57-agent-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-cards")) }
             // An itinerary whose stops open in Maps.
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
+            // Task links in each status: running, needs you, done, failed, stopped, no response, later.
+            await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.

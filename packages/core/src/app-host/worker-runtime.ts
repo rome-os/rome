@@ -1,3 +1,4 @@
+import { registerGmailActionProxies } from "./gmail-calls.js";
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../apps/host-execution/service.js";
 import { getDb } from "../db/index.js";
@@ -26,7 +27,9 @@ import { chatsWiring } from "../chats-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { PolicyEngine } from "../core/policy-engine.js";
+import { PolicyEngine } from "../participation/wake-gate/policy/policy-engine.js";
+import { guardedSend } from "../participation/send-gate/index.js";
+import { wakeGateLoader } from "../participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "../profile-memory.js";
 import {
   ActionRegistryProxy,
@@ -171,6 +174,12 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const channelsService = new ChannelsServiceProxy();
   const chatSettings = new ChatSettingsControlProxy();
   const appChatSettings = legacyChatIdSettings(chatSettings);
+  const wakeGateFor = wakeGateLoader({
+    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
+    policies: () => policiesRepo.findAll(),
+    connectionKindOf: connectionKindOfChannel,
+  });
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
@@ -222,6 +231,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
+      sendGate: guardedSend,
+      wakeGateFor,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>
         resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
@@ -280,6 +291,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     });
   }
 
+  registerGmailActionProxies(actionRegistry);
   return actionEngine;
 }
 

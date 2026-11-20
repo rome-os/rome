@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import i18n from "@/i18n";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { ConciergeHeaderStatus } from "./ConciergeHeaderStatus";
@@ -44,28 +44,11 @@ describe("ConciergeHeaderStatus", () => {
     expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
   });
 
-  it("shows its menu from the badge, or from the name tag without a badge, and opens nothing itself", () => {
-    const opened: string[] = [];
-    const menu = {
-      items: [{ key: "tasks", icon: null, label: "Tasks", run: () => opened.push("tasks") }],
-    };
-    const { container, rerender } = render(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} menu={menu} />,
-    );
-    const badge = screen.getByRole("button", { name: "Chat menu" });
-    expect(badge.hasAttribute("data-concierge-header-badge")).toBe(true);
-    // Only one trigger: the name tag stays a plain box beside the badge.
+  it("is no button: the badge and the name tag open nothing", () => {
+    const { container } = render(<ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(container.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     expect(container.querySelector("[data-concierge-header-name]")?.tagName).toBe("DIV");
-    fireEvent.click(badge);
-    expect(opened).toEqual([]);
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Tasks"]);
-
-    rerender(
-      <ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} badge={false} menu={menu} />,
-    );
-    expect(
-      screen.getByRole("button", { name: "Chat menu" }).hasAttribute("data-concierge-header-name"),
-    ).toBe(true);
   });
 
   it("lifts the name tag and the status a row when the badge is left out", () => {
@@ -165,64 +148,6 @@ describe("ConciergeHeaderStatus", () => {
     expect(mascot(container).hasAttribute("data-poked")).toBe(false);
     fireEvent.pointerDown(mascot(container));
     expect(mascot(container).hasAttribute("data-poked")).toBe(true);
-  });
-});
-
-describe("ConciergeHeaderStatus quick menu", () => {
-  function renderWithMenu(caption?: string) {
-    const opened: string[] = [];
-    const item = (key: string, label: string) => ({
-      key,
-      icon: null,
-      label,
-      run: () => opened.push(key),
-    });
-    const { container } = render(
-      <ConciergeHeaderStatus
-        name="Yo"
-        activity={{ kind: "idle" }}
-        menu={{ items: [item("tasks", "Tasks"), item("outputs", "Outputs")], caption }}
-      />,
-    );
-    const badge = container.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
-    return { opened, badge };
-  }
-  const items = () => screen.queryAllByRole("menuitem").map((item) => item.textContent);
-
-  it("shows its items on hover, with no counts, and runs the one chosen", () => {
-    const { opened, badge } = renderWithMenu();
-    expect(items()).toEqual([]);
-    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
-    expect(items()).toEqual(["Tasks", "Outputs"]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Outputs" }));
-    expect(opened).toEqual(["outputs"]);
-    expect(items()).toEqual([]);
-  });
-
-  it("shows the menu on a click or a tap of the badge, and opens no tab from it", () => {
-    const { opened, badge } = renderWithMenu();
-    fireEvent.click(badge);
-    expect(items()).toEqual(["Tasks", "Outputs"]);
-    expect(opened).toEqual([]);
-  });
-
-  it("names the model that answered last at its foot, as text only", () => {
-    renderWithMenu("Opus 5.5");
-    fireEvent.click(screen.getByRole("button", { name: "Chat menu" }));
-    const caption = document.querySelector("[data-concierge-menu-caption]");
-    expect(caption?.textContent).toBe("Opus 5.5");
-    expect(caption?.querySelector("button, a")).toBeNull();
-  });
-
-  it("moves focus into the menu on Arrow Down, and between its items", async () => {
-    const { badge } = renderWithMenu();
-    badge.focus();
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
-    await waitFor(() => expect(document.activeElement?.textContent).toBe("Tasks"));
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(document.activeElement?.textContent).toBe("Outputs");
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(document.activeElement?.textContent).toBe("Tasks");
   });
 });
 

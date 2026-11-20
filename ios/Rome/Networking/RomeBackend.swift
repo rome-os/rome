@@ -75,6 +75,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func taskList(chatId: String) async throws -> TaskListResponse
     /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
+    /// `GET /chats/:chatId/task-links?ids=`: the task chats among `ids` of this
+    /// Concierge chat's owner, from any of their Concierge chats, as a task
+    /// link draws them.
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
     /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
@@ -273,6 +277,10 @@ final class LiveBackend: RomeBackend {
 
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
         try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
+    }
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await client.get("/chats/\(escape(chatId))/task-links", query: [URLQueryItem(name: "ids", value: ids.joined(separator: ","))])
     }
 
     func stopListedTask(chatId: String, taskId: String) async throws {
@@ -483,6 +491,7 @@ extension RomeBackend {
     }
     func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse { TaskLinksResponse(tasks: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
     func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
