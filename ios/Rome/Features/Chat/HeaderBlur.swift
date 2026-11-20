@@ -115,12 +115,6 @@ final class HeaderBlurView: UIView {
     /// instead of the part they hold, so only `layoutSubviews` sets them up.
     private var builtSize: CGSize?
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window == nil { stopAnimators() }
-        invalidate()
-    }
-
     @objc private func invalidate() {
         builtSize = nil
         setNeedsLayout()
@@ -136,9 +130,20 @@ final class HeaderBlurView: UIView {
         }
         CATransaction.commit()
         if window != nil, bounds.size != .zero, bounds.size != builtSize {
+            // Paused animations set up while a page slides over or off this
+            // one (a task chat closing) are dropped, and the bands would show
+            // the full blur: set them up once it has settled.
+            if let coordinator = owningController?.transitionCoordinator {
+                coordinator.animate(alongsideTransition: nil) { [weak self] (_: UIViewControllerTransitionCoordinatorContext) in self?.setNeedsLayout() }
+                return
+            }
             builtSize = bounds.size
             rebuild()
         }
+    }
+
+    private var owningController: UIViewController? {
+        sequence(first: self as UIResponder, next: { $0.next }).first { $0 is UIViewController } as? UIViewController
     }
 
     private func rebuild() {
@@ -188,7 +193,8 @@ final class HeaderBlurView: UIView {
     }
 
     /// Stops the animators, which a paused animator needs before it is
-    /// released. Leaving the window stops them; so does SwiftUI's teardown.
+    /// released. SwiftUI's teardown stops them; they stay set up while the
+    /// view is off screen, so a page closing over it finds them intact.
     func stopAnimators() {
         for animator in animators {
             animator.stopAnimation(true)
