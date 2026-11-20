@@ -12,9 +12,10 @@ const MEMBER_CHANNELS_TTL_MS = 5 * 60 * 1000;
  *  again: someone may have just added the app with /invite. */
 const RELIST_AFTER_MS = 10 * 1000;
 /** One page of Slack's listing, and how many pages a listing reads at most:
- *  a listing that would need more is refused, never taken as whole. */
+ *  a listing that would need more is refused, never taken as whole. 10,000
+ *  channels is also as far as a directory page's cursor reaches. */
 const PAGE = 200;
-const MAX_PAGES = 100;
+const MAX_PAGES = 50;
 
 /** What a call that needs the channel scopes says when the workspace was
  *  connected before Rome's Slack app asked for them. */

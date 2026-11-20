@@ -38,4 +38,27 @@ describe("SlackMemberChannels", () => {
     // A channel named by its id needs no listing.
     expect(await listing.resolve("C_OPS")).toBe("C_OPS");
   });
+
+  it("lists 10,000 channels whole, as far as a directory page's cursor reaches, and refuses one more page", async () => {
+    const pageOf = (page: number) =>
+      Array.from({ length: 200 }, (_, i) => ({
+        id: `C${page * 200 + i}`,
+        name: `c${page * 200 + i}`,
+        isPrivate: false,
+      }));
+    const listed = (pages: number) =>
+      rs.fn(async (_token: string, read: { cursor?: string }) => {
+        const page = read.cursor ? Number(read.cursor) : 0;
+        return {
+          channels: pageOf(page),
+          ...(page + 1 < pages ? { nextCursor: String(page + 1) } : {}),
+        };
+      });
+
+    const whole = new SlackMemberChannels({ api: { memberChannels: listed(50) }, botToken: "x" });
+    const over = new SlackMemberChannels({ api: { memberChannels: listed(51) }, botToken: "x" });
+
+    expect(await whole.list()).toHaveLength(10_000);
+    await expect(over.list()).rejects.toThrow(/more than 10000 channels/);
+  });
 });

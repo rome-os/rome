@@ -363,8 +363,9 @@ describe("a mention inside a Slack thread (R14)", () => {
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     await adapter.start();
-    // Rome's record: id 3 is the first mention, id 30 the second.
-    const keys: Record<number, string> = { 3: tsOf(3), 30: tsOf(30) };
+    // Rome's record: id 3 is the first mention, id 30 the second, each kept
+    // by its message id in the thread.
+    const keys: Record<number, string> = { 3: `${root}:${tsOf(3)}`, 30: `${root}:${tsOf(30)}` };
     const facts = chatPromptFacts({
       facts: { unseen: () => [], seen: () => {} },
       messages: { byIds: (ids) => ids.map((id) => ({ key: keys[id] })) as never },
@@ -378,6 +379,8 @@ describe("a mention inside a Slack thread (R14)", () => {
 
     const first = await facts.thread!(place, `C_NEWS:${root}`, at(3), 3);
     const later = await facts.thread!(place, `C_NEWS:${root}`, at(30), 30, 3);
+    // A session whose first message in the thread is the second mention.
+    const late = await facts.thread!(place, `C_NEWS:${root}`, at(30), 30);
     await adapter.stop();
 
     expect(first?.messages.map((m) => m.text)).toEqual(["reply 1", "reply 2"]);
@@ -389,6 +392,10 @@ describe("a mention inside a Slack thread (R14)", () => {
     );
     // Replies 19 to 29 were not read: the model is told so.
     expect(later?.cut).toBe(true);
+    // A first read of the thread that stops short of the mention says so too.
+    expect(late?.messages.length).toBeGreaterThan(0);
+    expect(late?.messages.map((m) => m.text)).not.toContain("reply 29");
+    expect(late?.cut).toBe(true);
   });
 
   it("names no thread on a mention that is not in one, nor on a reply in a direct message", async () => {
