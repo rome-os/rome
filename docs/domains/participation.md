@@ -23,7 +23,7 @@ The moment a message is judged to need the agent and the agent starts a turn. Th
 The check that decides whether a message wakes the agent. It looks at where the message was said and who said it, never at the text, and answers *wake*, *quiet*, *block* or *review*. On *review*, the sentinel reads the message and ignores it, answers it itself, or wakes the agent.
 
 - By default a chat switched off wakes nobody, a policy that blocks the sender or the chat wins over every setting, a sender below the bond levels the agent replies to stays quiet, and a trusted sender or one a policy allows wakes the agent. Anyone else goes to review.
-- A message that wakes nobody shows no typing and downloads no attachments.
+- A message that wakes nobody shows no typing.
 - The wake gate calls no model, sends nothing and stores nothing, so the same message from the same sender always gets the same answer. It reads the guardian's settings as they are when the message arrives.
 
 ## Projection

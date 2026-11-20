@@ -225,7 +225,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
     // A recorded message carries People's answer for its sender, so the wake
-    // gate decides here, before typing shows or attachments download. Without
+    // gate decides here, before typing shows. Without
     // it, `inbox:message_handler` asks the gate once it has looked the sender up.
     const sender = "sender" in event ? event.sender : undefined;
     let wake: "wake" | "review" | undefined;
@@ -245,10 +245,16 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
             : null,
         },
       );
-      if (decision === "quiet" || decision === "block") {
-        log.debug("message wakes nobody", { connectionId, chatId: message.chatId, decision });
-        return;
-      }
+      // Logged at info, since no action span is open here to carry the
+      // policy decision as an event.
+      log.info("wake decided", {
+        connectionId,
+        chatId: message.chatId,
+        messageId: message.messageId,
+        bondLevel: sender.person?.bondLevel ?? "other",
+        decision,
+      });
+      if (decision === "quiet" || decision === "block") return;
       wake = decision;
     } else if (!enabled) {
       log.debug("conversation disabled", { connectionId, chatId: message.chatId });

@@ -559,7 +559,7 @@ describe("wake: in the hook", () => {
   });
 
   // The hook asks the gate once People's answer comes with the message, so a
-  // message that wakes nobody shows no typing and downloads nothing. Before
+  // message that wakes nobody shows no typing. Before
   // the wake gate, the hook showed typing for it and Inbox dropped it after.
   it.each([
     { gate: "wake", heard: "handled", wake: "wake", typing: true },
