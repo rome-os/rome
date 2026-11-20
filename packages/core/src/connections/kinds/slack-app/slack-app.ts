@@ -1001,7 +1001,6 @@ export class SlackAppAdapter {
     )) as ChatId;
   }
 
-  /** A member's name, best effort: a failed lookup leaves the message unnamed. */
   /** The names of `authors`, each looked up once and all together. A page is
    *  answered without the names Slack has not given within
    *  {@link NAME_WAIT_MS}, so a slow lookup never holds up a read. */
@@ -1023,6 +1022,7 @@ export class SlackAppAdapter {
     }
   }
 
+  /** A member's name, best effort: a failed lookup leaves the message unnamed. */
   private async lookUpName(userId: string): Promise<SlackUserName> {
     const cached = this.userNames.get(userId);
     if (cached) return cached;

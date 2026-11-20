@@ -272,10 +272,12 @@ export function createAction(
         // full: a short one reached the present. A page read back continues
         // from its oldest unless it is empty: a platform read live can answer
         // fewer than the limit while it holds more, as Slack answers at most
-        // 15.
+        // 15. A plain read of one chat is such a page too, so it names where
+        // to read on as well, and a short Slack read does not pass for the
+        // whole day.
         if (paging && newerThan) {
           if (page.length >= (limit ?? DEFAULT_LIMIT)) nextNewerThan = page[0]?.messageId ?? null;
-        } else if (paging && page.length > 0) {
+        } else if ((paging || threadId) && page.length > 0) {
           nextCursor = page.at(-1)?.cursor ?? null;
         }
         // `query` answers newest first; the transcript reads oldest first.
@@ -305,9 +307,15 @@ export function createAction(
         channel,
         messageCount: messages.length,
         ...(windowHours !== undefined ? { windowHours } : {}),
-        // Only a paged read names where the next page starts, so a plain read
-        // keeps the payload it always had.
-        ...(paging ? (newerThan ? { nextNewerThan } : { nextCursor }) : {}),
+        // A paged read, or a plain read of one chat, names where the next page
+        // starts. A read across every chat keeps the payload it always had.
+        ...(paging
+          ? newerThan
+            ? { nextNewerThan }
+            : { nextCursor }
+          : threadId
+            ? { nextCursor }
+            : {}),
         content: formatMessages(
           channel,
           messages,
