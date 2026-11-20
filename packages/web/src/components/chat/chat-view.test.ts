@@ -248,6 +248,24 @@ describe("buildRows model switch notice", () => {
     });
   });
 
+  it("says why Rome moved the chat to another model, with no row of its own", () => {
+    const quota = {
+      type: "quota_switch" as const,
+      reason: "model_limit" as const,
+      from: "openai" as const,
+      to: "openai" as const,
+      fromModel: "gpt-6.1-sol",
+      model: "gpt-6-luna",
+    };
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6.1-sol"),
+      mk(MAIN, "assistant", "q1", [quota]),
+      ...turn(MAIN, "t2", "gpt-6-luna"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "model_switch", "user", "agent"]);
+    expect(rows[2]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", quota });
+  });
+
   it("skips turns with no known model and compares within one session", () => {
     const rows = rowsOf([
       ...turn(MAIN, "t1", "gpt-6-luna"),

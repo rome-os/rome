@@ -1,3 +1,4 @@
+import type { QuotaSwitchPart } from "@rome/api-types/chat";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
@@ -225,6 +226,8 @@ export type ChatRow =
       fromModel: string;
       turnId: string;
       sessionId: string;
+      /** Rome moved the chat because a model hit its own limit: the note says why. */
+      quota?: QuotaSwitchPart;
     })
   // The turn after it ran on what a routine, an app or another agent sent
   // into the chat, which shows as a faint line naming the source.
@@ -252,7 +255,8 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
       b.kind === "model_switch" &&
       a.model === b.model &&
       a.fromModel === b.fromModel &&
-      a.turnId === b.turnId
+      a.turnId === b.turnId &&
+      a.quota === b.quota
     );
   }
   if (a.kind === "automated_input") {
@@ -303,8 +307,18 @@ export function buildRows(
 
   const rows: ChatRow[] = [];
   const renderedTraceTurns = new Set<string>();
+  // Rome's note that it moved the chat to another model of the provider. It
+  // has no row of its own: the next turn's switch notice says why.
+  const quotas = new Map<string, QuotaSwitchPart>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    if (msg.role === "assistant") {
+      const quota = quotaSwitchOf(msg);
+      if (quota) {
+        quotas.set(`${msg.sessionId}\u0000${quota.model}`, quota);
+        continue;
+      }
+    }
     if (msg.role === "user") {
       rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: msg }));
       continue;
@@ -358,7 +372,22 @@ export function buildRows(
       }),
     );
   }
-  return withModelSwitches(rows, tracesByTurn);
+  return withModelSwitches(rows, tracesByTurn, quotas);
+}
+
+/** The model-switch note a message is, when that is all it holds. */
+function quotaSwitchOf(message: ChatMessage): QuotaSwitchPart | null {
+  if (!message.content.includes('"quota_switch"')) return null;
+  try {
+    const parts = JSON.parse(message.content) as unknown;
+    if (!Array.isArray(parts) || parts.length !== 1) return null;
+    const [part] = parts as Array<Partial<QuotaSwitchPart>>;
+    return part?.type === "quota_switch" && typeof part.model === "string"
+      ? (part as QuotaSwitchPart)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
@@ -374,7 +403,11 @@ function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
  * model comes from its trace summary, so a running turn shows its notice once
  * it ends, and a turn without one changes nothing.
  */
-function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
+function withModelSwitches(
+  rows: ChatRow[],
+  tracesByTurn: Map<string, ChatMessage>,
+  quotas: Map<string, QuotaSwitchPart> = new Map(),
+): ChatRow[] {
   const lastModelBySession = new Map<string, string>();
   const seenTurns = new Set<string>();
   const out: ChatRow[] = [];
@@ -401,6 +434,7 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
       if (model) {
         const previous = lastModelBySession.get(turn.sessionId);
         if (previous && previous !== model) {
+          const quota = quotas.get(`${turn.sessionId}\u0000${model}`);
           const notice: ChatRow = {
             kind: "model_switch",
             key: `model-switch:${turn.turnId}`,
@@ -408,6 +442,7 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
             fromModel: previous,
             turnId: turn.turnId,
             sessionId: turn.sessionId,
+            ...(quota ? { quota } : {}),
           };
           const built = builtSwitches.get(row);
           if (built && sameRow(built, notice)) out.push(built);
