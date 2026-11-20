@@ -328,6 +328,8 @@ describe("wake: what member review decides", () => {
     { sentinel: "Decision: ESCALATE or IGNORE", action: "sentinel_ignored", agents: ["sentinel"] },
     // A reply that says "reply" in its own words is still the sentinel's own.
     { sentinel: "REPLY: I will reply soon.", action: "sentinel_replied", agents: ["sentinel"] },
+    // A decision that opens the answer counts in any case.
+    { sentinel: "Reply: Hi there.", action: "sentinel_replied", agents: ["sentinel"] },
   ])("Sentinel answers '$sentinel' → $action", async ({ sentinel, action, agents }) => {
     const handled = await handle({ ...member, answers: [[result(sentinel)]] });
 

@@ -225,11 +225,12 @@ export function buildMessageContext(
 const DECISION_OF = { replied: "REPLY", escalated: "ESCALATE", ignored: "IGNORE" } as const;
 
 /** Whether `raw` names `action`'s decision and no other: every REPLY,
- *  ESCALATE or IGNORE written in capitals, and every one after "Decision:"
- *  in any case, is that one. */
+ *  ESCALATE or IGNORE written in capitals, the one that opens it and every
+ *  one after "Decision:" in any case, is that one. */
 export function namesOnly(raw: string, action: SentinelDecision["action"]): boolean {
   const named = new Set([
     ...[...raw.matchAll(/\b(REPLY|ESCALATE|IGNORE)\b/g)].map((m) => m[1]),
+    ...[...raw.matchAll(/^\s*(REPLY|ESCALATE|IGNORE)\b/gi)].map((m) => (m[1] ?? "").toUpperCase()),
     ...[...raw.matchAll(/Decision\s*:\s*(REPLY|ESCALATE|IGNORE)\b/gi)].map((m) =>
       (m[1] ?? "").toUpperCase(),
     ),
