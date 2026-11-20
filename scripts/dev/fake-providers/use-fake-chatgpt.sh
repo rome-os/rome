@@ -25,13 +25,13 @@ fi
 tls="${2:?scratch TLS directory from make-tls.sh}"
 port="${3:-18765}"
 tls_port=$((port + 1))
-docker exec -u 0 -i "$container" sh -c 'cat > /usr/local/share/ca-certificates/rome-fake-providers.crt && update-ca-certificates >/dev/null 2>&1' < "${tls}/ca.pem"
+docker exec -u 0 -i "$container" sh -c 'cat > /usr/local/share/ca-certificates/rome-fake-providers.crt && update-ca-certificates >/dev/null 2>&1' <"${tls}/ca.pem"
 if docker exec "$container" sh -c 'test -f "$HOME/.codex/auth.json" && ! grep -q fake-chatgpt "$HOME/.codex/auth.json"'; then
   echo "use-fake-chatgpt: ${container} already holds a real-looking Codex login; refusing." >&2
   exit 1
 fi
 b64() { printf '%s' "$1" | base64 | tr -d '=\n' | tr '/+' '_-'; }
-exp=$(( $(date +%s) + 365 * 24 * 3600 ))
+exp=$(($(date +%s) + 365 * 24 * 3600))
 header=$(b64 '{"alg":"none","typ":"JWT"}')
 claims=$(b64 "{\"email\":\"fake-chatgpt@example.com\",\"exp\":${exp},\"https://api.openai.com/auth\":{\"chatgpt_plan_type\":\"plus\",\"chatgpt_account_id\":\"fake-chatgpt-account\",\"chatgpt_user_id\":\"fake-chatgpt-user\"}}")
 jwt="${header}.${claims}.fake-chatgpt"

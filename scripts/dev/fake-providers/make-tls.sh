@@ -13,7 +13,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.pem -days 30 \
   -subj "/CN=Rome dev fake providers CA" 2>/dev/null
 openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr \
   -subj "/CN=host.docker.internal" 2>/dev/null
-printf 'subjectAltName=DNS:host.docker.internal,DNS:auth.openai.com,DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > ext.cnf
+printf 'subjectAltName=DNS:host.docker.internal,DNS:auth.openai.com,DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' >ext.cnf
 openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out server.pem \
   -days 30 -extfile ext.cnf 2>/dev/null
 echo "scratch CA and certificate in ${dir}"
