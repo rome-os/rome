@@ -78,15 +78,22 @@
       }
     },
     "topicEmpty": {
-      "title": "Start an ongoing topic",
-      "description": "Alerts and tasks here show up only in this chat.",
+      "welcome": "What's on your mind?",
+      "label": "Suggestions",
       "starters": {
-        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
-        "work": "Keep track of work here: project progress, PRs and meetings",
-        "trip": "Help me plan next month's trip, and keep everything about it here"
-      },
-      "justAsk": "Just asking a question?",
-      "backToMain": "Ask in the main chat →"
+        "life": {
+          "label": "Keep my bills and errands here",
+          "text": "Keep my bills, deliveries and other errands here, and remind me before anything is due"
+        },
+        "work": {
+          "label": "Track my work and meetings",
+          "text": "Track my work here: project progress, PRs and meetings"
+        },
+        "trip": {
+          "label": "Plan next month's trip",
+          "text": "Help me plan next month's trip, and keep everything about it here"
+        }
+      }
     },
     "activity": {
       "idle": "Idle",

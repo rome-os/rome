@@ -36,8 +36,10 @@ export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
  * a Concierge chat, a capsule under it with what the Concierge is doing right
  * now. The name and the status are separate, so a short name stays under the
  * badge whatever the status's length. Idle, the status capsule is gone, and
- * the mascot only blinks. The status line is a live region, so a screen
- * reader hears it change; idle, it stays in the page, read but not drawn.
+ * the mascot only blinks, unless the caller gives an `idleText` for the
+ * capsule to say instead (a blank topic chat's welcome). The status line is a
+ * live region, so a screen reader hears it change; idle with no `idleText`,
+ * it stays in the page, read but not drawn.
  *
  * The badge and the name tag are no actions: what a chat opens is in the
  * header's buttons (`ChatHeaderActions`).
@@ -55,6 +57,7 @@ export function ConciergeHeaderStatus({
   badge = true,
   avatar,
   showsActivity = true,
+  idleText,
 }: {
   name: ReactNode;
   /** What the Concierge is doing; an ordinary chat leaves it idle. */
@@ -68,9 +71,14 @@ export function ConciergeHeaderStatus({
    * ordinary chat's header has none, and its name tag may run longer.
    */
   showsActivity?: boolean;
+  /**
+   * What the status capsule says while the Concierge is idle. Without it an
+   * idle capsule is not drawn; any activity takes its place.
+   */
+  idleText?: string;
 }) {
   const { t } = useTranslation("chat");
-  const status = statusText(activity, t);
+  const status = statusText(activity, t) ?? idleText ?? null;
   const busy = activity.kind !== "idle";
   const badgeEl = (
     <div
