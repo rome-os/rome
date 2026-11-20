@@ -438,6 +438,10 @@ export interface ConnectionDescriptor {
        *  from another on the same platform before it unlocks. Absent means
        *  it does not. */
       searches?: boolean;
+      /** True when agents act on the platform through this talker, such as
+       *  through the connector's proxy, so a kind with no actor reports `act`
+       *  as its chat. Absent means they do not. */
+      acts?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */
