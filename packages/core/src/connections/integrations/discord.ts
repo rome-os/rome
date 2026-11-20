@@ -113,6 +113,8 @@ export interface DiscordDeps {
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
+  /** The platform ids of all of Rome's Discord accounts. */
+  romeAccountIds?: () => ReadonlySet<string>;
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
    *  users/@me probe without hitting the network. Production pings the Discord
@@ -260,6 +262,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
+            romeAccountIds: deps.romeAccountIds,
             resolveDiscordPerson: (channelUserId) =>
               deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
             // Live gateway faults (post-login) route through here; the descriptor

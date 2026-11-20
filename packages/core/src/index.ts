@@ -1912,6 +1912,13 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
+    romeAccountIds: () =>
+      new Set(
+        connectionRegistry
+          .find("discord")
+          .map((connection) => accounts.accountOf(connection.id)?.id)
+          .filter((id): id is string => !!id),
+      ),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {

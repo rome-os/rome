@@ -143,6 +143,19 @@ describeAdapterConformance(
         account: { platform: "discord", id: DISCORD_SECOND_BOT_ID },
         channel: channelOver("discord-2", "00000000-0000-4000-8000-000000000007", second),
         bothHear: (text) => peer.emitMessage(text, DISCORD_CHANNEL, { mentionsEveryBot: true }).id,
+        alone: {
+          // The first account hears it first, so it would record it before
+          // the account it is for if it did not leave it.
+          mentions: (text) =>
+            peer.emitMessage(text, DISCORD_CHANNEL, { names: "second", firstBotHearsFirst: true })
+              .id,
+          repliesTo: (messageId, text) =>
+            peer.emitMessage(text, DISCORD_CHANNEL, {
+              names: "nobody",
+              replyTo: messageId,
+              firstBotHearsFirst: true,
+            }).id,
+        },
       },
       visible: (at) => peer.visible(at),
       // Discord refuses a message to a channel it does not know.
@@ -160,7 +173,14 @@ describeAdapterConformance(
       },
     };
   },
-  { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: true },
+  {
+    directMessages: true,
+    romeWritesFirst: true,
+    groups: true,
+    twoAccounts: true,
+    oneOfTwoAccounts: true,
+    threads: true,
+  },
   {
     romeWritesFirst: DISCORD_USER_ID,
     quote: DISCORD_DM_QUOTE,

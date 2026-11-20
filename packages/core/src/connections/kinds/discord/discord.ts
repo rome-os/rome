@@ -353,6 +353,7 @@ export class DiscordAdapter {
   private listAgents?: () => string[];
   private accountAgent?: () => string | null | undefined;
   private hasAgent?: (name: string) => boolean;
+  private romeAccountIds?: () => ReadonlySet<string>;
   private resolveDiscordPerson?: (
     channelUserId: string,
   ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
@@ -385,6 +386,8 @@ export class DiscordAdapter {
     /** Whether an agent is loaded, aliases included. Absent, every agent
      *  counts as loaded. */
     hasAgent?: (name: string) => boolean;
+    /** The platform ids of all of Rome's Discord accounts, this one included. */
+    romeAccountIds?: () => ReadonlySet<string>;
     resolveDiscordPerson?: (
       channelUserId: string,
     ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
@@ -399,6 +402,7 @@ export class DiscordAdapter {
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
+    this.romeAccountIds = config.romeAccountIds;
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
@@ -786,6 +790,18 @@ export class DiscordAdapter {
         return;
       }
 
+      // A message addressed to another of Rome's accounts, and not to this
+      // one, is left for that account to record. A message is recorded once
+      // and only the account that records it decides its wake, so if this
+      // one recorded it first, the account it was for would never wake. This
+      // stands in for deciding the wake once per account (ZHA-229).
+      if (addressing === "ambient" && (await this.addressesAnotherRomeAccount(message))) {
+        log.debug("leaving a message addressed to another of Rome's accounts", {
+          channelId: message.channelId,
+        });
+        return;
+      }
+
       // Every other message is recorded. Whether it wakes the agent (the
       // reply rule, bots, mentions of others) is the wake gate's call.
       await this.dispatchMessage(message, isDm, isThread, addressing, { fromBot, mentionsOthers });
@@ -793,6 +809,29 @@ export class DiscordAdapter {
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
+  }
+
+  /** Whether the message mentions, replies to, or sits in a thread of
+   *  another of Rome's accounts. */
+  private async addressesAnotherRomeAccount(message: Message): Promise<boolean> {
+    const others = new Set(this.romeAccountIds?.() ?? []);
+    const botId = this.client.user?.id;
+    if (botId) others.delete(botId);
+    if (others.size === 0) return false;
+    if ([...message.mentions.users.keys()].some((id) => others.has(id))) return true;
+    if (message.reference?.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+        if (others.has(refMsg.author.id)) return true;
+      } catch {
+        // A missing reference cannot prove the message is another account's.
+      }
+    }
+    const owner =
+      isThreadType(message.channel.type) && "ownerId" in message.channel
+        ? (message.channel as ThreadChannel).ownerId
+        : null;
+    return !!owner && others.has(owner);
   }
 
   /** Whether the message came through a webhook that is linked to a person. */
