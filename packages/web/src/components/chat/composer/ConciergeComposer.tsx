@@ -264,7 +264,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           sendEnded(text, false);
-          if (!textareaRef.current?.value && !voiceActiveRef.current) {
+          if (textareaRef.current?.value === "" && !voiceActiveRef.current) {
             // Text typed or dictated while the send was pending survives a
             // failure; only an empty field takes the failed text and its
             // context back. Dictated words are not in the field until listening
