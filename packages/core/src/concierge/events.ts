@@ -177,10 +177,7 @@ export async function renderTaskEvents(
   tasks: DirtyTask[],
 ): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const byChat = new Map<
-    string,
-    { taskIds: string[]; blocks: string[]; quiet: boolean; owner: string }
-  >();
+  const byChat = new Map<string, { taskIds: string[]; blocks: string[]; owner: string }>();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
@@ -189,10 +186,9 @@ export async function renderTaskEvents(
     const status = (await store.statusOf([row], { asReported: true })).get(row.id);
     // The chat the row reports to now: its own while live, else its owner's main chat.
     const key = found.conciergeChat.id;
-    const group = byChat.get(key) ?? { taskIds: [], blocks: [], quiet: true, owner: found.owner };
+    const group = byChat.get(key) ?? { taskIds: [], blocks: [], owner: found.owner };
     byChat.set(key, group);
     group.taskIds.push(task.taskId);
-    group.quiet &&= task.quiet;
     const blocks = group.blocks;
     const changes = task.changes.map((change) => change.kind);
     const lines: string[] = [];
@@ -230,6 +226,12 @@ export async function renderTaskEvents(
         }
       }
     }
+    // A scheduled task's owner may want only news or a problem: the Concierge
+    // reads it here and judges each run by what it says.
+    if (row.sessionId && wantsReply) {
+      const schedule = await service.deps.schedules?.of(task.taskId);
+      if (schedule?.report === "when_it_matters") lines.push("report: when_it_matters");
+    }
     for (const change of task.changes) {
       if (change.detail) lines.push(change.detail);
     }
@@ -250,18 +252,16 @@ export async function renderTaskEvents(
       status ? `status="${status.status}"` : null,
       status?.endReason ? `end_reason="${status.endReason}"` : null,
       `changes="${attr([...new Set(changes)].join(", "))}"`,
-      task.quiet ? 'quiet="true"' : null,
     ]
       .filter(Boolean)
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet, owner }]) => ({
+  return [...byChat.entries()].map(([chatId, { taskIds, blocks, owner }]) => ({
     chatId,
     owner,
     taskIds,
     prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
-    quiet,
   }));
 }
 
@@ -279,15 +279,17 @@ export function startConciergeEvents(
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async ({ chatId: from, owner, prompt, quiet, taskIds }) => {
+    deliver: async ({ chatId: from, owner, prompt, taskIds }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from, owner);
       if (!chatId) return "failed";
       // A dashboard admin dropped from the allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
+      // Most reports need no word, so the turn shows no sign that it runs
+      // until the Concierge speaks.
       return await service.systemTurnOutcome(chatId, prompt, {
-        quiet,
+        quiet: true,
         pushLevel: "active",
         taskIds,
       });
@@ -663,45 +665,33 @@ export function startConciergeEvents(
     // wait is over, it ends as its new work does. Rome's own turn-down of an
     // approval, and the turn that carries on from it, reopen nothing.
     if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(taskId);
-    // A follow-up the task chat queued or deferred sits under the turn that
-    // answered it, so the turn is Concierge's when any of its inputs was said
-    // as Concierge's account. The guardian answering the task's own card or
-    // approval carries on what the Concierge started, so it counts as the
-    // Concierge's too. Only the guardian's typed words are their own turn.
-    // A scheduled run that reports only when it matters reads as the
-    // system's, like any scheduled turn: one with nothing to ask goes to
-    // the digest rather than a report of its own.
-    const quietRun =
-      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id) && service.takeQuietRun(chatId);
+    // Who started the turn, as a fact for the Concierge: every turn's end is
+    // told, whoever started it. A follow-up the task chat queued sits under
+    // the turn that answered it, so the turn is Concierge's when any of its
+    // inputs was said as Concierge's account, as a scheduled run's brief is.
+    // The guardian answering the task's own card or approval carries on what
+    // the Concierge started, so it counts as the Concierge's too. The
+    // guardian's typed words are their own turn, and a turn with no input,
+    // such as a wake-up the task chat set itself, is the system's.
     const started =
-      !quietRun &&
-      (carriesApproval ||
-        userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content)));
-    const by = started ? "concierge" : quietRun || userRows.length === 0 ? "system" : "guardian";
+      carriesApproval ||
+      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content));
+    const by = started ? "concierge" : userRows.length === 0 ? "system" : "guardian";
     // The guardian's own words reach the chat through the user-input path, which
     // announces nothing, so they are read from the rows of the turn they started.
     const words = userRows.map((row) => userText(row.content)).join(" | ");
     const said = by === "guardian" ? `guardian: ${excerpt(words, DETAIL_EXCERPT_CHARS)}` : null;
     const question = event.status === "completed" ? openQuestion(rows) : null;
-    // A scheduled turn that finished with no question, approval or error
-    // needs no word: its result waits for no report.
     const finalText =
       event.status === "completed" && !question
         ? event.output.text?.trim() ||
           userText(rows.filter((row) => row.role === "assistant").at(-1)?.content ?? "")
         : "";
-    // A turn that only carries out what the guardian chose on the task's
-    // card or decided on its approval, and says it has nothing to report,
-    // owes no report: the card already shows it, so no Concierge turn hears
-    // of it. Any other turn reports as usual, and so does a wish for the
-    // work to recur, which is news for the Concierge.
-    const carriesOwnersChoice =
-      (carriesApproval && !turnedDownByRome) || userRows.some((row) => answersCard(row.content));
-    const nothingNew =
-      carriesOwnersChoice && hasNothingToReport(finalText) && recurringOf(finalText) === null;
-    const passive =
-      nothingNew ||
-      (by === "system" && event.status === "completed" && !carriesApproval && !question);
+    // A turn whose conclusion says it has nothing to report owes no report,
+    // whoever started it: no Concierge turn hears of it. Any other turn
+    // reports, and so does a wish for the work to recur, which is news for
+    // the Concierge.
+    const nothingNew = hasNothingToReport(finalText) && recurringOf(finalText) === null;
     // How the task chat's work ended, once it has nothing left to run: a turn
     // a newer input took over hands its work on, and ends nothing.
     const stillRunning = service.dashboard.chats
@@ -709,7 +699,7 @@ export function startConciergeEvents(
       .filter((id) => id !== event.turn.turnId);
     if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
       await tasks.repo
-        .setLastOutcome(taskId, outcomeOf(event.status), new Date(), { reported: !passive })
+        .setLastOutcome(taskId, outcomeOf(event.status), new Date(), { reported: !nothingNew })
         .catch((error: unknown) =>
           log.warn("failed to write a task's outcome", {
             taskId,
@@ -752,13 +742,9 @@ export function startConciergeEvents(
     coalescer.mark({
       taskId,
       kind: `turn_end:${event.status} by=${by}`,
-      // A result the Concierge asked for, or an error, is worth telling now.
-      // The guardian's own turns, scheduled ones and a stop wait.
-      urgent: event.status === "error" || (event.status === "completed" && started),
-      // A scheduled turn that finished with no question, approval or error
-      // needs no word: its row holds the outcome, and it goes with the next
-      // flush or digest rather than waking a turn of its own.
-      ...(passive ? { passive: true } : {}),
+      // Every turn's end is told within seconds: the Concierge judges from
+      // what it says whether the guardian should hear of it.
+      urgent: true,
       ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
   };

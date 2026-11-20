@@ -2379,7 +2379,7 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toEqual([]);
   });
 
-  it("still reports a turn the Concierge's own brief started, even with nothing to report", async () => {
+  it("drops a turn the Concierge's own brief started when it has nothing to report", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2393,9 +2393,8 @@ describe("Concierge events", () => {
       chatId,
       text: concluded(NOTHING_TO_REPORT),
     });
-    await rs.advanceTimersByTimeAsync(2_100);
-    expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(s.backendTurns).toEqual([]);
   });
 
   it("tells the Concierge of a wish for the work to recur, even with nothing else to report", async () => {
@@ -2432,7 +2431,7 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt).toBe(
       `${MAIN_LINE}<task_events>\n<task chat_id="task-1" start_message_id="ack-1" title="Flights" status="ended" end_reason="done" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
     );
-    expect(s.quietFlags).toEqual([false]);
+    expect(s.quietFlags).toEqual([true]);
     // The guardian did not start it, so its first message goes to the phone.
     expect(s.turnOptions[0]?.pushLevel).toBe("active");
   });
@@ -2599,7 +2598,7 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt.match(/<task /g)).toHaveLength(2);
   });
 
-  it("holds the guardian's own turn in a task chat for a minute and runs it quietly", async () => {
+  it("tells the guardian's own turn in a task chat within seconds, as a turn that shows no sign until it speaks", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2610,12 +2609,10 @@ describe("Concierge events", () => {
       turnId: "task-turn-2",
     });
     await finishTask(s, chatId, { turnId: "task-turn-2" });
-    await rs.advanceTimersByTimeAsync(59_000);
-    expect(s.backendTurns).toEqual([]);
-    await rs.advanceTimersByTimeAsync(1_000);
+    await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
-    expect(s.backendTurns[0].prompt).toContain('quiet="true"');
+    expect(s.backendTurns[0].prompt).not.toContain("quiet=");
     expect(s.quietFlags).toEqual([true]);
   });
 
@@ -2776,7 +2773,7 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toHaveLength(2);
   });
 
-  it("tells the Concierge of a failed turn at once, with its cause, and holds a stopped one", async () => {
+  it("tells the Concierge of a failed or stopped turn at once, a failed one with its cause", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2796,8 +2793,8 @@ describe("Concierge events", () => {
     stopped.fakeTimers();
     await finishTask(stopped, task.chatId, { status: "interrupted" });
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(stopped.backendTurns).toEqual([]);
-    await rs.advanceTimersByTimeAsync(58_000);
+    expect(stopped.backendTurns).toHaveLength(1);
+    expect(stopped.backendTurns[0].prompt).toContain("turn_end:interrupted by=concierge");
     expect(stopped.quietFlags).toEqual([true]);
   });
 
@@ -2845,8 +2842,6 @@ describe("Concierge events", () => {
     });
     s.fakeTimers();
     await s.finish({ turnId: "guardian-turn", agentName: "core:main", chatId });
-    await rs.advanceTimersByTimeAsync(59_000);
-    expect(s.backendTurns).toEqual([]);
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     expect(s.backendTurns[0].prompt).toContain(`<task chat_id="${taskId}"`);
@@ -2871,10 +2866,10 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
-    expect(s.quietFlags).toEqual([false]);
+    expect(s.quietFlags).toEqual([true]);
   });
 
-  it("keeps a typed reply that dismisses the open card the guardian's own, quiet turn", async () => {
+  it("keeps a typed reply that dismisses the open card the guardian's own turn", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2889,8 +2884,6 @@ describe("Concierge events", () => {
     });
     await finishTask(s, chatId, { turnId: "task-turn-2" });
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(s.backendTurns).toEqual([]);
-    await rs.advanceTimersByTimeAsync(58_000);
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
     expect(s.quietFlags).toEqual([true]);
   });
@@ -3085,7 +3078,7 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns[0].prompt).toContain('changes="approval"');
     expect(s.backendTurns[0].prompt).toContain("approval: Send the booking email");
-    expect(s.quietFlags).toEqual([false]);
+    expect(s.quietFlags).toEqual([true]);
   });
 
   it("tells the Concierge at once of a task turn that failed before it started, either way it is told", async () => {
@@ -3096,7 +3089,7 @@ describe("Concierge events", () => {
         `<task chat_id="${chatId}" start_message_id="ack-1" title="Flights" status="ended" end_reason="failed" changes="turn_end:error by=concierge">`,
       );
       expect(s.backendTurns[0].prompt).toContain(`error: ${error}`);
-      expect(s.quietFlags).toEqual([false]);
+      expect(s.quietFlags).toEqual([true]);
     };
 
     // A reused agent session: it could not resolve the model for the turn.
@@ -3128,51 +3121,66 @@ describe("Concierge events", () => {
     expectFailedTurn(cold, second.chatId);
   });
 
-  it("wakes no turn for a scheduled run that finished with nothing to ask, and lists it in the next digest", async () => {
+  it("tells within seconds a turn with no input, such as a wake-up the task chat set itself, with its conclusion", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
-    // A routine woke the task chat; nobody typed in it, and it asked nothing.
+    // The task chat's own `defer` woke it: nobody wrote in it, and it asked nothing.
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([
+        { type: "text", content: concluded("CI passed on PR #7.", "All 13 checks passed.") },
+      ]),
+      turnId: "wake-turn",
+    });
     await s.finish({
-      turnId: "scheduled-turn",
+      turnId: "wake-turn",
       agentName: "core:main",
       chatId,
       status: "completed",
+      text: concluded("CI passed on PR #7.", "All 13 checks passed."),
+    });
+    // Its result waits for the report: the task has not ended unsaid.
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      lastOutcome: "succeeded",
+      outcomeUnsaid: true,
+    });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(
+      `<task chat_id="${taskId}" start_message_id="ack-1" title="Flights"`,
+    );
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=system"');
+    expect(s.backendTurns[0].prompt).toContain("conclusion: CI passed on PR #7.");
+    expect(s.backendTurns[0].prompt).not.toContain("quiet=");
+    // The digest lists no such run.
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
+  });
+
+  it("drops a turn whose conclusion has nothing to report, whoever started it", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.finish({
+      turnId: "wake-turn",
+      agentName: "core:main",
+      chatId,
+      status: "completed",
+      text: concluded(NOTHING_TO_REPORT, "Checked again."),
     });
     await rs.advanceTimersByTimeAsync(10 * 60_000);
     expect(s.backendTurns).toEqual([]);
-    // Its result waits for no report: the task ended, and nothing stays working.
-    expect(await s.taskRepo.get(taskId)).toMatchObject({
-      lastOutcome: "succeeded",
-      outcomeUnsaid: false,
-    });
-    const notes = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
-    expect(notes.text).toContain(`<ran_on_schedule task="${taskId}" title="Flights"/>`);
-    // Listed once, after a digest that listed it ran to its end.
-    await s.service.markTaskNotesListed(notes);
-    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).not.toContain(
-      "ran_on_schedule",
-    );
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ outcomeUnsaid: false });
   });
 
-  it("keeps a digest's no-response and scheduled-run notes until a digest that lists them runs to its end", async () => {
+  it("keeps a digest's no-response notes until a digest that lists them runs to its end", async () => {
     const s = setup();
-    const { chatId, taskId } = await startTask(s);
-    s.fakeTimers();
-    await s.finish({
-      turnId: "scheduled-turn",
-      agentName: "core:main",
-      chatId,
-      status: "completed",
-    });
-    await rs.advanceTimersByTimeAsync(10 * 60_000);
     const unanswered = await s.makeTaskRow({ title: "Pick a seat", chatId: CONCIERGE_CHAT });
     await s.taskRepo.markWaitExpired(unanswered!.id, new Date(Date.now() - 2 * 86_400_000));
     // A digest turn that failed marked nothing: the next digest reads the same notes.
     const first = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
     const again = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
     expect(again).toEqual(first);
-    expect(first.text).toContain(`<ran_on_schedule task="${taskId}"`);
     expect(first.text).toContain(`<ended_no_response task="${unanswered!.id}"`);
     await s.service.markTaskNotesListed(again);
     expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
@@ -6911,7 +6919,7 @@ describe("scheduled tasks", () => {
     );
   });
 
-  it("lets a quiet run with nothing to ask go to the digest, not a report", async () => {
+  it("tells a run that reports only when it matters like any run, with its report setting", async () => {
     const s = setup();
     withSchedules(s, "when_it_matters");
     const { chatId, taskId } = await startScheduled(s, "when_it_matters");
@@ -6919,11 +6927,24 @@ describe("scheduled tasks", () => {
 
     await s.service.runScheduledTask(taskId, Date.now());
     await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
-    await rs.advanceTimersByTimeAsync(10 * 60_000);
-    expect(s.backendTurns).toEqual([]);
-    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toContain(
-      `<ran_on_schedule task="${taskId}"`,
-    );
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`<task chat_id="${taskId}"`);
+    expect(s.backendTurns[0].prompt).toContain("report: when_it_matters");
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
+  });
+
+  it("gives an every-run task's event no report line", async () => {
+    const s = setup();
+    withSchedules(s, "every_run");
+    const { chatId, taskId } = await startScheduled(s);
+    s.fakeTimers();
+
+    await s.service.runScheduledTask(taskId, Date.now());
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId, text: "x" });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).not.toContain("report:");
   });
 
   it("sends nothing for a stopped task, and removes its schedule", async () => {

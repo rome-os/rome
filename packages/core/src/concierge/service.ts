@@ -79,8 +79,6 @@ const log = createLogger("concierge");
 /** What a digest adds about a chat's tasks, and which notes it lists. */
 export interface DigestTaskNotes {
   text: string;
-  /** Tasks whose scheduled run finished with nothing to say. */
-  passive: string[];
   /** Tasks that ended for no response. */
   noResponse: string[];
 }
@@ -1365,9 +1363,8 @@ export class ConciergeService {
   /**
    * What a digest of Concierge chat `chatId` adds about its tasks: each task
    * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
-   * so the Concierge asks the guardian rather than check again, each
-   * scheduled run that finished with nothing to say, each task that ended
-   * for no response, listed once. `text` is empty when there is nothing to say.
+   * so the Concierge asks the guardian rather than check again, and each
+   * task that ended for no response, listed once. `text` is empty when there is nothing to say.
    * Read only: {@link markTaskNotesListed} settles them once the digest's
    * turn ran to its end, so a failed digest leaves them for the next one.
    */
@@ -1389,13 +1386,6 @@ export class ConciergeService {
           ]
         : [];
     });
-    // A scheduled run that finished with nothing to say goes here, not in a turn of its own.
-    const passive = this.taskEvents?.passiveOf(ids) ?? [];
-    for (const row of rows) {
-      if (passive.includes(row.id)) {
-        lines.push(`<ran_on_schedule task="${attr(row.id)}" title="${attr(row.title)}"/>`);
-      }
-    }
     // Each task that ended for no response is listed once, so it can be resumed.
     const noResponse = await this.deps.tasks.repo.noResponseUnlisted(ids);
     for (const row of rows) {
@@ -1405,14 +1395,12 @@ export class ConciergeService {
     }
     return {
       text: lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "",
-      passive,
       noResponse,
     };
   }
 
   /** Settles the notes a digest listed, once its turn ran to its end. */
   async markTaskNotesListed(notes: DigestTaskNotes): Promise<void> {
-    this.taskEvents?.settlePassive(notes.passive);
     await this.deps.tasks.repo.markNoResponseListed(notes.noResponse);
   }
 
@@ -1616,9 +1604,6 @@ export class ConciergeService {
     );
   }
 
-  /** Task chats whose scheduled run in flight reports only when it matters. */
-  private readonly quietRuns = new Set<string>();
-
   /**
    * A scheduled run of task `taskId` fired at `firedAt`: its brief goes
    * straight into the task's own task chat, as the Concierge's words, with no
@@ -1644,7 +1629,6 @@ export class ConciergeService {
       return "no_chat";
     }
     const chatId = row.sessionId;
-    if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
     // No one is asking from a device in a scheduled run, and a device id saved
     // by an earlier handoff ends at the next sign-in: the run's live reads
     // take a working device instead. A later handoff from a device sets it again.
@@ -1655,18 +1639,9 @@ export class ConciergeService {
       CONCIERGE_ACCOUNT,
     );
     if (!sent.ok) {
-      this.quietRuns.delete(chatId);
       throw new Error("error" in sent ? sent.error : "The task chat cannot take the scheduled run");
     }
     return "sent";
-  }
-
-  /**
-   * Whether the turn that just ended in task chat `chatId` was a scheduled
-   * run that reports only when it matters. Read once per run.
-   */
-  takeQuietRun(chatId: string): boolean {
-    return this.quietRuns.delete(chatId);
   }
 
   /**

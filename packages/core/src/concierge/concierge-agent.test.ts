@@ -114,7 +114,7 @@ describe("the Concierge agent", () => {
   it("tells a finished task's result with one say from its conclusion, never its whole report", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
-    const finished = rule("- A turn that ended `by=concierge`");
+    const finished = rule("- A new result of a task");
     for (const text of [
       "tell the result in ONE `say`",
       "with `replyTo` set to the task's `start_message_id`",
@@ -149,7 +149,7 @@ describe("the Concierge agent", () => {
   it("forwards a task's card with card_forward, alone, and never composes a card from a result", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
-    const finished = rule("- A turn that ended `by=concierge`");
+    const finished = rule("- A new result of a task");
     for (const text of [
       "each `card id=` line means the task's final answer showed a card, so send each one with `card_forward` and its id",
       "sends the card as it is (or its text where cards cannot show) and nothing else",
@@ -367,14 +367,29 @@ describe("the Concierge agent", () => {
     const finished =
       concierge.systemPromptPrefix
         .split("\n")
-        .find((line) => line.startsWith("- A turn that ended `by=concierge`")) ?? "";
-    // Silent only where Rome's own gate is: the guardian's card choice or approval.
+        .find((line) => line.startsWith("- A new result of a task")) ?? "";
+    // Rome drops only a turn whose conclusion has nothing to report; a turn
+    // that repeats the guardian's card choice is the Concierge's to judge.
     expect(finished).toContain(
       "only carried out what the guardian chose on that task's card or decided on its approval",
     );
     expect(finished).toContain("says there is nothing to report, send nothing");
     expect(finished).toContain("as for any other result such as a scheduled run's");
     expect(finished).not.toContain("tells nothing the card or the thread does not already show");
+  });
+
+  it("hears every task turn's end and judges it by what it says, not by who started it", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("Every turn a task chat ends comes to you, whoever started it");
+    expect(prompt).toContain("`by` says who started the turn, not whether to speak");
+    const silent =
+      prompt.split("\n").find((line) => line.startsWith("- Say nothing when a turn only says")) ??
+      "";
+    expect(silent).toContain("when its conclusion repeats what you already told");
+    expect(silent).toContain("A `by=guardian` turn was read by the guardian in the task chat");
+    expect(silent).toContain("`report: when_it_matters` line: tell only news or a problem");
+    for (const removed of ['quiet="true"', "ran_on_schedule", "Stay silent unless the result"])
+      expect(prompt).not.toContain(removed);
   });
 
   it("schedules recurring work itself, never through a task chat", () => {
