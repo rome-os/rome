@@ -86,7 +86,7 @@ describe("the Concierge agent", () => {
     for (const text of [
       "Only what you send with `say` reaches the guardian",
       "Speak only when you bring something new",
-      'Never send an acknowledgement ("on it", "got it")',
+      'Never send an acknowledgement ("got it")',
       'an announcement ("I\'ll…", "let me check")',
       "a card's outcome, their own words back",
       "or the same news twice",
