@@ -1,4 +1,4 @@
-import { connectComputerHost } from "./computer-host.js";
+import { connectComputerHost, createComputerResponder } from "./computer-host.js";
 import { signComputerRequest } from "./computer-origin.js";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createServer } from "node:http";
@@ -588,6 +588,36 @@ describe("caller daemon observation", () => {
       await raw.call({ jsonrpc: "2.0", id: 1, method: "log.query", params: { kind: "actions" } }),
     ).toMatchObject({ result: { rows: [], hasMore: false } });
   });
+});
+
+it("reports a broken target grant once and keeps discovery available", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rome-node-invalid-grant-"));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "grant.json");
+  await writeFile(file, "broken-grant-data");
+  const reply = rs.fn(() => true);
+  const warn = rs.fn();
+  const responder = createComputerResponder(
+    { deviceId: target, cloudUrl: "http://localhost", name: "Target" },
+    file,
+    noAudit,
+    reply,
+    () => false,
+    warn,
+  );
+  const send = (action: string) =>
+    responder.receive({ id: caller, from: caller, payload: { type: "request", action, args: {} } });
+  await send("system.info");
+  expect(reply.mock.calls[0]).toMatchObject([
+    { payload: { result: { actions: ["system.info"] } } },
+  ]);
+  responder.disconnect();
+  await send("computer.status");
+  expect(reply.mock.calls[1]).toMatchObject([
+    { payload: { error: { code: "computer_origin_required" } } },
+  ]);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn.mock.calls[0]?.[0]).not.toContain("broken-grant-data");
 });
 
 it("runs signed Computer Use over the daemon and gateway, reusing the saved target grant after restart", async () => {

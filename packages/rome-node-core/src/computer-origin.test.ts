@@ -61,3 +61,19 @@ it("refuses expired signatures across a clock rollback", () => {
   time.mockReturnValue(100_001);
   expect(verifier.consume(request, proof.authorization)).toBe(false);
 });
+
+it("accepts a controller up to two seconds ahead without extending the signed expiry", () => {
+  const time = rs.spyOn(Date, "now").mockReturnValue(100_000);
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const peer = randomUUID();
+  const deviceId = randomUUID();
+  const verifier = new ComputerRequestVerifier(deviceId, peer, publicKey);
+  const input = { peer, deviceId, epoch: verifier.epoch, action: "computer.status", args: {} };
+  const proof = signComputerRequest(privateKey, input);
+  const request = { ...input, requestId: proof.requestId };
+  time.mockReturnValue(97_999);
+  expect(verifier.consume(request, proof.authorization)).toBe(false);
+  time.mockReturnValue(98_000);
+  expect(verifier.consume(request, proof.authorization)).toBe(true);
+  expect(verifier.consume(request, proof.authorization)).toBe(false);
+});

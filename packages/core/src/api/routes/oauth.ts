@@ -202,7 +202,8 @@ export function oauthRoutes(deps: ApiDeps): Hono {
           ? "/"
           : "/onboard";
 
-      issueGuardianSession(c, guardian.userId);
+      if (!connecting || existingSession?.userId !== guardian.userId)
+        issueGuardianSession(c, guardian.userId);
       if (!connecting) deps.loginUsage.recordLogin("oauth");
 
       c.header("Cache-Control", "no-store");

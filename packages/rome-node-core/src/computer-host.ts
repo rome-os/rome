@@ -2,6 +2,7 @@ import { createPublicKey } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
 import { readBrowserStatus } from "./browser-status.js";
+import { cloudOrigin } from "./cloud.js";
 import { ComputerRequestVerifier, signedComputerRequest } from "./computer-origin.js";
 import { decodeMeta, encodeMeta, FRAME_TYPE, isUuid, type Frame } from "./frame.js";
 import type { HostConnectionOptions, HostResponder } from "./host-connection.js";
@@ -32,25 +33,39 @@ export function createComputerResponder(
   audit: HostAudit,
   send: (reply: OutboundEnvelope) => boolean,
   sendFrame: (frame: Frame) => boolean,
+  warn: (message: string) => void = (message) => process.emitWarning(message),
 ): HostResponder {
+  let warned = false;
   const loadGrant = async () => {
-    const grant: unknown = JSON.parse(await readFile(grantFile, "utf8"));
-    if (
-      !isRecord(grant) ||
-      grant.deviceId !== session.deviceId ||
-      grant.cloudUrl !== session.cloudUrl ||
-      !isUuid(grant.peer) ||
-      typeof grant.publicKey !== "string" ||
-      !grant.publicKey.startsWith("-----BEGIN PUBLIC KEY-----")
-    )
+    try {
+      const grant: unknown = JSON.parse(await readFile(grantFile, "utf8"));
+      if (
+        !isRecord(grant) ||
+        grant.deviceId !== session.deviceId ||
+        typeof grant.cloudUrl !== "string" ||
+        cloudOrigin(grant.cloudUrl) !== session.cloudUrl ||
+        !isUuid(grant.peer) ||
+        typeof grant.publicKey !== "string" ||
+        !grant.publicKey.startsWith("-----BEGIN PUBLIC KEY-----")
+      )
+        throw new Error("Invalid grant");
+      const verifier = new ComputerRequestVerifier(
+        session.deviceId,
+        grant.peer,
+        createPublicKey(grant.publicKey),
+      );
+      warned = false;
+      return verifier;
+    } catch {
+      if (!warned)
+        warn(
+          "Computer Use disabled: check the target grant file, paired device ID, Cloud origin and Ed25519 public key.",
+        );
+      warned = true;
       return null;
-    return new ComputerRequestVerifier(
-      session.deviceId,
-      grant.peer,
-      createPublicKey(grant.publicKey),
-    );
+    }
   };
-  let connection = loadGrant().catch(() => null);
+  let connection = loadGrant();
   const running = new Set<Promise<void>>();
   async function receive(message: InboundEnvelope) {
     const current = connection;
@@ -142,7 +157,7 @@ export function createComputerResponder(
         });
     },
     disconnect() {
-      connection = loadGrant().catch(() => null);
+      connection = loadGrant();
     },
     async idle() {
       await Promise.allSettled(running);

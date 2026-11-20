@@ -71,7 +71,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
-import { verifySession } from "../../access/auth.js";
+import { issueGuardianSession, verifySession } from "../../access/auth.js";
 import { oauthRoutes } from "./oauth.js";
 
 // A fresh drizzle-backed connections repository per test;
@@ -117,6 +117,19 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();
+  });
+
+  it("keeps the signed-in guardian's browser cookie when connecting a provider", async () => {
+    rs.mocked(verifySession).mockReturnValueOnce({ userId: "guardian-1", entry: "cloud-browser" });
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { login: "octocat" },
+      tokens: { accessToken: "test" },
+      metadata: null,
+      intent: "connect",
+    });
+    expect((await postRedeem(makeDeps(makeRegistry()))).status).toBe(200);
+    expect(issueGuardianSession).not.toHaveBeenCalled();
   });
 
   it("github: writes the ledger only; grant authorized with profile; custody materializes off the transition", async () => {

@@ -1000,6 +1000,12 @@ work and ordinary device commands cannot issue a protected request.
 
 ### Grant a target
 
+The standard Rome image runs agent commands as the same operating-system user
+as Core. Those commands can read any controller key Core can read. Leave
+Computer Use grants disabled on that image. Moving the key to another
+directory or removing an environment variable from child processes does not
+protect the key or the Guardian session secret.
+
 The owner sets `ROME_COMPUTER_USE_GRANTS_FILE` to an absolute path on the
 instance. Each target needs its own entry. Use an instance-specific
 `ROME_JWT_SECRET` of at least 32 characters. Keep signing material and grants
@@ -1052,7 +1058,9 @@ These files survive restarts. Edit the grant and restart its process to
 change or revoke access. Every protected call gets a separate Ed25519
 signature over the peer, target, connection epoch, request ID, operation,
 arguments, transport and expiry. The receiver consumes the request ID once.
-A reconnect changes its epoch.
+The receiver accepts a controller clock up to two seconds ahead and rejects
+expired requests. A reconnect changes its epoch. A target with an unreadable
+or invalid grant logs a warning and offers only discovery.
 
 ### Version boundary
 

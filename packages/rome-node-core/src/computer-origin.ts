@@ -9,6 +9,7 @@ export const signedComputerRequest = {
 } as const;
 
 const lifetime = 15_000;
+const maxClockLead = 2_000;
 const maxBytes = 256 * 1024;
 
 export function isComputerOperation(name: unknown): name is string {
@@ -156,7 +157,8 @@ export class ComputerRequestVerifier {
         version !== 1 ||
         !Number.isSafeInteger(issuedAt) ||
         !Number.isSafeInteger(expiresAt) ||
-        issuedAt > this.clock ||
+        issuedAt > this.clock + maxClockLead ||
+        expiresAt <= issuedAt ||
         expiresAt <= this.clock ||
         expiresAt - issuedAt > lifetime ||
         typeof signature !== "string" ||
