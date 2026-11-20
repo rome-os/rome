@@ -4,6 +4,10 @@
  * keep every row here green, and the table becomes their providers' shared
  * suite. One row is one case: change a row only when the behavior is meant
  * to change.
+ *
+ * The policy column is whatever the policy engine answered, taken as given.
+ * With no policy configured the engine answers from the trusted levels, which
+ * its own tests pin (packages/core/src/core/policy-engine.test.ts).
  */
 import { describe, expect, it, rs } from "@rstest/core";
 import type {
@@ -15,9 +19,11 @@ import type {
   ChatId,
   ChatSettingsControl,
   InboundEvent,
+  MessagesSaid,
   PersonRecord,
   PolicyRule,
   RunParams,
+  SaidInboundEvent,
 } from "@rome-os/app-runtime";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
@@ -47,6 +53,9 @@ interface Setup {
   replyTo?: string[];
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
+  /** The host recorded the message before Inbox heard it, as it does when it
+   *  hands the hook `messagesSaid`. */
+  recorded?: boolean;
 }
 
 function result(content: string, structuredOutput?: unknown): AgentMessage {
@@ -141,6 +150,7 @@ async function handle(setup: Setup) {
     displayName: "Alice",
     text: "Can you help?",
     messageId: "message-1",
+    ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
   });
 
   return { outcome, runs, stored, promoted, sent, approvals, policyContexts };
@@ -248,6 +258,35 @@ describe("wake: sender × policy × settings", () => {
     expect(quiet.stored.map((m) => m.role)).toEqual(["notification"]);
     expect(reviewed.stored.map((m) => m.role)).toEqual(["notification"]);
     expect(blocked.stored).toEqual([]);
+  });
+
+  it("on a message the host recorded, makes it the turn's prompt only when it wakes the agent", async () => {
+    const woke = await handle({ sender: "guardian", policy: "allow", recorded: true });
+    const quiet = await handle({ sender: "stranger", policy: "allow", recorded: true });
+    const reviewed = await handle({
+      sender: "stranger",
+      policy: "sentinel_review",
+      replyTo: ["other"],
+      answers: [[result("IGNORE")]],
+      recorded: true,
+    });
+    const escalated = await handle({
+      sender: "stranger",
+      policy: "sentinel_review",
+      replyTo: ["other"],
+      answers: [[result("ESCALATE")]],
+      recorded: true,
+    });
+    const blocked = await handle({ sender: "guardian", policy: "block", recorded: true });
+
+    for (const handled of [woke, quiet, reviewed, escalated, blocked]) {
+      expect(handled.stored).toEqual([]);
+    }
+    expect(woke.promoted).toEqual(["message-1"]);
+    expect(quiet.promoted).toEqual([]);
+    expect(reviewed.promoted).toEqual([]);
+    expect(escalated.promoted).toEqual(["message-1"]);
+    expect(blocked.promoted).toEqual([]);
   });
 
   it("asks the policy engine about the linked person, or no one for a stranger", async () => {
@@ -436,9 +475,21 @@ describe("send: recipient × Envoy", () => {
 });
 
 describe("wake: chat on/off and the account's agent", () => {
-  async function hear(options: { enabled: boolean; accountAgent: string | null | undefined }) {
+  async function hear(options: {
+    enabled: boolean;
+    accountAgent: string | null | undefined;
+    recorded: boolean;
+  }) {
     const run = rs.fn(async () => ({ status: "ok" as const }));
     let handler: ((event: InboundEvent) => Promise<void>) | undefined;
+    let recordedHandler: ((event: SaidInboundEvent) => Promise<void>) | undefined;
+    const messagesSaid: MessagesSaid = {
+      subscribe: (h) => {
+        recordedHandler = h;
+        return () => {};
+      },
+      decided: async () => {},
+    };
     const channel: Channel = {
       name: "telegram",
       inbound: {
@@ -460,10 +511,13 @@ describe("wake: chat on/off and the account's agent", () => {
       chatSettings,
       async () => ({ status: "stop_requested" as const, turnId: "turn-1" }),
       [channel],
-      { accountAgentOf: () => options.accountAgent },
+      {
+        accountAgentOf: () => options.accountAgent,
+        ...(options.recorded ? { messagesSaid } : {}),
+      },
     );
     await hook.register();
-    await handler?.({
+    const event: InboundEvent = {
       kind: "message",
       ref: { connectionId: "connection:telegram", chatId: "chat-1" as ChatId },
       message: {
@@ -478,18 +532,31 @@ describe("wake: chat on/off and the account's agent", () => {
         timestamp: new Date("2026-01-20T12:00:00Z"),
         thread: { kind: "group", name: "Dev Chat" },
       },
-    });
+    };
+    if (options.recorded) {
+      await recordedHandler?.({
+        ...event,
+        recorded: { chatRecordId: "chat-1", messageId: "recorded-1" },
+      });
+    } else {
+      await handler?.(event);
+    }
     return run.mock.calls.length > 0 ? "handled" : "quiet";
   }
 
-  it.each([
-    { enabled: true, agent: "main", accountAgent: "main", heard: "handled" },
-    // A host that predates accounts names no agent, and answers the connection.
-    { enabled: true, agent: "not named", accountAgent: undefined, heard: "handled" },
-    { enabled: false, agent: "main", accountAgent: "main", heard: "quiet" },
-    // An account whose agent was unlinked answers nothing.
-    { enabled: true, agent: "unlinked", accountAgent: null, heard: "quiet" },
-  ])("chat enabled $enabled, account's agent $agent → $heard", async ({
+  it.each(
+    [
+      { enabled: true, agent: "main", accountAgent: "main", heard: "handled" },
+      // A host that predates accounts names no agent, and answers the connection.
+      { enabled: true, agent: "not named", accountAgent: undefined, heard: "handled" },
+      { enabled: false, agent: "main", accountAgent: "main", heard: "quiet" },
+      // An account whose agent was unlinked answers nothing.
+      { enabled: true, agent: "unlinked", accountAgent: null, heard: "quiet" },
+    ].flatMap((row) => [
+      { ...row, recorded: true },
+      { ...row, recorded: false },
+    ]),
+  )("recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
     heard,
     agent: _label,
     ...options
