@@ -30,6 +30,13 @@ export type DevRoute = {
 export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
   ? [
       {
+        path: "/dev/connections/slack",
+        title: "Slack connect prototype",
+        description:
+          "Prototype of the Slack connect flow (ZHA-228) on mock data: the entry, a stand-in approve screen, next steps, and the cancelled and admin states.",
+        Component: lazy(() => import("./SlackConnectPrototypePage")),
+      },
+      {
         path: "/dev/styleguide",
         title: "Style guide",
         description:
