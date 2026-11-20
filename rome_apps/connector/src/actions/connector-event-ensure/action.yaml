@@ -3,7 +3,7 @@ type: custom
 description: |
   Make sure a provider event reaches Rome's event bus. Core calls it when an
   agent waits on an event this app declares under `eventSources` (a `defer`
-  with `event`), and with `dryRun` when `search_event_catalog` gets `match`.
+  with `event`), and with `dryRun` when `system:search_event_catalog` gets `match`.
   Pass the bus `eventName` (e.g. `provider:event:github.workflow_run`) and the
   wait's equality `filter`; for GitHub the filter must name the repository
   (`repository.full_name`) or the organization (`organization.login`).

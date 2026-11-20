@@ -13,7 +13,7 @@ import { createTestRome, type TestRome } from "../test/kit/index.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 const resumeSessionConfig = {
-  name: "resume_session",
+  name: "system:resume_session",
   type: "system",
   description: "Continue an existing conversation",
   complexity: "simple",

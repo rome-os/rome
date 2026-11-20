@@ -249,6 +249,37 @@ private let listJSON = #"""
 }
 
 
+/// The header's Tasks button: its dot, and the list it keeps live.
+@MainActor
+@Suite struct ChatHeaderTasksTests {
+    @Test func theDotShowsWhileATaskNeedsTheGuardian() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try JSONDecoder().decode(TaskListResponse.self, from: Data(listJSON.utf8))
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        #expect(!store.needsYou)
+        await store.load()
+        #expect(store.needsYou)
+        backend.taskLists["concierge"] = TaskListResponse(chatId: "concierge", groups: [TaskListGroup(key: .needsYou, items: [])])
+        await store.load()
+        #expect(!store.needsYou)
+    }
+
+    @Test func theListIsListenedToUntilItsLastHolderLetsGo() {
+        let backend = FakeBackend()
+        let store = TaskListStore(chatId: "topic-1", backend: backend)
+        let topic = LiveTopic.chatTasks("topic-1")
+        // The header and the Agent page over it.
+        store.hold()
+        store.hold()
+        #expect(backend.bus.isListening(to: topic))
+        // The Agent page closes: the header still shows the dot live.
+        store.release()
+        #expect(backend.bus.isListening(to: topic))
+        store.release()
+        #expect(!backend.bus.isListening(to: topic))
+    }
+}
+
 @Suite struct TaskLinkTests {
     @Test func readsAndBuildsTheLinkTheConciergeWrites() {
         #expect(TaskLink.chatId(ofHref: "#rome-task=abc-123") == "abc-123")
@@ -280,6 +311,52 @@ private let listJSON = #"""
         #expect(symbol("ended", "no_response") == "circle")
         // A status this build does not know reads as active.
         #expect(symbol("sleeping") == "arrow.triangle.2.circlepath")
+    }
+
+    @Test func aChipStartsFlushWhereNothingStandsBeforeIt() {
+        // The start of a paragraph or a list item, a line break, a space: no space of its own.
+        #expect(!TaskLink.spacesChip(after: nil))
+        #expect(!TaskLink.spacesChip(after: "\n"))
+        #expect(!TaskLink.spacesChip(after: " "))
+        // Another chip ends in a no-break space.
+        #expect(!TaskLink.spacesChip(after: "\u{00A0}"))
+        // Right after a word or punctuation it keeps one.
+        #expect(TaskLink.spacesChip(after: "a"))
+        #expect(TaskLink.spacesChip(after: "："))
+    }
+
+    @Test func coloursEachStatusAsTheWebDoes() {
+        func tone(_ status: String, _ reason: String? = nil) -> TaskMarkTone {
+            TaskLinkInfo(id: "c", name: "N", status: status, endReason: reason).tone
+        }
+        #expect(tone("active") == .running)
+        #expect(tone("needs_you") == .needsYou)
+        #expect(tone("ended", "done") == .done)
+        #expect(tone("ended", "failed") == .failed)
+        #expect(tone("ended", "stopped") == .quiet)
+        #expect(tone("ended", "no_response") == .quiet)
+        #expect(tone("later") == .quiet)
+        // Read as leniently as the symbol: an unknown status runs, an ended task with no reason is done.
+        #expect(tone("sleeping") == .running)
+        #expect(tone("ended") == .done)
+    }
+
+    @Test func turnsTheRunningRingOnceAPeriod() {
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        #expect(TaskMarkRing.frame(at: start) == 0)
+        #expect(TaskMarkRing.frame(at: start.addingTimeInterval(TaskMarkRing.frameInterval * 1.5)) == 1)
+        #expect(TaskMarkRing.frame(at: start.addingTimeInterval(TaskMarkRing.period)) == 0)
+    }
+
+    @MainActor
+    @Test func aStoppedWorkspaceStopsListeningForTaskLinks() async {
+        let backend = FakeBackend()
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-task-links-stop-\(UUID().uuidString)/Drafts"), instance: "t"))
+        let links = workspace.taskLinks(forChat: "topic-1")
+        links?.register(["c1"])
+        #expect(backend.bus.isListening(to: LiveTopic.chatTasks("topic-1")))
+        workspace.stop()
+        #expect(!backend.bus.isListening(to: LiveTopic.chatTasks("topic-1")))
     }
 
     @Test func readsTheLinksResponseLeniently() throws {

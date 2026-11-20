@@ -44,7 +44,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         return {
           status: "error",
           error:
-            "Not signed in to Composio. Call connector_login once to sign in, then re-run connector_event_search.",
+            "Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_event_search.",
         };
       }
       try {

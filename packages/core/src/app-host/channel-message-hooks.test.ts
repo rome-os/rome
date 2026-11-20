@@ -85,7 +85,9 @@ function setup(hooks: ArtifactRef[], options: { mayLoad?: (appId: string) => boo
   const failed: Array<[string, string]> = [];
   const hookSet = new ChannelMessageHooks({
     catalog: catalogOf(hooks),
-    deps: { messagesSaid: said, channels: [] } as unknown as ChannelMessageHookDeps,
+    deps: { messagesSaid: said, channels: [] } as unknown as ConstructorParameters<
+      typeof ChannelMessageHooks
+    >[0]["deps"],
     onFailed: (appId, error) => failed.push([appId, error]),
     log: { warn: () => {} },
     ...options,
@@ -261,7 +263,9 @@ export function createHook(deps) {
     const t = setup(hooks);
     const withReset = new ChannelMessageHooks({
       catalog: catalogOf(hooks),
-      deps: { messagesSaid: t.said, channels: [] } as unknown as ChannelMessageHookDeps,
+      deps: { messagesSaid: t.said, channels: [] } as unknown as ConstructorParameters<
+        typeof ChannelMessageHooks
+      >[0]["deps"],
       onFailed: () => {},
       onReset: (appId) => reset.push(appId),
       log: { warn: () => {} },

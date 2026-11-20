@@ -135,7 +135,7 @@ describe("a routine that reads personal data", () => {
     await expect(repo.create(query("group-chat"))).rejects.toThrow("personal_data_private_only");
     await expect(repo.create(query())).rejects.toThrow("personal_data_private_only");
     await expect(
-      repo.create({ ...query("group-chat"), actionName: "personal_data_catalog" }),
+      repo.create({ ...query("group-chat"), actionName: "core:personal_data_catalog" }),
     ).rejects.toThrow("personal_data_private_only");
   });
 

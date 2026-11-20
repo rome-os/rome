@@ -2,8 +2,8 @@ name: connector_login
 type: custom
 description: |
   Sign in to Composio so Rome can connect toolkits on the guardian's behalf.
-  This is the prerequisite for connector_connect: if connector_connect reports
-  that Composio is not signed in, call this once, then re-run connector_connect
+  This is the prerequisite for connector:connector_connect: if connector:connector_connect reports
+  that Composio is not signed in, call this once, then re-run connector:connector_connect
   for each toolkit. Also call it when another connector action reports that
   Composio rejected Rome's saved sign-in. Reports immediately when the saved
   sign-in is still valid. Otherwise, including when Composio rejects the saved

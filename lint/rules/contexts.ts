@@ -19,6 +19,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "connections",
     "favors",
     "instance",
+    "participation",
     "people",
     "relay",
     "routines",
@@ -61,7 +62,7 @@ const REASONS: Record<string, string> = {
   "desktops-never-imports-chats":
     "Desktops never names a chat or an account, so no file in desktops/ imports chats/.",
   "desktops-never-imports-connections":
-    "A connection that needs a screen, such as WeChat's own-account connection, asks Desktops for one. Desktops never names a connection, so no file in desktops/ imports connections/.",
+    "Desktops never names a connection, so no file in desktops/ imports connections/.",
   "desktops-never-imports-people":
     "Desktops never names a person or an account, so no file in desktops/ imports people/.",
   "desktops-never-imports-apps":

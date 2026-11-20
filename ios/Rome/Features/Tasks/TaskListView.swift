@@ -317,21 +317,21 @@ struct TaskListRow: View {
     }
 }
 
-/// The mark of a task's status at a row's leading edge, the set the task link
-/// chip uses: needs you an alert, active the running ring, later a clock, and
-/// done, failed, stopped and no response each a circle of their own.
+/// The mark of a task's status at a row's leading edge, the set and colours
+/// the task link chip uses: needs you an alert, active the running ring, later
+/// a clock, and done, failed, stopped and no response each a circle of their own.
 struct TaskStatusMark: View {
     let task: ConciergeTask
 
     var body: some View {
-        let status = TaskListWords.status(task)
+        let info = TaskLinkInfo(id: task.id, name: task.title, status: TaskListWords.status(task), endReason: task.endReason)
         Group {
-            if status == "active" {
-                Spinner(size: 16, color: Palette.sub)
+            if info.tone == .running {
+                Spinner(size: 16, color: info.tone.color)
             } else {
-                Image(systemName: TaskLinkInfo(id: task.id, name: task.title, status: status, endReason: task.endReason).symbol)
+                Image(systemName: info.symbol)
                     .romeFont(16)
-                    .foregroundStyle(status == "needs_you" ? Palette.warning : Palette.sub)
+                    .foregroundStyle(info.tone.color)
             }
         }
         .frame(width: 20, height: 20)

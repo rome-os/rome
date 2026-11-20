@@ -150,7 +150,7 @@ export function NavigationSection() {
                 size="sm"
                 options={[
                   { value: "json", label: "Paste JSON", icon: <Braces aria-hidden /> },
-                  { value: "fields", label: "Key / Value", icon: <Rows3 aria-hidden /> },
+                  { value: "fields", label: "Key / value", icon: <Rows3 aria-hidden /> },
                 ]}
                 value={smallScope}
                 onValueChange={setSmallScope}

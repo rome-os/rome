@@ -611,6 +611,7 @@ final class Workspace {
         topics.stop()
         for store in topicStores.values { store.close() }
         for store in taskStores.values { store.close() }
+        for store in taskLinkStores.values { store.stop() }
         for actions in shells.values { actions.reset() }
         shells = [:]
         backend.events.pause()
@@ -687,7 +688,8 @@ final class AppModel {
         // the widget's copy of the apps is filed under.
         didSet {
             guard workspace !== oldValue else { return }
-            images.reset()
+            // Pictures on disk stay only for the instance now open.
+            images.reset(instance: workspace == nil ? nil : currentInstanceID)
             workspace?.instanceID = currentInstanceID
             // Only this workspace writes the widget's copy from now on.
             WidgetShelf.shared.hand(to: workspace, instanceId: currentInstanceID)
@@ -1388,6 +1390,7 @@ final class AppModel {
         DraftStore.removeAll()
         TranscriptCache.removeAll()
         ImageDiskCache.shared.removeAll()
+        ImageDiskCache.thumbnails.removeAll()
         LanguageSync.removeAll()
         RecentApps.removeAll()
         UpdateBannerStore.removeAll()

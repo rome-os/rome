@@ -18,7 +18,7 @@ const urgent = (taskId: string, kind = "turn_end:completed by=concierge") => ({
 const quiet = (taskId: string, kind = "guardian_message") => ({ taskId, kind, urgent: false });
 
 function setup(carried: Set<string> = new Set()) {
-  const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
+  const flushes: Array<{ ids: string[]; at: number }> = [];
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
   const reported: string[] = [];
@@ -37,12 +37,11 @@ function setup(carried: Set<string> = new Set()) {
           owner: "guardian",
           taskIds: tasks.map((task) => task.taskId),
           prompt: tasks.map((task) => task.taskId).join(","),
-          quiet: tasks.every((task) => task.quiet),
         },
       ];
     },
-    deliver: async ({ prompt, quiet }) => {
-      flushes.push({ ids: prompt.split(","), quiet, at: Date.now() });
+    deliver: async ({ prompt }) => {
+      flushes.push({ ids: prompt.split(","), at: Date.now() });
       if (holdTurns) await new Promise<void>((resolve) => (endTurn = resolve));
       return outcome;
     },
@@ -120,7 +119,6 @@ describe("TaskEventCoalescer", () => {
           owner: "guardian",
           taskIds,
           prompt: taskIds.join(","),
-          quiet: true,
         }));
       },
       deliver: async ({ taskIds }) => {
@@ -228,22 +226,22 @@ describe("TaskEventCoalescer", () => {
     }
   });
 
-  it("flushes an urgent change after 2 s, as one non-quiet batch", async () => {
+  it("flushes an urgent change after 2 s", async () => {
     const s = setup();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS - 1);
     expect(s.flushes).toEqual([]);
     await rs.advanceTimersByTimeAsync(1);
-    expect(s.flushes).toMatchObject([{ ids: ["a"], quiet: false }]);
+    expect(s.flushes).toMatchObject([{ ids: ["a"] }]);
   });
 
-  it("waits 60 s for quiet changes, and flushes them as a quiet batch", async () => {
+  it("waits 60 s for quiet changes", async () => {
     const s = setup();
     s.coalescer.mark(quiet("a"));
     await rs.advanceTimersByTimeAsync(QUIET_DELAY_MS - 1);
     expect(s.flushes).toEqual([]);
     await rs.advanceTimersByTimeAsync(1);
-    expect(s.flushes).toMatchObject([{ ids: ["a"], quiet: true }]);
+    expect(s.flushes).toMatchObject([{ ids: ["a"] }]);
   });
 
   it("lets a quiet change ride along with the next urgent flush", async () => {
@@ -252,7 +250,7 @@ describe("TaskEventCoalescer", () => {
     await rs.advanceTimersByTimeAsync(5_000);
     s.coalescer.mark(urgent("b"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    expect(s.flushes).toMatchObject([{ ids: ["a", "b"], quiet: false }]);
+    expect(s.flushes).toMatchObject([{ ids: ["a", "b"] }]);
   });
 
   it("batches rows that go urgent together into one flush", async () => {
@@ -378,22 +376,17 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual([]);
   });
 
-  it("still retries news a failing turn carried when a change needing no word arrives while it runs", async () => {
+  it("still retries news a failing turn carried when the task's own wake-up ends while it runs", async () => {
     const s = setup();
     s.turnsRun(false);
     s.holdTurns();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    // A scheduled turn finishes with nothing to say while the report turn runs, which then fails.
+    // A wake-up the task chat set itself ends while the report turn runs, which then fails.
     await rs.advanceTimersByTimeAsync(1_000);
-    s.coalescer.mark({
-      taskId: "a",
-      kind: "turn_end:completed by=system",
-      urgent: false,
-      passive: true,
-    });
+    s.coalescer.mark(urgent("a", "turn_end:completed by=system"));
     await s.endTurn();
-    expect(s.coalescer.passiveOf(["a"])).toEqual([]);
+    expect(s.coalescer.pending).toEqual(["a"]);
 
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
@@ -420,42 +413,13 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual([]);
   });
 
-  it("wakes no turn for a change that needs no word, and takes it along with the next flush", async () => {
+  it("flushes the end of a wake-up the task chat set itself on its own, with no other row", async () => {
     const s = setup();
-    s.coalescer.mark({
-      taskId: "a",
-      kind: "turn_end:completed by=system",
-      urgent: false,
-      passive: true,
-    });
-    await rs.advanceTimersByTimeAsync(10 * QUIET_DELAY_MS);
-    expect(s.flushes).toEqual([]);
-    expect(s.coalescer.pending).toEqual(["a"]);
-    s.coalescer.mark(urgent("b"));
+    s.coalescer.mark(urgent("a", "turn_end:completed by=system"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a", "b"]]);
-  });
-
-  it("hands a change that needs no word to the digest, and a row with any other change to its flush", async () => {
-    const s = setup();
-    s.coalescer.mark({
-      taskId: "a",
-      kind: "turn_end:completed by=system",
-      urgent: false,
-      passive: true,
-    });
-    s.coalescer.mark({
-      taskId: "b",
-      kind: "turn_end:completed by=system",
-      urgent: false,
-      passive: true,
-    });
-    s.coalescer.mark(urgent("b", "approval"));
-    expect(s.coalescer.passiveOf(["a", "b"])).toEqual(["a"]);
-    // Read only, until the digest that listed them ran to its end.
-    expect(s.coalescer.pending).toEqual(["a", "b"]);
-    s.coalescer.settlePassive(["a", "b"]);
-    expect(s.coalescer.pending).toEqual(["b"]);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a"]]);
+    expect(s.reported).toEqual(["a"]);
+    expect(s.coalescer.pending).toEqual([]);
   });
 
   it("hands back what a failing turn carried though it wrote the row before it failed", async () => {
@@ -591,7 +555,6 @@ describe("TaskEventCoalescer", () => {
           owner: "guardian",
           taskIds: [task.taskId],
           prompt: task.taskId,
-          quiet: false,
         })),
       deliver: async ({ chatId, prompt }) => {
         delivered.push(prompt);
@@ -613,8 +576,8 @@ describe("TaskEventCoalescer", () => {
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
       render: async () => [
-        { chatId: "topic-1", owner: "guardian", taskIds: ["a"], prompt: "a", quiet: false },
-        { chatId: null, owner: "guardian", taskIds: ["b"], prompt: "b", quiet: false },
+        { chatId: "topic-1", owner: "guardian", taskIds: ["a"], prompt: "a" },
+        { chatId: null, owner: "guardian", taskIds: ["b"], prompt: "b" },
       ],
       deliver: async ({ chatId }) => {
         if (chatId === "topic-1") throw new Error("no runtime");
@@ -629,7 +592,7 @@ describe("TaskEventCoalescer", () => {
   });
 
   it("delivers one turn per Concierge chat the rows came from, in one flush", async () => {
-    const delivered: Array<{ chatId: string | null; prompt: string; quiet: boolean }> = [];
+    const delivered: Array<{ chatId: string | null; prompt: string }> = [];
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
       // Rows "a" and "b" came from a topic chat, "c" from the main chat.
@@ -644,12 +607,11 @@ describe("TaskEventCoalescer", () => {
                   owner: "guardian",
                   taskIds: topic.map((t) => t.taskId),
                   prompt: topic.map((t) => t.taskId).join(","),
-                  quiet: false,
                 },
               ]
             : []),
           ...(main.length
-            ? [{ chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c", quiet: true }]
+            ? [{ chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c" }]
             : []),
         ];
       },
@@ -664,8 +626,8 @@ describe("TaskEventCoalescer", () => {
     coalescer.mark(quiet("c"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(delivered).toEqual([
-      { chatId: "topic-1", owner: "guardian", taskIds: ["a", "b"], prompt: "a,b", quiet: false },
-      { chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c", quiet: true },
+      { chatId: "topic-1", owner: "guardian", taskIds: ["a", "b"], prompt: "a,b" },
+      { chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c" },
     ]);
   });
 });
@@ -681,7 +643,6 @@ describe("TaskEventCoalescer and session actors", () => {
           owner: task.taskId === "v" ? "visitor:acct-v" : "guardian",
           taskIds: [task.taskId],
           prompt: task.taskId,
-          quiet: false,
         })),
       deliver: async ({ owner }) => {
         seen.push({ owner, actor: await currentSessionActor() });
