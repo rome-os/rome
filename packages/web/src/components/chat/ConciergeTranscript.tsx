@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
+import { ConciergeFoldLine } from "@/components/chat/ConciergeFoldLine";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
 import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator";
 import { ConciergeUnreadDivider } from "@/components/chat/ConciergeUnreadDivider";
@@ -31,6 +32,13 @@ function TypingBubble() {
   );
 }
 
+/** A closed fold: what it hides, and how to show it. */
+export interface ConciergeFold {
+  /** ISO timestamp: the messages sent at or before it are folded away. */
+  through: string;
+  onOpen: () => void;
+}
+
 // One element for every render: a typing bubble has no props, and a fresh one
 // each time would defeat the memoized group that draws it.
 const TYPING_BUBBLE = <TypingBubble />;
@@ -50,6 +58,7 @@ export function ConciergeTranscript({
   contentRef,
   feedback = false,
   unreadFrom,
+  fold,
 }: {
   rows: ChatRow[];
   live: LivePreview;
@@ -61,14 +70,20 @@ export function ConciergeTranscript({
   feedback?: boolean;
   /** The id of the first message that was unread when the chat opened; a divider goes above it. */
   unreadFrom?: string | null;
+  /**
+   * The main chat's fold while it is closed: the messages sent at or before
+   * `through` show as one line, and `onOpen` shows them again.
+   */
+  fold?: ConciergeFold | null;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const simulated = useSimulatedTyping(allRows, live);
   const rows = simulated.rows;
   const typing = showsTyping(rows, live, simulated.holding);
+  const foldThrough = fold?.through ?? null;
   const items = useMemo(
-    () => buildConciergeItems(rows, { typing, unreadFrom }),
-    [rows, typing, unreadFrom],
+    () => buildConciergeItems(rows, { typing, unreadFrom, foldThrough }),
+    [rows, typing, unreadFrom, foldThrough],
   );
   const messageIds = useMemo(
     () =>
@@ -108,6 +123,8 @@ export function ConciergeTranscript({
             if (item.kind === "separator")
               return <ConciergeTimeSeparator key={item.key} at={item.at} />;
             if (item.kind === "unread") return <ConciergeUnreadDivider key={item.key} />;
+            if (item.kind === "fold")
+              return fold ? <ConciergeFoldLine key={item.key} onOpen={fold.onOpen} /> : null;
             if (item.kind === "notice")
               return (
                 <ModelSwitchNotice

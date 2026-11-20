@@ -178,7 +178,14 @@
       "tasks": "Tasks",
       "routines": "Routines",
       "outputs": "Outputs",
-      "needsYouDot": "A task needs you"
+      "needsYouDot": "A task needs you",
+      "fold": "Fold earlier messages",
+      "unfold": "Unfold"
+    },
+    "fold": {
+      "line": "Earlier messages folded",
+      "show": "Show",
+      "failed": "Couldn't save the fold. Try again."
     }
   },
   "reply": {

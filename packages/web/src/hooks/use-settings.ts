@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 
-const SETTINGS_QUERY_KEY = ["settings"] as const;
+export const SETTINGS_QUERY_KEY = ["settings"] as const;
 
 export type SettingsMap = Record<string, unknown>;
 

@@ -425,3 +425,39 @@ describe("ConciergeTranscript in share mode", () => {
     expect(screen.getAllByRole("button", { name: /select message/i })).toHaveLength(4);
   });
 });
+
+describe("ConciergeTranscript fold", () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 9, 27, 12, minute)).toISOString();
+  const messages = [
+    { ...user("u1", "t1"), createdAt: at(0) },
+    { ...agent("a1", "t1"), createdAt: at(1) },
+    { ...user("u2", "t2"), createdAt: at(90) },
+  ];
+  const folded = (onOpen: () => void) => (
+    <ThemeProvider>
+      <ConciergeTranscript
+        rows={buildRows(messages, new Map(), IDENTITY, { runningTurnId: null, isStreaming: false })}
+        live={live}
+        actions={actions}
+        contentRef={() => {}}
+        fold={{ through: at(1), onOpen }}
+      />
+    </ThemeProvider>
+  );
+
+  it("draws one line for the folded messages above the rest, and its tap shows them", () => {
+    const onOpen = rs.fn();
+    const { container } = render(folded(onOpen));
+    expect(container.querySelector('[data-timeline-anchor="u1"]')).toBeNull();
+    expect(screen.queryByText("said a1")).toBeNull();
+    expect(container.querySelector('[data-timeline-anchor="u2"]')).toBeTruthy();
+    const line = container.querySelector<HTMLElement>("[data-concierge-fold]")!;
+    expect(
+      line.compareDocumentPosition(container.querySelector('[data-timeline-anchor="u2"]')!),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    fireEvent.click(within(line).getByRole("button"));
+
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+});

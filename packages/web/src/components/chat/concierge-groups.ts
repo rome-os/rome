@@ -43,6 +43,8 @@ export type ConciergeItem =
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
+  /** One line in place of the messages folded away, first in the transcript. */
+  | { kind: "fold"; key: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -57,6 +59,17 @@ export type ConciergeItem =
     };
 
 const UNREAD_DIVIDER: ConciergeItem = { kind: "unread", key: "unread-divider" };
+const FOLD_LINE: ConciergeItem = { kind: "fold", key: "fold" };
+
+/**
+ * Whether `message` is folded away by a fold at `through`, an ISO timestamp:
+ * it was sent at or before it. A message with an unparsable time stays shown.
+ */
+export function isFolded(message: Pick<ChatMessage, "createdAt">, through: string): boolean {
+  const at = Date.parse(message.createdAt);
+  const fold = Date.parse(through);
+  return !Number.isNaN(at) && !Number.isNaN(fold) && at <= fold;
+}
 
 /** Whether the Concierge draws something for `message`. */
 export function isRenderable(message: ChatMessage): boolean {
@@ -153,6 +166,7 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
   if (a.kind === "unread") return b.kind === "unread";
+  if (a.kind === "fold") return b.kind === "fold";
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -185,6 +199,9 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  * The unread divider comes before the message `opts.unreadFrom` names, after
  * that message's separator, and it ends the group before it. A chat that does
  * not draw that message has no divider.
+ * With `opts.foldThrough`, the messages sent at or before it are folded away:
+ * one fold line stands first in their place, and the notices among them go
+ * with them. The first message after it starts afresh, with its own separator.
  * Rows with nothing to draw (trace rows, empty messages) leave no trace.
  *
  * Items and entries are reference-stable: building again from the same message
@@ -194,7 +211,7 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  */
 export function buildConciergeItems(
   rows: ChatRow[],
-  opts: { typing: boolean; unreadFrom?: string | null },
+  opts: { typing: boolean; unreadFrom?: string | null; foldThrough?: string | null },
 ): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
@@ -205,8 +222,20 @@ export function buildConciergeItems(
   let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
   let previousSender: "guardian" | "agent" | null = null;
+  const { foldThrough } = opts;
+  // Whether anything was folded, and whether the transcript is still among
+  // the folded messages, where a notice goes with them.
+  let foldedAny = false;
+  let inFold = false;
+  const folds = (message: ChatMessage): boolean => {
+    if (!foldThrough || !isFolded(message, foldThrough)) return false;
+    foldedAny = true;
+    inFold = true;
+    return true;
+  };
 
   const add = (message: ChatMessage, sender: "guardian" | "agent") => {
+    inFold = false;
     const at = Date.parse(message.createdAt);
     const before = previous ? Date.parse(previous.createdAt) : Number.NaN;
     const known = !Number.isNaN(at) && !Number.isNaN(before);
@@ -265,9 +294,10 @@ export function buildConciergeItems(
             name: sender.name,
           });
         }
-      } else if (isRenderable(row.message)) add(row.message, "guardian");
+      } else if (!folds(row.message) && isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
+        if (folds(message)) continue;
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
         const quota = parseMessageEntries(message).find(
           (part): part is QuotaSwitchPart => part.type === "quota_switch",
@@ -285,6 +315,7 @@ export function buildConciergeItems(
         automaticModel = undefined;
         continue;
       }
+      if (inFold) continue;
       slots.push({ kind: "notice", key: row.key, model: row.model });
       group = null;
     }
@@ -301,7 +332,7 @@ export function buildConciergeItems(
     }
   }
 
-  const items: ConciergeItem[] = [];
+  const items: ConciergeItem[] = foldedAny ? [FOLD_LINE] : [];
   for (const slot of slots) {
     if (slot.kind === "unread") {
       items.push(UNREAD_DIVIDER);

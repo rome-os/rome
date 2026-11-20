@@ -230,8 +230,10 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace,
     unreadFrom,
     contentRef,
+    fold,
   }: {
     unreadFrom?: string | null;
+    fold?: { through: string; onOpen: () => void } | null;
     contentRef: (node: HTMLElement | null) => void;
     onOpenStoredTrace: (target: unknown) => void;
     live: {
@@ -245,6 +247,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       message?: {
         id?: string;
         content: string;
+        createdAt?: string;
         traceArchived?: boolean;
         sender?: { name: string | null; avatarUrl?: string | null; onBehalfOf?: { kind: string } };
       };
@@ -283,8 +286,17 @@ rs.mock("@/components/chat/MessageList", () => ({
       >
         open stored trace
       </button>
+      {/* As ConciergeTranscript folds: one line for what was sent by the point. */}
+      {fold ? (
+        <button type="button" data-testid="fold-line" onClick={fold.onOpen}>
+          fold
+        </button>
+      ) : null}
       {rows
         .filter((row) => row.kind === "user")
+        .filter(
+          (row) => !fold || Date.parse(row.message?.createdAt ?? "") > Date.parse(fold.through),
+        )
         .map((row) => (
           <div
             key={row.key}
@@ -3918,5 +3930,109 @@ describe("Chat header archive of a Concierge topic chat", () => {
     );
     expect(workReads).toEqual([]);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Chat fold of the main chat", () => {
+  const message = (n: number) => ({
+    id: `m-${n}`,
+    sessionId: "concierge",
+    turnId: `turn-${n}`,
+    role: "user" as const,
+    content: `question ${n}`,
+    createdAt: new Date(Date.UTC(2026, 9, 27, 12, 0, n)).toISOString(),
+  });
+  const shown = () => screen.queryAllByTestId("user-row").map((row) => row.dataset.rowKey);
+  const anchor = (id: string) => document.querySelector(`[data-timeline-anchor="${id}"]`);
+  const originalScrollTo = Element.prototype.scrollTo;
+  let settings: Record<string, unknown>;
+  const puts: unknown[] = [];
+
+  beforeEach(() => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    Element.prototype.scrollTo = rs.fn() as typeof Element.prototype.scrollTo;
+    settings = {};
+    puts.length = 0;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string, init?: RequestInit) => {
+        if (String(url) === "/api/settings" && init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          puts.push(body);
+          Object.assign(settings, body);
+          return new Response(JSON.stringify({ ok: true }));
+        }
+        if (String(url) === "/api/settings") return new Response(JSON.stringify(settings));
+        return new Response("{}", { status: 404 });
+      }),
+    );
+  });
+  afterEach(() => {
+    Element.prototype.scrollTo = originalScrollTo;
+  });
+
+  const openMain = async (messages: ReturnType<typeof message>[], nextCursor: string | null) => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({ messages, nextCursor });
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
+    await waitFor(() => expect(screen.queryAllByTestId("user-row").length).toBeGreaterThan(0));
+  };
+
+  it("folds every message up to the newest from the menu, and Unfold brings them back", async () => {
+    const user = userEvent.setup();
+    await openMain([message(1), message(2)], null);
+    expect(screen.queryByRole("menuitem", { name: "concierge.menu.unfold" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.fold" }));
+
+    await waitFor(() => expect(screen.queryByTestId("fold-line")).toBeTruthy());
+    expect(puts).toEqual([{ "conciergeFold.concierge": message(2).createdAt }]);
+    expect(shown()).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.unfold" }));
+    await waitFor(() => expect(shown()).toEqual(["m-1", "m-2"]));
+    expect(puts.at(-1)).toEqual({ "conciergeFold.concierge": null });
+  });
+
+  it("shows the folded messages for this visit when the line is tapped, keeping the fold", async () => {
+    settings = { "conciergeFold.concierge": message(2).createdAt };
+    await openMain([message(1), message(2), message(3)], null);
+    await waitFor(() => expect(shown()).toEqual(["m-3"]));
+
+    fireEvent.click(screen.getByTestId("fold-line"));
+
+    expect(shown()).toEqual(["m-1", "m-2", "m-3"]);
+    expect(puts).toEqual([]);
+  });
+
+  it("opens the fold for a jump to a folded message, and lands on it", async () => {
+    settings = { "conciergeFold.concierge": message(2).createdAt };
+    await openMain([message(1), message(2), message(3)], null);
+    await waitFor(() => expect(shown()).toEqual(["m-3"]));
+
+    act(() => void requestConciergeJump("m-1"));
+
+    expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true);
+    expect(screen.queryByTestId("fold-line")).toBeNull();
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops paging older history once the loaded messages reach into a closed fold", async () => {
+    settings = { "conciergeFold.concierge": message(2).createdAt };
+    await openMain([message(2), message(3)], "c1");
+    await waitFor(() => expect(shown()).toEqual(["m-3"]));
+    expect(document.querySelector("[data-older-sentinel]")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("fold-line"));
+
+    expect(document.querySelector("[data-older-sentinel]")).toBeTruthy();
+  });
+
+  it("offers no fold in a topic chat", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.queryByRole("menuitem", { name: "concierge.menu.fold" })).toBeNull();
   });
 });

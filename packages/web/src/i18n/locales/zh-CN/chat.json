@@ -178,7 +178,14 @@
       "tasks": "任务",
       "routines": "定时任务",
       "outputs": "产出",
-      "needsYouDot": "有任务需要你"
+      "needsYouDot": "有任务需要你",
+      "fold": "折叠旧消息",
+      "unfold": "取消折叠"
+    },
+    "fold": {
+      "line": "更早的消息已折叠",
+      "show": "展开",
+      "failed": "没能保存折叠，请再试一次。"
     }
   },
   "reply": {

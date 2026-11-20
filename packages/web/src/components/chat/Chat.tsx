@@ -30,11 +30,13 @@ import {
   CalendarClock,
   Cpu,
   FileOutput,
+  FoldVertical,
   FolderOpen,
   PanelRightOpen,
   Pencil,
   Share2,
   Trash2,
+  UnfoldVertical,
 } from "lucide-react";
 import { z } from "zod";
 import type { MessageWritingEvent } from "@rome/api-types/concierge";
@@ -56,6 +58,8 @@ import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
 import { TaskLinksScope } from "@/components/chat/task-link/task-links";
+import { useConciergeFold } from "@/components/chat/use-concierge-fold";
+import { isFolded } from "@/components/chat/concierge-groups";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -758,6 +762,31 @@ export function Chat({
     () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
     [displayMessages, unreadAtOpen, olderRemains],
   );
+
+  // The main chat's fold: the messages up to a point its owner picked show as
+  // one line. Showing them lasts for this visit; the point stays until Unfold.
+  const foldPoint = useConciergeFold(isMainChat ? (mainSessionId ?? null) : null);
+  const foldThrough = foldPoint.through;
+  const [openedFold, setOpenedFold] = useState<string | null>(null);
+  const foldKey = foldThrough ? `${mainSessionId}:${foldThrough}` : null;
+  const foldClosed = foldKey !== null && openedFold !== foldKey;
+  // The loaded history reaches into the fold: older pages then hold only
+  // folded messages, so none is read while it stays closed.
+  const foldReached = useMemo(
+    () =>
+      foldClosed &&
+      !!foldThrough &&
+      displayMessages.some((m) => m.sessionId === mainSessionId && isFolded(m, foldThrough)),
+    [foldClosed, foldThrough, displayMessages, mainSessionId],
+  );
+  const foldClosedRef = useRef(foldClosed);
+  foldClosedRef.current = foldClosed;
+  // Draws the folded messages before it returns, so a jump can find them.
+  const openFold = useCallback(() => {
+    if (!foldClosedRef.current || !foldKey) return;
+    foldClosedRef.current = false;
+    flushSync(() => setOpenedFold(foldKey));
+  }, [foldKey]);
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
   const activeSessionId = mainSessionId ?? "";
@@ -869,6 +898,14 @@ export function Chat({
         await reveal();
         return true;
       }
+      // What it looks for may be folded away: shown, it is found where it is.
+      if (foldClosedRef.current) {
+        openFold();
+        if (find()) {
+          await reveal();
+          return true;
+        }
+      }
       findingMessageRef.current = true;
       const loading =
         missing === null ? undefined : toast.loading(t("concierge.tasks.findingMessage"));
@@ -898,8 +935,32 @@ export function Chat({
         findingMessageRef.current = false;
       }
     },
-    [mainSessionId, t],
+    [mainSessionId, openFold, t],
   );
+  // The fold line was tapped: the folded messages show above it, and what was
+  // on screen stays where it was, as when an older page loads.
+  const showFolded = useCallback(() => {
+    const scroller = scrollerEl;
+    const fromBottom = scroller ? scroller.scrollHeight - scroller.scrollTop : 0;
+    openFold();
+    if (scroller) scroller.scrollTop = scroller.scrollHeight - fromBottom;
+  }, [scrollerEl, openFold]);
+  const fold = useMemo(
+    () => (foldClosed && foldThrough ? { through: foldThrough, onOpen: showFolded } : null),
+    [foldClosed, foldThrough, showFolded],
+  );
+  // Folds every message the chat holds now, up to the newest one. Its time is
+  // the server's, so a device's clock does not move the point.
+  const foldEarlier = useCallback(async () => {
+    const newest = displayMessages.findLast(
+      (m) => m.sessionId === mainSessionId && !Number.isNaN(Date.parse(m.createdAt)),
+    );
+    if (!newest) return;
+    if (!(await foldPoint.fold(newest.createdAt))) toast.error(t("concierge.fold.failed"));
+  }, [displayMessages, mainSessionId, foldPoint, t]);
+  const unfold = useCallback(async () => {
+    if (!(await foldPoint.unfold())) toast.error(t("concierge.fold.failed"));
+  }, [foldPoint, t]);
   // Respond in the Tasks panel points to a Concierge message that may sit
   // pages above the loaded ones, so the jump reads history down through it in
   // one page.
@@ -961,9 +1022,11 @@ export function Chat({
   // Share chat picks every turn in a common chat. A Concierge chat holds its
   // owner's private history, so there it starts with none picked.
   const enterShareMode = useCallback(() => {
+    // Every turn can be picked, the folded ones too.
+    openFold();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds]);
+  }, [concierge, mainTurnIds, openFold]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -2531,6 +2594,26 @@ export function Chat({
       label: t("share.title", "Share chat"),
       run: () => enterShareMode(),
     },
+    ...(isMainChat && !conciergeEmpty
+      ? [
+          {
+            key: "fold",
+            icon: <FoldVertical />,
+            label: t("concierge.menu.fold"),
+            run: () => void foldEarlier(),
+          },
+        ]
+      : []),
+    ...(isMainChat && foldThrough
+      ? [
+          {
+            key: "unfold",
+            icon: <UnfoldVertical />,
+            label: t("concierge.menu.unfold"),
+            run: () => void unfold(),
+          },
+        ]
+      : []),
     ...(isMainChat
       ? []
       : [
@@ -2772,8 +2855,13 @@ export function Chat({
                   )
                 ) : mainSessionId ? (
                   <>
-                    {hasOlder(mainSessionId) ? (
-                      <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                    {hasOlder(mainSessionId) && !foldReached ? (
+                      <div
+                        ref={olderSentinelRef}
+                        data-older-sentinel
+                        aria-hidden
+                        className="h-px shrink-0"
+                      />
                     ) : null}
                     <TaskLinksScope chatId={concierge ? mainSessionId : null}>
                       <TaskChatContext.Provider value={isTaskChat}>
@@ -2810,6 +2898,7 @@ export function Chat({
                           fork={forkable}
                           variant={variant}
                           unreadFrom={unread?.firstId ?? null}
+                          fold={fold}
                         />
                       </TaskChatContext.Provider>
                     </TaskLinksScope>

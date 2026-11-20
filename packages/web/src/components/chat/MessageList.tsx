@@ -14,7 +14,7 @@ import { ErrorEventView, hasGuidedErrorCopy } from "@/components/chat/entries/Er
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
-import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import { type ConciergeFold, ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import { TurnActions, turnCopyText } from "@/components/chat/TurnActions";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
@@ -101,6 +101,8 @@ export interface MessageListProps {
   variant?: ChatVariant;
   /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
   unreadFrom?: string | null;
+  /** In a `concierge` transcript, the main chat's fold while it is closed. */
+  fold?: ConciergeFold | null;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -418,6 +420,7 @@ export function MessageList({
   fork,
   variant = "default",
   unreadFrom,
+  fold,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
@@ -429,6 +432,7 @@ export function MessageList({
         contentRef={contentRef}
         feedback={feedback}
         unreadFrom={unreadFrom}
+        fold={fold}
       />
     );
   }
@@ -463,7 +467,7 @@ function TranscriptMessageList({
   actions,
   feedback,
   fork,
-}: Omit<MessageListProps, "variant" | "unreadFrom">) {
+}: Omit<MessageListProps, "variant" | "unreadFrom" | "fold">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;

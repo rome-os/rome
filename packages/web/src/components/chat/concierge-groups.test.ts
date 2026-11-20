@@ -5,6 +5,7 @@ import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import {
   buildConciergeItems,
   type ConciergeItem,
+  isFolded,
   showsTyping,
   simulatedTypingMs,
 } from "./concierge-groups";
@@ -52,6 +53,7 @@ function shape(items: ConciergeItem[]): string[] {
     if (item.kind === "separator") return "sep";
     if (item.kind === "notice") return "notice";
     if (item.kind === "unread") return "new";
+    if (item.kind === "fold") return "fold";
     const ids = item.entries.map((e) => e.message.id).join(",");
     return `${item.sender === "guardian" ? "G" : "A"}:${ids}${item.typing ? "+typing" : ""}`;
   });
@@ -540,5 +542,63 @@ describe("where a reply came from", () => {
     old.turnId = "t1";
     old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
     expect(build([userRow(old)])).toEqual([]);
+  });
+});
+
+describe("buildConciergeItems with a fold", () => {
+  const folded = (rows: ChatRow[], foldThrough: string | null, unreadFrom?: string) =>
+    shape(buildConciergeItems(rows, { typing: false, foldThrough, unreadFrom }));
+  const rows = () => [
+    userRow(guardian("g1", 0)),
+    agentRow(say("a1", 1_000)),
+    userRow(guardian("g2", 120 * MIN)),
+    agentRow(say("a2", 121 * MIN, "t2")),
+  ];
+
+  it("draws one line in place of the messages sent at or before the fold point", () => {
+    // a1 is sent exactly at the point, so it folds too.
+    expect(folded(rows(), at(1_000))).toEqual(["fold", "sep", "G:g2", "A:a2"]);
+  });
+
+  it("draws everything as before without a fold point, or with one before every message", () => {
+    const plain = ["sep", "G:g1", "A:a1", "sep", "G:g2", "A:a2"];
+    expect(folded(rows(), null)).toEqual(plain);
+    expect(folded(rows(), at(-MIN))).toEqual(plain);
+  });
+
+  it("folds every message when the point is the newest, and shows what comes after it", () => {
+    expect(folded(rows(), at(121 * MIN))).toEqual(["fold"]);
+    const later = [...rows(), agentRow(say("a3", 122 * MIN, "t3"))];
+    expect(folded(later, at(121 * MIN))).toEqual(["fold", "sep", "A:a3"]);
+  });
+
+  it("starts the first shown message afresh, with its own time separator", () => {
+    // g2 is two minutes after a1: without the fold they share no separator.
+    const close = [
+      userRow(guardian("g1", 0)),
+      agentRow(say("a1", 1_000)),
+      userRow(guardian("g2", 3 * MIN)),
+    ];
+    expect(folded(close, null)).toEqual(["sep", "G:g1", "A:a1", "G:g2"]);
+    expect(folded(close, at(1_000))).toEqual(["fold", "sep", "G:g2"]);
+  });
+
+  it("takes the notices among the folded messages with them", () => {
+    const withSwitch: ChatRow[] = [
+      userRow(guardian("g1", 0)),
+      { kind: "model_switch", key: "switch", model: "m2", turnId: "t2", sessionId: "concierge" },
+      agentRow(say("a2", 2 * 60 * MIN, "t2")),
+    ];
+    expect(folded(withSwitch, at(0))).toEqual(["fold", "sep", "A:a2"]);
+  });
+
+  it("keeps the unread divider on a shown message", () => {
+    expect(folded(rows(), at(1_000), "g2")).toEqual(["fold", "sep", "new", "G:g2", "A:a2"]);
+  });
+
+  it("folds a message by its time, keeping one with no readable time", () => {
+    expect(isFolded({ createdAt: at(0) }, at(0))).toBe(true);
+    expect(isFolded({ createdAt: at(1) }, at(0))).toBe(false);
+    expect(isFolded({ createdAt: "not a time" }, at(0))).toBe(false);
   });
 });
