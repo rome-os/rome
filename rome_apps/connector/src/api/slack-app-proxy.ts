@@ -16,6 +16,11 @@ export const SLACK_APP_CONNECT_HINT =
 export const SLACK_BOTH_ON_APP =
   'Both Slack connections are connected: this call went through Rome\'s Slack app, which replaces the Slack sign-in. Pass via: "sign_in" to make it through the sign-in instead.';
 
+/** What a call that asked for the Slack app says when only the Slack sign-in
+ *  is connected: it names the way that works, and never takes it itself. */
+export const SLACK_APP_NOT_CONNECTED =
+  'Rome\'s Slack app is not connected, but the Slack sign-in is. Omit via, or pass via: "sign_in", to go through the sign-in.';
+
 /** What a call that asked for the Slack sign-in says when there is none. */
 export const SLACK_NO_SIGN_IN =
   'The Slack sign-in is not connected. Omit via, or pass via: "app", to go through Rome\'s Slack app.';

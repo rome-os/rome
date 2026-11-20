@@ -239,10 +239,14 @@ describe("connector_proxy for Slack with both the sign-in and the Slack app conn
       send: rs.fn(),
       query: rs.fn(),
     } as unknown as ChannelsService;
-    expect(await run(none, { ...post, via: "app" })).toMatchObject({
+    const refused = await run(none, { ...post, via: "app" });
+    expect(refused).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/Settings → Connections/),
+      error: expect.stringMatching(
+        /Slack app is not connected, but the Slack sign-in is.*via: "sign_in"/,
+      ),
     });
+    expect(JSON.stringify(refused)).not.toContain("Settings");
     expect(slackProxyCall).not.toHaveBeenCalled();
   });
 });
