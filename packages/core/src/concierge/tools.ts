@@ -42,6 +42,7 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { ownerOf } from "../webchat/owner.js";
@@ -175,6 +176,17 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
   if ("invalid" in result) return result.invalid;
   return `The task chat cannot take a message (${result.send})`;
+}
+
+/** The tool use the one card part of a stored message waits on, or undefined. */
+function toolUseOf(content: string): string | undefined {
+  try {
+    const parts: unknown = JSON.parse(content);
+    const part = Array.isArray(parts) ? (parts[0] as { toolUseId?: unknown }) : undefined;
+    return typeof part?.toolUseId === "string" ? part.toolUseId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -653,6 +665,63 @@ export async function buildConciergeTools(
       );
     }
     return only;
+  };
+
+  // The question card message `id` of a task chat holds: its chat, the tool
+  // use it waits on, and its questions in one line. Null for any other
+  // message, such as an approval or an app's own card, which its task chat
+  // answers.
+  const questionCardIn = async (id: string) => {
+    const message = await webchatRepo.widgetMessage(id);
+    if (!message) return null;
+    const holder = await webchatRepo.getSession(message.chatId);
+    if (holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) return null;
+    const asked = openQuestion([{ id, role: "assistant", content: message.content }]);
+    const toolUseId = toolUseOf(message.content);
+    return asked && toolUseId ? { chatId: message.chatId, toolUseId, line: asked.line } : null;
+  };
+
+  // Forwards task chat question card `cardId` as the card itself: a task
+  // card that shows the question it waits on and answers it in its task chat,
+  // so both chats show the same card and its one answer
+  // (docs/domains/chats.md#task). It replies to the task's start message.
+  // Where this chat cannot draw cards, the questions go as a message, which
+  // the guardian answers in words. Forwarding it twice in one turn is one message.
+  const forwardQuestion = async (
+    question: { chatId: string; toolUseId: string; line: string },
+    cardId: string,
+    title: string,
+  ) => {
+    const { chatId, turnId } = currentTurn();
+    const key = sayKey(`card:${cardId}`, undefined);
+    const repeated = service.saidInTurn(turnId, key);
+    if (repeated) return repeated;
+    const task = await tasks.repo.findBySession(question.chatId);
+    const start = await startMessageOf(task?.id);
+    const waitedOn = { kind: "question" as const, id: question.toolUseId, messageId: cardId };
+    // A card replies with no quote, as a forwarded result card does.
+    const id =
+      context.widgets === "card"
+        ? (
+            await webchatRepo.addBackendMessage(
+              chatId,
+              turnId,
+              [{ type: "task_chat", chatId: question.chatId, title, show: "ask", waitedOn }],
+              start ? { replyTo: start.id } : {},
+            )
+          ).id
+        : await addMessage(
+            [
+              {
+                type: "text",
+                content: `${taskLink(title, question.chatId)}: ${question.line}`,
+              },
+            ],
+            start,
+          );
+    said(chatId, turnId, `${title}: ${pushBody(question.line)}`);
+    service.keepSaid(turnId, key, id);
+    return id;
   };
 
   // Forwards the card message `cardId` of a task chat, as it is: Rome issues
@@ -1299,6 +1368,7 @@ export async function buildConciergeTools(
       name: "card_forward",
       description:
         "Send the guardian one card a task chat showed, as it is, by its id: Rome copies the card, so you pass no content. The id is the `id` of a `card id=…` line in a task event, or the `cardId` of a message chat_read shows. Where this chat cannot show cards, the card's plain-text line goes instead. " +
+        "A task's question card goes as the card itself: the guardian answers it here or in the task chat, and both show the one answer. An approval is decided in its task chat, so it is refused. " +
         "To send several cards, call it once for each: every card is a message of its own. Any card of a task chat started from this Concierge chat can go, from any turn. " +
         "An id that names no such card is refused and nothing is sent: then tell the result yourself with say, replying to the task's start message. " +
         "The message replies to the task's start message and leaves it where it is, so several cards all reply to the same one.",
@@ -1313,6 +1383,16 @@ export async function buildConciergeTools(
           currentTurn();
           const found = await messages.cardIn(cardId);
           const holder = found ? await webchatRepo.getSession(found.chatId) : undefined;
+          // A task's question card goes as itself: the same card, answered
+          // wherever it is.
+          if (!found) {
+            const question = await questionCardIn(cardId);
+            if (question) {
+              const chat = await requireOwnTaskChat(question.chatId);
+              const messageId = await forwardQuestion(question, cardId, chat.name);
+              return { forwarded: context.widgets === "card" ? "card" : "card_text", messageId };
+            }
+          }
           // Everything that can refuse comes before anything is said.
           if (!found || holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
             throw new Error(

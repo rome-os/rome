@@ -400,6 +400,13 @@ function setup(
       onMessageInserted: () => () => {},
       awaitingGuardianSince: async () => new Map<string, number>(),
       openWaitsOf: async () => new Map(),
+      widgetMessage: async (id: string) => {
+        for (const [chatId, rows] of messages) {
+          const row = rows.find((each) => each.id === id);
+          if (row) return { chatId, content: row.content };
+        }
+        return null;
+      },
       taskCardsOf: async () => new Map(),
       ownerSpokeAt: async () => null,
       taskChatPartMessages: async (chatId: string) =>
@@ -1920,6 +1927,69 @@ describe("Concierge tools", () => {
     };
     const widgets = (s: ReturnType<typeof setup>) =>
       stored(s).filter((parts) => parts[0]?.type === "widget");
+    const QUESTIONS = [
+      { id: "airport", question: "Which airport?", type: "single", options: ["LIS", "OPO"] },
+    ];
+    const questionRow = (id: string, render: Record<string, unknown> = {}) => ({
+      id,
+      role: "assistant",
+      turnId: "task-turn-1",
+      content: JSON.stringify([
+        {
+          type: "pending_interaction",
+          toolUseId: "task-ask-1",
+          appId: "core",
+          render: {
+            kind: "inline",
+            builtin: true,
+            componentId: "question-card",
+            props: { questions: QUESTIONS },
+            ...render,
+          },
+        },
+      ]),
+    });
+
+    it("forwards a task's question card as the card itself, which answers the task's own card", async () => {
+      const s = await withRows(questionRow("ask-1"));
+      const result = text(await s.tool("card_forward", { cardId: "ask-1" }));
+      expect(result).toMatchObject({ forwarded: "card" });
+      const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
+      expect(JSON.parse(row?.content ?? "[]")).toEqual([
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Health",
+          show: "ask",
+          waitedOn: { kind: "question", id: "task-ask-1", messageId: "ask-1" },
+        },
+      ]);
+      expect(row?.replyTo).toBe("ack-1");
+      // Twice in one turn is one message.
+      expect(text(await s.tool("card_forward", { cardId: "ask-1" })).messageId).toBe(
+        result.messageId,
+      );
+    });
+
+    it("sends a question card's questions as words where this chat cannot draw cards", async () => {
+      const s = await withRows(questionRow("ask-1"));
+      s.drawWidgets("plain_text");
+      expect(text(await s.tool("card_forward", { cardId: "ask-1" }))).toMatchObject({
+        forwarded: "card_text",
+      });
+      const parts = JSON.parse(s.messages.get(CONCIERGE_CHAT)?.at(-1)?.content ?? "[]");
+      expect(parts.find((part: { type: string }) => part.type === "text")?.content).toBe(
+        "[Health](#rome-task=task-1): Which airport? (options: LIS | OPO)",
+      );
+    });
+
+    it("refuses an app's own card and a card of a chat that is not its task chat", async () => {
+      const s = await withRows(questionRow("app-1", { builtin: false, componentId: "today" }));
+      expect((await s.tool("card_forward", { cardId: "app-1" })).isError).toBe(true);
+      s.messages.get(CONCIERGE_CHAT)?.push(questionRow("own-1"));
+      expect((await s.tool("card_forward", { cardId: "own-1" })).isError).toBe(true);
+      expect(stored(s).some((parts) => parts[0]?.type === "task_chat")).toBe(false);
+    });
 
     it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
       const s = await withRows(cardRow("card-1"), textRow(concluded("Your daily health summary.")));
@@ -2828,17 +2898,24 @@ describe("Concierge events", () => {
     expect(stopped.quietFlags).toEqual([true]);
   });
 
-  it("tells the Concierge of a question card at once, with the question", async () => {
+  it("tells the Concierge of a question card at once, by the id card_forward takes", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.messages.get(chatId)?.push({
+      id: "ask-1",
       role: "assistant",
       content: JSON.stringify([
         {
           type: "pending_interaction",
           render: {
             builtin: true,
-            props: { questions: [{ question: "Which airport?", options: ["LIS", "OPO"] }] },
+            componentId: "question-card",
+            props: {
+              questions: [
+                { question: "Which airport?", options: ["LIS", "OPO"] },
+                { question: "Anything else?" },
+              ],
+            },
           },
         },
       ]),
@@ -2848,7 +2925,7 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     const prompt = s.backendTurns[0].prompt;
     expect(prompt).toContain('changes="turn_end:completed question by=concierge"');
-    expect(prompt).toContain("question: Which airport? (options: LIS | OPO)");
+    expect(prompt).toContain("card id=ask-1: Which airport? (options: LIS | OPO) · Anything else?");
   });
 
   it("tells the Concierge what the guardian said in a task chat, read from the turn's own rows", async () => {
