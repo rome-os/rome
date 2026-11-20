@@ -780,10 +780,9 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
+  const storedLegacyBindings = await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING);
   const artifactIdentity = {
-    legacyBindings: parseLegacyArtifactBindings(
-      await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
-    ),
+    legacyBindings: parseLegacyArtifactBindings(storedLegacyBindings),
   };
   // Routines saved before action names carried their app fire by the full ID.
   // Renamed before boot removal, which pauses a removed app's routines by it.
@@ -2453,12 +2452,15 @@ async function main() {
 
   // A profile from before the old-name map was stored has routines with bare
   // action names the map cannot rename; a name one registered action has is
-  // that action's.
-  const renamedByRegistry = await routinesRepo.deprecatedQualifyActionNames(
-    fullIdsByUniqueLocalName(actionRegistry.list()),
-  );
-  if (renamedByRegistry > 0) {
-    appsLog.info("old action names on routines renamed", { routines: renamedByRegistry });
+  // that action's. Only its first boot renames, since this boot stores the map,
+  // so a bare name no action had stays unmatched when an app adds one later.
+  if (storedLegacyBindings == null) {
+    const renamedByRegistry = await routinesRepo.deprecatedQualifyActionNames(
+      fullIdsByUniqueLocalName(actionRegistry.list()),
+    );
+    if (renamedByRegistry > 0) {
+      appsLog.info("old action names on routines renamed", { routines: renamedByRegistry });
+    }
   }
 
   await routineEngine.start();
