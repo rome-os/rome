@@ -382,12 +382,12 @@ write_rome_env() {
       [ -z "${ANTHROPIC_API_KEY:-}" ] || echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
       [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
       # When Rome, or the chief of staff, renews a session; set to renew it sooner than a real Rome would.
-      # CHIEF_OF_STAFF_UNSAFE_NO_MEMORY=1 turns the app's memory off, to measure recall without it.
+      # CHIEF_OF_STAFF_REASONING_EFFORT (low, high or xhigh) sets the effort of every chief of staff turn.
       # A value given once stays for the copy's later resets.
       local name value
       for name in SESSION_HANDOFF_CONTEXT_TOKENS SESSION_HANDOFF_HARD_CONTEXT_TOKENS \
         SESSION_HANDOFF_TIMEOUT_SECONDS SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS \
-        CHIEF_OF_STAFF_SESSION_CONTEXT_TOKENS CHIEF_OF_STAFF_UNSAFE_NO_MEMORY; do
+        CHIEF_OF_STAFF_SESSION_CONTEXT_TOKENS CHIEF_OF_STAFF_REASONING_EFFORT; do
         value="${!name:-$(kept "$name")}"
         [ -z "$value" ] || echo "$name=$value"
       done
