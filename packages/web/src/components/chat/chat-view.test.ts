@@ -266,6 +266,32 @@ describe("buildRows model switch notice", () => {
     expect(rows[2]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", quota });
     // The resumed turn ran on the new model: no second notice for the same move.
     expect(rows.filter((r) => r.kind === "model_switch")).toHaveLength(1);
+    // Nor when the quiet turn that hit the limit stands between them.
+    const failed = [
+      mk(MAIN, "user", "t1b", [{ type: "text", content: "again" }]),
+      mk(MAIN, "trace", "t1b", [], {
+        traceSummary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+      }),
+      mk(MAIN, "assistant", "t1b", [
+        {
+          type: "provider_failure",
+          provider: "openai",
+          reason: "capacity",
+          card: "wait",
+          followsDefault: true,
+          alternatives: [],
+          chatId: MAIN,
+          retrying: true,
+        },
+      ]),
+    ];
+    const withQuiet = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6.1-sol"),
+      mk(MAIN, "assistant", "q1", [quota]),
+      ...failed,
+      ...turn(MAIN, "t2", "gpt-6-luna"),
+    ]);
+    expect(withQuiet.filter((r) => r.kind === "model_switch")).toHaveLength(1);
   });
 
   it("shows a send a provider card explains as delivered, not failed", () => {

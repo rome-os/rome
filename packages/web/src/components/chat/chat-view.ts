@@ -456,8 +456,18 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
             sessionId: turn.sessionId,
           };
           // Rome's own note about this move already stands just before.
-          const before = out.at(-1);
-          const noted = before?.kind === "model_switch" && before.quota?.model === model;
+          // Rome's own note about this move stands before it, perhaps above the
+          // quiet turn that hit the limit.
+          let noted = false;
+          for (let i = out.length - 1; i >= 0; i--) {
+            const earlier = out[i];
+            if (earlier.kind === "model_switch") {
+              noted = earlier.quota?.model === model;
+              break;
+            }
+            const earlierTurn = rowTurn(earlier);
+            if (earlierTurn && tracesByTurn.get(earlierTurn.turnId)?.traceSummary?.model) break;
+          }
           const built = builtSwitches.get(row);
           if (noted) {
             // No second notice for the same move.
