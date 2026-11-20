@@ -12,9 +12,6 @@ web:
   displayName: Inbox
   navLabel: Inbox
 
-agents:
-  - agents/sentinel.yaml
-
 actions:
   - actions/message-handler
 

@@ -17,6 +17,8 @@ import type {
   MessagesSaid,
 } from "@rome-os/app-runtime";
 
+import type { WakeGateFor } from "../../actions/message-handler/index.js";
+
 const log = createAppLogger("channel-message-hook");
 
 /** Core's `AGENTS_KIND`, which an app cannot import. */
@@ -52,6 +54,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
       unsafeTestOnlyBypassesInbox?: ChannelMessageHookDeps["unsafeTestOnlyBypassesInbox"];
       messagesSaid?: MessagesSaid;
+      wakeGateFor?: WakeGateFor;
     } = {},
   ) {}
 
@@ -221,7 +224,33 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       snapshot.overrides.routing?.agentName === null
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
-    if (!enabled) {
+    // A recorded message carries People's answer for its sender, so the wake
+    // gate decides here, before typing shows or attachments download. Without
+    // it, `inbox:message_handler` asks the gate once it has looked the sender up.
+    const sender = "sender" in event ? event.sender : undefined;
+    let wake: "wake" | "review" | undefined;
+    if (sender && this.options.wakeGateFor) {
+      const gate = await this.options.wakeGateFor({ chat: ref });
+      const decision = gate(
+        {
+          connectionId,
+          chatId: message.chatId,
+          channel: service,
+          place: message.thread?.kind === "dm" ? "direct" : "group",
+          threadName: message.thread?.name,
+        },
+        {
+          person: sender.person
+            ? { id: sender.person.id, bondLevel: sender.person.bondLevel }
+            : null,
+        },
+      );
+      if (decision === "quiet" || decision === "block") {
+        log.debug("message wakes nobody", { connectionId, chatId: message.chatId, decision });
+        return;
+      }
+      wake = decision;
+    } else if (!enabled) {
       log.debug("conversation disabled", { connectionId, chatId: message.chatId });
       return;
     }
@@ -267,6 +296,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName,
       accountAgentName: accountAgent,
       ...(recorded ? { recordedMessageId: recorded.messageId } : {}),
+      ...(wake ? { wake } : {}),
     });
     return { turn };
   }
@@ -281,6 +311,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName: string | undefined;
       accountAgentName: string | undefined;
       recordedMessageId?: string;
+      wake?: "wake" | "review";
     },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
@@ -382,6 +413,13 @@ function byChannelName(
   return (target) => (typeof target === "string" ? linkedAgentOf(target) : undefined);
 }
 
+/** Core's wake gate, passed beside the hook deps the SDK describes. A host
+ *  that predates it passes none. */
+function wakeGateForOf(deps: ChannelMessageHookDeps): WakeGateFor | undefined {
+  const candidate = (deps as { wakeGateFor?: unknown }).wakeGateFor;
+  return typeof candidate === "function" ? (candidate as WakeGateFor) : undefined;
+}
+
 /** A host handed the hook no `channels`, so it would hear nothing. */
 export class MissingChannelsError extends Error {
   constructor() {
@@ -407,6 +445,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
         ? { unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox }
         : {}),
       ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
+      ...(wakeGateForOf(deps) ? { wakeGateFor: wakeGateForOf(deps) } : {}),
     },
   );
 }
