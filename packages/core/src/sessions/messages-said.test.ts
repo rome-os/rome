@@ -101,12 +101,14 @@ describe("messagesSaid", () => {
       sessions?: Pick<WebChatRepository, "ensureChannelChat">;
       wakes?: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
       labels?: Pick<SenderLabels, "sender">;
+      /** More channels to record, such as an account's new one. */
+      channels?: readonly Channel[];
     } = {},
   ) {
     events = new ChatEvents();
     const recording = inboundRecording(
       { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
-      [telegram.channel, second.channel],
+      [telegram.channel, second.channel, ...(overrides.channels ?? [])],
     );
     return messagesSaid({
       chats: wiring.chats,
@@ -120,11 +122,17 @@ describe("messagesSaid", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    const accounts: Record<string, Account> = { telegram: BOT, "telegram-2": SECOND };
+    // `telegram-again` is the first account's channel once it is connected
+    // again; only the case that reconnects records it.
+    const accounts: Record<string, Account> = {
+      telegram: BOT,
+      "telegram-2": SECOND,
+      "telegram-again": BOT,
+    };
     wiring = chatsWiring(testDb.db, {
       accountOf: (channel) => accounts[channel] ?? null,
       platformOfChannel: () => "telegram",
-      channelsOn: () => Object.keys(accounts),
+      channelsOn: () => ["telegram", "telegram-2"],
     });
     telegram = fakeChannel("telegram");
     second = fakeChannel("telegram-2");
@@ -237,6 +245,41 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session)).toHaveLength(0);
     await said.decided(other.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
+
+  it("raises a shared line for the second account with who said it as that account knows them", async () => {
+    said.subscribe(async () => undefined);
+    const senders: string[] = [];
+    events.subscribe((event) => {
+      if (event.type === "MessageSaid") senders.push(event.message.saidBy.account.id);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message({ ...supergroup, senderId: "alice-to-first" }));
+    await second.deliver(
+      message({
+        ...supergroup,
+        senderId: "alice-to-second",
+        account: SECOND,
+        channel: "telegram-2",
+      }),
+    );
+    await settled();
+    expect(senders).toEqual(["alice-to-first", "alice-to-second"]);
+  });
+
+  it("raises nothing when an account connected again hears a line it heard already", async () => {
+    const again = fakeChannel("telegram-again");
+    said = build({ channels: [again.channel] });
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message(supergroup));
+    await again.deliver(message({ ...supergroup, channel: "telegram-again" }));
+    await settled();
+    await wiring.adapters.of(again.channel).settled();
+    expect(heard.map((event) => event.message.channel)).toEqual(["telegram"]);
   });
 
   it("raises nothing for a second account that hears a line only after a restart", async () => {
