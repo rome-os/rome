@@ -117,6 +117,7 @@ function adapter(
   api = fakeApi(),
   copy: SlackMessageCopyRepository = testCopy(),
   now?: () => Date,
+  listened?: () => boolean,
 ) {
   const delivered: ChannelMessage[] = [];
   const faults: string[] = [];
@@ -132,6 +133,7 @@ function adapter(
     onFault: ({ kind }) => faults.push(kind),
     copy,
     ...(now ? { now } : {}),
+    ...(listened ? { listened } : {}),
   });
   a.onInbound((message) => delivered.push(message));
   return { adapter: a, delivered, faults, api, copy };
@@ -269,6 +271,29 @@ describe("Slack app's own copy of its direct messages", () => {
     await mailbox.deposit();
     expect(mailbox.statuses).toEqual([500, 200]);
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("keeps nothing heard while Rome does not listen to the account, so linking an agent brings none of it back", async () => {
+    const { db } = createTestDb();
+    const copy = new SlackMessageCopyRepository(db);
+    const mailbox = fakeMailbox();
+    let listening = false;
+    const first = adapter(mailbox, fakeApi(), copy, at(0), () => listening);
+    await first.adapter.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(mailbox.statuses).toEqual([200]);
+    expect(first.delivered).toHaveLength(0);
+    expect(copy.mayNotHold(TEAM, 60_000)).toEqual([]);
+
+    listening = true;
+    await mailbox.deposit(frame(dmEvent(2)));
+    expect(first.delivered.map((m) => m.text)).toEqual(["message 2"]);
+    await first.adapter.stop();
+
+    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(30), () => listening);
+    await restarted.adapter.start();
+    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 2"]);
   });
 
   it("hands Rome on start what it kept but never handed over", async () => {

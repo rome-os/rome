@@ -19,7 +19,13 @@ import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.
 function registerEveryKind(registry: ConnectionRegistry): void {
   registerBuiltinConnections(registry, {
     listAgents: () => [],
-    slackApp: { api: {}, cloud: {}, openMailbox: () => ({ stop() {} }), copy: {} },
+    slackApp: {
+      api: {},
+      cloud: {},
+      openMailbox: () => ({ stop() {} }),
+      copy: {},
+      listens: () => true,
+    },
   } as unknown as BuiltinConnectionDeps);
   const mounted = [
     feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
