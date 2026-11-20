@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Rome
 
@@ -64,19 +65,44 @@ import Testing
     }
 
     /// A send's refresh that works while a chat that never loaded waits for
-    /// its retry leaves the retry to finish the load: the spinner goes.
-    @Test func aRefreshDoesNotCancelTheFirstLoadsRetry() async {
+    /// its retry starts the full read: the spinner goes.
+    @Test func aRefreshFinishesAChatThatNeverLoaded() async {
         let backend = FakeBackend()
         backend.messagesError = .server(status: 503, message: nil)
         let store = TranscriptStore(sessionId: "task-1", kind: .task, backend: backend)
-        store.autoRetryFirst = .milliseconds(200)
+        // Far off: the refresh itself must bring the full read.
+        store.autoRetryFirst = .seconds(10)
         store.start()
         for _ in 0..<200 where backend.pageLimits.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         backend.messagesError = nil
         #expect(await store.refreshLatest())
-        #expect(!store.loaded)
         for _ in 0..<200 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(store.loaded && store.loadBar == nil)
+        store.stop()
+    }
+
+    /// A chat whose first read failed until the bar showed sets up its
+    /// paging when the retry works: older pages still load.
+    @Test func recoveringAfterTheBarStillPagesUp() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<60).map { index in
+            let made = Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))
+            return ChatMessage(
+                id: "m\(index)", sessionId: "task-1", turnId: "t\(index)", role: "assistant",
+                content: "Message \(index)", createdAt: RomeDate.string(made)
+            )
+        }
+        backend.messagesError = .server(status: 503, message: nil)
+        let store = TranscriptStore(sessionId: "task-1", kind: .task, backend: backend)
+        store.autoRetryFirst = .milliseconds(20)
+        store.start()
+        for _ in 0..<200 where store.loadBar != .failed { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.loaded && !store.hasOlder)
+        backend.messagesError = nil
+        for _ in 0..<200 where store.loadBar != nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.hasOlder)
+        await store.loadOlder()
+        #expect(store.messages.count == 60)
         store.stop()
     }
 

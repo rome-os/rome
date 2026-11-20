@@ -108,6 +108,10 @@ final class TranscriptStore {
     /// The rows came from `cache`: the first fetch sets the paging and
     /// replaces what it covers.
     private var fromCache = false
+    /// A full read of the newest page set up the paging (or the chat was
+    /// made just now, with nothing older). A failed first read can show its
+    /// bar, and so count as loaded, before this.
+    @ObservationIgnored private var pagingKnown = false
     /// How many messages a page holds, the newest page included.
     static let pageSize = 40
 
@@ -269,6 +273,7 @@ final class TranscriptStore {
         loaded = true
         readOnce = true
         hasOlder = false
+        pagingKnown = true
     }
 
     /// Shows the rows kept from last time, before anything is fetched. The
@@ -337,10 +342,11 @@ final class TranscriptStore {
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
                 arrivals += 1
             }
-            if !loaded || fromCache {
+            if !pagingKnown || fromCache {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
                 fromCache = false
+                pagingKnown = true
             }
             loaded = true
             readOnce = true
@@ -395,9 +401,9 @@ final class TranscriptStore {
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
         mergeLatest(page)
-        // A chat that never loaded keeps its retry: only a full read sets
-        // up its paging and takes the spinner away.
-        if loaded { loadWorked() }
+        // A chat whose paging no full read set up yet (never loaded, or shown
+        // from the copy on disk) reads in full now: only that sets it up.
+        if pagingKnown { loadWorked() } else { resync() }
         readOnce = true
         return true
     }
