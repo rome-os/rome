@@ -1273,10 +1273,14 @@ final class DemoBackend: RomeBackend {
             TaskLinkInfo(id: "chat-quotes", name: "抓取供应商报价", status: "ended", endReason: "stopped"),
             TaskLinkInfo(id: "chat-research", name: "竞品定价调研", status: "ended", endReason: "no_response"),
             TaskLinkInfo(id: "chat-weekly", name: "每周一整理周报", status: "later"),
+            TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
+            TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
         ].map { ($0.id, $0) })
         messages["topic-task-links"] = [
             user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
             agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
+            // Chips on a wrapped paragraph's first line, and one that wraps itself.
+            agent("在查了：[iOS 退出 task chat 后头部模糊变实心](#rome-task=chat-blur)。会在 Mac mini 上复现、找根因，先给你看修法，不直接改。\n\n另一件：[iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现](#rome-task=chat-reload) 等你确认。", at: at(9, 32), session: "topic-task-links"),
         ]
         messages["topic-itinerary"] = [
             user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),

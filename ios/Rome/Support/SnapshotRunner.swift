@@ -406,6 +406,8 @@ enum SnapshotRunner {
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
                let demo = model.workspace?.backend as? DemoBackend, let store = model.workspace?.topicStore("topic-errors") {
                 demo.unreadableChats.insert("topic-errors")
+                // The bar shows on the second failure in a row.
+                await store.reload()
                 await store.reload()
                 await capture("58b-load-failed", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-errors")) }
                 store.retryHold = .seconds(4)

@@ -314,7 +314,9 @@ import { callerNotifyService } from "./app-host/caller-notify.js";
 import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
-import { PolicyEngine } from "./core/policy-engine.js";
+import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
+import { guardedSend } from "./participation/send-gate/index.js";
+import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -1581,6 +1583,12 @@ async function main() {
   // What apps get of the chat settings, with the chat ids an app built for
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
+  const wakeGateFor = wakeGateLoader({
+    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
+    policies: () => policiesRepo.findAll(),
+    connectionKindOf: connectionKindOfChannel,
+  });
   // Only the Concierge writes in a Concierge chat. An app's action sending
   // there, as a task chat's agent or a routine may, wakes the Concierge with
   // a quiet system turn instead (docs/architecture/concierge.md).
@@ -1620,6 +1628,8 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
+    sendGate: guardedSend,
+    wakeGateFor,
     routinesRepo,
     routineEngine,
     // Real coordinators in the main process; workers inject the matching proxies
@@ -2040,6 +2050,7 @@ async function main() {
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
       unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
+      wakeGateFor,
     },
     mayLoad: (appId) =>
       appId !== messageHandlerOwner() || actionRegistry.has("inbox:message_handler"),

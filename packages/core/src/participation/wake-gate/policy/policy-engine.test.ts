@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import { PolicyEngine, type PolicyContext } from "./policy-engine.js";
-import { PoliciesRepository } from "../db/repositories/policies.js";
-import { SettingsRepository } from "../db/repositories/settings.js";
-import type { PolicyRule, PolicyScope } from "../types.js";
+import { PoliciesRepository } from "../../../db/repositories/policies.js";
+import { SettingsRepository } from "../../../db/repositories/settings.js";
+import type { PolicyRule, PolicyScope } from "../../../types.js";
 import {
   createTestDb,
   installTestSpanHarness,
   type SpanHarness,
   type TestDb,
   identityConnectionKindOf,
-} from "../test/helpers.js";
+} from "../../../test/helpers.js";
 
 // PolicyEngine over real repositories on in-memory SQLite (edge-only fakes,
 // #763): policies and the trustedBondLevels setting are DB rows, so evaluate()
