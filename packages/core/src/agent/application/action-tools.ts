@@ -14,8 +14,8 @@ import { MAX_SEARCH_LIMIT, SEARCH_LIMIT_DESCRIPTION } from "../domain/catalog-se
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
 
-function requireAction(actionCatalog: readonly AgentAction[], actionName: string): AgentAction {
-  const action = actionCatalog.find((entry) => entry.name === actionName);
+function requireAction(actions: AgentActions, turn: TurnFacts, actionName: string): AgentAction {
+  const action = actions.find(turn, actionName);
   if (!action) {
     throw new Error(`Unknown action: ${actionName}`);
   }
@@ -62,7 +62,7 @@ export function actionTools(
       },
       handler: (input) =>
         run("read_action", input, async (args) =>
-          describeAction(requireAction(actions.list(turn), String(args.action_name))),
+          describeAction(requireAction(actions, turn, String(args.action_name))),
         ),
     },
     {
