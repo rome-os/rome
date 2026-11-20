@@ -1507,6 +1507,23 @@ describe("Slack app reads Slack refused as too soon", () => {
     // first read started.
     expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
   });
+
+  it("refuses a read whose Retry-After would take it past its limit, without asking Slack again", async () => {
+    const asked: number[] = [];
+    const fetchImpl = (async () => {
+      asked.push(Date.now());
+      return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+    }) as unknown as typeof fetch;
+    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 500 });
+
+    await expect(
+      gate.run("replies:C1:1.0", () =>
+        api.conversationReplies("t", { channel: "C1", ts: "1.0", limit: 15 }),
+      ),
+    ).rejects.toThrow(/Try again in 1 seconds/);
+    expect(asked).toHaveLength(1);
+  });
 });
 
 describe("Slack app searches what it keeps (R9)", () => {
