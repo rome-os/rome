@@ -51,10 +51,9 @@ export interface BuiltinConnectionDeps {
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** A test-only back door: whether an agent keeps the Inbox app off the
-   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
-   *  every message, whatever its chats' settings say. */
-  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
+  /** Whether an agent's own app runs its turns (`app-host/runs-own-turns.ts`).
+   *  An account linked to it hears every message, whatever its chats' settings say. */
+  runsOwnTurns?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
@@ -89,7 +88,7 @@ export function registerBuiltinConnections(
       peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
-      unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox,
+      runsOwnTurns: deps.runsOwnTurns,
       hasAgent: deps.hasAgent,
     }),
   );

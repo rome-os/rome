@@ -125,8 +125,10 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
-    // A test-only back door: Rome honours it only for the apps in
-    // INBOX_BYPASS_APPS (app-host/inbox-bypass.ts).
+    // The agent's own app runs its turns. Rome honours it only for the apps in
+    // RUNS_OWN_TURNS_APPS (app-host/runs-own-turns.ts).
+    runsOwnTurns: z.boolean().optional(),
+    // Deprecated: the old name of runsOwnTurns, which apps built before it still send.
     unsafeTestOnlyBypassInbox: z.boolean().optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
@@ -195,6 +197,19 @@ export const AgentConfigSchema = z
       });
       return z.NEVER;
     }
-    const { model: _legacy, tier: _tier, provider, ...rest } = raw;
-    return { ...rest, ...(tier ? { tier } : {}), ...(provider ? { providerId: provider } : {}) };
+    const {
+      model: _legacy,
+      tier: _tier,
+      provider,
+      unsafeTestOnlyBypassInbox,
+      runsOwnTurns,
+      ...rest
+    } = raw;
+    const ownTurns = runsOwnTurns ?? unsafeTestOnlyBypassInbox;
+    return {
+      ...rest,
+      ...(tier ? { tier } : {}),
+      ...(provider ? { providerId: provider } : {}),
+      ...(ownTurns === undefined ? {} : { runsOwnTurns: ownTurns }),
+    };
   });

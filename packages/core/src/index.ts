@@ -342,7 +342,7 @@ import {
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
-import { bypassesInbox } from "./app-host/inbox-bypass.js";
+import { runsOwnTurns } from "./app-host/runs-own-turns.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -1900,7 +1900,7 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
+    runsOwnTurns: (agent) => runsOwnTurns(agentLoader.find(agent)),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
@@ -2036,7 +2036,8 @@ async function main() {
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
-      unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
+      // The SDK keeps the name it shipped with; it means `runsOwnTurns`.
+      unsafeTestOnlyBypassesInbox: (agent) => runsOwnTurns(agentLoader.find(agent)),
       wakeGateFor,
     },
     mayLoad: (appId) =>
