@@ -32,12 +32,7 @@ function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   }
 
   if (method === "container") {
-    return (
-      <div className="space-y-2">
-        <Badge variant="muted">{t("comingSoon")}</Badge>
-        <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>
-      </div>
-    );
+    return <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>;
   }
 
   return (
@@ -72,7 +67,10 @@ export function DeviceConnectionCards() {
       {setupMethods.map((method) => (
         <Card key={method}>
           <CardHeader>
-            <CardTitle>{t(`methods.${method}`)}</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle>{t(`methods.${method}`)}</CardTitle>
+              {method === "container" && <Badge variant="muted">{t("comingSoon")}</Badge>}
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <DeviceConnectionContent method={method} />
@@ -93,7 +91,8 @@ export function LinkDeviceMenu() {
     <>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button id="link-device" ref={trigger} size="sm" className="sm:max-lg:mr-10">
+          {/* Leaves room for SettingsDialog's close button at mid-width viewports. */}
+          <Button ref={trigger} size="sm" className="sm:max-lg:mr-10">
             <Plus data-icon="inline-start" aria-hidden />
             {t("devices.setup.linkDevice")}
           </Button>
@@ -131,7 +130,12 @@ export function LinkDeviceMenu() {
         }}
       >
         <DialogHeader onClose={close} closeLabel={t("common.close")}>
-          <DialogTitle>{method && t(`devices.setup.methods.${method}`)}</DialogTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <DialogTitle>{method && t(`devices.setup.methods.${method}`)}</DialogTitle>
+            {method === "container" && (
+              <Badge variant="muted">{t("devices.setup.comingSoon")}</Badge>
+            )}
+          </div>
         </DialogHeader>
         <DialogBody className="min-h-0 space-y-4">
           {method && <DeviceConnectionContent method={method} />}

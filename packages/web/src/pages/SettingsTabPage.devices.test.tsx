@@ -163,8 +163,8 @@ it("shows device guides and the container placeholder in the empty list", async 
   expect(setup.getByRole("link", { name: "Download Rome" })).toBeTruthy();
   expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
   expect(setup.getByText("rome-node connect")).toBeTruthy();
-  expect(setup.getByRole("heading", { name: "Rome Node container" })).toBeTruthy();
-  expect(setup.getByText("Coming soon")).toBeTruthy();
+  const containerHeading = setup.getByRole("heading", { name: "Rome Node container" });
+  expect(within(containerHeading.parentElement!).getByText("Coming soon")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
@@ -190,6 +190,10 @@ it("opens each setup guide and the container placeholder from Link device", asyn
     await user.click(await screen.findByRole("menuitem", { name }));
     const dialog = await screen.findByRole("dialog", { name });
     expect(within(dialog).getByText(text)).toBeTruthy();
+    if (name === "Rome Node container") {
+      const heading = within(dialog).getByRole("heading", { name });
+      expect(within(heading.parentElement!).getByText("Coming soon")).toBeTruthy();
+    }
     await user.keyboard("{Escape}");
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   }
@@ -216,7 +220,8 @@ it("starts only on explicit click and refreshes server truth after success", asy
     }),
     start,
   );
-  const button = await screen.findByRole("button", { name: "Start service" });
+  const connection = within(await screen.findByRole("region", { name: "Rome connection" }));
+  const button = connection.getByRole("button", { name: "Start service" });
   expect(screen.getByRole("heading", { name: "Connect a device" })).toBeTruthy();
   expect(start).not.toHaveBeenCalled();
   await userEvent.click(button);
@@ -263,14 +268,15 @@ it("localizes the service recovery and device setup in Chinese", async () => {
       checkedAt: new Date().toISOString(),
       devices: [],
     }));
-    expect(await screen.findByRole("button", { name: "启动服务" })).toBeTruthy();
+    const connection = within(await screen.findByRole("region", { name: "Rome 连接" }));
+    expect(connection.getByRole("button", { name: "启动服务" })).toBeTruthy();
     const setup = within(screen.getByRole("region", { name: "连接设备" }));
     expect(setup.getByRole("heading", { name: "应用" })).toBeTruthy();
     expect(setup.getByRole("link", { name: "下载 Rome" })).toBeTruthy();
     expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
     expect(setup.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
-    expect(setup.getByRole("heading", { name: "Rome Node 容器" })).toBeTruthy();
-    expect(setup.getByText("即将推出")).toBeTruthy();
+    const containerHeading = setup.getByRole("heading", { name: "Rome Node 容器" });
+    expect(within(containerHeading.parentElement!).getByText("即将推出")).toBeTruthy();
   } finally {
     cleanup();
     await i18n.changeLanguage("en");

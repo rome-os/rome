@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
-import { Measure, Section } from "@rome-os/ui/page";
+import { Measure, Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -105,18 +105,20 @@ export function DevicesSection() {
           locale={i18n.language}
         />
       )}
-      <Section aria-label={t("devices.title")}>
+      <Section aria-labelledby="device-connection-title">
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle id="device-connection-title">{t("devices.connectionLabel")}</SectionTitle>
+          </SectionHeading>
+        </SectionHeader>
         <Card>
           <CardContent>
-            <div className="space-y-2">
-              <p className="text-ui">{t("devices.connectionLabel")}</p>
-              <StatusIndicator
-                status={{
-                  label: t(`devices.connection.${connection}`),
-                  tone: connection === "incompatible" ? "attention" : "muted",
-                }}
-              />
-            </div>
+            <StatusIndicator
+              status={{
+                label: t(`devices.connection.${connection}`),
+                tone: connection === "incompatible" ? "attention" : "muted",
+              }}
+            />
             <p
               role={connection === "unavailable" ? "alert" : undefined}
               className="mt-4 text-ui text-muted-foreground"
