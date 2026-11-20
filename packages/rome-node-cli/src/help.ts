@@ -6,6 +6,7 @@ Usage:
 
 Commands:
   connect          Keep this computer online as a remote executor.
+  web              Run the local Web UI to manage connection and audit logs.
   auth             Configure caller authorization through stdin or server mode.
   auth status      Report local caller configuration without revealing the token.
   device           List authorized devices (they may be offline).
@@ -65,6 +66,30 @@ Options:
 Example:
   rome-node connect --name "My computer"
   rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
+`,
+  web: `Usage: rome-node web [--host <addr>] [--port <port>] [--cloud <origin>] [--name <name>] [--assets-dir <dir>] [--require-auth]
+
+Start a local Web UI to manage this computer's Rome Cloud device authorization,
+connection state, remote execution toggle, and local audit log.
+Built for container and headless deployments where a browser is easier than CLI logs.
+
+Options:
+  --host <addr>       Listen address (default: ROME_NODE_WEB_HOST or 127.0.0.1).
+  --port <port>       Listen port (default: ROME_NODE_WEB_PORT or 4310).
+  --cloud <origin>    Default Cloud origin (default: ROME_NODE_CLOUD_URL or https://romeos.cc).
+  --name <name>       Default device name (default: ROME_NODE_NAME or computer hostname).
+  --assets-dir <dir>  Path to built @rome-os/node-web static files (or ROME_NODE_WEB_ASSETS_DIR).
+  --require-auth      Require an access token even when listening on loopback.
+
+Environment:
+  ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
+  ROME_NODE_UI_TOKEN        Access token for the Web UI. When unset on a non-loopback host,
+                            a random token is generated and printed once to stderr at startup.
+  ROME_NODE_WEB_ASSETS_DIR  Directory containing the built Web UI assets.
+
+Example:
+  rome-node web
+  rome-node web --host 0.0.0.0 --port 4310
 `,
   auth: `Usage:
   rome-node auth [--cloud <origin>] < token-file

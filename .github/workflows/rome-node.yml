@@ -1,13 +1,19 @@
 name: Rome Node package
 
-# The unit suites of both packages run in ci.yml. This workflow checks the
-# standalone npm archives and the Docker image. A manual run can publish the image.
+# The unit suites of the packages run in ci.yml. This workflow checks the
+# standalone npm archives, the Web UI bundle budget, and the Docker image.
+# A manual run can publish the image.
 on:
   pull_request:
     paths:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-web/**
+      - packages/ui/**
+      - packages/web/src/lib/theme.ts
+      - packages/web/src/lib/themes.ts
+      - packages/web/src/lib/stored-preference.ts
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
@@ -19,6 +25,11 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-web/**
+      - packages/ui/**
+      - packages/web/src/lib/theme.ts
+      - packages/web/src/lib/themes.ts
+      - packages/web/src/lib/stored-preference.ts
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
@@ -44,8 +55,11 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node...
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node... --filter @rome-os/node-web...
+      - run: pnpm --filter @rome-os/ui build
       - run: pnpm --filter @rome-os/node build
+      - run: pnpm --filter @rome-os/node-web build
+      - run: pnpm --filter @rome-os/node-web test
       - run: node packages/rome-node-cli/bin/rome-node.js --help
       - name: Install the standalone archive
         run: |
@@ -77,7 +91,7 @@ jobs:
       - name: Cross-build the arm64 image on amd64
         if: matrix.platform == 'linux/amd64'
         run: docker buildx build --platform linux/arm64 --file infra/rome-node/Dockerfile --output type=cacheonly .
-      - name: Run CLI and audit checks as an unprivileged user
+      - name: Run CLI, Web UI, and audit checks as an unprivileged user
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true rome-node:ci --help
@@ -93,6 +107,40 @@ jobs:
                 audit.close();
               '\''
               rome-node audit status
+              ROME_NODE_UI_TOKEN=ci-smoke-token rome-node web --host 0.0.0.0 --port 4310 >/dev/null 2>&1 &
+              WEB_PID=$!
+              trap "kill $WEB_PID 2>/dev/null || true" EXIT
+              node --input-type=module -e '\''
+                const base = "http://127.0.0.1:4310";
+                let healthy = false;
+                for (let i = 0; i < 40; i++) {
+                  try {
+                    const res = await fetch(`${base}/healthz`);
+                    if (res.status === 200) { healthy = true; break; }
+                  } catch {}
+                  await new Promise((r) => setTimeout(r, 100));
+                }
+                if (!healthy) throw new Error("web UI did not become healthy");
+                const indexRes = await fetch(`${base}/`, { headers: { "accept-encoding": "gzip" } });
+                if (indexRes.status !== 200) throw new Error(`GET / returned ${indexRes.status}`);
+                const html = await indexRes.text();
+                if (!html.includes("id=\"root\"")) throw new Error("missing SPA root");
+                const unauth = await fetch(`${base}/api/status`);
+                if (unauth.status !== 401) throw new Error(`expected 401 unauthenticated, got ${unauth.status}`);
+                const login = await fetch(`${base}/api/auth/login`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json", origin: base },
+                  body: JSON.stringify({ token: "ci-smoke-token" }),
+                });
+                if (login.status !== 200) throw new Error(`login failed: ${login.status}`);
+                const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+                const statusRes = await fetch(`${base}/api/status`, { headers: { cookie } });
+                if (statusRes.status !== 200) throw new Error(`authenticated /api/status failed: ${statusRes.status}`);
+                const snap = await statusRes.json();
+                if (snap.phase !== "unconfigured" || snap.audit?.summary?.status?.state !== "ok") {
+                  throw new Error(`unexpected status snapshot: ${JSON.stringify(snap)}`);
+                }
+              '\''
             '
 
   publish-image:

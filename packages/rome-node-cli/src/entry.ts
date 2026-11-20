@@ -109,6 +109,10 @@ async function main(): Promise<void> {
       outcome: { type: "string" },
       text: { type: "string" },
       content: { type: "string" },
+      host: { type: "string" },
+      port: { type: "string" },
+      "assets-dir": { type: "string" },
+      "require-auth": { type: "boolean" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -123,6 +127,11 @@ async function main(): Promise<void> {
     throw new Error("--server is only supported by rome-node auth.");
   if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
     throw new Error("--device-code is only supported by rome-node connect.");
+  const webOptions = ["host", "port", "assets-dir", "require-auth"] as const;
+  if (positionals[0] !== "web" && webOptions.some((option) => values[option] !== undefined))
+    throw new Error(
+      `--${webOptions.find((option) => values[option] !== undefined)} is only supported by rome-node web.`,
+    );
   if (
     (values.input !== undefined || values.output !== undefined) &&
     !(positionals[0] === "device" && positionals[1] === "run")
@@ -144,6 +153,41 @@ async function main(): Promise<void> {
     throw new Error(
       `--${auditOptions.find((option) => values[option] !== undefined)} is only supported by rome-node audit.`,
     );
+  if (positionals[0] === "web") {
+    if (positionals.length !== 1) throw new Error("Usage: rome-node web [options]");
+    const host = values.host ?? process.env.ROME_NODE_WEB_HOST ?? "127.0.0.1";
+    const portText = values.port ?? process.env.ROME_NODE_WEB_PORT ?? "4310";
+    const port = Number(portText);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new Error("--port must be an integer between 0 and 65535.");
+    }
+    const { startWebServer } = await import("./web/server.js");
+    await withShutdown(async (signal) => {
+      const running = await startWebServer({
+        host,
+        port,
+        configDirectory: config.directory,
+        cloudUrl: values.cloud ?? process.env.ROME_NODE_CLOUD_URL,
+        explicitCloudUrl:
+          values.cloud !== undefined || process.env.ROME_NODE_CLOUD_URL !== undefined,
+        name: values.name ?? process.env.ROME_NODE_NAME,
+        explicitName: values.name !== undefined || process.env.ROME_NODE_NAME !== undefined,
+        assetsDir: values["assets-dir"] ?? process.env.ROME_NODE_WEB_ASSETS_DIR,
+        token: process.env.ROME_NODE_UI_TOKEN,
+        requireAuth: values["require-auth"],
+        version: version(),
+      });
+      try {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } finally {
+        await running.close();
+      }
+    });
+    return;
+  }
   if (positionals[0] === "audit") {
     const { AuditStore } = await import("@rome-os/node-core/host");
     await runAudit(
