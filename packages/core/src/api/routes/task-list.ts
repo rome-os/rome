@@ -120,7 +120,8 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     return streamEvents(c, (emit) => subscribeChatTasks(deps, at.chatId, at.owner, emit));
   });
 
-  // The task chats among `ids` that are this chat's, as a task link draws them.
+  // The task chats among `ids` of this chat's owner, from any of their
+  // Concierge chats, as a task link draws them.
   app.get("/chats/:chatId/task-links", async (c) => {
     const at = await gate(c);
     if (at instanceof Response) return at;
@@ -134,8 +135,7 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     ].slice(0, 100);
     const { tasks } = at.concierge.deps;
     const found = (await Promise.all(ids.map((id) => tasks.repo.getWithChat(id)))).flatMap(
-      (task) =>
-        task && task.owner === at.owner && task.conciergeChat.id === at.chatId ? [task] : [],
+      (task) => (task && task.owner === at.owner ? [task] : []),
     );
     const status = await tasks.statusOf(found.map((task) => task.row));
     return c.json({

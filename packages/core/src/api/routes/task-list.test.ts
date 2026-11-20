@@ -348,8 +348,20 @@ describe("/chats/:chatId/tasks", () => {
     expect(calls).toEqual([`stop ${flights.id} guardian`]);
   });
 
-  it("answers a task link only for a task chat of the caller's own Concierge chat", async () => {
+  it("answers a task link for a task chat of any of the caller's own Concierge chats", async () => {
     const flights = await task({ title: "Flights" });
+    await chats.createSession(
+      "calendar",
+      "Calendar",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+    );
+    const agenda = await task({ title: "Agenda", chatId: "calendar" });
     const annsTask = await task({
       title: "Ann's",
       chatId: "ann-main",
@@ -363,11 +375,22 @@ describe("/chats/:chatId/tasks", () => {
     // Its live name and status, as the link draws it.
     await chats.updateSessionName(flights.id, "Book direct flights");
     expect(await links("concierge", [flights.id, "no-such-chat", annsTask.id])).toEqual({
-      tasks: [{ id: flights.id, name: "Book direct flights", status: "ended", endReason: "done" }],
+      tasks: [
+        {
+          id: flights.id,
+          name: "Book direct flights",
+          status: "ended",
+          endReason: "done",
+        },
+      ],
     });
-    // Another owner's task chat reads as none, and so does another Concierge chat's.
+    // A task of another of the owner's Concierge chats draws too.
+    expect((await links("concierge", [agenda.id])).tasks).toMatchObject([
+      { id: agenda.id, name: "Agenda" },
+    ]);
+    // Another owner's task chat reads as none.
     expect(
-      (await links("ann-main", [annsTask.id, flights.id], ann)).tasks.map((t) => t.id),
+      (await links("ann-main", [annsTask.id, flights.id, agenda.id], ann)).tasks.map((t) => t.id),
     ).toEqual([annsTask.id]);
     // Another person's chat does not exist to the caller.
     expect((await app().request("/chats/ann-main/task-links?ids=x", guardian)).status).toBe(404);

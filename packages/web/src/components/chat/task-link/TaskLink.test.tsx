@@ -75,7 +75,15 @@ describe("a task link in a Concierge message", () => {
   });
 
   it("draws the task chat's current name, not the link's text, and opens the chat", async () => {
-    known = [{ id: "chat-1", name: "Book direct flights", status: "active", endReason: null }];
+    known = [
+      {
+        id: "chat-1",
+        name: "Book direct flights",
+        status: "active",
+        endReason: null,
+        from: "concierge",
+      },
+    ];
     renderLinks(link("chat-1", "Book flights"));
     const chip = await screen.findByRole("link", { name: "Book direct flights, Active" });
     expect(chip.textContent).toBe("Book direct flights");
@@ -103,8 +111,7 @@ describe("a task link in a Concierge message", () => {
   });
 
   it("reads as plain text for a foreign or unknown task chat, and outside a Concierge chat", async () => {
-    // The chat this message is in knows no such task chat: another owner's, another
-    // Concierge chat's, or none.
+    // The chat this message is in knows no such task chat: another owner's, or none.
     known = [];
     renderLinks(<>See {link("someone-elses", "Their task")} now</>);
     await waitFor(() => expect(asked).toEqual(["someone-elses"]));
@@ -144,5 +151,23 @@ describe("a task link in a Concierge message", () => {
       });
     });
     expect(await screen.findByRole("link", { name: "First, Done" })).toBeTruthy();
+  });
+
+  it("draws a task of another of the owner's chats, and moves on this chat's changes", async () => {
+    // Another chat's task: the server answers it, and this chat's topic carries
+    // every change of its owner's tasks.
+    known = [{ id: "agenda", name: "Agenda", status: "active", endReason: null }];
+    renderLinks(link("agenda", "Agenda"));
+    await screen.findByRole("link", { name: "Agenda, Active" });
+    known = [{ ...known[0]!, status: "ended", endReason: "done" }];
+    act(() => {
+      acceptLatestSocket().receive({
+        type: "event",
+        topic: chatTasksTopicName("concierge"),
+        event: "tasks_changed",
+        data: { chatId: "concierge" },
+      });
+    });
+    expect(await screen.findByRole("link", { name: "Agenda, Done" })).toBeTruthy();
   });
 });
