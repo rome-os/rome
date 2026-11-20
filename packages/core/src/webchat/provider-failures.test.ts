@@ -387,6 +387,20 @@ describe("the three cards", () => {
     expect(empty.cardIn("chat")?.credits).toBeUndefined();
   });
 
+  it("learns a quota card's reset time from the account read that follows", async () => {
+    const reports: ModelAccountReports = { openai: reportOf("available") };
+    const h = harness({ chat: {} }, reports, { defaultProvider: "openai" });
+    await h.fail("chat", {
+      provider: "openai",
+      message: "You've hit your usage limit.",
+      code: "usage_limit",
+    });
+    expect(h.cardIn("chat")?.until).toBeUndefined();
+    reports.openai = reportOf("usage_limit_reached", {}, "2026-11-20T14:20:00.000Z");
+    await h.accountChanged("openai");
+    expect(h.cardIn("chat")?.until).toBe("2026-11-20T14:20:00.000Z");
+  });
+
   it("keeps the provider's error behind Details", async () => {
     const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
     await h.fail("chat", quota);

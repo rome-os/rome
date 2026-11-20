@@ -136,7 +136,8 @@ export type ProviderSwitch =
   | { kind: "model"; selection: string };
 
 export interface ProviderFailuresDeps {
-  accounts: Pick<ModelAccounts, "read" | "onChanged">;
+  /** `refresh`, when given, reads a provider's account again, as for a reset time a card lacks. */
+  accounts: Pick<ModelAccounts, "read" | "onChanged"> & Partial<Pick<ModelAccounts, "refresh">>;
   defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose" | "onChanged">;
   chats: Pick<ChatProviders, "keep" | "follow">;
   webchatRepo: Pick<
@@ -676,7 +677,27 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   const stopAccounts = deps.accounts.onChanged((provider, _change, succeeded) => {
     if (stopped || succeeded === false) return;
     if (provider !== "anthropic" && provider !== "openai") return;
-    const state = deps.accounts.read()[provider]?.state;
+    const report = deps.accounts.read()[provider];
+    const state = report?.state;
+    // A read that found the usage limit names when it ends: a quota card
+    // without that time learns it.
+    if (state === "usage_limit_reached" && report?.usageLimitUntil) {
+      const until = report.usageLimitUntil;
+      void serial(async () => {
+        const cards = await readCards();
+        const lacking = cards.filter(
+          (card) => card.runsOn === provider && card.part.reason === "quota" && !card.part.until,
+        );
+        for (const card of lacking) {
+          card.part = { ...card.part, until };
+          await deps.webchatRepo
+            .updateMessageContent(card.messageId, content(card))
+            .catch(() => undefined);
+        }
+        if (lacking.length > 0) await writeCards(cards);
+      });
+      return;
+    }
     if (state !== "available") return;
     void serial(async () => {
       const cards = await readCards();
@@ -799,6 +820,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const card = await writeCard(turn, decided.part, decided.runsOn);
       scheduleRecovery(card);
       if (decided.unattended) await groupIn(turn, decided.part, decided.runsOn);
+      // The account read that knows when the limit ends.
+      if (decided.part.reason === "quota" && !decided.part.until) {
+        void deps.accounts.refresh?.(decided.runsOn).catch(() => undefined);
+      }
     },
     async cardFor(turn, messageId, beside) {
       if (stopped) return null;
