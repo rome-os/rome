@@ -69,10 +69,6 @@ export function chatRuleDefaults(): ChatRules {
   };
 }
 
-/** A kind that offers no chat rule, as an official app does: every rule runs
- *  at its default, so the account's own agent answers when addressed. */
-export const NO_CHAT_RULES: KindChatRules = { offers: [] };
-
 /** The values for a kind whose chats wake the agent on every message the
  *  platform delivers, whoever it addresses and whoever sent it. Kinds that
  *  offer none of the three state this as `fixed`. */

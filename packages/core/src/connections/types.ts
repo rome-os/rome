@@ -368,8 +368,11 @@ export interface ConnectionDescriptor {
   link?: AccountLink;
   /** The chat rules the kind's chats offer the guardian, and the values it
    *  fixes for the rules it does not offer. Core owns the rules and runs
-   *  them. A kind that leaves it unset offers none, so every rule runs at
-   *  its default. Vocabulary: docs/domains/chats.md#chat-rule. */
+   *  them. A kind that hears messages declares it: one that leaves it unset
+   *  runs as Core's undeclared rules, the session reset alone with every
+   *  message waking the agent. A kind that offers nothing, as an official app,
+   *  declares `{ offers: [] }`, so every rule runs at its default.
+   *  Vocabulary: docs/domains/chats.md#chat-rule. */
   chatRules?: KindChatRules;
   capabilities: Partial<{
     talker: {

@@ -390,3 +390,31 @@ describe("chat rule conformance", () => {
     }
   }
 });
+
+describe("chat rule resolution", () => {
+  // Older data can hold a value for a rule a kind does not offer, such as a
+  // Telegram group's session agent. The chat runs on the default or the
+  // kind's fixed value, never on it.
+  it("ignores a value stored for a rule the kind does not offer", () => {
+    const stored = storedOf({
+      enabled: false,
+      "activation.mode": "mention",
+      "routing.agentName": "helper",
+    });
+    const telegram = effectiveChatRules(
+      { offers: ["session.reset"], fixed: { "activation.mode": "all" } },
+      stored,
+    );
+    expect(telegram).toMatchObject({
+      enabled: true,
+      "activation.mode": "all",
+      "routing.agentName": null,
+    });
+  });
+
+  it("runs every rule at its default for a kind that offers none, as an official app", () => {
+    const stored = storedOf({ enabled: false, "routing.agentName": "helper" });
+    expect(effectiveChatRules({ offers: [] }, stored)).toEqual(chatRuleDefaults());
+    expect(chatRulesOf({ offers: [] }, "direct").offers).toEqual([]);
+  });
+});
