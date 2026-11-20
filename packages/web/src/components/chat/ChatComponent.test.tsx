@@ -379,7 +379,11 @@ describe("ChatComponent topic chat draft", () => {
       return original(input, init);
     }) as typeof fetch);
     // The topic chat's own empty state, not the home greeting or the main chat's.
-    expect(await screen.findByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Suggestions" })).toBeTruthy();
+    // The header's status capsule says the welcome until the first message.
+    expect(screen.getByText("What's on your mind?")).toBeTruthy();
+    const badge = document.querySelector("[data-concierge-header-badge]");
+    expect(badge).not.toBeNull();
     expect(
       screen.queryByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeNull();
@@ -388,6 +392,9 @@ describe("ChatComponent topic chat draft", () => {
     expect(posted).toEqual([]);
     await userEvent.setup().keyboard("Plan my week{Enter}");
     await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("topic-9"));
+    // The same header carries on into the chat the send made: its badge is
+    // the very one the blank chat drew, not a fresh copy.
+    expect(document.querySelector("[data-concierge-header-badge]")).toBe(badge);
     // An untitled topic chat, which its first message names.
     expect(posted).toEqual([{ url: "/api/concierge/chats", body: {} }]);
     const turnPost = fetchSpy.mock.calls.find(
@@ -513,7 +520,7 @@ describe("ChatComponent Concierge", () => {
     expect(
       await screen.findByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Start an ongoing topic" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Suggestions" })).toBeNull();
   });
 });
 
