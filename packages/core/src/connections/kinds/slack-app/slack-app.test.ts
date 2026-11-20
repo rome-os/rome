@@ -126,6 +126,7 @@ function adapter(
   copy: SlackMessageCopyRepository = testCopy(),
   now?: () => Date,
   readGate?: SlackReadGate,
+  listened?: () => boolean,
 ) {
   const delivered: ChannelMessage[] = [];
   const faults: string[] = [];
@@ -142,6 +143,7 @@ function adapter(
     copy,
     ...(now ? { now } : {}),
     ...(readGate ? { readGate } : {}),
+    ...(listened ? { listened } : {}),
   });
   a.onInbound((message) => delivered.push(message));
   return { adapter: a, delivered, faults, api, copy };
@@ -486,6 +488,29 @@ describe("Slack app's own copy of its direct messages", () => {
     await mailbox.deposit();
     expect(mailbox.statuses).toEqual([500, 200]);
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("keeps nothing heard while Rome does not listen to the account, so linking an agent brings none of it back", async () => {
+    const { db } = createTestDb();
+    const copy = new SlackMessageCopyRepository(db);
+    const mailbox = fakeMailbox();
+    let listening = false;
+    const first = adapter(mailbox, fakeApi(), copy, at(0), undefined, () => listening);
+    await first.adapter.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(mailbox.statuses).toEqual([200]);
+    expect(first.delivered).toHaveLength(0);
+    expect(copy.mayNotHold(TEAM, 60_000)).toEqual([]);
+
+    listening = true;
+    await mailbox.deposit(frame(dmEvent(2)));
+    expect(first.delivered.map((m) => m.text)).toEqual(["message 2"]);
+    await first.adapter.stop();
+
+    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(30), undefined, () => listening);
+    await restarted.adapter.start();
+    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 2"]);
   });
 
   it("hands Rome on start what it kept but never handed over", async () => {
@@ -888,7 +913,11 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: { db?: ReturnType<typeof createTestDb>["db"]; gate?: SlackReadGate } = {},
+  options: {
+    db?: ReturnType<typeof createTestDb>["db"];
+    gate?: SlackReadGate;
+    listened?: () => boolean;
+  } = {},
 ) {
   const db = options.db ?? createTestDb().db;
   const api = fakeApi({ conversationHistory: slack.conversationHistory });
@@ -899,6 +928,7 @@ function historyAdapter(
       new SlackMessageCopyRepository(db),
       undefined,
       options.gate ?? openGate(),
+      options.listened,
     ),
     db,
   };
@@ -1094,6 +1124,29 @@ describe("Slack app reads a direct message (R13)", () => {
 
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
     expect(texts(read)).toEqual(["message 3", "message 2"]);
+  });
+
+  it("links no message across one heard while Rome did not listen to the account, which Slack's history still shows", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    let listening = true;
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, {
+      listened: () => listening,
+    });
+    await a.start();
+    for (const i of [1, 2]) slack.say(i);
+    // A read of the whole chat tells the drain its newest message.
+    await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
+    for (const i of [3, 4, 5]) slack.say(i);
+    await mailbox.deposit(frame(dmEvent(3)));
+    listening = false;
+    await mailbox.deposit(frame(dmEvent(4)));
+    listening = true;
+    await mailbox.deposit(frame(dmEvent(5)));
+    expect(texts(delivered)).toEqual(["message 3", "message 5"]);
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 5", "message 4", "message 3"]);
   });
 
   it("answers a read without the names Slack is slow to give, asking once per author", async () => {
