@@ -40,7 +40,7 @@ export interface SlackAppWebApi {
    *  most `limit` after `cursor`, or from the start. */
   conversationReplies(
     botToken: string,
-    input: { channel: string; ts: string; cursor?: string; limit: number },
+    input: { channel: string; ts: string; cursor?: string; oldest?: string; limit: number },
     signal?: AbortSignal,
   ): Promise<{ messages: SlackWireMessage[]; nextCursor?: string }>;
   /** One page of the channels the app is a member of, public and private. */
@@ -243,6 +243,7 @@ export function createSlackAppWebApi(
           ts: input.ts,
           limit: String(input.limit),
           ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(input.oldest ? { oldest: input.oldest } : {}),
         },
         signal,
       );

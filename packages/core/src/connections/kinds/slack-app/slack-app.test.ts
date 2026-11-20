@@ -1987,6 +1987,66 @@ describe("Slack app in the channels it is a member of", () => {
     expect(texts(older)).toEqual(["reply", "root"]);
   });
 
+  it("reads a thread longer than Slack's page of 15 on from newerThan, each page asking Slack from there", async () => {
+    const root = "1700000000.000100";
+    // 20 replies after the root: Slack answers 15 a page, oldest first, from
+    // `oldest` when it names one.
+    const all = Array.from({ length: 21 }, (_, i) => ({
+      ts: `1700000000.${String(100 + i).padStart(6, "0")}`,
+      user: "U_MEMBER",
+      text: `message ${i}`,
+      thread_ts: root,
+    }));
+    const conversationReplies = rs.fn(
+      async (_token: string, input: { oldest?: string; limit: number }) => {
+        const after = all.filter((wire) => !input.oldest || wire.ts > input.oldest);
+        // Slack always answers the root first.
+        const page = [all[0], ...after.filter((wire) => wire.ts !== root)].slice(0, input.limit);
+        return {
+          messages: page as typeof all,
+          ...(after.length > input.limit ? { nextCursor: "more" } : {}),
+        };
+      },
+    );
+    const api = channelApi({ conversationReplies });
+    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    await a.start();
+
+    const first = await a.readHistory(`C_NEWS:${root}` as never, { limit: 100 });
+    const newest = first[0]?.messageId as string;
+    const second = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: newest,
+      limit: 100,
+    });
+    const last = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: second[0]?.messageId as string,
+      limit: 100,
+    });
+    const fromStart = await a.readHistory(`C_NEWS:${root}` as never, { limit: 3 });
+
+    expect(texts(first)).toHaveLength(15);
+    expect(texts(first).at(-1)).toBe("message 0");
+    expect(texts(second)).toEqual(
+      [
+        "message 15",
+        "message 16",
+        "message 17",
+        "message 18",
+        "message 19",
+        "message 20",
+      ].reverse(),
+    );
+    expect(last).toEqual([]);
+    expect(conversationReplies).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-a",
+      expect.objectContaining({ oldest: "1700000000.000114" }),
+      expect.anything(),
+    );
+    // With no bound, a thread is read from its start, as Slack reads it.
+    expect(texts(fromStart)).toEqual(["message 2", "message 1", "message 0"]);
+  });
+
   it("reads a thread and a page of history ending at its root as two calls to Slack", async () => {
     const root = "1700000000.000005";
     const api = channelApi({

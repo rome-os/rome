@@ -1,10 +1,4 @@
-import type {
-  Account,
-  ChannelMessage,
-  ChannelsService,
-  ChatId,
-  ChatSettingsControl,
-} from "@rome-os/app-runtime";
+import type { Account, ChannelMessage, ChannelsService, ChatId } from "@rome-os/app-runtime";
 
 /**
  * Slack's Web API methods, answered through Rome's own Slack app connection
@@ -142,8 +136,6 @@ function refused(error: string): SlackAppProxyResult {
  */
 export async function slackAppProxyCall(params: {
   channels: ChannelsService;
-  /** Lists the chats Rome knows, which carry the Slack app's channels. */
-  chatSettings?: Pick<ChatSettingsControl, "list">;
   account: Account;
   /** The HTTP verb the call names. Absent, the method's own verb. */
   method?: string;
@@ -229,32 +221,47 @@ export async function slackAppProxyCall(params: {
           );
         }
         const limit = numberArg(args, "limit") ?? 100;
+        // A page goes on from `cursor`, the last message of the one before, or
+        // from `oldest`: Slack reads a thread oldest first.
+        const fromArg = stringArg(args, "cursor") ?? stringArg(args, "oldest");
+        const from = fromArg === undefined ? undefined : slackTsOf(fromArg);
+        if (fromArg !== undefined && from === undefined) {
+          return refused(
+            `Slack "conversations.replies" takes "cursor" and "oldest" as a Unix time such as 1700000000.000100, not "${fromArg}".`,
+          );
+        }
         const messages = await channels.query(account, {
           chatId: `${channel}:${ts}` as ChatId,
           limit,
+          ...(from ? { newerThan: from } : {}),
         });
-        // Slack answers a thread oldest first.
-        return ok({ messages: messages.map(wireOf).reverse(), has_more: false });
+        // The connection reads a thread a short page at a time, so only an
+        // empty page says nothing is left.
+        const last = messages.length > 0 ? tsOf(messages[0]?.messageId) : undefined;
+        return ok({
+          messages: messages.map(wireOf).reverse(),
+          has_more: last !== undefined,
+          response_metadata: { next_cursor: last ?? "" },
+        });
       }
       case "conversations.list": {
-        if (!params.chatSettings) return refused("This Rome lists no Slack channels.");
+        if (!channels.chats) return refused("This Rome lists no Slack channels.");
         const limit = numberArg(args, "limit") ?? 100;
         const query = stringArg(args, "query");
-        const page = await params.chatSettings.list({
+        const cursor = stringArg(args, "cursor");
+        // The connection lists the channels the app is a member of now, a
+        // page at a time, and a refusal from Slack comes back as one.
+        const page = await channels.chats(account, {
           limit,
           ...(query ? { query } : {}),
-          ...(stringArg(args, "cursor") ? { cursor: stringArg(args, "cursor") } : {}),
+          ...(cursor ? { cursor } : {}),
         });
-        const listed = page.items
-          .map((item) => item.snapshot.conversation)
-          .filter((chat) => chat.connectionKind === "slack_app" && chat.kind === "channel")
-          .map((chat) => ({
-            id: chat.ref.chatId,
-            name: chat.displayName.replace(/^#/, ""),
-            is_member: true,
-          }));
         return ok({
-          channels: listed,
+          channels: page.chats.map((chat) => ({
+            id: chat.chatId,
+            name: chat.name.replace(/^#/, ""),
+            is_member: true,
+          })),
           response_metadata: { next_cursor: page.nextCursor ?? "" },
         });
       }
