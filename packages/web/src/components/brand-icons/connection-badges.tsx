@@ -130,7 +130,8 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
-  microsoft: { Icon: MicrosoftIcon, badge: "border border-border bg-white" },
+  // The four squares read on any surface, so this needs no off-system white.
+  microsoft: { Icon: MicrosoftIcon, badge: "border border-border bg-background" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
   shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {
