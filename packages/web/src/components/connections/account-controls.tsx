@@ -117,6 +117,9 @@ function AnswerMembersRow({
   }, [snapshot]);
   const shown = mine ?? on;
   const change = async (next: boolean) => {
+    // What the switch showed before: a write that fails shows it again, so
+    // a value the server confirmed stays shown.
+    const before = mine;
     changing.current = true;
     setBusy(true);
     setMine(next);
@@ -128,7 +131,7 @@ function AnswerMembersRow({
       );
       setMine(answerMembers);
     } catch (error) {
-      setMine(null);
+      setMine(before);
       toast.error(error instanceof Error ? error.message : t("connections.answerMembers.failed"));
     } finally {
       setBusy(false);

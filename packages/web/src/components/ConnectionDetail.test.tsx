@@ -685,6 +685,31 @@ describe("ConnectionDetailBody — accounts", () => {
     await waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("false"));
   });
 
+  it("shows the value the server last confirmed when a later write fails", async () => {
+    let writes = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (!String(input).endsWith("/answer-members")) return new Response("{}", { status: 200 });
+      writes += 1;
+      return writes === 1
+        ? new Response(JSON.stringify({ answerMembers: true }), { status: 200 })
+        : new Response("{}", { status: 500 });
+    });
+    // Every refresh fails, so the card keeps the state from before.
+    const onRefresh = rs.fn(async () => false);
+    renderAccountBody(cardFor([feishu({ answerMembers: false })], "feishu"), { onRefresh });
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    const user = userEvent.setup();
+
+    await user.click(toggle());
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    await user.click(toggle());
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(2));
+
+    expect(writes).toBe(2);
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
   it("shows no members switch for a service that has none", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
     expect(
