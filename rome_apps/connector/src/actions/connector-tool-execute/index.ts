@@ -27,11 +27,11 @@ const inputSchema = z.object({
   slug: z
     .string()
     .min(1)
-    .describe("Tool slug to execute, e.g. 'GMAIL_SEND_EMAIL' (from connector_search)"),
+    .describe("Tool slug to execute, e.g. 'GMAIL_SEND_EMAIL' (from connector:connector_search)"),
   args: z
     .record(z.string(), z.unknown())
     .describe(
-      "Arguments matching the tool's input schema (connector_tool_schema). Pass {} if the tool takes none.",
+      "Arguments matching the tool's input schema (connector:connector_tool_schema). Pass {} if the tool takes none.",
     ),
 });
 
@@ -57,7 +57,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_tool_execute for "${slug}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_tool_execute for "${slug}".`,
         };
       }
       try {
@@ -72,7 +72,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             status: "error",
             error: isRomeManagedToolkit(toolkit)
               ? romeManagedConnectHint(toolkit)
-              : `Toolkit "${toolkit}" is not connected. Call connector_connect with toolkit "${toolkit}" first, then re-run connector_tool_execute.`,
+              : `Toolkit "${toolkit}" is not connected. Call connector:connector_connect with toolkit "${toolkit}" first, then re-run connector:connector_tool_execute.`,
           };
         }
         if (account.kind === "ambiguous") {

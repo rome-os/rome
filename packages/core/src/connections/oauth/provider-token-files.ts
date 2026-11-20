@@ -17,7 +17,7 @@ const log = createLogger("provider-token-files");
  * Some provider credentials must be shared with a consumer that can't read
  * core's grant ledger — either an out-of-process tool (the in-container shell
  * `gh`/`git` wrappers) or a sandboxed app (the `connector` reading them for
- * `connector_proxy`). The sanctioned channel for that is a file on the shared
+ * `connector:connector_proxy`). The sanctioned channel for that is a file on the shared
  * `/run/rome` tmpfs, and its contents are a pure function of grant state: the
  * connection registry's custody hook drives `syncProviderTokenFile` /
  * `clearProviderTokenFile` off grant transitions, so the atomic-write discipline
@@ -144,7 +144,7 @@ export async function clearProviderTokenFile(provider: OAuthProvider): Promise<v
 
 /**
  * Read the GitHub access token from its on-disk token file — the custody
- * artifact the out-of-process consumers (shell `gh`/`git`, `connector_proxy`)
+ * artifact the out-of-process consumers (shell `gh`/`git`, `connector:connector_proxy`)
  * also read. The file is a bare access-token line, returned trimmed.
  *
  * An absent file (ENOENT) → `null`: the grant is not connected, degraded, or

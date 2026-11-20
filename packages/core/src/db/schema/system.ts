@@ -867,8 +867,12 @@ export const taskChats = sqliteTable("task_chats", {
    * (`resume`).
    */
   stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
-  /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
-  lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
+  /**
+   * How the task chat's latest turn ended, or its start failed; or
+   * `done_by_owner` beside `stoppedAt` when its owner marked it done. Rome
+   * writes it.
+   */
+  lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped", "done_by_owner"] }),
   /**
    * Set when the task chat's work ends, cleared once the Concierge reported
    * it. Kept here so a restart still knows a result was never said.

@@ -661,7 +661,7 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Create Routine" }));
+    await user.click(await screen.findByRole("button", { name: "Create routine" }));
 
     expect(document.querySelector<HTMLInputElement>("#routine-localtime")?.value).toBe("10:17");
     expect(document.querySelector<HTMLButtonElement>("#routine-startdate")?.textContent).toContain(
@@ -676,7 +676,7 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Create Routine" }));
+    await user.click(await screen.findByRole("button", { name: "Create routine" }));
 
     expect(document.querySelector<HTMLInputElement>("#routine-localtime")?.value).toBe("23:59");
     expect(document.querySelector<HTMLButtonElement>("#routine-startdate")?.textContent).toContain(
@@ -709,7 +709,7 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Create Routine" }));
+    await user.click(await screen.findByRole("button", { name: "Create routine" }));
     const actionPicker = await waitFor(() => {
       const element = document.querySelector<HTMLButtonElement>("#routine-actionname");
       expect(element).toBeTruthy();
@@ -838,17 +838,17 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Create Routine" }));
+    await user.click(await screen.findByRole("button", { name: "Create routine" }));
 
     // In flight: an explicit loading control, not the degraded free-text fallback.
-    const loadingControl = await screen.findByLabelText("Action Name");
+    const loadingControl = await screen.findByLabelText("Action name");
     expect(loadingControl.textContent).toContain("Loading actions…");
     expect(screen.queryByPlaceholderText("send_reminder")).toBeNull();
 
     releaseCatalog();
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Action Name").textContent).toContain("Pick an action…"),
+      expect(screen.getByLabelText("Action name").textContent).toContain("Pick an action…"),
     );
   });
 

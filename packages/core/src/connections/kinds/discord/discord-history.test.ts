@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+import { discordInboundText } from "./discord.js";
 import {
   type DiscordGet,
   type WireChannel,
@@ -194,6 +195,29 @@ describe("readDiscordHistory", () => {
     );
 
     expect(page[0]?.senderDisplayName).toBe("nick of 200000000000000001");
+  });
+
+  it("names each mentioned user by their own name, as a message heard live does", async () => {
+    const { get } = discord({
+      [CHAT]: {
+        channel: textChannel,
+        messages: [
+          said(1, {
+            content: "<@900> and <@901> and <@902>",
+            mentions: [
+              { id: "900", username: "rome", global_name: "Rome" },
+              { id: "901", username: "bo" },
+            ],
+          }),
+        ],
+      },
+    });
+
+    const page = await readDiscordHistory({ ...deps(get), textOf: discordInboundText }, CHAT, {
+      limit: 5,
+    });
+
+    expect(page[0]?.text).toBe("@Rome and @bo and <@902>");
   });
 
   it("refuses a read whose permission it cannot tell, and an id that is no Discord id", async () => {

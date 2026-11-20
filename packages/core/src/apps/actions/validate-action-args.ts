@@ -21,7 +21,7 @@ function storedArgsSchema(schema: Record<string, unknown>): Record<string, unkno
 
 /** Check routine args against the bound action's input schema, so a routine
  * can't be saved with args that fail on every fire. Shared by
- * `POST /api/routines` (the card's "Turn it on"), `create_routine` (through
+ * `POST /api/routines` (the card's "Turn it on"), `system:create_routine` (through
  * `ActionRegistryImpl.validateArgs`) and `propose_routine`'s auto-enable gate.
  * `__triggerPayload` is not required here: the engine supplies it at fire time.
  * Returns an error message, or null when the args fit (or the action declares

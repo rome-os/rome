@@ -1,13 +1,12 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   ACCOUNT_KINDS,
   GUARDIAN_OWN_KINDS,
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
 import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
-import { wechatUser } from "../kinds/wechat-user/index.js";
-import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
@@ -25,7 +24,6 @@ function registerEveryKind(registry: ConnectionRegistry): void {
   const mounted = [
     feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
     linkedin({} as unknown as LinkedInDescriptorDeps),
-    wechatUser({ runtime: {} as WechatUserRuntime, guardianOnly: (_c, next) => next() }),
   ];
   for (const kind of mounted) {
     if (kind.descriptor) registry.register(kind.descriptor);
@@ -33,8 +31,25 @@ function registerEveryKind(registry: ConnectionRegistry): void {
 }
 
 describe("registerBuiltinConnections", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+    rs.unstubAllEnvs();
+    setInstanceTokenInMemory(null);
+  });
   it("renews through Rome Cloud only for providers Rome Cloud can refresh", async () => {
-    const fetchMock = rs.fn(async () => new Response("{}", { status: 400 }));
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example.test");
+    setInstanceTokenInMemory("romeinst_test-instance-token");
+    const fetchMock = rs.fn(async (_url: unknown, init?: RequestInit) => {
+      const provider = JSON.parse(init!.body as string).provider;
+      return Response.json({
+        provider,
+        tokens: {
+          accessToken: "test-new",
+          refreshToken: "test-refresh",
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        },
+      });
+    });
     rs.stubGlobal("fetch", fetchMock);
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
@@ -49,10 +64,14 @@ describe("registerBuiltinConnections", () => {
       material: { accessToken: "ya29.old", refreshToken: "1//refresh" },
       expiresAt: new Date(0),
     };
-    // Google: Rome Cloud has no refresh for it, so renew answers at once.
-    await expect(registered.get("google")!.auth.renew(expired)).resolves.toBe("needs-fix");
+    await expect(registered.get("github")!.auth.renew(expired)).resolves.toBe("needs-fix");
     expect(fetchMock).not.toHaveBeenCalled();
-    rs.unstubAllGlobals();
+    for (const provider of ["google", "shopify"]) {
+      await expect(registered.get(provider)!.auth.renew(expired)).resolves.toMatchObject({
+        material: { accessToken: "test-new", refreshToken: "test-refresh" },
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // A bot takes an agent as its own account and the guardian's signed-in
@@ -95,6 +114,19 @@ describe("registerBuiltinConnections", () => {
         .filter((kind) => links[kind] === "delegate")
         .sort(),
     ).toEqual([...GUARDIAN_OWN_KINDS].sort());
+  });
+
+  it("starts a new account with the Concierge only for Rome's Slack app", () => {
+    const registered: ConnectionDescriptor[] = [];
+    registerEveryKind({
+      register: (descriptor: ConnectionDescriptor) => registered.push(descriptor),
+    } as unknown as ConnectionRegistry);
+
+    expect(
+      registered
+        .filter((descriptor) => descriptor.startsWithConcierge === true)
+        .map((descriptor) => descriptor.connectionKind),
+    ).toEqual(["slack_app"]);
   });
 
   // A grant names the account it reaches, and every kind with a platform has

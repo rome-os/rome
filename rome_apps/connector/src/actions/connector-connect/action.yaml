@@ -5,8 +5,8 @@ description: |
   its tools become usable in workflows and agent steps. GitHub, Slack and Shopify
   are connected by Rome itself: for those, call the connect_account tool instead,
   never this action.
-  For Composio toolkits, sign in with connector_login first, then re-run
-  connector_connect per toolkit. If already connected, this reports so. Otherwise
+  For Composio toolkits, sign in with connector:connector_login first, then re-run
+  connector:connector_connect per toolkit. If already connected, this reports so. Otherwise
   it provisions the managed auth config and shows the authorization card for the
   guardian to complete in the browser. Pass the toolkit slug.
 entry: ./index.ts

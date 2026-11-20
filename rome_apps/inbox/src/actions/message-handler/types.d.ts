@@ -1,4 +1,4 @@
-import type { MessageReplyReference } from "@rome-os/app-runtime";
+import type { MessageAddressing, MessageReplyReference } from "@rome-os/app-runtime";
 
 /**
  * message_handler — Process an inbound message from a channel.
@@ -74,6 +74,12 @@ export interface MessageHandlerInput {
   /** The guardian opened the account to its workspace's other members, and
    *  the sender is one (ChannelMessage.openToMembers). */
   openToMembers?: boolean;
+  /** How the message addressed Rome's account, as the connection reported it. */
+  addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection reported it. */
+  fromBot?: boolean;
+  /** It mentions only others, as the connection reported it. */
+  mentionsOthers?: boolean;
   /** Optional pre-resolved person mapping (skips lookup). */
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */
@@ -89,6 +95,11 @@ export interface MessageHandlerInput {
   /** @deprecated The name `accountAgentName` had in actions queued before it.
    *  Read only when `accountAgentName` is absent. */
   linkedAgentName?: string;
+  /** The wake gate's answer, which the channel-message hook passes when it
+   *  asked the gate itself. Only that hook sets it: a caller that passes it
+   *  skips the gate, policy blocks and the chat's on/off switch included.
+   *  Absent, the handler asks the gate. */
+  wake?: "wake" | "review";
 }
 
 export interface MessageHandlerOutput {

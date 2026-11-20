@@ -589,10 +589,6 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
-    },
-    "wechatUser": {
-      "fallbackName": "微信账号",
-      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {

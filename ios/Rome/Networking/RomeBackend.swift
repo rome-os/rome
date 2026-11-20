@@ -75,8 +75,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func taskList(chatId: String) async throws -> TaskListResponse
     /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
-    /// `GET /chats/:chatId/task-links?ids=`: the task chats among `ids` that are
-    /// this Concierge chat's, as a task link draws them.
+    /// `GET /chats/:chatId/task-links?ids=`: the task chats among `ids` of this
+    /// Concierge chat's owner, from any of their Concierge chats, as a task
+    /// link draws them.
     func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws

@@ -3533,7 +3533,7 @@ describe("Webchat API", () => {
 
       // The final reply goes through send_message with the result content.
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({ text: "Final answer" }),
         expect.anything(),
       );
@@ -3563,7 +3563,7 @@ describe("Webchat API", () => {
                 name: "Inbox check",
                 watchLabel: "Run on demand",
                 thenSummary: "check the inbox",
-                actionName: "summon",
+                actionName: "system:summon",
                 args: { agentName: "main", prompt: "Check the inbox." },
               },
             };
@@ -3601,7 +3601,7 @@ describe("Webchat API", () => {
 
       // send_message carries only the final answer; commentary is its own message.
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "It's sunny.", turnPhase: "final", blockIx: 1 }],
         }),
@@ -3685,7 +3685,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).not.toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.anything(),
         expect.anything(),
       );
@@ -3714,7 +3714,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3754,7 +3754,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3781,7 +3781,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [
             {
@@ -3822,7 +3822,7 @@ describe("Webchat API", () => {
       );
       expect(assistantTexts(events)).toContainEqual({ blockIx: 0, text: "Whole block" });
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Whole block", turnPhase: "final", blockIx: 0 }],
         }),
@@ -3840,7 +3840,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Same text", turnPhase: "final", blockIx: 1 }],
         }),
@@ -3857,7 +3857,7 @@ describe("Webchat API", () => {
       );
 
       expect(sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({
           parts: [{ type: "text", content: "Result only", turnPhase: "final", blockIx: 0 }],
         }),
@@ -4196,7 +4196,7 @@ describe("Webchat API", () => {
       const stream = await h.finish();
       expect(stream).toContain('"stopped":true');
       expect(h.sendMessageRun).toHaveBeenCalledWith(
-        "send_message",
+        "system:send_message",
         expect.objectContaining({ text: "Already changed the file" }),
         expect.anything(),
       );
@@ -6440,7 +6440,7 @@ describe("Webchat API", () => {
         tzid: "America/Los_Angeles",
         localTime: "09:00",
         rrule: "FREQ=HOURLY;INTERVAL=12",
-        actionName: "summon",
+        actionName: "system:summon",
         args: { agentName: "main", prompt: "Check feedback." },
       };
 
@@ -6513,7 +6513,7 @@ describe("Webchat API", () => {
         expect(cards[0]).toMatchObject({
           toolUseId: "tu-routine",
           routineKey: expect.stringMatching(/^chat-routine:[^:]+:tu-routine$/),
-          draft: { name: "Feedback triage", actionName: "summon" },
+          draft: { name: "Feedback triage", actionName: "system:summon" },
         });
         expect(cards[0].routineId).toBeUndefined();
       });
@@ -6883,7 +6883,7 @@ describe("Webchat API", () => {
       expect(capturedFork?.prompt).not.toContain("Now tell me about Rome.");
       expect(capturedFork?.prompt).not.toContain("Rome is the capital of Italy.");
       expect(showApp).toHaveBeenCalledWith(
-        "show_app",
+        "system:show_app",
         { appId: "sessions", route: "feedback-fork-session" },
         expect.objectContaining({
           initiator: "system:turn-feedback",
@@ -9177,7 +9177,7 @@ describe("Webchat API", () => {
     // its description from the connection kind, so no tool can supply one.
     it.each([
       ["persists", "connect_account", true],
-      ["rejects", "connector_connect", false],
+      ["rejects", "connector:connector_connect", false],
     ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
       const sessionId = `sess-connect-${tool}`;
       await deps.webchatRepo.createSession(sessionId, "Connect card");

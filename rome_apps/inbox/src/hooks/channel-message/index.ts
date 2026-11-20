@@ -17,6 +17,8 @@ import type {
   MessagesSaid,
 } from "@rome-os/app-runtime";
 
+import type { WakeGateFor } from "../../actions/message-handler/index.js";
+
 const log = createAppLogger("channel-message-hook");
 
 /** Core's `AGENTS_KIND`, which an app cannot import. */
@@ -52,6 +54,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
       unsafeTestOnlyBypassesInbox?: ChannelMessageHookDeps["unsafeTestOnlyBypassesInbox"];
       messagesSaid?: MessagesSaid;
+      wakeGateFor?: WakeGateFor;
     } = {},
   ) {}
 
@@ -142,7 +145,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    * then dispatch the turn and settle. The channel holds this conversation
    * until the handler settles (rule R4 of `ChannelInbound`), so waiting for
    * the whole turn would hold a `/stop` in the same chat behind the turn it is
-   * meant to stop. Once dispatched, the order is best-effort: `message_handler`
+   * meant to stop. Once dispatched, the order is best-effort: `inbox:message_handler`
    * awaits a person lookup, a policy check and a store before its turn reaches
    * the agent session's queue, so two quick messages can reach the session in
    * either order, as they could before the channel ordered its handlers.
@@ -163,12 +166,13 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     // A program sends on `agents`, not a person, so `/stop` there is text for
-    // the model, and `message_handler` decides whether Rome answers it.
+    // the model, and `inbox:message_handler` decides whether Rome answers it.
     if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
-      if (addressing === "ambient") {
-        log.debug("ignoring group stop command not directed at the bot", {
+      // Another bot cannot stop a turn, however the chat takes bots.
+      if (addressing === "ambient" || message.fromBot) {
+        log.debug("ignoring stop command not directed at the bot by a person", {
           service,
           messageId: message.messageId,
         });
@@ -203,9 +207,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       });
       return;
     }
-    // A test-only back door: the agent's own app runs its turns.
+    // The agent's own app runs its turns (`runsOwnTurns`).
     if (accountAgent && this.options.unsafeTestOnlyBypassesInbox?.(accountAgent)) {
-      log.debug("account's agent bypasses Inbox; not answering", {
+      log.debug("account's agent runs its own turns; not answering", {
         service,
         agent: accountAgent,
         messageId: message.messageId,
@@ -221,7 +225,40 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       snapshot.overrides.routing?.agentName === null
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
-    if (!enabled) {
+    // A recorded message carries People's answer for its sender, so the wake
+    // gate decides here, before typing shows. Without
+    // it, `inbox:message_handler` asks the gate once it has looked the sender up.
+    const sender = "sender" in event ? event.sender : undefined;
+    let wake: "wake" | "review" | undefined;
+    if (sender && this.options.wakeGateFor) {
+      const gate = await this.options.wakeGateFor({ chat: ref });
+      const decision = gate(
+        {
+          connectionId,
+          chatId: message.chatId,
+          channel: service,
+          place: message.thread?.kind === "dm" ? "direct" : "group",
+          threadName: message.thread?.name,
+          ...addressedBy(message),
+        },
+        {
+          person: sender.person
+            ? { id: sender.person.id, bondLevel: sender.person.bondLevel }
+            : null,
+        },
+      );
+      // Logged at info, since no action span is open here to carry the
+      // policy decision as an event.
+      log.info("wake decided", {
+        connectionId,
+        chatId: message.chatId,
+        messageId: message.messageId,
+        bondLevel: sender.person?.bondLevel ?? "other",
+        decision,
+      });
+      if (decision === "quiet" || decision === "block") return;
+      wake = decision;
+    } else if (!enabled) {
       log.debug("conversation disabled", { connectionId, chatId: message.chatId });
       return;
     }
@@ -267,6 +304,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName,
       accountAgentName: accountAgent,
       ...(recorded ? { recordedMessageId: recorded.messageId } : {}),
+      ...(wake ? { wake } : {}),
     });
     return { turn };
   }
@@ -281,6 +319,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName: string | undefined;
       accountAgentName: string | undefined;
       recordedMessageId?: string;
+      wake?: "wake" | "review";
     },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
@@ -294,7 +333,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     slow.unref?.();
     try {
       await this.actionEngine.run(
-        "message_handler",
+        "inbox:message_handler",
         {
           connectionId,
           channel: service,
@@ -310,7 +349,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           messageId: message.messageId,
           replyTo: message.replyTo,
           ...(message.inThread ? { inThread: message.inThread } : {}),
-          ...(message.openToMembers ? { openToMembers: true } : {}),
+          ...addressedBy(message),
           ...agents,
         },
         {
@@ -340,7 +379,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         );
     } catch (err) {
       void activity.then((session) => session?.finish("error")).catch(() => {});
-      log.error("message_handler action failed", {
+      log.error("inbox:message_handler action failed", {
         service,
         messageId: message.messageId,
         senderId: message.senderId,
@@ -387,6 +426,13 @@ function byChannelName(
   return (target) => (typeof target === "string" ? linkedAgentOf(target) : undefined);
 }
 
+/** Core's wake gate, passed beside the hook deps the SDK describes. A host
+ *  that predates it passes none. */
+function wakeGateForOf(deps: ChannelMessageHookDeps): WakeGateFor | undefined {
+  const candidate = (deps as { wakeGateFor?: unknown }).wakeGateFor;
+  return typeof candidate === "function" ? (candidate as WakeGateFor) : undefined;
+}
+
 /** A host handed the hook no `channels`, so it would hear nothing. */
 export class MissingChannelsError extends Error {
   constructor() {
@@ -412,6 +458,18 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
         ? { unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox }
         : {}),
       ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
+      ...(wakeGateForOf(deps) ? { wakeGateFor: wakeGateForOf(deps) } : {}),
     },
   );
+}
+
+/** How the message addressed Rome's account, as its connection reported it. */
+function addressedBy(
+  message: InboundEvent["message"],
+): Pick<InboundEvent["message"], "addressing" | "fromBot" | "mentionsOthers"> {
+  return {
+    ...(message.addressing ? { addressing: message.addressing } : {}),
+    ...(message.fromBot ? { fromBot: true } : {}),
+    ...(message.mentionsOthers ? { mentionsOthers: true } : {}),
+  };
 }

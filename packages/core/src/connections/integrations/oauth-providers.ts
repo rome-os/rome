@@ -3,17 +3,11 @@
 // Each provider is brokered by Rome Cloud OAuth: the guardian delegates access by
 // clicking Connect, Rome Cloud runs the provider authorization, and the instance
 // redeems a handoff for an OAuthTokenBundle. Grant is route-driven
-// (`romeCloudOAuth` — see schemes.ts), and renew() is "needs-fix" until a
-// Rome Cloud refresh exchange exists.
+// (`romeCloudOAuth` — see schemes.ts). Google and Shopify renew through Cloud.
 //
-// This phase migrates ONLY the connection state into the registry: the grant
-// ledger becomes the system of record for whether a provider is connected, while
-// the legacy consumers (the tmpfs token files written at connect time, the
-// gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
-// keep reading the token file. The Act seam (registry-built
-// Actors) is a follow-up — `capabilities` is deliberately empty, which the
-// registry supports (`capabilities` is `Partial<…>`); a capability-less
-// connection still carries full grant state.
+// Google keeps Gmail credentials in its Core-only Actor so shell tools and apps
+// cannot bypass send approval with a raw token. Other providers keep their
+// token-file consumers. All providers share the registry's grant lifecycle.
 //
 // Grant names follow the grant table: grants are about grants, not
 // token count. GitHub and Google each mint one user credential → one `user`
@@ -22,6 +16,7 @@
 // for a store, not a person → one `store` grant.
 
 import { z } from "zod";
+import { createGmailActor } from "../gmail/api.js";
 import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
@@ -354,10 +349,8 @@ export function makeOAuthProviderSetup(
 }
 
 /**
- * Build a provider's ConnectionDescriptor: one Rome Cloud-OAuth grant, no
- * capabilities, and grant-state-driven custody of its out-of-process artifacts
- * (the tmpfs token file + gh/git shell auth). The descriptor holds the provider's
- * connection/grant state (imported by the oauth redeem route); Actor/Watcher capabilities land in follow-ups.
+ * Build one Rome Cloud-OAuth grant. Google uses a Core-only Gmail Actor;
+ * the other providers keep grant-state-driven token-file and shell custody.
  *
  * `setupDeps` attaches the setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;
@@ -382,6 +375,6 @@ export function makeOAuthProviderDescriptor(
     // the installer in its workspace, and for Shopify the store.
     accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
-    capabilities: {},
+    capabilities: provider === "google" ? { actor: { build: createGmailActor } } : {},
   };
 }

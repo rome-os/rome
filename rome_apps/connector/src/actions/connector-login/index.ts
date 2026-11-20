@@ -59,7 +59,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       // which is what stops duplicate login cards when several toolkits are
       // connected in one turn.
       return loginCard(
-        "Sign in to Composio using the shown card. This authorizes Rome account-wide — once signed in, re-run connector_connect for each toolkit you want to connect.",
+        "Sign in to Composio using the shown card. This authorizes Rome account-wide — once signed in, re-run connector:connector_connect for each toolkit you want to connect.",
       );
     },
   });

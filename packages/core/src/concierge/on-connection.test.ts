@@ -7,10 +7,11 @@ import {
 } from "./on-connection.js";
 
 describe("the Concierge on a connection", () => {
-  it("starts a newly connected own account with the Concierge, and a delegate or a kind that takes no agent with none", () => {
-    expect(agentOnConnect("own_account")).toBe("core:concierge");
-    expect(agentOnConnect("delegate")).toBeNull();
-    expect(agentOnConnect(null)).toBeNull();
+  it("starts a newly connected own account with the Concierge only when its kind asks for it", () => {
+    expect(agentOnConnect("own_account", true)).toBe("core:concierge");
+    expect(agentOnConnect("own_account", false)).toBeNull();
+    expect(agentOnConnect("delegate", true)).toBeNull();
+    expect(agentOnConnect(null, true)).toBeNull();
   });
 
   it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {

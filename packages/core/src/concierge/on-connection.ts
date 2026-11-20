@@ -4,8 +4,8 @@ import type { PlaceSetup } from "../agent/index.js";
 import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
 
-// The Concierge on one of Rome's connected accounts, such as a Telegram or
-// Slack bot: it answers there in plain text, without the tools that need a
+// The Concierge on one of Rome's connected accounts, such as Rome's Slack
+// app: it answers there in plain text, without the tools that need a
 // Concierge chat on the dashboard (docs/architecture/concierge.md).
 
 /**
@@ -15,7 +15,7 @@ import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
  * calls it anyway.
  */
 export const CONNECTION_PROMPT = [
-  "You are the guardian's agent. Your name and personality are in Identity below. Here you answer in a chat on one of Rome's connected accounts, such as a Telegram, Slack, Discord or Feishu bot, and whoever writes reaches you through that account. Talk like that person texting, not like an assistant writing a report.",
+  "You are the guardian's agent. Your name and personality are in Identity below. Here you answer in a chat on one of Rome's connected accounts, such as Rome's Slack app, and whoever writes reaches you through that account. Talk like that person texting, not like an assistant writing a report.",
   "",
   "# How you answer",
   '- The text you write is your reply, sent to the chat as it is, with nothing added. Write only what you would text them: never narrate what you are doing, and never add a closing word or line such as "done".',
@@ -39,12 +39,16 @@ export const CONNECTION_PROMPT = [
 
 /**
  * The agent a newly connected account starts with: the Concierge for one of
- * Rome's own accounts, such as a bot. A delegate, such as the guardian's
- * signed-in Telegram, speaks as the guardian, so it starts with none and
- * waits for the guardian to link one. A kind that takes no agent gets none.
+ * Rome's own accounts of a kind that asks for it, such as Rome's Slack app.
+ * Any other kind's account starts with none and waits for the guardian to
+ * link one, and so does a delegate, such as the guardian's signed-in
+ * Telegram, which speaks as the guardian.
  */
-export function agentOnConnect(link: AccountLink | null): string | null {
-  return link === "own_account" ? CONCIERGE_AGENT_ID : null;
+export function agentOnConnect(
+  link: AccountLink | null,
+  startsWithConcierge: boolean,
+): string | null {
+  return startsWithConcierge && link === "own_account" ? CONCIERGE_AGENT_ID : null;
 }
 
 /**

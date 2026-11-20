@@ -131,9 +131,9 @@ describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
     expect(card?.className).not.toContain("border");
     // The bot slot runs the generic setup: the unconnected
     // card offers a single Connect action that starts the setup coroutine — the
-    // bespoke Bot Token field + "Setup steps" accordion are gone.
+    // bespoke bot token field + "Setup steps" accordion are gone.
     expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
-    expect(screen.queryByText("Bot Token")).toBeNull();
+    expect(screen.queryByText("Bot token")).toBeNull();
     expect(screen.queryByRole("button", { name: /Setup steps/i })).toBeNull();
   });
 

@@ -1715,7 +1715,7 @@ class ConnectionImpl implements Connection {
     return promise;
   }
 
-  /** Attempt a renewal; on success persist + rebuild, on "needs-fix"/throw degrade.
+  /** Attempt renewal. An unavailable answer stays retryable; a refusal degrades.
    *
    *  Store first on the success branch (the store is authoritative).
    *  If the durable write throws, the renewal is NOT applied: the mirror is
@@ -1738,6 +1738,17 @@ class ConnectionImpl implements Connection {
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
+      if (err instanceof RenewalUnavailable) {
+        // No renewal answer means no authority to mark the grant broken or
+        // consume its one fault-driven renewal attempt.
+        if (stillCurrent()) this.renewedSinceGranted.delete(grant);
+        this.log.warn("fault-driven renewal unavailable; will retry", {
+          connectionId: this.id,
+          grant,
+          error: errMsg(err),
+        });
+        return;
+      }
       await this.degradeGrant(grant, `renew threw (${reason}): ${errMsg(err)}`, stillCurrent);
       return;
     }

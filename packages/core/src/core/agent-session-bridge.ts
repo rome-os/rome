@@ -203,7 +203,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         }
 
         // Every run over this bridge is a forked action worker asking main to
-        // run an agent — a nested subagent run (e.g. blocking `summon`) by
+        // run an agent — a nested subagent run (e.g. blocking `system:summon`) by
         // construction. Mark it so `rome.session.acquire` labels these opens
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
         const { romeSessionId: namedChat, ...sessionInit } = req.init ?? {};
@@ -459,7 +459,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
   /**
    * The worker names a working dir from app code, so an explicit one must
-   * resolve inside the projects root. Without one, a new `summon` run inherits
+   * resolve inside the projects root. Without one, a new `system:summon` run inherits
    * the working dir of the open agent session whose action asked for it, as
    * `execute_subagent` inherits its parent's. Summon sends no channel-thread
    * key, so a summon run without a `sessionId` always opens a new session.

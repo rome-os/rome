@@ -288,12 +288,6 @@ describe("FeishuAdapter", () => {
 
   it("passes a link code said in a group to admission without a mention, so it is voided", async () => {
     await channel.emit({ chatType: "group", mentionedBot: false, content: "ROME-7KQ2M9XA" });
-    await channel.emit({
-      chatType: "group",
-      mentionedBot: false,
-      content: "hi",
-      messageId: "om_456",
-    });
     expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
   });
 
@@ -387,16 +381,6 @@ describe("FeishuAdapter", () => {
     }
   });
 
-  it("drops an unaddressed group message without waiting on the name lookup", async () => {
-    channel.chatInfo = () => new Promise(() => {});
-    await channel.emit({ chatType: "group", mentionedBot: false });
-
-    expect(captured).toHaveLength(0);
-    expect(adapter.listObservedConversations()).toStrictEqual([
-      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
-    ]);
-  });
-
   it("carries the replied-to message, and no sender name where Feishu gave none", async () => {
     await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
     expect(captured[0].senderDisplayName).toBeUndefined();
@@ -458,9 +442,11 @@ describe("FeishuAdapter", () => {
     expect(captured).toHaveLength(0);
   });
 
-  it("ignores group messages that do not mention the bot by default", async () => {
+  // Whether it wakes the agent under the reply rule is the wake gate's call.
+  it("hears a group message that mentions no one, as addressed to nobody", async () => {
     await channel.emit({ chatType: "group", mentionedBot: false });
-    expect(captured).toHaveLength(0);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].addressing).toBe("ambient");
   });
 
   it("sends a group settings card for guardian settings requests", async () => {

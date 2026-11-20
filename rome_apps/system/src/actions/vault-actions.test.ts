@@ -149,7 +149,7 @@ describe("vault_apply", () => {
     expect(pending).toEqual({
       status: "error",
       error:
-        "There is no grant for STRIPE_KEY. The guardian approves vault_apply with the PIN in the dashboard.",
+        "There is no grant for STRIPE_KEY. The guardian approves system:vault_apply with the PIN in the dashboard.",
     });
     const missing = await apply.execute({ names: ["GITHUB_TOKEN", "MISSING_KEY"], reason: "r" });
     expect((missing as { error: string }).error).toContain("no secret named MISSING_KEY");
@@ -161,7 +161,7 @@ describe("vault_apply", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        "There is no grant for GITHUB_TOKEN. The guardian approves vault_apply with the PIN in the dashboard.",
+        "There is no grant for GITHUB_TOKEN. The guardian approves system:vault_apply with the PIN in the dashboard.",
     });
     expect(await apply.execute({ name: "GITHUB_TOKEN", reason: "Push the tag" })).toMatchObject({
       status: "error",

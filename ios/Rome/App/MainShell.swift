@@ -427,7 +427,10 @@ struct MainShell: View {
     private func installShellActions() {
         actions.linkOpener.run = { openChatLink($0) }
         actions.toggleNavigation.run = { _ in toggleNavigation() }
-        actions.openAgent.run = { _ in agentPage = AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID) }
+        actions.openAgent.run = { tab in
+            if let tab { agentTab = tab }
+            agentPage = AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
+        }
         actions.openTaskChat.run = { path.append(.taskChat(chatId: $0.chatId, title: $0.title)) }
         actions.openUsage.run = { _ in
             settingsPath = []
@@ -533,8 +536,9 @@ struct MainShell: View {
             chatId: chatId,
             draftKey: draftKey,
             onMenu: { toggleNavigation() },
-            onAgent: { id in
+            onAgent: { id, tab in
                 // A blank chat has no tasks yet; its Tasks tab shows the empty state.
+                if let tab { agentTab = tab }
                 agentPage = AgentRoute(tasksChatId: id ?? "", chatKey: id ?? draftKey)
             },
             onArchived: { show(.chat) },

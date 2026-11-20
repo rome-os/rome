@@ -56,7 +56,7 @@ struct AgentPage: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 360)
             .padding(.horizontal, Metrics.pagePadding)
-            .padding(.top, 18)
+            .padding(.top, 14)
             .padding(.bottom, 12)
             switch tab {
             case .outputs:
@@ -67,11 +67,8 @@ struct AgentPage: View {
                 TaskListView(store: taskList, mode: .routines, onOpenChat: onOpenTask)
             }
         }
-        .task(id: route.tasksChatId) {
-            // The list as it was last read shows at once, and is read again.
-            taskList?.open()
-        }
-        .onDisappear { taskList?.stop() }
+        // The list as it was last read shows at once, and is read again.
+        .holdsTaskList(taskList)
         .readableColumn()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.bg.ignoresSafeArea())
@@ -91,7 +88,7 @@ struct AgentPage: View {
 
 
     private var header: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // A tap pokes it; ten quick ones open the stacking game.
             // The header avatar's disc, grown: the mascot keeps its share.
             Mascot(blinks: !reduceMotion, pokes: pokes)
@@ -118,7 +115,9 @@ struct AgentPage: View {
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
         }
-        .padding(.top, 56)
+        // The disc's top is level with the close button's, in its row: the
+        // disc is centred, so the two never meet, even on the narrowest phone.
+        .padding(.top, 4)
     }
 }
 

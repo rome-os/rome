@@ -8,6 +8,7 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
+import { MIN_TAB_WIDTH, TAB_GAP } from "./tool-tab-fit";
 import { useToolOutputs } from "./tool-outputs";
 import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
@@ -17,11 +18,7 @@ import type { ToolView, WidgetPlacement } from "./use-free-cells";
 rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
 rs.mock("@/components/concierge/TaskList", () => ({
-  TaskList: ({ chatId, view = "tasks" }: { chatId: string; view?: string }) => (
-    <p>
-      {view === "routines" ? "Routine" : "Task"} panel body {chatId}
-    </p>
-  ),
+  TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
 }));
 
 rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
@@ -161,21 +158,57 @@ describe("ToolWorkspace", () => {
       workspace(view, many, rs.fn(), rs.fn(), (widget) => `app ${widget.id}`);
 
     it("draws the tabs that fit, and counts the rest on the all-apps menu", () => {
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
       expect(tabNames()).toEqual(["app a", "app b", "app c"]);
       expect(screen.getByRole("button", { name: "All open apps, 2 more" }).textContent).toBe("+2");
     });
 
     it("moves a hidden active tab into the last slot", () => {
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       render(labelled({ activeId: "e", collapsed: false, unreadIds: [] }));
       expect(tabNames()).toEqual(["app a", "app b", "app e"]);
     });
 
+    it("keeps one fit near the threshold when the first tab has a dot and a later one is active", () => {
+      // A drawn tab is 34 px around what it holds; a name is 8 px a letter,
+      // a dot 6. "app a" with its dot is 80 px, the others 74.
+      const widthOf = (el: Element): number => {
+        if (el.matches("[data-tool-tab]")) {
+          const trigger = el.querySelector("[role=tab]")!;
+          return 34 + [...trigger.children].reduce((sum, child) => sum + widthOf(child), 0);
+        }
+        if (el.matches(".size-1\\.5")) return 6;
+        if (el.matches("[data-tool-tab-label], [data-measure-label]")) {
+          return (el.textContent ?? "").length * 8;
+        }
+        return 0;
+      };
+      rs.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: Element,
+      ) {
+        return {
+          width: widthOf(this),
+          height: 0,
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+        } as DOMRect;
+      });
+      // a + e = 80 + 4 + 74. Measured with "a"'s dot taken for every tab, the
+      // strip flipped between [a, e] and [e] until React gave up.
+      stripWidth = 160;
+      render(labelled({ activeId: "e", collapsed: false, unreadIds: ["a"] }));
+      expect(tabNames()).toEqual(["app a", "app e"]);
+      rs.restoreAllMocks();
+    });
+
     it("lists every tab on the menu and keeps the plain label when all fit", async () => {
       const user = userEvent.setup();
-      stripWidth = 3 * 128 + 2 * 4;
+      stripWidth = 3 * MIN_TAB_WIDTH + 2 * TAB_GAP;
       const { unmount } = render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
       await user.click(screen.getByRole("button", { name: "All open apps, 2 more" }));
       expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
@@ -270,7 +303,7 @@ describe("ToolWorkspace in the Mac app's title bar", () => {
   });
 
   it("fits the tabs to the strip in the title bar too", () => {
-    stripWidth = 128;
+    stripWidth = MIN_TAB_WIDTH;
     render(inTitlebar({ activeId: "b", collapsed: false, unreadIds: [] }));
     const end = screen.getByTestId("titlebar-end");
     expect(Array.from(end.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual([
@@ -780,9 +813,6 @@ function TasksOwner() {
       <button type="button" onClick={() => pane?.show("chat-1")}>
         Show tasks
       </button>
-      <button type="button" onClick={() => pane?.show("chat-1", "routines")}>
-        Show routines
-      </button>
       <button type="button" onClick={() => pane?.hide()}>
         Hide tasks
       </button>
@@ -881,17 +911,6 @@ describe("ToolWorkspace Tasks tab", () => {
       active: true,
       compact: false,
     });
-  });
-
-  it("opens the Routines list in the same tab, named for it, and Tasks again after", async () => {
-    const user = userEvent.setup();
-    render(<TasksHarness />);
-    await user.click(screen.getByRole("button", { name: "Show routines" }));
-    expect(tabNames()).toEqual(["Routines", "desktop", "projects"]);
-    expect(screen.getByText("Routine panel body chat-1")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
-    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
   });
 
   it("is not part of the saved layout: nothing about it reaches storage", async () => {

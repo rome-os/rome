@@ -341,6 +341,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     reviveProfile: (record) => toSlackAppDisplay(slackAppGrantProfileSchema.parse(record)),
     accountIdOf: (record) => slackAppAccountId(record),
     link: "own_account",
+    // A new workspace answers as the guardian's Concierge from its first
+    // message (docs/adrs/channels-and-connectors-are-one-connection.md).
+    startsWithConcierge: true,
     grant: "bot",
     auth: scheme,
     // Revoke the token at Slack, then release the workspace at Rome Cloud.

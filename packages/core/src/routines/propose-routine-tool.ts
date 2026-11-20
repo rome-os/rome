@@ -14,10 +14,13 @@ import { isValidTimeZone } from "../lib/timezone.js";
  * guardian's click. */
 export interface RoutineActivationGate {
   /** Whether this session's agent may call `name` itself — the same allow-list
-   * check `executeAction` enforces. Auto-enable needs both `create_routine` and
+   * check `executeAction` enforces. Auto-enable needs both `system:create_routine` and
    * the target action, so it never schedules anything the agent couldn't
-   * already schedule by calling `create_routine` directly. */
+   * already schedule by calling `system:create_routine` directly. */
   canCallAction(name: string): "permitted" | "denied" | "unknown";
+  /** For an "unknown" `name` that is an action's name without its app, that
+   * action's full ID when the agent may call it. */
+  suggestAction?(name: string): string | undefined;
   /** The target action's input-schema check on the routine's args — the same
    * one `POST /api/routines` runs for the card's "Turn it on". Null when the
    * args fit. */
@@ -31,10 +34,10 @@ export interface RoutineActivationGate {
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
 
-const CREATE_ROUTINE_ACTION = "create_routine";
+const CREATE_ROUTINE_ACTION = "system:create_routine";
 
 /** Create the drafted routine enabled, on the guardian's explicit instruction.
- * The routine goes through the agent's own `create_routine` call (same
+ * The routine goes through the agent's own `system:create_routine` call (same
  * allow-list, validation and attribution as a direct call); the target must be
  * an action the agent may call too. Without that permission, it falls back to
  * the draft card, so the guardian's click stays the gate.
@@ -66,8 +69,9 @@ async function activateRoutineDraft(
   if (!routineKey) return fallback("this tool call has no id to key the routine by");
   const target = gate.canCallAction(draft.actionName);
   if (target === "unknown") {
+    const suggestion = gate.suggestAction?.(draft.actionName);
     return text(
-      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
+      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action${suggestion ? `, such as "${suggestion}"` : ""}.`,
       true,
     );
   }
@@ -114,7 +118,8 @@ async function activateRoutineDraft(
   const routineId =
     result.status === "ok" ? (result.data as { routineId?: unknown } | undefined)?.routineId : null;
   if (typeof routineId !== "string") {
-    const error = result.status === "error" ? result.error : "create_routine returned no routineId";
+    const error =
+      result.status === "error" ? result.error : "system:create_routine returned no routineId";
     return text(
       `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
       true,
@@ -236,7 +241,7 @@ function buildEventTriggerFromInput(
   return { ok: true, trigger };
 }
 
-/** Validate the schedule fields the same way the `create_routine` action does,
+/** Validate the schedule fields the same way the `system:create_routine` action does,
  * so a confirm card never creates a silently-dead schedule (bad HH:mm, unknown
  * timezone, or a MONTHLY rule with no day-of-month). */
 function buildScheduleTriggerFromInput(
@@ -314,7 +319,7 @@ export function proposeRoutineTools(input: {
     {
       name: ROUTINE_PROPOSAL_TOOL,
       description:
-        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with system:search_event_catalog rather than guessing.",
       inputSchema: {
         type: "object",
         required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -352,7 +357,7 @@ export function proposeRoutineTools(input: {
           eventName: {
             type: "string",
             description:
-              'Event routines (kind: event) only — required there. The exact bus event type to watch, from search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".',
+              'Event routines (kind: event) only — required there. The exact bus event type to watch, from system:search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".',
           },
           filter: {
             type: "array",
@@ -398,7 +403,7 @@ export function proposeRoutineTools(input: {
           },
           actionName: {
             type: "string",
-            description: "The action the routine fires when it triggers, e.g. send_message.",
+            description: "The action the routine fires when it triggers, e.g. system:send_message.",
           },
           args: {
             type: "object",
