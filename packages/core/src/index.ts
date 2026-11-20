@@ -1369,6 +1369,8 @@ async function main() {
     {
       agentLoader,
       sessionRepository,
+      chatOnCredits: async (chatId) =>
+        (await webchatRepo.getSession(chatId))?.largeModelSelectionBy === "credits",
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),

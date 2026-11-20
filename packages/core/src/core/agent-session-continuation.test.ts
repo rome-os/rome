@@ -143,6 +143,9 @@ describe("continuation notice through Sessions", () => {
     options: {
       state?: ReturnType<typeof healthyState>;
       handoffs?: (resolver: ModelResolver) => RenewalHandoffs;
+      /** Codex runs on the Rome credits login, with ChatGPT the default. */
+      creditsLogin?: boolean;
+      chatOnCredits?: (chatId: string) => Promise<boolean>;
     } = {},
   ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
@@ -160,11 +163,15 @@ describe("continuation notice through Sessions", () => {
     const modelResolver = createModelResolver({
       providers: [openai.provider, anthropic.provider],
       accounts: fakeAccounts(() => state),
-      codexLogins: loginsOn(false),
+      codexLogins: loginsOn(options.creditsLogin === true),
+      ...(options.creditsLogin
+        ? { defaults: { ready: async () => {}, current: () => "openai" as const } }
+        : {}),
     });
     const manager = createSessions(
       {
         ...(options.handoffs ? { handoffs: options.handoffs(modelResolver) } : {}),
+        ...(options.chatOnCredits ? { chatOnCredits: options.chatOnCredits } : {}),
         agentLoader: loader,
         sessionRepository,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
@@ -353,6 +360,22 @@ describe("continuation notice through Sessions", () => {
     expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
     expect(prompt).toContain("Email the landlord about rent.");
     expect(prompt).not.toContain("<handoff>");
+  });
+
+  it("spends Rome credits only once its chat is on them, whoever opens the session", async () => {
+    const onCredits = { chat: false };
+    const manager = createManager({
+      state: { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      creditsLogin: true,
+      chatOnCredits: async () => onCredits.chat,
+    });
+    // ChatGPT is the default and logged out: the open refuses rather than spend credits.
+    await expect(acquire(manager, "gpt-6-luna")).rejects.toThrow(/not signed in|unavailable/i);
+    // Moved onto credits, the same open runs, with no flag from the opener.
+    onCredits.chat = true;
+    const session = await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Hello on credits.");
+    expect(openai.calls.at(-1)?.prompt).toContain("Hello on credits.");
   });
 
   it("carries what the latest turns did when the old model's handoff fails", async () => {

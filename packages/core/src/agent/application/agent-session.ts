@@ -442,6 +442,12 @@ interface ManagerDeps {
    * turn shows beside it. Absent, no renewal writes a handoff.
    */
   handoffs?: RenewalHandoffs;
+  /**
+   * Whether the chat runs on Rome credits, the guardian having moved it onto
+   * them. Read at open and before each turn, so every opener and resume
+   * agrees. Absent, only `init.credits` says so.
+   */
+  chatOnCredits?: (chatId: string) => Promise<boolean>;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -1565,6 +1571,7 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
+  const credits = init.credits ?? (await chatOnCredits(deps, init.threadContext?.romeSessionId));
   // A cold resume runs at the effort its web chat saved when the open names
   // none, as a message to that chat does; a turn that names one still wins.
   const savedEffort =
@@ -2006,7 +2013,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.resolve(
-      modelResolutionRequest(selectionId, sessionPin, config, init.providerOverride, init.credits),
+      modelResolutionRequest(selectionId, sessionPin, config, init.providerOverride, credits),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
@@ -2063,7 +2070,7 @@ async function openSession(
       ? "subagent"
       : (init.kind ?? (init.threadContext ? "conversation" : "action")),
     selectionId,
-    credits: init.credits,
+    credits,
     sessionPin,
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
@@ -2780,6 +2787,9 @@ class AgentSessionImpl implements AgentSession {
 
   private async ensureModelSessionForTurn(override?: AccountedProviderId): Promise<void> {
     if (this.config.codeBacked) return;
+    // Whether the chat runs on Rome credits now: a switch since the open moved it.
+    const onCredits = await chatOnCredits(this.deps, this.threadContext?.romeSessionId);
+    if (onCredits !== undefined) this.credits = onCredits;
     const resolution = await this.deps.modelResolver.resolve(
       modelResolutionRequest(
         this.selectionId,
@@ -4648,4 +4658,13 @@ function failureFieldsOf(terminal: StreamAgentEvent): AgentTurnFailedBeforeStart
     ...(text("usageLimitUntil") ? { usageLimitUntil: text("usageLimitUntil") } : {}),
   };
   return Object.keys(failure).length > 0 ? failure : undefined;
+}
+
+/** Whether the chat runs on Rome credits, as the deps read it; undefined when they cannot. */
+async function chatOnCredits(
+  deps: Pick<ManagerDeps, "chatOnCredits">,
+  chatId: string | undefined,
+): Promise<boolean | undefined> {
+  if (!chatId || !deps.chatOnCredits) return undefined;
+  return await deps.chatOnCredits(chatId).catch(() => undefined);
 }
