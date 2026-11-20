@@ -909,7 +909,11 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: { db?: ReturnType<typeof createTestDb>["db"]; gate?: SlackReadGate } = {},
+  options: {
+    db?: ReturnType<typeof createTestDb>["db"];
+    gate?: SlackReadGate;
+    listened?: () => boolean;
+  } = {},
 ) {
   const db = options.db ?? createTestDb().db;
   const api = fakeApi({ conversationHistory: slack.conversationHistory });
@@ -920,6 +924,7 @@ function historyAdapter(
       new SlackMessageCopyRepository(db),
       undefined,
       options.gate ?? openGate(),
+      options.listened,
     ),
     db,
   };
@@ -1115,6 +1120,29 @@ describe("Slack app reads a direct message (R13)", () => {
 
     const read = await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
     expect(texts(read)).toEqual(["message 3", "message 2"]);
+  });
+
+  it("links no message across one heard while Rome did not listen to the account, which Slack's history still shows", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    let listening = true;
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, {
+      listened: () => listening,
+    });
+    await a.start();
+    for (const i of [1, 2]) slack.say(i);
+    // A read of the whole chat tells the drain its newest message.
+    await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
+    for (const i of [3, 4, 5]) slack.say(i);
+    await mailbox.deposit(frame(dmEvent(3)));
+    listening = false;
+    await mailbox.deposit(frame(dmEvent(4)));
+    listening = true;
+    await mailbox.deposit(frame(dmEvent(5)));
+    expect(texts(delivered)).toEqual(["message 3", "message 5"]);
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
+    expect(texts(read)).toEqual(["message 5", "message 4", "message 3"]);
   });
 
   it("answers a read without the names Slack is slow to give, asking once per author", async () => {
