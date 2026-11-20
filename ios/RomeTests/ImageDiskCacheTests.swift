@@ -51,6 +51,35 @@ import UIKit
         #expect(cache.entry(instance: "i", key: "k")?.stamp.hash == ImageDiskCache.hash(Data("<svg>2</svg>".utf8)))
     }
 
+    /// The chat's pictures: one folder per instance, and only the open one's stays.
+    @Test func picturesStayOnlyForTheOpenInstance() {
+        let cache = cache()
+        defer { cache.removeAll() }
+        cache.store(Data("me".utf8), instance: "me.romeos.cc", key: "pic|a")
+        #expect(cache.data(instance: "me.romeos.cc", key: "pic|a") == Data("me".utf8))
+        #expect(cache.data(instance: "team.romeos.cc", key: "pic|a") == nil)
+        cache.store(Data("team".utf8), instance: "team.romeos.cc", key: "pic|a")
+        cache.removeAll(except: "team.romeos.cc")
+        #expect(cache.data(instance: "me.romeos.cc", key: "pic|a") == nil)
+        #expect(cache.data(instance: "team.romeos.cc", key: "pic|a") == Data("team".utf8))
+        cache.removeAll(except: nil)
+        #expect(cache.data(instance: "team.romeos.cc", key: "pic|a") == nil)
+    }
+
+    /// Past the limit the least recently read picture goes first; a key may be a long URL.
+    @Test func picturesTrimLeastRecentlyReadFirst() {
+        let cache = cache(limit: 25)
+        defer { cache.removeAll() }
+        let long = "pic|external(https://example.com/" + String(repeating: "a", count: 400) + ")"
+        for key in ["pic|1", "pic|2", long] { cache.store(Data(repeating: 1, count: 10), instance: "i", key: key) }
+        // Read: the newest now.
+        #expect(cache.data(instance: "i", key: "pic|1") != nil)
+        cache.trim()
+        #expect(cache.data(instance: "i", key: "pic|2") == nil)
+        #expect(cache.data(instance: "i", key: "pic|1") != nil)
+        #expect(cache.data(instance: "i", key: long) != nil)
+    }
+
     @Test func keysAreStable() {
         #expect(AppIcon.cacheKey(InstalledApp(id: "habits")) == "app-icon-habits")
         let url = URL(string: "https://lh3.example.com/a.png")!

@@ -321,6 +321,50 @@ final class HugeProtocol: URLProtocol, @unchecked Sendable {
         #expect(cache.image(before) == nil)
     }
 
+    /// Memory, then disk, then the network: a picture is fetched once, and
+    /// after a relaunch it shows offline. Another instance never reads it.
+    @Test @MainActor func aPictureIsFetchedOnceAndShowsOffline() async throws {
+        let disk = ImageDiskCache(root: FileManager.default.temporaryDirectory
+            .appending(path: "rome-pictures-\(UUID().uuidString)", directoryHint: .isDirectory))
+        defer { disk.removeAll() }
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+        var fetches = 0
+        let cache = StoredImageCache(disk: disk)
+        cache.reset(instance: "me.romeos.cc")
+        _ = try await cache.load("pic|a", maxPixel: 600) { fetches += 1; return png }
+        _ = try await cache.load("pic|a", maxPixel: 600) { fetches += 1; return png }
+        #expect(fetches == 1)
+        #expect(cache.image(cache.key("pic|a")) != nil)
+
+        let relaunched = StoredImageCache(disk: disk)
+        relaunched.reset(instance: "me.romeos.cc")
+        _ = try await relaunched.load("pic|a", maxPixel: 600) { throw APIError.network }
+
+        let other = StoredImageCache(disk: disk)
+        other.reset(instance: "team.romeos.cc")
+        await #expect(throws: APIError.network) {
+            try await other.load("pic|a", maxPixel: 600) { throw APIError.network }
+        }
+        await #expect(throws: APIError.decoding) {
+            try await other.load("pic|b", maxPixel: 600) { Data("<html>".utf8) }
+        }
+    }
+
+    /// A load that ends after a switch or sign-out writes nothing to disk.
+    @Test @MainActor func aLoadThatEndsAfterASwitchIsNotKept() async throws {
+        let disk = ImageDiskCache(root: FileManager.default.temporaryDirectory
+            .appending(path: "rome-pictures-\(UUID().uuidString)", directoryHint: .isDirectory))
+        defer { disk.removeAll() }
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+        let cache = StoredImageCache(disk: disk)
+        cache.reset(instance: "me.romeos.cc")
+        _ = try await cache.load("pic|a", maxPixel: 600) {
+            cache.reset(instance: nil)
+            return png
+        }
+        #expect(disk.data(instance: "me.romeos.cc", key: "pic|a") == nil)
+    }
+
     @Test func theSameImageTwiceIsTwoPages() {
         let source = ImageSource(src: "/projects/a.png")
         let first = ViewerImage.markdown(source, alt: "", src: "/projects/a.png", position: 0)
