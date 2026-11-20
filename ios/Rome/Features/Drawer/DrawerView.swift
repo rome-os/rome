@@ -136,8 +136,10 @@ struct DrawerView: View {
                     TopicItem(chat: chat, selected: section == .topic(chat.id), pinned: pinned) {
                         onSection(.topic(chat.id))
                     }
-                    // Above its neighbours, whose opaque rows would cover its shadow.
-                    .zIndex(section == .topic(chat.id) ? 1 : 0)
+                    // A row sliding to its new place goes over the rows it passes,
+                    // and the selected row over its neighbours, whose opaque rows
+                    // would cover its shadow.
+                    .zIndex(workspace.topics.moving == chat.id ? 2 : section == .topic(chat.id) ? 1 : 0)
                     .drawerRow()
                     // Right: pin or unpin, all the way across too. The row
                     // moves once its swipe has closed: moved while it is

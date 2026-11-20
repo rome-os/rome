@@ -32,6 +32,10 @@ final class TopicChatsStore {
     /// When each pinned chat was pinned, from the same chat list. A chat
     /// missing here is not pinned.
     private(set) var pinnedAt: [String: Date] = [:]
+    /// The chat whose pin just changed, for the second its row takes to
+    /// slide to its new place: the drawer draws it above the rows it passes.
+    private(set) var moving: String?
+    @ObservationIgnored private var movingWork: Task<Void, Never>?
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
     /// Whether the drawer folds the list away, kept on this phone per instance.
@@ -150,12 +154,21 @@ final class TopicChatsStore {
         pinnedAt[id] != nil
     }
 
-    /// A pin this app made or took off: the list moves now, ahead of the next
-    /// refetch, which then brings the server's time.
+    /// A pin this app made or took off: the list moves now, and is read
+    /// again once the row has settled, for the server's time.
     func setPinned(_ id: String, _ pinned: Bool) {
         pinnedAt[id] = pinned ? .now : nil
+        moving = id
         apply(chats)
-        refresh()
+        movingWork?.cancel()
+        // The server's list is read once the row has settled: a list that
+        // lands while the row slides would redraw the rows under it.
+        movingWork = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            self.moving = nil
+            self.refresh()
+        }
     }
 
     /// A rename this app made: shown now, ahead of its `session_name` event.
