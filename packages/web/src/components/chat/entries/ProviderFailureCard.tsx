@@ -337,7 +337,7 @@ export function ProviderFailureCard({
  * credits exist only with no login, so their switch offers no default and
  * names the balance instead. docs/domains/agents.md#provider-failure
  */
-export function SwitchConfirmDialog({
+function SwitchConfirmDialog({
   provider,
   affectedTasks,
   pending,

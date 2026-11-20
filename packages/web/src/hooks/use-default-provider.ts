@@ -30,10 +30,10 @@ export interface ProviderOutage {
   since: string;
 }
 
-export const DEFAULT_PROVIDER_QUERY_KEY = ["ai-tools", "default"] as const;
-export const PROVIDER_OUTAGES_QUERY_KEY = ["ai-tools", "provider-outages"] as const;
+const DEFAULT_PROVIDER_QUERY_KEY = ["ai-tools", "default"] as const;
+const PROVIDER_OUTAGES_QUERY_KEY = ["ai-tools", "provider-outages"] as const;
 
-export const DEFAULT_MODEL_PROVIDERS: readonly DefaultModelProvider[] = [
+const DEFAULT_MODEL_PROVIDERS: readonly DefaultModelProvider[] = [
   "anthropic",
   "openai",
   "rome_credits",
