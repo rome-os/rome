@@ -41,10 +41,20 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   session: () => requestJson<AuthSession>("/api/auth/session"),
-  login: (token: string) =>
+  login: (password: string) =>
     requestJson<AuthSession>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ password }),
+    }),
+  setPassword: (input: { currentPassword?: string; newPassword: string }) =>
+    requestJson<AuthSession>("/api/auth/password", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  removePassword: (currentPassword: string) =>
+    requestJson<AuthSession>("/api/auth/password", {
+      method: "DELETE",
+      body: JSON.stringify({ currentPassword }),
     }),
   logout: () => requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   status: () => requestJson<HostSnapshot>("/api/status"),

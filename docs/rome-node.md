@@ -104,10 +104,9 @@ services:
     security_opt: ["no-new-privileges:true"]
     ports:
       - "127.0.0.1:4310:4310"
-    environment:
-      # Optional: set a fixed access token. When omitted on 0.0.0.0, a random
-      # token is generated at startup and printed once to container logs.
-      ROME_NODE_UI_TOKEN: "change-me-to-a-long-random-token"
+    # Optional: set a custom password for remote access (you can also set one inside the Web UI).
+    # environment:
+    #   ROME_NODE_UI_PASSWORD: "your-custom-password"
     volumes:
       - rome-node:/var/lib/rome-node
 volumes:
@@ -115,8 +114,9 @@ volumes:
 ```
 
 1. Start the container with `docker compose up -d`.
-2. Open `http://127.0.0.1:4310` in a browser and unlock the Web UI with
-   `ROME_NODE_UI_TOKEN` (or the generated token printed in `docker compose logs`).
+2. Open `http://127.0.0.1:4310` in a browser — localhost access is passwordless
+   by default (non-loopback hosts are rejected until you set a custom password
+   in the Web UI or via `ROME_NODE_UI_PASSWORD`).
 3. Click **Authorize device**, open the Rome Cloud verification link, confirm
    the user code, and approve the container with your Rome Cloud account.
 
@@ -128,11 +128,14 @@ After approval, the container connects to the account Gateway and appears on
   between full execution and limited mode (`computer_use_off`).
 - Inspect the local SQLite audit log (24-hour chart, filters, search, and
   `stdin`/`stdout`/`stderr`/`file` previews up to 256 KiB).
+- Optionally set, change, or remove a custom Web UI password (stored as an
+  `scrypt` hash in `/var/lib/rome-node/web-auth.json`).
 - Clear the local credential to re-authorize under another identity.
 
-Recreating the container with the same volume keeps the device identity and
-reconnects automatically without another approval. If Rome Cloud revokes the
-device, the container stays up so you can re-authorize from the Web UI.
+Recreating the container with the same volume keeps the device identity,
+custom Web UI password, and audit log, and reconnects automatically without
+another approval. If Rome Cloud revokes the device, the container stays up so
+you can re-authorize from the Web UI.
 
 For headless CLI-only deployments without the Web UI, override the container
 command:

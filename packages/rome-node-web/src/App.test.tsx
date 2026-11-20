@@ -93,7 +93,7 @@ describe("Rome Node Web UI", () => {
     rstest.restoreAllMocks();
   });
 
-  it("renders login gate when auth is required and unlocks with token", async () => {
+  it("renders password unlock gate when auth is required and unlocks with password", async () => {
     let unlocked = false;
     const onlineSnapshot = makeSnapshot({
       phase: "online",
@@ -104,11 +104,17 @@ describe("Rome Node Web UI", () => {
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/auth/session") {
-        return jsonResponse({ authRequired: true, authenticated: unlocked });
+        return jsonResponse({
+          authRequired: true,
+          authenticated: unlocked,
+          passwordSource: "file",
+        });
       }
       if (url === "/api/auth/login" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { password?: string };
+        expect(body.password).toBe("my-secret-pass");
         unlocked = true;
-        return jsonResponse({ authRequired: true, authenticated: true });
+        return jsonResponse({ authRequired: true, authenticated: true, passwordSource: "file" });
       }
       if (url === "/api/status") {
         return jsonResponse(onlineSnapshot);
@@ -120,10 +126,46 @@ describe("Rome Node Web UI", () => {
 
     expect(await screen.findByText("Unlock Rome Node")).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "secret-token" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "my-secret-pass" } });
     fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
 
     expect(await screen.findByText("dev_123")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Lock UI" })).toBeTruthy();
+    expect(screen.getByText("Password set")).toBeTruthy();
+  });
+
+  it("allows setting a custom password from local passwordless mode", async () => {
+    const snapshot = makeSnapshot();
+
+    globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/auth/session") {
+        return jsonResponse({ authRequired: false, authenticated: true, passwordSource: "none" });
+      }
+      if (url === "/api/status") {
+        return jsonResponse(snapshot);
+      }
+      if (url === "/api/auth/password" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as { newPassword?: string };
+        expect(body.newPassword).toBe("custom-pass-1");
+        return jsonResponse({ authRequired: true, authenticated: true, passwordSource: "file" });
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    }) as typeof fetch;
+
+    render(<App />);
+
+    expect(await screen.findByText("Local passwordless")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Lock UI" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "custom-pass-1" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "custom-pass-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save password" }));
+
+    expect(await screen.findByText("Password set")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lock UI" })).toBeTruthy();
   });
 
@@ -133,7 +175,7 @@ describe("Rome Node Web UI", () => {
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/auth/session") {
-        return jsonResponse({ authRequired: false, authenticated: true });
+        return jsonResponse({ authRequired: false, authenticated: true, passwordSource: "none" });
       }
       if (url === "/api/status") {
         return jsonResponse(snapshot);
@@ -179,7 +221,7 @@ describe("Rome Node Web UI", () => {
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/auth/session") {
-        return jsonResponse({ authRequired: false, authenticated: true });
+        return jsonResponse({ authRequired: false, authenticated: true, passwordSource: "none" });
       }
       if (url === "/api/status") {
         return jsonResponse(snapshot);

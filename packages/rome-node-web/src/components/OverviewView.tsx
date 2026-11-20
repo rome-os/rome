@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  KeyRound,
   Link2,
   Power,
   RefreshCw,
@@ -43,12 +44,14 @@ import { Spinner } from "@rome-os/ui/spinner";
 import { Switch } from "@rome-os/ui/switch";
 import { api } from "../api";
 import { formatBytes, formatDuration, type Messages } from "../i18n";
-import type { HostPhase, HostSnapshot } from "../types";
+import type { AuthSession, HostPhase, HostSnapshot, PasswordSource } from "../types";
 
 export interface OverviewViewProps {
   t: Messages;
   snapshot: HostSnapshot;
   onSnapshot: (next: HostSnapshot) => void;
+  passwordSource: PasswordSource;
+  onSessionChange: (next: AuthSession) => void;
 }
 
 export function phaseBadgeVariant(phase: HostPhase): BadgeProps["variant"] {
@@ -68,13 +71,25 @@ export function phaseBadgeVariant(phase: HostPhase): BadgeProps["variant"] {
   }
 }
 
-export function OverviewView({ t, snapshot, onSnapshot }: OverviewViewProps) {
+export function OverviewView({
+  t,
+  snapshot,
+  onSnapshot,
+  passwordSource,
+  onSessionChange,
+}: OverviewViewProps) {
   const [deviceName, setDeviceName] = useState(snapshot.deviceName);
   const [cloudUrl, setCloudUrl] = useState(snapshot.cloudUrl);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [passwordDialog, setPasswordDialog] = useState<"set" | "remove" | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -120,6 +135,76 @@ export function OverviewView({ t, snapshot, onSnapshot }: OverviewViewProps) {
       window.setTimeout(() => setCopiedCode(false), 1800);
     } catch {
       // Clipboard API may be unavailable on non-secure origins.
+    }
+  }
+
+  function openPasswordDialog(mode: "set" | "remove") {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordError(null);
+    setPasswordDialog(mode);
+  }
+
+  function closePasswordDialog() {
+    if (passwordBusy) return;
+    setPasswordDialog(null);
+    setPasswordError(null);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  }
+
+  async function handleSavePassword(event: FormEvent) {
+    event.preventDefault();
+    if (passwordSource === "file" && !currentPassword) {
+      setPasswordError(t.password.currentRequired);
+      return;
+    }
+    if (newPassword.length < 6 || newPassword.trim().length === 0) {
+      setPasswordError(t.password.tooShort);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError(t.password.mismatch);
+      return;
+    }
+    setPasswordBusy(true);
+    setPasswordError(null);
+    try {
+      const nextSession = await api.setPassword({
+        currentPassword: passwordSource === "file" ? currentPassword : undefined,
+        newPassword,
+      });
+      onSessionChange(nextSession);
+      setPasswordDialog(null);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  async function handleRemovePassword(event: FormEvent) {
+    event.preventDefault();
+    if (!currentPassword) {
+      setPasswordError(t.password.currentRequired);
+      return;
+    }
+    setPasswordBusy(true);
+    setPasswordError(null);
+    try {
+      const nextSession = await api.removePassword(currentPassword);
+      onSessionChange(nextSession);
+      setPasswordDialog(null);
+      setCurrentPassword("");
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPasswordBusy(false);
     }
   }
 
@@ -431,6 +516,53 @@ export function OverviewView({ t, snapshot, onSnapshot }: OverviewViewProps) {
         )}
       </div>
 
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle>{t.password.title}</CardTitle>
+            <Badge variant={passwordSource === "none" ? "muted" : "success"}>
+              {passwordSource === "env"
+                ? t.password.badgeEnv
+                : passwordSource === "file"
+                  ? t.password.badgeFile
+                  : t.password.badgeNone}
+            </Badge>
+          </div>
+          <CardDescription>
+            {passwordSource === "env"
+              ? t.password.descriptionEnv
+              : passwordSource === "file"
+                ? t.password.descriptionFile
+                : t.password.descriptionNone}
+          </CardDescription>
+          {passwordSource !== "env" ? (
+            <CardAction>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openPasswordDialog("set")}
+                >
+                  <KeyRound data-icon="inline-start" />
+                  {passwordSource === "file" ? t.password.changeButton : t.password.setButton}
+                </Button>
+                {passwordSource === "file" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openPasswordDialog("remove")}
+                  >
+                    {t.password.removeButton}
+                  </Button>
+                ) : null}
+              </div>
+            </CardAction>
+          ) : null}
+        </CardHeader>
+      </Card>
+
       <Dialog open={resetDialogOpen} onClose={() => setResetDialogOpen(false)} modal size="sm">
         <DialogHeader onClose={() => setResetDialogOpen(false)}>
           <DialogTitle>{t.overview.resetDialogTitle}</DialogTitle>
@@ -459,6 +591,131 @@ export function OverviewView({ t, snapshot, onSnapshot }: OverviewViewProps) {
             {t.overview.resetConfirm}
           </Button>
         </DialogFooter>
+      </Dialog>
+
+      <Dialog open={passwordDialog === "set"} onClose={closePasswordDialog} modal size="sm">
+        <form onSubmit={handleSavePassword}>
+          <DialogHeader onClose={closePasswordDialog}>
+            <DialogTitle>
+              {passwordSource === "file" ? t.password.changeDialogTitle : t.password.setDialogTitle}
+            </DialogTitle>
+            <DialogDescription>
+              {passwordSource === "file"
+                ? t.password.changeDialogDescription
+                : t.password.setDialogDescription}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <FieldGroup>
+              {passwordSource === "file" ? (
+                <Field>
+                  <FieldLabel htmlFor="rome-node-current-password">
+                    {t.password.currentLabel}
+                  </FieldLabel>
+                  <Input
+                    id="rome-node-current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    size="md"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    disabled={passwordBusy}
+                  />
+                </Field>
+              ) : null}
+              <Field>
+                <FieldLabel htmlFor="rome-node-new-password">{t.password.newLabel}</FieldLabel>
+                <Input
+                  id="rome-node-new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  size="md"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={passwordBusy}
+                />
+                <FieldDescription>{t.password.minLengthHint}</FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="rome-node-confirm-password">
+                  {t.password.confirmLabel}
+                </FieldLabel>
+                <Input
+                  id="rome-node-confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  size="md"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={passwordBusy}
+                />
+              </Field>
+            </FieldGroup>
+            {passwordError ? (
+              <div className="mt-3">
+                <FormError>{passwordError}</FormError>
+              </div>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              disabled={passwordBusy}
+              onClick={closePasswordDialog}
+            >
+              {t.overview.cancel}
+            </Button>
+            <Button type="submit" size="md" disabled={passwordBusy}>
+              {passwordBusy ? <Spinner size="sm" data-icon="inline-start" /> : null}
+              {passwordBusy ? t.password.saving : t.password.save}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
+
+      <Dialog open={passwordDialog === "remove"} onClose={closePasswordDialog} modal size="sm">
+        <form onSubmit={handleRemovePassword}>
+          <DialogHeader onClose={closePasswordDialog}>
+            <DialogTitle>{t.password.removeDialogTitle}</DialogTitle>
+            <DialogDescription>{t.password.removeDialogDescription}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field>
+              <FieldLabel htmlFor="rome-node-remove-password">{t.password.currentLabel}</FieldLabel>
+              <Input
+                id="rome-node-remove-password"
+                type="password"
+                autoComplete="current-password"
+                size="md"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                disabled={passwordBusy}
+              />
+            </Field>
+            {passwordError ? (
+              <div className="mt-3">
+                <FormError>{passwordError}</FormError>
+              </div>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              disabled={passwordBusy}
+              onClick={closePasswordDialog}
+            >
+              {t.overview.cancel}
+            </Button>
+            <Button type="submit" variant="destructive" size="md" disabled={passwordBusy}>
+              {passwordBusy ? <Spinner size="sm" data-icon="inline-start" /> : null}
+              {passwordBusy ? t.password.removing : t.password.removeConfirm}
+            </Button>
+          </DialogFooter>
+        </form>
       </Dialog>
     </div>
   );

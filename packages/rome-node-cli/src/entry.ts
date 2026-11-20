@@ -112,7 +112,6 @@ async function main(): Promise<void> {
       host: { type: "string" },
       port: { type: "string" },
       "assets-dir": { type: "string" },
-      "require-auth": { type: "boolean" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -127,7 +126,7 @@ async function main(): Promise<void> {
     throw new Error("--server is only supported by rome-node auth.");
   if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
     throw new Error("--device-code is only supported by rome-node connect.");
-  const webOptions = ["host", "port", "assets-dir", "require-auth"] as const;
+  const webOptions = ["host", "port", "assets-dir"] as const;
   if (positionals[0] !== "web" && webOptions.some((option) => values[option] !== undefined))
     throw new Error(
       `--${webOptions.find((option) => values[option] !== undefined)} is only supported by rome-node web.`,
@@ -173,8 +172,7 @@ async function main(): Promise<void> {
         name: values.name ?? process.env.ROME_NODE_NAME,
         explicitName: values.name !== undefined || process.env.ROME_NODE_NAME !== undefined,
         assetsDir: values["assets-dir"] ?? process.env.ROME_NODE_WEB_ASSETS_DIR,
-        token: process.env.ROME_NODE_UI_TOKEN,
-        requireAuth: values["require-auth"],
+        password: process.env.ROME_NODE_UI_PASSWORD,
         version: version(),
       });
       try {

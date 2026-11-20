@@ -79,9 +79,12 @@ export interface HostSnapshot {
   };
 }
 
+export type PasswordSource = "none" | "file" | "env";
+
 export interface AuthSession {
   authRequired: boolean;
   authenticated: boolean;
+  passwordSource: PasswordSource;
 }
 
 export interface AuditItemsPage {

@@ -107,7 +107,7 @@ jobs:
                 audit.close();
               '\''
               rome-node audit status
-              ROME_NODE_UI_TOKEN=ci-smoke-token rome-node web --host 0.0.0.0 --port 4310 >/dev/null 2>&1 &
+              ROME_NODE_UI_PASSWORD=ci-smoke-password rome-node web --host 0.0.0.0 --port 4310 >/dev/null 2>&1 &
               WEB_PID=$!
               trap "kill $WEB_PID 2>/dev/null || true" EXIT
               node --input-type=module -e '\''
@@ -130,7 +130,7 @@ jobs:
                 const login = await fetch(`${base}/api/auth/login`, {
                   method: "POST",
                   headers: { "content-type": "application/json", origin: base },
-                  body: JSON.stringify({ token: "ci-smoke-token" }),
+                  body: JSON.stringify({ password: "ci-smoke-password" }),
                 });
                 if (login.status !== 200) throw new Error(`login failed: ${login.status}`);
                 const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];

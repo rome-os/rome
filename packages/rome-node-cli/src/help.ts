@@ -67,11 +67,16 @@ Example:
   rome-node connect --name "My computer"
   rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
 `,
-  web: `Usage: rome-node web [--host <addr>] [--port <port>] [--cloud <origin>] [--name <name>] [--assets-dir <dir>] [--require-auth]
+  web: `Usage: rome-node web [--host <addr>] [--port <port>] [--cloud <origin>] [--name <name>] [--assets-dir <dir>]
 
 Start a local Web UI to manage this computer's Rome Cloud device authorization,
 connection state, remote execution toggle, and local audit log.
 Built for container and headless deployments where a browser is easier than CLI logs.
+
+By default, localhost / 127.0.0.1 access is passwordless and non-loopback hosts are
+rejected. You can set a custom password inside the Web UI (persisted as an scrypt
+hash in <config dir>/web-auth.json) or via ROME_NODE_UI_PASSWORD to protect the UI
+and allow remote access.
 
 Web UI static assets are prebuilt in the official Docker image (ghcr.io/rome-os/rome-node)
 and available in a monorepo checkout after building @rome-os/node-web. The standalone
@@ -84,12 +89,11 @@ Options:
   --cloud <origin>    Default Cloud origin (default: ROME_NODE_CLOUD_URL or https://romeos.cc).
   --name <name>       Default device name (default: ROME_NODE_NAME or computer hostname).
   --assets-dir <dir>  Path to built Web UI static files (or ROME_NODE_WEB_ASSETS_DIR).
-  --require-auth      Require an access token even when listening on loopback.
 
 Environment:
   ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
-  ROME_NODE_UI_TOKEN        Access token for the Web UI. When unset on a non-loopback host,
-                            a random token is generated and printed once to stderr at startup.
+  ROME_NODE_UI_PASSWORD     Optional password for the Web UI (overrides any UI-managed password
+                            and enables password-protected remote access).
   ROME_NODE_WEB_ASSETS_DIR  Directory containing the built Web UI assets.
 
 Example:

@@ -1,7 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AuditQuery, AuditResult, ContentName } from "@rome-os/node-core/host";
 import { createStaticHandler, resolveWebAssetsDir } from "./assets.js";
-import { createWebAuth, isSecureRequest } from "./auth.js";
+import {
+  createWebAuth,
+  isSecureRequest,
+  validateNewPassword,
+  type PasswordSource,
+} from "./auth.js";
 import {
   ControllerInputError,
   HostController,
@@ -16,6 +21,30 @@ const SSE_HEARTBEAT_MS = 20_000;
 const VALID_RESULTS = new Set<AuditResult>(["succeeded", "failed", "no_result"]);
 const VALID_CONTENT_NAMES = new Set<ContentName>(["stdin", "stdout", "stderr", "file"]);
 
+const UNTRUSTED_HOST_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rome Node — Local Access Only</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 32px 16px; background: #faf8f5; color: #1c1917; }
+      main { max-width: 560px; margin: 48px auto; background: #fff; border: 1px solid #e7e5e4; border-radius: 14px; padding: 24px; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      p { font-size: 14px; line-height: 1.6; color: #57534e; margin: 8px 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; background: #f5f5f4; padding: 2px 6px; border-radius: 6px; color: #1c1917; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local access only / 仅限本机免密访问</h1>
+      <p>Rome Node Web UI currently has no password set and only allows requests from <code>localhost</code> or <code>127.0.0.1</code>.</p>
+      <p>To access remotely, open this UI from localhost and set a custom password, or restart the container with <code>ROME_NODE_UI_PASSWORD</code>.</p>
+      <p>当前未设置访问密码，仅允许通过本机（<code>localhost</code> / <code>127.0.0.1</code>）免密访问。如需远程访问，请先在本机 Web UI 中设置自定义密码，或在启动时设置 <code>ROME_NODE_UI_PASSWORD</code> 环境变量。</p>
+    </main>
+  </body>
+</html>`;
+
 export interface WebServerOptions {
   host: string;
   port: number;
@@ -25,8 +54,7 @@ export interface WebServerOptions {
   name?: string;
   explicitName?: boolean;
   assetsDir?: string;
-  token?: string;
-  requireAuth?: boolean;
+  password?: string;
   version?: string;
   signal?: AbortSignal;
   log?: (line: string) => void;
@@ -38,7 +66,7 @@ export interface RunningWebServer {
   readonly url: string;
   readonly port: number;
   readonly authRequired: boolean;
-  readonly initialToken: string | null;
+  readonly passwordSource: PasswordSource;
   readonly controller: HostController;
   close(): Promise<void>;
 }
@@ -109,10 +137,9 @@ function parseOptionalInt(value: string | null, name: string): number | undefine
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const assetsDir = resolveWebAssetsDir(options.assetsDir);
   const serveStatic = createStaticHandler(assetsDir);
-  const auth = createWebAuth({
-    host: options.host,
-    token: options.token,
-    requireAuth: options.requireAuth,
+  const auth = await createWebAuth({
+    configDirectory: options.configDirectory,
+    password: options.password,
     now: options.deps?.now,
   });
   const controller = new HostController({
@@ -127,6 +154,13 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   await controller.start();
 
   const sseClients = new Set<ServerResponse>();
+  function closeAllSseClients(): void {
+    for (const client of sseClients) {
+      client.end();
+    }
+    sseClients.clear();
+  }
+
   const unsubscribeController = controller.subscribe((event: HostControllerEvent) => {
     const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of [...sseClients]) {
@@ -181,11 +215,17 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 
     if (!auth.isTrustedHost(req)) {
       if (pathname.startsWith("/api/")) {
-        sendJson(res, 403, { error: "Untrusted Host header." });
+        sendJson(res, 403, {
+          error:
+            "Local passwordless mode only allows localhost requests. Set a password from localhost or via ROME_NODE_UI_PASSWORD for remote access.",
+        });
       } else {
         res
-          .writeHead(403, { "content-type": "text/plain; charset=utf-8" })
-          .end("Forbidden: untrusted Host header.");
+          .writeHead(403, {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+          })
+          .end(UNTRUSTED_HOST_HTML);
       }
       return;
     }
@@ -201,13 +241,18 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         sendJson(res, 200, {
           authRequired: auth.authRequired,
           authenticated: auth.isAuthenticated(req),
+          passwordSource: auth.passwordSource,
         });
         return;
       }
 
       if (pathname === "/api/auth/login" && method === "POST") {
         if (!auth.authRequired) {
-          sendJson(res, 200, { authRequired: false, authenticated: true });
+          sendJson(res, 200, {
+            authRequired: false,
+            authenticated: true,
+            passwordSource: auth.passwordSource,
+          });
           return;
         }
         const remote = req.socket.remoteAddress ?? "unknown";
@@ -222,10 +267,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return;
         }
         const body = await readJsonBody(req);
-        const token = typeof body.token === "string" ? body.token.trim() : "";
-        if (!auth.verifyToken(token)) {
+        const password = typeof body.password === "string" ? body.password : "";
+        if (!(await auth.verifyPassword(password))) {
           auth.recordLoginFailure(remote);
-          sendJson(res, 401, { error: "Invalid access token." });
+          sendJson(res, 401, { error: "Incorrect password." });
           return;
         }
         auth.clearLoginFailures(remote);
@@ -233,7 +278,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         sendJson(
           res,
           200,
-          { authRequired: true, authenticated: true },
+          { authRequired: true, authenticated: true, passwordSource: auth.passwordSource },
           { "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)) },
         );
         return;
@@ -241,6 +286,97 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 
       if (!auth.isAuthenticated(req)) {
         sendJson(res, 401, { error: "Authentication required." });
+        return;
+      }
+
+      if (pathname === "/api/auth/password" && method === "PUT") {
+        if (auth.passwordSource === "env") {
+          sendJson(res, 409, {
+            error: "Password is managed by the ROME_NODE_UI_PASSWORD environment variable.",
+          });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const newPasswordError = validateNewPassword(body.newPassword);
+        if (newPasswordError) {
+          throw new ControllerInputError(newPasswordError);
+        }
+        if (auth.passwordSource === "file") {
+          const remote = req.socket.remoteAddress ?? "unknown";
+          const limit = auth.checkLoginRateLimit(remote);
+          if (!limit.allowed) {
+            sendJson(
+              res,
+              429,
+              { error: "Too many failed password attempts. Try again shortly." },
+              { "retry-after": String(limit.retryAfterSeconds) },
+            );
+            return;
+          }
+          const currentPassword =
+            typeof body.currentPassword === "string" ? body.currentPassword : "";
+          if (!(await auth.verifyPassword(currentPassword))) {
+            auth.recordLoginFailure(remote);
+            sendJson(res, 401, { error: "Current password is incorrect." });
+            return;
+          }
+          auth.clearLoginFailures(remote);
+        }
+        const sessionId = await auth.setPassword(body.newPassword as string);
+        closeAllSseClients();
+        sendJson(
+          res,
+          200,
+          { authRequired: true, authenticated: true, passwordSource: auth.passwordSource },
+          { "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)) },
+        );
+        return;
+      }
+
+      if (pathname === "/api/auth/password" && method === "DELETE") {
+        if (auth.passwordSource === "env") {
+          sendJson(res, 409, {
+            error: "Password is managed by the ROME_NODE_UI_PASSWORD environment variable.",
+          });
+          return;
+        }
+        if (auth.passwordSource === "none") {
+          sendJson(res, 200, { authRequired: false, authenticated: true, passwordSource: "none" });
+          return;
+        }
+        if (!auth.isLoopbackRequest(req)) {
+          throw new ControllerInputError(
+            "Password can only be removed when accessing from localhost.",
+          );
+        }
+        const remote = req.socket.remoteAddress ?? "unknown";
+        const limit = auth.checkLoginRateLimit(remote);
+        if (!limit.allowed) {
+          sendJson(
+            res,
+            429,
+            { error: "Too many failed password attempts. Try again shortly." },
+            { "retry-after": String(limit.retryAfterSeconds) },
+          );
+          return;
+        }
+        const body = await readJsonBody(req);
+        const currentPassword =
+          typeof body.currentPassword === "string" ? body.currentPassword : "";
+        if (!(await auth.verifyPassword(currentPassword))) {
+          auth.recordLoginFailure(remote);
+          sendJson(res, 401, { error: "Current password is incorrect." });
+          return;
+        }
+        auth.clearLoginFailures(remote);
+        await auth.removePassword();
+        closeAllSseClients();
+        sendJson(
+          res,
+          200,
+          { authRequired: false, authenticated: true, passwordSource: "none" },
+          { "set-cookie": auth.clearSessionCookieHeader(isSecureRequest(req)) },
+        );
         return;
       }
 
@@ -466,13 +602,14 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   log(`Rome Node Web UI listening on ${url}`);
-  if (auth.tokenGenerated && auth.initialToken) {
-    log(`Web UI access token (generated): ${auth.initialToken}`);
-    log("Set ROME_NODE_UI_TOKEN to keep a stable token across container restarts.");
-  } else if (auth.authRequired) {
-    log("Web UI authentication: enabled (ROME_NODE_UI_TOKEN).");
+  if (auth.passwordSource === "env") {
+    log("Web UI authentication: enabled (ROME_NODE_UI_PASSWORD).");
+  } else if (auth.passwordSource === "file") {
+    log("Web UI authentication: enabled (custom password).");
   } else {
-    log("Web UI authentication: disabled (loopback only).");
+    log(
+      "Web UI authentication: passwordless for localhost (set a password in the UI or via ROME_NODE_UI_PASSWORD for remote access).",
+    );
   }
 
   let closed = false;
@@ -481,10 +618,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     closed = true;
     clearInterval(heartbeat);
     unsubscribeController();
-    for (const client of sseClients) {
-      client.end();
-    }
-    sseClients.clear();
+    closeAllSseClients();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await controller.dispose();
@@ -508,8 +642,12 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     server,
     url,
     port: actualPort,
-    authRequired: auth.authRequired,
-    initialToken: auth.initialToken,
+    get authRequired() {
+      return auth.authRequired;
+    },
+    get passwordSource() {
+      return auth.passwordSource;
+    },
     controller,
     close,
   };

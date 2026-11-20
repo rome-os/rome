@@ -159,34 +159,90 @@ describe("rome-node web server", () => {
     expect(isLoopbackHost("192.168.1.10")).toBe(false);
   });
 
-  it("enforces token auth, HttpOnly cookie session, CSRF check, and static gzip serving", async () => {
+  it("supports passwordless localhost default, custom scrypt password lifecycle, and env password auth", async () => {
     const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-auth-"));
     cleanup.push(() => rm(configDir, { recursive: true, force: true }));
     const assetsDir = await createAssetsFixture();
     const logs: string[] = [];
 
+    // Default startup is passwordless on localhost even when listening on 0.0.0.0 (Docker pattern).
+    const first = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      log: (line) => logs.push(line),
+    });
+
+    expect(first.authRequired).toBe(false);
+    expect(first.passwordSource).toBe("none");
+    expect(logs.some((line) => line.includes("passwordless for localhost"))).toBe(true);
+
+    // Health check works without authentication.
+    const health = await fetch(`${first.url}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true });
+
+    // Localhost API works immediately without password.
+    const initialSession = (await (await fetch(`${first.url}/api/auth/session`)).json()) as {
+      authRequired: boolean;
+      authenticated: boolean;
+      passwordSource: string;
+    };
+    expect(initialSession).toEqual({
+      authRequired: false,
+      authenticated: true,
+      passwordSource: "none",
+    });
+    expect((await fetch(`${first.url}/api/status`)).status).toBe(200);
+
+    // Setting too short password is rejected.
+    const shortRes = await fetch(`${first.url}/api/auth/password`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ newPassword: "123" }),
+    });
+    expect(shortRes.status).toBe(400);
+
+    // Setting a custom password persists scrypt hash to web-auth.json and returns session cookie.
+    const setRes = await fetch(`${first.url}/api/auth/password`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ newPassword: "my-custom-pass" }),
+    });
+    expect(setRes.status).toBe(200);
+    expect(first.authRequired).toBe(true);
+    expect(first.passwordSource).toBe("file");
+    const savedAuth = JSON.parse(await readFile(join(configDir, "web-auth.json"), "utf8")) as {
+      version: number;
+      salt: string;
+      hash: string;
+    };
+    expect(savedAuth.version).toBe(1);
+    expect(savedAuth.salt).toHaveLength(32);
+    expect(savedAuth.hash).toHaveLength(128);
+    expect(JSON.stringify(savedAuth)).not.toContain("my-custom-pass");
+    const cookieAfterSet = (setRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+    expect(
+      (await fetch(`${first.url}/api/status`, { headers: { cookie: cookieAfterSet } })).status,
+    ).toBe(200);
+    expect((await fetch(`${first.url}/api/status`)).status).toBe(401);
+
+    await first.close();
+
+    // Restarting with the same configDir loads the persisted custom password automatically.
     const running = await startWebServer({
       host: "127.0.0.1",
       port: 0,
       configDirectory: configDir,
       assetsDir,
-      requireAuth: true,
-      log: (line) => logs.push(line),
+      log: () => {},
     });
     cleanup.push(() => running.close());
 
     expect(running.authRequired).toBe(true);
-    expect(running.initialToken).toBeTruthy();
-    expect(logs.some((line) => line.includes(running.initialToken!))).toBe(true);
-
-    // Health check works without authentication.
-    const health = await fetch(`${running.url}/healthz`);
-    expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({ ok: true });
-
-    // Unauthenticated API access is rejected.
-    const unauth = await fetch(`${running.url}/api/status`);
-    expect(unauth.status).toBe(401);
+    expect(running.passwordSource).toBe("file");
+    expect((await fetch(`${running.url}/api/status`)).status).toBe(401);
 
     // Cross-origin login is rejected.
     const csrf = await fetch(`${running.url}/api/auth/login`, {
@@ -195,23 +251,23 @@ describe("rome-node web server", () => {
         "content-type": "application/json",
         origin: "https://evil.example",
       },
-      body: JSON.stringify({ token: running.initialToken }),
+      body: JSON.stringify({ password: "my-custom-pass" }),
     });
     expect(csrf.status).toBe(403);
 
-    // Wrong token fails with 401.
+    // Wrong password fails with 401.
     const badLogin = await fetch(`${running.url}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: "wrong-token" }),
+      body: JSON.stringify({ password: "wrong-password" }),
     });
     expect(badLogin.status).toBe(401);
 
-    // Correct token issues HttpOnly SameSite=Strict cookie.
+    // Correct password issues HttpOnly SameSite=Strict cookie.
     const login = await fetch(`${running.url}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: running.initialToken }),
+      body: JSON.stringify({ password: "my-custom-pass" }),
     });
     expect(login.status).toBe(200);
     const cookieHeader = login.headers.get("set-cookie") ?? "";
@@ -228,6 +284,28 @@ describe("rome-node web server", () => {
     expect(status.phase).toBe("unconfigured");
     expect(status.configured).toBe(false);
 
+    // Changing password requires correct currentPassword and rotates session cookie.
+    const badChange = await fetch(`${running.url}/api/auth/password`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie: cookiePair },
+      body: JSON.stringify({ currentPassword: "wrong", newPassword: "new-password-2" }),
+    });
+    expect(badChange.status).toBe(401);
+
+    const goodChange = await fetch(`${running.url}/api/auth/password`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie: cookiePair },
+      body: JSON.stringify({ currentPassword: "my-custom-pass", newPassword: "new-password-2" }),
+    });
+    expect(goodChange.status).toBe(200);
+    const rotatedCookie = (goodChange.headers.get("set-cookie") ?? "").split(";")[0]!;
+    expect(
+      (await fetch(`${running.url}/api/status`, { headers: { cookie: cookiePair } })).status,
+    ).toBe(401);
+    expect(
+      (await fetch(`${running.url}/api/status`, { headers: { cookie: rotatedCookie } })).status,
+    ).toBe(200);
+
     // Static assets negotiate pre-compressed gzip and block path traversal.
     const jsRes = await fetch(`${running.url}/static/app.js`, {
       headers: { "accept-encoding": "gzip" },
@@ -243,16 +321,16 @@ describe("rome-node web server", () => {
     const traversal = await fetch(`${running.url}/%2e%2e/package.json`);
     expect([403, 404]).toContain(traversal.status);
 
-    // Logout clears session.
-    const logout = await fetch(`${running.url}/api/auth/logout`, {
-      method: "POST",
-      headers: { cookie: cookiePair },
+    // Removing password restores localhost passwordless mode.
+    const removeRes = await fetch(`${running.url}/api/auth/password`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie: rotatedCookie },
+      body: JSON.stringify({ currentPassword: "new-password-2" }),
     });
-    expect(logout.status).toBe(200);
-    const afterLogout = await fetch(`${running.url}/api/status`, {
-      headers: { cookie: cookiePair },
-    });
-    expect(afterLogout.status).toBe(401);
+    expect(removeRes.status).toBe(200);
+    expect(running.authRequired).toBe(false);
+    expect(running.passwordSource).toBe("none");
+    expect((await fetch(`${running.url}/api/status`)).status).toBe(200);
   });
 
   it("handles full host lifecycle: device-code auth, exec + audit, limited mode toggle, disconnect/reconnect, and revocation", async () => {
@@ -493,6 +571,18 @@ describe("rome-node web server", () => {
     });
     expect(crossOriginRead.status).toBe(403);
 
+    // Reverse-proxied non-loopback X-Forwarded-Host / X-Forwarded-For must be rejected when passwordless.
+    const forwardedHost = await rawRequest(loopbackServer.port, "GET", "/api/status", {
+      host: `127.0.0.1:${loopbackServer.port}`,
+      "x-forwarded-host": "node.example.com",
+    });
+    expect(forwardedHost.status).toBe(403);
+    const forwardedFor = await rawRequest(loopbackServer.port, "GET", "/api/status", {
+      host: `127.0.0.1:${loopbackServer.port}`,
+      "x-forwarded-for": "203.0.113.42",
+    });
+    expect(forwardedFor.status).toBe(403);
+
     // Valid loopback Host passes and carries strict CSP without unsafe-inline in script-src.
     const validLocalhost = await rawRequest(loopbackServer.port, "GET", "/api/status", {
       host: `localhost:${loopbackServer.port}`,
@@ -504,7 +594,7 @@ describe("rome-node web server", () => {
     expect(csp).toContain("script-src 'self';");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
 
-    // Auth-required server rejects Authorization: Bearer bypasses (cookie sessions only).
+    // Env-password server allows remote Host with cookie login, blocks Bearer bypass, and returns 409 on password edit.
     const authConfigDir = await mkdtemp(join(tmpdir(), "rome-node-web-bearer-"));
     cleanup.push(() => rm(authConfigDir, { recursive: true, force: true }));
     const authServer = await startWebServer({
@@ -512,14 +602,36 @@ describe("rome-node web server", () => {
       port: 0,
       configDirectory: authConfigDir,
       assetsDir,
-      token: "fixed-secret-token",
+      password: "fixed-secret-password",
       log: () => {},
     });
     cleanup.push(() => authServer.close());
 
+    expect(authServer.passwordSource).toBe("env");
     const bearerAttempt = await fetch(`${authServer.url}/api/status`, {
-      headers: { authorization: "Bearer fixed-secret-token" },
+      headers: { authorization: "Bearer fixed-secret-password" },
     });
     expect(bearerAttempt.status).toBe(401);
+
+    const loginRes = await fetch(`${authServer.url}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "fixed-secret-password" }),
+    });
+    expect(loginRes.status).toBe(200);
+    const cookie = (loginRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const editEnvPass = await fetch(`${authServer.url}/api/auth/password`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ newPassword: "another-password" }),
+    });
+    expect(editEnvPass.status).toBe(409);
+
+    // Remote Host works once password is set.
+    const remoteRead = await rawRequest(authServer.port, "GET", "/api/status", {
+      host: `node.example.com:${authServer.port}`,
+      cookie,
+    });
+    expect(remoteRead.status).toBe(200);
   });
 });

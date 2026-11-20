@@ -1,23 +1,44 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { rm } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
+import { join } from "node:path";
+import { isRecord } from "@rome-os/node-core";
+import { readPrivateJson, writePrivateJson } from "@rome-os/node-core/storage";
 
 const SESSION_COOKIE = "rome_node_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SESSIONS = 64;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_FAILURES = 10;
+const AUTH_FILE_NAME = "web-auth.json";
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1 };
+export const MIN_PASSWORD_LENGTH = 6;
+export const MAX_PASSWORD_LENGTH = 256;
+
+export type PasswordSource = "none" | "file" | "env";
+
+interface StoredPasswordRecord {
+  version: 1;
+  salt: string;
+  hash: string;
+}
+
+interface ActivePassword {
+  salt: Buffer;
+  hash: Buffer;
+}
 
 export interface WebAuthOptions {
-  host: string;
-  token?: string;
-  requireAuth?: boolean;
+  configDirectory?: string;
+  password?: string;
   now?: () => number;
 }
 
 export interface WebAuth {
   readonly authRequired: boolean;
-  readonly tokenGenerated: boolean;
-  readonly initialToken: string | null;
+  readonly passwordSource: PasswordSource;
+  isLoopbackRequest(req: IncomingMessage): boolean;
   isTrustedHost(req: IncomingMessage): boolean;
   isAuthenticated(req: IncomingMessage): boolean;
   checkSameOrigin(req: IncomingMessage): boolean;
@@ -26,7 +47,9 @@ export interface WebAuth {
   ): { allowed: true } | { allowed: false; retryAfterSeconds: number };
   recordLoginFailure(remoteAddress: string): void;
   clearLoginFailures(remoteAddress: string): void;
-  verifyToken(candidate: string): boolean;
+  verifyPassword(candidate: string): Promise<boolean>;
+  setPassword(newPassword: string): Promise<string>;
+  removePassword(): Promise<void>;
   createSession(): string;
   clearSession(req: IncomingMessage): void;
   sessionCookieHeader(sessionId: string, secure: boolean): string;
@@ -40,6 +63,12 @@ export function isLoopbackHost(host: string): boolean {
     .replace(/^\[|\]$/g, "");
   if (normalized === "localhost" || normalized === "::1" || normalized === "127.0.0.1") {
     return true;
+  }
+  if (/^::ffff:127(?:\.\d{1,3}){3}$/.test(normalized)) {
+    return normalized
+      .slice("::ffff:".length)
+      .split(".")
+      .every((part) => Number(part) <= 255);
   }
   if (/^127(?:\.\d{1,3}){3}$/.test(normalized)) {
     return normalized.split(".").every((part) => Number(part) <= 255);
@@ -60,8 +89,41 @@ function parseHostHeaderHostname(hostHeader: string | undefined): string | null 
   }
 }
 
-function sha256(value: string): Buffer {
-  return createHash("sha256").update(value, "utf8").digest();
+function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
+}
+
+async function hashPassword(password: string): Promise<ActivePassword> {
+  const salt = randomBytes(16);
+  const hash = await deriveKey(password, salt);
+  return { salt, hash };
+}
+
+function parseStoredPassword(raw: unknown): ActivePassword | null {
+  if (!isRecord(raw) || raw.version !== 1) return null;
+  if (typeof raw.salt !== "string" || typeof raw.hash !== "string") return null;
+  if (!/^[0-9a-f]{32}$/i.test(raw.salt) || !/^[0-9a-f]{128}$/i.test(raw.hash)) return null;
+  const salt = Buffer.from(raw.salt, "hex");
+  const hash = Buffer.from(raw.hash, "hex");
+  if (salt.byteLength !== 16 || hash.byteLength !== SCRYPT_KEY_LENGTH) return null;
+  return { salt, hash };
+}
+
+export function validateNewPassword(candidate: unknown): string | null {
+  if (typeof candidate !== "string") return "Password must be a string.";
+  if (candidate.trim().length === 0) return "Password cannot be empty or whitespace only.";
+  if (candidate.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  if (candidate.length > MAX_PASSWORD_LENGTH) {
+    return `Password must be at most ${MAX_PASSWORD_LENGTH} characters.`;
+  }
+  return null;
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -88,13 +150,28 @@ export function isSecureRequest(req: IncomingMessage): boolean {
   return false;
 }
 
-export function createWebAuth(options: WebAuthOptions): WebAuth {
+export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   const now = options.now ?? (() => Date.now());
-  const provided = options.token?.trim() || undefined;
-  const authRequired = Boolean(provided || options.requireAuth || !isLoopbackHost(options.host));
-  const tokenGenerated = authRequired && !provided;
-  const activeToken = authRequired ? (provided ?? randomBytes(24).toString("base64url")) : null;
-  const expectedDigest = activeToken ? sha256(activeToken) : null;
+  const authPath = options.configDirectory ? join(options.configDirectory, AUTH_FILE_NAME) : null;
+  const envPassword = options.password?.trim() ? options.password : undefined;
+
+  let passwordSource: PasswordSource = "none";
+  let activePassword: ActivePassword | null = null;
+
+  if (envPassword !== undefined) {
+    activePassword = await hashPassword(envPassword);
+    passwordSource = "env";
+  } else if (authPath) {
+    try {
+      const stored = parseStoredPassword(await readPrivateJson(authPath));
+      if (stored) {
+        activePassword = stored;
+        passwordSource = "file";
+      }
+    } catch {
+      // Missing or unreadable auth file falls back to local passwordless mode.
+    }
+  }
 
   const sessions = new Map<string, number>();
   const failures = new Map<string, number[]>();
@@ -110,20 +187,43 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     }
   }
 
-  function verifyToken(candidate: string): boolean {
-    if (!expectedDigest) return true;
-    if (!candidate) return false;
-    return timingSafeEqual(sha256(candidate), expectedDigest);
+  function isLoopbackRequest(req: IncomingMessage): boolean {
+    const hostname = parseHostHeaderHostname(req.headers.host);
+    if (hostname === null || !isLoopbackHost(hostname)) return false;
+
+    const forwardedHost = req.headers["x-forwarded-host"];
+    if (typeof forwardedHost === "string" && forwardedHost.trim() !== "") {
+      const firstHost = forwardedHost.split(",")[0]?.trim();
+      const parsedForwardedHost = parseHostHeaderHostname(firstHost);
+      if (parsedForwardedHost === null || !isLoopbackHost(parsedForwardedHost)) return false;
+    }
+
+    const forwardedFor = req.headers["x-forwarded-for"];
+    if (typeof forwardedFor === "string" && forwardedFor.trim() !== "") {
+      const hops = forwardedFor
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (hops.length === 0 || !hops.every((hop) => isLoopbackHost(hop))) return false;
+    }
+
+    return true;
   }
 
   function isTrustedHost(req: IncomingMessage): boolean {
-    if (authRequired) return true;
-    const hostname = parseHostHeaderHostname(req.headers.host);
-    return hostname !== null && isLoopbackHost(hostname);
+    if (passwordSource !== "none") return true;
+    return isLoopbackRequest(req);
+  }
+
+  async function verifyPassword(candidate: string): Promise<boolean> {
+    if (!activePassword) return true;
+    if (!candidate) return false;
+    const derived = await deriveKey(candidate, activePassword.salt);
+    return timingSafeEqual(derived, activePassword.hash);
   }
 
   function isAuthenticated(req: IncomingMessage): boolean {
-    if (!authRequired) return isTrustedHost(req);
+    if (passwordSource === "none") return isTrustedHost(req);
     const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!sessionId) return false;
     const currentTime = now();
@@ -148,7 +248,7 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     if (!host) return false;
     try {
       const parsedOrigin = new URL(origin);
-      if (!authRequired && !isLoopbackHost(parsedOrigin.hostname)) return false;
+      if (passwordSource === "none" && !isLoopbackHost(parsedOrigin.hostname)) return false;
       return parsedOrigin.host.toLowerCase() === host.toLowerCase();
     } catch {
       return false;
@@ -198,6 +298,33 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     return id;
   }
 
+  async function setPassword(newPassword: string): Promise<string> {
+    if (!authPath) {
+      throw new Error("Configuration directory is not available for password storage.");
+    }
+    const next = await hashPassword(newPassword);
+    const record: StoredPasswordRecord = {
+      version: 1,
+      salt: next.salt.toString("hex"),
+      hash: next.hash.toString("hex"),
+    };
+    await writePrivateJson(authPath, record);
+    activePassword = next;
+    passwordSource = "file";
+    sessions.clear();
+    return createSession();
+  }
+
+  async function removePassword(): Promise<void> {
+    if (!authPath) {
+      throw new Error("Configuration directory is not available for password storage.");
+    }
+    await rm(authPath, { force: true });
+    activePassword = null;
+    passwordSource = "none";
+    sessions.clear();
+  }
+
   function clearSession(req: IncomingMessage): void {
     const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (sessionId) sessions.delete(sessionId);
@@ -213,16 +340,22 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
   }
 
   return {
-    authRequired,
-    tokenGenerated,
-    initialToken: tokenGenerated ? activeToken : null,
+    get authRequired() {
+      return passwordSource !== "none";
+    },
+    get passwordSource() {
+      return passwordSource;
+    },
+    isLoopbackRequest,
     isTrustedHost,
     isAuthenticated,
     checkSameOrigin,
     checkLoginRateLimit,
     recordLoginFailure,
     clearLoginFailures,
-    verifyToken,
+    verifyPassword,
+    setPassword,
+    removePassword,
     createSession,
     clearSession,
     sessionCookieHeader,

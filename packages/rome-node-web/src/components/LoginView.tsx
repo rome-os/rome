@@ -7,31 +7,31 @@ import { Input } from "@rome-os/ui/input";
 import { Spinner } from "@rome-os/ui/spinner";
 import { api } from "../api";
 import type { Messages } from "../i18n";
+import type { AuthSession } from "../types";
 import { RomeLogo } from "./RomeLogo";
 
 export interface LoginViewProps {
   t: Messages;
-  onUnlocked: () => void;
+  onUnlocked: (session: AuthSession) => void;
 }
 
 export function LoginView({ t, onUnlocked }: LoginViewProps) {
-  const [token, setToken] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const trimmed = token.trim();
-    if (!trimmed) {
+    if (!password) {
       setError(t.login.empty);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await api.login(trimmed);
-      setToken("");
-      onUnlocked();
+      const nextSession = await api.login(password);
+      setPassword("");
+      onUnlocked(nextSession);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -55,17 +55,17 @@ export function LoginView({ t, onUnlocked }: LoginViewProps) {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <Field>
-                <FieldLabel htmlFor="rome-node-ui-token">{t.login.tokenLabel}</FieldLabel>
+                <FieldLabel htmlFor="rome-node-ui-password">{t.login.passwordLabel}</FieldLabel>
                 <Input
-                  id="rome-node-ui-token"
+                  id="rome-node-ui-password"
                   type="password"
                   autoComplete="current-password"
                   autoFocus
                   size="md"
                   icon={<KeyRound />}
-                  placeholder={t.login.tokenPlaceholder}
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
+                  placeholder={t.login.passwordPlaceholder}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   disabled={busy}
                 />
               </Field>

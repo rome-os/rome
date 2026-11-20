@@ -76,7 +76,11 @@ export function App() {
       setAuditRevision((r) => r + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setSession({ authRequired: true, authenticated: false });
+        setSession((prev) => ({
+          authRequired: true,
+          authenticated: false,
+          passwordSource: prev?.passwordSource ?? "file",
+        }));
         setSnapshot(null);
       } else {
         setLoadError(err instanceof Error ? err.message : String(err));
@@ -136,7 +140,11 @@ export function App() {
     try {
       await api.logout();
     } finally {
-      setSession({ authRequired: true, authenticated: false });
+      setSession((prev) => ({
+        authRequired: true,
+        authenticated: false,
+        passwordSource: prev?.passwordSource ?? "file",
+      }));
       setSnapshot(null);
     }
   }
@@ -153,8 +161,8 @@ export function App() {
       {session && session.authRequired && !session.authenticated ? (
         <LoginView
           t={t}
-          onUnlocked={() => {
-            setSession({ authRequired: true, authenticated: true });
+          onUnlocked={(nextSession) => {
+            setSession(nextSession);
             void loadStatus();
           }}
         />
@@ -243,7 +251,13 @@ export function App() {
                   <EmptyStateTitle>{t.audit.loading}</EmptyStateTitle>
                 </EmptyState>
               ) : tab === "overview" ? (
-                <OverviewView t={t} snapshot={snapshot} onSnapshot={setSnapshot} />
+                <OverviewView
+                  t={t}
+                  snapshot={snapshot}
+                  onSnapshot={setSnapshot}
+                  passwordSource={session?.passwordSource ?? "none"}
+                  onSessionChange={setSession}
+                />
               ) : (
                 <AuditView
                   t={t}
