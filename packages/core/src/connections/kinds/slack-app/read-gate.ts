@@ -93,7 +93,16 @@ export class SlackReadGate {
       // later than this turn's start when the request before ran long or
       // waited out a refusal.
       await before;
-      await waitOut(this.answeredAt + this.options.intervalMs - Math.max(at, this.now()));
+      try {
+        await waitOut(this.answeredAt + this.options.intervalMs - Math.max(at, this.now()));
+      } catch (error) {
+        // A read refused before it asked gives its turn back, unless a later
+        // read has booked past it.
+        if (this.nextAt === at + this.options.intervalMs) {
+          this.nextAt = Math.max(this.answeredAt + this.options.intervalMs, at);
+        }
+        throw error;
+      }
       try {
         try {
           return await ask();
