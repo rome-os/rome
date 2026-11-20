@@ -9,17 +9,8 @@ export interface NodeUiMessages {
   /** The Gateway connections that need attention. A healthy one shows no text. */
   gateway: Record<Extract<NodeConnectionStatus, "retrying" | "revoked" | "superseded">, string>;
   title: string;
-  linkDevice: string;
-  linkDialog: {
-    title: string;
-    commandHelp: string;
-    access: string;
-    instructions: string;
-    close: string;
-  };
   status: Record<NodeDeviceStatus, string>;
   revokedDevices: string;
-  noDevices: string;
   statsUnavailable: string;
   card: {
     /** The name of a device's curve. */
@@ -124,16 +115,6 @@ const en: NodeUiMessages = {
     superseded: "Gateway connection replaced",
   },
   title: "Devices",
-  linkDevice: "Link device",
-  linkDialog: {
-    title: "Link a computer",
-    commandHelp:
-      "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
-    access:
-      "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
-    instructions: "Installation and connection guide",
-    close: "Close",
-  },
   status: {
     connected: "Connected",
     not_connected: "Not connected",
@@ -141,7 +122,6 @@ const en: NodeUiMessages = {
     revoked: "Access revoked",
   },
   revokedDevices: "Revoked",
-  noDevices: "No computers are linked to this account.",
   statsUnavailable: "Restart the device service to show command counts.",
   card: {
     chart: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
@@ -258,16 +238,6 @@ const zhCN: NodeUiMessages = {
     superseded: "Gateway 连接已被替换",
   },
   title: "设备",
-  linkDevice: "关联设备",
-  linkDialog: {
-    title: "关联电脑",
-    commandHelp:
-      "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
-    access:
-      "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
-    instructions: "安装与连接指南",
-    close: "关闭",
-  },
   status: {
     connected: "已连接",
     not_connected: "未连接",
@@ -275,7 +245,6 @@ const zhCN: NodeUiMessages = {
     revoked: "授权已撤销",
   },
   revokedDevices: "已撤销",
-  noDevices: "此账户尚未关联电脑。",
   statsUnavailable: "重启设备服务后即可显示命令统计。",
   card: {
     chart: { one: "24 小时 {count} 条命令", other: "24 小时 {count} 条命令" },

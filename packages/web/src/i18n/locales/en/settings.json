@@ -1029,8 +1029,17 @@
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
     "setup": {
-      "title": "Connect a computer",
-      "description": "Connect each computer separately.",
+      "title": "Connect a device",
+      "linkDevice": "Link device",
+      "methods": {
+        "desktop": "App",
+        "cli": "Rome Node CLI",
+        "container": "Rome Node container"
+      },
+      "desktopHelp": "Sign in to the Rome app with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
+      "desktopDownload": "Download Rome",
+      "comingSoon": "Coming soon",
+      "containerHelp": "Runs Rome Node in a Docker container using Docker Compose.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"
