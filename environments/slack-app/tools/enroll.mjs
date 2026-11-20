@@ -1,6 +1,6 @@
 // Enrolls one Rome instance in the environment's Rome Cloud and signs its
 // guardian in, the way a person does it in a browser: Rome Cloud's dev sign-in
-// for the account, then the instance's "Sign in with Rome Cloud", the consent
+// for the account, then the instance's "Continue with Rome Cloud", the consent
 // form, and the callback. The first sign-in creates the guardian seat and turns
 // the Concierge on.
 //

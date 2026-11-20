@@ -256,9 +256,11 @@ ENV
 
   cat <<DONE
 [slackenv-live] ready
+  To open Rome's dashboard as $guardian:
+    1. Open https://$CLOUD_HOST/api/auth/dev/start?email=$guardian
+       It signs you in to Rome Cloud and lands on Rome Cloud's own page. That is expected.
+    2. Open https://$ROME_HOST and press "Continue with Rome Cloud".
   Rome Cloud     https://$CLOUD_HOST
-  sign in first  https://$CLOUD_HOST/api/auth/dev/start?email=$guardian
-  dashboard      https://$ROME_HOST  (Sign in with Rome Cloud, as $guardian)
   Slack app      redirect https://$CLOUD_HOST/api/slack/app/callback
                  events   https://$CLOUD_HOST/api/slack/events
   check          $ENV_DIR/live.sh check
