@@ -161,6 +161,7 @@ const PAIRINGS: Pairing[] = [
   // makes reaching for one later safe.
   { fg: "primary-foreground", bg: "primary", min: AA_TEXT, why: "Button default label" },
   { fg: "primary-foreground", bg: "primary-hover", min: AA_TEXT, why: "Button hover label" },
+  { fg: "unread-foreground", bg: "unread", min: AA_TEXT, why: "sidebar unread count" },
   { fg: "brand-fg", bg: "brand", min: AA_TEXT, why: "declared partner" },
   { fg: "secondary-foreground", bg: "secondary", min: AA_TEXT, why: "Button secondary label" },
   { fg: "accent-foreground", bg: "accent", min: AA_TEXT, why: "focused menu item" },
@@ -247,6 +248,7 @@ const PAIRING_IDS = [
   "brand/surface",
   "primary-foreground/primary",
   "primary-foreground/primary-hover",
+  "unread-foreground/unread",
   "brand-fg/brand",
   "secondary-foreground/secondary",
   "accent-foreground/accent",

@@ -87,6 +87,26 @@ export function topicChatRows(
 }
 
 /**
+ * A row's unread count, on the bottom right corner of its icon, so the icon
+ * still shows. One red in every theme, ringed in the row's fill. Up to 99+;
+ * the pill widens to the left, so it never reaches the name.
+ */
+function UnreadCorner({ count, label }: { count: number; label: string }) {
+  const { t } = useTranslation("common");
+  return (
+    <Badge
+      shape="pill"
+      className="absolute -right-1.5 -bottom-1 h-2.75 min-w-2.75 justify-center border-0 bg-unread px-[var(--row-count-px)] font-semibold tabular-nums ring-2 ring-background group-hover:ring-surface-hover dark:group-hover:ring-surface"
+      data-concierge-unread
+      role="img"
+      aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+    >
+      {label}
+    </Badge>
+  );
+}
+
+/**
  * The sidebar's main chat entry, with a badge counting the agent messages the
  * guardian has not read. A new message recounts, and a read in this tab clears
  * it; another tab or device catches up on its next message or reconnect. The open
@@ -119,21 +139,9 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
             : undefined
         }
       >
-        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
-          {count > 0 ? (
-            <Badge
-              variant="brand"
-              shape="pill"
-              className="h-4 min-w-4 shrink-0 justify-center bg-primary-hover px-[var(--row-count-px)] font-normal tabular-nums"
-              data-concierge-unread
-              role="img"
-              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-            >
-              {label}
-            </Badge>
-          ) : (
-            <RomeLogo className="size-4 shrink-0" aria-hidden />
-          )}
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          <RomeLogo className="size-4 shrink-0" aria-hidden />
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
       </Link>
@@ -281,21 +289,9 @@ function ConciergeTopicEntry({
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
-          {count > 0 ? (
-            <Badge
-              variant="brand"
-              shape="pill"
-              className="h-4 min-w-4 shrink-0 justify-center bg-primary-hover px-[var(--row-count-px)] font-normal tabular-nums"
-              data-concierge-unread
-              role="img"
-              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-            >
-              {label}
-            </Badge>
-          ) : (
-            <Hash aria-hidden className="size-4 shrink-0" />
-          )}
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          <Hash aria-hidden className="size-4 shrink-0" />
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
         </span>
         {/* The menu button floats over the row's end, so the name keeps clear
             of it. */}
