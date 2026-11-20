@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type {
   Account,
   Channel,
-  ChannelMessage,
   ChatId,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { chatsWiring } from "../../../chats-wiring.js";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelSend } from "../../../chats/connected-accounts/connected-account.js";
 import type { ChatRepository } from "../../../chats/storage/chat-repository.js";
 import { ChatEvents, type MessageSaid } from "../../../chats/storage/events.js";
@@ -20,6 +20,7 @@ import type { MessageRepository } from "../../../chats/storage/message-repositor
 import { type Place, placeIn } from "../../../chats/storage/place.js";
 import { EMAIL_PLATFORM } from "../../../connections/email-chat-adapter.js";
 import { inboundRecording } from "../../../connections/inbound-recording.js";
+import type * as connections from "../../../connections/message.js";
 import { createTestDb, type TestDb } from "../../helpers.js";
 import { deferred, type VisibleMessage } from "./peer.js";
 
@@ -50,6 +51,14 @@ export interface ConformanceChannel {
     /** How a person sees what `personWrites` sent, where the platform adds
      *  to the words, as a mention of Rome's account. The words alone by default. */
     shows?(text: string): string;
+    /** A lookup the adapter makes on the platform before it hands a message
+     *  over, where it makes one, such as a reply's author. `hold` holds the
+     *  platform's next answer to it until released; `personWrites` writes a
+     *  message in the group that needs it, and the platform's id for it. */
+    readonly lookup?: {
+      hold(): { entered: Promise<void>; release(): void };
+      personWrites(text: string): string | Promise<string>;
+    };
   };
   /** A thread in `group`, where the platform has threads and the peer
    *  models one. */
@@ -87,13 +96,15 @@ export interface ConformanceChannel {
   stop(): Promise<void>;
 }
 
-/** A legacy channel adapter as the `Channel` ports Chats' adapter takes. */
+/** A legacy channel adapter as the `Channel` ports Chats' adapter takes. Each
+ *  message it hands over becomes what apps receive at the one point production
+ *  turns it, so the cases read the same `ChannelMessage` an app would. */
 export function channelOver(
   name: string,
   connectionId: string,
   adapter: {
     send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
-    onInbound(handler: (message: ChannelMessage) => Promise<void>): void;
+    onInbound(handler: (message: connections.Message) => Promise<void>): void;
   },
 ): Channel {
   const handlers = new Set<
@@ -101,7 +112,8 @@ export function channelOver(
       event: Parameters<Parameters<NonNullable<Channel["inbound"]>["subscribe"]>[0]>[0],
     ) => Promise<void>
   >();
-  adapter.onInbound(async (message) => {
+  adapter.onInbound(async (heard) => {
+    const message = channelMessageOf(heard, name);
     for (const handler of handlers)
       await handler({ kind: "message", message, ref: { connectionId, chatId: message.chatId } });
   });
@@ -131,7 +143,8 @@ export type ConformanceCase =
   | "group"
   | "twoAccounts"
   | "oneOfTwoAccounts"
-  | "thread";
+  | "thread"
+  | "inOrder";
 
 /**
  * Runs the conformance cases for the adapter `start` sets up. Each case gets
@@ -160,6 +173,9 @@ export function describeAdapterConformance(
     oneOfTwoAccounts?: boolean;
     /** A thread in the group, as `thread` names it. */
     threads: boolean;
+    /** A lookup the adapter waits on before handing a message over, as
+     *  `group.lookup` names it. */
+    lookups?: boolean;
   },
   /**
    * Cases Rome fails on this platform today, each with why. They are
@@ -406,6 +422,39 @@ export function describeAdapterConformance(
         ]);
         expect(chatsOf("group")).toEqual([heard.message.place.chat.id]);
         expect(directMessages()).toHaveLength(0);
+      },
+    );
+
+    runs("inOrder", models.groups && models.lookups === true)(
+      "hands a chat's messages over in the order they arrived, however slow a lookup",
+      async () => {
+        const group = peer.group!;
+        const lookup = group.lookup!;
+        const shows = (text: string) => group.shows?.(text) ?? text;
+        const held = lookup.hold();
+        const before = said.length;
+
+        await lookup.personWrites("first, which needs a lookup");
+        await held.entered;
+        await group.personWrites("second");
+        // Give the second message the time to overtake the first, if it can.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        held.release();
+
+        // A message the lookup needs, such as the one a reply answers, may
+        // be recorded too; only the two the person wrote are compared.
+        const written = [shows("first, which needs a lookup"), shows("second")];
+        const recorded = () =>
+          said
+            .slice(before)
+            .map((heard) => heard.message.body.text)
+            .filter((text) => written.includes(text));
+        const deadline = Date.now() + 3_000;
+        while (recorded().length < 2) {
+          if (Date.now() > deadline) throw new Error("Rome did not record both messages");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(recorded()).toEqual(written);
       },
     );
 

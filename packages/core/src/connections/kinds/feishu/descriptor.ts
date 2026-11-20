@@ -3,7 +3,7 @@
 // Feishu shares a single `app` grant between chat and Docx plain-text reads.
 // The grant holds the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
-// the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
+// the SDK long connection, the inbound `Message`, markdown send, and the
 // group-config card flow — is the existing
 // `FeishuAdapter` (packages/core/src/connections/kinds/feishu/feishu.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The

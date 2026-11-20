@@ -13,7 +13,8 @@ import { RenewalUnavailable } from "./errors.js";
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/db.js";
 import type { DrizzleTx, SqliteExec } from "../db/index.js";
-import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
+import type * as connections from "./message.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import type { GrantValue } from "./grant.js";
 import type { ConnectionsRepository, StoredConnection } from "./repository.js";
@@ -395,7 +396,7 @@ describe("registry faults", () => {
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       expect(conn.isUnlocked("chat")).toBe(true);
-      const heard: ChannelMessage[] = [];
+      const heard: connections.Message[] = [];
       expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
       await conn.withTalker((talker) =>
         talker.send("thread-1" as ChatId, { text: "before revoke" }),
@@ -420,7 +421,7 @@ describe("registry faults", () => {
         talker.send("thread-1" as ChatId, { text: "after reimport" }),
       );
       expect(newTalker.state.sends.map((s) => s.msg)).toEqual([{ text: "after reimport" }]);
-      newTalker.state.deliver?.(makeInboundMessage({ messageId: "after-reimport" }));
+      newTalker.state.deliver?.(makeInboundMessage({ id: "after-reimport" }));
       await flush();
       expect(heard).toEqual([]);
     });
@@ -684,18 +685,7 @@ describe("registry faults", () => {
       // Deliver a message through the rebuilt instance → resets disconnectStreak.
       const inst1 = fx.talkerFactory.instances.at(-1);
       if (!inst1) throw new Error("inst1 not built");
-      inst1.state.deliver?.({
-        channel: "test",
-        direction: "inbound",
-        messageId: "m",
-        chatId: "thread-1" as ChatId,
-        senderId: "s",
-        senderDisplayName: "S",
-        thread: { kind: "dm" },
-        text: "hi",
-        attachments: [],
-        timestamp: new Date(0),
-      });
+      inst1.state.deliver?.(makeInboundMessage({ id: "m" }));
 
       // Next fault should start again from base, not base*2.
       inst1.state.fault?.(new Disconnected());
@@ -762,8 +752,8 @@ describe("registry faults", () => {
       // produces (build() runs synchronously inside the grant, before
       // start(), so the knob is set in time).
       const flushed = makeInboundMessage({
-        messageId: "buffered-1",
-        text: "buffered on start",
+        id: "buffered-1",
+        content: { text: "buffered on start", attachments: [] },
       });
       const originalBuild = fx.talkerFactory.build.bind(fx.talkerFactory);
       fx.talkerFactory.build = (cred) => {
@@ -777,7 +767,7 @@ describe("registry faults", () => {
       // Register the unlock handler BEFORE the epoch is built. When chat unlocks,
       // the handler synchronously registers an onMessage listener — which must be
       // wired before start() runs, or the buffered flush is lost.
-      const received: ChannelMessage[] = [];
+      const received: connections.Message[] = [];
       registry.onUnlocked("chat", (c) => {
         c.hearTalker(async (msg) => {
           received.push(msg);
@@ -791,8 +781,8 @@ describe("registry faults", () => {
 
       // Before the fix (start before onUnlocked) the buffered message dropped
       // into empty handler arrays; after the fix it is delivered.
-      expect(received.map((m) => m.messageId)).toContain("buffered-1");
-      expect(received.map((m) => m.text)).toContain("buffered on start");
+      expect(received.map((m) => m.id)).toContain("buffered-1");
+      expect(received.map((m) => m.content.text)).toContain("buffered on start");
     });
   });
 });

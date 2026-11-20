@@ -159,6 +159,10 @@ export class DiscordPeer implements Peer {
       names?: "second" | "nobody";
       /** The message it replies to. */
       replyTo?: string;
+      /** The frame carries the reply's reference but not the message it
+       *  answers, as Discord sends it when it cannot resolve that message, so
+       *  a bot that never saw it fetches it. */
+      referenceOnly?: boolean;
       /** The first bot hears it well before any other, as one gateway can. */
       firstBotHearsFirst?: boolean;
     } = {},
@@ -174,7 +178,7 @@ export class DiscordPeer implements Peer {
       ...(options.replyTo ? { replyTo: options.replyTo } : {}),
     });
     this.stamp(message.id);
-    const wire = this.wire(message);
+    const wire = this.wire(message, options.referenceOnly === true);
     const guild = this.channels.get(channelId)?.guild_id;
     const named =
       options.names === "nobody"
@@ -200,6 +204,22 @@ export class DiscordPeer implements Peer {
     } else {
       this.dispatch("MESSAGE_CREATE", data, guild ? undefined : BOT);
     }
+    return message;
+  }
+
+  /** A user's message the bots never heard, as one said before they joined:
+   *  on record, and fetched by id, but never dispatched. */
+  sayUnheard(text: string, channelId: string): VisibleMessage {
+    const message = this.store.add({
+      // The upper half of the low bits keeps it apart from a dispatched id.
+      id: String(
+        ((BigInt(Date.now()) - DISCORD_EPOCH) << 22n) | BigInt((this.sequence + 0x800) & 0xfff),
+      ),
+      conversation: channelId,
+      from: "user",
+      text,
+    });
+    this.stamp(message.id);
     return message;
   }
 

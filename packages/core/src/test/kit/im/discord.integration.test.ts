@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { REST, type RequestMethod, type RESTOptions, Routes } from "discord.js";
 import { DiscordAdapter } from "../../../connections/kinds/discord/discord.js";
@@ -76,7 +77,7 @@ describe("DiscordAdapter.send against the peer", () => {
 
   async function receive(text: string): Promise<ChannelMessage> {
     const heard = deferred<ChannelMessage>();
-    adapter.onInbound(async (message) => heard.resolve(message));
+    adapter.onInbound(async (message) => heard.resolve(channelMessageOf(message, "discord")));
     peer.emitMessage(text);
     return heard.promise;
   }

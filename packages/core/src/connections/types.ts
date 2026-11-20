@@ -4,7 +4,6 @@
 // the `expiresAt` envelope).
 
 import type {
-  ChannelMessage,
   ChatDescriptor,
   ChatId,
   MessageReceipt,
@@ -15,14 +14,15 @@ import type {
 } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { CredentialRejected, Disconnected } from "./errors.js";
+import type { Message } from "./message.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it
 // (`Talker`). Only the channel ports (chats/connected-accounts/connection-ports.ts) reach it,
 // through `Connection.withTalker`: apps reach channels through the channels
 // service (actions) or a hook's `channels`. A talker delivers each message as
-// the channel's own record: a `ChannelMessage` naming the channel it backs,
-// with direction `inbound`.
+// a Connections `Message` (message.ts): the platform's facts, with no
+// addressing. The ports turn it into the `ChannelMessage` apps receive.
 
 /** The conversations a Connection can see, for conversation settings. */
 export interface TalkDirectory {
@@ -246,7 +246,7 @@ export interface Connection {
   withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
   /** Hears each message the live talker delivers until chat relocks, or null
    *  while chat is locked. */
-  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
+  hearTalker(handler: (message: Message) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
   get act(): Act | null;
   get watch(): Watch | null;
@@ -268,7 +268,18 @@ export interface RuntimeKit {
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
-  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
+  /**
+   * Starts the transport, which calls `deliver` for each message heard.
+   *
+   * Order, per chat: `deliver` is called for a chat's messages in the order
+   * the platform gave them, even when one needs a lookup first, such as a
+   * reply's author. Core keeps the order `deliver` is called in, so a
+   * Talker that calls it late for a slow message reorders the chat for good.
+   * Different chats may deliver in any order. A `KeyedMutex` keyed by chat,
+   * held from the platform's event to `deliver`, keeps the rule; the adapter
+   * conformance suite checks it.
+   */
+  start(deliver: (msg: Message) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
