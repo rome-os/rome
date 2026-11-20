@@ -94,30 +94,6 @@ describe("create_routine — engine activation", () => {
     expect(engine.activated[0]).toMatchObject({ id: routineId, name: "daily-dream" });
   });
 
-  it("saves the action's full ID when asked by its bare name", async () => {
-    const result = await createRoutine(
-      {
-        name: "nightly",
-        trigger: { type: "manual" },
-        actionName: "system_upgrade",
-        args: {},
-      },
-      {
-        routinesRepo: repo,
-        actionRegistry: {
-          ...allActions,
-          getCanonicalName: (name: string) => `system:${name}`,
-        },
-        routineEngine: makeFakeEngine(),
-        resolveOneOffDate,
-      },
-    );
-
-    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
-    const row = await repo.findById((result.data as { routineId: string }).routineId);
-    expect(row?.actionName).toBe("system:system_upgrade");
-  });
-
   it("auto-attributes managedBy to the app that invoked the action", async () => {
     const engine = makeFakeEngine();
 
@@ -450,6 +426,49 @@ describe("create_routine — validation and fail-closed", () => {
     expect(result.error).toMatch(/workflow_creation/);
     expect(await repo.findAll()).toHaveLength(0);
     expect(engine.activated).toHaveLength(0);
+  });
+
+  it("names the full ID of a bare target only to an agent that holds it", async () => {
+    const registry = {
+      has: (n: string) => n === "coding:coding_task",
+      isExplicit: () => false,
+      suggest: (n: string) => (n === "coding_task" ? "coding:coding_task" : undefined),
+      validateArgs: () => null,
+    };
+    const attempt = (holds: boolean) =>
+      actionExecutionContext.run(
+        { executionId: "exec", rootExecutionId: "root", agentName: "main" },
+        () =>
+          createRoutine(
+            {
+              name: "nightly-code",
+              trigger: {
+                type: "schedule",
+                tzid: "UTC",
+                tzMode: "fixed",
+                localTime: "02:00",
+                rrule: "FREQ=DAILY",
+              },
+              actionName: "coding_task",
+              args: {},
+            },
+            {
+              routinesRepo: repo,
+              actionRegistry: registry,
+              agentRunner: { hasAction: () => holds },
+              routineEngine: makeFakeEngine(),
+              resolveOneOffDate,
+            },
+          ),
+      );
+
+    const held = await attempt(true);
+    const notHeld = await attempt(false);
+
+    if (held.status !== "error" || notHeld.status !== "error") throw new Error("expected errors");
+    expect(held.error).toContain('Did you mean "coding:coding_task"?');
+    expect(notHeld.error).not.toContain("coding:coding_task");
+    expect(await repo.findAll()).toHaveLength(0);
   });
 
   it("accepts a routine bound to a built-in action the registry knows", async () => {

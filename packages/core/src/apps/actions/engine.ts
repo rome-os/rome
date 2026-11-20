@@ -22,6 +22,7 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { didYouMean } from "./registry.js";
 import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
@@ -431,8 +432,8 @@ interface ActionWorkerProcess {
  * Typed so the app-facing invocation port can map it to `code: "not_found"`
  * without matching on the message. */
 export class ActionNotFoundError extends Error {
-  constructor(actionName: string) {
-    super(`Action "${actionName}" not found`);
+  constructor(actionName: string, hint = "") {
+    super(`Action "${actionName}" not found${hint}`);
     this.name = "ActionNotFoundError";
   }
 }
@@ -572,7 +573,7 @@ export class ActionEngine {
   ): Promise<ActionResult> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name);
+      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
     }
     if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
       log.info("personal-data action refused outside a private turn", {
@@ -625,7 +626,7 @@ export class ActionEngine {
   ): Promise<ActionDispatchReceipt> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name);
+      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
     }
     const store = replayContext.getStore();
     if (store?.coordinationRoot) {
@@ -1358,7 +1359,10 @@ export class ActionEngine {
       throw new Error("Only the main ActionEngine can accept detached actions");
     }
     if (!this.registry.get(payload.actionName)) {
-      throw new ActionNotFoundError(payload.actionName);
+      throw new ActionNotFoundError(
+        payload.actionName,
+        didYouMean(this.registry, payload.actionName),
+      );
     }
     const executionId = payload.context.executionId;
     if (!executionId || payload.context.rootExecutionId !== executionId) {

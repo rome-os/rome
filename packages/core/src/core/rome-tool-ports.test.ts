@@ -22,10 +22,9 @@ const ACTIONS = [action("system:send_message"), action("system:create_routine"),
 
 const registry: ActionRegistry = {
   register: () => {},
-  get: (name) =>
-    ACTIONS.find((a) => a.config.name === (name === "send" ? "system:send_message" : name)),
+  get: (name) => ACTIONS.find((a) => a.config.name === name),
   has: (name) => ACTIONS.some((a) => a.config.name === name),
-  getCanonicalName: (name) => (name === "send" ? "system:send_message" : name),
+  suggest: (name) => (name === "send_message" ? "system:send_message" : undefined),
   list: () => ACTIONS.map((a) => a.config.name),
   getForAgent: (names) =>
     names.includes("*") ? ACTIONS : ACTIONS.filter((a) => names.includes(a.config.name)),
@@ -73,20 +72,36 @@ function ports(
 }
 
 describe("romeToolPorts actions", () => {
-  it("lists and permits only what the turn's agent may call, under any of its names", () => {
+  it("lists and permits only what the turn's agent may call, by full ID", () => {
     const { actions } = ports();
     expect(actions.list(turn()).map((a) => a.name)).toEqual([
       "system:send_message",
       "system:create_routine",
     ]);
-    expect(actions.permits(turn(), "send")).toBe(true);
+    expect(actions.permits(turn(), "system:send_message")).toBe(true);
+    expect(actions.permits(turn(), "send_message")).toBe(false);
     expect(actions.permits(turn(), "secret")).toBe(false);
   });
 
-  it("finds an action the turn's agent may call under any of its names, and no other", () => {
+  it("names the full ID when an action is called without its app", async () => {
     const { actions } = ports();
-    expect(actions.find(turn(), "send")?.name).toBe("system:send_message");
+    await expect(actions.run(turn(), "send_message", { text: "hi" })).rejects.toThrow(
+      'Unknown action: send_message. Did you mean "system:send_message"?',
+    );
+  });
+
+  it("names no full ID the turn's agent may not call", async () => {
+    const { actions } = ports();
+    const denied = turn({ actions: ["system:create_routine"] });
+    await expect(actions.run(denied, "send_message", { text: "hi" })).rejects.toThrow(
+      /^Unknown action: send_message$/,
+    );
+  });
+
+  it("finds an action the turn's agent may call by its full ID, and no other", () => {
+    const { actions } = ports();
     expect(actions.find(turn(), "system:send_message")?.name).toBe("system:send_message");
+    expect(actions.find(turn(), "send_message")).toBeUndefined();
     expect(actions.find(turn(), "secret")).toBeUndefined();
     expect(actions.find(turn(), "missing")).toBeUndefined();
   });

@@ -119,8 +119,8 @@ export interface WorkerRpcServices {
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
   isExplicitAction: (name: string) => boolean;
-  /** The action's full ID for any name it is known by. */
-  canonicalActionName: (name: string) => string | undefined;
+  /** The full ID of the one action whose name without its app is `name`. */
+  suggestAction: (name: string) => string | undefined;
   /** Checks args against the main registry's input schema for the action, the
    * one worker-local lazy stubs lack. Returns an error message, or null when
    * the args fit, the action declares no schema, or the action is unknown. */
@@ -153,7 +153,7 @@ export class WorkerRpcServer {
           ),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
-        "actions.canonicalName": (params) => this.handleActionsCanonicalName(params),
+        "actions.suggest": (params) => this.handleActionsSuggest(params),
         "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
         "events.publish": (params) => this.handleEventsPublish(params),
         "events.searchCatalog": (params) => this.handleEventsSearchCatalog(params),
@@ -268,10 +268,10 @@ export class WorkerRpcServer {
     return { explicit: this.services.isExplicitAction(actionName) };
   }
 
-  /** The full ID the worker-side create_routine saves a routine under. */
-  private handleActionsCanonicalName(params: unknown): { canonicalName: string | null } {
-    const { actionName } = parseWorkerCallParams("actions.canonicalName", ActionHasParams, params);
-    return { canonicalName: this.services.canonicalActionName(actionName) ?? null };
+  /** The worker-side create_routine's "did you mean" for an unknown name. */
+  private handleActionsSuggest(params: unknown): { suggestion: string | null } {
+    const { actionName } = parseWorkerCallParams("actions.suggest", ActionHasParams, params);
+    return { suggestion: this.services.suggestAction(actionName) ?? null };
   }
 
   /** Input-schema check for the worker-side create_routine args gate. */
