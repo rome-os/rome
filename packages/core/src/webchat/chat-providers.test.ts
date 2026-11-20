@@ -255,3 +255,14 @@ describe("a card rewritten in place", () => {
     ).toBe(false);
   });
 });
+
+describe("a chat that moved on since a request", () => {
+  it("has a person's newer message, or is gone", async () => {
+    const { webchatRepo } = await setup();
+    const before = Date.now() - 60_000;
+    // "plain" holds a message said just now.
+    expect(webchatRepo.chatMovedOnSince("plain", before)).toBe(true);
+    expect(webchatRepo.chatMovedOnSince("plain", Date.now() + 60_000)).toBe(false);
+    expect(webchatRepo.chatMovedOnSince("gone", before)).toBe(true);
+  });
+});

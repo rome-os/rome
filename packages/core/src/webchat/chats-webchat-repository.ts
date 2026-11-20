@@ -402,6 +402,27 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return true;
   }
 
+  /**
+   * Whether dashboard chat `sessionId` moved on after `sinceMs`: a person
+   * wrote in it, it was archived, or it is gone. A request a card stopped
+   * then no longer runs again by itself.
+   */
+  chatMovedOnSince(sessionId: string, sinceMs: number): boolean {
+    const since = Math.floor(sinceMs / 1000);
+    const chat = this.db.get<{ archived: number; wrote: number }>(sql`
+      SELECT (s.archived_at IS NOT NULL) AS archived,
+        EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id IS NOT NULL AND m.sender_agent IS NULL
+            AND m.said_at > ${since}
+        ) AS wrote
+      FROM ${romeSessions} s
+      WHERE s.id = ${sessionId}
+    `);
+    return !chat || chat.archived === 1 || chat.wrote === 1;
+  }
+
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
   canContinueAfterRestart(turn: InterruptedTurn): boolean {
     return (

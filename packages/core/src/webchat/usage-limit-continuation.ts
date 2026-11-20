@@ -84,29 +84,6 @@ export interface UsageLimitContinuationOptions {
 }
 
 /**
- * Whether the turn that stopped in chat `chatId` may still run again by itself,
- * by the checks a usage-limit continuation makes: its chat's newest turn, in
- * a chat nobody has written in since, with activity in the last day.
- */
-export function stoppedTurnContinues(
-  repo: Pick<
-    ChatsWebChatRepository,
-    "getLatestErroredTurns" | "canContinueAfterUsageLimit" | "getRestartLastActivityAt"
-  >,
-  chatId: string,
-  now = Date.now(),
-): boolean {
-  const stop = repo
-    .getLatestErroredTurns(now - MAX_RESTART_INACTIVITY_MS)
-    .find(({ turn }) => turn.sessionId === chatId);
-  if (!stop) return false;
-  return (
-    repo.canContinueAfterUsageLimit(stop.turn) &&
-    isRecentActivity(repo.getRestartLastActivityAt(stop.turn), now)
-  );
-}
-
-/**
  * Continues turns a usage limit stopped, once the limit has cleared: the
  * guardian's own, and a task chat's, which runs unattended. Call once after
  * startup. Each settled read of an account that shows its provider available

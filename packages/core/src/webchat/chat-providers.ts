@@ -24,6 +24,18 @@ import type { WebChatRepository } from "./repository.js";
 
 const log = createLogger("chat-providers");
 
+/**
+ * Whether a chat may spend Rome credits: true once the guardian moved it onto
+ * them, false while it is kept on another provider, undefined when it
+ * follows the default, which decides.
+ */
+export function chatSpendsCredits(
+  chat: { romeCredits?: boolean | null; largeModelSelectionBy?: string | null } | null | undefined,
+): boolean | undefined {
+  if (chat?.romeCredits) return true;
+  return chat?.largeModelSelectionBy === "kept" ? false : undefined;
+}
+
 export interface ChatProvidersDeps {
   webchatRepo: Pick<
     WebChatRepository,

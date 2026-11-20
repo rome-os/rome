@@ -55,8 +55,12 @@ function harness(
     runtimeOf?: (chatId: string) => Promise<string | null>;
     /** What keeping a chat waits on, as the real write would. */
     keeping?: Promise<void>;
+    /** The clock. Default: the real one. */
+    now?: () => Date;
+    /** What a recovery turn waits on in the chat's queue before it is dispatched. */
+    queue?: Promise<void>;
     /** Whether a stopped turn may still run again by itself. Default: always. */
-    continues?: (chatId: string) => boolean;
+    continues?: (chatId: string, since: number) => boolean;
   } = {},
 ) {
   const messages = new Map<string, { chatId: string; parts: unknown[] }>();
@@ -162,7 +166,11 @@ function harness(
     mainChatId: async (owner) => (owner === "guardian" ? "main" : `main-${owner}`),
     runtimeOf: options.runtimeOf ?? (async (chatId) => `session-${chatId}`),
     runner: {
+      // As the real runner: the turn waits its turn in the queue, then asks
+      // `shouldRun` once more and runs only if it still should.
       runAndReport: async (params, runOptions) => {
+        await options.queue;
+        if (runOptions?.shouldRun && !runOptions.shouldRun()) return "completed";
         runs.push({
           threadId: params.threadId,
           prompt: params.prompt,
@@ -190,6 +198,7 @@ function harness(
       },
     },
     delay: options.delay ?? (async () => {}),
+    ...(options.now ? { now: options.now } : {}),
     later: (ms, work) => {
       timers.push({ ms, work });
       return () => {
@@ -849,6 +858,10 @@ describe("a card resumes its turn, once", () => {
     ]);
     const h = harness({ chat: {} }, { openai: reportOf("available") }, { settings });
     await flush();
+    // Nothing runs until Rome has started.
+    expect(h.runs).toEqual([]);
+    await h.failures.start();
+    await flush();
     expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
     expect(settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
   });
@@ -1007,6 +1020,7 @@ describe("the silent retry", () => {
     await first.fail("chat", temporary);
     first.failures.stop();
     const after = harness({ chat: {} }, reports, { settings: first.settings });
+    await after.failures.start();
     await flush();
     expect(after.timers.map((timer) => timer.ms)).toEqual([30_000]);
     after.timers[0]?.work();
@@ -1148,6 +1162,7 @@ describe("round 5: what the second review found", () => {
       { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
       { settings: h.settings },
     );
+    await after.failures.start();
     await flush();
     expect(after.runs.map((run) => run.threadId)).toEqual(["chat"]);
     expect(after.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
@@ -1383,5 +1398,127 @@ describe("a recovery turn", () => {
     );
     await h.fail("chat", revoked);
     expect(h.cardIn("chat")).toMatchObject({ provider: "rome_credits", reason: "credits_used_up" });
+  });
+});
+
+describe("round 6: recovery bound to the card's request", () => {
+  const held = () => {
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { wait, release };
+  };
+
+  it("checks the request the card stopped, not Rome's own failed retry", async () => {
+    let clock = Date.parse("2026-11-20T10:00:00Z");
+    const asked: number[] = [];
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("available") },
+      {
+        now: () => new Date(clock),
+        continues: (_chatId, since) => {
+          asked.push(since);
+          return true;
+        },
+        // The silent retry fails again, later, as Rome's own turn.
+        onRun: (params, failures) => {
+          clock += 60_000;
+          void failures.failed({
+            chatId: params.threadId,
+            agentName: "main",
+            turnId: "t-retry",
+            failure: { kind: "turn", failure: temporary },
+          });
+        },
+      },
+    );
+    await h.fail("chat", temporary);
+    await flush();
+    const [card] = await h.failures.cards();
+    expect(card?.origin).toBe("2026-11-20T10:00:00.000Z");
+    // The card's recovery, when it comes, asks about that first request.
+    h.timers.at(-1)?.work();
+    await flush();
+    expect(asked.at(-1)).toBe(Date.parse("2026-11-20T10:00:00Z"));
+  });
+
+  it("replays a restart's resumes only once Rome has started, keeping each until dispatched", async () => {
+    const queue = held();
+    const settings = new Map<string, unknown>([
+      [PROVIDER_RESUMES_SETTING_KEY, [{ chatId: "chat", agentName: "main", name: "Claude" }]],
+    ]);
+    const h = harness(
+      { chat: {} },
+      { openai: reportOf("available") },
+      {
+        settings,
+        queue: queue.wait,
+      },
+    );
+    await flush();
+    await h.failures.start();
+    await flush();
+    // Waiting in the chat's queue: the promise to run is still kept.
+    expect(settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([
+      expect.objectContaining({ chatId: "chat" }),
+    ]);
+    queue.release();
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
+  });
+
+  it("skips a resumed turn the queue reaches after a newer turn of the chat ran", async () => {
+    const queue = held();
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { queue: queue.wait },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    await flush();
+    // The guardian sent again meanwhile, and that turn ran.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await h.failures.succeeded("chat");
+    queue.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+    // Decided, so the promise to run is gone too.
+    expect(h.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
+  });
+
+  it("skips a resumed turn whose chat someone wrote in since its request", async () => {
+    const queue = held();
+    let wrote = false;
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { queue: queue.wait, continues: () => !wrote },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    wrote = true;
+    queue.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+  });
+
+  it("names ChatGPT for a chat kept on it, though Rome credits are the default", async () => {
+    const h = harness(
+      { chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "kept" } },
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      {
+        defaultProvider: "rome_credits",
+        signedIn: { anthropic: false, openai: false, rome_credits: true },
+        credits: true,
+      },
+    );
+    await h.fail("chat", revoked);
+    expect(h.cardIn("chat")).toMatchObject({ provider: "openai", reason: "removed" });
   });
 });

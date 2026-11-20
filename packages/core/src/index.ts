@@ -1,14 +1,15 @@
-import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { continueInterruptedTurns, isRecentActivity } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import {
-  startUsageLimitContinuation,
-  stoppedTurnContinues,
-} from "./webchat/usage-limit-continuation.js";
+import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { webchatSessionKey } from "./core/agent-session-key.js";
-import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
+import {
+  chatSpendsCredits,
+  createChatProviders,
+  type ChatProviders,
+} from "./webchat/chat-providers.js";
 import { createProviderFailures } from "./webchat/provider-failures.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
@@ -1375,11 +1376,7 @@ async function main() {
       agentLoader,
       sessionRepository,
       // On Rome credits; kept on another provider, never on them; else as the default says.
-      chatOnCredits: async (chatId) => {
-        const chat = await webchatRepo.getSession(chatId);
-        if (chat?.romeCredits) return true;
-        return chat?.largeModelSelectionBy === "kept" ? false : undefined;
-      },
+      chatOnCredits: async (chatId) => chatSpendsCredits(await webchatRepo.getSession(chatId)),
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1592,8 +1589,10 @@ async function main() {
       const chat = await webchatRepo.getSession(chatId);
       return chat ? actorOfOwner(db, ownerOf(chat)) : undefined;
     },
-    // A turn resumed by itself passes the usage-limit continuation's checks.
-    continues: (chatId) => stoppedTurnContinues(webchatRepo, chatId),
+    // A request a card stopped runs again only as a continuation would: in a
+    // chat nobody has written in since, not archived, within a day.
+    continues: (chatId, since) =>
+      !webchatRepo.chatMovedOnSince(chatId, since) && isRecentActivity(since, Date.now()),
     selectModel: selectChatModel,
     canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,
@@ -2809,6 +2808,10 @@ async function main() {
   // Startup is known-good: record this version as the last completed boot so
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
+
+  // The chats' runtime and channels are up: the turns a restart left to the
+  // provider cards run now.
+  void providerFailures.start();
 
   // The API, actions and agents are ready. One continuation runs at a time,
   // outside boot, and each rechecks its chat after waiting in the webchat queue.
