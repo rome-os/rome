@@ -114,7 +114,8 @@ async function activateRoutineDraft(
   const routineId =
     result.status === "ok" ? (result.data as { routineId?: unknown } | undefined)?.routineId : null;
   if (typeof routineId !== "string") {
-    const error = result.status === "error" ? result.error : "create_routine returned no routineId";
+    const error =
+      result.status === "error" ? result.error : "system:create_routine returned no routineId";
     return text(
       `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
       true,
@@ -314,7 +315,7 @@ export function proposeRoutineTools(input: {
     {
       name: ROUTINE_PROPOSAL_TOOL,
       description:
-        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with system:search_event_catalog rather than guessing.",
       inputSchema: {
         type: "object",
         required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -352,7 +353,7 @@ export function proposeRoutineTools(input: {
           eventName: {
             type: "string",
             description:
-              'Event routines (kind: event) only — required there. The exact bus event type to watch, from search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".',
+              'Event routines (kind: event) only — required there. The exact bus event type to watch, from system:search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".',
           },
           filter: {
             type: "array",
@@ -398,7 +399,7 @@ export function proposeRoutineTools(input: {
           },
           actionName: {
             type: "string",
-            description: "The action the routine fires when it triggers, e.g. send_message.",
+            description: "The action the routine fires when it triggers, e.g. system:send_message.",
           },
           args: {
             type: "object",

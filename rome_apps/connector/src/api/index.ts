@@ -1050,7 +1050,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     try {
       await this.ctx.runAction("system:email_inbound", { rawBody, signature });
     } catch (err) {
-      this.ctx.log.error("email_inbound transport failed", {
+      this.ctx.log.error("system:email_inbound transport failed", {
         error: err instanceof Error ? err.message : String(err),
       });
     }

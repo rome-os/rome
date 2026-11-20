@@ -2220,7 +2220,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             placement: { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           };
         }
-        log.warn("show_app did not return the fork session placement", {
+        log.warn("system:show_app did not return the fork session placement", {
           sessionId: input.session.id,
           turnId: input.turnId,
           forkSessionId,
