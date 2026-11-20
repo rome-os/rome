@@ -647,6 +647,26 @@ describe("ChatSettingsService", () => {
     );
   });
 
+  it("lists as changed only a chat that still holds a value", async () => {
+    const { service, discord, parent } = await setup();
+    const changed = async () =>
+      (await service.list({ connectionId: discord.id, changed: true })).items.map(
+        (item) => item.snapshot.conversation.ref.chatId,
+      );
+
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect(await changed()).toEqual(["parent"]);
+
+    // Clearing the last value leaves the row's settings empty, not gone.
+    await service.update({ ref: parent, set: {}, clear: ["enabled"], actor: { kind: "guardian" } });
+    expect(await changed()).toEqual([]);
+  });
+
   it("hides persisted settings after their connection is removed", async () => {
     const { registry, repository, service, discord, wechat, parent } = await setup();
     await service.update({

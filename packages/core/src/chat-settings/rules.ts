@@ -1,18 +1,11 @@
-// The chat rules: what a guardian can set on one chat, the value each takes
-// when nobody set it, and how Core works out the value a chat runs on. Core
-// owns the set. A kind of connection only says which rules its chats offer,
-// and which values it fixes for the rest; the kinds' declarations live in
-// @rome/api-types/chat-rules so the dashboard's mock mode reads the same
-// ones. Vocabulary:
-// docs/domains/chats.md#chat-rule.
+// The chat rules: what a guardian can set on one chat. Core owns the set and
+// is the one place that runs it. A kind of connection only says which rules
+// its chats offer, and which values it fixes for the rest. Those
+// declarations, the defaults, and how a chat's value is worked out live in
+// @rome/api-types/chat-rules, so the dashboard's mock mode derives the same
+// values. Vocabulary: docs/domains/chats.md#chat-rule.
 
-import {
-  CONVERSATION_SETTING_FIELDS,
-  type ChatSettingField,
-  type ChatSettings,
-  type ChatSettingsOverrides,
-  type ProviderSessionResetPolicy,
-} from "@rome-os/app-runtime";
+import { CONVERSATION_SETTING_FIELDS, type ChatSettingField } from "@rome-os/app-runtime";
 import {
   type ChatRuleName,
   type ChatRules,
@@ -20,31 +13,21 @@ import {
   SESSION_RESET_ONLY_CHAT_RULES,
   WAKES_ON_EVERY_MESSAGE,
 } from "@rome/api-types/chat-rules";
-import { DEFAULT_PROVIDER_SESSION_RESET_POLICY } from "./reset-policy.js";
 
 export {
+  asChatSettings,
   type ChatRuleName,
   type ChatRules,
+  chatRuleDefaults,
+  effectiveChatRules,
   type KindChatRules,
+  storedRuleValue,
   WAKES_ON_EVERY_MESSAGE,
 } from "@rome/api-types/chat-rules";
 
 /** Every chat rule, in the order the dashboard lists them: the stored
  *  fields, in the order the app SDK declares them. */
 export const CHAT_RULE_NAMES: readonly ChatRuleName[] = CONVERSATION_SETTING_FIELDS;
-
-/** The value of each rule nobody set and no kind fixed. */
-export function chatRuleDefaults(): ChatRules {
-  return {
-    enabled: true,
-    "activation.mode": "mention",
-    "activation.botMessages": "ignore",
-    "activation.whenOthersMentioned": "ignore",
-    "replies.placement": "thread",
-    "routing.agentName": null,
-    "session.reset": structuredClone(DEFAULT_PROVIDER_SESSION_RESET_POLICY),
-  };
-}
 
 /** The rules of a chat whose kind Rome has not registered or that declares
  *  none, such as Rome's own webchat: only the session reset, waking on every
@@ -75,59 +58,6 @@ export function chatRulesOf(kind: KindChatRules, place: "direct" | "group"): Kin
   const fixed: Partial<ChatRules> = { ...kind.fixed, ...WAKES_ON_EVERY_MESSAGE };
   for (const rule of offers) delete fixed[rule];
   return { offers, ...(Object.keys(fixed).length > 0 ? { fixed } : {}) };
-}
-
-/**
- * The value of each rule a chat runs on: the kind's fixed value, else what
- * the guardian stored if the kind offers the rule, else the default. A value
- * stored for a rule the kind does not offer is ignored.
- */
-export function effectiveChatRules(rules: KindChatRules, stored: ChatSettingsOverrides): ChatRules {
-  const effective = chatRuleDefaults();
-  const set = <R extends ChatRuleName>(rule: R, value: ChatRules[R] | undefined) => {
-    if (value !== undefined) effective[rule] = structuredClone(value);
-  };
-  for (const rule of CHAT_RULE_NAMES) {
-    const fixed = rules.fixed?.[rule];
-    if (fixed !== undefined) {
-      set(rule, fixed);
-    } else if (rules.offers.includes(rule)) {
-      set(rule, storedRuleValue(stored, rule));
-    }
-  }
-  return effective;
-}
-
-/** `rules` in the nested shape `ChatSettings` stores and apps read. */
-export function asChatSettings(rules: ChatRules): ChatSettings {
-  return {
-    enabled: rules.enabled,
-    activation: {
-      mode: rules["activation.mode"],
-      botMessages: rules["activation.botMessages"],
-      whenOthersMentioned: rules["activation.whenOthersMentioned"],
-    },
-    replies: { placement: rules["replies.placement"] },
-    routing: { agentName: rules["routing.agentName"] },
-    session: { reset: rules["session.reset"] },
-  };
-}
-
-/** The value `stored` holds for `rule`, or undefined where it holds none. */
-export function storedRuleValue<R extends ChatRuleName>(
-  stored: ChatSettingsOverrides,
-  rule: R,
-): ChatRules[R] | undefined {
-  const values: { [F in ChatRuleName]: ChatRules[F] | undefined } = {
-    enabled: stored.enabled,
-    "activation.mode": stored.activation?.mode,
-    "activation.botMessages": stored.activation?.botMessages,
-    "activation.whenOthersMentioned": stored.activation?.whenOthersMentioned,
-    "replies.placement": stored.replies?.placement,
-    "routing.agentName": stored.routing?.agentName,
-    "session.reset": stored.session?.reset,
-  };
-  return values[rule];
 }
 
 // The rule names are the stored fields, so a field added to one without the

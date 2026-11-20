@@ -111,6 +111,13 @@ function offeredOverrides(
   return result;
 }
 
+/** Whether the chat holds a value of its own for a rule its kind offers. */
+function hasOverrides(snapshot: ChatSettingsSnapshot): boolean {
+  return snapshot.supportedFields.some(
+    (field) => fieldValue(snapshot.overrides, field) !== undefined,
+  );
+}
+
 function normalizeOverrides(value: ChatSettingsOverrides): ChatSettingsOverrides {
   const result: ChatSettingsOverrides = {};
   for (const field of CONVERSATION_SETTING_FIELDS) {
@@ -320,7 +327,6 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Native threads are runtime conversations, not settings aggregates.
       // Their effective settings are resolved through the parent conversation.
       if (this.isThread(descriptor)) continue;
-      if (input.changed && source !== "configured") continue;
       if (query) {
         const haystack = [
           descriptor.connectionKind,
@@ -335,6 +341,17 @@ export class ChatSettingsService implements ChatSettingsControl {
       const availability = this.availability(descriptor.ref.connectionId);
       if (input.availability && availability !== input.availability) continue;
       candidates.push({ descriptor, availability, source });
+    }
+    if (input.changed) {
+      // A row can hold settings with nothing left in them, after every value
+      // was cleared, so a chat counts as changed by what its snapshot shows.
+      const changed = await Promise.all(
+        candidates.map(
+          async ({ descriptor, source }) =>
+            source === "configured" && hasOverrides(await this.get(descriptor.ref)),
+        ),
+      );
+      candidates.splice(0, candidates.length, ...candidates.filter((_, index) => changed[index]));
     }
     candidates.sort((a, b) => {
       const left = `${a.descriptor.connectionKind}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;

@@ -65,7 +65,7 @@ import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
-import { CHAT_RULE_DEFAULTS, connections } from "./connections-store";
+import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
 /** Connected accounts left by a disconnect in this session, each with its
  *  agent. Core keeps them, so Envoys lists them as disconnected. */
@@ -1954,7 +1954,7 @@ export const handlers = [
       items: conversationSettings.items.filter((item) => {
         const chat = item.snapshot.conversation;
         if (connectionId && chat.ref.connectionId !== connectionId) return false;
-        if (changed && item.source !== "configured") return false;
+        if (changed && Object.keys(item.snapshot.overrides).length === 0) return false;
         if (!query) return true;
         return [chat.connectionKind, chat.containerName, chat.displayName]
           .filter(Boolean)
@@ -1974,7 +1974,7 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.source = "live";
     found.snapshot.overrides = {};
-    found.snapshot.effective = structuredClone(conversationDefaults);
+    found.snapshot.effective = chatRuleDefaultsOf(found.snapshot.conversation.connectionKind);
     return HttpResponse.json(found.snapshot);
   }),
   // Auto-save writes through on every edit, so mock mode needs a real write

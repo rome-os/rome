@@ -434,7 +434,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "Every chat follows the defaults",
-      "emptyDescription": "Add a chat to give it rules of its own.",
+      "emptyDescription": "To give a chat rules of its own, add it.",
       "loadMore": "Load more",
       "sections": {
         "activation": "Activation",
@@ -518,7 +518,8 @@
         "hours_other": "{{count}} hours",
         "days_one": "{{count}} day",
         "days_other": "{{count}} days"
-      }
+      },
+      "allListed": "Every chat here already has rules of its own."
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",

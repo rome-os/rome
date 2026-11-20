@@ -98,8 +98,9 @@ function keyOf(item: ChatSettingsListItem): string {
   return `${ref.connectionId}:${ref.chatId}`;
 }
 
-/** Chats grouped under the server or workspace they live in, in list order.
- *  A chat that lives in none, such as a direct message, groups under "". */
+/** Chats grouped under the server or workspace they live in, each group and
+ *  each chat in it by name, as the server sorts them. A chat that lives in
+ *  none, such as a direct message, groups under "", which comes first. */
 function groupByContainer(
   items: ChatSettingsListItem[],
 ): Array<{ container: string; items: ChatSettingsListItem[] }> {
@@ -108,7 +109,25 @@ function groupByContainer(
     const container = item.snapshot.conversation.containerName ?? "";
     groups.set(container, [...(groups.get(container) ?? []), item]);
   }
-  return [...groups].map(([container, grouped]) => ({ container, items: grouped }));
+  return [...groups]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([container, grouped]) => ({
+      container,
+      items: grouped.sort((left, right) =>
+        left.snapshot.conversation.displayName.localeCompare(
+          right.snapshot.conversation.displayName,
+        ),
+      ),
+    }));
+}
+
+/** `items` with each of `more` whose key it lacks, so no chat shows twice. */
+function mergeByKey(
+  items: ChatSettingsListItem[],
+  more: ChatSettingsListItem[],
+): ChatSettingsListItem[] {
+  const keys = new Set(items.map(keyOf));
+  return [...items, ...more.filter((item) => !keys.has(keyOf(item)))];
 }
 
 /**
@@ -125,6 +144,10 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [agentNames, setAgentNames] = useState<string[]>([]);
   const [items, setItems] = useState<ChatSettingsListItem[]>([]);
+  // Chats added from the dialog, which a reload of the changed list would
+  // drop until a rule of theirs is saved.
+  const [added, setAdded] = useState<ChatSettingsListItem[]>([]);
+  const addButton = useRef<HTMLButtonElement>(null);
   const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -140,15 +163,11 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
         search.set("connectionId", connectionId);
         if (query.trim()) search.set("query", query.trim());
         if (cursor) search.set("cursor", cursor);
-        const [page, connectionList, agentPage] = await Promise.all([
-          api<PageResponse>(`/api/chat-settings?${search}`),
-          fetchConnections(),
-          api<AgentPage>("/api/agents"),
-        ]);
-        setItems((current) => (append ? [...current, ...page.items] : page.items));
+        const page = await api<PageResponse>(`/api/chat-settings?${search}`);
+        // A save or a reset between pages shifts the offset the cursor holds,
+        // so a page can repeat a chat already listed.
+        setItems((current) => (append ? mergeByKey(current, page.items) : page.items));
         setNextCursor(page.nextCursor);
-        setConnections(connectionList);
-        setAgentNames(agentPage.agents.map((agent) => agent.name));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -162,6 +181,24 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
     const timer = window.setTimeout(() => void load(), 150);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  // The account's agent and the agents a chat can pick change rarely, so a
+  // search does not fetch them again.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchConnections(), api<AgentPage>("/api/agents")])
+      .then(([connectionList, agentPage]) => {
+        if (cancelled) return;
+        setConnections(connectionList);
+        setAgentNames(agentPage.agents.map((agent) => agent.name));
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId]);
 
   const connection = connections.find((candidate) => candidate.id === connectionId);
 
@@ -178,33 +215,47 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
   // Stable identity: every row takes this as a dependency, so an inline
   // function here would change on each render and churn their save closures.
   const handleSaved = useCallback((snapshot: ChatSettingsSnapshot) => {
-    setItems((current) =>
+    const update = (current: ChatSettingsListItem[]) =>
       current.map((candidate) =>
         candidate.snapshot.conversation.ref.connectionId ===
           snapshot.conversation.ref.connectionId &&
         candidate.snapshot.conversation.ref.chatId === snapshot.conversation.ref.chatId
-          ? { ...candidate, snapshot, source: hasOverrides(snapshot) ? "configured" : "known" }
+          ? {
+              ...candidate,
+              snapshot,
+              source: hasOverrides(snapshot) ? ("configured" as const) : ("known" as const),
+            }
           : candidate,
-      ),
-    );
+      );
+    setItems(update);
+    setAdded(update);
   }, []);
 
   const handleReset = useCallback((key: string) => {
-    setItems((current) => current.filter((candidate) => keyOf(candidate) !== key));
+    const remove = (current: ChatSettingsListItem[]) =>
+      current.filter((candidate) => keyOf(candidate) !== key);
+    setItems(remove);
+    setAdded(remove);
     setOpenKey((current) => (current === key ? null : current));
+    // The focused Reset button leaves with its row.
+    addButton.current?.focus();
   }, []);
 
   const handlePick = useCallback((picked: ChatSettingsListItem) => {
-    const key = keyOf(picked);
-    setItems((current) =>
-      current.some((candidate) => keyOf(candidate) === key) ? current : [...current, picked],
-    );
-    setOpenKey(key);
+    setAdded((current) => mergeByKey(current, [picked]));
+    setOpenKey(keyOf(picked));
     setAdding(false);
   }, []);
 
-  const shownKeys = useMemo(() => new Set(items.map(keyOf)), [items]);
-  const groups = useMemo(() => groupByContainer(items), [items]);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const matching = added.filter((item) =>
+      item.snapshot.conversation.displayName.toLocaleLowerCase().includes(needle),
+    );
+    return mergeByKey(items, matching);
+  }, [added, items, query]);
+  const shownKeys = useMemo(() => new Set(shown.map(keyOf)), [shown]);
+  const groups = useMemo(() => groupByContainer(shown), [shown]);
   const defaults = connection?.chatRuleDefaults;
   const defaultsSummary = defaults
     ? defaultsLine(t, defaults, new Set(connection?.chatRules ?? []), accountAgent)
@@ -223,13 +274,13 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
             </>
           )}
         </p>
-        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+        <Button ref={addButton} variant="outline" size="sm" onClick={() => setAdding(true)}>
           <Plus data-icon="inline-start" aria-hidden />
           {t("channels.conversationSettings.addChat")}
         </Button>
       </div>
 
-      {(items.length > SEARCH_THRESHOLD || query) && (
+      {(shown.length > SEARCH_THRESHOLD || query) && (
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -242,7 +293,7 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
         </label>
       )}
 
-      {loading && items.length === 0 ? (
+      {loading && shown.length === 0 ? (
         <EmptyState className="rounded-12 border border-dashed border-border">
           <EmptyStateIcon>
             <Spinner label={t("channels.conversationSettings.loading")} />
@@ -256,7 +307,7 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
             {t("channels.conversationSettings.retry")}
           </Button>
         </Alert>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <EmptyState className="rounded-12 border border-dashed border-border">
           <EmptyStateTitle>
             {query
@@ -375,6 +426,7 @@ function AddChatDialog({
   }, [open]);
 
   const choices = items.filter((item) => !exclude.has(keyOf(item)));
+  const allListed = items.length > 0 && choices.length === 0;
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
@@ -405,9 +457,11 @@ function AddChatDialog({
           </div>
         ) : choices.length === 0 ? (
           <p className="py-6 text-center text-ui text-muted-foreground">
-            {query
-              ? t("channels.conversationSettings.noMatches")
-              : t("channels.conversationSettings.findChats")}
+            {allListed
+              ? t("channels.conversationSettings.allListed")
+              : query
+                ? t("channels.conversationSettings.noMatches")
+                : t("channels.conversationSettings.findChats")}
           </p>
         ) : (
           <List className="max-h-80 overflow-y-auto rounded-12 border border-border">
@@ -473,6 +527,8 @@ function ChatRow({
   const agentFieldId = useId();
   const enabledFieldId = useId();
   const panelId = useId();
+  const titleId = useId();
+  const summaryId = useId();
   const { snapshot } = item;
   const conversation = snapshot.conversation;
   const supported = new Set(snapshot.supportedFields);
@@ -678,22 +734,31 @@ function ChatRow({
   /**
    * Drops every value the chat holds, so it runs on the defaults and leaves
    * the list. An edit still waiting for its debounce is dropped with it, and
-   * one already sent lands first, so the reset is the last write.
+   * one already sent lands first, so the reset is the last write. A failed
+   * reset queues the dropped edit again.
    */
   async function reset() {
     window.clearTimeout(flushTimer.current);
-    dirty.current.clear();
+    const pending = dirty.current;
+    dirty.current = new Set();
     setResetting(true);
     try {
       await inFlight.current;
-      await api<ChatSettingsSnapshot>("/api/chat-settings/reset", {
+      const next = await api<ChatSettingsSnapshot>("/api/chat-settings/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ref: conversation.ref }),
       });
-      onReset(keyOf(item));
+      // A rule set through another of Rome's accounts in the group still
+      // holds, so the chat stays listed with it.
+      if (hasOverrides(next)) onSaved(next);
+      else onReset(keyOf(item));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
+      if (pending.size > 0 && mounted.current) {
+        for (const field of pending) dirty.current.add(field);
+        flushTimer.current = window.setTimeout(() => void flush(), AUTOSAVE_DEBOUNCE_MS);
+      }
     } finally {
       if (mounted.current) setResetting(false);
     }
@@ -703,17 +768,21 @@ function ChatRow({
 
   return (
     <article>
-      <h4>
+      <h5>
         <ListRow asChild interactive size="md">
           <button
             type="button"
             aria-expanded={open}
             aria-controls={open ? panelId : undefined}
+            // The name is the chat alone, and the summary describes it, so
+            // a heading list reads the same while a save runs.
+            aria-labelledby={titleId}
+            aria-describedby={summaryId}
             onClick={onToggle}
           >
             <ChatKindIcon kind={conversation.kind} />
             <ListRowContent>
-              <ListRowTitle className="truncate">
+              <ListRowTitle id={titleId} className="truncate">
                 {conversation.displayName}
                 {/* The icon is decorative, so the kind and the service reach
                     assistive tech here. */}
@@ -721,7 +790,9 @@ function ChatRow({
                   {` · ${t(`channels.conversationSettings.kinds.${conversation.kind}`)} · ${serviceLabel(conversation.connectionKind)}`}
                 </span>
               </ListRowTitle>
-              <ListRowDescription className="truncate">{summary}</ListRowDescription>
+              <ListRowDescription id={summaryId} className="truncate">
+                {summary}
+              </ListRowDescription>
             </ListRowContent>
             {saving && (
               <span className="shrink-0 text-aux text-muted-foreground">
@@ -734,9 +805,14 @@ function ChatRow({
             />
           </button>
         </ListRow>
-      </h4>
+      </h5>
       {open && (
-        <div id={panelId} className="border-t border-border-subtle px-4 pb-3">
+        // Disabled while a reset runs, so no edit lands after it.
+        <fieldset
+          id={panelId}
+          disabled={resetting}
+          className="min-w-0 border-t border-border-subtle px-4 pb-3"
+        >
           <SettingSection>
             {supported.has("enabled") && (
               <SettingRow
@@ -877,7 +953,7 @@ function ChatRow({
               {t("channels.conversationSettings.resetToDefaults")}
             </Button>
           </div>
-        </div>
+        </fieldset>
       )}
     </article>
   );
@@ -1032,7 +1108,7 @@ function SettingSection({ title, children }: { title?: string; children: ReactNo
   if (rows.length === 0) return null;
   return (
     <section className="pt-3 first-of-type:pt-1">
-      {title && <h5 className="pb-1 text-aux text-muted-foreground">{title}</h5>}
+      {title && <h6 className="pb-1 text-aux text-muted-foreground">{title}</h6>}
       <div className="divide-y divide-border-subtle">{rows}</div>
     </section>
   );

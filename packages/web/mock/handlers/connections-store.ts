@@ -1,8 +1,10 @@
 import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import {
-  type ChatRules,
+  asChatSettings,
+  chatRuleDefaults,
   DISCORD_CHAT_RULES,
+  effectiveChatRules,
   FEISHU_CHAT_RULES,
   type KindChatRules,
   SESSION_RESET_ONLY_CHAT_RULES,
@@ -21,31 +23,26 @@ const CHAT_RULES: Record<string, KindChatRules> = {
   linkedin: SESSION_RESET_ONLY_CHAT_RULES,
 };
 
-/** The values a chat runs on where nobody set one and its kind fixes none:
- *  fixture values, matching Core's defaults today. */
-export const CHAT_RULE_DEFAULTS: ChatSettings = {
-  enabled: true,
-  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-  replies: { placement: "thread" },
-  routing: { agentName: null },
-  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
-};
+/** The values a chat runs on where nobody set one and no kind fixed one. */
+export const CHAT_RULE_DEFAULTS: ChatSettings = asChatSettings(chatRuleDefaults());
 
-/** A kind's connection fields for its chat rules: what it offers, and the
- *  defaults with what it fixes laid over them. */
+/** What a group chat of the kind `connectionKind` runs on where nobody set
+ *  a value, worked out as core works it out. */
+export function chatRuleDefaultsOf(connectionKind: string): ChatSettings {
+  const kind = CHAT_RULES[connectionKind] ?? SESSION_RESET_ONLY_CHAT_RULES;
+  return asChatSettings(effectiveChatRules(kind, {}));
+}
+
+/** A kind's connection fields for its chat rules: what it offers, and what
+ *  its group chats run on where nobody set a value. */
 function chatRuleFields(
   kind: KindChatRules | undefined,
 ): Pick<ApiConnection, "chatRules" | "chatRuleDefaults"> {
   if (!kind) return { chatRules: [], chatRuleDefaults: null };
-  const defaults = structuredClone(CHAT_RULE_DEFAULTS);
-  const fixed: Partial<ChatRules> = kind.fixed ?? {};
-  if (fixed["activation.mode"]) defaults.activation.mode = fixed["activation.mode"];
-  if (fixed["activation.botMessages"])
-    defaults.activation.botMessages = fixed["activation.botMessages"];
-  if (fixed["activation.whenOthersMentioned"]) {
-    defaults.activation.whenOthersMentioned = fixed["activation.whenOthersMentioned"];
-  }
-  return { chatRules: [...kind.offers], chatRuleDefaults: defaults };
+  return {
+    chatRules: [...kind.offers],
+    chatRuleDefaults: asChatSettings(effectiveChatRules(kind, {})),
+  };
 }
 
 // The connection ledger. In its own module because two surfaces read it and one

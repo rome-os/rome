@@ -434,7 +434,7 @@
       },
       "loading": "正在加载聊天…",
       "emptyTitle": "所有聊天都使用默认规则",
-      "emptyDescription": "添加一个聊天，为它单独设置规则。",
+      "emptyDescription": "要为某个聊天单独设置规则，请添加它。",
       "loadMore": "加载更多",
       "sections": {
         "activation": "触发",
@@ -518,7 +518,8 @@
         "hours_other": "{{count}} 小时",
         "days_one": "{{count}} 天",
         "days_other": "{{count}} 天"
-      }
+      },
+      "allListed": "这里的聊天都已有单独的规则。"
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
