@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -110,5 +110,77 @@ describe("Settings connections request states", () => {
 
     expect(await screen.findByText("No connections available")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the members switch as its change left it when an older poll answers after the change's refresh", async () => {
+    const feishu = (answerMembers: boolean) => ({
+      connections: [
+        {
+          id: "conn-feishu",
+          state: "connected",
+          connectionKind: "feishu",
+          label: "Feishu",
+          channel: "feishu",
+          grants: { app: "authorized" },
+          display: {
+            app: { displayName: "Support Bot", handle: null, email: null, avatarUrl: null },
+          },
+          setups: {},
+          capabilities: {
+            chat: { state: "unlocked" },
+            act: { state: "unsupported" },
+            watch: { state: "unsupported" },
+          },
+          connect: null,
+          agent: null,
+          severalAccounts: true,
+          answerMembers,
+        },
+      ],
+    });
+    // The poll's answer is held until after the change's refresh lands.
+    let answerPoll: (response: Response) => void = () => {};
+    let loads = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      if (url === "/api/settings") return ok({});
+      if (url === "/api/integrations/composio/status") return ok({});
+      if (url.endsWith("/answer-members") && init?.method === "PUT") {
+        return ok({ answerMembers: true });
+      }
+      if (url === "/api/connections") {
+        loads += 1;
+        if (loads === 2) return new Promise<Response>((resolve) => (answerPoll = resolve));
+        return ok(feishu(loads > 2));
+      }
+      return ok({});
+    }) as typeof fetch);
+    const polls: Array<() => void> = [];
+    const setInterval = window.setInterval.bind(window);
+    rs.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, ms?: number) => {
+      if (typeof handler === "function") polls.push(handler as () => void);
+      return setInterval(() => {}, ms);
+    }) as typeof window.setInterval);
+
+    renderConnectionsSettings();
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Feishu/ }));
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+
+    // A poll starts before the change, and its answer is the state before it.
+    for (const poll of polls) poll();
+    await userEvent.click(toggle());
+    await screen.findByRole("switch", { checked: true });
+    await waitFor(() => expect(loads).toBe(3));
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
+    answerPoll(ok(feishu(false)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 });

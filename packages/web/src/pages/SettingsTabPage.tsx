@@ -185,8 +185,14 @@ export default function SettingsPage() {
 
   // The Connections tab's single data source (`/api/connections`) plus the
   // Composio account status for the broker card.
+  // Loads overlap: a poll can start before a change and answer after the
+  // refresh that change asked for. Only an answer to a load started after
+  // the one shown last is taken, so an older state never replaces a newer.
+  const loadsStarted = useRef(0);
+  const loadShown = useRef(0);
   const loadConnections = useCallback(
     async (backgroundRefresh = false) => {
+      const load = ++loadsStarted.current;
       if (!backgroundRefresh) {
         setConnectionsLoading(true);
         setConnectionsError(null);
@@ -196,6 +202,8 @@ export default function SettingsPage() {
           fetchConnections(),
           fetch("/api/integrations/composio/status", { cache: "no-store" }),
         ]);
+        if (load < loadShown.current) return connectionList;
+        loadShown.current = load;
         setConnections(connectionList);
         if (composioRes.ok) {
           const payload = (await composioRes.json()) as {
@@ -207,6 +215,7 @@ export default function SettingsPage() {
         return connectionList;
       } catch (err) {
         console.error("Failed to load connections data", err);
+        if (load < loadShown.current) return null;
         setConnectionsError(
           err instanceof Error ? err.message : t("connections.loadFailedFallback"),
         );
