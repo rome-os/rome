@@ -400,7 +400,7 @@ describe("ConnectionDetailBody — accounts", () => {
   function renderAccountBody(
     card: ConnectionCard,
     handlers: {
-      onRefresh?: () => void;
+      onRefresh?: () => void | Promise<unknown>;
       onFlash?: (message: string) => void;
       onOpenAccount?: (connectionId: string) => void;
     } = {},
@@ -584,8 +584,14 @@ describe("ConnectionDetailBody — accounts", () => {
       }
       return new Response("{}", { status: 200 });
     });
-    const onRefresh = rs.fn();
-    renderAccountBody(cardFor([feishu({ answerMembers: false })], "feishu"), { onRefresh });
+    // The refresh brings the server's new state, as the page's does.
+    const onRefresh = rs.fn(async () => {
+      rerenderCard(cardFor([feishu({ answerMembers: true })], "feishu"));
+    });
+    const { rerenderCard } = renderAccountBody(
+      cardFor([feishu({ answerMembers: false })], "feishu"),
+      { onRefresh },
+    );
     const toggle = screen.getByRole("switch", { name: "Answer other members of this workspace" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
 
@@ -612,6 +618,30 @@ describe("ConnectionDetailBody — accounts", () => {
     rerenderCard(cardFor([feishu({ answerMembers: true })], "feishu"));
 
     expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows the server's state after its own change once the refresh lands, a change elsewhere included", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/answer-members")
+        ? new Response(JSON.stringify({ answerMembers: false }), { status: 200 })
+        : new Response("{}", { status: 200 }),
+    );
+    // This page turns it off, then another tab turns it on again before the
+    // refresh, which brings back the same state the page started from.
+    const onRefresh = rs.fn(async () => {
+      rerenderCard(cardFor([feishu({ answerMembers: true })], "feishu"));
+    });
+    const { rerenderCard } = renderAccountBody(
+      cardFor([feishu({ answerMembers: true })], "feishu"),
+      { onRefresh },
+    );
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+
+    await userEvent.setup().click(toggle());
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    await waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("true"));
   });
 
   it("shows no members switch for a service that has none", () => {

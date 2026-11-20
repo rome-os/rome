@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
@@ -36,7 +36,7 @@ export function AccountControls({
   onOpenAccount,
 }: {
   card: ConnectionCard;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   /** Open another account's card by its connection id. Rejects when the
    *  account is not listed yet. Without it, the add button is hidden. */
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
@@ -97,14 +97,13 @@ function AnswerMembersRow({
 }: {
   connectionId: string;
   on: boolean;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
-  // What this page last set, shown until the server's state next changes:
-  // a change made anywhere else then shows here.
+  // What this page last set, shown until the refresh after the change lands:
+  // the server's state then shows, a change made anywhere else included.
   const [mine, setMine] = useState<boolean | null>(null);
-  useEffect(() => setMine(null), [on]);
   const shown = mine ?? on;
   const change = async (next: boolean) => {
     setBusy(true);
@@ -121,7 +120,11 @@ function AnswerMembersRow({
       toast.error(error instanceof Error ? error.message : t("connections.answerMembers.failed"));
     } finally {
       setBusy(false);
-      void onRefresh();
+    }
+    try {
+      await onRefresh();
+    } finally {
+      setMine(null);
     }
   };
   return (

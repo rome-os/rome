@@ -35,7 +35,7 @@ export function ConnectionDetailBody({
   card: ConnectionCard;
   composio: ComposioCliStatus | null;
   /** Re-fetch `/api/connections` (and the Composio status where shown). */
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onFlash: (message: string) => void;
   /** Open another account's card by its connection id, after "Add another
    *  account" connected it. Without it, the add button is hidden. */
@@ -95,7 +95,7 @@ function SlotEntry({
   slot: ConnectionSlot;
   role: "primary" | "secondary";
   composio: ComposioCliStatus | null;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onFlash: (message: string) => void;
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
@@ -167,7 +167,7 @@ export function ConnectionDetailPane({
   backLabel: string;
   composio: ComposioCliStatus | null;
   onClose: () => void;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onFlash: (message: string) => void;
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
