@@ -631,6 +631,7 @@ describe("Slack app mailbox key", () => {
   function renewing(
     stored: string,
     refresh: () => Promise<{ connectUrl: string; drainKey: string }>,
+    persist: (drainKey: string) => Promise<void> = async () => {},
   ) {
     const opened: string[] = [];
     const stopped: string[] = [];
@@ -650,7 +651,10 @@ describe("Slack app mailbox key", () => {
       api: fakeApi(),
       openMailbox: open,
       refreshMailbox: rs.fn(refresh),
-      onMailboxRefreshed: (mailbox) => refreshed.push(mailbox.drainKey),
+      onMailboxRefreshed: async (mailbox) => {
+        refreshed.push(mailbox.drainKey);
+        await persist(mailbox.drainKey);
+      },
       onFault: ({ kind }) => faults.push(kind),
       copy: testCopy(),
     });
@@ -777,6 +781,45 @@ describe("Slack app mailbox key", () => {
     expect(t.refreshed).toEqual([]);
     expect(t.opened).toEqual([]);
   });
+
+  it("drains with the stored key when the fresh one could not be kept, and renews it later", () =>
+    withClock(async () => {
+      const stored = keyExpiringAt(NOW + 30 * DAY, "stored");
+      const fresh = keyExpiringAt(NOW + 120 * DAY, "fresh");
+      let keeps = false;
+      const t = renewing(
+        stored,
+        async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: fresh }),
+        async () => {
+          if (!keeps) throw new Error("database is locked");
+        },
+      );
+      await t.adapter.start();
+      // The relay still takes the stored key, which a restart reads back.
+      expect(t.opened).toEqual([stored]);
+      keeps = true;
+      await rs.advanceTimersByTimeAsync(23 * DAY + 1000);
+      expect(t.opened).toEqual([stored, fresh]);
+      expect(t.faults).toEqual([]);
+      await t.adapter.stop();
+    }));
+
+  it("waits for the hourly retry when Rome Cloud answers a key already due for renewal", () =>
+    withClock(async () => {
+      const key = keyExpiringAt(NOW + 3 * DAY);
+      let calls = 0;
+      const t = renewing(key, async () => {
+        calls++;
+        return { connectUrl: "wss://relay.test/c/mbx", drainKey: key };
+      });
+      await t.adapter.start();
+      await rs.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(2);
+      await rs.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(calls).toBe(3);
+      expect(t.opened).toEqual([key]);
+      await t.adapter.stop();
+    }));
 
   it("retries a failed renewal hourly, and reports the connection down once the key expires", () =>
     withClock(async () => {

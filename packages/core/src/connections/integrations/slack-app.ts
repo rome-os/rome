@@ -425,10 +425,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             openMailbox: deps.openMailbox,
             refreshMailbox: () => deps.cloud.refreshMailbox(material.teamId),
             // The drain key expires; keep the fresh one with the grant so a
-            // restart while Rome Cloud is away still drains.
-            onMailboxRefreshed: (mailbox) => {
-              kit.persist({ ...material, ...mailbox }).catch(() => {});
-            },
+            // restart while Rome Cloud is away still drains. A failed write
+            // keeps the adapter on the stored key, which the relay still takes.
+            onMailboxRefreshed: (mailbox) => kit.persist({ ...material, ...mailbox }),
             onFault: ({ kind, cause }) => routeFault(cause, kind),
             copy: deps.copy,
           });
