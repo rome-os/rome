@@ -314,6 +314,7 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
   function descriptorWith(revoke: () => Promise<void>, c = cloud()) {
     const steps: string[] = [];
     const descriptor = makeSlackAppDescriptor({
+      listens: () => true,
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
         postMessage: async () => ({ ts: "1.0" }),
