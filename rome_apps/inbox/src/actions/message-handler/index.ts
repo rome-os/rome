@@ -60,6 +60,9 @@ interface MessageContext {
 export interface SentinelDecision {
   action: "replied" | "ignored" | "escalated";
   response?: string;
+  /** The sentinel said ESCALATE itself, rather than escalate by default on
+   *  output that is empty, unreadable or contradicts itself. */
+  explicit?: true;
 }
 
 type CollectedAgentResult =
@@ -195,17 +198,6 @@ export function buildMessageContext(
   ].join("\n");
 }
 
-/** Whether the sentinel itself said ESCALATE, rather than answer with output
- *  that is empty, unreadable or contradicts itself, which also escalate. */
-export function saysEscalate(raw: string): boolean {
-  const trimmed = raw.trim();
-  if (/^\s*REPLY\s*:/i.test(trimmed)) return false;
-  const match =
-    trimmed.match(/^\s*(ESCALATE|IGNORE)\s*$/i) ??
-    trimmed.match(/(?:^|\n)\s*Decision\s*:\s*(REPLY|ESCALATE|IGNORE)\b/i);
-  return match?.[1].toUpperCase() === "ESCALATE";
-}
-
 export function parseSentinelDecision(raw: string): SentinelDecision {
   const trimmed = raw.trim();
   if (!trimmed) return { action: "escalated" };
@@ -217,7 +209,7 @@ export function parseSentinelDecision(raw: string): SentinelDecision {
   if (!match) return { action: "escalated" };
 
   const decision = directReply ? "REPLY" : match[1].toUpperCase();
-  if (decision === "ESCALATE") return { action: "escalated" };
+  if (decision === "ESCALATE") return { action: "escalated", explicit: true };
   if (decision === "IGNORE") return { action: "ignored" };
 
   const explicitResponse = trimmed.match(/(?:^|\n)\s*(?:Response|Reply)\s*:\s*([\s\S]*)$/i);
@@ -655,7 +647,7 @@ async function handleUntrustedMessage(
   // A member let in only by the switch reaches the account's agent only when
   // the sentinel said so, never because its output could not be read.
   const decision: SentinelDecision =
-    answeredOnlyAsMember && parsed.action === "escalated" && !saysEscalate(sentinelOutput)
+    answeredOnlyAsMember && parsed.action === "escalated" && !parsed.explicit
       ? { action: "ignored" }
       : parsed;
   log.info("sentinel decision", { action: decision.action, channel, channelUserId });
@@ -893,7 +885,12 @@ export function createMessageHandlerAction(
           (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
 
         const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || policy.action === "allow";
+        // A sender answered only because the connection opened it to its
+        // workspace's members always goes through the sentinel: no trust
+        // level or policy hands them straight to the account's agent.
+        const answeredOnlyAsMember =
+          openToMembers && !canReplyToBondLevel(bondLevel, replyToLevels);
+        const triggersTargetAgent = !answeredOnlyAsMember && (trusted || policy.action === "allow");
         if (recorded && triggersTargetAgent) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
         }
@@ -944,7 +941,7 @@ export function createMessageHandlerAction(
             resolveProfilePath: deps.resolveProfilePath,
             strangerPersonId: deps.strangerPersonId,
           }),
-          openToMembers && !canReplyToBondLevel(bondLevel, replyToLevels),
+          answeredOnlyAsMember,
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
