@@ -5,7 +5,6 @@ import type { DrizzleDb } from "../db/index.js";
 import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
-import { desktopSlot } from "./desktops.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("desktop-proxy");
@@ -16,19 +15,12 @@ const SHARED_SEGMENT = "websockify";
 /**
  * The websockify port and the path it sees, for an upgrade under `/desktop-proxy`.
  * `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop,
- * whose websockify ignores the path. Any other first segment names a desktop:
- * it and everything under it go to that desktop's websockify, and resolve to
- * null when the table has no such desktop.
+ * whose websockify ignores the path. Any other first segment resolves to null.
  */
 export function desktopUpstream(rawUrl: string): { port: number; path: string } | null {
   const rest = rawUrl.slice(PREFIX.length);
-  const named = /^\/([^/?]+)(.*)$/.exec(rest);
-  if (named && named[1] !== SHARED_SEGMENT) {
-    const slot = desktopSlot(named[1]!);
-    if (!slot) return null;
-    const tail = named[2]!;
-    return { port: slot.novncPort, path: tail.startsWith("/") ? tail : `/${tail}` };
-  }
+  const segment = /^\/([^/?]+)/.exec(rest);
+  if (segment && segment[1] !== SHARED_SEGMENT) return null;
   return {
     port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
     path: rest || "/",

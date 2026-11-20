@@ -42,6 +42,10 @@ export function addressedRomeBy(message: AddressingFacts, me: string): Addressed
  * way {@link addressedRomeBy} names, `others` when it mentions or replies to
  * another account, and `nobody` otherwise. A reply to `me` that also mentions
  * someone else addresses `me`.
+ *
+ * Nothing outside tests calls this yet. The wake gate reads the fields apps
+ * receive until ZHA-229 moves it onto this function, and until then a reply
+ * to someone else is `others` here but `nobody` in the gate.
  */
 export function addressing(message: AddressingFacts, me: string): Addressed {
   if (addressedRomeBy(message, me) !== null) return "rome";

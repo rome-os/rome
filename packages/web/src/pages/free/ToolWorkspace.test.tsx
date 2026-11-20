@@ -18,11 +18,7 @@ import type { ToolView, WidgetPlacement } from "./use-free-cells";
 rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
 rs.mock("@/components/concierge/TaskList", () => ({
-  TaskList: ({ chatId, view = "tasks" }: { chatId: string; view?: string }) => (
-    <p>
-      {view === "routines" ? "Routine" : "Task"} panel body {chatId}
-    </p>
-  ),
+  TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
 }));
 
 rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
@@ -817,9 +813,6 @@ function TasksOwner() {
       <button type="button" onClick={() => pane?.show("chat-1")}>
         Show tasks
       </button>
-      <button type="button" onClick={() => pane?.show("chat-1", "routines")}>
-        Show routines
-      </button>
       <button type="button" onClick={() => pane?.hide()}>
         Hide tasks
       </button>
@@ -918,17 +911,6 @@ describe("ToolWorkspace Tasks tab", () => {
       active: true,
       compact: false,
     });
-  });
-
-  it("opens the Routines list in the same tab, named for it, and Tasks again after", async () => {
-    const user = userEvent.setup();
-    render(<TasksHarness />);
-    await user.click(screen.getByRole("button", { name: "Show routines" }));
-    expect(tabNames()).toEqual(["Routines", "desktop", "projects"]);
-    expect(screen.getByText("Routine panel body chat-1")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
-    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
   });
 
   it("is not part of the saved layout: nothing about it reaches storage", async () => {

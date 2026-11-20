@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops/desktops.js";
 
 /**
  * A relay drain URL must be a parseable ws/wss URL pointing at a `/c/{mailboxId}`
@@ -45,12 +44,6 @@ const configSchema = z.object({
   // is written waits for the renewal; under it, the retired session answers.
   // Read as at least the limit above.
   sessionHandoffHardContextTokens: z.coerce.number().int().min(50_000).default(180_000),
-
-  // Personal WeChat is opt-in and runs as the Rome service user.
-  wechatUserEnabled: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((value) => value === "true"),
 
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
@@ -196,9 +189,6 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS) {
     raw.sessionHandoffHardContextTokens = env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS;
   }
-  if (env.WECHAT_USER_ENABLED !== undefined) {
-    raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;
-  }
   if (env.ROME_ACTION_MAX_WORKERS) {
     raw.actionWorkerMaxProcesses = env.ROME_ACTION_MAX_WORKERS;
   }
@@ -267,25 +257,6 @@ export function loadConfig(): Config {
   if (!result.success) {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
-  }
-  // WeChat's own desktop has one rule, shared with the runtime and the desktop
-  // proxy; a bad value fails boot here rather than when WeChat first starts.
-  // Without this, the runtime would read a missing row as "no own desktop" and
-  // quietly run the client beside Chrome.
-  try {
-    wechatUserDisplay(process.env);
-  } catch (error) {
-    throw new Error(`Invalid configuration:\n${(error as Error).message}`);
-  }
-  if (process.env.WECHAT_USER_ENABLED === "true" && !desktopSlot("wechat")) {
-    const shared = process.env.DISPLAY || ":99";
-    // wechatUserDisplay has already rejected a WECHAT_USER_DISPLAY equal to
-    // DISPLAY, so a clash here is the default display.
-    throw new Error(
-      !process.env.WECHAT_USER_DISPLAY && shared === WECHAT_DEFAULT_DISPLAY
-        ? `Invalid configuration:\nWeChat's desktop defaults to ${WECHAT_DEFAULT_DISPLAY}, which is the shared desktop. Set WECHAT_USER_DISPLAY to a display other than DISPLAY (${shared}).`
-        : "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535",
-    );
   }
 
   return result.data;

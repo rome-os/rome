@@ -1,3 +1,3 @@
 # Desktops
 
-The machines Rome can reach and what it can do on them: the named desktops, computer use, and Rome nodes.
+The machines Rome can reach and what it can do on them: computer use and Rome nodes.

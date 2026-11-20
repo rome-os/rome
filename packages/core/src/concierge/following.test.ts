@@ -1505,7 +1505,6 @@ describe("follows in several Concierge chats", () => {
     /** A no-response note for task `id` in a chat's next digest. */
     const noResponseNote = (id: string): DigestTaskNotes => ({
       text: `<task_review>\n<ended_no_response task="${id}" title="Flights"/>\n</task_review>`,
-      passive: [],
       noResponse: [id],
     });
 
