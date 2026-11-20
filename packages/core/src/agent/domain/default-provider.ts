@@ -8,11 +8,7 @@ import { type AccountedProviderId, type ModelAccountReports } from "./model-acco
 /** A provider the guardian can make the default. Rome credits run Codex. */
 export type DefaultProvider = "anthropic" | "openai" | "rome_credits";
 
-export const DEFAULT_PROVIDERS: readonly DefaultProvider[] = [
-  "anthropic",
-  "openai",
-  "rome_credits",
-];
+const DEFAULT_PROVIDERS: readonly DefaultProvider[] = ["anthropic", "openai", "rome_credits"];
 
 export function isDefaultProvider(value: unknown): value is DefaultProvider {
   return typeof value === "string" && (DEFAULT_PROVIDERS as readonly string[]).includes(value);

@@ -6,7 +6,7 @@ import {
 } from "../../domain/default-provider.js";
 
 /** The stored name of the default provider and the note a removal left. */
-export const DEFAULT_MODEL_PROVIDER_SETTING_KEY = "defaultModelProvider";
+const DEFAULT_MODEL_PROVIDER_SETTING_KEY = "defaultModelProvider";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

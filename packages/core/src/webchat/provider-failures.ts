@@ -60,12 +60,12 @@ const PROVIDER_NAMES: Record<DefaultModelProvider, string> = {
   rome_credits: "Rome credits",
 };
 
-export function providerName(provider: DefaultModelProvider): string {
+function providerName(provider: DefaultModelProvider): string {
   return PROVIDER_NAMES[provider];
 }
 
 /** The card a reason shows: what the guardian has to do. */
-export function cardKindOf(reason: ProviderFailureReason): ProviderFailureCardKind {
+function cardKindOf(reason: ProviderFailureReason): ProviderFailureCardKind {
   switch (reason) {
     case "quota":
     case "temporary":
@@ -202,7 +202,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function retryPrompt(provider: string): string {
+function retryPrompt(provider: string): string {
   return (
     `${RETRY_MARKER}The previous request in this chat did not run because ${provider} could not run it. ` +
     "It can run now. Read this chat's history to see what was asked. " +
