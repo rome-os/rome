@@ -45,6 +45,13 @@ describe("Discord stop command", () => {
     expect(discordInboundText("/stop", () => undefined)).toBe("/stop");
   });
 
+  it("reads a link code after mentions alone as the bare code, so admission voids it", () => {
+    expect(discordInboundText("<@123> ROME-7KQ2M9XA", () => "Rome")).toBe("ROME-7KQ2M9XA");
+    expect(discordInboundText("<@123> ROME-7KQ2M9XA please", () => "Rome")).toBe(
+      "@Rome ROME-7KQ2M9XA please",
+    );
+  });
+
   it("routes native /stop through chat control before the guardian-only config gate", async () => {
     const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
     const chatStop: ChatStopHandler = stop;

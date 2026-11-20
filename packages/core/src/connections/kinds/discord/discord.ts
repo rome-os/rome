@@ -252,20 +252,28 @@ const USER_MENTION = /<@!?([^\s>&]+)>/g;
  * The text of an inbound message as a person sees it: each user mention
  * shows as `@name`, Rome's own accounts included, so the text is the same
  * whichever of Rome's accounts heard it. A mention whose name the message
- * does not carry stays as typed. A `/stop` after mentions alone reads as
- * `/stop`, so the stop rule can match it; whom it addressed is `addressing`'s.
+ * does not carry stays as typed. A command after mentions alone, `/stop` or
+ * a link code, reads as the bare command, so its rule matches it; whom it
+ * addressed is `addressing`'s.
  */
 export function discordInboundText(
   content: string,
   nameOf: (userId: string) => string | undefined,
 ): string {
-  if (isStopCommand(content.replace(USER_MENTION, ""))) return "/stop";
+  const command = withoutMentions(content);
+  if (isStopCommand(command)) return "/stop";
+  if (isLinkCodeMessage(command)) return command;
   return content
     .replace(USER_MENTION, (token, id: string) => {
       const name = nameOf(id)?.trim();
       return name ? `@${name}` : token;
     })
     .trim();
+}
+
+/** The message with its user mentions removed, as a command reads it. */
+function withoutMentions(content: string): string {
+  return content.replace(USER_MENTION, "").trim();
 }
 
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
@@ -746,7 +754,7 @@ export class DiscordAdapter {
 
       // A link code said in a guild channel must void the code, so it skips
       // the filters below. Admission voids it and keeps it from every agent.
-      if (!isDm && isLinkCodeMessage(message.content)) {
+      if (!isDm && isLinkCodeMessage(withoutMentions(message.content))) {
         await this.dispatchMessage(message, isDm, isThread, "ambient");
         return;
       }
@@ -830,9 +838,9 @@ export class DiscordAdapter {
     const text = discordInboundText(
       message.content,
       (id) =>
-        message.mentions.members?.get(id)?.displayName ??
-        message.mentions.users.get(id)?.displayName ??
-        message.mentions.users.get(id)?.username,
+        // The account's own name, not a server nickname, so it reads the
+        // same in every server and matches the name the agent is told.
+        message.mentions.users.get(id)?.displayName ?? message.mentions.users.get(id)?.username,
     );
 
     let threadName: string | undefined;
