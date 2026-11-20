@@ -767,6 +767,16 @@
     "spendCap": "{{provider}} reached its spending limit",
     "account": "{{provider}} cannot run on this account",
     "modelUnavailable": "{{model}} is unavailable",
+    "reasonQuota": "{{provider}} quota used up",
+    "reasonTemporary": "{{provider}} is unavailable for now",
+    "status": {
+      "pausedToday": "Paused · continues today at {{time}}",
+      "pausedTomorrow": "Paused · continues tomorrow at {{time}}",
+      "pausedOn": "Paused · continues {{date}} at {{time}}",
+      "pausedRetrying": "Paused · Rome tries again by itself",
+      "needsYou": "Needs you",
+      "modelUnavailable": "Model unavailable"
+    },
     "logIn": "Log in",
     "switchTo": "Switch to {{target}}",
     "useCredits": "Use Rome credits",

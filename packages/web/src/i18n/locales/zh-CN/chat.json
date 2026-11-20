@@ -767,6 +767,16 @@
     "spendCap": "{{provider}} 已达到消费上限",
     "account": "{{provider}} 的账号目前无法运行",
     "modelUnavailable": "{{model}} 用不了了",
+    "reasonQuota": "{{provider}} 额度用完了",
+    "reasonTemporary": "{{provider}} 暂时用不了",
+    "status": {
+      "pausedToday": "已暂停 · 今天 {{time}} 自动继续",
+      "pausedTomorrow": "已暂停 · 明天 {{time}} 自动继续",
+      "pausedOn": "已暂停 · {{date}} {{time}} 自动继续",
+      "pausedRetrying": "已暂停 · Rome 会自己重试",
+      "needsYou": "需要处理",
+      "modelUnavailable": "模型不可用"
+    },
     "logIn": "登录",
     "switchTo": "切换到 {{target}}",
     "useCredits": "改用 Rome 额度",

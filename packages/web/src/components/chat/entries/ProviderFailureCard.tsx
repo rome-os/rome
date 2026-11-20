@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CirclePause, Info, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -112,6 +112,54 @@ export function failureText(
     }
   }
 }
+
+/**
+ * The open card's status line: whether the turn waits by itself, needs the
+ * guardian, or needs another model. A wait carries the reset time here, so
+ * the reason below it does not repeat it.
+ */
+export function cardStatus(
+  facts: FailureFacts,
+  t: TFunction<"chat">,
+  locale: string,
+): { kind: ProviderFailureCardKind; label: string } {
+  const kind = failureCardKind(facts);
+  if (kind === "account") return { kind, label: t("providerFailure.status.needsYou") };
+  if (kind === "model") return { kind, label: t("providerFailure.status.modelUnavailable") };
+  if (!facts.until) return { kind, label: t("providerFailure.status.pausedRetrying") };
+  const { day, date, time } = formatUntil(facts.until, locale);
+  const label =
+    day === "today"
+      ? t("providerFailure.status.pausedToday", { time })
+      : day === "tomorrow"
+        ? t("providerFailure.status.pausedTomorrow", { time })
+        : t("providerFailure.status.pausedOn", { date, time });
+  return { kind, label };
+}
+
+/** The open card's reason, under its status line. */
+export function cardReason(
+  facts: FailureFacts,
+  t: TFunction<"chat">,
+  providerName: (provider: DefaultModelProvider) => string,
+  locale: string,
+): string {
+  const provider = providerName(facts.provider);
+  if (facts.reason === "quota") return t("providerFailure.reasonQuota", { provider });
+  if (facts.reason === "temporary") return t("providerFailure.reasonTemporary", { provider });
+  if (facts.reason === "capacity") {
+    const model = facts.model ? modelDisplayName(facts.model) : provider;
+    return t("providerFailure.reasonTemporary", { provider: model });
+  }
+  if (failureCardKind(facts) === "wait") return t("providerFailure.reasonTemporary", { provider });
+  return failureText(facts, t, providerName, locale);
+}
+
+const STATUS_ICON = {
+  wait: CirclePause,
+  account: TriangleAlert,
+  model: Info,
+} as const;
 
 /** The one line a settled card or notice reads as. */
 export function resolvedText(
@@ -314,13 +362,34 @@ export function ProviderFailureCard({
     }
   };
 
+  const status = cardStatus(part, t, i18n.language);
+  const StatusIcon = STATUS_ICON[status.kind];
+  // A turn that waits or needs the guardian stands out when scanning the
+  // chat; a model change does not. Never red: red is for what cannot recover.
+  const accented = status.kind !== "model";
   return (
     <div
-      className="mb-4 w-full max-w-md rounded-12 border border-border bg-surface p-4"
+      className={cn(
+        "mb-4 w-full max-w-md rounded-12 border border-border bg-surface p-4",
+        accented && "border-l-3 border-l-warning",
+      )}
       data-provider-failure=""
-      data-card={failureCardKind(part)}
+      data-card={status.kind}
     >
-      <p className="text-ui text-foreground">{failureText(part, t, providerName, i18n.language)}</p>
+      <p
+        className={cn(
+          "mb-1 flex items-center gap-1.5 text-aux",
+          accented ? "text-warning-fg" : "text-muted-foreground",
+        )}
+      >
+        <StatusIcon
+          aria-hidden
+          className="size-3.5 shrink-0"
+          strokeWidth={status.kind === "account" ? 2.5 : 2}
+        />
+        {status.label}
+      </p>
+      <p className="text-ui text-foreground">{cardReason(part, t, providerName, i18n.language)}</p>
       <FailureActions
         facts={part}
         pending={pending || !messageId}

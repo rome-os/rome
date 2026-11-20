@@ -84,7 +84,12 @@ describe("ProviderFailureCard", () => {
     until.setHours(14, 20, 0, 0);
     renderCard({ until: until.toISOString() }, settled);
     const { time } = formatUntil(until.toISOString(), "en");
-    expect(screen.getByText(`ChatGPT quota used up, continues today at ${time}`)).toBeTruthy();
+    // The status line carries the reset time; the reason under it does not.
+    expect(screen.getByText(`Paused · continues today at ${time}`)).toBeTruthy();
+    expect(screen.getByText("ChatGPT quota used up")).toBeTruthy();
+    expect(
+      document.querySelector("[data-provider-failure]")?.className.includes("border-l-warning"),
+    ).toBe(true);
     // A usage limit ends by itself, so nothing asks to log in.
     expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
     // The card itself carries no default choice: its switch asks in a dialog.
@@ -125,6 +130,7 @@ describe("ProviderFailureCard", () => {
       card: "account",
       detail: "401 Unauthorized",
     });
+    expect(screen.getByText("Needs you")).toBeTruthy();
     expect(screen.getByText("ChatGPT needs you to log in again")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Switch to Claude" })).toBeTruthy();
@@ -169,7 +175,12 @@ describe("ProviderFailureCard", () => {
       replacement: { selection: "gpt-6-1-sol", model: "gpt-6.1-sol" },
       followsDefault: false,
     });
+    expect(screen.getByText("Model unavailable")).toBeTruthy();
     expect(screen.getByText("GPT-6 Astra is unavailable")).toBeTruthy();
+    // A model change waits on nobody: no accent.
+    expect(
+      document.querySelector("[data-provider-failure]")?.className.includes("border-l-warning"),
+    ).toBe(false);
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByRole("button", { name: "Switch to Claude" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Switch to GPT-6.1 Sol" }));
@@ -189,6 +200,7 @@ describe("ProviderFailureCard", () => {
     });
     expect(screen.getByText("Switched to Claude, continued")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText(/^Paused/)).toBeNull();
     expect(container.querySelector("[data-provider-failure]")).toBeNull();
     rerender(
       <QueryClientProvider client={new QueryClient()}>
@@ -218,6 +230,14 @@ describe("ProviderFailureCard", () => {
     const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Could not switch");
+  });
+});
+
+describe("cardStatus", () => {
+  it("says the wait retries by itself when no reset time is known", () => {
+    renderCard({ reason: "temporary", card: "wait" });
+    expect(screen.getByText("Paused · Rome tries again by itself")).toBeTruthy();
+    expect(screen.getByText("ChatGPT is unavailable for now")).toBeTruthy();
   });
 });
 
