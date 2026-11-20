@@ -233,7 +233,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     fold,
   }: {
     unreadFrom?: string | null;
-    fold?: { through: string; onOpen: () => void } | null;
+    fold?: { point: { at: string; id: string }; onOpen: () => void } | null;
     contentRef: (node: HTMLElement | null) => void;
     onOpenStoredTrace: (target: unknown) => void;
     live: {
@@ -295,7 +295,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       {rows
         .filter((row) => row.kind === "user")
         .filter(
-          (row) => !fold || Date.parse(row.message?.createdAt ?? "") > Date.parse(fold.through),
+          (row) => !fold || Date.parse(row.message?.createdAt ?? "") > Date.parse(fold.point.at),
         )
         .map((row) => (
           <div
@@ -3986,7 +3986,7 @@ describe("Chat fold of the main chat", () => {
     await user.click(screen.getByRole("menuitem", { name: "concierge.menu.fold" }));
 
     await waitFor(() => expect(screen.queryByTestId("fold-line")).toBeTruthy());
-    expect(puts).toEqual([{ "conciergeFold.concierge": message(2).createdAt }]);
+    expect(puts).toEqual([{ "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } }]);
     expect(shown()).toEqual([]);
 
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
@@ -3996,7 +3996,7 @@ describe("Chat fold of the main chat", () => {
   });
 
   it("shows the folded messages for this visit when the line is tapped, keeping the fold", async () => {
-    settings = { "conciergeFold.concierge": message(2).createdAt };
+    settings = { "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } };
     await openMain([message(1), message(2), message(3)], null);
     await waitFor(() => expect(shown()).toEqual(["m-3"]));
 
@@ -4007,7 +4007,7 @@ describe("Chat fold of the main chat", () => {
   });
 
   it("opens the fold for a jump to a folded message, and lands on it", async () => {
-    settings = { "conciergeFold.concierge": message(2).createdAt };
+    settings = { "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } };
     await openMain([message(1), message(2), message(3)], null);
     await waitFor(() => expect(shown()).toEqual(["m-3"]));
 
@@ -4019,12 +4019,51 @@ describe("Chat fold of the main chat", () => {
   });
 
   it("stops paging older history once the loaded messages reach into a closed fold", async () => {
-    settings = { "conciergeFold.concierge": message(2).createdAt };
+    settings = { "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } };
     await openMain([message(2), message(3)], "c1");
     await waitFor(() => expect(shown()).toEqual(["m-3"]));
     expect(document.querySelector("[data-older-sentinel]")).toBeNull();
 
     fireEvent.click(screen.getByTestId("fold-line"));
+
+    expect(document.querySelector("[data-older-sentinel]")).toBeTruthy();
+  });
+
+  it("folds again after Show, closing what the visit opened at the same point", async () => {
+    const user = userEvent.setup();
+    settings = { "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } };
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
+    await waitFor(() => expect(screen.queryByTestId("fold-line")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("fold-line"));
+    expect(shown()).toEqual(["m-1", "m-2"]);
+
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.fold" }));
+
+    await waitFor(() => expect(shown()).toEqual([]));
+    expect(screen.queryByTestId("fold-line")).toBeTruthy();
+  });
+
+  it("keeps paging older history when only an older trace on the page is folded", async () => {
+    settings = { "conciergeFold.concierge": { at: message(2).createdAt, id: "m-2" } };
+    const oldTrace = {
+      id: "trace-old",
+      sessionId: "concierge",
+      turnId: "turn-1",
+      role: "trace" as const,
+      content: "",
+      createdAt: message(1).createdAt,
+    };
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [oldTrace, message(5), message(6)] as never,
+      nextCursor: "c1",
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
+    await waitFor(() => expect(shown()).toEqual(["m-5", "m-6"]));
 
     expect(document.querySelector("[data-older-sentinel]")).toBeTruthy();
   });

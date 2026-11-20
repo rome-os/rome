@@ -59,7 +59,7 @@ import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
 import { TaskLinksScope } from "@/components/chat/task-link/task-links";
 import { useConciergeFold } from "@/components/chat/use-concierge-fold";
-import { isFolded } from "@/components/chat/concierge-groups";
+import { foldedBy, newestFoldPoint } from "@/components/chat/concierge-groups";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -765,19 +765,23 @@ export function Chat({
 
   // The main chat's fold: the messages up to a point its owner picked show as
   // one line. Showing them lasts for this visit; the point stays until Unfold.
-  const foldPoint = useConciergeFold(isMainChat ? (mainSessionId ?? null) : null);
-  const foldThrough = foldPoint.through;
+  const conciergeFold = useConciergeFold(isMainChat ? (mainSessionId ?? null) : null);
+  const foldPoint = conciergeFold.point;
   const [openedFold, setOpenedFold] = useState<string | null>(null);
-  const foldKey = foldThrough ? `${mainSessionId}:${foldThrough}` : null;
+  const foldKey = foldPoint ? `${mainSessionId}:${foldPoint.at}:${foldPoint.id}` : null;
   const foldClosed = foldKey !== null && openedFold !== foldKey;
+  // The main chat's own messages, which a fold point is picked from and
+  // measured against. A trace is left out: a page carries its turns' traces
+  // even when they are older than the page.
+  const foldable = useMemo(
+    () => displayMessages.filter((m) => m.sessionId === mainSessionId && m.role !== "trace"),
+    [displayMessages, mainSessionId],
+  );
   // The loaded history reaches into the fold: older pages then hold only
   // folded messages, so none is read while it stays closed.
   const foldReached = useMemo(
-    () =>
-      foldClosed &&
-      !!foldThrough &&
-      displayMessages.some((m) => m.sessionId === mainSessionId && isFolded(m, foldThrough)),
-    [foldClosed, foldThrough, displayMessages, mainSessionId],
+    () => foldClosed && !!foldPoint && foldable.some(foldedBy(foldable, foldPoint)),
+    [foldClosed, foldPoint, foldable],
   );
   const foldClosedRef = useRef(foldClosed);
   foldClosedRef.current = foldClosed;
@@ -946,21 +950,24 @@ export function Chat({
     if (scroller) scroller.scrollTop = scroller.scrollHeight - fromBottom;
   }, [scrollerEl, openFold]);
   const fold = useMemo(
-    () => (foldClosed && foldThrough ? { through: foldThrough, onOpen: showFolded } : null),
-    [foldClosed, foldThrough, showFolded],
+    () => (foldClosed && foldPoint ? { point: foldPoint, onOpen: showFolded } : null),
+    [foldClosed, foldPoint, showFolded],
   );
-  // Folds every message the chat holds now, up to the newest one. Its time is
-  // the server's, so a device's clock does not move the point.
+  // Folds every message the server has stored, up to the newest.
   const foldEarlier = useCallback(async () => {
-    const newest = displayMessages.findLast(
-      (m) => m.sessionId === mainSessionId && !Number.isNaN(Date.parse(m.createdAt)),
+    const point = newestFoldPoint(
+      foldable,
+      localOptimisticMessageIdsRef.current.get(mainSessionId ?? ""),
     );
-    if (!newest) return;
-    if (!(await foldPoint.fold(newest.createdAt))) toast.error(t("concierge.fold.failed"));
-  }, [displayMessages, mainSessionId, foldPoint, t]);
+    if (!point) return;
+    // Folding again closes what this visit opened, even at the same point.
+    setOpenedFold(null);
+    if (!(await conciergeFold.fold(point))) toast.error(t("concierge.fold.failed"));
+  }, [foldable, mainSessionId, conciergeFold, t]);
   const unfold = useCallback(async () => {
-    if (!(await foldPoint.unfold())) toast.error(t("concierge.fold.failed"));
-  }, [foldPoint, t]);
+    setOpenedFold(null);
+    if (!(await conciergeFold.unfold())) toast.error(t("concierge.fold.failed"));
+  }, [conciergeFold, t]);
   // Respond in the Tasks panel points to a Concierge message that may sit
   // pages above the loaded ones, so the jump reads history down through it in
   // one page.
@@ -2594,7 +2601,9 @@ export function Chat({
       label: t("share.title", "Share chat"),
       run: () => enterShareMode(),
     },
-    ...(isMainChat && !conciergeEmpty
+    // Not while the chat waits on a card: folding would hide the card the
+    // message box asks its owner to answer.
+    ...(isMainChat && !conciergeEmpty && !awaitingGuardian
       ? [
           {
             key: "fold",
@@ -2604,7 +2613,7 @@ export function Chat({
           },
         ]
       : []),
-    ...(isMainChat && foldThrough
+    ...(isMainChat && foldPoint
       ? [
           {
             key: "unfold",

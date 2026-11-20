@@ -61,14 +61,51 @@ export type ConciergeItem =
 const UNREAD_DIVIDER: ConciergeItem = { kind: "unread", key: "unread-divider" };
 const FOLD_LINE: ConciergeItem = { kind: "fold", key: "fold" };
 
+/** Where a fold ends: the newest message it holds, and that message's time (ISO). */
+export interface FoldPoint {
+  at: string;
+  id: string;
+}
+
+type Dated = Pick<ChatMessage, "id" | "createdAt">;
+
 /**
- * Whether `message` is folded away by a fold at `through`, an ISO timestamp:
- * it was sent at or before it. A message with an unparsable time stays shown.
+ * What `point` folds among `messages`, given in transcript order: every message
+ * sent before its time, and of those sent in the same second, the ones up to
+ * its own message. Times are whole seconds, so a message that lands in that
+ * second after the fold stays shown, and so does one with an unreadable time.
  */
-export function isFolded(message: Pick<ChatMessage, "createdAt">, through: string): boolean {
-  const at = Date.parse(message.createdAt);
-  const fold = Date.parse(through);
-  return !Number.isNaN(at) && !Number.isNaN(fold) && at <= fold;
+export function foldedBy(
+  messages: readonly Dated[],
+  point: FoldPoint,
+): (message: Dated) => boolean {
+  const fold = Date.parse(point.at);
+  const end = messages.findIndex((message) => message.id === point.id);
+  const throughEnd = new Set(messages.slice(0, end + 1).map((message) => message.id));
+  return (message) => {
+    const at = Date.parse(message.createdAt);
+    if (Number.isNaN(at) || Number.isNaN(fold)) return false;
+    return at < fold || (at === fold && throughEnd.has(message.id));
+  };
+}
+
+/**
+ * The point that folds every message the server has stored: the newest by
+ * time, the later one in transcript order on a tie. A message still being sent
+ * (`sending`) carries the device's clock rather than the server's, so it never
+ * sets the point, and stays shown.
+ */
+export function newestFoldPoint(
+  messages: readonly Dated[],
+  sending: ReadonlySet<string> = new Set(),
+): FoldPoint | null {
+  let newest: { message: Dated; at: number } | null = null;
+  for (const message of messages) {
+    const at = Date.parse(message.createdAt);
+    if (Number.isNaN(at) || sending.has(message.id)) continue;
+    if (!newest || at >= newest.at) newest = { message, at };
+  }
+  return newest ? { at: newest.message.createdAt, id: newest.message.id } : null;
 }
 
 /** Whether the Concierge draws something for `message`. */
@@ -199,7 +236,7 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  * The unread divider comes before the message `opts.unreadFrom` names, after
  * that message's separator, and it ends the group before it. A chat that does
  * not draw that message has no divider.
- * With `opts.foldThrough`, the messages sent at or before it are folded away:
+ * With `opts.fold`, the messages it holds (see {@link foldedBy}) are folded away:
  * one fold line stands first in their place, and the notices among them go
  * with them. The first message after it starts afresh, with its own separator.
  * Rows with nothing to draw (trace rows, empty messages) leave no trace.
@@ -211,7 +248,7 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  */
 export function buildConciergeItems(
   rows: ChatRow[],
-  opts: { typing: boolean; unreadFrom?: string | null; foldThrough?: string | null },
+  opts: { typing: boolean; unreadFrom?: string | null; fold?: FoldPoint | null },
 ): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
@@ -222,13 +259,20 @@ export function buildConciergeItems(
   let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
   let previousSender: "guardian" | "agent" | null = null;
-  const { foldThrough } = opts;
+  const isFolded = opts.fold
+    ? foldedBy(
+        rows.flatMap((row) =>
+          row.kind === "user" ? [row.message] : row.kind === "agent" ? row.messages : [],
+        ),
+        opts.fold,
+      )
+    : null;
   // Whether anything was folded, and whether the transcript is still among
   // the folded messages, where a notice goes with them.
   let foldedAny = false;
   let inFold = false;
   const folds = (message: ChatMessage): boolean => {
-    if (!foldThrough || !isFolded(message, foldThrough)) return false;
+    if (!isFolded?.(message)) return false;
     foldedAny = true;
     inFold = true;
     return true;

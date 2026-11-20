@@ -440,7 +440,7 @@ describe("ConciergeTranscript fold", () => {
         live={live}
         actions={actions}
         contentRef={() => {}}
-        fold={{ through: at(1), onOpen }}
+        fold={{ point: { at: at(1), id: "a1" }, onOpen }}
       />
     </ThemeProvider>
   );

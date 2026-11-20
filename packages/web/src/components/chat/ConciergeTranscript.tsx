@@ -11,7 +11,11 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
-import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
+import {
+  buildConciergeItems,
+  type FoldPoint,
+  showsTyping,
+} from "@/components/chat/concierge-groups";
 import { useGroupDrawings } from "@/components/chat/reply/reply-drawing";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 import { useSimulatedTyping } from "@/components/chat/use-simulated-typing";
@@ -34,8 +38,8 @@ function TypingBubble() {
 
 /** A closed fold: what it hides, and how to show it. */
 export interface ConciergeFold {
-  /** ISO timestamp: the messages sent at or before it are folded away. */
-  through: string;
+  /** Where the fold ends: the messages up to it are folded away. */
+  point: FoldPoint;
   onOpen: () => void;
 }
 
@@ -71,8 +75,8 @@ export function ConciergeTranscript({
   /** The id of the first message that was unread when the chat opened; a divider goes above it. */
   unreadFrom?: string | null;
   /**
-   * The main chat's fold while it is closed: the messages sent at or before
-   * `through` show as one line, and `onOpen` shows them again.
+   * The main chat's fold while it is closed: the messages up to its point
+   * show as one line, and `onOpen` shows them again.
    */
   fold?: ConciergeFold | null;
 }) {
@@ -80,10 +84,10 @@ export function ConciergeTranscript({
   const simulated = useSimulatedTyping(allRows, live);
   const rows = simulated.rows;
   const typing = showsTyping(rows, live, simulated.holding);
-  const foldThrough = fold?.through ?? null;
+  const foldPoint = fold?.point ?? null;
   const items = useMemo(
-    () => buildConciergeItems(rows, { typing, unreadFrom, foldThrough }),
-    [rows, typing, unreadFrom, foldThrough],
+    () => buildConciergeItems(rows, { typing, unreadFrom, fold: foldPoint }),
+    [rows, typing, unreadFrom, foldPoint],
   );
   const messageIds = useMemo(
     () =>

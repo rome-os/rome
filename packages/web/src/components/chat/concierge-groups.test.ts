@@ -5,7 +5,8 @@ import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import {
   buildConciergeItems,
   type ConciergeItem,
-  isFolded,
+  foldedBy,
+  newestFoldPoint,
   showsTyping,
   simulatedTypingMs,
 } from "./concierge-groups";
@@ -546,8 +547,10 @@ describe("where a reply came from", () => {
 });
 
 describe("buildConciergeItems with a fold", () => {
-  const folded = (rows: ChatRow[], foldThrough: string | null, unreadFrom?: string) =>
-    shape(buildConciergeItems(rows, { typing: false, foldThrough, unreadFrom }));
+  // A fold that ends at the message `id`, sent `offsetMs` after noon.
+  const point = (id: string, offsetMs: number) => ({ at: at(offsetMs), id });
+  const folded = (rows: ChatRow[], fold: { at: string; id: string } | null, unreadFrom?: string) =>
+    shape(buildConciergeItems(rows, { typing: false, fold, unreadFrom }));
   const rows = () => [
     userRow(guardian("g1", 0)),
     agentRow(say("a1", 1_000)),
@@ -557,19 +560,19 @@ describe("buildConciergeItems with a fold", () => {
 
   it("draws one line in place of the messages sent at or before the fold point", () => {
     // a1 is sent exactly at the point, so it folds too.
-    expect(folded(rows(), at(1_000))).toEqual(["fold", "sep", "G:g2", "A:a2"]);
+    expect(folded(rows(), point("a1", 1_000))).toEqual(["fold", "sep", "G:g2", "A:a2"]);
   });
 
   it("draws everything as before without a fold point, or with one before every message", () => {
     const plain = ["sep", "G:g1", "A:a1", "sep", "G:g2", "A:a2"];
     expect(folded(rows(), null)).toEqual(plain);
-    expect(folded(rows(), at(-MIN))).toEqual(plain);
+    expect(folded(rows(), point("gone", -MIN))).toEqual(plain);
   });
 
   it("folds every message when the point is the newest, and shows what comes after it", () => {
-    expect(folded(rows(), at(121 * MIN))).toEqual(["fold"]);
+    expect(folded(rows(), point("a2", 121 * MIN))).toEqual(["fold"]);
     const later = [...rows(), agentRow(say("a3", 122 * MIN, "t3"))];
-    expect(folded(later, at(121 * MIN))).toEqual(["fold", "sep", "A:a3"]);
+    expect(folded(later, point("a2", 121 * MIN))).toEqual(["fold", "sep", "A:a3"]);
   });
 
   it("starts the first shown message afresh, with its own time separator", () => {
@@ -580,7 +583,7 @@ describe("buildConciergeItems with a fold", () => {
       userRow(guardian("g2", 3 * MIN)),
     ];
     expect(folded(close, null)).toEqual(["sep", "G:g1", "A:a1", "G:g2"]);
-    expect(folded(close, at(1_000))).toEqual(["fold", "sep", "G:g2"]);
+    expect(folded(close, point("a1", 1_000))).toEqual(["fold", "sep", "G:g2"]);
   });
 
   it("takes the notices among the folded messages with them", () => {
@@ -589,16 +592,54 @@ describe("buildConciergeItems with a fold", () => {
       { kind: "model_switch", key: "switch", model: "m2", turnId: "t2", sessionId: "concierge" },
       agentRow(say("a2", 2 * 60 * MIN, "t2")),
     ];
-    expect(folded(withSwitch, at(0))).toEqual(["fold", "sep", "A:a2"]);
+    expect(folded(withSwitch, point("g1", 0))).toEqual(["fold", "sep", "A:a2"]);
   });
 
   it("keeps the unread divider on a shown message", () => {
-    expect(folded(rows(), at(1_000), "g2")).toEqual(["fold", "sep", "new", "G:g2", "A:a2"]);
+    expect(folded(rows(), point("a1", 1_000), "g2")).toEqual([
+      "fold",
+      "sep",
+      "new",
+      "G:g2",
+      "A:a2",
+    ]);
   });
 
-  it("folds a message by its time, keeping one with no readable time", () => {
-    expect(isFolded({ createdAt: at(0) }, at(0))).toBe(true);
-    expect(isFolded({ createdAt: at(1) }, at(0))).toBe(false);
-    expect(isFolded({ createdAt: "not a time" }, at(0))).toBe(false);
+  it("shows a message that lands in the fold point's second after its message", () => {
+    // Stored times are whole seconds: a1 and a1b share one.
+    const same = [...rows().slice(0, 2), agentRow(say("a1b", 1_000, "t1b"))];
+    expect(folded(same, point("a1", 1_000))).toEqual(["fold", "sep", "A:a1b"]);
+  });
+
+  it("picks the newest stored message as the point, never one still being sent", () => {
+    const messages = [
+      { id: "a", createdAt: at(0) },
+      { id: "b", createdAt: at(MIN) },
+      { id: "c", createdAt: at(MIN) },
+      // Sent from a device whose clock runs ten minutes ahead.
+      { id: "sending", createdAt: at(10 * MIN) },
+    ];
+    expect(newestFoldPoint(messages, new Set(["sending"]))).toEqual(point("c", MIN));
+    expect(newestFoldPoint([], new Set())).toBeNull();
+  });
+
+  it("folds by time before the point and by order within its second", () => {
+    const messages = [
+      { id: "x", createdAt: at(0) },
+      { id: "y", createdAt: at(1_000) },
+      { id: "z", createdAt: at(1_000) },
+      { id: "late", createdAt: at(2_000) },
+      { id: "odd", createdAt: "not a time" },
+    ];
+    const isFolded = foldedBy(messages, point("y", 1_000));
+    expect(messages.filter(isFolded).map((m) => m.id)).toEqual(["x", "y"]);
+    // With its message not loaded, the loaded ones of its second all came after it.
+    const unloaded = foldedBy(messages.slice(2), point("y", 1_000));
+    expect(
+      messages
+        .slice(2)
+        .filter(unloaded)
+        .map((m) => m.id),
+    ).toEqual([]);
   });
 });
