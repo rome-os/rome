@@ -60,7 +60,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     place: ThreadContext,
     before: Date,
     first: number | undefined,
-    since?: number,
+    thread: { since?: number } | null,
   ): Promise<ThreadRead | null> => {
     if (!deps.latest || handsEveryMessage(place.channel)) return null;
     // Rome's record keeps whole seconds, so what was said just before the
@@ -74,14 +74,17 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // which the platform reads from its start, answers what came after it.
     // A read takes one bound by message, so the session's first message is
     // then cut by its own order.
+    const since = thread?.since;
     const sinceKey = since === undefined ? undefined : deps.messages.byIds([since])[0]?.key;
-    // One more than kept: the bound takes in a message said at `until`.
+    // One more than kept: the bound takes in a message said at `until`. A
+    // thread is read without a bound at the session's first message, so the
+    // page shows whether the read reached it.
     const read = deps.latest(place, {
       limit: EARLIER_MESSAGES + 1,
       until,
       ...(sinceKey !== undefined
         ? { newerThan: sinceKey }
-        : key === undefined
+        : key === undefined || thread
           ? {}
           : { olderThan: key }),
     });
@@ -92,14 +95,11 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);
     const said = earlierMessages(newerThan(below, sinceKey), bound);
-    // A read after the message shown last that does not reach the turn's
-    // message stops short of it. The page's length tells nothing: the
-    // connection may leave out messages it cannot show, such as a thread's
-    // root on each later page.
+    // A thread read that does not reach the turn's message stops short of
+    // it. The page's length tells nothing: the connection may leave out
+    // messages it cannot show, such as a thread's root on each later page.
     const cut =
-      sinceKey !== undefined &&
-      key !== undefined &&
-      !page.some((message) => message.messageId === key);
+      thread !== null && key !== undefined && !page.some((message) => message.messageId === key);
     const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
     const messages = labelled.map(
       (message, i): UnseenMessage => ({
@@ -123,7 +123,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       // Only a direct message: in a group, the platform also holds what was
       // said before Rome joined, which no turn's catch-up shows.
       if (!place.threadId || place.threadType !== "private") return null;
-      return (await readBefore(place, before, first))?.messages ?? null;
+      return (await readBefore(place, before, first, null))?.messages ?? null;
     },
     // A thread inside a group's conversation is read whole: the session
     // holds the conversation, and none of its turns saw the thread's replies
@@ -133,7 +133,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // since the last one the model was shown.
     thread: (place, thread, before, first, since) =>
       place.threadId && thread.startsWith(`${place.threadId}:`)
-        ? readBefore({ ...place, threadId: thread }, before, first, since)
+        ? readBefore({ ...place, threadId: thread }, before, first, { since })
         : Promise.resolve(null),
   };
 }
