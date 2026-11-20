@@ -84,6 +84,62 @@ not checked within that budget remain unknown. Gateway connection setup has its
 own existing wait limits. No history, remote actions with side effects, or new
 Gateway presence protocol is involved.
 
+## Run Rome Node with Docker
+
+The [Rome Node image](../infra/rome-node/Dockerfile) packages the existing
+`rome-node` CLI and runs `rome-node connect --device-code` as an unprivileged
+container user. State lives in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`),
+so mounting one Docker volume keeps both the device credential and the
+[device audit log](#device-audit-log) across container replacements.
+
+```yaml
+services:
+  rome-node:
+    image: ghcr.io/rome-os/rome-node@sha256:<manifest-digest>
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - rome-node:/var/lib/rome-node
+    command: ["connect", "--device-code", "--name", "My Container"]
+volumes:
+  rome-node:
+```
+
+1. Start the container with `docker compose up -d`.
+2. Read the Rome Cloud verification URL and user code from `docker compose logs -f`.
+3. Open the URL in a browser and approve the device with your Rome Cloud account.
+
+After approval, the container opens an outbound connection to the account
+Gateway and appears on **Settings → Devices** and in `rome-node device`.
+Authorized callers can run programs and access files as the container user.
+Recreating the container with the same volume keeps the device identity without
+another approval. Inspect the audit log inside the container with
+`docker compose exec rome-node rome-node audit status`.
+
+To revoke access, choose **Remove** on its device card. If you added a restart
+policy, stop the container with `docker compose down`.
+
+### Build the image
+
+Build the [Rome Node image](../infra/rome-node/Dockerfile) for the local Docker host.
+
+```sh
+docker buildx build --file infra/rome-node/Dockerfile \
+  --tag rome-node:local --load .
+```
+
+To run the local build with Compose, set `image: rome-node:local` and pass
+`--pull never` to `docker compose up -d`.
+
+### Release the image
+
+Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
+`main` with **Publish the Docker image to GitHub Container Registry** selected.
+The workflow checks amd64 and arm64 before publishing both under the source
+commit SHA and writes the multi-platform image digest to the workflow summary.
+A package admin sets the package to public and verifies anonymous pulls on both
+architectures.
+
 ## Chat device folders
 
 A new chat can work in a folder on a connected device instead of in a Rome
