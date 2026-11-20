@@ -1,21 +1,52 @@
 import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import {
+  type ChatRules,
   DISCORD_CHAT_RULES,
   FEISHU_CHAT_RULES,
+  type KindChatRules,
   SESSION_RESET_ONLY_CHAT_RULES,
   WECHAT_CHAT_RULES,
 } from "@rome/api-types/chat-rules";
-import type { ChatSettingField } from "@rome/api-types/chat-settings";
+import type { ChatSettings } from "@rome/api-types/chat-settings";
 
 // What each kind of connection offers: the declarations core runs on.
-const CHAT_RULES: Record<string, ChatSettingField[]> = {
-  discord: [...DISCORD_CHAT_RULES.offers],
-  feishu: [...FEISHU_CHAT_RULES.offers],
-  wechat: [...WECHAT_CHAT_RULES.offers],
-  telegram: [...SESSION_RESET_ONLY_CHAT_RULES.offers],
-  email: [...SESSION_RESET_ONLY_CHAT_RULES.offers],
+const CHAT_RULES: Record<string, KindChatRules> = {
+  discord: DISCORD_CHAT_RULES,
+  feishu: FEISHU_CHAT_RULES,
+  wechat: WECHAT_CHAT_RULES,
+  telegram: SESSION_RESET_ONLY_CHAT_RULES,
+  email: SESSION_RESET_ONLY_CHAT_RULES,
+  whatsapp: SESSION_RESET_ONLY_CHAT_RULES,
+  linkedin: SESSION_RESET_ONLY_CHAT_RULES,
 };
+
+/** The values a chat runs on where nobody set one and its kind fixes none:
+ *  fixture values, matching Core's defaults today. */
+export const CHAT_RULE_DEFAULTS: ChatSettings = {
+  enabled: true,
+  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+  replies: { placement: "thread" },
+  routing: { agentName: null },
+  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
+};
+
+/** A kind's connection fields for its chat rules: what it offers, and the
+ *  defaults with what it fixes laid over them. */
+function chatRuleFields(
+  kind: KindChatRules | undefined,
+): Pick<ApiConnection, "chatRules" | "chatRuleDefaults"> {
+  if (!kind) return { chatRules: [], chatRuleDefaults: null };
+  const defaults = structuredClone(CHAT_RULE_DEFAULTS);
+  const fixed: Partial<ChatRules> = kind.fixed ?? {};
+  if (fixed["activation.mode"]) defaults.activation.mode = fixed["activation.mode"];
+  if (fixed["activation.botMessages"])
+    defaults.activation.botMessages = fixed["activation.botMessages"];
+  if (fixed["activation.whenOthersMentioned"]) {
+    defaults.activation.whenOthersMentioned = fixed["activation.whenOthersMentioned"];
+  }
+  return { chatRules: [...kind.offers], chatRuleDefaults: defaults };
+}
 
 // The connection ledger. In its own module because two surfaces read it and one
 // of them writes it: the Connections page revokes a grant, and the send routes
@@ -84,7 +115,7 @@ export const connections: { connections: ApiConnection[] } = {
         agent: service === "feishu" ? MAIN_AGENT_ID : null,
         link: service === "feishu" ? "own_account" : null,
         severalAccounts,
-        chatRules: CHAT_RULES[service] ?? [],
+        ...chatRuleFields(CHAT_RULES[service]),
       }),
     ),
     {
@@ -109,7 +140,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
-      chatRules: CHAT_RULES.discord,
+      ...chatRuleFields(CHAT_RULES.discord),
     },
     {
       id: "telegram-1",
@@ -133,7 +164,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
-      chatRules: CHAT_RULES.telegram,
+      ...chatRuleFields(CHAT_RULES.telegram),
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -159,7 +190,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
-      chatRules: ["session.reset"],
+      ...chatRuleFields(CHAT_RULES.whatsapp),
     },
     {
       id: "linkedin-1",
@@ -181,7 +212,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
-      chatRules: ["session.reset"],
+      ...chatRuleFields(CHAT_RULES.linkedin),
     },
     // The OAuth services this host offers but nobody has connected. Core lists
     // them as placeholders (`id: null`), so the page has something to offer.

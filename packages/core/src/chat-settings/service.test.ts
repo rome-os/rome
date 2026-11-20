@@ -625,6 +625,12 @@ describe("ChatSettingsService", () => {
         (item) => item.snapshot.conversation.ref.chatId === "parent",
       )?.source,
     ).toBe("configured");
+    // Asked for changed chats, a connection lists only those a value was set on.
+    expect(
+      (await service.list({ connectionId: discord.id, changed: true })).items.map(
+        (item) => item.snapshot.conversation.ref.chatId,
+      ),
+    ).toEqual(["parent"]);
 
     await registry.stopAll();
     expect(discord.isUnlocked("chat")).toBe(false);

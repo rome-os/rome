@@ -426,13 +426,6 @@
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "搜索聊天",
-      "anyStatus": "所有状态",
-      "statusFilterAria": "按状态筛选",
-      "status": {
-        "online": "在线",
-        "offline": "离线",
-        "notConnected": "未连接"
-      },
       "kinds": {
         "channel": "频道",
         "group": "群组",
@@ -440,12 +433,9 @@
         "topic": "话题"
       },
       "loading": "正在加载聊天…",
-      "emptyTitle": "未找到可配置的聊天",
-      "emptyDescription": "在这个账号的聊天里发一条消息，Rome 就能找到它。",
+      "emptyTitle": "所有聊天都使用默认规则",
+      "emptyDescription": "添加一个聊天，为它单独设置规则。",
       "loadMore": "加载更多",
-      "overrideCount_one": "{{count}} 项覆盖",
-      "overrideCount_other": "{{count}} 项覆盖",
-      "providerDefaults": "产品默认值",
       "sections": {
         "activation": "触发",
         "replies": "回复",
@@ -464,9 +454,6 @@
       "descriptions": {
         "sessionReset": "清除模型提供商侧保存的智能体记忆"
       },
-      "source": {
-        "overridden": "已覆盖"
-      },
       "options": {
         "mentions": "仅提及消息",
         "all": "全部",
@@ -482,7 +469,7 @@
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
       "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
-      "silentAccountLink": "<account>在账号页面关联</account>。",
+      "silentAccountLink": "<account>在外派智能体中关联一个</account>。",
       "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",
@@ -503,6 +490,34 @@
       "chatRules": {
         "title": "聊天规则",
         "description": "Rome 在这个账号的每个聊天中如何参与。"
+      },
+      "otherChats": "其他聊天：",
+      "addChat": "添加聊天",
+      "noMatches": "没有匹配的聊天",
+      "findChats": "在这个账号的聊天里发一条消息，Rome 就能找到它。",
+      "close": "关闭",
+      "addDialog": {
+        "title": "添加聊天",
+        "description": "在你修改规则之前，它沿用默认规则。"
+      },
+      "resetToDefaults": "恢复默认",
+      "changed": "已改动默认值",
+      "summary": {
+        "defaults": "使用默认规则",
+        "on": "开启",
+        "off": "关闭",
+        "thread": "在话题中回复",
+        "inline": "直接回复",
+        "agent": "由 {{agent}} 回答",
+        "resetNever": "从不重置",
+        "resetDaily": "每天 {{time}} UTC 重置",
+        "resetIdle": "闲置 {{duration}}后重置",
+        "minutes_one": "{{count}} 分钟",
+        "minutes_other": "{{count}} 分钟",
+        "hours_one": "{{count}} 小时",
+        "hours_other": "{{count}} 小时",
+        "days_one": "{{count}} 天",
+        "days_other": "{{count}} 天"
       }
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",

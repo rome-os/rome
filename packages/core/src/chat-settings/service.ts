@@ -239,7 +239,9 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
   }
 
-  async list(input: ListChatSettingsInput = {}): Promise<ChatSettingsPage> {
+  /** `changed` keeps only the chats a guardian set a value on, which the
+   *  dashboard lists apart from the ones running on their defaults. */
+  async list(input: ListChatSettingsInput & { changed?: boolean } = {}): Promise<ChatSettingsPage> {
     const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
     const offset = cursorOffset(input.cursor);
     // The public cursor addresses the normalized, cross-provider result set.
@@ -318,6 +320,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Native threads are runtime conversations, not settings aggregates.
       // Their effective settings are resolved through the parent conversation.
       if (this.isThread(descriptor)) continue;
+      if (input.changed && source !== "configured") continue;
       if (query) {
         const haystack = [
           descriptor.connectionKind,

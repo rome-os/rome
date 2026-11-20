@@ -12,7 +12,16 @@ import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { TFunction } from "i18next";
-import { Search } from "lucide-react";
+import {
+  ChevronDown,
+  Hash,
+  MessageSquare,
+  Plus,
+  RotateCcw,
+  Search,
+  User,
+  Users,
+} from "lucide-react";
 import type {
   ChatSettingField,
   ChatSettings,
@@ -21,10 +30,15 @@ import type {
   PartialChatSettings,
   ProviderSessionResetPolicy,
 } from "@rome/api-types/chat-settings";
-import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   EmptyState,
   EmptyStateDescription,
@@ -33,6 +47,13 @@ import {
 } from "@/components/ui/empty-state";
 import { FieldGroupLabel, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  List,
+  ListRow,
+  ListRowContent,
+  ListRowDescription,
+  ListRowTitle,
+} from "@/components/ui/list-row";
 import {
   Select,
   SelectContent,
@@ -44,7 +65,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
-import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
+import { serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
@@ -56,10 +77,8 @@ interface PageResponse {
 /** Coalesces a burst of edits — typing in the inactivity field — into one PATCH. */
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
-/** A Select item cannot carry an empty value, so "any status" needs a
- *  sentinel. It maps back to "" before the request, so an unfiltered list
- *  sends no `availability` param. */
-const ANY_STATUS = "any";
+/** Past this many chats with rules of their own, the list offers a search. */
+const SEARCH_THRESHOLD = 6;
 
 interface AgentPage {
   agents: Array<{ name: string }>;
@@ -74,32 +93,52 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function keyOf(item: ChatSettingsListItem): string {
+  const ref = item.snapshot.conversation.ref;
+  return `${ref.connectionId}:${ref.chatId}`;
+}
+
+/** Chats grouped under the server or workspace they live in, in list order.
+ *  A chat that lives in none, such as a direct message, groups under "". */
+function groupByContainer(
+  items: ChatSettingsListItem[],
+): Array<{ container: string; items: ChatSettingsListItem[] }> {
+  const groups = new Map<string, ChatSettingsListItem[]>();
+  for (const item of items) {
+    const container = item.snapshot.conversation.containerName ?? "";
+    groups.set(container, [...(groups.get(container) ?? []), item]);
+  }
+  return [...groups].map(([container, grouped]) => ({ container, items: grouped }));
+}
+
 /**
- * The chat rules of one connection's chats, on that connection's page: each
- * chat it knows, with a row per rule its kind offers. A kind that offers none
- * shows no section, which the page decides from the connection's `chatRules`.
+ * The chat rules of one connection's chats, on that connection's page. Every
+ * chat runs on the connection's defaults, which one line states. The list
+ * holds only the chats a guardian gave rules of their own, and a dialog adds
+ * another. A kind that offers no rules shows no section, which the page
+ * decides from the connection's `chatRules`.
  * Vocabulary: docs/domains/chats.md#chat-rule.
  */
 export function ChatRulesSection({ connectionId }: { connectionId: string }) {
   const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
-  const [availability, setAvailability] = useState("");
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [agentNames, setAgentNames] = useState<string[]>([]);
   const [items, setItems] = useState<ChatSettingsListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(
     async (cursor?: string, append = false) => {
       setLoading(true);
       setError("");
       try {
-        const search = new URLSearchParams({ limit: "100" });
+        const search = new URLSearchParams({ limit: "100", changed: "true" });
         search.set("connectionId", connectionId);
         if (query.trim()) search.set("query", query.trim());
-        if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
         const [page, connectionList, agentPage] = await Promise.all([
           api<PageResponse>(`/api/chat-settings?${search}`),
@@ -116,7 +155,7 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
         setLoading(false);
       }
     },
-    [availability, connectionId, query],
+    [connectionId, query],
   );
 
   useEffect(() => {
@@ -124,41 +163,19 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  const connection = connections.find((candidate) => candidate.id === connectionId);
+
   // Rome does not listen to a linkable account with no agent, whatever
-  // agent a conversation on it picks. A core that predates links omits `agent`.
-  // Each maps to the page that links its agent.
-  const silentAccounts = useMemo(
-    () =>
-      new Map(
-        connections.flatMap((connection) =>
-          connection.id !== null && Boolean(connection.link) && connection.agent === null
-            ? [
-                [
-                  connection.id,
-                  `/settings/connections/${encodeURIComponent(connectionRoute(connection))}`,
-                ],
-              ]
-            : [],
-        ),
-      ),
-    [connections],
-  );
+  // agent a chat on it picks. A core that predates links omits `agent`.
+  const silent = connection !== undefined && Boolean(connection.link) && connection.agent === null;
+  // A linkable account's agent answers each chat on it that has no agent
+  // of its own.
+  const accountAgent =
+    connection !== undefined && Boolean(connection.link) && typeof connection.agent === "string"
+      ? connection.agent
+      : undefined;
 
-  // A linkable account's agent answers each conversation on it that has
-  // no agent of its own.
-  const accountAgents = useMemo(
-    () =>
-      new Map(
-        connections.flatMap((connection) =>
-          connection.id !== null && Boolean(connection.link) && typeof connection.agent === "string"
-            ? [[connection.id, connection.agent]]
-            : [],
-        ),
-      ),
-    [connections],
-  );
-
-  // Stable identity: every card takes this as a dependency, so an inline
+  // Stable identity: every row takes this as a dependency, so an inline
   // function here would change on each render and churn their save closures.
   const handleSaved = useCallback((snapshot: ChatSettingsSnapshot) => {
     setItems((current) =>
@@ -172,46 +189,60 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
     );
   }, []);
 
+  const handleReset = useCallback((key: string) => {
+    setItems((current) => current.filter((candidate) => keyOf(candidate) !== key));
+    setOpenKey((current) => (current === key ? null : current));
+  }, []);
+
+  const handlePick = useCallback((picked: ChatSettingsListItem) => {
+    const key = keyOf(picked);
+    setItems((current) =>
+      current.some((candidate) => keyOf(candidate) === key) ? current : [...current, picked],
+    );
+    setOpenKey(key);
+    setAdding(false);
+  }, []);
+
+  const shownKeys = useMemo(() => new Set(items.map(keyOf)), [items]);
+  const groups = useMemo(() => groupByContainer(items), [items]);
+  const defaults = connection?.chatRuleDefaults;
+  const defaultsSummary = defaults
+    ? defaultsLine(t, defaults, new Set(connection?.chatRules ?? []), accountAgent)
+    : "";
+
   return (
-    <section className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
-        <label className="relative">
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-aux text-muted-foreground">
+          {defaultsSummary && (
+            <>
+              <span className="text-foreground">
+                {t("channels.conversationSettings.otherChats")}
+              </span>{" "}
+              {defaultsSummary}
+            </>
+          )}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          <Plus data-icon="inline-start" aria-hidden />
+          {t("channels.conversationSettings.addChat")}
+        </Button>
+      </div>
+
+      {(items.length > SEARCH_THRESHOLD || query) && (
+        <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("channels.conversationSettings.searchPlaceholder")}
+            aria-label={t("channels.conversationSettings.searchPlaceholder")}
             className="pl-9"
           />
         </label>
-        <Select
-          value={availability || ANY_STATUS}
-          onValueChange={(next) => setAvailability(next === ANY_STATUS ? "" : next)}
-        >
-          <SelectTrigger
-            className="w-full"
-            aria-label={t("channels.conversationSettings.statusFilterAria")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ANY_STATUS}>
-              {t("channels.conversationSettings.anyStatus")}
-            </SelectItem>
-            <SelectItem value="online">
-              {t("channels.conversationSettings.status.online")}
-            </SelectItem>
-            <SelectItem value="offline">
-              {t("channels.conversationSettings.status.offline")}
-            </SelectItem>
-            <SelectItem value="not-connected">
-              {t("channels.conversationSettings.status.notConnected")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      )}
 
-      {loading ? (
+      {loading && items.length === 0 ? (
         <EmptyState className="rounded-12 border border-dashed border-border">
           <EmptyStateIcon>
             <Spinner label={t("channels.conversationSettings.loading")} />
@@ -227,25 +258,43 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
         </Alert>
       ) : items.length === 0 ? (
         <EmptyState className="rounded-12 border border-dashed border-border">
-          <EmptyStateTitle>{t("channels.conversationSettings.emptyTitle")}</EmptyStateTitle>
-          <EmptyStateDescription>
-            {t("channels.conversationSettings.emptyDescription")}
-          </EmptyStateDescription>
+          <EmptyStateTitle>
+            {query
+              ? t("channels.conversationSettings.noMatches")
+              : t("channels.conversationSettings.emptyTitle")}
+          </EmptyStateTitle>
+          {!query && (
+            <EmptyStateDescription>
+              {t("channels.conversationSettings.emptyDescription")}
+            </EmptyStateDescription>
+          )}
         </EmptyState>
       ) : (
         <>
-          <div className="space-y-4">
-            {items.map((item) => (
-              <ConversationRow
-                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.chatId}`}
-                item={item}
-                agentNames={agentNames}
-                silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
-                accountAgent={accountAgents.get(item.snapshot.conversation.ref.connectionId)}
-                onSaved={handleSaved}
-              />
-            ))}
-          </div>
+          {groups.map((group) => (
+            <div key={group.container} className="space-y-1.5">
+              {group.container && (
+                <h4 className="px-1 text-aux text-muted-foreground">{group.container}</h4>
+              )}
+              <List className="overflow-hidden rounded-12 border border-border bg-surface">
+                {group.items.map((item) => (
+                  <ChatRow
+                    key={keyOf(item)}
+                    item={item}
+                    open={openKey === keyOf(item)}
+                    onToggle={() =>
+                      setOpenKey((current) => (current === keyOf(item) ? null : keyOf(item)))
+                    }
+                    agentNames={agentNames}
+                    silent={silent}
+                    accountAgent={accountAgent}
+                    onSaved={handleSaved}
+                    onReset={handleReset}
+                  />
+                ))}
+              </List>
+            </div>
+          ))}
           {nextCursor && (
             <div className="flex justify-center">
               <Button
@@ -259,40 +308,176 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
           )}
         </>
       )}
+
+      <AddChatDialog
+        open={adding}
+        connectionId={connectionId}
+        exclude={shownKeys}
+        onClose={() => setAdding(false)}
+        onPick={handlePick}
+      />
     </section>
   );
 }
 
-function ConversationRow({
+/**
+ * Picks a chat to give rules of its own. The chat joins the list open, at its
+ * defaults, and the guardian changes a rule there.
+ */
+function AddChatDialog({
+  open,
+  connectionId,
+  exclude,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  connectionId: string;
+  /** The chats the list already shows. */
+  exclude: ReadonlySet<string>;
+  onClose: () => void;
+  onPick: (item: ChatSettingsListItem) => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<ChatSettingsListItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      const search = new URLSearchParams({ limit: "50", connectionId });
+      if (query.trim()) search.set("query", query.trim());
+      api<PageResponse>(`/api/chat-settings?${search}`)
+        .then((page) => {
+          if (!cancelled) setItems(page.items);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [connectionId, open, query]);
+
+  // A reopened dialog starts from a blank search.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const choices = items.filter((item) => !exclude.has(keyOf(item)));
+
+  return (
+    <Dialog open={open} onClose={onClose} size="sm">
+      <DialogHeader onClose={onClose} closeLabel={t("channels.conversationSettings.close")}>
+        <DialogTitle>{t("channels.conversationSettings.addDialog.title")}</DialogTitle>
+        <DialogDescription>
+          {t("channels.conversationSettings.addDialog.description")}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogBody className="space-y-3 pb-6">
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("channels.conversationSettings.searchPlaceholder")}
+            aria-label={t("channels.conversationSettings.searchPlaceholder")}
+            className="pl-9"
+          />
+        </label>
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription className="text-ui">{error}</AlertDescription>
+          </Alert>
+        ) : loading && choices.length === 0 ? (
+          <div className="flex justify-center py-6">
+            <Spinner label={t("channels.conversationSettings.loading")} />
+          </div>
+        ) : choices.length === 0 ? (
+          <p className="py-6 text-center text-ui text-muted-foreground">
+            {query
+              ? t("channels.conversationSettings.noMatches")
+              : t("channels.conversationSettings.findChats")}
+          </p>
+        ) : (
+          <List className="max-h-80 overflow-y-auto rounded-12 border border-border">
+            {choices.map((item) => {
+              const chat = item.snapshot.conversation;
+              return (
+                <ListRow key={keyOf(item)} asChild interactive size="md">
+                  <button type="button" onClick={() => onPick(item)}>
+                    <ChatKindIcon kind={chat.kind} />
+                    <ListRowContent>
+                      <ListRowTitle className="truncate">{chat.displayName}</ListRowTitle>
+                      <ListRowDescription className="truncate">
+                        {[chat.containerName, t(`channels.conversationSettings.kinds.${chat.kind}`)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </ListRowDescription>
+                    </ListRowContent>
+                  </button>
+                </ListRow>
+              );
+            })}
+          </List>
+        )}
+      </DialogBody>
+    </Dialog>
+  );
+}
+
+/** The kind of chat: every row on a connection's page shares its brand. */
+function ChatKindIcon({ kind }: { kind: string }) {
+  const Icon =
+    kind === "channel" ? Hash : kind === "dm" ? User : kind === "group" ? Users : MessageSquare;
+  return (
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-8 bg-muted text-muted-foreground">
+      <Icon className="size-4" aria-hidden />
+    </span>
+  );
+}
+
+function ChatRow({
   item,
+  open,
+  onToggle,
   agentNames,
-  silentAccount,
+  silent,
   accountAgent,
   onSaved,
+  onReset,
 }: {
   item: ChatSettingsListItem;
+  open: boolean;
+  onToggle: () => void;
   agentNames: string[];
-  /** Set when Rome does not listen to the conversation's account: the page that links
-   *  its agent. */
-  silentAccount: string | undefined;
-  /** The agent linked to the conversation's account, which answers while the
-   *  conversation has no agent of its own. */
+  /** Set when Rome does not listen to the connection's account, which has no agent. */
+  silent: boolean;
+  /** The agent linked to the connection's account, which answers while the
+   *  chat has no agent of its own. */
   accountAgent: string | undefined;
   onSaved: (snapshot: ChatSettingsSnapshot) => void;
+  onReset: (key: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const agentFieldId = useId();
   const enabledFieldId = useId();
-  const headingId = useId();
+  const panelId = useId();
   const { snapshot } = item;
   const conversation = snapshot.conversation;
   const supported = new Set(snapshot.supportedFields);
-  const silent = silentAccount !== undefined;
   const agentOverridden = settingSource(snapshot, "routing.agentName") === "overridden";
-  const overrideCount = snapshot.supportedFields.filter(
-    (field) =>
-      settingSource(snapshot, field) === "overridden" && !(field === "routing.agentName" && silent),
-  ).length;
+  const [resetting, setResetting] = useState(false);
   const [draft, setDraft] = useState<ChatSettings>(() => structuredClone(snapshot.effective));
   const [saving, setSaving] = useState(false);
   // Whether the conversation follows its account's agent, kept beside
@@ -466,7 +651,10 @@ function ConversationRow({
   // Leaving the page mid-debounce must not silently discard the edit. Empty
   // deps on purpose: keyed on `flush` this would re-run on every parent render
   // and flush queued edits ahead of their debounce window.
+  // Strict mode runs this effect's cleanup once before the real mount, so the
+  // setup marks the row mounted again.
   useEffect(() => {
+    mounted.current = true;
     return () => {
       window.clearTimeout(flushTimer.current);
       flushRef.current();
@@ -487,187 +675,293 @@ function ConversationRow({
     flushTimer.current = window.setTimeout(() => void flush(), AUTOSAVE_DEBOUNCE_MS);
   }
 
+  /**
+   * Drops every value the chat holds, so it runs on the defaults and leaves
+   * the list. An edit still waiting for its debounce is dropped with it, and
+   * one already sent lands first, so the reset is the last write.
+   */
+  async function reset() {
+    window.clearTimeout(flushTimer.current);
+    dirty.current.clear();
+    setResetting(true);
+    try {
+      await inFlight.current;
+      await api<ChatSettingsSnapshot>("/api/chat-settings/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: conversation.ref }),
+      });
+      onReset(keyOf(item));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mounted.current) setResetting(false);
+    }
+  }
+
+  const summary = changedSummary(t, snapshot, draft, silent);
+
   return (
-    <article
-      aria-labelledby={headingId}
-      className="overflow-hidden rounded-12 border border-border bg-surface px-4"
-    >
-      <header className="-mx-4 flex items-start gap-3 border-b border-border px-4 py-4">
-        <ConnectionBrandBadge connection={conversation.connectionKind} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* The container reads as the place the conversation lives, so it
-                prefixes the name rather than sitting in the meta line — a bare
-                provider-supplied name ("can you see active chats?") gives no
-                clue on its own that it names a conversation. */}
-            <h4 id={headingId} className="truncate text-ui text-foreground">
-              {conversation.containerName && (
-                <span className="text-muted-foreground">{conversation.containerName} / </span>
-              )}
-              {conversation.displayName}
-            </h4>
-            <Badge variant={item.availability === "online" ? "success" : "muted"}>
-              {t(
-                `channels.conversationSettings.status.${
-                  item.availability === "not-connected" ? "notConnected" : item.availability
-                }`,
-              )}
-            </Badge>
-            <Badge variant="muted">
-              {overrideCount > 0
-                ? t("channels.conversationSettings.overrideCount", { count: overrideCount })
-                : t("channels.conversationSettings.providerDefaults")}
-            </Badge>
-          </div>
-          {/* Visually the kind is enough — the brand badge says which service
-              this is. That badge is aria-hidden though, so in a mixed-provider
-              list the service would otherwise be absent from the a11y tree. */}
-          <p className="mt-1 truncate text-aux text-muted-foreground">
-            {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
-            <span className="sr-only">{` · ${serviceLabel(conversation.connectionKind)}`}</span>
-          </p>
-        </div>
-        {saving && (
-          <span className="shrink-0 text-aux text-muted-foreground">
-            {t("channels.conversationSettings.saving")}
-          </span>
-        )}
-      </header>
-
-      <SettingSection>
-        {supported.has("enabled") && (
-          <SettingRow
-            field="enabled"
-            overridden={settingSource(snapshot, "enabled") === "overridden"}
-            controlId={enabledFieldId}
+    <article>
+      <h4>
+        <ListRow asChild interactive size="md">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={open ? panelId : undefined}
+            onClick={onToggle}
           >
-            <Switch
-              id={enabledFieldId}
-              checked={draft.enabled}
-              onCheckedChange={(enabled) => change("enabled", enabled)}
+            <ChatKindIcon kind={conversation.kind} />
+            <ListRowContent>
+              <ListRowTitle className="truncate">
+                {conversation.displayName}
+                {/* The icon is decorative, so the kind and the service reach
+                    assistive tech here. */}
+                <span className="sr-only">
+                  {` · ${t(`channels.conversationSettings.kinds.${conversation.kind}`)} · ${serviceLabel(conversation.connectionKind)}`}
+                </span>
+              </ListRowTitle>
+              <ListRowDescription className="truncate">{summary}</ListRowDescription>
+            </ListRowContent>
+            {saving && (
+              <span className="shrink-0 text-aux text-muted-foreground">
+                {t("channels.conversationSettings.saving")}
+              </span>
+            )}
+            <ChevronDown
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+              aria-hidden
             />
-          </SettingRow>
-        )}
-      </SettingSection>
-
-      <SettingSection title={t("channels.conversationSettings.sections.activation")}>
-        {supported.has("activation.mode") && (
-          <SelectSettingRow
-            field="respond"
-            overridden={settingSource(snapshot, "activation.mode") === "overridden"}
-            value={draft.activation.mode}
-            options={settingOptions(t, ["mention", "all"], "replyRule.")}
-            onChange={(mode) => change("activation.mode", mode)}
-          />
-        )}
-        {supported.has("activation.botMessages") && (
-          <SelectSettingRow
-            field="botMessages"
-            overridden={settingSource(snapshot, "activation.botMessages") === "overridden"}
-            value={draft.activation.botMessages}
-            options={settingOptions(t, ["ignore", "mentions", "all"])}
-            onChange={(botMessages) => change("activation.botMessages", botMessages)}
-          />
-        )}
-        {supported.has("activation.whenOthersMentioned") && (
-          <SegmentedSettingRow
-            field="whenOthersMentioned"
-            overridden={settingSource(snapshot, "activation.whenOthersMentioned") === "overridden"}
-            value={draft.activation.whenOthersMentioned}
-            options={settingOptions(t, ["ignore", "respond"])}
-            onChange={(whenOthersMentioned) =>
-              change("activation.whenOthersMentioned", whenOthersMentioned)
-            }
-          />
-        )}
-      </SettingSection>
-
-      <SettingSection title={t("channels.conversationSettings.sections.replies")}>
-        {supported.has("replies.placement") && (
-          <SegmentedSettingRow
-            field="replies"
-            overridden={settingSource(snapshot, "replies.placement") === "overridden"}
-            value={draft.replies.placement}
-            options={settingOptions(t, ["thread", "inline"])}
-            onChange={(placement) => change("replies.placement", placement)}
-          />
-        )}
-      </SettingSection>
-
-      <SettingSection title={t("channels.conversationSettings.sections.session")}>
-        {supported.has("session.reset") && (
-          <SessionResetRows
-            value={draft.session.reset}
-            overridden={settingSource(snapshot, "session.reset") === "overridden"}
-            onChange={(value) => change("session.reset", value)}
-          />
-        )}
-      </SettingSection>
-
-      <SettingSection title={t("channels.conversationSettings.sections.routing")}>
-        {supported.has("routing.agentName") && silent && (
-          <SettingRow field="agent" overridden={false}>
-            <div className="sm:max-w-xs">
-              <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
-              <p className="mt-1 text-aux text-muted-foreground">
-                {t("channels.conversationSettings.silentAccount")}{" "}
-                <Trans
-                  t={t}
-                  i18nKey="channels.conversationSettings.silentAccountLink"
-                  components={{
-                    account: <Link to={silentAccount} className="underline underline-offset-2" />,
-                  }}
+          </button>
+        </ListRow>
+      </h4>
+      {open && (
+        <div id={panelId} className="border-t border-border-subtle px-4 pb-3">
+          <SettingSection>
+            {supported.has("enabled") && (
+              <SettingRow
+                field="enabled"
+                overridden={settingSource(snapshot, "enabled") === "overridden"}
+                controlId={enabledFieldId}
+              >
+                <Switch
+                  id={enabledFieldId}
+                  checked={draft.enabled}
+                  onCheckedChange={(enabled) => change("enabled", enabled)}
                 />
-                {agentOverridden &&
-                  ` ${t("channels.conversationSettings.silentAccountOverride", {
-                    agent: overriddenAgentLabel(snapshot.overrides.routing?.agentName),
-                  })}`}
-              </p>
-            </div>
-          </SettingRow>
-        )}
-        {supported.has("routing.agentName") && !silent && (
-          <SettingRow
-            field="agent"
-            overridden={settingSource(snapshot, "routing.agentName") === "overridden"}
-            controlId={agentFieldId}
-          >
-            <Select
-              value={
-                accountAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")
-              }
-              onValueChange={(name) => {
-                if (accountAgent) setFollowsLink(name === FOLLOW_LINK);
-                change("routing.agentName", name === FOLLOW_LINK ? null : name);
-              }}
-            >
-              <SelectTrigger id={agentFieldId} className={CONTROL_WIDTH}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {accountAgent && (
-                  <SelectItem value={FOLLOW_LINK}>
-                    {t("channels.conversationSettings.accountAgent", {
-                      agent: overriddenAgentLabel(accountAgent),
-                    })}
-                  </SelectItem>
-                )}
-                {routingOptions.map((name) => (
-                  <SelectItem key={name} value={name}>
-                    {name !== "main"
-                      ? agentLabel(name)
-                      : accountAgent
-                        ? "main"
-                        : t("channels.conversationSettings.mainAgent")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingRow>
-        )}
-      </SettingSection>
+              </SettingRow>
+            )}
+          </SettingSection>
+
+          <SettingSection title={t("channels.conversationSettings.sections.activation")}>
+            {supported.has("activation.mode") && (
+              <SelectSettingRow
+                field="respond"
+                overridden={settingSource(snapshot, "activation.mode") === "overridden"}
+                value={draft.activation.mode}
+                options={settingOptions(t, ["mention", "all"], "replyRule.")}
+                onChange={(mode) => change("activation.mode", mode)}
+              />
+            )}
+            {supported.has("activation.botMessages") && (
+              <SelectSettingRow
+                field="botMessages"
+                overridden={settingSource(snapshot, "activation.botMessages") === "overridden"}
+                value={draft.activation.botMessages}
+                options={settingOptions(t, ["ignore", "mentions", "all"])}
+                onChange={(botMessages) => change("activation.botMessages", botMessages)}
+              />
+            )}
+            {supported.has("activation.whenOthersMentioned") && (
+              <SegmentedSettingRow
+                field="whenOthersMentioned"
+                overridden={
+                  settingSource(snapshot, "activation.whenOthersMentioned") === "overridden"
+                }
+                value={draft.activation.whenOthersMentioned}
+                options={settingOptions(t, ["ignore", "respond"])}
+                onChange={(whenOthersMentioned) =>
+                  change("activation.whenOthersMentioned", whenOthersMentioned)
+                }
+              />
+            )}
+          </SettingSection>
+
+          <SettingSection title={t("channels.conversationSettings.sections.replies")}>
+            {supported.has("replies.placement") && (
+              <SegmentedSettingRow
+                field="replies"
+                overridden={settingSource(snapshot, "replies.placement") === "overridden"}
+                value={draft.replies.placement}
+                options={settingOptions(t, ["thread", "inline"])}
+                onChange={(placement) => change("replies.placement", placement)}
+              />
+            )}
+          </SettingSection>
+
+          <SettingSection title={t("channels.conversationSettings.sections.session")}>
+            {supported.has("session.reset") && (
+              <SessionResetRows
+                value={draft.session.reset}
+                overridden={settingSource(snapshot, "session.reset") === "overridden"}
+                onChange={(value) => change("session.reset", value)}
+              />
+            )}
+          </SettingSection>
+
+          <SettingSection title={t("channels.conversationSettings.sections.routing")}>
+            {supported.has("routing.agentName") && silent && (
+              <SettingRow field="agent" overridden={false}>
+                <div className="sm:max-w-xs">
+                  <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
+                  <p className="mt-1 text-aux text-muted-foreground">
+                    {t("channels.conversationSettings.silentAccount")}{" "}
+                    <Trans
+                      t={t}
+                      i18nKey="channels.conversationSettings.silentAccountLink"
+                      components={{
+                        account: <Link to="/envoys" className="underline underline-offset-2" />,
+                      }}
+                    />
+                    {agentOverridden &&
+                      ` ${t("channels.conversationSettings.silentAccountOverride", {
+                        agent: overriddenAgentLabel(snapshot.overrides.routing?.agentName),
+                      })}`}
+                  </p>
+                </div>
+              </SettingRow>
+            )}
+            {supported.has("routing.agentName") && !silent && (
+              <SettingRow
+                field="agent"
+                overridden={settingSource(snapshot, "routing.agentName") === "overridden"}
+                controlId={agentFieldId}
+              >
+                <Select
+                  value={
+                    accountAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")
+                  }
+                  onValueChange={(name) => {
+                    if (accountAgent) setFollowsLink(name === FOLLOW_LINK);
+                    change("routing.agentName", name === FOLLOW_LINK ? null : name);
+                  }}
+                >
+                  <SelectTrigger id={agentFieldId} className={CONTROL_WIDTH}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accountAgent && (
+                      <SelectItem value={FOLLOW_LINK}>
+                        {t("channels.conversationSettings.accountAgent", {
+                          agent: overriddenAgentLabel(accountAgent),
+                        })}
+                      </SelectItem>
+                    )}
+                    {routingOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name !== "main"
+                          ? agentLabel(name)
+                          : accountAgent
+                            ? "main"
+                            : t("channels.conversationSettings.mainAgent")}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+            )}
+          </SettingSection>
+          <div className="flex justify-end pt-3">
+            <Button variant="ghost" size="sm" disabled={resetting} onClick={() => void reset()}>
+              <RotateCcw data-icon="inline-start" aria-hidden />
+              {t("channels.conversationSettings.resetToDefaults")}
+            </Button>
+          </div>
+        </div>
+      )}
     </article>
   );
+}
+
+/** The values the connection's other chats run on, as one line. */
+function defaultsLine(
+  t: TFunction<"settings">,
+  defaults: ChatSettings,
+  offered: ReadonlySet<ChatSettingField>,
+  accountAgent: string | undefined,
+): string {
+  const parts: string[] = [];
+  if (offered.has("activation.mode")) {
+    parts.push(t(`channels.conversationSettings.options.replyRule.${defaults.activation.mode}`));
+  }
+  if (offered.has("replies.placement")) {
+    parts.push(t(`channels.conversationSettings.summary.${defaults.replies.placement}`));
+  }
+  if (offered.has("routing.agentName") && accountAgent) {
+    parts.push(
+      t("channels.conversationSettings.summary.agent", {
+        agent: overriddenAgentLabel(accountAgent),
+      }),
+    );
+  }
+  if (offered.has("session.reset")) parts.push(resetSummary(t, defaults.session.reset));
+  return parts.join(" · ");
+}
+
+/** The rules a chat set for itself, as one line, in the order the panel lists them. */
+function changedSummary(
+  t: TFunction<"settings">,
+  snapshot: ChatSettingsSnapshot,
+  draft: ChatSettings,
+  silent: boolean,
+): string {
+  const changed = (field: ChatSettingField) =>
+    snapshot.supportedFields.includes(field) && settingSource(snapshot, field) === "overridden";
+  const option = (field: "botMessages" | "whenOthersMentioned", value: string) =>
+    `${t(`channels.conversationSettings.fields.${field}`)}: ${t(`channels.conversationSettings.options.${value}`)}`;
+  const parts: string[] = [];
+  if (changed("enabled")) {
+    parts.push(t(`channels.conversationSettings.summary.${draft.enabled ? "on" : "off"}`));
+  }
+  if (changed("activation.mode")) {
+    parts.push(t(`channels.conversationSettings.options.replyRule.${draft.activation.mode}`));
+  }
+  if (changed("activation.botMessages")) {
+    parts.push(option("botMessages", draft.activation.botMessages));
+  }
+  if (changed("activation.whenOthersMentioned")) {
+    parts.push(option("whenOthersMentioned", draft.activation.whenOthersMentioned));
+  }
+  if (changed("replies.placement")) {
+    parts.push(t(`channels.conversationSettings.summary.${draft.replies.placement}`));
+  }
+  // An agent choice has no effect while the account has no agent.
+  if (changed("routing.agentName") && !silent) {
+    parts.push(
+      t("channels.conversationSettings.summary.agent", {
+        agent: overriddenAgentLabel(draft.routing.agentName),
+      }),
+    );
+  }
+  if (changed("session.reset")) parts.push(resetSummary(t, draft.session.reset));
+  return parts.length > 0 ? parts.join(" · ") : t("channels.conversationSettings.summary.defaults");
+}
+
+function resetSummary(t: TFunction<"settings">, reset: ProviderSessionResetPolicy): string {
+  if (reset.mode === "none") return t("channels.conversationSettings.summary.resetNever");
+  if (reset.mode === "daily") {
+    return t("channels.conversationSettings.summary.resetDaily", {
+      time: `${String(reset.atHour).padStart(2, "0")}:00`,
+    });
+  }
+  const minutes = reset.idleMinutes;
+  const duration =
+    minutes % 1_440 === 0
+      ? t("channels.conversationSettings.summary.days", { count: minutes / 1_440 })
+      : minutes % 60 === 0
+        ? t("channels.conversationSettings.summary.hours", { count: minutes / 60 })
+        : t("channels.conversationSettings.summary.minutes", { count: minutes });
+  return t("channels.conversationSettings.summary.resetIdle", { duration });
 }
 
 /** A stored agent choice, where null and either spelling of main pin main. */
@@ -715,9 +1009,17 @@ type SettingFieldKey =
  */
 const FIELDS_WITH_DESCRIPTION = new Set<SettingFieldKey>(["sessionReset"]);
 
-function OverriddenBadge() {
+/** Marks a rule changed from the connection's default, with the words for
+ *  assistive tech. */
+function ChangedDot() {
   const { t } = useTranslation("settings");
-  return <Badge variant="muted">{t("channels.conversationSettings.source.overridden")}</Badge>;
+  const label = t("channels.conversationSettings.changed");
+  return (
+    <span className="inline-flex items-center" title={label}>
+      <span className="size-1.5 rounded-full bg-primary" aria-hidden />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
 }
 
 /**
@@ -729,9 +1031,9 @@ function SettingSection({ title, children }: { title?: string; children: ReactNo
   const rows = Children.toArray(children);
   if (rows.length === 0) return null;
   return (
-    <section className="border-t border-border first-of-type:border-t-0">
-      {title && <h5 className="pt-4 pb-2 text-section text-foreground">{title}</h5>}
-      <div className="divide-y divide-border">{rows}</div>
+    <section className="pt-3 first-of-type:pt-1">
+      {title && <h5 className="pb-1 text-aux text-muted-foreground">{title}</h5>}
+      <div className="divide-y divide-border-subtle">{rows}</div>
     </section>
   );
 }
@@ -764,7 +1066,7 @@ function SettingRow({
           ) : (
             <FieldGroupLabel>{label}</FieldGroupLabel>
           )}
-          {overridden && <OverriddenBadge />}
+          {overridden && <ChangedDot />}
         </div>
         {FIELDS_WITH_DESCRIPTION.has(field) && (
           <p className="mt-1 text-aux text-muted-foreground">

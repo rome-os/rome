@@ -426,13 +426,6 @@
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "Search chats",
-      "anyStatus": "Any status",
-      "statusFilterAria": "Filter by status",
-      "status": {
-        "online": "Online",
-        "offline": "Offline",
-        "notConnected": "Not connected"
-      },
       "kinds": {
         "channel": "Channel",
         "group": "Group",
@@ -440,12 +433,9 @@
         "topic": "Topic"
       },
       "loading": "Loading chats…",
-      "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Send a message in a chat on this account, and Rome will find it.",
+      "emptyTitle": "Every chat follows the defaults",
+      "emptyDescription": "Add a chat to give it rules of its own.",
       "loadMore": "Load more",
-      "overrideCount_one": "{{count}} override",
-      "overrideCount_other": "{{count}} overrides",
-      "providerDefaults": "product defaults",
       "sections": {
         "activation": "Activation",
         "replies": "Replies",
@@ -464,9 +454,6 @@
       "descriptions": {
         "sessionReset": "Clears the agent's memory kept by the model provider"
       },
-      "source": {
-        "overridden": "Overridden"
-      },
       "options": {
         "mentions": "Only mentions",
         "all": "All",
@@ -482,7 +469,7 @@
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
       "silentAccount": "Messages here do not reach Rome until this account has an agent.",
-      "silentAccountLink": "<account>Link one on the account</account>.",
+      "silentAccountLink": "<account>Link one in Envoys</account>.",
       "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
@@ -503,6 +490,34 @@
       "chatRules": {
         "title": "Chat rules",
         "description": "How Rome takes part in each chat on this account."
+      },
+      "otherChats": "Every other chat:",
+      "addChat": "Add chat",
+      "noMatches": "No chats match",
+      "findChats": "Send a message in a chat on this account, and Rome will find it.",
+      "close": "Close",
+      "addDialog": {
+        "title": "Add a chat",
+        "description": "It follows the defaults until you change a rule."
+      },
+      "resetToDefaults": "Reset to defaults",
+      "changed": "Changed from the default",
+      "summary": {
+        "defaults": "Follows the defaults",
+        "on": "On",
+        "off": "Off",
+        "thread": "Replies in a thread",
+        "inline": "Replies inline",
+        "agent": "Answered by {{agent}}",
+        "resetNever": "Never resets",
+        "resetDaily": "Resets daily at {{time}} UTC",
+        "resetIdle": "Resets after {{duration}} idle",
+        "minutes_one": "{{count}} minute",
+        "minutes_other": "{{count}} minutes",
+        "hours_one": "{{count}} hour",
+        "hours_other": "{{count}} hours",
+        "days_one": "{{count}} day",
+        "days_other": "{{count}} days"
       }
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",

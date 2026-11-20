@@ -129,6 +129,9 @@ describe("GET /connections", () => {
       link: "own_account",
       severalAccounts: false,
       chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
     });
 
     // Nothing granted on discord yet: its grant unauthorized, everything
@@ -236,6 +239,9 @@ describe("GET /connections", () => {
       severalAccounts: false,
       // A kind that declares no chat rules offers the session reset alone.
       chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
     });
   });
 
@@ -261,6 +267,20 @@ describe("GET /connections", () => {
       ["fake-discord", []],
       ["fake-telegram", ["enabled", "session.reset"]],
     ]);
+    // A kind that fixes nothing runs its group chats on Core's defaults.
+    const byKind = new Map(
+      connections.map((c: { connectionKind: string; chatRuleDefaults: unknown }) => [
+        c.connectionKind,
+        c.chatRuleDefaults,
+      ]),
+    );
+    expect(byKind.get("fake-discord")).toBeNull();
+    expect(byKind.get("fake-telegram")).toMatchObject({
+      enabled: true,
+      activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+      replies: { placement: "thread" },
+      routing: { agentName: null },
+    });
   });
 
   it("offers OAuth placeholders only for host-enabled providers", async () => {

@@ -133,9 +133,16 @@ function renderPage() {
   );
 }
 
-async function findCard() {
-  const heading = await screen.findByRole("heading", { name: /engineering/ });
+/** The chat's row, opened so its rules show. */
+async function openCard(name: RegExp) {
+  const heading = await screen.findByRole("heading", { name });
+  const toggle = within(heading).getByRole("button");
+  if (toggle.getAttribute("aria-expanded") !== "true") await userEvent.click(toggle);
   return heading.closest("article") as HTMLElement;
+}
+
+async function findCard() {
+  return openCard(/engineering/);
 }
 
 /** Comfortably past AUTOSAVE_DEBOUNCE_MS, so "no PATCH" means it was dropped. */
@@ -210,17 +217,23 @@ describe("ChatRulesSection", () => {
     );
     const user = userEvent.setup();
     const engineeringHeading = await screen.findByRole("heading", { name: /engineering/ });
-    const engineeringRow = engineeringHeading.closest("article") as HTMLElement;
+    // The server names the group, so the row names only the chat, and the
+    // summary says what the chat changed.
+    expect(screen.getByRole("heading", { name: "Rome" })).toBeTruthy();
+    expect(within(engineeringHeading).getByText("Only when addressed")).toBeTruthy();
+    const engineeringRow = await openCard(/engineering/);
 
+    // The list asks only for the chats a value was set on.
     expect(
-      fetchMock.mock.calls.some(([request]) => String(request).includes("connectionId=discord-1")),
+      fetchMock.mock.calls.some(
+        ([request]) =>
+          String(request).includes("connectionId=discord-1") &&
+          String(request).includes("changed=true"),
+      ),
     ).toBe(true);
     // The fixture overrides exactly one field (activation.mode), so a single
-    // marker proves overridden rows are flagged and default rows are not.
-    expect(within(engineeringRow).getByText("Overridden")).toBeTruthy();
-    // The container prefixes the conversation name so a bare provider-supplied
-    // name still reads as a place.
-    expect(engineeringHeading.textContent).toBe("Rome / engineering");
+    // marker proves changed rules are flagged and default ones are not.
+    expect(within(engineeringRow).getAllByText("Changed from the default")).toHaveLength(1);
 
     await user.click(within(engineeringRow).getByRole("switch", { name: "Rome in this chat" }));
     await choose(user, within(engineeringRow).getByLabelText(/Respond/), "Every message");
@@ -286,7 +299,6 @@ describe("ChatRulesSection", () => {
               name: "engineering",
               overrides: { routing: { agentName: "coding:build" } },
             }),
-            item({ id: "support", service: "feishu", name: "support" }),
           ],
         });
       }
@@ -294,22 +306,20 @@ describe("ChatRulesSection", () => {
     }) as typeof fetch);
 
     renderPage();
+    // The stored agent choice has no effect yet, so the row does not list it.
+    expect(
+      within(await screen.findByRole("heading", { name: /engineering/ })).getByText(
+        "Follows the defaults",
+      ),
+    ).toBeTruthy();
     const silent = await findCard();
     expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
     expect(within(silent).getByText("None. Rome does not listen to this account.")).toBeTruthy();
     expect(
-      within(silent).getByRole("link", { name: "Link one on the account" }).getAttribute("href"),
-    ).toBe("/settings/connections/discord");
-    // The stored agent choice has no effect yet, so it is not counted, but the
-    // card says it applies once an agent is linked.
-    expect(within(silent).queryByText(/override/)).toBeNull();
+      within(silent).getByRole("link", { name: "Link one in Envoys" }).getAttribute("href"),
+    ).toBe("/envoys");
+    // The panel says the stored choice applies once an agent is linked.
     expect(within(silent).getByText(/This chat's choice, build · coding, applies/)).toBeTruthy();
-
-    // A chat's own choice wins over the account's agent, so the picker stays.
-    const linked = (await screen.findByRole("heading", { name: /support/ })).closest(
-      "article",
-    ) as HTMLElement;
-    expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
   });
 
   it("offers a linked account's agent for a conversation with no agent of its own", async () => {
@@ -524,11 +534,119 @@ describe("ChatRulesSection", () => {
     const user = userEvent.setup();
 
     expect(await screen.findByText("Could not load conversations")).toBeTruthy();
-    expect(screen.queryByText("No configurable chats found")).toBeNull();
+    expect(screen.queryByText("Every chat follows the defaults")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByText("No configurable chats found")).toBeTruthy();
+    expect(await screen.findByText("Every chat follows the defaults")).toBeTruthy();
     expect(settingsLoads).toBe(2);
+  });
+
+  it("states the defaults the other chats follow", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            {
+              id: "discord-1",
+              connectionKind: "discord",
+              capabilities: { chat: { state: "unlocked" } },
+              chatRules: ["activation.mode", "replies.placement", "session.reset"],
+              chatRuleDefaults: defaults,
+            },
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.startsWith("/api/chat-settings?")) return ok({ items: [] });
+      throw new Error(`Unexpected request: GET ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+
+    expect(
+      await screen.findByText(
+        "Only when addressed · Replies in a thread · Resets after 7 days idle",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Every other chat:")).toBeTruthy();
+  });
+
+  it("resets a chat to the defaults, which takes it off the list", async () => {
+    const resets: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") return ok({ connections: [] });
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.startsWith("/api/chat-settings?")) {
+        return ok({
+          items: [item({ id: "engineering", name: "engineering", overrides: { enabled: false } })],
+        });
+      }
+      if (url === "/api/chat-settings/reset" && init?.method === "POST") {
+        resets.push(JSON.parse(String(init.body)));
+        return ok(item({ id: "engineering", name: "engineering" }).snapshot);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    const card = await findCard();
+    await user.click(within(card).getByRole("button", { name: "Reset to defaults" }));
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /engineering/ })).toBeNull());
+    expect(resets).toEqual([{ ref: { connectionId: "discord-1", chatId: "engineering" } }]);
+    expect(screen.getByText("Every chat follows the defaults")).toBeTruthy();
+  });
+
+  it("adds a chat from the dialog, open at its defaults", async () => {
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") return ok({ connections: [] });
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.startsWith("/api/chat-settings?") && url.includes("changed=true")) {
+        return ok({
+          items: [item({ id: "engineering", name: "engineering", overrides: { enabled: false } })],
+        });
+      }
+      if (url.startsWith("/api/chat-settings?")) {
+        return ok({
+          items: [
+            item({ id: "engineering", name: "engineering", overrides: { enabled: false } }),
+            item({ id: "design", name: "design" }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: GET ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    await screen.findByRole("heading", { name: /engineering/ });
+    await user.click(screen.getByRole("button", { name: "Add chat" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Add a chat" });
+    // A chat the list already shows is not offered again.
+    const choice = await within(dialog).findByRole("button", { name: /design/ });
+    expect(within(dialog).queryByRole("button", { name: /engineering/ })).toBeNull();
+    await user.type(within(dialog).getByRole("textbox", { name: "Search chats" }), "des");
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([request]) => String(request).includes("query=des"))).toBe(
+        true,
+      ),
+    );
+    await user.click(choice);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add a chat" })).toBeNull());
+    const heading = await screen.findByRole("heading", { name: /design/ });
+    expect(within(heading).getByText("Follows the defaults")).toBeTruthy();
+    expect(within(heading).getByRole("button").getAttribute("aria-expanded")).toBe("true");
   });
 });
