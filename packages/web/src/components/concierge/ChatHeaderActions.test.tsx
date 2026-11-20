@@ -103,6 +103,26 @@ describe("ChatHeaderActions", () => {
     await waitFor(() => expect(items()).toEqual([]));
   });
 
+  it("leaves focus in the composer when a hovered menu closes as the pointer leaves", async () => {
+    render(
+      <>
+        <textarea aria-label="Message" />
+        <ChatHeaderActions
+          floating
+          menu={{ sections: [[{ key: "outputs", icon: null, label: "Outputs", run: () => {} }]] }}
+        />
+      </>,
+    );
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    composer.focus();
+    const more = screen.getByRole("button", { name: "More actions" });
+    fireEvent.pointerEnter(more, { pointerType: "mouse" });
+    expect(items()).toEqual(["Outputs"]);
+    fireEvent.pointerLeave(more, { pointerType: "mouse" });
+    await waitFor(() => expect(items()).toEqual([]));
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("opens on a tap too, and closes on Escape with focus back on ⋯", async () => {
     const { more } = renderActions();
     fireEvent.click(more);

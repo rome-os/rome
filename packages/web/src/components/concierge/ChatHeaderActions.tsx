@@ -140,6 +140,16 @@ function MoreMenu({
   const fromKeyboard = useRef(false);
   // The pointer that pressed the button, read by the click that follows.
   const pressedWith = useRef<string | null>(null);
+  // How the open menu was opened, and whether focus went into it: a menu
+  // only hovered open gives focus back to nothing when it closes, so the
+  // composer keeps it.
+  const openedBy = useRef<"hover" | "press">("press");
+  const focusedInside = useRef(false);
+  const show = (by: "hover" | "press") => {
+    if (!open || by === "press") openedBy.current = by;
+    if (!open) focusedInside.current = false;
+    setOpen(true);
+  };
   const cancelLeave = () => {
     if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
@@ -159,7 +169,7 @@ function MoreMenu({
     onPointerEnter: (event) => {
       if (event.pointerType !== "mouse") return;
       cancelLeave();
-      setOpen(true);
+      show("hover");
     },
     onPointerLeave: (event) => {
       if (event.pointerType === "mouse") leave();
@@ -177,13 +187,14 @@ function MoreMenu({
       const mouse = !keyboard && pressedWith.current === "mouse";
       pressedWith.current = null;
       if (keyboard) fromKeyboard.current = true;
+      openedBy.current = "press";
       setOpen((was) => (mouse ? true : !was));
     },
     onKeyDown: (event) => {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         fromKeyboard.current = true;
-        setOpen(true);
+        show("press");
       }
     },
   };
@@ -202,6 +213,14 @@ function MoreMenu({
         collisionPadding={8}
         // Hover or a tap leaves focus where it was; the keyboard moves it to
         // the first item.
+        onFocusCapture={() => {
+          focusedInside.current = true;
+        }}
+        // Focus goes back to ⋯ only for a menu opened by a click, a tap or
+        // the keyboard, or one focus went into; a hovered one leaves it be.
+        onCloseAutoFocus={(event) => {
+          if (openedBy.current === "hover" && !focusedInside.current) event.preventDefault();
+        }}
         onOpenAutoFocus={(event) => {
           if (!fromKeyboard.current) event.preventDefault();
           fromKeyboard.current = false;
