@@ -198,6 +198,10 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         return store
     }
 
+    private func rows(_ messages: [ChatMessage]) -> [TranscriptRow] {
+        TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showNotices: true))
+    }
+
     private func reply(_ id: String, to original: String, at seconds: TimeInterval) -> ChatMessage {
         message(id, role: "user", at: seconds, parts: [
             ["type": "reply_to", "messageId": original, "author": "agent", "text": "sunny"],
@@ -216,13 +220,40 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.composerReply == nil && !store.showsQuoteBar)
     }
 
-    /// Only the Agent's text offers Reply: no card of any kind, open or folded.
-    @Test func cardsOfferNoReply() {
-        #expect(ConciergeRow.offersReply(.agentText(id: "a:0", text: "x", long: false, forwardedFrom: nil, position: .single)))
-        #expect(!ConciergeRow.offersReply(.userText(id: "u:0", text: "x", pending: nil)))
-        #expect(!ConciergeRow.offersReply(.taskCard(id: "c:0", chatId: "c", title: "T")))
-        #expect(!ConciergeRow.offersReply(.taskAsk(id: "k:0", chatId: "c", title: "T", card: nil)))
-        #expect(!ConciergeRow.offersReply(.webOnly(id: "w:0", kind: .unknown)))
+    /// Reply goes to the Agent's text and to the guardian's own settled
+    /// messages, as on the web: never a card, nor a send that did not go through.
+    @Test func whatTakesAReply() {
+        let agent = message("a", "sunny", at: 0)
+        let mine = message("u", role: "user", "plan", at: 1)
+        var queued = message("q", role: "user", "later", at: 2)
+        queued.inputState = "queued"
+        var consumed = message("c", role: "user", "done", at: 3)
+        consumed.inputState = "consumed"
+        var failed = message("f", role: "user", "lost", at: 4)
+        failed.inputState = "failed"
+        let infos = RowInfo.build(rows: rows([agent, mine, queued, consumed, failed]), messages: [agent, mine, queued, consumed, failed], pending: [], kind: .concierge)
+        #expect(infos["a:0"]?.canReply == true)
+        #expect(infos["u:0"]?.canReply == true)
+        #expect(infos["c:0"]?.canReply == true)
+        #expect(infos["q:0"]?.canReply == false)
+        #expect(infos["f:0"]?.canReply == false)
+        // A task chat has no replies.
+        let task = RowInfo.build(rows: rows([agent, mine]), messages: [agent, mine], pending: [], kind: .task)
+        #expect(task["a:0"]?.canReply == false && task["u:0"]?.canReply == false)
+        // A card takes none.
+        #expect(!RowInfo.takesReply(agent, row: .taskCard(id: "a:0", chatId: "c", title: "T")))
+        #expect(!RowInfo.takesReply(agent, row: .taskAsk(id: "a:0", chatId: "c", title: "T", card: nil)))
+        #expect(!RowInfo.takesReply(agent, row: .webOnly(id: "a:0", kind: .unknown)))
+    }
+
+    /// A Reply names the row it was picked on, which stays in view as the
+    /// keyboard comes up; a Reply from elsewhere names the message's first row.
+    @Test func aReplyNamesItsRow() async {
+        let store = await chat([message("q", role: "user", at: 0), message("a", "sunny", at: 10)])
+        store.reply(to: "a", row: "a:0")
+        #expect(store.replyRow == "a:0")
+        store.reply(to: "q")
+        #expect(store.replyRow == "q:0")
     }
 
     /// A reply sent from the bar replies to the message, and the bar closes.

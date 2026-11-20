@@ -72,9 +72,16 @@ private struct BubbleMenuItems: View {
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu.
+    /// The bubble lifts under the finger with the system's menu. Reply is
+    /// also a swipe to the right (`SwipeToReply`), and an action of its own
+    /// for VoiceOver.
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
         contextMenu { BubbleMenuItems(text: text, menu: menu) }
+            .accessibilityActions {
+                if menu.problem == nil, let onReply = menu.onReply {
+                    Button("Reply", action: onReply)
+                }
+            }
     }
 }
 
