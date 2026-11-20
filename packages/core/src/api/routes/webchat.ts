@@ -1370,6 +1370,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       });
     });
+    // A message rewritten in place, as a provider failure card that settled:
+    // the client replaces the one it holds with the same id.
+    const unsubscribeUpdates = deps.webchatRepo.onMessageUpdated((message) => {
+      if (message.sessionId !== sessionId) return;
+      inserting = inserting.then(() => emit("message_insert", message));
+    });
     // A card a task card shows settled: the client patches it in place.
     const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
       if (event.sessionId === sessionId) emit("chat_card_settled", event);
@@ -1390,6 +1396,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       runningListeners.delete(runningListener);
       writingListeners.delete(writingListener);
       unsubscribeMessages();
+      unsubscribeUpdates();
       unsubscribeSessionName();
       unsubscribeReaction();
       unsubscribeStatus?.();

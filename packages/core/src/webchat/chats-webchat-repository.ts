@@ -744,6 +744,35 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .map((row) => ({ id: row.id, largeModelSelection: row.large_model_selection }));
   }
 
+  /**
+   * A dashboard line said in a chat is rewritten there, and the chat's live
+   * view told. Any other message is the session's own, as in the base.
+   */
+  override async updateMessageContent(id: string, content: string) {
+    const chat = this.lines.chatHolding(WEBCHAT_PLATFORM, id);
+    if (!chat) return super.updateMessageContent(id, content);
+    assertWidgetAloneInContent(content);
+    this.lines.setParts(chat, id, JSON.stringify(partsOf(content)));
+    const session = this.db.get<{ id: string }>(sql`
+      SELECT id FROM ${romeSessions}
+      WHERE chat_id = ${chat.id} AND type = 'channel' AND chat_platform = 'webchat'
+        AND parent_session_id IS NULL
+      LIMIT 1
+    `);
+    if (!session) return;
+    const [line] = this.selectLines([session.id], sql`WHERE id = ${id}`);
+    if (line) {
+      this.emitMessageUpdated({
+        id: line.id,
+        sessionId: session.id,
+        turnId: line.turnId,
+        role: line.role,
+        content: line.content,
+        createdAt: line.createdAt,
+      });
+    }
+  }
+
   override async getMessages(sessionId: string) {
     return this.selectLines([sessionId]);
   }

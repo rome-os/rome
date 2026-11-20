@@ -104,17 +104,21 @@ const romeCredits: RomeCreditsView = {
 let defaultProvider: DefaultModelProvider | null = "anthropic";
 let defaultNote: DefaultProviderState["note"] = undefined;
 
-const defaultProviderState = (): DefaultProviderState => ({
-  provider: defaultProvider,
-  signedIn: {
-    anthropic: aiToolStatus.claude?.loggedIn === true,
-    openai: aiToolStatus.codex?.loggedIn === true,
-    rome_credits: hasUsableRomeCredits(romeCredits),
-  },
-  ...(defaultNote ? { note: defaultNote } : {}),
-});
+const defaultProviderState = (): DefaultProviderState => {
+  const anthropic = aiToolStatus.claude?.loggedIn === true;
+  const openai = aiToolStatus.codex?.loggedIn === true;
+  // Rome credits run chats only while no AI account is logged in.
+  const romeCreditsUsable = hasUsableRomeCredits(romeCredits);
+  return {
+    provider: defaultProvider,
+    signedIn: { anthropic, openai, rome_credits: !anthropic && !openai && romeCreditsUsable },
+    ...(defaultNote ? { note: defaultNote } : {}),
+    followingChats: 4,
+    romeCreditsUsable,
+  };
+};
 
-/** The outage the Concierge transcript's notice points at. */
+/** The outage the provider cards chat's notice points at. */
 export const MOCK_OUTAGE_ID = "mock-outage-claude-quota";
 
 let outages: ProviderOutage[] = [
@@ -123,7 +127,7 @@ let outages: ProviderOutage[] = [
     provider: "anthropic",
     reason: "quota",
     until: fromNow(2 * HOUR),
-    chatIds: ["mock-chat-lisbon", "mock-task-question", "mock-chat-4"],
+    chatIds: ["mock-chat-lisbon", "mock-task-question"],
     since: fromNow(-20 * MINUTE),
   },
 ];
@@ -419,13 +423,20 @@ export const settingsHandlers = [
     } satisfies ComputerUseStatus),
   ),
   http.get("/api/ai-tools/status", () =>
-    HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
+    HttpResponse.json({
+      ...aiToolStatus,
+      anthropicCompatible: configuredAnthropic,
+      defaultProvider: defaultProviderState(),
+    }),
   ),
   http.get("/api/ai-tools/default", () =>
     HttpResponse.json({ defaultProvider: defaultProviderState() }),
   ),
   http.put("/api/ai-tools/default", async ({ request }) => {
-    const body = (await request.json()) as { provider: DefaultModelProvider };
+    const body = (await request.json()) as {
+      provider: DefaultModelProvider;
+      moveExisting?: boolean;
+    };
     if (!defaultProviderState().signedIn[body.provider]) {
       return HttpResponse.json({ error: "Not signed in" }, { status: 409 });
     }
@@ -437,12 +448,13 @@ export const settingsHandlers = [
     defaultNote = undefined;
     return HttpResponse.json({ defaultProvider: defaultProviderState() });
   }),
-  http.post("/api/ai-tools/provider-failures/resend", () => HttpResponse.json({ ok: true })),
   http.get("/api/ai-tools/provider-outages", () => HttpResponse.json({ outages })),
-  http.post("/api/ai-tools/provider-outages/:id/run", ({ params }) => {
-    const ran = outages.find((outage) => outage.id === params.id)?.chatIds.length ?? 0;
+  // Mock mode runs no turns: the chats only move, and the outage closes.
+  http.post("/api/ai-tools/provider-outages/:id/switch", ({ params }) => {
+    const moved = outages.find((outage) => outage.id === params.id)?.chatIds.length;
+    if (moved === undefined) return HttpResponse.json({ error: "Unknown outage" }, { status: 409 });
     outages = outages.filter((outage) => outage.id !== params.id);
-    return HttpResponse.json({ ran });
+    return HttpResponse.json({ moved });
   }),
   http.get("/api/ai-tools/rome-credits", () =>
     HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),

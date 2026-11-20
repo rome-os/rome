@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { DefaultModelProvider } from "@rome/api-types/chat";
+import type { DefaultModelProvider, ProviderFailureReason } from "@rome/api-types/chat";
 import { fetchJson } from "@/lib/fetch-json";
 
 export type { DefaultModelProvider };
@@ -14,13 +14,17 @@ export interface DefaultProviderState {
   signedIn: SignedInProviders;
   /** Left when the default was removed and another provider took its place. */
   note?: { from: DefaultModelProvider; to: DefaultModelProvider; at: string };
+  /** How many chats follow the default, which a change of default can move. */
+  followingChats?: number;
+  /** Rome credits could run chats once no AI account is logged in. */
+  romeCreditsUsable?: boolean;
 }
 
 /** One provider that stopped working while unattended chats waited on it. */
 export interface ProviderOutage {
   id: string;
   provider: DefaultModelProvider;
-  reason: "quota" | "login" | "removed";
+  reason: ProviderFailureReason;
   until?: string;
   chatIds: string[];
   since: string;
@@ -56,14 +60,14 @@ export function useInvalidateDefaultProvider() {
   return useCallback(() => qc.invalidateQueries({ queryKey: DEFAULT_PROVIDER_QUERY_KEY }), [qc]);
 }
 
-/** Makes `provider` the default. `resend` also runs that chat's stopped request again. */
+/**
+ * Makes `provider` the default. With `moveExisting` false, the chats that
+ * follow the default stay on the provider they run on.
+ */
 export function useSetDefaultProvider() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: {
-      provider: DefaultModelProvider;
-      resend?: { chatId: string; agentName: string };
-    }) =>
+    mutationFn: (input: { provider: DefaultModelProvider; moveExisting: boolean }) =>
       fetchJson<{ defaultProvider: DefaultProviderState | null }>("/api/ai-tools/default", {
         method: "PUT",
         json: input,
@@ -88,12 +92,24 @@ export function useDismissDefaultProviderNote() {
   });
 }
 
-/** Runs a chat's request again after its provider failed. */
-export function resendProviderFailure(chatId: string, agentName: string): Promise<unknown> {
-  return fetchJson("/api/ai-tools/provider-failures/resend", {
+/**
+ * What a failure card's or an outage notice's button asks for: move to another
+ * provider (and with `makeDefault`, make it the default), or to another model
+ * on the same provider.
+ */
+export type ProviderSwitch =
+  | { kind: "provider"; provider: DefaultModelProvider; makeDefault: boolean }
+  | { kind: "model"; selection: string };
+
+/**
+ * Settles the failure card in message `messageId`: the chat moves, and the
+ * stopped turn runs again. The server rewrites the card's message in place.
+ */
+export function switchProviderFailure(messageId: string, change: ProviderSwitch): Promise<unknown> {
+  return fetchJson(`/api/ai-tools/provider-failures/${encodeURIComponent(messageId)}/switch`, {
     method: "POST",
-    json: { chatId, agentName },
-    fallback: "Failed to resend",
+    json: change,
+    fallback: "Failed to switch",
   });
 }
 
@@ -112,16 +128,21 @@ export function useProviderOutages() {
   });
 }
 
-/** Runs an outage's waiting chats once on `provider`. */
-export function useRunOutageOn() {
+/** Moves every chat an outage stopped, which then run again. */
+export function useSwitchOutage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { outageId: string; provider: "anthropic" | "openai" }) =>
-      fetchJson<{ ran: number }>(
-        `/api/ai-tools/provider-outages/${encodeURIComponent(input.outageId)}/run`,
-        { method: "POST", json: { provider: input.provider }, fallback: "Failed to run the chats" },
+    mutationFn: (input: { outageId: string; change: ProviderSwitch }) =>
+      fetchJson<{ moved: number }>(
+        `/api/ai-tools/provider-outages/${encodeURIComponent(input.outageId)}/switch`,
+        { method: "POST", json: input.change, fallback: "Failed to switch" },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: PROVIDER_OUTAGES_QUERY_KEY }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: PROVIDER_OUTAGES_QUERY_KEY });
+      if (input.change.kind === "provider" && input.change.makeDefault) {
+        void qc.invalidateQueries({ queryKey: DEFAULT_PROVIDER_QUERY_KEY });
+      }
+    },
   });
 }
 

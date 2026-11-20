@@ -516,7 +516,7 @@
     "quota": "{{from}} quota ran out, switched to {{to}}",
     "login": "{{from}} sign-in failed, switched to {{to}}",
     "temporary": "{{from}} is temporarily unavailable, switched to {{to}}",
-    "model_limit": "{{fromModel}} limit reached, switched to {{toModel}}",
+    "model_limit": "Switched to {{toModel}}; {{fromModel}} is unavailable for now",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
@@ -749,30 +749,29 @@
     }
   },
   "providerFailure": {
-    "quota": "{{provider}} has reached its usage limit.",
-    "quotaUntil": "{{provider}} has reached its usage limit until {{time}}.",
-    "login": "{{provider}} needs you to sign in again.",
-    "removed": "{{provider}} is not signed in.",
-    "retriesAt": "Rome retries at {{time}}.",
-    "makeDefault": "Make {{provider}} the default",
-    "backToDefault": "Back to following default",
-    "signIn": "Sign in",
-    "resend": "Resend",
-    "sent": "Sent again.",
-    "failed": "Could not resend"
+    "quota": "{{provider}} quota used up, continues when it resets",
+    "quotaUntil": "{{provider}} quota used up, continues at {{time}}",
+    "temporary": "{{provider}} is unavailable for now. Rome tries again by itself.",
+    "login": "{{provider}} needs you to log in again",
+    "removed": "{{provider}} is not logged in",
+    "creditsUsedUp": "Rome credits are used up",
+    "spendCap": "{{provider}} reached its spending limit",
+    "account": "{{provider}} cannot run on this account",
+    "modelUnavailable": "{{model}} is unavailable",
+    "logIn": "Log in",
+    "switchTo": "Switch to {{target}}",
+    "useCredits": "Use Rome credits",
+    "alsoMakeDefault": "Also make default",
+    "details": "Details",
+    "switchFailed": "Could not switch",
+    "switched": "Switched to {{target}}",
+    "switchedContinued": "Switched to {{target}}, continued",
+    "recovered": "Recovered",
+    "recoveredContinued": "Recovered, continued"
   },
   "providerOutage": {
-    "quota_one": "{{provider}} usage limit reached, {{count}} chat waiting",
-    "quota_other": "{{provider}} usage limit reached, {{count}} chats waiting",
-    "quotaUntil_one": "{{provider}} usage limit reached (back at {{time}}), {{count}} chat waiting",
-    "quotaUntil_other": "{{provider}} usage limit reached (back at {{time}}), {{count}} chats waiting",
-    "login_one": "{{provider}} sign-in expired, {{count}} chat waiting",
-    "login_other": "{{provider}} sign-in expired, {{count}} chats waiting",
-    "removed_one": "{{provider}} not signed in, {{count}} chat waiting",
-    "removed_other": "{{provider}} not signed in, {{count}} chats waiting",
-    "resolved": "No chats waiting on {{provider}}",
-    "runOn": "Run them on {{provider}} now",
-    "runFailed": "Could not run the chats"
+    "waiting_one": "{{count}} task waiting",
+    "waiting_other": "{{count}} tasks waiting"
   },
   "outputs": {
     "title": "Outputs",

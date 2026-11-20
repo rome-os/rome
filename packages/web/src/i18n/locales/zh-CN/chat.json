@@ -516,7 +516,7 @@
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",
     "login": "{{from}} 登录失败，已切换到 {{to}}",
     "temporary": "{{from}} 暂时无法使用，已切换到 {{to}}",
-    "model_limit": "{{fromModel}} 已达限制，已切换到 {{toModel}}",
+    "model_limit": "已换成 {{toModel}}，{{fromModel}} 暂时用不了",
     "notice": "已切换到 {{model}}"
   },
   "modelSelector": {
@@ -749,30 +749,29 @@
     }
   },
   "providerFailure": {
-    "quota": "{{provider}} 已达到用量上限。",
-    "quotaUntil": "{{provider}} 已达到用量上限，{{time}} 恢复。",
-    "login": "{{provider}} 需要重新登录。",
-    "removed": "{{provider}} 未登录。",
-    "retriesAt": "Rome 会在 {{time}} 重试。",
-    "makeDefault": "将 {{provider}} 设为默认",
-    "backToDefault": "恢复跟随默认",
-    "signIn": "登录",
-    "resend": "重新发送",
-    "sent": "已重新发送。",
-    "failed": "未能重新发送"
+    "quota": "{{provider}} 额度用完了，重置后自动继续",
+    "quotaUntil": "{{provider}} 额度用完了，{{time}} 后自动继续",
+    "temporary": "{{provider}} 暂时用不了，Rome 会自己重试。",
+    "login": "{{provider}} 需要重新登录",
+    "removed": "{{provider}} 未登录",
+    "creditsUsedUp": "Rome 额度用完了",
+    "spendCap": "{{provider}} 已达到消费上限",
+    "account": "{{provider}} 的账号目前无法运行",
+    "modelUnavailable": "{{model}} 用不了了",
+    "logIn": "登录",
+    "switchTo": "切换到 {{target}}",
+    "useCredits": "改用 Rome 额度",
+    "alsoMakeDefault": "同时设为默认",
+    "details": "详情",
+    "switchFailed": "未能切换",
+    "switched": "已切换到 {{target}}",
+    "switchedContinued": "已切换到 {{target}}，已继续",
+    "recovered": "已恢复",
+    "recoveredContinued": "已恢复，已继续"
   },
   "providerOutage": {
-    "quota_one": "{{provider}} 已达用量上限，{{count}} 个聊天在等待",
-    "quota_other": "{{provider}} 已达用量上限，{{count}} 个聊天在等待",
-    "quotaUntil_one": "{{provider}} 已达用量上限（{{time}} 恢复），{{count}} 个聊天在等待",
-    "quotaUntil_other": "{{provider}} 已达用量上限（{{time}} 恢复），{{count}} 个聊天在等待",
-    "login_one": "{{provider}} 登录已失效，{{count}} 个聊天在等待",
-    "login_other": "{{provider}} 登录已失效，{{count}} 个聊天在等待",
-    "removed_one": "{{provider}} 未登录，{{count}} 个聊天在等待",
-    "removed_other": "{{provider}} 未登录，{{count}} 个聊天在等待",
-    "resolved": "没有聊天在等待 {{provider}}",
-    "runOn": "现在改用 {{provider}} 运行",
-    "runFailed": "未能运行这些聊天"
+    "waiting_one": "{{count}} 个任务在等待",
+    "waiting_other": "{{count}} 个任务在等待"
   },
   "outputs": {
     "title": "产出",

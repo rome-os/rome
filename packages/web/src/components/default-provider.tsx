@@ -1,8 +1,13 @@
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
-import { type DefaultModelProvider, useSetDefaultProvider } from "@/hooks/use-default-provider";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  type DefaultModelProvider,
+  useDefaultProvider,
+  useSetDefaultProvider,
+} from "@/hooks/use-default-provider";
 
 /** The name the guardian reads for a provider: Claude, ChatGPT, Rome credits. */
 export function useProviderName(): (provider: DefaultModelProvider) => string {
@@ -15,36 +20,58 @@ export function useProviderName(): (provider: DefaultModelProvider) => string {
         : t("aiTools.romeCredits.name");
 }
 
-type ResendTarget = { chatId: string; agentName: string };
+/** A checkbox with its label, the whole row a target. */
+export function LabeledCheckbox({
+  checked,
+  onCheckedChange,
+  disabled,
+  children,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex w-fit items-center gap-2 text-ui text-foreground">
+      <Checkbox
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+      />
+      {children}
+    </label>
+  );
+}
 
 /**
- * A button that makes `provider` the default after the guardian confirms. The
- * AI Tools panel, a failure card and an outage notice share it, so the dialog
- * reads the same everywhere. `resend` also runs that chat's stopped request.
+ * "Set as default" in AI Tools, and the confirm dialog it opens. While chats
+ * follow the default, the dialog asks whether they move too, checked by
+ * default. docs/domains/agents.md#default-provider
  */
 export function MakeDefaultProviderButton({
   provider,
-  resend,
   label,
   variant = "outline",
   size = "sm",
   className,
-  onDone,
 }: {
   provider: DefaultModelProvider;
-  /** A chat to resend in, or a read of one when its agent is not known yet. */
-  resend?: ResendTarget | (() => Promise<ResendTarget>);
   /** The button's text; "Set as default" when unset. */
   label?: ReactNode;
   variant?: ComponentProps<typeof Button>["variant"];
   size?: ComponentProps<typeof Button>["size"];
   className?: string;
-  onDone?: () => void;
 }) {
   const { t } = useTranslation("settings");
   const name = useProviderName()(provider);
   const [open, setOpen] = useState(false);
+  const [moveExisting, setMoveExisting] = useState(true);
+  const { data: state } = useDefaultProvider();
   const save = useSetDefaultProvider();
+  const asksToMove = (state?.followingChats ?? 0) > 0;
   const close = () => {
     if (save.isPending) return;
     setOpen(false);
@@ -57,42 +84,42 @@ export function MakeDefaultProviderButton({
         variant={variant}
         size={size}
         className={className}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setMoveExisting(true);
+          setOpen(true);
+        }}
       >
         {label ?? t("aiTools.defaultProvider.setAsDefault")}
       </Button>
       <RomeConfirmDialog
         open={open}
         title={t("aiTools.defaultProvider.confirmTitle", { provider: name })}
-        description={t("aiTools.defaultProvider.confirmBody", { provider: name })}
+        description={
+          asksToMove && !moveExisting
+            ? t("aiTools.defaultProvider.confirmBodyStay", { provider: name })
+            : t("aiTools.defaultProvider.confirmBody", { provider: name })
+        }
         confirmLabel={t("aiTools.defaultProvider.confirm")}
         cancelLabel={t("common.cancel")}
         confirmDisabled={save.isPending}
         onCancel={close}
-        onConfirm={async () => {
-          let target: ResendTarget | undefined;
-          try {
-            target = typeof resend === "function" ? await resend() : resend;
-          } catch {
-            target = undefined;
-          }
+        onConfirm={() =>
           save.mutate(
-            { provider, ...(target ? { resend: target } : {}) },
-            {
-              onSuccess: () => {
-                setOpen(false);
-                onDone?.();
-              },
-            },
-          );
-        }}
+            { provider, moveExisting: asksToMove ? moveExisting : true },
+            { onSuccess: () => setOpen(false) },
+          )
+        }
       >
-        {provider === "rome_credits" || save.isError ? (
+        {asksToMove || save.isError ? (
           <div className="space-y-2">
-            {provider === "rome_credits" && (
-              <p className="text-ui text-muted-foreground">
-                {t("aiTools.defaultProvider.creditsBody")}
-              </p>
+            {asksToMove && (
+              <LabeledCheckbox
+                checked={moveExisting}
+                disabled={save.isPending}
+                onCheckedChange={setMoveExisting}
+              >
+                {t("aiTools.defaultProvider.moveExisting")}
+              </LabeledCheckbox>
             )}
             {save.isError && (
               <p role="alert" className="text-ui text-destructive">

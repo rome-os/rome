@@ -351,7 +351,15 @@ export function renderSingleEntry(
         />
       );
     case "provider_failure":
-      return <ProviderFailureCard key={key} part={block} />;
+      // The card settles in place on the server, so a switch reads the chat again.
+      return (
+        <ProviderFailureCard
+          key={key}
+          part={block}
+          messageId={messageId}
+          onSettled={onApprovalResolved}
+        />
+      );
     case "result":
       return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":

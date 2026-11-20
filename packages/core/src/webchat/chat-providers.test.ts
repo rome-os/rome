@@ -91,3 +91,22 @@ describe("which provider a chat that follows the default runs on", () => {
     expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
   });
 });
+
+describe("a card rewritten in place", () => {
+  it("rewrites the line in its chat and tells the chat's live view", async () => {
+    const { webchatRepo } = await setup();
+    const message = await webchatRepo.addBackendMessage("plain", "turn-1", [
+      { type: "text", content: "before" },
+    ]);
+    const updated: Array<{ id: string; sessionId: string; content: string }> = [];
+    webchatRepo.onMessageUpdated((m) => updated.push(m));
+    await webchatRepo.updateMessageContent(
+      message.id,
+      JSON.stringify([{ type: "text", content: "after" }]),
+    );
+    const lines = await webchatRepo.getMessages("plain");
+    expect(lines.find((line) => line.id === message.id)?.content).toContain("after");
+    expect(updated).toEqual([expect.objectContaining({ id: message.id, sessionId: "plain" })]);
+    expect(updated[0]?.content).toContain("after");
+  });
+});

@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { lazy } from "@/lib/lazy-with-reload";
+import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
 import { ChevronDown, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -382,6 +383,30 @@ const LOGOUT_PROVIDER_CONFIG = {
 
 type LogoutProvider = keyof typeof LOGOUT_PROVIDER_CONFIG;
 
+/**
+ * What logging out of `provider` does to the chats: the other logged-in
+ * account becomes the default, or with none left, the chats pause.
+ * docs/domains/agents.md#default-provider
+ */
+export function logoutOutcome(
+  provider: LogoutProvider,
+  state: DefaultProviderState | null | undefined,
+  providerName: (provider: DefaultModelProvider) => string,
+  t: TFunction<"settings">,
+): string | null {
+  if (!state) return null;
+  const leaving: DefaultModelProvider = provider === "claude" ? "anthropic" : "openai";
+  const other: DefaultModelProvider = provider === "claude" ? "openai" : "anthropic";
+  if (state.signedIn[other]) {
+    return state.provider === leaving
+      ? t("aiTools.logoutOutcome.otherBecomesDefault", { provider: providerName(other) })
+      : null;
+  }
+  return state.romeCreditsUsable
+    ? t("aiTools.logoutOutcome.pauseOrCredits")
+    : t("aiTools.logoutOutcome.pause");
+}
+
 interface AiToolsPanelProps {
   hiddenProviders?: readonly AiToolProviderId[];
   showUsage?: boolean;
@@ -611,8 +636,10 @@ export function DefaultProviderControl({
   if (state.provider === provider) {
     return <Badge variant="info">{t("aiTools.defaultProvider.badge")}</Badge>;
   }
-  const signedInCount = Object.values(state.signedIn).filter(Boolean).length;
-  if (signedInCount < 2) return null;
+  // Rome credits run only while no AI account is logged in, so the choice is
+  // between the two accounts.
+  if (provider === "rome_credits") return null;
+  if (!state.signedIn.anthropic || !state.signedIn.openai) return null;
   return <MakeDefaultProviderButton provider={provider} className={AI_TOOL_ACTION_BUTTON_CLASS} />;
 }
 
@@ -663,6 +690,7 @@ export function AiToolsPanel({
   onConnectedChange,
 }: AiToolsPanelProps) {
   const { t } = useTranslation("settings");
+  const providerName = useProviderName();
   const uid = useId();
   const [terminalPreset, setTerminalPreset] = useState<string | null>(null);
   const [chatgptModalOpen, setChatgptModalOpen] = useState(false);
@@ -1003,6 +1031,21 @@ export function AiToolsPanel({
   );
   const anyConnected = hasConnectedAiProvider(toolStatus, hiddenProviders);
   const logoutConfig = logoutProvider ? LOGOUT_PROVIDER_CONFIG[logoutProvider] : null;
+  // Rome credits show only while no AI account is logged in. Rome counts an
+  // unknown login as logged in, so only an explicit false on both counts.
+  const noAccountLoggedIn =
+    toolStatus.claude?.loggedIn === false &&
+    toolStatus.codex?.loggedIn === false &&
+    defaultProvider?.signedIn.anthropic !== true &&
+    defaultProvider?.signedIn.openai !== true;
+  const logoutDescription = logoutConfig
+    ? [
+        t(logoutConfig.descriptionKey),
+        logoutProvider ? logoutOutcome(logoutProvider, defaultProvider, providerName, t) : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
 
   useEffect(() => {
     if (!loadingStatus) onConnectedChange?.(anyConnected);
@@ -1016,13 +1059,9 @@ export function AiToolsPanel({
       <PanelSection>
         {showHeader && <DefaultProviderNote state={defaultProvider} />}
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
-          {showRomeCredits && romeCredits && statusLoaded && (
+          {showRomeCredits && romeCredits && statusLoaded && noAccountLoggedIn && (
             <RomeCreditsRow
               credits={romeCredits}
-              // Rome counts an unknown ChatGPT login as connected, so only
-              // an explicit false puts Codex on credits.
-              chatgptConnected={toolStatus.codex?.loggedIn !== false}
-              claudeConnected={toolStatus.claude?.loggedIn === true}
               defaultControl={
                 <DefaultProviderControl provider="rome_credits" state={defaultProvider} />
               }
@@ -1593,7 +1632,7 @@ export function AiToolsPanel({
             open
             icon={logoutConfig.icon}
             title={t(logoutConfig.titleKey)}
-            description={logoutError ?? t(logoutConfig.descriptionKey)}
+            description={logoutError ?? logoutDescription}
             confirmLabel={t("aiTools.logOut")}
             destructive
             confirmDisabled={logoutPending}

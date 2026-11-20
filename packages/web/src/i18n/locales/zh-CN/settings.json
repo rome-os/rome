@@ -629,10 +629,7 @@
       "name": "Rome 额度",
       "status": {
         "inUse": "使用中",
-        "ready": "就绪",
-        "standby": "待用",
         "usedUp": "已用完",
-        "usedUpWithClaude": "已用完",
         "paused": "已暂停"
       },
       "ofGranted": "共 {{amount}}",
@@ -744,11 +741,17 @@
       "setAsDefault": "设为默认",
       "confirmTitle": "将 {{provider}} 设为默认？",
       "confirmBody": "进行中的聊天会在下一次回复时切换到 {{provider}}。",
-      "creditsBody": "Rome 额度设为默认时，每次 ChatGPT 运行都使用 Rome 额度。",
+      "confirmBodyStay": "新聊天使用 {{provider}}，进行中的聊天保留原来的提供方。",
+      "moveExisting": "已有聊天也一起切过去",
       "confirm": "设为默认",
       "saveFailed": "未能更改默认提供方",
       "removedNote": "{{from}} 已移除，{{to}} 现在是默认。",
       "dismissNote": "关闭"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "pause": "聊天会暂停，直到你重新登录。",
+      "pauseOrCredits": "聊天会暂停，直到你重新登录，或在聊天里选择改用 Rome 额度。"
     }
   },
   "sentinelLog": {

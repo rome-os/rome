@@ -1,17 +1,27 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ProviderOutagePart } from "@rome/api-types/chat";
-import { MakeDefaultProviderButton, useProviderName } from "@/components/default-provider";
-import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
-import { formatUntil } from "@/components/chat/entries/ProviderFailureCard";
-import { Button } from "@/components/ui/button";
-import { useProviderOutages, useRunOutageOn } from "@/hooks/use-default-provider";
+import type { ProviderFailureResolution, ProviderOutagePart } from "@rome/api-types/chat";
+import { useProviderName } from "@/components/default-provider";
+import { ChatNotice } from "@/components/chat/ChatNotice";
+import {
+  FailureActions,
+  failureText,
+  resolvedText,
+} from "@/components/chat/entries/ProviderFailureCard";
+import { TaskLink } from "@/components/chat/task-link/TaskLink";
+import {
+  type ProviderSwitch,
+  useProviderOutages,
+  useSwitchOutage,
+} from "@/hooks/use-default-provider";
 import { cn } from "@/lib/utils";
 
 /**
- * The Concierge main chat's line for unattended chats (task chats, routines)
- * waiting on a provider that stopped working. The open outages are read live,
- * so the count is current and the actions go once the outage resolves.
+ * The Concierge main chat's notice for unattended chats (task chats, routines)
+ * one provider failure stopped: what stopped, the task links, and the same
+ * buttons as a failure card, which act on every chat at once. The open
+ * outages are read live, so a notice the server has not rewritten yet still
+ * reads as settled once its outage is gone.
  */
 export function ProviderOutageNotice({
   part,
@@ -23,81 +33,69 @@ export function ProviderOutageNotice({
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const outages = useProviderOutages();
-  const runOn = useRunOutageOn();
-  const [signInOpen, setSignInOpen] = useState(false);
+  const switchOutage = useSwitchOutage();
+  const [switched, setSwitched] = useState<ProviderFailureResolution | null>(null);
   const live = outages.data?.find((outage) => outage.id === part.outageId);
-  const resolved = !!part.resolvedAt || (outages.isSuccess && !live);
-  const name = providerName(part.provider);
-  const count = live?.chatIds.length ?? part.chatIds.length;
-  const untilIso = live?.until ?? part.until;
-  const until = untilIso ? formatUntil(untilIso, i18n.language) : null;
-  const reason = live?.reason ?? part.reason;
+  const resolved: ProviderFailureResolution | null =
+    part.resolved ??
+    switched ??
+    (part.resolvedAt || (outages.isSuccess && !live)
+      ? { at: part.resolvedAt ?? "", by: "recovered" }
+      : null);
 
-  const text = resolved
-    ? t("providerOutage.resolved", { provider: name })
-    : reason === "quota"
-      ? until
-        ? t("providerOutage.quotaUntil", { provider: name, time: until, count })
-        : t("providerOutage.quota", { provider: name, count })
-      : reason === "login"
-        ? t("providerOutage.login", { provider: name, count })
-        : t("providerOutage.removed", { provider: name, count });
+  if (resolved) {
+    return (
+      <ChatNotice className={cn("mb-4", className)}>
+        {resolvedText({ ...resolved, continued: false }, t, providerName)}
+      </ChatNotice>
+    );
+  }
 
-  const runnable = part.alternatives.filter(
-    (alternative): alternative is "anthropic" | "openai" =>
-      alternative === "anthropic" || alternative === "openai",
-  );
+  const facts = {
+    ...part,
+    reason: live?.reason ?? part.reason,
+    until: live?.until ?? part.until,
+  };
+  const chatIds = live?.chatIds ?? part.chatIds;
+  const onSwitch = (change: ProviderSwitch) =>
+    switchOutage.mutate(
+      { outageId: part.outageId, change },
+      {
+        onSuccess: () =>
+          setSwitched({
+            at: new Date().toISOString(),
+            by: "switched",
+            ...(change.kind === "provider"
+              ? { provider: change.provider }
+              : { model: part.replacement?.model }),
+          }),
+      },
+    );
 
   return (
-    <div role="note" className={cn("mb-4 text-center", className)}>
-      <p className="text-aux text-muted-foreground">{text}</p>
-      {!resolved && (
-        <>
-          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-            {runnable.map((alternative) => (
-              <Button
-                key={`run-${alternative}`}
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={runOn.isPending}
-                onClick={() => runOn.mutate({ outageId: part.outageId, provider: alternative })}
-              >
-                {t("providerOutage.runOn", { provider: providerName(alternative) })}
-              </Button>
-            ))}
-            {part.alternatives.map((alternative) => (
-              <MakeDefaultProviderButton
-                key={`default-${alternative}`}
-                provider={alternative}
-                variant="ghost"
-                label={t("providerFailure.makeDefault", { provider: providerName(alternative) })}
-              />
-            ))}
-            {reason !== "quota" && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                aria-expanded={signInOpen}
-                onClick={() => setSignInOpen((open) => !open)}
-              >
-                {t("providerFailure.signIn")}
-              </Button>
-            )}
-          </div>
-          {runOn.isError && (
-            <p role="alert" className="mt-2 text-aux text-destructive">
-              {t("providerOutage.runFailed")}
-            </p>
-          )}
-          {signInOpen && (
-            <div className="mx-auto mt-3 max-w-xl text-left">
-              <ProviderSignIn />
-            </div>
-          )}
-        </>
+    <div role="note" data-provider-outage="" className={cn("mb-4 text-center", className)}>
+      <p className="text-aux text-muted-foreground">
+        {failureText(facts, t, providerName, i18n.language)}
+      </p>
+      <p className="mt-1 text-aux text-muted-foreground">
+        {t("providerOutage.waiting", { count: chatIds.length })}
+      </p>
+      {chatIds.length > 0 && (
+        <ul className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-aux">
+          {chatIds.map((chatId) => (
+            <li key={chatId}>
+              <TaskLink id={chatId} />
+            </li>
+          ))}
+        </ul>
       )}
+      <FailureActions
+        facts={facts}
+        pending={switchOutage.isPending}
+        failed={switchOutage.isError}
+        onSwitch={onSwitch}
+        centered
+      />
     </div>
   );
 }

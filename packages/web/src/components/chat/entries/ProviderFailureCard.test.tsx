@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ProviderFailurePart } from "@rome/api-types/chat";
 import i18n from "@/i18n";
-import { ProviderFailureCard, formatUntil } from "./ProviderFailureCard";
+import { ProviderFailureCard, failureCardKind, formatUntil } from "./ProviderFailureCard";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -16,41 +16,33 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-const SIGNED_IN = {
-  provider: "anthropic",
-  signedIn: { anthropic: true, openai: true, rome_credits: false },
-};
-
 type Call = { url: string; method: string; body: unknown };
 
-function mockApi(session: { agentName: string | null } | null = { agentName: "concierge" }) {
+function mockApi() {
   const calls: Call[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (url === "/api/ai-tools/default") return Response.json({ defaultProvider: SIGNED_IN });
-    if (url === "/api/chat/sessions/c1" && method === "GET") {
-      return session
-        ? Response.json({ id: "c1", ...session })
-        : new Response(null, { status: 404 });
-    }
     return Response.json({ ok: true });
   }) as typeof fetch);
   return calls;
 }
 
-function renderCard(part: Partial<ProviderFailurePart>) {
+function renderCard(part: Partial<ProviderFailurePart>, onSettled?: () => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ProviderFailureCard
+        messageId="m1"
+        onSettled={onSettled}
         part={{
           type: "provider_failure",
-          provider: "anthropic",
+          provider: "openai",
           reason: "quota",
+          card: "wait",
           followsDefault: true,
-          alternatives: ["openai"],
+          alternatives: ["anthropic"],
           chatId: "c1",
           ...part,
         }}
@@ -60,56 +52,132 @@ function renderCard(part: Partial<ProviderFailurePart>) {
 }
 
 describe("ProviderFailureCard", () => {
-  it("makes another provider the default after the confirm and resends in this chat", async () => {
+  it("waits out a usage limit and switches this chat only, unless also made default", async () => {
     const calls = mockApi();
+    const settled = rs.fn();
     const until = new Date();
-    until.setHours(15, 0, 0, 0);
-    renderCard({ until: until.toISOString() });
+    until.setHours(14, 20, 0, 0);
+    renderCard({ until: until.toISOString() }, settled);
     const time = formatUntil(until.toISOString(), "en");
-    expect(screen.getByText(`Claude has reached its usage limit until ${time}.`)).toBeTruthy();
-    expect(screen.getByText(`Rome retries at ${time}.`)).toBeTruthy();
-    // A usage limit is not fixed by signing in.
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(screen.getByText(`ChatGPT quota used up, continues at ${time}`)).toBeTruthy();
+    // A usage limit ends by itself, so nothing asks to log in.
+    expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
+    const makeDefault = screen.getByRole("checkbox", { name: "Also make default" });
+    expect(makeDefault.getAttribute("aria-checked")).toBe("false");
 
-    await userEvent.click(screen.getByRole("button", { name: "Make ChatGPT the default" }));
-    expect(screen.getByText("Make ChatGPT the default?")).toBeTruthy();
-    expect(screen.getByText("Ongoing chats switch to ChatGPT on their next reply.")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Make default" }));
-
-    await waitFor(() =>
-      expect(calls.find((call) => call.method === "PUT")).toMatchObject({
-        url: "/api/ai-tools/default",
-        body: { provider: "openai", resend: { chatId: "c1", agentName: "concierge" } },
-      }),
-    );
-    expect(await screen.findByText("Sent again.")).toBeTruthy();
-  });
-
-  it("takes an exact selection back to following the default, then resends", async () => {
-    const calls = mockApi({ agentName: null });
-    renderCard({ followsDefault: false, reason: "login" });
-    expect(screen.getByText("Claude needs you to sign in again.")).toBeTruthy();
-
-    await userEvent.click(screen.getByRole("button", { name: "Back to following default" }));
+    await userEvent.click(makeDefault);
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
 
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")).toMatchObject({
-        url: "/api/ai-tools/provider-failures/resend",
-        body: { chatId: "c1", agentName: "main" },
+        url: "/api/ai-tools/provider-failures/m1/switch",
+        body: { kind: "provider", provider: "anthropic", makeDefault: true },
       }),
     );
-    const patch = calls.find((call) => call.method === "PATCH");
-    expect(patch).toMatchObject({
-      url: "/api/chat/sessions/c1/model",
-      body: { largeModelSelection: "auto" },
-    });
-    expect(calls.indexOf(patch!)).toBeLessThan(calls.findIndex((call) => call.method === "POST"));
+    expect(await screen.findByText("Switched to Claude, continued")).toBeTruthy();
+    expect(settled).toHaveBeenCalled();
   });
 
-  it("offers a resend once the failed provider reads as signed in", async () => {
+  it("asks to log in again, with a switch and the provider's detail behind Details", async () => {
     mockApi();
-    renderCard({ reason: "removed", alternatives: [] });
-    expect(screen.getByText("Claude is not signed in.")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Resend" })).toBeTruthy();
+    renderCard({
+      reason: "login",
+      card: "account",
+      detail: "401 Unauthorized",
+    });
+    expect(screen.getByText("ChatGPT needs you to log in again")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Switch to Claude" })).toBeTruthy();
+    expect(screen.queryByText("401 Unauthorized")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("401 Unauthorized")).toBeTruthy();
+  });
+
+  it("offers Rome credits when no account is logged in and credits are left", async () => {
+    const calls = mockApi();
+    renderCard({
+      provider: "anthropic",
+      reason: "removed",
+      card: "account",
+      alternatives: [],
+      credits: true,
+    });
+    expect(screen.getByText("Claude is not logged in")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Use Rome credits" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+        kind: "provider",
+        provider: "rome_credits",
+        makeDefault: false,
+      }),
+    );
+  });
+
+  it("moves to the replacement model, with no make-default choice", async () => {
+    const calls = mockApi();
+    renderCard({
+      reason: "model_unavailable",
+      card: "model",
+      model: "gpt-6-astra",
+      replacement: { selection: "gpt-6-1-sol", model: "gpt-6.1-sol" },
+      followsDefault: false,
+    });
+    expect(screen.getByText("GPT-6 Astra is unavailable")).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Switch to Claude" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Switch to GPT-6.1 Sol" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+        kind: "model",
+        selection: "gpt-6-1-sol",
+      }),
+    );
+    expect(await screen.findByText("Switched to GPT-6.1 Sol, continued")).toBeTruthy();
+  });
+
+  it("reads as one line once settled, with no buttons", () => {
+    mockApi();
+    const { container, rerender } = renderCard({
+      resolved: { at: "2026-08-08T09:22:00.000Z", by: "switched", provider: "anthropic" },
+    });
+    expect(screen.getByText("Switched to Claude, continued")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(container.querySelector("[data-provider-failure]")).toBeNull();
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProviderFailureCard
+          messageId="m1"
+          part={{
+            type: "provider_failure",
+            provider: "openai",
+            reason: "temporary",
+            followsDefault: true,
+            alternatives: [],
+            chatId: "c1",
+            resolved: { at: "2026-08-08T09:22:00.000Z", by: "recovered", continued: true },
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Recovered, continued")).toBeTruthy();
+  });
+
+  it("says when a switch failed", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ error: "No open card" }, { status: 409 }),
+    );
+    renderCard({});
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not switch");
+  });
+});
+
+describe("failureCardKind", () => {
+  it("reads a card written before `card` existed from its reason", () => {
+    expect(failureCardKind({ reason: "quota" })).toBe("wait");
+    expect(failureCardKind({ reason: "login" })).toBe("account");
+    expect(failureCardKind({ reason: "removed" })).toBe("account");
+    expect(failureCardKind({ reason: "model_unavailable" })).toBe("model");
+    expect(failureCardKind({ reason: "login", card: "wait" })).toBe("wait");
   });
 });

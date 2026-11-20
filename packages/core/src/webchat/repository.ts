@@ -865,6 +865,24 @@ export class WebChatRepository {
     };
   }
 
+  private messageUpdatedListeners = new Set<WebchatMessageInsertedListener>();
+
+  /**
+   * Told when a stored message's content is rewritten in place, as a provider
+   * failure card is when it settles, with the message as it now reads. Not
+   * told of new messages.
+   */
+  onMessageUpdated(listener: WebchatMessageInsertedListener): () => void {
+    this.messageUpdatedListeners.add(listener);
+    return () => {
+      this.messageUpdatedListeners.delete(listener);
+    };
+  }
+
+  protected emitMessageUpdated(message: StoredWebchatMessage): void {
+    for (const listener of this.messageUpdatedListeners) listener(message);
+  }
+
   protected emitMessageInserted(message: StoredWebchatMessage): void {
     for (const listener of this.messageInsertedListeners) {
       listener(message);

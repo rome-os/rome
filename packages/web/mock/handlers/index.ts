@@ -2,6 +2,7 @@ import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
+import type { ProviderFailurePart } from "@rome/api-types/chat";
 import type {
   ChatId,
   ChatSettings,
@@ -105,7 +106,7 @@ import { taskListHandlers } from "./task-list";
 import { chatOutputHandlers, outputProjectFolder } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { pickerDevices, settingsHandlers } from "./settings";
+import { MOCK_OUTAGE_ID, pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
@@ -615,9 +616,10 @@ const transcripts: Record<string, ChatMessage[]> = {
         type: "provider_failure",
         provider: "anthropic",
         reason: "quota",
+        card: "wait",
         until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
         followsDefault: true,
-        alternatives: ["rome_credits"],
+        alternatives: [],
         chatId: "mock-chat-lisbon",
       },
     ]),
@@ -1055,6 +1057,135 @@ transcripts["mock-topic-news"] = turn(
   [text("Done. Every Monday at 7:30 I will send the week's top stories.")],
 );
 
+// Each state of the provider failure card, and the main chat's grouped
+// notice, in a topic chat of their own: the main chat's transcript is the one
+// the layout checks measure, so these stay out of it.
+const PROVIDER_CARDS_CHAT_ID = "mock-topic-provider-cards";
+const providerCard = (part: Omit<ProviderFailurePart, "type" | "chatId">): TranscriptPart => ({
+  type: "provider_failure",
+  chatId: PROVIDER_CARDS_CHAT_ID,
+  ...part,
+});
+transcripts[PROVIDER_CARDS_CHAT_ID] = [
+  ...turn(PROVIDER_CARDS_CHAT_ID, 1, "2026-08-08T09:00:00.000Z", "Plan the Kyoto budget.", [
+    providerCard({
+      provider: "openai",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+      followsDefault: true,
+      alternatives: ["anthropic"],
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 2, "2026-08-08T09:05:00.000Z", "Book the 9:40 train.", [
+    providerCard({
+      provider: "openai",
+      reason: "login",
+      card: "account",
+      followsDefault: true,
+      alternatives: ["anthropic"],
+      detail: "401 Unauthorized: the refresh token was revoked.",
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 3, "2026-08-08T09:10:00.000Z", "Summarise the inbox.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "removed",
+      card: "account",
+      followsDefault: true,
+      alternatives: [],
+      credits: true,
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 4, "2026-08-08T09:15:00.000Z", "Draft the release notes.", [
+    providerCard({
+      provider: "openai",
+      reason: "model_unavailable",
+      card: "model",
+      model: "gpt-6-astra",
+      replacement: { selection: "gpt-6-1-sol", model: "gpt-6.1-sol" },
+      followsDefault: false,
+      alternatives: ["anthropic"],
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 5, "2026-08-08T09:20:00.000Z", "Check the flight prices.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      followsDefault: true,
+      alternatives: ["openai"],
+      resolved: {
+        at: "2026-08-08T09:22:00.000Z",
+        by: "switched",
+        provider: "openai",
+        continued: true,
+      },
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 6, "2026-08-08T09:30:00.000Z", "Any updates on the tasks?", [
+    {
+      type: "provider_outage",
+      outageId: MOCK_OUTAGE_ID,
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      chatIds: ["mock-chat-lisbon", "mock-task-question"],
+      alternatives: ["openai"],
+    },
+  ]),
+];
+
+/** A failure card's switch: the card settles in place, as the server rewrites it. */
+const switchProviderCard = (messageId: string, change: Record<string, unknown>) => {
+  for (const messages of Object.values(transcripts)) {
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index < 0) continue;
+    const message = messages[index]!;
+    const parts = JSON.parse(message.content) as TranscriptPart[];
+    const card = parts.find(
+      (part): part is ProviderFailurePart => part.type === "provider_failure",
+    );
+    if (!card || card.resolved) return false;
+    card.resolved = {
+      at: new Date().toISOString(),
+      by: "switched",
+      ...(change.kind === "model"
+        ? { model: card.replacement?.model }
+        : { provider: change.provider as ProviderFailurePart["provider"] }),
+      continued: true,
+    };
+    messages[index] = { ...message, content: JSON.stringify(parts) };
+    return true;
+  }
+  return false;
+};
+
+// A content card beside a question card: the content card reads as wide as a
+// text bubble, the question card keeps its narrow width.
+const CARD_WIDTHS_CHAT_ID = "mock-topic-card-widths";
+transcripts[CARD_WIDTHS_CHAT_ID] = [
+  ...turn(CARD_WIDTHS_CHAT_ID, 1, "2026-08-08T10:00:00.000Z", "How did I do this week?", [
+    { ...AGENT_CARD_HEALTH, toolUseId: "mock-card-widths-health" } as TranscriptPart,
+  ]),
+  ...turn(CARD_WIDTHS_CHAT_ID, 2, "2026-08-08T10:05:00.000Z", "Plan a walk for tonight.", [
+    {
+      type: "pending_interaction",
+      toolUseId: "mock-card-widths-question",
+      appId: "core",
+      render: questionCardRender([
+        {
+          id: "time",
+          question: "When should the walk start?",
+          type: "single",
+          options: ["18:30", "19:30"],
+        },
+      ]),
+    } as TranscriptPart,
+  ]),
+];
+
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
 const session = (
@@ -1086,6 +1217,8 @@ const chatSessions: ChatSession[] = [
   // Topic chats, which the Concierge section lists under the main chat.
   session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
   session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
+  session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+  session(CARD_WIDTHS_CHAT_ID, "Card widths", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -1553,6 +1686,14 @@ export const handlers = [
     return found
       ? HttpResponse.json(found)
       : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+  }),
+  http.post("/api/ai-tools/provider-failures/:messageId/switch", async ({ params, request }) => {
+    const change = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!change)
+      return HttpResponse.json({ error: "A provider or a model is required" }, { status: 400 });
+    return switchProviderCard(String(params.messageId), change)
+      ? HttpResponse.json({ ok: true })
+      : HttpResponse.json({ error: "No open card in that message" }, { status: 409 });
   }),
   http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
