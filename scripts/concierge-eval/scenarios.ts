@@ -3,7 +3,7 @@
 // Change a scenario and earlier labels stop being comparable: bump
 // SCENARIOS_VERSION so a comparison says so. docs/concierge-eval.md
 
-export const SCENARIOS_VERSION = 2;
+export const SCENARIOS_VERSION = 3;
 
 export interface Step {
   text: string;
@@ -59,6 +59,18 @@ export const SCENARIOS: Scenario[] = [
     steps: [
       {
         text: "Make it a task: ask me with a question card whether I prefer tea or coffee in the afternoon, and note my pick in your memory.",
+      },
+    ],
+    cards: "first",
+    approvals: "never",
+    expect: { decision: true, endReason: "done" },
+  },
+  {
+    id: "ask-two",
+    about: "Two tasks ask at once, each answered on the Concierge's own card",
+    steps: [
+      {
+        text: "Two separate tasks, please: one asks me with a question card whether I prefer tea or coffee in the afternoon and notes my pick in your memory; the other asks me with a question card which season I like best and notes it there too.",
       },
     ],
     cards: "first",

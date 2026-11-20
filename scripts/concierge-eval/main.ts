@@ -226,7 +226,14 @@ function checksFor(
     const deciding = decidingTaskChats(rows.taskChats.map((t) => t.session_id));
     const shown = new Set(
       concierge.flatMap((m) => {
-        if (kindOf(m) === "own_ask") return ["own"];
+        // The Concierge's card that asks a task's question names the task.
+        if (kindOf(m) === "own_ask") {
+          const part = (
+            JSON.parse(m.parts) as { type: string; render?: { props?: { task?: unknown } } }[]
+          ).find((p) => p.type === "pending_interaction");
+          const task = part?.render?.props?.task;
+          return [typeof task === "string" ? task : "own"];
+        }
         if (kindOf(m) !== "ask_card") return [];
         const part = (JSON.parse(m.parts) as { type: string; chatId?: string }[]).find(
           (p) => p.type === "task_chat",

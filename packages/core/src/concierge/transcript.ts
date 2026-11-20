@@ -21,24 +21,24 @@ function parts(content: string): StoredPart[] {
   }
 }
 
-export interface OpenQuestion {
-  question: string;
-  options?: string[];
-}
+/** A question card's questions, as the task's `ask_question` call gave them. */
+export type OpenQuestions = Record<string, unknown>[];
 
-/** The first question of a question card in these rows, or null when there is none. */
-export function openQuestion(rows: StoredRow[]): OpenQuestion | null {
+/** The questions of a question card in these rows, whole, or null when there is none. */
+export function openQuestion(rows: StoredRow[]): OpenQuestions | null {
   for (const row of rows) {
     if (row.role !== "assistant") continue;
     for (const part of parts(row.content)) {
       if (part.type !== "pending_interaction" || part.render?.builtin !== true) continue;
       const questions = (part.render.props as { questions?: unknown } | undefined)?.questions;
-      const first = Array.isArray(questions) ? (questions[0] as Record<string, unknown>) : null;
-      if (!first || typeof first.question !== "string") continue;
-      const options = Array.isArray(first.options)
-        ? first.options.filter((option): option is string => typeof option === "string")
-        : [];
-      return { question: first.question, ...(options.length ? { options } : {}) };
+      if (!Array.isArray(questions)) continue;
+      const whole = questions.filter(
+        (q): q is Record<string, unknown> =>
+          !!q &&
+          typeof q === "object" &&
+          typeof (q as { question?: unknown }).question === "string",
+      );
+      if (whole.length > 0) return whole;
     }
   }
   return null;

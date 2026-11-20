@@ -32,6 +32,11 @@ export const REPLY_TO_PARAMETER = {
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
 
+/** A card that asks a task's question parks nothing else: the Concierge may
+ *  still ask another task's question in the same turn. */
+const TASK_QUESTION_DIRECTIVE =
+  "The card is shown. Its answer comes as a later turn that names the task. Send nothing about it; another task's question gets its own card.";
+
 /** What `ask_question` accepts, the same where it draws a card and where it
  * relays a plain message. Fails closed on a malformed questions array, so a
  * broken card never renders. */
@@ -165,6 +170,8 @@ function askQuestionsToPromptText(questions: readonly Question[]): string {
 export function askQuestionToolOutput(
   questions: readonly Question[],
   widgetsShow: boolean,
+  /** The task chat whose question the Concierge's card asks for it. */
+  task?: string,
 ): unknown {
   if (!widgetsShow) {
     return (
@@ -179,10 +186,10 @@ export function askQuestionToolOutput(
     render: {
       kind: "inline",
       componentId: ASK_QUESTION_COMPONENT_ID,
-      props: { questions },
+      props: { questions, ...(task ? { task } : {}) },
       builtin: true,
     },
-    message: ASK_QUESTION_PARK_DIRECTIVE,
+    message: task ? TASK_QUESTION_DIRECTIVE : ASK_QUESTION_PARK_DIRECTIVE,
   };
 }
 

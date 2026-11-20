@@ -154,6 +154,19 @@ describe("askQuestionToolOutput", () => {
     });
   });
 
+  it("names the task a card asks for, and parks nothing else on it", () => {
+    const output = askQuestionToolOutput(questions, true, "task-7") as {
+      render: { props: unknown };
+      message: string;
+    };
+    expect(output.render.props).toEqual({ questions, task: "task-7" });
+    expect(output.message).toContain("another task's question gets its own card");
+    expect(output.message).not.toContain("do not call any further tools");
+    expect(
+      (askQuestionToolOutput(questions, true) as { render: { props: unknown } }).render.props,
+    ).toEqual({ questions });
+  });
+
   it("keeps defaults and descriptions in the card and the plain message", () => {
     const questions: Question[] = [
       {

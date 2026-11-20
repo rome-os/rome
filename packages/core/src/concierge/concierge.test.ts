@@ -53,7 +53,7 @@ import {
 } from "./service.js";
 import { ConciergeTasks } from "./tasks.js";
 import { WORKING_GRACE_MS } from "./message-status.js";
-import { buildConciergeTools } from "./tools.js";
+import { buildConciergeTools, checkTaskAnswers } from "./tools.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -260,6 +260,7 @@ function setup(
     }),
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     sendAsGuardian: rs.fn(async () => {}),
+    answerCard: rs.fn(async () => ({ ok: true as const, messageId: "answer-1", at: new Date(0) })),
     isRunning: rs.fn(() => false),
     isBusy: rs.fn(() => false),
     openTool: rs.fn(() => null),
@@ -711,6 +712,7 @@ describe("Concierge tools", () => {
       "react",
       "chat_start",
       "chat_send",
+      "task_answer",
       "chat_read",
       "chat_stop",
       "chat_update",
@@ -2828,19 +2830,25 @@ describe("Concierge events", () => {
     expect(stopped.quietFlags).toEqual([true]);
   });
 
-  it("tells the Concierge of a question card at once, with the question", async () => {
+  it("tells the Concierge of a question card at once, whole, as the input of its own ask_question", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
+    const questions = [
+      {
+        id: "airport",
+        question: "Which airport?",
+        type: "single",
+        options: ["LIS", "OPO"],
+        optionDescriptions: { LIS: "Lisbon" },
+        defaults: ["LIS"],
+        freeText: true,
+      },
+      { id: "note", question: "Anything else?", type: "text", optional: true, defaultText: "" },
+    ];
     s.messages.get(chatId)?.push({
       role: "assistant",
       content: JSON.stringify([
-        {
-          type: "pending_interaction",
-          render: {
-            builtin: true,
-            props: { questions: [{ question: "Which airport?", options: ["LIS", "OPO"] }] },
-          },
-        },
+        { type: "pending_interaction", render: { builtin: true, props: { questions } } },
       ]),
     });
     s.fakeTimers();
@@ -2848,7 +2856,162 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     const prompt = s.backendTurns[0].prompt;
     expect(prompt).toContain('changes="turn_end:completed question by=concierge"');
-    expect(prompt).toContain("question: Which airport? (options: LIS | OPO)");
+    const line = prompt.split("\n").find((each) => each.startsWith("ask_question: "));
+    const start = (await s.tasks.repo.getWithChat(chatId))?.sourceMessageId;
+    // Every field of every question, the task named, replying to its start message.
+    expect(JSON.parse(line!.slice("ask_question: ".length))).toEqual({
+      task: chatId,
+      ...(start ? { replyTo: start } : {}),
+      questions,
+    });
+    expect(prompt).not.toContain("card id=");
+  });
+
+  describe("task_answer", () => {
+    const questions = [
+      { id: "airport", question: "Which airport?", type: "single", options: ["LIS", "OPO"] },
+      { id: "note", question: "Anything else?", type: "text", optional: true },
+    ];
+    const asking = async (s: ReturnType<typeof setup>) => {
+      const { chatId } = await startTask(s);
+      s.deps.webchatRepo.openWaitsOf = async (ids: readonly string[]) =>
+        new Map(
+          ids.includes(chatId)
+            ? [
+                [
+                  chatId,
+                  [
+                    {
+                      kind: "card" as const,
+                      id: "item_0",
+                      messageId: "card-msg",
+                      render: { builtin: true, componentId: "question-card", props: { questions } },
+                      since: 0,
+                    },
+                  ],
+                ],
+              ]
+            : [],
+        );
+      return chatId;
+    };
+
+    it("answers the task's open question card as Concierge's account, as the card's answer gave it", async () => {
+      const s = setup();
+      const chatId = await asking(s);
+      const result = await s.tool("task_answer", {
+        chatId,
+        answers: [{ questionId: "airport", value: "OPO" }],
+      });
+      expect(result.isError).toBeFalsy();
+      expect(s.chats.answerCard).toHaveBeenCalledWith(
+        chatId,
+        { text: "airport: OPO" },
+        {
+          toolUseId: "item_0",
+          messageId: "card-msg",
+          output: { answers: [{ questionId: "airport", value: "OPO" }] },
+        },
+        CONCIERGE_ACCOUNT,
+      );
+      // Nothing was typed into the task chat: its brief is its only message.
+      expect(s.send).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses an answer the card cannot take, and sends nothing", async () => {
+      const s = setup();
+      const chatId = await asking(s);
+      for (const answers of [
+        [{ questionId: "airport", value: "Faro" }],
+        [{ questionId: "seat", value: "Window" }],
+        [{ questionId: "note", value: "Window seat" }],
+      ]) {
+        const result = await s.tool("task_answer", { chatId, answers });
+        expect(result.isError).toBe(true);
+      }
+      const words = await s.tool("task_answer", {
+        chatId,
+        answers: [{ questionId: "airport", value: "Faro" }],
+      });
+      expect(words.content[0].text).toContain("chat_send");
+      expect(s.chats.answerCard).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the task waits on no question, as when it was answered in the task chat", async () => {
+      const s = setup();
+      const { chatId } = await startTask(s);
+      const result = await s.tool("task_answer", {
+        chatId,
+        answers: [{ questionId: "airport", value: "OPO" }],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("waits on no question");
+      expect(s.chats.answerCard).not.toHaveBeenCalled();
+    });
+
+    it("says the task chat's own refusal, as when another answer won", async () => {
+      const s = setup();
+      const chatId = await asking(s);
+      s.chats.answerCard = rs.fn(async () => ({
+        ok: false as const,
+        error: "No open interaction matches this toolUseId",
+      }));
+      const result = await s.tool("task_answer", {
+        chatId,
+        answers: [{ questionId: "airport", value: "LIS" }],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("No open interaction matches this toolUseId");
+    });
+
+    it("takes the card's own words only where the card does", () => {
+      const card = [
+        {
+          id: "day",
+          question: "Which day?",
+          type: "single" as const,
+          options: ["Mon", "Tue"],
+          freeText: true,
+        },
+        {
+          id: "food",
+          question: "Which foods?",
+          type: "multi" as const,
+          options: ["Tapas", "Fish"],
+        },
+      ];
+      expect(
+        checkTaskAnswers(card, [
+          { questionId: "day", value: "Friday evening" },
+          { questionId: "food", value: "Tapas, Fish" },
+        ]),
+      ).toEqual({
+        ok: true,
+        answers: [
+          { questionId: "day", value: "Friday evening" },
+          { questionId: "food", value: "Tapas, Fish" },
+        ],
+      });
+      expect(
+        checkTaskAnswers(card, [
+          { questionId: "day", value: "Mon" },
+          { questionId: "food", value: "Tapas, Pizza" },
+        ]),
+      ).toMatchObject({ ok: false });
+      expect(checkTaskAnswers(card, [{ questionId: "day", value: "Mon" }])).toMatchObject({
+        ok: false,
+      });
+      expect(checkTaskAnswers(card, [])).toMatchObject({ ok: false });
+    });
+
+    it("refuses a chat that is not its own task chat", async () => {
+      const s = setup();
+      const result = await s.tool("task_answer", {
+        chatId: CONCIERGE_CHAT,
+        answers: [{ questionId: "airport", value: "OPO" }],
+      });
+      expect(result.isError).toBe(true);
+    });
   });
 
   it("tells the Concierge what the guardian said in a task chat, read from the turn's own rows", async () => {

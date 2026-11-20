@@ -166,6 +166,16 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
   };
 }
 
+/**
+ * The Concierge's card that asks a task's question for it names the task: the
+ * answer's turn says which task it answers (docs/domains/chats.md#task-chat).
+ */
+const ASKED_FOR_TASK_PARAMETER = {
+  type: ["string", "null"],
+  description:
+    "When this card asks a task's question for it: that task's chat_id, as the task event's ask_question line gives it. The answer's turn names it. Leave it out for your own question.",
+};
+
 /** `ask_question`, then `defer` where a thread can be woken, then the session tools. */
 export function askUserTools(input: {
   turn: TurnFacts;
@@ -248,14 +258,19 @@ export function askUserTools(input: {
               },
             },
           },
-          ...(repliesTo ? { replyTo: REPLY_TO_PARAMETER } : {}),
+          ...(repliesTo ? { replyTo: REPLY_TO_PARAMETER, task: ASKED_FOR_TASK_PARAMETER } : {}),
         },
       },
       handler: (input) =>
         run("ask_question", input, async () => {
           const result = parseAskQuestionInput(input);
           if (!result.ok) throw new Error(result.error);
-          return askQuestionToolOutput(result.questions, widgetsShow);
+          const task = repliesTo ? (input as { task?: unknown }).task : undefined;
+          return askQuestionToolOutput(
+            result.questions,
+            widgetsShow,
+            typeof task === "string" && task.trim() ? task.trim() : undefined,
+          );
         }),
     },
   ];

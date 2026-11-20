@@ -187,28 +187,33 @@ describe("the Concierge agent", () => {
     expect(rule).toContain("writes its conclusion in the language of its brief");
   });
 
-  it("tells the guardian once, with the task link, that a task waits on them, and copies no card", () => {
-    const rule = concierge.systemPromptPrefix
-      .split("\n")
-      .find((line) => line.startsWith("- `turn_end:completed question` or `approval`"));
+  it("asks a task's question with the same card and answers it back, and tells an approval in one line", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const question = lines.find((line) => line.startsWith("- `turn_end:completed question`")) ?? "";
     for (const text of [
-      "turn_end:completed question",
-      "`approval`",
-      "the task waits for the guardian",
+      "Call `ask_question` once with the event's `ask_question:` line as its input, unchanged",
+      "send nothing else",
+      "Its answer comes as a turn that names the task: pass it on with `task_answer`",
+      "When the guardian answers in words instead, or `task_answer` refuses, pass their words on with `chat_send`",
+      "An answer they gave in the task chat needs nothing from you",
+    ])
+      expect(question).toContain(text);
+    const approval = lines.find((line) => line.startsWith("- `approval`")) ?? "";
+    for (const text of [
       "Say so once, in one short line, with the task's link",
       "they decide it in the task chat",
-      "pass their words on with `chat_send`",
-      "an approval is decided only in its task chat",
+      "it is decided only in its task chat",
     ])
-      expect(rule).toContain(text);
-    // The Concierge shows no card for a task: its tool is gone, and so are the old words.
+      expect(approval).toContain(text);
+    // The Concierge shows no task card: its tool is gone, and so are the old words.
     expect(concierge.systemPromptPrefix).not.toContain("chat_card");
+    expect(concierge.systemPromptPrefix).not.toContain("ask it in plain words");
     // Rome keeps the status; the prompt never asks for one by hand.
     expect(concierge.systemPromptPrefix).not.toContain("needs_user");
     const tasks = concierge.systemPromptPrefix.split("# Tasks\n")[1];
     expect(tasks).toContain("You never set a status");
-    // The Concierge's own question goes in a card; a task asks in its own chat.
-    expect(tasks).toContain("with a question card or an approval");
+    // A task's question card is asked again; its own questions go in a card too.
+    expect(tasks).toContain("A task's question card you ask again with `ask_question`");
     expect(tasks).toContain("never in plain text");
   });
 
@@ -221,15 +226,23 @@ describe("the Concierge agent", () => {
     for (const removed of ["task_upsert", "task_list", "chat_card"]) {
       expect(concierge.systemPromptPrefix).not.toContain(removed);
     }
-    for (const kept of ["chat_start", "chat_update", "chat_stop", "chat_list", "chat_send"]) {
+    for (const kept of [
+      "chat_start",
+      "chat_update",
+      "chat_stop",
+      "chat_list",
+      "chat_send",
+      "task_answer",
+    ]) {
       expect(concierge.systemPromptPrefix).toContain(`\`${kept}\``);
     }
   });
 
   it("says a task waits once, and never calls a turned-down approval waiting", () => {
     const taskEvents = concierge.systemPromptPrefix.split("# Task events\n")[1] ?? "";
-    expect(taskEvents).toContain("Say what a task waits for once");
-    expect(taskEvents).toContain("never say it again, even when a later batch names the task");
+    expect(taskEvents).toContain(
+      "While a task still waits, never ask its question or say its approval again, even when a later batch names the task",
+    );
     expect(taskEvents).toContain("When the guardian turns an approval down");
     expect(taskEvents).toContain("never say it is still waiting");
     // The single `<task_event>` input is gone; batches are the only kind.

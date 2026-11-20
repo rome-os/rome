@@ -5292,6 +5292,143 @@ describe("Webchat API", () => {
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
     });
 
+    it("names the task in the turn that answers, or skips, a card that asks a task's question", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      const askFor = (toolUseId: string) =>
+        async function* () {
+          yield {
+            type: "tool_result",
+            toolUseId,
+            tool: "ask_question",
+            output: askQuestionToolOutput(questions, true, "task-7"),
+          };
+          yield { type: "result", content: "" };
+        };
+      ctl.setEvents(askFor("tu-ask-task"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "plan it" }),
+        }),
+      );
+      const card = await findCard(sessionId, "tu-ask-task");
+      expect((card as { render?: { props?: unknown } }).render?.props).toEqual({
+        questions,
+        task: "task-7",
+      });
+
+      ctl.setEvents(askFor("tu-ask-task-2"));
+      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-ask-task",
+              output: { answers: [{ questionId: "tone", value: "Plain" }] },
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(200);
+      await drainTurn(app, res);
+      const answered = ctl.sentTurns.at(-1)?.prompt ?? "";
+      expect(answered).toContain('Your card for task chat_id="task-7":');
+      expect(answered).toContain('"value": "Plain"');
+
+      // A typed reply skips the open card, and says whose question it was.
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Warm, but short" }),
+      });
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain(
+        'skipped your open card for task chat_id="task-7"',
+      );
+    });
+
+    it("answers a chat's open question card as an agent account through answerCard", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-agent",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const original = deps.agentLoader.find.bind(deps.agentLoader);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+        name === "core:concierge" ? buildAgent(name) : original(name),
+      );
+      const { routes: app, runtime } = createWebchatRuntime(deps);
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      const messageId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
+        m.content.includes("tu-ask-agent"),
+      )?.id as string;
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const concierge = { platform: "webchat", id: "core:concierge" };
+      const output = { answers: [{ questionId: "tone", value: "Plain" }] };
+      // Another message's id is no card of this tool use: refused.
+      expect(
+        await runtime.answerCard(
+          sessionId,
+          { text: "tone: Plain" },
+          { toolUseId: "tu-ask-agent", messageId: "not-the-card", output },
+          concierge,
+        ),
+      ).toMatchObject({ ok: false });
+      expect(
+        await runtime.answerCard(
+          sessionId,
+          { text: "tone: Plain" },
+          { toolUseId: "tu-ask-agent", messageId, output },
+          concierge,
+        ),
+      ).toMatchObject({ ok: true });
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-agent",
+        messageId,
+        output: { ...output, card: [{ values: ["Plain"], text: "" }] },
+      });
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+      // The card is answered: a second answer is refused.
+      expect(
+        await runtime.answerCard(
+          sessionId,
+          { text: "tone: Plain" },
+          { toolUseId: "tu-ask-agent", messageId, output },
+          concierge,
+        ),
+      ).toMatchObject({ ok: false });
+    });
+
     it("answers a described question card through the widget's events route, by its message id", async () => {
       const questions: Question[] = [
         { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },

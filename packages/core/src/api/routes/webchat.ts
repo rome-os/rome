@@ -118,6 +118,7 @@ import {
   type SessionActor,
 } from "../../access/session-actor.js";
 import type { DashboardInbox } from "../../webchat/send.js";
+import type { Body } from "../../chats/send.js";
 import {
   admitTaskInput,
   withoutTaskInputActor,
@@ -834,6 +835,8 @@ interface OpenSuspensionCard {
   dismissedByReply?: boolean;
   /** The questions of an open question card, to read its answers by. */
   questions?: Question[];
+  /** The task chat whose question a Concierge's question card asks for it. */
+  task?: string;
   /** A share-location card, whose answer the agent reads in its own words. */
   location?: true;
   /** The message that holds the card. */
@@ -883,7 +886,7 @@ async function findOpenSuspensions(
         render?: {
           builtin?: unknown;
           componentId?: unknown;
-          props?: { questions?: unknown };
+          props?: { questions?: unknown; task?: unknown };
           ui?: unknown;
         };
       };
@@ -902,6 +905,9 @@ async function findOpenSuspensions(
           dismissedByReply:
             builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
           ...(questions?.ok ? { questions: questions.questions } : {}),
+          ...(questions?.ok && typeof part.render?.props?.task === "string"
+            ? { task: part.render.props.task }
+            : {}),
           ...(builtin && part.render?.componentId === LOCATION_CARD_ID
             ? { location: true as const }
             : {}),
@@ -1097,6 +1103,17 @@ export interface WebchatRuntime {
   hasStoredSession(sessionId: string): Promise<boolean>;
   /** The dashboard's side of a send into one of its chats (webchat/send.ts). */
   post: DashboardInbox["post"];
+  /**
+   * Answers the open card `card` names in a chat as `as`, as a press on the
+   * card does: the card shows answered and its agent goes on. `body` is the
+   * send's text for its attribution only.
+   */
+  answerCard(
+    chatId: string,
+    body: Body,
+    card: { toolUseId: string; messageId: string; output: unknown },
+    as: Account,
+  ): ReturnType<DashboardInbox["post"]>;
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
   startChat(input: ChatStart, ownerKey: string): Promise<string>;
@@ -4315,6 +4332,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
+    // The Concierge's card that asks a task's question names the task, so
+    // the answer's turn says which task it answers, however many ask at once.
+    const forTask = resolution && openSuspensions.get(resolution.toolUseId)?.task;
+    if (resolution && forTask) {
+      resolution.prompt = `Your card for task chat_id="${forTask}":\n\n${resolution.prompt}`;
+    }
+
     // A share-location card's answer reads in its own words, which say how
     // far to trust the position and that it is for this turn only.
     if (resolution && openSuspensions.get(resolution.toolUseId)?.location) {
@@ -4442,9 +4466,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       !resolution && displayText.trim()
         ? [...openSuspensions].filter(([, card]) => card.dismissedByReply).map(([id]) => id)
         : [];
+    // A skipped card that asked a task's question names the task, as its answer would.
+    const skippedTasks = skippedCardIds.flatMap((id) => {
+      const task = openSuspensions.get(id)?.task;
+      return task ? [`task chat_id="${task}"`] : [];
+    });
     const turnPrompt =
       skippedCardIds.length > 0
-        ? "(The guardian skipped your open card and replied in chat instead. " +
+        ? `(The guardian skipped your open card${skippedTasks.length ? ` for ${skippedTasks.join(", ")}` : ""} and replied in chat instead. ` +
           `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
@@ -5565,6 +5594,57 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // A send into a dashboard chat as one of Rome's agent accounts: `body`'s
+  // text, or `parts` that answer a card in it, as the widget route's turn does.
+  const postAs = async (
+    chatId: string,
+    body: Body,
+    as: Account,
+    parts?: SendBody["parts"],
+  ): ReturnType<DashboardInbox["post"]> => {
+    if (!deps.agentLoader.find(as.id)) {
+      return { ok: false, error: `No agent ${as.id} to say it as` };
+    }
+    const inputId = randomUUID();
+    const claim = claimTaskInputActor(chatId, body, as);
+    const taskActor = claim
+      ? await taskInputActor(claim, deps.webchatRepo, taskSourceChat)
+      : undefined;
+    if (claim)
+      log.info("task input attributed", {
+        sourceChatId: claim.source.chatId,
+        sourceTurnId: claim.source.turnId,
+        chatId,
+        inputId,
+        actorKind: taskActor?.kind,
+      });
+    const sent = await withoutTaskInputActor(() =>
+      handleChatSend(
+        chatId,
+        parts ? { inputId, parts } : { inputId, text: body.text, skillName: body.skillName },
+        { saidBy: as, taskActor, taskInput: claim },
+      ),
+    );
+    if (sent.status >= 400) {
+      // A refused attributed input never reached submit, even if recorded.
+      if (claim) {
+        await deps.webchatRepo.failQueuedUserInput(chatId, inputId);
+        return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
+      }
+      // Once the input is recorded it is said, even when the agent could not
+      // be woken on it: answering failed would invite a second message.
+      if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+        return { ok: false, error: routeError(sent) };
+      }
+      log.warn("dashboard send recorded but its agent was not woken", {
+        chatId,
+        inputId,
+        error: routeError(sent),
+      });
+    }
+    return { ok: true, messageId: inputId, at: new Date() };
+  };
+
   const runtime: WebchatRuntime = {
     activeStreams,
     async flushAll(): Promise<void> {
@@ -5582,49 +5662,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const session = await deps.webchatRepo.getSession(sessionId);
       return Boolean(session && isStoredWebchatSession(session));
     },
-    async post(chatId, body, as) {
-      if (!deps.agentLoader.find(as.id)) {
-        return { ok: false, error: `No agent ${as.id} to say it as` };
-      }
-      const inputId = randomUUID();
-      const claim = claimTaskInputActor(chatId, body, as);
-      const taskActor = claim
-        ? await taskInputActor(claim, deps.webchatRepo, taskSourceChat)
-        : undefined;
-      if (claim)
-        log.info("task input attributed", {
-          sourceChatId: claim.source.chatId,
-          sourceTurnId: claim.source.turnId,
-          chatId,
-          inputId,
-          actorKind: taskActor?.kind,
-        });
-      const sent = await withoutTaskInputActor(() =>
-        handleChatSend(
-          chatId,
-          { inputId, text: body.text, skillName: body.skillName },
-          { saidBy: as, taskActor, taskInput: claim },
-        ),
-      );
-      if (sent.status >= 400) {
-        // A refused attributed input never reached submit, even if recorded.
-        if (claim) {
-          await deps.webchatRepo.failQueuedUserInput(chatId, inputId);
-          return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
-        }
-        // Once the input is recorded it is said, even when the agent could not
-        // be woken on it: answering failed would invite a second message.
-        if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
-          return { ok: false, error: routeError(sent) };
-        }
-        log.warn("dashboard send recorded but its agent was not woken", {
-          chatId,
-          inputId,
-          error: routeError(sent),
-        });
-      }
-      return { ok: true, messageId: inputId, at: new Date() };
-    },
+    post: (chatId, body, as) => postAs(chatId, body, as),
+    answerCard: (chatId, body, card, as) =>
+      postAs(chatId, body, as, [
+        {
+          type: "interaction_result",
+          toolUseId: card.toolUseId,
+          messageId: card.messageId,
+          output: card.output,
+        },
+      ]),
     async startChat({ model, reasoningEffort, ...input }, ownerKey) {
       // A task chat is the owner's whose Concierge started it.
       const started = await startChat(input, ownerKey);

@@ -705,12 +705,17 @@ export function startConciergeEvents(
       }
     }
     if (question) {
-      const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
+      // The question card whole, as the input of the Concierge's own
+      // `ask_question`: it asks the same card, replying to the task's start
+      // message, and names the task so the answer's turn says which task it
+      // answers.
+      const start = (await tasks.repo.getWithChat(taskId))?.sourceMessageId;
+      const ask = { task: chatId, ...(start ? { replyTo: start } : {}), questions: question };
       coalescer.mark({
         taskId,
         kind: `turn_end:completed question by=${by}`,
         urgent: true,
-        detail: [said, `question: ${question.question}${options}`].filter(Boolean).join("\n"),
+        detail: [said, `ask_question: ${JSON.stringify(ask)}`].filter(Boolean).join("\n"),
       });
       return;
     }

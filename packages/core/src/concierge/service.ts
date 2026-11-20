@@ -197,6 +197,16 @@ export interface TaskChats {
   onTurnChange(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
+  /**
+   * Answers the open card `card` names in the chat as `as`, as a press on the
+   * card does. `body` is the send's text, for its attribution only.
+   */
+  answerCard(
+    chatId: string,
+    body: Body,
+    card: { toolUseId: string; messageId: string; output: unknown },
+    as: Account,
+  ): Promise<{ ok: true; messageId: string; at: Date } | { ok: false; error: string }>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
   interruptTurn(turnId: string): Promise<void>;

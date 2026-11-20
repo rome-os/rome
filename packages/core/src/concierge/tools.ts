@@ -1,8 +1,9 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
 // tools run its task chats (a task is its task chat) and read its other
-// Concierge chats, `topic_start` starts a topic chat, `react` puts an emoji on
-// a guardian message, `connect_card` shows a card that connects a service, and
-// `show_card` shows a card the Concierge composes itself.
+// Concierge chats, `task_answer` answers a task's question card, `topic_start`
+// starts a topic chat, `react` puts an emoji on a guardian message,
+// `connect_card` shows a card that connects a service, and `show_card` shows
+// a card the Concierge composes itself.
 
 import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
@@ -28,7 +29,13 @@ import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
 } from "../core/conversation-title.js";
-import { REPLY_TO_PARAMETER, romeToolRunner, type RomeTool } from "../agent/index.js";
+import {
+  parseAskQuestionInput,
+  type Question,
+  REPLY_TO_PARAMETER,
+  romeToolRunner,
+  type RomeTool,
+} from "../agent/index.js";
 import type { TaskInputSender, SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
@@ -175,6 +182,64 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
   if ("invalid" in result) return result.invalid;
   return `The task chat cannot take a message (${result.send})`;
+}
+
+/** One answer to a question card, as the card's answer brings it. */
+interface TaskAnswer {
+  questionId: string;
+  value: string;
+  values?: string[];
+}
+
+/**
+ * `answers` checked against the questions of the task's card, or why the card
+ * cannot take them: words that pick none of a choice question's options,
+ * where it takes no words of its own, go on with `chat_send` instead.
+ */
+export function checkTaskAnswers(
+  questions: readonly Question[],
+  answers: unknown,
+): { ok: true; answers: TaskAnswer[] } | { ok: false; error: string } {
+  const typed = "Nothing was answered. Pass the guardian's words on with chat_send instead.";
+  if (!Array.isArray(answers) || answers.length === 0) {
+    return { ok: false, error: "answers must be a non-empty array of {questionId, value}" };
+  }
+  const out: TaskAnswer[] = [];
+  for (const answer of answers) {
+    const { questionId, value, values } = (answer ?? {}) as Record<string, unknown>;
+    if (typeof questionId !== "string" || typeof value !== "string") {
+      return { ok: false, error: "Each answer is {questionId, value}, both strings" };
+    }
+    const question = questions.find((q) => q.id === questionId);
+    if (!question) {
+      return {
+        ok: false,
+        error: `The task's card has no question ${questionId}: its questions are ${questions.map((q) => q.id).join(", ")}`,
+      };
+    }
+    const parts =
+      Array.isArray(values) && values.every((v) => typeof v === "string")
+        ? (values as string[])
+        : question.type === "multi"
+          ? value.split(", ")
+          : [value];
+    const options = question.options ?? [];
+    const own = parts.filter((part) => part.trim() && !options.includes(part.trim()));
+    if (question.type !== "text" && question.freeText !== true && own.length > 0) {
+      return {
+        ok: false,
+        error: `"${own[0]}" is none of the options of question ${questionId}, and it takes no words of its own. ${typed}`,
+      };
+    }
+    out.push({ questionId, value, ...(Array.isArray(values) ? { values: parts } : {}) });
+  }
+  const missing = questions.find(
+    (q) => q.optional !== true && !out.some((a) => a.questionId === q.id && a.value.trim()),
+  );
+  if (missing) {
+    return { ok: false, error: `Question ${missing.id} needs an answer. ${typed}` };
+  }
+  return { ok: true, answers: out };
 }
 
 /**
@@ -1025,6 +1090,72 @@ export async function buildConciergeTools(
             if (relayed) await pointTaskTo(chatId, relayed);
           } else await sendInput(sender, chatId, text);
           return "Sent; the task chat takes it as input.";
+        }),
+    },
+    {
+      name: "task_answer",
+      description:
+        "Answer a task's question card with the guardian's answer to your card that asked it: the task's card shows answered, and the task goes on. " +
+        "Pass `answers` as your card's answer gave them. " +
+        "Refused, with nothing sent, when the task no longer waits on a question, or when the answer does not fit its card, such as words for a choice question that takes no words of its own: then pass the guardian's words on with chat_send.",
+      inputSchema: {
+        type: "object",
+        required: ["chatId", "answers"],
+        properties: {
+          chatId: { type: "string", description: "The task's chat_id." },
+          answers: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["questionId", "value"],
+              properties: {
+                questionId: { type: "string" },
+                value: { type: "string" },
+                values: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+      handler: (input) =>
+        runTool("task_answer", input, async (args) => {
+          const sender = context.captureTaskInput?.();
+          currentTurn();
+          const chatId = requireString(args, "chatId");
+          await requireOwnTaskChat(chatId);
+          // The task's newest question card still open: one answered in the
+          // task chat, or ended, takes no answer here.
+          const open = ((await webchatRepo.openWaitsOf([chatId])).get(chatId) ?? []).filter(
+            (item) => item.kind === "card" && item.render?.componentId === "question-card",
+          );
+          const card = open.at(-1);
+          const questions =
+            card?.kind === "card" ? parseAskQuestionInput(card.render?.props) : undefined;
+          if (!card || card.kind !== "card" || !questions?.ok) {
+            throw new Error(
+              `Task chat ${chatId} waits on no question now: it was answered in the task chat, or the task ended. Nothing was sent.`,
+            );
+          }
+          const checked = checkTaskAnswers(questions.questions, args.answers);
+          if (!checked.ok) throw new Error(checked.error);
+          // The send's text names the answers, for its attribution only.
+          const body = {
+            text: checked.answers.map((a) => `${a.questionId}: ${a.value}`).join("\n"),
+          };
+          const answer = () =>
+            service.dashboard.chats.answerCard(
+              chatId,
+              body,
+              {
+                toolUseId: card.id,
+                messageId: card.messageId,
+                output: { answers: checked.answers },
+              },
+              CONCIERGE_ACCOUNT,
+            );
+          const sent = sender ? await sender(chatId, body, answer) : await answer();
+          if (!sent.ok) throw new Error(`The task's card took no answer: ${sent.error}`);
+          return "Answered; the task's card shows it and the task goes on.";
         }),
     },
     {
