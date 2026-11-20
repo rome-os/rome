@@ -817,6 +817,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (concierge) return null;
       if (!ownerPicked(chat) && (await deps.swapModel?.(turn.chatId, turn.agentName, failure))) {
         swapped.add(turn.chatId);
+        // The move's own note says what happened: the failed turn stays quiet.
+        const quiet = await cardPart(turn.chatId, turn.agentName, classified);
+        if (quiet) await writeCard(turn, { ...quiet, retrying: true }, classified.provider);
         resume(turn.chatId, turn.agentName, providerName(named(classified.provider)));
         return null;
       }

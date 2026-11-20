@@ -284,7 +284,8 @@ describe("automatic recovery, the same in every chat", () => {
     await flush();
     expect(h.swaps).toEqual(["chat"]);
     expect(h.runs).toHaveLength(1);
-    expect(h.cardIn("chat")).toBeUndefined();
+    // Only a quiet card on the failed turn: the move's note says what happened.
+    expect(h.shownCards("chat")).toEqual([]);
   });
 
   it("never moves a model its owner picked: a capacity limit shows the wait card", async () => {
