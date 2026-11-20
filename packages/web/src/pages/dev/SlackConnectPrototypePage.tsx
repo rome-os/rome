@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, ExternalLink, Hourglass, MessageSquare } from "lucide-react";
+import { ArrowLeft, ExternalLink, Hourglass, MessageSquare } from "lucide-react";
 import { Page } from "@rome-os/ui/page";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -45,9 +45,9 @@ export default function SlackConnectPrototypePage() {
 
 const FACTS: { label: string; body: string }[] = [
   { label: "Hears", body: "Direct messages to Rome, and messages that mention @rome." },
-  { label: "Reads", body: "Channels you invite it to. Nothing else in the workspace." },
-  { label: "Answers", body: "Only you, until you turn on answers for other members." },
-  { label: "Sign-in", body: "On Slack's own approve screen. There is nothing to paste." },
+  { label: "Reads", body: "Only channels you invite it to." },
+  { label: "Answers", body: "Only you, until you turn on Answer other members." },
+  { label: "Does not", body: "Use its tools in Slack. That work stays on this dashboard." },
 ];
 
 function Header({ status, action }: { status: ReactNode; action?: ReactNode }) {
@@ -73,7 +73,7 @@ function SlackEntry({ step, go }: { step: Step; go: (next: Step, extra?: string)
   const admin = step === "admin";
   const desktop = step === "desktop";
   const status = admin
-    ? { label: "Waiting for your Slack admin", tone: "muted" as const }
+    ? { label: "Waiting for Slack", tone: "muted" as const }
     : { label: "Not connected", tone: "muted" as const };
 
   return (
@@ -89,18 +89,14 @@ function SlackEntry({ step, go }: { step: Step; go: (next: Step, extra?: string)
 
       {step === "cancelled" ? (
         <Alert>
-          <AlertTitle>Slack was not added.</AlertTitle>
-          <AlertDescription>Press Add to Slack again when you are ready.</AlertDescription>
+          <AlertTitle>Rome was not added to Slack</AlertTitle>
         </Alert>
       ) : null}
       {admin ? (
         <Alert>
           <Hourglass aria-hidden />
-          <AlertTitle>Waiting for your Slack admin</AlertTitle>
-          <AlertDescription>
-            {WORKSPACE} asks an admin to approve new apps, and Slack has sent them your request.
-            When they approve, Slack tells you, and you press Add to Slack once more.
-          </AlertDescription>
+          <AlertTitle>Your Slack admin may need to approve Rome</AlertTitle>
+          <AlertDescription>When they approve, press Add to Slack again.</AlertDescription>
         </Alert>
       ) : null}
       {desktop ? (
@@ -108,26 +104,16 @@ function SlackEntry({ step, go }: { step: Step; go: (next: Step, extra?: string)
           <ExternalLink aria-hidden />
           <AlertTitle>Slack's approve screen opens in your browser</AlertTitle>
           <AlertDescription className="space-y-3">
-            <p>Approve Rome there, then come back here. This page updates on its own.</p>
+            <p>This page updates on its own when you are done.</p>
             <Button size="sm" onClick={() => go("approve")}>
-              Continue in the browser
+              Open Slack in the browser
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
 
       <div className="flex flex-col gap-6 sm:flex-row">
-        <div className="min-w-0 flex-1 space-y-3 text-body text-foreground">
-          <p className="text-ui text-muted-foreground">
-            Talk to Rome where your team already works.
-          </p>
-          <p>
-            Rome joins your workspace as an app called Rome. Message it directly, or mention it in a
-            channel you bring it into, and it answers there with the same memory and tools it has
-            here.
-          </p>
-        </div>
-        <dl className="flex shrink-0 flex-col gap-3 sm:w-56">
+        <dl className="grid gap-4 sm:grid-cols-2">
           {FACTS.map((fact) => (
             <div key={fact.label}>
               <dt className="text-aux text-muted-foreground">{fact.label}</dt>
@@ -150,43 +136,32 @@ function ConnectedSlack({ go }: { go: (next: Step) => void }) {
           <StatusIndicator status={{ label: `Connected to ${WORKSPACE}`, tone: "success" }} />
         }
       />
-      <Alert variant="success">
-        <Check aria-hidden />
-        <AlertTitle>Rome is in {WORKSPACE}</AlertTitle>
-        <AlertDescription>
-          It just sent you a direct message in Slack to say hello.
-        </AlertDescription>
-      </Alert>
 
       <section className="space-y-3">
         <h3 className="text-ui font-semibold text-foreground">Next steps</h3>
         <ol className="divide-y divide-border rounded-8 border border-border">
           <li className="flex items-center gap-3 p-3">
             <div className="min-w-0 flex-1">
-              <p className="text-ui text-foreground">Talk to it</p>
-              <p className="text-aux text-muted-foreground">
-                Your direct message with Rome is where to start.
-              </p>
+              <p className="text-ui text-foreground">Rome sent you a direct message</p>
             </div>
             <Button size="sm" variant="outline" onClick={() => go("dm")}>
               <MessageSquare data-icon="inline-start" aria-hidden />
-              Open the DM in Slack
+              Open in Slack
             </Button>
           </li>
           <li className="p-3">
-            <p className="text-ui text-foreground">Bring it into a channel</p>
+            <p className="text-ui text-foreground">Invite Rome to a channel</p>
             <p className="text-aux text-muted-foreground">
               In that channel, type{" "}
               <code className="rounded-4 bg-surface-muted px-1 text-foreground">/invite @rome</code>
-              . It reads only the channels it is in.
+              .
             </p>
           </li>
           <li className="flex items-start gap-3 p-3">
             <div className="min-w-0 flex-1">
               <p className="text-ui text-foreground">Answer other members of this workspace</p>
               <p className="text-aux text-muted-foreground">
-                Off, Rome answers only you here. On, it answers the workspace's full members as
-                visitors, never guests or people from other workspaces.
+                Full members only. Never guests or people from other workspaces.
               </p>
             </div>
             <Switch aria-label="Answer other members of this workspace" />
@@ -260,7 +235,7 @@ function SlackHelloStill({ go }: { go: (next: Step) => void }) {
             <p>
               <strong>Rome</strong> <span className="text-aux text-muted-foreground">just now</span>
             </p>
-            <p>Hi, I'm Rome, and I'm in {WORKSPACE} now.</p>
+            <p>Hi, I'm Rome.</p>
             <p>
               Message me here any time. To bring me into a channel, type /invite @rome there, then
               mention @rome when you want me.
