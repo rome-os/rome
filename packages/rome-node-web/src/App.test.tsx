@@ -3,6 +3,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
 import type { AuditItem, HostSnapshot } from "./types";
 
+const BUCKET_MS = 600_000;
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function makeSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
   return {
     phase: "unconfigured",
@@ -35,6 +38,7 @@ function makeSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
   };
 }
 
+// Mirrors the exact record shape persisted by AuditStore in @rome-os/node-core.
 const sampleAuditItem: AuditItem = {
   seq: 1,
   at: Date.now() - 2_000,
@@ -46,6 +50,7 @@ const sampleAuditItem: AuditItem = {
     requestId: "req-1",
     from: "instance-1",
     args: { command: "echo", args: ["hello-rome"], cwd: "/workspace" },
+    envKeys: ["PATH", "HOME"],
   },
   end: {
     seq: 2,
@@ -57,7 +62,13 @@ const sampleAuditItem: AuditItem = {
     record: {
       exitCode: 0,
       durationMs: 100,
-      stdout: { bytes: 11, keptBytes: 11, truncated: false },
+      content: {
+        stdout: {
+          size: 11,
+          storedBytes: 11,
+          sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+        },
+      },
     },
   },
 };
@@ -152,13 +163,18 @@ describe("Rome Node Web UI", () => {
     expect(link.getAttribute("href")).toBe("https://rome.ai/device?user_code=ABCD-EFGH");
   });
 
-  it("toggles remote execution and inspects audit log output in detail sheet", async () => {
+  it("toggles execution, renders real AuditStore bucket indices, and loads record.content stdout preview", async () => {
     let snapshot = makeSnapshot({
       phase: "online",
       configured: true,
       deviceId: "dev_999",
       executionEnabled: true,
     });
+    const alignedUntil = (Math.floor(Date.now() / BUCKET_MS) + 1) * BUCKET_MS;
+    const alignedSince = alignedUntil - WINDOW_MS;
+    const activeBucketIndex = 140;
+    const expectedBucketStart = alignedSince + activeBucketIndex * BUCKET_MS;
+    const auditItemUrls: string[] = [];
 
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -175,13 +191,14 @@ describe("Rome Node Web UI", () => {
       }
       if (url.startsWith("/api/audit/stats")) {
         return jsonResponse({
-          since: Date.now() - 86_400_000,
-          until: Date.now(),
-          bucketMs: 600_000,
-          groups: [],
+          since: alignedSince,
+          until: alignedUntil,
+          bucketMs: BUCKET_MS,
+          groups: [{ peer: null, bucket: activeBucketIndex, result: "succeeded", count: 3 }],
         });
       }
       if (url.startsWith("/api/audit/items?")) {
+        auditItemUrls.push(url);
         return jsonResponse({ items: [sampleAuditItem], hasMore: false });
       }
       if (url === "/api/audit/items/1/content/stdout") {
@@ -210,8 +227,28 @@ describe("Rome Node Web UI", () => {
     fireEvent.click(screen.getByRole("link", { name: "Audit log" }));
 
     const rowBtn = await screen.findByRole("button", { name: /echo hello-rome/i });
+
+    // Click the populated histogram bar and verify it filters by computed bucket timestamp (not epoch 0).
+    const svg = screen.getByRole("img", { name: "24-hour audit request activity" });
+    const clickableBar = svg.querySelector("g.cursor-pointer");
+    expect(clickableBar).toBeTruthy();
+    fireEvent.click(clickableBar!);
+
+    await waitFor(() => {
+      expect(
+        auditItemUrls.some(
+          (u) =>
+            u.includes(`since=${expectedBucketStart}`) &&
+            u.includes(`until=${expectedBucketStart + BUCKET_MS}`),
+        ),
+      ).toBe(true);
+    });
+
     fireEvent.click(rowBtn);
 
     expect(await screen.findByText("hello-rome")).toBeTruthy();
+    expect(
+      screen.getByText("SHA-256 b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
+    ).toBeTruthy();
   });
 });

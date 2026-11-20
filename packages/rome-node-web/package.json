@@ -9,9 +9,8 @@
     "dist/web"
   ],
   "scripts": {
-    "generate:theme": "tsx scripts/generate-theme.mjs",
-    "dev": "pnpm generate:theme && rsbuild dev",
-    "build": "pnpm generate:theme && rsbuild build && node scripts/postbuild.mjs",
+    "dev": "rsbuild dev",
+    "build": "rsbuild build",
     "typecheck": "tsc --noEmit",
     "test": "../../scripts/test-env.sh rstest"
   },
@@ -30,7 +29,6 @@
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwindcss": "^4.1.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "repository": {

@@ -49,7 +49,7 @@ function setSecurityHeaders(res: ServerResponse): void {
   res.setHeader("referrer-policy", "no-referrer");
   res.setHeader(
     "content-security-policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
   );
 }
 
@@ -179,8 +179,20 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       return;
     }
 
+    if (!auth.isTrustedHost(req)) {
+      if (pathname.startsWith("/api/")) {
+        sendJson(res, 403, { error: "Untrusted Host header." });
+      } else {
+        res
+          .writeHead(403, { "content-type": "text/plain; charset=utf-8" })
+          .end("Forbidden: untrusted Host header.");
+      }
+      return;
+    }
+
     if (pathname.startsWith("/api/")) {
-      if (method !== "GET" && method !== "HEAD" && !auth.checkSameOrigin(req)) {
+      const requireSameOrigin = !auth.authRequired || (method !== "GET" && method !== "HEAD");
+      if (requireSameOrigin && !auth.checkSameOrigin(req)) {
         sendJson(res, 403, { error: "Cross-origin requests are not allowed." });
         return;
       }

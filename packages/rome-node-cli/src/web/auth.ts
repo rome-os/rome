@@ -18,6 +18,7 @@ export interface WebAuth {
   readonly authRequired: boolean;
   readonly tokenGenerated: boolean;
   readonly initialToken: string | null;
+  isTrustedHost(req: IncomingMessage): boolean;
   isAuthenticated(req: IncomingMessage): boolean;
   checkSameOrigin(req: IncomingMessage): boolean;
   checkLoginRateLimit(
@@ -44,6 +45,19 @@ export function isLoopbackHost(host: string): boolean {
     return normalized.split(".").every((part) => Number(part) <= 255);
   }
   return false;
+}
+
+function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
+  if (typeof hostHeader !== "string") return null;
+  const trimmed = hostHeader.trim();
+  if (!trimmed || /[\s@/?#\\]/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(`http://${trimmed}`);
+    if (parsed.host.toLowerCase() !== trimmed.toLowerCase()) return null;
+    return parsed.hostname;
+  } catch {
+    return null;
+  }
 }
 
 function sha256(value: string): Buffer {
@@ -102,12 +116,14 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     return timingSafeEqual(sha256(candidate), expectedDigest);
   }
 
+  function isTrustedHost(req: IncomingMessage): boolean {
+    if (authRequired) return true;
+    const hostname = parseHostHeaderHostname(req.headers.host);
+    return hostname !== null && isLoopbackHost(hostname);
+  }
+
   function isAuthenticated(req: IncomingMessage): boolean {
-    if (!authRequired) return true;
-    const authHeader = req.headers.authorization;
-    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-      return verifyToken(authHeader.slice("Bearer ".length).trim());
-    }
+    if (!authRequired) return isTrustedHost(req);
     const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!sessionId) return false;
     const currentTime = now();
@@ -121,6 +137,7 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
   }
 
   function checkSameOrigin(req: IncomingMessage): boolean {
+    if (!isTrustedHost(req)) return false;
     const fetchSite = req.headers["sec-fetch-site"];
     if (typeof fetchSite === "string" && fetchSite !== "same-origin" && fetchSite !== "none") {
       return false;
@@ -130,7 +147,9 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     const host = req.headers.host;
     if (!host) return false;
     try {
-      return new URL(origin).host.toLowerCase() === host.toLowerCase();
+      const parsedOrigin = new URL(origin);
+      if (!authRequired && !isLoopbackHost(parsedOrigin.hostname)) return false;
+      return parsedOrigin.host.toLowerCase() === host.toLowerCase();
     } catch {
       return false;
     }
@@ -197,6 +216,7 @@ export function createWebAuth(options: WebAuthOptions): WebAuth {
     authRequired,
     tokenGenerated,
     initialToken: tokenGenerated ? activeToken : null,
+    isTrustedHost,
     isAuthenticated,
     checkSameOrigin,
     checkLoginRateLimit,

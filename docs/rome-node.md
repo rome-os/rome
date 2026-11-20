@@ -87,10 +87,13 @@ Gateway presence protocol is involved.
 ## Run Rome Node with Docker
 
 The [Rome Node image](../infra/rome-node/Dockerfile) packages the `rome-node`
-CLI together with its lightweight Web UI (`@rome-os/node-web`) and runs
-`rome-node web --host 0.0.0.0` as an unprivileged container user. State lives
-in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`), so mounting one Docker volume
-keeps the device credential, Web UI preferences, and the
+CLI together with its lightweight Web UI (`@rome-os/node-web`, built with
+Rsbuild) and runs `rome-node web --host 0.0.0.0` as an unprivileged container
+user. The standalone `@rome-os/node` npm package does not bundle Web UI assets,
+so `rome-node web` runs out of the box in the Docker image or a monorepo
+checkout (or with `--assets-dir` pointing to a built asset directory). State
+lives in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`), so mounting one Docker
+volume keeps the device credential, Web UI preferences, and the
 [device audit log](#device-audit-log) across container replacements.
 
 ```yaml

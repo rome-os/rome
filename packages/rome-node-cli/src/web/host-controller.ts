@@ -254,8 +254,9 @@ export class HostController {
     this.emit({ type: "status", snapshot: this.snapshot() });
   }
 
-  private async saveConfig(): Promise<void> {
-    await writePrivateJson(this.configPath, this.config);
+  private async saveConfig(nextConfig: WebHostConfig = this.config): Promise<void> {
+    await writePrivateJson(this.configPath, nextConfig);
+    this.config = nextConfig;
   }
 
   private async enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -469,9 +470,7 @@ export class HostController {
       await this.stopActiveConnection();
       await this.stopActiveAuthorization();
 
-      this.config.cloudUrl = nextCloud;
-      this.config.name = nextName;
-      await this.saveConfig();
+      await this.saveConfig({ ...this.config, cloudUrl: nextCloud, name: nextName });
 
       const controller = new AbortController();
       this.authAbort = controller;
@@ -508,10 +507,12 @@ export class HostController {
           this.pendingAuth = null;
           this.configured = true;
           this.deviceId = credential.deviceId;
-          this.config.cloudUrl = credential.cloudUrl;
-          this.config.name = credential.name;
-          this.config.autoConnect = true;
-          await this.saveConfig();
+          await this.saveConfig({
+            ...this.config,
+            cloudUrl: credential.cloudUrl,
+            name: credential.name,
+            autoConnect: true,
+          });
           this.launchConnection(credential);
         })
         .catch((error: unknown) => {
@@ -555,10 +556,12 @@ export class HostController {
       }
       this.configured = true;
       this.deviceId = credential.deviceId;
-      this.config.cloudUrl = credential.cloudUrl;
-      this.config.name = credential.name;
-      this.config.autoConnect = true;
-      await this.saveConfig();
+      await this.saveConfig({
+        ...this.config,
+        cloudUrl: credential.cloudUrl,
+        name: credential.name,
+        autoConnect: true,
+      });
       this.launchConnection(credential);
       return this.snapshot();
     });
@@ -567,8 +570,7 @@ export class HostController {
   async disconnect(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
       await this.stopActiveConnection();
-      this.config.autoConnect = false;
-      await this.saveConfig();
+      await this.saveConfig({ ...this.config, autoConnect: false });
       if (this.phase !== "authorizing") {
         this.setPhase(this.configured ? "disconnected" : "unconfigured", null);
       }
@@ -579,8 +581,7 @@ export class HostController {
   async setExecutionEnabled(enabled: boolean): Promise<HostSnapshot> {
     return this.enqueue(async () => {
       if (this.config.executionEnabled === enabled) return this.snapshot();
-      this.config.executionEnabled = enabled;
-      await this.saveConfig();
+      await this.saveConfig({ ...this.config, executionEnabled: enabled });
       const wasActive = this.activeAbort !== null;
       if (wasActive) {
         await this.stopActiveConnection();
@@ -602,8 +603,7 @@ export class HostController {
       await this.credentials.clear();
       this.configured = false;
       this.deviceId = null;
-      this.config.autoConnect = true;
-      await this.saveConfig();
+      await this.saveConfig({ ...this.config, autoConnect: true });
       this.setPhase("unconfigured", null);
       return this.snapshot();
     });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -313,10 +313,41 @@ describe("rome-node web server", () => {
 
     const itemsRes = await fetch(`${running.url}/api/audit/items?limit=10`);
     expect(itemsRes.status).toBe(200);
-    const { items } = (await itemsRes.json()) as { items: { seq: number; action: string }[] };
+    const { items } = (await itemsRes.json()) as {
+      items: {
+        seq: number;
+        action: string;
+        end?: {
+          record?: {
+            content?: { stdout?: { size: number; storedBytes: number; sha256: string } };
+          };
+        };
+      }[];
+    };
     expect(items.length).toBeGreaterThanOrEqual(1);
     const execItem = items.find((item) => item.action === "exec");
     expect(execItem).toBeTruthy();
+    expect(execItem?.end?.record?.content?.stdout?.size).toBe(300 * 1024);
+    expect(execItem?.end?.record?.content?.stdout?.storedBytes).toBe(300 * 1024);
+    expect(typeof execItem?.end?.record?.content?.stdout?.sha256).toBe("string");
+
+    const now = Date.now();
+    const bucketMs = 600_000;
+    const untilTs = (Math.floor(now / bucketMs) + 1) * bucketMs;
+    const sinceTs = untilTs - 24 * 60 * 60 * 1000;
+    const statsRes = await fetch(
+      `${running.url}/api/audit/stats?since=${sinceTs}&until=${untilTs}&bucketMs=${bucketMs}`,
+    );
+    expect(statsRes.status).toBe(200);
+    const statsBody = (await statsRes.json()) as {
+      since: number;
+      until: number;
+      bucketMs: number;
+      groups: { bucket: number; result: string; count: number }[];
+    };
+    expect(statsBody.groups.length).toBeGreaterThanOrEqual(1);
+    expect(statsBody.groups[0]!.bucket).toBeGreaterThanOrEqual(0);
+    expect(statsBody.groups[0]!.bucket).toBeLessThan(144);
 
     const contentRes = await fetch(
       `${running.url}/api/audit/items/${execItem!.seq}/content/stdout`,
@@ -326,6 +357,23 @@ describe("rome-node web server", () => {
     expect(Number(contentRes.headers.get("x-content-total-bytes"))).toBe(300 * 1024);
     const previewBytes = new Uint8Array(await contentRes.arrayBuffer());
     expect(previewBytes.byteLength).toBe(256 * 1024);
+
+    // Simulate config persistence failure while toggling execution OFF:
+    // executionEnabled must remain true and a retry after recovery must succeed.
+    const configFile = join(configDir, "web-config.json");
+    await rm(configFile, { force: true });
+    await mkdir(configFile);
+    const failedToggle = await fetch(`${running.url}/api/host/execution`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(failedToggle.status).toBe(500);
+    const statusAfterFailure = (await (await fetch(`${running.url}/api/status`)).json()) as {
+      executionEnabled: boolean;
+    };
+    expect(statusAfterFailure.executionEnabled).toBe(true);
+    await rm(configFile, { recursive: true, force: true });
 
     // Switch remote execution OFF -> reconnects in limited mode and refuses exec.
     const prevConnections = mock.getConnections();
@@ -379,5 +427,99 @@ describe("rome-node web server", () => {
     const clearedBody = (await cleared.json()) as { phase: string; configured: boolean };
     expect(clearedBody.phase).toBe("unconfigured");
     expect(clearedBody.configured).toBe(false);
+  });
+
+  it("blocks DNS rebinding on auth-free loopback mode, rejects Bearer auth, and sends strict script-src CSP", async () => {
+    function rawRequest(
+      port: number,
+      method: string,
+      path: string,
+      headers: Record<string, string>,
+      body?: string,
+    ): Promise<{ status: number; headers: Record<string, string | string[] | undefined> }> {
+      return new Promise((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+        });
+        req.on("error", reject);
+        if (body) req.write(body);
+        req.end();
+      });
+    }
+
+    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-dns-rebind-"));
+    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+    const assetsDir = await createAssetsFixture();
+
+    const loopbackServer = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      log: () => {},
+    });
+    cleanup.push(() => loopbackServer.close());
+
+    // Rebound attacker domain with matching Host, Origin, and Sec-Fetch-Site must be rejected everywhere.
+    const rebindHeaders = {
+      host: `evil.example:${loopbackServer.port}`,
+      origin: `http://evil.example:${loopbackServer.port}`,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    };
+    const rebindRead = await rawRequest(loopbackServer.port, "GET", "/api/status", rebindHeaders);
+    expect(rebindRead.status).toBe(403);
+    const rebindEvents = await rawRequest(loopbackServer.port, "GET", "/api/events", rebindHeaders);
+    expect(rebindEvents.status).toBe(403);
+    const rebindMutate = await rawRequest(
+      loopbackServer.port,
+      "POST",
+      "/api/host/execution",
+      rebindHeaders,
+      JSON.stringify({ enabled: false }),
+    );
+    expect(rebindMutate.status).toBe(403);
+    const rebindHtml = await rawRequest(loopbackServer.port, "GET", "/", {
+      host: `evil.example:${loopbackServer.port}`,
+    });
+    expect(rebindHtml.status).toBe(403);
+
+    // Cross-origin API read on loopback must also be rejected.
+    const crossOriginRead = await rawRequest(loopbackServer.port, "GET", "/api/status", {
+      host: `127.0.0.1:${loopbackServer.port}`,
+      origin: "https://evil.example",
+      "sec-fetch-site": "cross-site",
+    });
+    expect(crossOriginRead.status).toBe(403);
+
+    // Valid loopback Host passes and carries strict CSP without unsafe-inline in script-src.
+    const validLocalhost = await rawRequest(loopbackServer.port, "GET", "/api/status", {
+      host: `localhost:${loopbackServer.port}`,
+      origin: `http://localhost:${loopbackServer.port}`,
+      "sec-fetch-site": "same-origin",
+    });
+    expect(validLocalhost.status).toBe(200);
+    const csp = String(validLocalhost.headers["content-security-policy"] ?? "");
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+
+    // Auth-required server rejects Authorization: Bearer bypasses (cookie sessions only).
+    const authConfigDir = await mkdtemp(join(tmpdir(), "rome-node-web-bearer-"));
+    cleanup.push(() => rm(authConfigDir, { recursive: true, force: true }));
+    const authServer = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: authConfigDir,
+      assetsDir,
+      token: "fixed-secret-token",
+      log: () => {},
+    });
+    cleanup.push(() => authServer.close());
+
+    const bearerAttempt = await fetch(`${authServer.url}/api/status`, {
+      headers: { authorization: "Bearer fixed-secret-token" },
+    });
+    expect(bearerAttempt.status).toBe(401);
   });
 });

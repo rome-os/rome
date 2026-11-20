@@ -73,12 +73,17 @@ Start a local Web UI to manage this computer's Rome Cloud device authorization,
 connection state, remote execution toggle, and local audit log.
 Built for container and headless deployments where a browser is easier than CLI logs.
 
+Web UI static assets are prebuilt in the official Docker image (ghcr.io/rome-os/rome-node)
+and available in a monorepo checkout after building @rome-os/node-web. The standalone
+@rome-os/node npm package does not bundle frontend assets; pass --assets-dir to serve
+a built asset directory from npm.
+
 Options:
   --host <addr>       Listen address (default: ROME_NODE_WEB_HOST or 127.0.0.1).
   --port <port>       Listen port (default: ROME_NODE_WEB_PORT or 4310).
   --cloud <origin>    Default Cloud origin (default: ROME_NODE_CLOUD_URL or https://romeos.cc).
   --name <name>       Default device name (default: ROME_NODE_NAME or computer hostname).
-  --assets-dir <dir>  Path to built @rome-os/node-web static files (or ROME_NODE_WEB_ASSETS_DIR).
+  --assets-dir <dir>  Path to built Web UI static files (or ROME_NODE_WEB_ASSETS_DIR).
   --require-auth      Require an access token even when listening on loopback.
 
 Environment:

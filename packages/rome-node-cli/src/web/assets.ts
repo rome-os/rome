@@ -57,7 +57,7 @@ export function resolveWebAssetsDir(explicit?: string): string {
   }
 
   throw new Error(
-    `Rome Node Web UI assets were not found. Build @rome-os/node-web or pass --assets-dir <dir> (or set ROME_NODE_WEB_ASSETS_DIR). Checked: ${checked.join(", ")}`,
+    `Rome Node Web UI assets were not found. The standalone npm package does not bundle Web UI assets; use the official Docker image (ghcr.io/rome-os/rome-node), build @rome-os/node-web in a monorepo checkout, or pass --assets-dir <dir> (or set ROME_NODE_WEB_ASSETS_DIR). Checked: ${checked.join(", ")}`,
   );
 }
 

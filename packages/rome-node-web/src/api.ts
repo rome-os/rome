@@ -64,17 +64,22 @@ export const api = {
     }),
   clearCredentials: () =>
     requestJson<HostSnapshot>("/api/host/credentials/clear", { method: "POST" }),
-  auditStats: (since: number, until: number, bucketMs: number) =>
-    requestJson<AuditStats>(`/api/audit/stats?since=${since}&until=${until}&bucketMs=${bucketMs}`),
-  auditItems: (params: {
-    limit?: number;
-    beforeSeq?: number;
-    result?: AuditResult;
-    action?: string;
-    text?: string;
-    since?: number;
-    until?: number;
-  }) => {
+  auditStats: (since: number, until: number, bucketMs: number, signal?: AbortSignal) =>
+    requestJson<AuditStats>(`/api/audit/stats?since=${since}&until=${until}&bucketMs=${bucketMs}`, {
+      signal,
+    }),
+  auditItems: (
+    params: {
+      limit?: number;
+      beforeSeq?: number;
+      result?: AuditResult;
+      action?: string;
+      text?: string;
+      since?: number;
+      until?: number;
+    },
+    signal?: AbortSignal,
+  ) => {
     const query = new URLSearchParams();
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     if (params.beforeSeq !== undefined) query.set("beforeSeq", String(params.beforeSeq));
@@ -83,7 +88,7 @@ export const api = {
     if (params.text) query.set("text", params.text);
     if (params.since !== undefined) query.set("since", String(params.since));
     if (params.until !== undefined) query.set("until", String(params.until));
-    return requestJson<AuditItemsPage>(`/api/audit/items?${query.toString()}`);
+    return requestJson<AuditItemsPage>(`/api/audit/items?${query.toString()}`, { signal });
   },
   auditItem: (seq: number) => requestJson<AuditItem>(`/api/audit/items/${seq}`),
   async auditContent(seq: number, name: ContentName): Promise<AuditContentPreview | null> {

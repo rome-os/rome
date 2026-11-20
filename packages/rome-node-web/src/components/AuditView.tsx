@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, FileText, Folder, Search, Terminal, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@rome-os/ui/alert";
 import { Badge, type BadgeProps } from "@rome-os/ui/badge";
@@ -91,25 +91,21 @@ function ActivityHistogram({
   locale: Locale;
 }) {
   const { bars, maxTotal } = useMemo(() => {
-    const map = new Map<number, BucketBar>();
-    const first = Math.floor(stats.since / stats.bucketMs) * stats.bucketMs;
-    const last = Math.floor(stats.until / stats.bucketMs) * stats.bucketMs;
-    for (let ts = first; ts <= last; ts += stats.bucketMs) {
-      map.set(ts, { bucket: ts, succeeded: 0, failed: 0, no_result: 0, total: 0 });
-    }
+    const count =
+      stats.bucketMs > 0 ? Math.max(0, Math.ceil((stats.until - stats.since) / stats.bucketMs)) : 0;
+    const list: BucketBar[] = Array.from({ length: count }, (_, index) => ({
+      bucket: stats.since + index * stats.bucketMs,
+      succeeded: 0,
+      failed: 0,
+      no_result: 0,
+      total: 0,
+    }));
     for (const g of stats.groups) {
-      const entry = map.get(g.bucket) ?? {
-        bucket: g.bucket,
-        succeeded: 0,
-        failed: 0,
-        no_result: 0,
-        total: 0,
-      };
+      const entry = list[g.bucket];
+      if (!entry) continue;
       entry[g.result] += g.count;
       entry.total += g.count;
-      map.set(g.bucket, entry);
     }
-    const list = Array.from(map.values()).sort((a, b) => a.bucket - b.bucket);
     const max = list.reduce((acc, item) => Math.max(acc, item.total), 0);
     return { bars: list, maxTotal: Math.max(1, max) };
   }, [stats]);
@@ -202,10 +198,35 @@ function ActivityHistogram({
   );
 }
 
+interface ContentDescriptor {
+  size: number;
+  storedBytes: number;
+  sha256: string;
+}
+
 interface ContentBlockState {
   name: ContentName;
   preview: AuditContentPreview | null;
-  meta: Record<string, unknown> | null;
+  meta: ContentDescriptor;
+}
+
+function readContentDescriptor(
+  record: Record<string, unknown> | undefined,
+  name: ContentName,
+): ContentDescriptor | null {
+  const content = record?.content;
+  if (!content || typeof content !== "object") return null;
+  const raw = (content as Record<string, unknown>)[name];
+  if (!raw || typeof raw !== "object") return null;
+  const info = raw as Record<string, unknown>;
+  if (
+    typeof info.size !== "number" ||
+    typeof info.storedBytes !== "number" ||
+    typeof info.sha256 !== "string"
+  ) {
+    return null;
+  }
+  return { size: info.size, storedBytes: info.storedBytes, sha256: info.sha256 };
 }
 
 function AuditDetailSheet({
@@ -231,23 +252,12 @@ function AuditDetailSheet({
     let cancelled = false;
     setLoadingContents(true);
 
-    const startArgs = (item.record.args ?? {}) as Record<string, unknown>;
-    const endRec = (item.end?.record ?? {}) as Record<string, unknown>;
-    const candidates: Array<{ name: ContentName; meta: Record<string, unknown> | null }> = [];
-    if (item.action === "exec") {
-      if (startArgs.stdin && typeof startArgs.stdin === "object") {
-        candidates.push({ name: "stdin", meta: startArgs.stdin as Record<string, unknown> });
-      }
-      if (endRec.stdout && typeof endRec.stdout === "object") {
-        candidates.push({ name: "stdout", meta: endRec.stdout as Record<string, unknown> });
-      }
-      if (endRec.stderr && typeof endRec.stderr === "object") {
-        candidates.push({ name: "stderr", meta: endRec.stderr as Record<string, unknown> });
-      }
-    } else if (item.action === "transfer.open") {
-      if (endRec.file && typeof endRec.file === "object") {
-        candidates.push({ name: "file", meta: endRec.file as Record<string, unknown> });
-      }
+    const candidates: Array<{ name: ContentName; meta: ContentDescriptor }> = [];
+    const stdinMeta = readContentDescriptor(item.record, "stdin");
+    if (stdinMeta) candidates.push({ name: "stdin", meta: stdinMeta });
+    for (const name of ["stdout", "stderr", "file"] as const) {
+      const meta = readContentDescriptor(item.end?.record, name);
+      if (meta) candidates.push({ name, meta });
     }
 
     void Promise.all(
@@ -283,7 +293,14 @@ function AuditDetailSheet({
       : item.end
         ? item.end.at - item.at
         : null;
-  const envNames = Array.isArray(args.env) ? (args.env as unknown[]).map(String) : [];
+  const envNames = Array.isArray(item.record.envKeys)
+    ? (item.record.envKeys as unknown[]).map(String)
+    : [];
+  const entriesCount = Array.isArray(endRec.entries)
+    ? endRec.entries.length
+    : typeof endRec.entries === "number"
+      ? endRec.entries
+      : null;
 
   async function handleCopy() {
     try {
@@ -437,13 +454,13 @@ function AuditDetailSheet({
                 </span>
               </ListRow>
             ) : null}
-            {typeof endRec.entries === "number" ? (
+            {entriesCount !== null ? (
               <ListRow size="sm">
                 <ListRowContent>
                   <ListRowDescription>{t.audit.entries}</ListRowDescription>
                 </ListRowContent>
                 <span className="font-mono text-aux tabular-nums text-foreground">
-                  {endRec.entries}
+                  {entriesCount}
                 </span>
               </ListRow>
             ) : null}
@@ -483,28 +500,28 @@ function AuditDetailSheet({
           </div>
         ) : (
           contents.map(({ name, preview, meta }) => {
-            const keptBytes = typeof meta?.keptBytes === "number" ? meta.keptBytes : null;
-            const totalBytes = typeof meta?.bytes === "number" ? meta.bytes : null;
             const truncatedByAudit =
-              meta?.truncated === true && keptBytes !== null ? formatBytes(keptBytes) : null;
-            const pruned = meta?.pruned === true;
+              meta.storedBytes < meta.size ? formatBytes(meta.storedBytes) : null;
 
             return (
               <div key={name} className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-mono text-ui font-medium text-foreground">{name}</span>
                   <div className="flex items-center gap-2 text-aux text-muted-foreground tabular-nums">
-                    {totalBytes !== null ? <span>{formatBytes(totalBytes)}</span> : null}
+                    <span>{formatBytes(meta.size)}</span>
                     {truncatedByAudit ? (
                       <Badge variant="warning">{t.audit.truncatedPayload(truncatedByAudit)}</Badge>
                     ) : null}
                   </div>
                 </div>
-                {pruned ? (
+                <p className="break-all font-mono text-aux text-muted-foreground">
+                  SHA-256 {meta.sha256}
+                </p>
+                {preview === null ? (
                   <div className="rounded-8 border border-border bg-surface-muted px-4 py-3 text-aux text-muted-foreground">
                     {t.audit.pruned}
                   </div>
-                ) : preview ? (
+                ) : (
                   <div className="overflow-hidden rounded-8 border border-border bg-surface-muted">
                     <pre className="max-h-72 overflow-auto p-4 font-mono text-aux whitespace-pre-wrap break-all text-foreground">
                       {preview.text || "(empty)"}
@@ -515,7 +532,7 @@ function AuditDetailSheet({
                       </div>
                     ) : null}
                   </div>
-                ) : null}
+                )}
               </div>
             );
           })
@@ -539,6 +556,10 @@ export function AuditView({ t, locale, summary, counts, revision }: AuditViewPro
   const [error, setError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<AuditItem | null>(null);
 
+  const requestSeqRef = useRef(0);
+  const extraPagesLoadedRef = useRef(false);
+  const prevQueryKeyRef = useRef("");
+
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchText(searchInput.trim()), 200);
     return () => window.clearTimeout(timer);
@@ -555,45 +576,75 @@ export function AuditView({ t, locale, summary, counts, revision }: AuditViewPro
     };
   }, [actionFilter, resultFilter, searchText, selectedBucket]);
 
-  const loadData = useCallback(async () => {
-    if (summary.status.state !== "ok") {
-      setItems([]);
-      setStats(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const until = Date.now();
-    const since = until - WINDOW_MS;
-    try {
-      const [page, nextStats] = await Promise.all([
-        api.auditItems(queryParams),
-        api.auditStats(since, until, BUCKET_MS),
-      ]);
-      setItems(page.items);
-      setHasMore(page.hasMore);
-      setStats(nextStats);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [queryParams, summary.status.state]);
+  const queryKey = useMemo(() => JSON.stringify(queryParams), [queryParams]);
+
+  const loadData = useCallback(
+    async (signal: AbortSignal, statsOnly: boolean) => {
+      if (summary.status.state !== "ok") {
+        setItems([]);
+        setStats(null);
+        setLoading(false);
+        return;
+      }
+      const seq = ++requestSeqRef.current;
+      if (!statsOnly) setLoading(true);
+      setError(null);
+      const until = (Math.floor(Date.now() / BUCKET_MS) + 1) * BUCKET_MS;
+      const since = until - WINDOW_MS;
+      try {
+        if (statsOnly) {
+          const nextStats = await api.auditStats(since, until, BUCKET_MS, signal);
+          if (signal.aborted || seq !== requestSeqRef.current) return;
+          setStats(nextStats);
+          return;
+        }
+        const [page, nextStats] = await Promise.all([
+          api.auditItems(queryParams, signal),
+          api.auditStats(since, until, BUCKET_MS, signal),
+        ]);
+        if (signal.aborted || seq !== requestSeqRef.current) return;
+        setItems(page.items);
+        setHasMore(page.hasMore);
+        setStats(nextStats);
+      } catch (err) {
+        if (signal.aborted || seq !== requestSeqRef.current) return;
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!signal.aborted && seq === requestSeqRef.current && !statsOnly) {
+          setLoading(false);
+        }
+      }
+    },
+    [queryParams, summary.status.state],
+  );
 
   useEffect(() => {
-    void loadData();
-  }, [loadData, revision]);
+    const queryChanged = prevQueryKeyRef.current !== queryKey;
+    prevQueryKeyRef.current = queryKey;
+    if (queryChanged) {
+      extraPagesLoadedRef.current = false;
+    }
+    const controller = new AbortController();
+    const statsOnly = !queryChanged && extraPagesLoadedRef.current;
+    void loadData(controller.signal, statsOnly);
+    return () => {
+      controller.abort();
+    };
+  }, [loadData, queryKey, revision]);
 
   async function handleLoadMore() {
     const last = items[items.length - 1];
     if (!last || loadingMore) return;
+    const seq = requestSeqRef.current;
     setLoadingMore(true);
     try {
       const next = await api.auditItems({ ...queryParams, beforeSeq: last.seq });
+      if (seq !== requestSeqRef.current) return;
+      extraPagesLoadedRef.current = true;
       setItems((prev) => [...prev, ...next.items]);
       setHasMore(next.hasMore);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoadingMore(false);
