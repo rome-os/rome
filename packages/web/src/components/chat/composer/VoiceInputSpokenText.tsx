@@ -210,6 +210,12 @@ function SpokenOverlay({
       ref={overlayRef}
       aria-hidden
       data-voice-input-spoken-text
+      // The copy takes the wheel and touch to scroll, but a press on it is a
+      // press on the field: focus stays there, so Enter still stops and sends.
+      onMouseDown={(event) => {
+        event.preventDefault();
+        textareaRef.current?.focus();
+      }}
       className="absolute overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
     >
       {value.slice(0, start)}

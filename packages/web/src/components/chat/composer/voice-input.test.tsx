@@ -343,6 +343,19 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(field().value).toBe("Note: buy milk");
   });
 
+  it("keeps focus in the field when the guardian presses on the spoken text", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " milk" });
+    const copy = document.querySelector("[data-voice-input-spoken-text]") as HTMLElement;
+    screen.getByRole("button", { name: "Stop voice input" }).focus();
+
+    expect(fireEvent.mouseDown(copy)).toBe(false);
+    expect(document.activeElement).toBe(field());
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
+  });
+
   it("ends listening on Enter and sends once the last words are in", async () => {
     const { onSend, field } = renderComposer(kind);
     const socket = await startListening();
