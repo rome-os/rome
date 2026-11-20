@@ -99,6 +99,10 @@ describe("/chats/:chatId/tasks", () => {
         calls.push(`stop ${taskId} ${by}`);
         return 0;
       },
+      markTaskDone: async (taskId: string) => {
+        calls.push(`done ${taskId}`);
+        return true;
+      },
     } as unknown as ConciergeService;
     const routineEngine = {
       onChange: (listener: (routineId: string) => void) => {
@@ -688,6 +692,42 @@ describe("/chats/:chatId/tasks", () => {
   });
 
   describe("row actions", () => {
+    it("marks a one-off task of the chat done for its owner only, and no scheduled or ended one", async () => {
+      const flights = await task({ title: "Flights" });
+      const brief = await task({ title: "Morning brief" });
+      const ended = await task({ title: "Hotel" });
+      await routines.create({
+        name: "Morning brief",
+        trigger: {
+          type: "schedule",
+          localTime: "08:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: CONCIERGE_TASK_RUN_ACTION,
+        args: { chatId: brief.id, brief: "Brief me." },
+      });
+      const sources = new ConciergeTasks(tasks);
+      sources.attachFacts({
+        now: () => Date.now(),
+        running: (chatId) => chatId !== ended.id,
+        openWaits: async () => new Map(),
+        reportPending: () => [],
+      });
+      taskSource = sources;
+      const done = (chatId: string, id: string, as = guardian) =>
+        app().request(`/chats/${chatId}/tasks/${id}/done`, { ...as, method: "POST" });
+
+      expect((await done("concierge", flights.id, ann)).status).toBe(404);
+      expect((await done("ann-main", flights.id, ann)).status).toBe(404);
+      expect((await done("concierge", brief.id)).status).toBe(409);
+      expect((await done("concierge", ended.id)).status).toBe(409);
+      expect(calls).toEqual([]);
+      expect((await done("concierge", flights.id)).status).toBe(200);
+      expect(calls).toEqual([`done ${flights.id}`]);
+    });
+
     it("cancels a reminder no task has, for the chat's owner only", async () => {
       const visa = await task({ title: "Visa" });
       checks.concierge = [

@@ -171,6 +171,24 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     return c.json({ ok: true });
   });
 
+  // Marks a one-off task of the chat done, as its row's status mark does on
+  // hover. A scheduled task and an ended one are not marked.
+  app.post("/chats/:chatId/tasks/:taskId/done", async (c) => {
+    const at = await gate(c);
+    if (at instanceof Response) return at;
+    const taskId = c.req.param("taskId");
+    const { tasks } = await at.list.parts(at.chatId, at.owner);
+    const item = tasks.find((found) => found.task.id === taskId);
+    if (!item) return c.json({ error: "No such task in this chat" }, 404);
+    if (item.schedule !== null || item.task.status === "ended") {
+      return c.json({ error: "Only a one-off task that has not ended can be marked done" }, 409);
+    }
+    if (!(await at.concierge.markTaskDone(taskId))) {
+      return c.json({ error: "This task has already ended" }, 409);
+    }
+    return c.json({ ok: true });
+  });
+
   // Cancels a reminder of the chat that no task of it has, as its row's Cancel does.
   app.post("/chats/:chatId/tasks/checks/:checkId/cancel", async (c) => {
     const at = await gate(c);

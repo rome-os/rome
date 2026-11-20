@@ -362,8 +362,9 @@ describe("TaskList", () => {
       ),
     ).toBeTruthy();
     // One ⋯ button on the right, shown on hover and focus only.
-    const more = within(rowOf("Pick a hotel")).getByRole("button");
-    expect(more.getAttribute("aria-label")).toBe("More actions for Pick a hotel");
+    const more = within(rowOf("Pick a hotel")).getByRole("button", {
+      name: "More actions for Pick a hotel",
+    });
     expect(more.className).toContain("opacity-0");
     expect(more.className).toContain("group-hover/row:opacity-100");
     // An ended task has none.
@@ -404,7 +405,8 @@ describe("TaskList", () => {
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     }
     expect(menus).toEqual({
-      "Review PRs": ["Stop"],
+      // Mark as done is in the menu only where there is no hover (CSS hides it elsewhere).
+      "Review PRs": ["Mark as done", "Stop"],
       "Morning brief": ["Stop"],
       "Remind me": ["Cancel"],
       "rome-os/rome": ["Unfollow"],
@@ -579,6 +581,40 @@ describe("TaskList", () => {
     await within(ended).findByText("Renamed");
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(within(ended).getByText(`Ended ${ENDED_PAGE}`)).toBeTruthy();
+  });
+
+  it("marks a one-off task done from its status mark, pending until it reads as ended", async () => {
+    renderList();
+    await screen.findByRole("region", { name: "Active" });
+    // A scheduled task and an ended one have no Mark as done.
+    expect(within(rowOf("Morning brief")).queryByRole("button", { name: /as done/ })).toBeNull();
+    const mark = within(rowOf("Review PRs")).getByRole("button", {
+      name: "Mark Review PRs as done",
+    });
+    // The status mark shows, and hover swaps in the check.
+    expect(mark.querySelector(".rome-status-spin")).toBeTruthy();
+    expect(mark.querySelector(".lucide-circle-check")?.getAttribute("class")).toContain(
+      "group-hover/row:flex",
+    );
+    fireEvent.click(mark);
+    expect(within(rowOf("Review PRs")).getByText("Marking done…")).toBeTruthy();
+    expect(posts()).toEqual(["POST /api/chats/concierge/tasks/Review%20PRs/done"]);
+    // Still active on the next read: still pending; done on a later one: it lets go.
+    await waitFor(() => expect(reads()).toBe(2));
+    expect(within(rowOf("Review PRs")).getByText("Marking done…")).toBeTruthy();
+    parts.tasks[1] = taskItem(task("Review PRs", "ended"));
+    acceptLatestSocket().receive({
+      type: "event",
+      topic: chatTasksTopicName("concierge"),
+      event: "tasks_changed",
+      data: { chatId: "concierge" },
+    });
+    await waitFor(() => expect(screen.queryByText("Marking done…")).toBeNull());
+    // On a screen without hover, the menu offers it.
+    await openMenu("Pick a hotel");
+    expect(screen.getByRole("menuitem", { name: "Mark as done" }).className).toContain(
+      "[@media(hover:none)]:flex",
+    );
   });
 
   it("says so when the chat has nothing to list", async () => {

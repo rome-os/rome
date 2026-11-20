@@ -172,6 +172,8 @@
       "actions": {
         "more": "More actions for {{title}}",
         "stop": "Stop",
+        "markDone": "Mark as done",
+        "markDoneTask": "Mark {{title}} as done",
         "cancel": "Cancel",
         "unfollow": "Unfollow",
         "pause": "Pause",
@@ -180,6 +182,7 @@
       },
       "failed": {
         "stop": "Failed to stop the task",
+        "markDone": "Failed to mark the task done",
         "cancel": "Failed to cancel the reminder",
         "unfollow": "Failed to unfollow",
         "pause": "Failed to pause the routine",
@@ -190,6 +193,7 @@
       "needsYouDot": "A task needs you",
       "pending": {
         "stopping": "Stopping…",
+        "finishing": "Marking done…",
         "cancelling": "Cancelling…",
         "unfollowing": "Unfollowing…",
         "pausing": "Pausing…",

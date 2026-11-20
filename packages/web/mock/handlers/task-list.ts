@@ -324,6 +324,36 @@ export const taskListHandlers = [
     item.schedule = null;
     return HttpResponse.json({ ok: true });
   }),
+  http.post("/api/chats/:chatId/tasks/:taskId/done", ({ params }) => {
+    const item = partsOf(String(params.chatId)).tasks.find(
+      (found) => found.task.id === params.taskId,
+    );
+    if (!item || item.schedule !== null || item.task.status === "ended") {
+      return notFound("one-off task");
+    }
+    const now = Date.now();
+    // Marked done is a stop that ends done; Rome's own rule says what status it gives.
+    const done = taskStatus(
+      {
+        stoppedAt: now,
+        waitingSince: null,
+        running: false,
+        reportPending: false,
+        laterAt: null,
+        lastOutcome: "done_by_owner",
+      },
+      now,
+    );
+    item.task = {
+      ...item.task,
+      ...done,
+      state: legacyTaskState(done),
+      openWait: null,
+      completedAt: now,
+    };
+    item.check = null;
+    return HttpResponse.json({ ok: true });
+  }),
   http.post("/api/chats/:chatId/tasks/checks/:checkId/cancel", ({ params }) => {
     const parts = partsOf(String(params.chatId));
     const left = parts.checks.filter((item) => item.check.id !== params.checkId);

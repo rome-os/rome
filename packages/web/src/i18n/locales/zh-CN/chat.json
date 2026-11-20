@@ -172,6 +172,8 @@
       "actions": {
         "more": "「{{title}}」的更多操作",
         "stop": "停止",
+        "markDone": "标记完成",
+        "markDoneTask": "将「{{title}}」标记完成",
         "cancel": "取消",
         "unfollow": "取消关注",
         "pause": "暂停",
@@ -180,6 +182,7 @@
       },
       "failed": {
         "stop": "停止任务失败",
+        "markDone": "标记完成失败",
         "cancel": "取消提醒失败",
         "unfollow": "取消关注失败",
         "pause": "暂停定时任务失败",
@@ -190,6 +193,7 @@
       "needsYouDot": "有任务需要你",
       "pending": {
         "stopping": "正在停止…",
+        "finishing": "正在标记完成…",
         "cancelling": "正在取消…",
         "unfollowing": "正在取消关注…",
         "pausing": "正在暂停…",

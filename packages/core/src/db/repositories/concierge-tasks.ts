@@ -268,14 +268,19 @@ export class ConciergeTasksRepository {
     return ended;
   }
 
-  /** How task `id`'s task chat's latest work ended. Rome writes it; the Concierge never does. */
+  /**
+   * How task `id`'s task chat's latest work ended. Rome writes it; the
+   * Concierge never does. A task its owner marked done keeps that until it is
+   * taken up again: the turn its marking stopped ends after it, and changes
+   * nothing.
+   */
   async setLastOutcome(
     id: string,
     outcome: "succeeded" | "failed" | "stopped",
     now = new Date(),
     options: { reported?: boolean } = {},
   ): Promise<void> {
-    await this.db
+    const changed = await this.db
       .update(taskChats)
       // A result waits for the Concierge's report; a stop has none to give.
       .set({
@@ -285,8 +290,39 @@ export class ConciergeTasksRepository {
         reportGivenUp: false,
         updatedAt: now,
       })
-      .where(eq(taskChats.sessionId, id));
-    await this.announce(id, "refresh");
+      .where(
+        and(
+          eq(taskChats.sessionId, id),
+          or(
+            isNull(taskChats.stoppedAt),
+            isNull(taskChats.lastOutcome),
+            ne(taskChats.lastOutcome, "done_by_owner"),
+          ),
+        ),
+      )
+      .returning({ id: taskChats.sessionId });
+    if (changed.length > 0) await this.announce(id, "refresh");
+  }
+
+  /**
+   * Its owner marked task `id` done: it is stopped as a stop stops it, and
+   * ends done. One already stopped changes nothing. Answers whether it was
+   * marked.
+   */
+  async markDone(id: string, now = new Date()): Promise<boolean> {
+    const marked = await this.db
+      .update(taskChats)
+      .set({
+        stoppedAt: now,
+        lastOutcome: "done_by_owner",
+        outcomeUnsaid: false,
+        reportGivenUp: false,
+        updatedAt: now,
+      })
+      .where(and(eq(taskChats.sessionId, id), isNull(taskChats.stoppedAt)))
+      .returning({ id: taskChats.sessionId });
+    if (marked.length > 0) await this.announce(id, "refresh");
+    return marked.length > 0;
   }
 
   /** Task `id` was stopped by `by`. A stop is kept: a later one changes nothing. */

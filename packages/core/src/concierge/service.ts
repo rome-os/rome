@@ -1423,9 +1423,32 @@ export class ConciergeService {
    */
   async stopTask(taskId: string, by: "concierge" | "guardian"): Promise<number> {
     await this.deps.tasks.repo.stop(taskId);
+    return this.endTaskWork(taskId, by === "guardian" ? "stopped_by_owner" : null);
+  }
+
+  /**
+   * Its owner marked task `taskId` done from the task list: it ends done, and
+   * otherwise as a Stop ends it. Its running work stops, its checks are
+   * cancelled, and the Concierge hears of it quietly. Answers whether it was
+   * marked; one already ended is not.
+   */
+  async markTaskDone(taskId: string): Promise<boolean> {
+    if (!(await this.deps.tasks.repo.markDone(taskId))) return false;
+    await this.endTaskWork(taskId, "done_by_owner");
+    return true;
+  }
+
+  /**
+   * The rest of ending task `taskId`: its checks are cancelled, the Concierge
+   * hears `told` quietly when there is one, its chat's turns stop, and what
+   * they asked for is turned down. Answers how many turns it stopped.
+   */
+  private async endTaskWork(
+    taskId: string,
+    told: "stopped_by_owner" | "done_by_owner" | null,
+  ): Promise<number> {
     await this.cancelChecks(taskId);
-    if (by === "guardian")
-      this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
+    if (told) this.taskEvents?.mark({ taskId, kind: told, urgent: false });
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
     const turns = this.attached?.chats.activeTurns(chatId) ?? [];

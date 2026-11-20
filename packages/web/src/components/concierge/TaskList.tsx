@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
+  CircleCheck,
   Clock,
   Ellipsis,
   Pause,
@@ -131,6 +132,8 @@ interface RowAction {
   text: string;
   icon: ReactNode;
   destructive?: boolean;
+  /** Shown only on a screen without hover, where the row offers it no other way. */
+  touchOnly?: boolean;
   onSelect: () => void;
 }
 
@@ -245,6 +248,7 @@ function Row({
               <DropdownMenuItem
                 key={action.text}
                 variant={action.destructive ? "destructive" : undefined}
+                className={cn(action.touchOnly && "hidden [@media(hover:none)]:flex")}
                 onPointerDown={pressedOnItem}
                 onPointerUp={releasedOnItem}
                 onSelect={action.onSelect}
@@ -277,7 +281,17 @@ function releasedOnItem(event: PointerEvent<HTMLDivElement>) {
 }
 
 /** What a row is doing while its action is under way, as its line says it. */
-type Pending = "stopping" | "cancelling" | "pausing" | "resuming" | "deleting" | "unfollowing";
+type Pending =
+  | "stopping"
+  | "finishing"
+  | "cancelling"
+  | "pausing"
+  | "resuming"
+  | "deleting"
+  | "unfollowing";
+
+/** The pending actions that last until the task reads as ended, not just the next read. */
+const UNTIL_ENDED: ReadonlySet<Pending> = new Set(["stopping", "finishing"]);
 
 /** What a task chat's line says: its status word, then the time that goes with it. */
 function taskState(
@@ -319,37 +333,106 @@ function taskState(
 
 const actionIcon = "size-3.5 shrink-0";
 
+/**
+ * A one-off task's status mark, which hover turns into its Mark as done
+ * check: pressing it ends the task done.
+ */
+function DoneMark({
+  title,
+  glyph,
+  pending,
+  onDone,
+}: {
+  title: string;
+  glyph: ReactNode;
+  pending: boolean;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const swap = !pending && "group-hover/row:hidden group-focus-visible/done:hidden";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("concierge.taskList.actions.markDoneTask", { title })}
+          disabled={pending}
+          onClick={onDone}
+          className="group/done relative z-10 -m-1 flex rounded-full p-1 outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 disabled:pointer-events-none"
+        >
+          <span className={cn("flex", swap)}>{glyph}</span>
+          <CircleCheck
+            aria-hidden
+            className={cn(
+              "hidden size-4 shrink-0 text-subtle-foreground transition-colors group-hover/done:text-success/80",
+              !pending && "group-hover/row:flex group-focus-visible/done:flex",
+            )}
+          />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{t("concierge.taskList.actions.markDone")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TaskRow({
   item,
   now,
   pending,
   onStop,
+  onDone,
   onNavigate,
 }: {
   item: TaskListTaskItem;
   now: number;
   pending: Pending | undefined;
   onStop: () => void;
+  onDone: () => void;
   onNavigate?: () => void;
 }) {
   const { t, i18n } = useTranslation("chat");
   const { task } = item;
   const status = taskStatusOfDto(task);
-  // Stop only, on every task chat that has not ended: the row itself opens it.
-  // A scheduled task's Stop ends its schedule too.
+  // A one-off task that has not ended can be marked done; a scheduled one only stopped.
+  const markable = status.status !== "ended" && item.schedule === null;
+  // Stop, on every task chat that has not ended: the row itself opens it.
+  // A scheduled task's Stop ends its schedule too. Mark as done is on the
+  // status mark, and in the menu only where there is no hover to show it.
   const actions: RowAction[] =
     status.status === "ended"
       ? []
       : [
+          ...(markable
+            ? [
+                {
+                  text: t("concierge.taskList.actions.markDone"),
+                  icon: <CircleCheck className={actionIcon} aria-hidden />,
+                  touchOnly: true,
+                  onSelect: onDone,
+                },
+              ]
+            : []),
           {
             text: t("concierge.taskList.actions.stop"),
             icon: <Square className={actionIcon} aria-hidden />,
             onSelect: onStop,
           },
         ];
+  const glyph = <TaskGlyph status={status} />;
   return (
     <Row
-      glyph={<TaskGlyph status={status} />}
+      glyph={
+        markable ? (
+          <DoneMark
+            title={task.title}
+            glyph={glyph}
+            pending={pending !== undefined}
+            onDone={onDone}
+          />
+        ) : (
+          glyph
+        )
+      }
       title={task.title}
       times={timesOf(t, status.status === "ended" ? (task.completedAt ?? task.updatedAt) : null)}
       to={`/chat/${encodeURIComponent(task.chat.id)}`}
@@ -586,9 +669,9 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  // A pressed Stop stays pending until the task chat is no longer at work.
+  // A pressed Stop or Mark as done stays pending until the task chat has ended.
   useEffect(() => {
-    if (!data || ![...pending.values()].includes("stopping")) return;
+    if (!data || ![...pending.values()].some((what) => UNTIL_ENDED.has(what))) return;
     const tasks = new Map(
       data.groups.flatMap((group) =>
         group.items.flatMap((item) =>
@@ -598,7 +681,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     );
     const left = new Map(
       [...pending].filter(([key, what]) => {
-        if (what !== "stopping") return true;
+        if (!UNTIL_ENDED.has(what)) return true;
         const item = tasks.get(key);
         return item !== undefined && taskStatusOfDto(item.task).status !== "ended";
       }),
@@ -614,8 +697,8 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     });
   /**
    * Runs one row action: the row shows `what` at once, and lets go once the
-   * list read after it is in, or at once when it fails. A Stop lets go only
-   * when the task reads as ended.
+   * list read after it is in, or at once when it fails. A Stop or a Mark as
+   * done lets go only when the task reads as ended.
    */
   const act = (
     item: TaskListItem,
@@ -629,7 +712,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     void fetchJson<unknown>(`${listUrl(chatId)}/${path}`, { ...init, fallback: failed }).then(
       async () => {
         await reread();
-        if (what !== "stopping") settle(key);
+        if (!UNTIL_ENDED.has(what)) settle(key);
       },
       (error: Error) => {
         settle(key);
@@ -644,6 +727,14 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
       `${encodeURIComponent(item.task.id)}/stop`,
       { method: "POST" },
       t("concierge.taskList.failed.stop"),
+    );
+  const markDone = (item: TaskListTaskItem) =>
+    act(
+      item,
+      "finishing",
+      `${encodeURIComponent(item.task.id)}/done`,
+      { method: "POST" },
+      t("concierge.taskList.failed.markDone"),
     );
   const cancel = (item: TaskListCheckItem) =>
     act(
@@ -717,6 +808,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
             now={now}
             pending={pending.get(key)}
             onStop={() => stop(item)}
+            onDone={() => markDone(item)}
             onNavigate={onNavigate}
           />
         );
