@@ -20,7 +20,7 @@ import {
   type ChatComposerSendControls,
 } from "./ChatComposer";
 import { ReplyDraftHarness } from "./reply/reply-draft-harness";
-import type { ReplyTarget } from "./reply/reply-draft";
+import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
 
 // The composer reads this once each time it renders.
 const composerRenders = rs.hoisted(() => ({ count: 0 }));
@@ -651,6 +651,27 @@ describe("composer attachment uploads", () => {
       false,
     );
   });
+
+  it("keeps a file attached while a text-only send is pending", async () => {
+    let rejectSend!: (error: Error) => void;
+    const composerRef = createRef<ChatComposerHandle>();
+    renderComposer(
+      {
+        onSend: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSend = reject;
+          }),
+      },
+      { composerRef },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "failed message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => composerRef.current?.addFiles([new File(["fixture"], "plan.pdf")]));
+    await act(async () => rejectSend(new Error("post failed")));
+
+    expect(screen.getByText("plan.pdf")).toBeTruthy();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("failed message");
+  });
 });
 
 describe("composer scoped slash skill", () => {
@@ -1219,6 +1240,29 @@ describe("New chat draft", () => {
     expect(loadNewChatDraft()?.text).toBe("newer");
   });
 
+  it("keeps a newer skill in storage when a skill-only new-chat send fails", async () => {
+    let reject!: (error: Error) => void;
+    const composerRef = createRef<ChatComposerHandle>();
+    renderComposer(
+      {
+        persistNewChatDraft: true,
+        onSend: () =>
+          new Promise<void>((_resolve, fail) => {
+            reject = fail;
+          }),
+      },
+      { composerRef },
+    );
+    act(() => composerRef.current?.setSkillSelection({ name: "skill-old" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => composerRef.current?.setSkillSelection({ name: "skill-new" }));
+    await act(async () => reject(new Error("create failed")));
+
+    expect(screen.getByText("skill-new")).toBeTruthy();
+    expect(screen.queryByText("skill-old")).toBeNull();
+    expect(loadNewChatDraft()?.skill?.name).toBe("skill-new");
+  });
+
   it("keeps newer text when an existing-session send fails", async () => {
     let rejectSend!: (error: Error) => void;
     renderComposer({
@@ -1342,8 +1386,18 @@ describe("composer model picker in an open chat", () => {
 
 describe("composer reply", () => {
   const reply: ReplyTarget = { messageId: "a1", author: "agent", preview: "Fly to Lisbon." };
+  const newerReply: ReplyTarget = { messageId: "a2", author: "agent", preview: "Stay in Alfama." };
 
-  function renderWithReply(onSend: ChatComposerProps["onSend"]) {
+  function ReplyPicker({ target }: { target: ReplyTarget }) {
+    const draft = useReplyDraft();
+    return (
+      <button type="button" onClick={() => draft?.set(target)}>
+        Pick newer reply
+      </button>
+    );
+  }
+
+  function renderWithReply(onSend: ChatComposerProps["onSend"], pickable?: ReplyTarget) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
       String(input) === "/api/settings"
@@ -1353,6 +1407,7 @@ describe("composer reply", () => {
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
           <ReplyDraftHarness initial={reply}>
+            {pickable ? <ReplyPicker target={pickable} /> : null}
             <ChatComposer onSend={onSend} />
           </ReplyDraftHarness>
         </QueryClientProvider>
@@ -1386,6 +1441,53 @@ describe("composer reply", () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+  });
+
+  it("does not put the reply back when newer text replaced the failed message", async () => {
+    stubCoarsePointer(false);
+    let rejectSend!: (error: Error) => void;
+    const onSend = rs.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    renderWithReply(onSend);
+    await screen.findByText("Fly to Lisbon.");
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.input(textarea, { target: { value: "newer text" } });
+    await act(async () => rejectSend(new Error("offline")));
+
+    expect(textarea.value).toBe("newer text");
+    expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
+  });
+
+  it("does not put the reply back after the guardian changed the reply draft during a pending send", async () => {
+    stubCoarsePointer(false);
+    let rejectSend!: (error: Error) => void;
+    const onSend = rs.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    renderWithReply(onSend, newerReply);
+    await screen.findByText("Fly to Lisbon.");
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Pick newer reply" }));
+    expect(await screen.findByText("Stay in Alfama.")).toBeTruthy();
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(screen.queryByText("Stay in Alfama.")).toBeNull();
+    await act(async () => rejectSend(new Error("offline")));
+
+    expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
+    expect(screen.queryByText("Stay in Alfama.")).toBeNull();
   });
 
   it("drops the reply on Escape from the textarea", async () => {
