@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type {
   Account,
   Channel,
-  ChannelMessage,
   ChatId,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { chatsWiring } from "../../../chats-wiring.js";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelSend } from "../../../chats/connected-accounts/connected-account.js";
 import type { ChatRepository } from "../../../chats/storage/chat-repository.js";
 import { ChatEvents, type MessageSaid } from "../../../chats/storage/events.js";
@@ -20,6 +20,7 @@ import type { MessageRepository } from "../../../chats/storage/message-repositor
 import { type Place, placeIn } from "../../../chats/storage/place.js";
 import { EMAIL_PLATFORM } from "../../../connections/email-chat-adapter.js";
 import { inboundRecording } from "../../../connections/inbound-recording.js";
+import type * as connections from "../../../connections/message.js";
 import { createTestDb, type TestDb } from "../../helpers.js";
 import { deferred, type VisibleMessage } from "./peer.js";
 
@@ -87,13 +88,15 @@ export interface ConformanceChannel {
   stop(): Promise<void>;
 }
 
-/** A legacy channel adapter as the `Channel` ports Chats' adapter takes. */
+/** A legacy channel adapter as the `Channel` ports Chats' adapter takes. Each
+ *  message it hands over becomes what apps receive at the one point production
+ *  turns it, so the cases read the same `ChannelMessage` an app would. */
 export function channelOver(
   name: string,
   connectionId: string,
   adapter: {
     send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
-    onInbound(handler: (message: ChannelMessage) => Promise<void>): void;
+    onInbound(handler: (message: connections.Message) => Promise<void>): void;
   },
 ): Channel {
   const handlers = new Set<
@@ -101,7 +104,8 @@ export function channelOver(
       event: Parameters<Parameters<NonNullable<Channel["inbound"]>["subscribe"]>[0]>[0],
     ) => Promise<void>
   >();
-  adapter.onInbound(async (message) => {
+  adapter.onInbound(async (heard) => {
+    const message = channelMessageOf(heard, name);
     for (const handler of handlers)
       await handler({ kind: "message", message, ref: { connectionId, chatId: message.chatId } });
   });

@@ -1,4 +1,5 @@
 import { Bot, type Context, InputFile } from "grammy";
+import type { MessageEntity } from "grammy/types";
 import { Marked, Renderer, type Token } from "marked";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "../../../types.js";
@@ -8,6 +9,7 @@ import {
   saveIncomingAttachmentPayloads,
 } from "../../inbound/attachment-files.js";
 import { createLogger } from "../../../logger.js";
+import type * as connections from "../../message.js";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
@@ -102,13 +104,13 @@ function markdownToTelegramHtml(md: string): string {
 export type CreateTelegramBot = (botToken: string) => Bot;
 
 /**
- * The Telegram Bot API transport. Inbound updates arrive as the channel's own
- * record, a `ChannelMessage` whose `raw` is the Bot API message, so the
- * Connection integration delivers them as they are.
+ * The Telegram Bot API transport. Inbound updates arrive as a Connections
+ * message whose `raw` is the Bot API message, so the Connection integration
+ * delivers them as they are.
  */
 export class TelegramAdapter {
   private bot: Bot;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
   private onPollingError?: (err: unknown) => void;
 
   constructor(
@@ -142,62 +144,48 @@ export class TelegramAdapter {
           ? (rawMsg.sender_chat as { title?: string }).title
           : chatTitle;
 
-      const msg: ChannelMessage = {
-        channel: "telegram",
-        direction: "inbound",
-        messageId: String(rawMsg.message_id),
-        chatId: String(chat.id) as ChatId,
-        senderId: ctx.channelPost
-          ? String(chat.id)
-          : rawMsg.sender_chat
-            ? String(rawMsg.sender_chat.id)
-            : ctx.from
-              ? String(ctx.from.id)
-              : String(chat.id),
-        ...(senderName ? { senderDisplayName: senderName } : {}),
-        ...(fromPerson?.username ? { senderUsername: fromPerson.username } : {}),
-        text: rawMsg.text ?? rawMsg.caption ?? "",
-        attachments: this.extractAttachments(ctx),
-        timestamp: new Date(rawMsg.date * 1000),
-        ...(rawMsg.reply_to_message
-          ? { replyTo: { messageId: String(rawMsg.reply_to_message.message_id) } }
-          : {}),
-        thread: {
-          kind: chat.type === "private" ? "dm" : "group",
+      const text = rawMsg.text ?? rawMsg.caption ?? "";
+      const replied = rawMsg.reply_to_message;
+      const msg: connections.Message = {
+        id: String(rawMsg.message_id),
+        where: {
+          chatId: String(chat.id) as ChatId,
+          kind: chat.type === "private" ? "direct" : "group",
           ...(chatTitle ? { name: chatTitle } : {}),
         },
-        addressing:
-          chat.type === "private"
-            ? "direct"
-            : (rawMsg.entities ?? rawMsg.caption_entities ?? []).some((entity) => {
-                  if (entity.type === "text_mention") return entity.user.id === ctx.me.id;
-                  const text = (rawMsg.text ?? rawMsg.caption ?? "")
-                    .slice(entity.offset, entity.offset + entity.length)
-                    .toLowerCase();
-                  const handle = `@${ctx.me.username.toLowerCase()}`;
-                  return (
-                    (entity.type === "mention" && text === handle) ||
-                    (entity.type === "bot_command" && text.endsWith(handle))
-                  );
-                })
-              ? "mention"
-              : rawMsg.reply_to_message?.from?.id === ctx.me.id
-                ? "reply"
-                : "ambient",
+        sender: {
+          accountId: ctx.channelPost
+            ? String(chat.id)
+            : rawMsg.sender_chat
+              ? String(rawMsg.sender_chat.id)
+              : ctx.from
+                ? String(ctx.from.id)
+                : String(chat.id),
+          ...(senderName ? { name: senderName } : {}),
+          ...(fromPerson?.username ? { handle: fromPerson.username } : {}),
+        },
+        content: { text, attachments: this.extractAttachments(ctx) },
+        receivedBy: String(ctx.me.id),
+        mentions: telegramMentions(rawMsg.entities ?? rawMsg.caption_entities ?? [], text, ctx.me),
+        ...(replied
+          ? {
+              replyTo: {
+                messageId: String(replied.message_id),
+                ...(replied.from ? { senderAccountId: String(replied.from.id) } : {}),
+              },
+            }
+          : {}),
+        saidAt: new Date(rawMsg.date * 1000),
         raw: rawMsg,
       };
 
-      log.info("message received", {
-        from: msg.senderId,
-        chatId: msg.chatId,
-        threadKind: msg.thread?.kind,
-      });
+      log.info("message received", { from: msg.sender.accountId, chatId: msg.where.chatId });
 
       try {
         await this.handler!(msg);
       } catch (err) {
         log.error("message handler error", {
-          messageId: msg.messageId,
+          messageId: msg.id,
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -296,7 +284,7 @@ export class TelegramAdapter {
     }
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -412,4 +400,33 @@ export class TelegramAdapter {
         break;
     }
   }
+}
+
+/**
+ * The accounts a message's entities mention, by Telegram user id. A text
+ * mention names its user. An `@handle`, alone or ending a bot command, names
+ * the bot's own account when it is the bot's handle: Telegram gives no id for
+ * another handle, so that one is left out.
+ */
+export function telegramMentions(
+  entities: readonly MessageEntity[],
+  text: string,
+  me: { readonly id: number; readonly username: string },
+): string[] {
+  const handle = `@${me.username.toLowerCase()}`;
+  const mentioned = new Set<string>();
+  for (const entity of entities) {
+    if (entity.type === "text_mention") {
+      mentioned.add(String(entity.user.id));
+      continue;
+    }
+    const said = text.slice(entity.offset, entity.offset + entity.length).toLowerCase();
+    if (
+      (entity.type === "mention" && said === handle) ||
+      (entity.type === "bot_command" && said.endsWith(handle))
+    ) {
+      mentioned.add(String(me.id));
+    }
+  }
+  return [...mentioned];
 }

@@ -2,7 +2,7 @@
 //
 // WhatsApp is a Talker with a single `session` grant: a linked-device session
 // (Baileys auth state) that comes from scanning a linking QR on the phone. The
-// transport core — the inbound `ChannelMessage`, address-book sync, media
+// transport core — the inbound `Message`, address-book sync, media
 // download, the generation-gated reconnect loop — is `WhatsAppAdapter`
 // (packages/core/src/connections/kinds/whatsapp/whatsapp.ts), wrapped here. The transport already
 // speaks the channel's record, so inbound and send pass through without a

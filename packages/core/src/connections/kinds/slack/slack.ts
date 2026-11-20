@@ -6,7 +6,8 @@
 // instance needs no public events address. Events arrive as Socket Mode
 // envelopes, which Rome acknowledges before handling.
 
-import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import type * as connections from "../../message.js";
 import { WebSocket } from "ws";
 import { createLogger } from "../../../logger.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
@@ -657,6 +658,12 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The users a message's wire text mentions, by their Slack ids. Mentions of
+ *  a channel or of everyone name no one user and are left out. */
+export function slackMentions(text: string): string[] {
+  return [...new Set([...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/gi)].map((match) => match[1]))];
+}
+
 /** Slack's wire text as a person reads it: mentions, channel links and URLs
  *  unwrapped, and the bot's own mention removed. */
 export function decodeSlackText(text: string, botUserId?: string): string {
@@ -717,13 +724,13 @@ export interface SlackAdapterConfig {
 }
 
 /**
- * The Slack bot transport. Inbound events arrive as the channel's own record,
- * a `ChannelMessage` whose `raw` is the Events API payload. Rome hears direct
+ * The Slack bot transport. Inbound events arrive as a Connections message
+ * whose `raw` is the Events API payload. Rome hears direct
  * messages and mentions of the bot. A mention in a channel opens a thread
  * conversation, and the reply goes into that thread.
  */
 export class SlackAdapter {
-  private handler?: (message: ChannelMessage) => Promise<void>;
+  private handler?: (message: connections.Message) => Promise<void>;
   private identity: SlackBotIdentity | null = null;
   private socket: SlackSocketMode | null = null;
   private readonly dedup = new InboundDedup(1_000);
@@ -738,7 +745,7 @@ export class SlackAdapter {
     this.api = config.api ?? slackWebApi;
   }
 
-  onInbound(handler: (message: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (message: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -846,76 +853,69 @@ export class SlackAdapter {
     if (event.subtype && event.subtype !== "file_share") return;
     if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") return;
 
-    const message = this.toChannelMessage(payload, identity);
+    const message = this.toMessage(payload, identity);
     if (!message) return;
     const user = event.user;
-    const previous = this.deliveries.get(message.chatId) ?? Promise.resolve();
+    const chatId = message.where.chatId;
+    const previous = this.deliveries.get(chatId) ?? Promise.resolve();
     const next = previous.then(() => this.deliver(message, identity.teamId, user));
-    this.deliveries.set(message.chatId, next);
+    this.deliveries.set(chatId, next);
     void next.finally(() => {
-      if (this.deliveries.get(message.chatId) === next) {
-        this.deliveries.delete(message.chatId);
+      if (this.deliveries.get(chatId) === next) {
+        this.deliveries.delete(chatId);
       }
     });
   }
 
-  private toChannelMessage(
+  private toMessage(
     payload: SlackEventCallback,
     identity: SlackBotIdentity,
-  ): ChannelMessage | null {
+  ): connections.Message | null {
     const event = payload.event;
     const channel = event.channel!;
     const ts = event.ts!;
     const text = decodeSlackText(event.text!, identity.botUserId);
     if (!text) return null;
     const base = {
-      channel: this.config.channel,
-      direction: "inbound" as const,
-      messageId: slackMessageId(ts, event.thread_ts),
-      senderId: slackSenderId(payload.team_id, event.user!),
-      text,
-      attachments: [],
-      timestamp: new Date(Number.parseFloat(ts) * 1_000),
+      id: slackMessageId(ts, event.thread_ts),
+      sender: { accountId: slackSenderId(payload.team_id, event.user!) },
+      content: { text, attachments: [] },
+      receivedBy: slackSenderId(payload.team_id, identity.botUserId),
+      mentions: slackMentions(event.text!).map((user) => slackSenderId(payload.team_id, user)),
+      // A thread lives inside its channel's chat. The reply finds the thread
+      // from the id of the message it answers.
+      ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
+      saidAt: new Date(Number.parseFloat(ts) * 1_000),
       raw: payload,
     };
     if (event.type === "message" && event.channel_type === "im") {
-      return {
-        ...base,
-        chatId: channel as ChatId,
-        ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-        thread: { kind: "dm" },
-        addressing: "direct",
-      };
+      return { ...base, where: { chatId: channel as ChatId, kind: "direct" } };
     }
     if (event.type === "app_mention" && event.channel_type !== "im" && !channel.startsWith("D")) {
-      // A thread lives inside its channel's chat. The reply finds the thread
-      // from the id of the message it answers.
-      return {
-        ...base,
-        chatId: channel as ChatId,
-        ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-        thread: { kind: "group" },
-        addressing: "mention",
-      };
+      return { ...base, where: { chatId: channel as ChatId, kind: "group" } };
     }
     return null;
   }
 
-  private async deliver(message: ChannelMessage, teamId: string, userId: string): Promise<void> {
+  private async deliver(
+    message: connections.Message,
+    teamId: string,
+    userId: string,
+  ): Promise<void> {
     const name = await this.lookUpName(teamId, userId);
-    const named: ChannelMessage = {
+    const named: connections.Message = {
       ...message,
-      ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
-      ...(name.username ? { senderUsername: name.username } : {}),
+      sender: {
+        ...message.sender,
+        ...(name.displayName ? { name: name.displayName } : {}),
+        ...(name.username ? { handle: name.username } : {}),
+      },
     };
-    log.info("message received", {
-      chatId: named.chatId,
-      threadKind: named.thread?.kind,
-    });
+    log.info("message received", { chatId: named.where.chatId, kind: named.where.kind });
     try {
       await this.handler?.(named);
     } catch (error) {
-      log.error("message handler error", { messageId: named.messageId, error: describe(error) });
+      log.error("message handler error", { messageId: named.id, error: describe(error) });
     }
   }
 

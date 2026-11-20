@@ -1,7 +1,7 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// transport core — gateway lifecycle, the inbound `Message`, slash
 // commands, send formatting — is `DiscordAdapter`
 // (packages/core/src/connections/kinds/discord/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.

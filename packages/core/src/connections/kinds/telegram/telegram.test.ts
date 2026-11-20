@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -67,7 +68,7 @@ describe("TelegramAdapter", () => {
   async function startCapturing(): Promise<ChannelMessage[]> {
     const captured: ChannelMessage[] = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "telegram"));
     });
     await adapter.start();
     await telegram.untilPolling();

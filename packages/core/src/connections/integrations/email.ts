@@ -3,7 +3,7 @@
 // Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
-// gate + body-pull + the inbound `ChannelMessage`, attachment download — is
+// gate + body-pull + the inbound `Message`, attachment download — is
 // `EmailAdapter` (packages/core/src/connections/kinds/email/email.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping (registry.ts)
 // drive it. The transport already speaks the channel's record, so inbound and

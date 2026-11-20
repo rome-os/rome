@@ -2,7 +2,7 @@
 //
 // WeChat is a Talker with a single `account` grant: the bot token + the account
 // coordinates (baseUrl, accountId, optional userId) minted by the QR pairing
-// flow. The transport core — long-poll, the inbound `ChannelMessage`,
+// flow. The transport core — long-poll, the inbound `Message`,
 // attachment download/decrypt, media send — is `WechatAdapter`
 // (packages/core/src/connections/kinds/wechat/wechat.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping drive it. The transport

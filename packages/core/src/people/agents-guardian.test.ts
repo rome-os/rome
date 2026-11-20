@@ -1,5 +1,6 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
 import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
 import type { PeopleRepository } from "./model/people-repository.js";
@@ -25,7 +26,7 @@ function message(
     hop: 1,
   });
   if (!inbound) throw new Error("the envelope names no sender agent");
-  return inbound;
+  return channelMessageOf(inbound, "agents");
 }
 
 const external = { account: "friend", sameAccount: false };

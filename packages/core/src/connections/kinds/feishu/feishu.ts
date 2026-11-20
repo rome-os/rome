@@ -15,15 +15,14 @@ import { preserveMentionOnlyText } from "../../../participation/mention-only.js"
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
+import type * as connections from "../../message.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
 import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type {
-  ChannelMessage,
   ChatDescriptor,
   ChatId,
   ChatSettingsControl,
   ChatSettingsSnapshot,
-  MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
@@ -31,6 +30,9 @@ import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 // The Lark SDK loads when a Feishu connection first needs it, not with every boot.
 const larkSdk =
   requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
+
+/** The bot's id in a message, while the SDK does not know the bot's own. */
+const UNKNOWN_BOT = "feishu:bot";
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
@@ -130,9 +132,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  * otherwise hand-roll:
  *
  * - inbound `on("message")` events arrive already normalized (sender name,
- *   resolved chat type, structured mentions). The adapter maps each onto the
- *   channel's own record, a `ChannelMessage` whose `raw` is the SDK's wire
- *   event, so the Connection integration delivers it as it is;
+ *   resolved chat type, structured mentions). The adapter maps each onto a
+ *   Connections message whose `raw` is the SDK's wire event, so the
+ *   Connection integration delivers it as it is;
  * - outbound `send(..., { markdown })` runs the SDK's builtin converter, which
  *   renders the text as a Feishu rich-text post so bold/lists/code/headings
  *   display correctly. Agent output is Markdown by design, so every reply takes
@@ -142,7 +144,7 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  */
 export class FeishuAdapter {
   private channel: LarkChannel;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
   private readonly connectionId?: string;
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
@@ -258,7 +260,7 @@ export class FeishuAdapter {
     return (await this.getChannelConfig(chatId)).autoThread ?? true;
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -293,9 +295,8 @@ export class FeishuAdapter {
           );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
-    const addressing: MessageAddressing =
-      threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
-    const directedStop = addressing !== "ambient" && isStopCommand(text);
+    // A stop said to the bot still reaches a group switched off below.
+    const directedStop = (threadType === "private" || m.mentionedBot) && isStopCommand(text);
     // Only a delivered message waits on the name; a dropped one starts the lookup.
     const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
@@ -323,36 +324,37 @@ export class FeishuAdapter {
     const name = await chatName;
     // The group's agent is not stamped on the message. The inbox reads it
     // from the conversation settings.
-    const msg: ChannelMessage = {
-      channel: "feishu",
-      direction: "inbound",
-      messageId: m.messageId,
-      chatId: m.chatId as ChatId,
-      senderId: m.senderId,
-      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
-      text,
-      attachments: [],
-      timestamp: new Date(m.createTime),
-      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
-      thread: {
-        kind: threadType === "private" ? "dm" : "group",
+    // The bot's own id, which its mentions name. Before the SDK knows it, a
+    // mention of the bot still names the bot, by this stand-in.
+    const me = this.channel.botIdentity?.openId ?? UNKNOWN_BOT;
+    const mentions = new Set(
+      m.mentions.map((each) => each.openId).filter((id): id is string => Boolean(id)),
+    );
+    if (m.mentionedBot) mentions.add(me);
+    const msg: connections.Message = {
+      id: m.messageId,
+      where: {
+        chatId: m.chatId as ChatId,
+        kind: threadType === "private" ? "direct" : "group",
         ...(name ? { name } : {}),
       },
-      addressing,
+      sender: { accountId: m.senderId, ...(m.senderName ? { name: m.senderName } : {}) },
+      content: { text, attachments: [] },
+      receivedBy: me,
+      // @all is not an individual account, so it is not among them.
+      mentions: [...mentions],
+      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
+      saidAt: new Date(m.createTime),
       raw: m.raw ?? m,
     };
 
-    log.info("message received", {
-      from: msg.senderId,
-      chatId: msg.chatId,
-      threadKind: msg.thread?.kind,
-    });
+    log.info("message received", { from: msg.sender.accountId, chatId: msg.where.chatId });
 
     try {
       await this.handler(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.messageId,
+        messageId: msg.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }

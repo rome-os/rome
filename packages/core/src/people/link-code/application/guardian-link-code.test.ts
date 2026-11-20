@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../../../connections/registry.js";
@@ -121,7 +122,7 @@ describe("guardian link admission", () => {
       config: { address: "slug@mail.romeos.cc", inboundSecret: "secret" },
     });
     mail.onInbound(async (m) => {
-      inbound.push(m);
+      inbound.push(channelMessageOf(m, "email"));
     });
     const raw = JSON.stringify({
       type: "message.received",

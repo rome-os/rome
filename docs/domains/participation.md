@@ -30,6 +30,15 @@ The check that decides whether a message wakes the agent. It looks at where the 
 - When two of Rome's accounts hear a message, the wake is decided once for each of them, on that account's settings and on how the message addressed it. A message addressed to neither can wake both agents, if both chats wake on every message.
 - The wake gate calls no model, sends nothing and stores nothing, so the same message from the same sender always gets the same answer. It reads the guardian's settings as they are when the message arrives.
 
+## Addressed
+
+Whom a message addresses, as one of Rome's accounts reads it: Rome's account, others, or nobody. It is worked out from the [message](connections.md#message) a connection delivered, for each of Rome's accounts that received it, and it is never stored on the message.
+
+- A message addresses Rome's account when it is a direct message, mentions the account, replies to a message the account said, or is said in a thread the account started.
+- Otherwise a message that mentions or replies to someone else addresses others, and any other message addresses nobody.
+- A reply to Rome's account that also mentions someone else addresses Rome's account (Ouou, 2026-11-20). So does a message in a thread the account started that mentions someone else, by the same rule.
+- Two of Rome's accounts in one chat can read one message differently: it can address one and not the other.
+
 ## Projection
 
 The agent's working memory of a chat: a view built from the chat's messages, not the record itself. [Chats](chats.md) keeps the record and offers it. What the agent keeps of it is its own business ([Agents](agents.md)).

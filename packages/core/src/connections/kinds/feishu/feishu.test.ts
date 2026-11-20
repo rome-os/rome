@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, rs } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type {
   ChannelMessage,
   ChatDescriptor,
@@ -250,7 +251,7 @@ describe("FeishuAdapter", () => {
     );
     captured = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
   });
@@ -464,7 +465,7 @@ describe("FeishuAdapter", () => {
     );
     captured = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
 
@@ -525,7 +526,7 @@ describe("FeishuAdapter", () => {
     );
     captured = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
 
@@ -555,7 +556,7 @@ describe("FeishuAdapter", () => {
     );
     captured = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
 
@@ -581,7 +582,7 @@ describe("FeishuAdapter", () => {
     );
     captured = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
 
@@ -613,7 +614,7 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "feishu"));
     });
     await adapter.start();
 

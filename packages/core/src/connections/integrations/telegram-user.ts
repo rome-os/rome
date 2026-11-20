@@ -7,7 +7,7 @@
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
-// inbound `ChannelMessage`, media download, send — is
+// inbound `Message`, media download, send — is
 // `TelegramUserAdapter` (packages/core/src/connections/kinds/telegram-user/telegram-user.ts), wrapped
 // here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
 // drive it. The transport already speaks the channel's record, so inbound and
