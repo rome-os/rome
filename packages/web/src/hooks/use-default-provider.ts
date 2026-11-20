@@ -33,12 +33,6 @@ export interface ProviderOutage {
 const DEFAULT_PROVIDER_QUERY_KEY = ["ai-tools", "default"] as const;
 const PROVIDER_OUTAGES_QUERY_KEY = ["ai-tools", "provider-outages"] as const;
 
-const DEFAULT_MODEL_PROVIDERS: readonly DefaultModelProvider[] = [
-  "anthropic",
-  "openai",
-  "rome_credits",
-];
-
 /** The default provider and signed-in providers; null where the instance has none. */
 export function useDefaultProvider() {
   return useQuery<DefaultProviderState | null>({
@@ -98,7 +92,13 @@ export function useDismissDefaultProviderNote() {
  * on the same provider.
  */
 export type ProviderSwitch =
-  | { kind: "provider"; provider: DefaultModelProvider; makeDefault: boolean }
+  | {
+      kind: "provider";
+      provider: DefaultModelProvider;
+      makeDefault: boolean;
+      /** With `makeDefault`: other chats move too, as Settings' "Move existing chats too". */
+      moveExisting?: boolean;
+    }
   | { kind: "model"; selection: string };
 
 /**

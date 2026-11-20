@@ -794,6 +794,8 @@
       "bodyTasks_one": "The {{count}} affected task continues on {{provider}}.",
       "bodyTasks_other": "The {{count}} affected tasks continue on {{provider}}.",
       "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
+      "moveExisting": "Move existing chats too",
+      "moveExistingHelp": "Other chats switch to {{provider}} on their next reply.",
       "switch": "Switch",
       "cancel": "Cancel"
     }

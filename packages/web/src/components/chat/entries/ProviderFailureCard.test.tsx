@@ -110,17 +110,47 @@ describe("ProviderFailureCard", () => {
     ).toBeTruthy();
     const makeDefault = within(dialog).getByRole("checkbox", { name: "Also make default" });
     expect(makeDefault.getAttribute("aria-checked")).toBe("false");
+    expect(within(dialog).queryByRole("checkbox", { name: "Move existing chats too" })).toBeNull();
     await userEvent.click(makeDefault);
+    // Making it the default asks what Settings asks, moving the other chats by default.
+    const moveExisting = within(dialog).getByRole("checkbox", { name: "Move existing chats too" });
+    expect(moveExisting.getAttribute("aria-checked")).toBe("true");
+    expect(
+      within(dialog).getByText("Other chats switch to Claude on their next reply."),
+    ).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
 
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")).toMatchObject({
         url: "/api/ai-tools/provider-failures/m1/switch",
-        body: { kind: "provider", provider: "anthropic", makeDefault: true },
+        body: { kind: "provider", provider: "anthropic", makeDefault: true, moveExisting: true },
       }),
     );
     expect(await screen.findByText("Switched to Claude, continued")).toBeTruthy();
     expect(settled).toHaveBeenCalled();
+  });
+
+  it("makes it the default and leaves the other chats where they are", async () => {
+    const calls = mockApi();
+    renderCard({});
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Also make default" }));
+    await userEvent.click(
+      within(dialog).getByRole("checkbox", { name: "Move existing chats too" }),
+    );
+    expect(
+      within(dialog).queryByText("Other chats switch to Claude on their next reply."),
+    ).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+        kind: "provider",
+        provider: "anthropic",
+        makeDefault: true,
+        moveExisting: false,
+      }),
+    );
   });
 
   it("asks to log in again, with a switch and the provider's detail behind Details", async () => {
@@ -151,11 +181,15 @@ describe("ProviderFailureCard", () => {
     expect(screen.getByText("Claude is not logged in")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Use Rome credits" }));
     const dialog = await screen.findByRole("dialog");
-    // Credits exist only with no login: no default to make, the balance instead.
+    // The balance, and the same default choice as any switch: this chat only unless checked.
     expect(
       await within(dialog).findByText("This chat continues on Rome credits ($2.00 left)."),
     ).toBeTruthy();
-    expect(within(dialog).queryByRole("checkbox")).toBeNull();
+    expect(
+      within(dialog)
+        .getByRole("checkbox", { name: "Also make default" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")?.body).toEqual({

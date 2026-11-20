@@ -264,9 +264,14 @@ export function FailureActions({
         affectedTasks={affectedTasks}
         pending={pending}
         onCancel={() => setConfirming(null)}
-        onConfirm={(makeDefault) => {
+        onConfirm={(makeDefault, moveExisting) => {
           if (!confirming) return;
-          onSwitch({ kind: "provider", provider: confirming, makeDefault });
+          onSwitch({
+            kind: "provider",
+            provider: confirming,
+            makeDefault,
+            ...(makeDefault ? { moveExisting } : {}),
+          });
           setConfirming(null);
         }}
       />
@@ -402,9 +407,9 @@ export function ProviderFailureCard({
 
 /**
  * Confirms a card's switch to another provider: this chat (or the notice's
- * stopped tasks) moves, and with "Also make default" the default too. Rome
- * credits exist only with no login, so their switch offers no default and
- * names the balance instead. docs/domains/agents.md#provider-failure
+ * stopped tasks) moves, and with "Also make default" the default too, with
+ * the same "Move existing chats too" choice Settings asks. Rome credits name
+ * their balance. docs/domains/agents.md#provider-failure
  */
 function SwitchConfirmDialog({
   provider,
@@ -418,16 +423,18 @@ function SwitchConfirmDialog({
   affectedTasks?: number;
   pending: boolean;
   onCancel: () => void;
-  onConfirm: (makeDefault: boolean) => void;
+  onConfirm: (makeDefault: boolean, moveExisting: boolean) => void;
 }) {
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const [makeDefault, setMakeDefault] = useState(false);
+  const [moveExisting, setMoveExisting] = useState(true);
   const [credits, setCredits] = useState<RomeCreditsView | null | undefined>(undefined);
   const open = provider !== null;
   useEffect(() => {
     if (!open) return;
     setMakeDefault(false);
+    setMoveExisting(true);
     if (provider === "rome_credits") void readRomeCredits().then(setCredits);
   }, [open, provider]);
   if (!provider) return null;
@@ -451,22 +458,33 @@ function SwitchConfirmDialog({
       cancelLabel={t("providerFailure.confirm.cancel")}
       confirmDisabled={pending}
       onCancel={onCancel}
-      onConfirm={() => onConfirm(provider !== "rome_credits" && makeDefault)}
+      onConfirm={() => onConfirm(makeDefault, moveExisting)}
     >
-      {provider === "rome_credits" ? null : (
-        <div className="space-y-1">
-          <LabeledCheckbox
-            checked={makeDefault}
-            disabled={pending}
-            onCheckedChange={setMakeDefault}
-          >
-            {t("providerFailure.alsoMakeDefault")}
-          </LabeledCheckbox>
+      <div className="space-y-1">
+        <LabeledCheckbox checked={makeDefault} disabled={pending} onCheckedChange={setMakeDefault}>
+          {t("providerFailure.alsoMakeDefault")}
+        </LabeledCheckbox>
+        {makeDefault ? (
+          <div className="space-y-1 pt-1 pl-6">
+            <LabeledCheckbox
+              checked={moveExisting}
+              disabled={pending}
+              onCheckedChange={setMoveExisting}
+            >
+              {t("providerFailure.confirm.moveExisting")}
+            </LabeledCheckbox>
+            {moveExisting && (
+              <p className="pl-6 text-aux text-muted-foreground">
+                {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
+              </p>
+            )}
+          </div>
+        ) : (
           <p className="pl-6 text-aux text-muted-foreground">
             {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}
           </p>
-        </div>
-      )}
+        )}
+      </div>
     </RomeConfirmDialog>
   );
 }

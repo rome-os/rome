@@ -79,7 +79,7 @@ describe("ProviderOutageNotice", () => {
       expect(calls).toEqual([
         {
           url: "/api/ai-tools/provider-outages/o1/switch",
-          body: { kind: "provider", provider: "openai", makeDefault: true },
+          body: { kind: "provider", provider: "openai", makeDefault: true, moveExisting: true },
         },
       ]),
     );
