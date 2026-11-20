@@ -442,6 +442,28 @@ describe("the three cards", () => {
     expect(h.runs.map((run) => run.threadId).sort()).toEqual(["chat", "other"]);
   });
 
+  it("rewrites the card in place when the resumed turn fails again", async () => {
+    const reports: ModelAccountReports = { anthropic: reportOf("usage_limit_reached") };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", quota);
+    reports.anthropic = reportOf("available");
+    await h.accountChanged("anthropic");
+    await h.fail("chat", quota, true);
+    await h.accountChanged("anthropic");
+    expect([...h.messages.values()].filter((m) => m.chatId === "chat")).toHaveLength(1);
+    expect(h.runs).toHaveLength(1);
+  });
+
+  it("never resumes a quota card on an account that read available all along", async () => {
+    // An API key has no usage window: its account reads available even while
+    // the provider refuses every turn, so resuming on each read would loop.
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") }, { outcome: "failed" });
+    await h.fail("chat", quota);
+    for (let read = 0; read < 3; read++) await h.accountChanged("anthropic");
+    expect(h.runs).toEqual([]);
+    expect(h.cardIn("chat")?.resolved).toBeUndefined();
+  });
+
   it("leaves a spending limit to the guardian when the account reads fine", async () => {
     const h = harness({ chat: {} }, { anthropic: reportOf("available") });
     await h.fail("chat", spendCap);
@@ -495,9 +517,14 @@ describe("the three cards", () => {
     expect(h.failures.carded("chat")).toBe(true);
     reports.anthropic = reportOf("available");
     await h.accountChanged("anthropic");
-    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
     expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    // The card settles once the stopped turn ran.
+    await h.failures.succeeded("chat");
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
     expect(h.failures.carded("chat")).toBe(false);
+    // Another read resumes nothing more.
+    await h.accountChanged("anthropic");
+    expect(h.runs).toHaveLength(1);
   });
 
   it("settles a card when a later turn in the chat runs", async () => {
@@ -588,6 +615,7 @@ describe("unattended chats", () => {
     await h.fail("a", quota);
     reports.anthropic = reportOf("available");
     await h.accountChanged("anthropic");
+    await h.failures.succeeded("a");
     expect(h.notice()?.resolved).toMatchObject({ by: "recovered" });
     expect(await h.failures.outages()).toEqual([]);
     expect(h.runs.map((run) => run.threadId)).toEqual(["a"]);

@@ -91,6 +91,12 @@ export interface OpenProviderCard {
   since: string;
   /** How many times Rome ran the stopped turn again for a card that recovers by itself. */
   attempts: number;
+  /**
+   * What the provider's account read when the card showed. Only a read that
+   * then turns available settles the card: an account billed per use reads
+   * available throughout, so its card waits for the guardian or a later turn.
+   */
+  stateAtFailure?: string;
 }
 
 /** One incident that stopped unattended chats, as stored. */
@@ -447,6 +453,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (open && !written) {
         open.part = part;
         open.runsOn = runsOn;
+        const state = deps.accounts.read()[runsOn]?.state;
+        if (state) open.stateAtFailure = state;
         await deps.webchatRepo.updateMessageContent(open.messageId, content(open));
         await writeCards(cards);
         return open;
@@ -462,6 +470,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       }
       // A newer card replaces the chat's older one, which settles as superseded.
       const rest = cards.filter((card) => card.chatId !== turn.chatId);
+      const state = deps.accounts.read()[runsOn]?.state;
       const card: OpenProviderCard = {
         messageId,
         chatId: turn.chatId,
@@ -471,6 +480,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         beside: written?.beside ?? [],
         since: now().toISOString(),
         attempts: 0,
+        ...(state ? { stateAtFailure: state } : {}),
       };
       await writeCards([...rest, card]);
       return card;
@@ -661,26 +671,34 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     }
   };
 
-  // The provider runs again: its cards settle, and their stopped turns run.
+  // The provider runs again: the stopped turns run, and each card settles
+  // when its turn does. One that fails again rewrites its card in place.
   const stopAccounts = deps.accounts.onChanged((provider, _change, succeeded) => {
     if (stopped || succeeded === false) return;
     if (provider !== "anthropic" && provider !== "openai") return;
-    if (deps.accounts.read()[provider]?.state !== "available") return;
-    void settle(
-      (card) =>
-        card.runsOn === provider &&
-        // A spending limit or used-up credits show nothing on the account's
-        // state, so only the guardian or a later turn settles them.
-        (card.part.reason === "quota" ||
-          card.part.reason === "login" ||
-          card.part.reason === "removed" ||
-          // A fresh temporary card waits for its own retry, not the next read.
-          ((card.part.reason === "temporary" || card.part.reason === "capacity") &&
-            card.attempts > 0)),
-      () => ({ at: now().toISOString(), by: "recovered", continued: true }),
-    ).then((ended) => {
-      for (const card of ended)
-        resume(card.chatId, card.agentName, providerName(card.part.provider));
+    const state = deps.accounts.read()[provider]?.state;
+    if (state !== "available") return;
+    void serial(async () => {
+      const cards = await readCards();
+      const due = cards.filter(
+        (card) =>
+          card.runsOn === provider &&
+          // Only an account that read as out when the card showed, and reads
+          // available now, recovered. One that read available all along
+          // (billed per use, or a temporary error) would only fail again.
+          card.stateAtFailure !== undefined &&
+          card.stateAtFailure !== "available" &&
+          (card.part.reason === "quota" ||
+            card.part.reason === "login" ||
+            card.part.reason === "removed"),
+      );
+      if (due.length === 0) return [];
+      // Recorded before the turns run, so a read during them resumes nothing twice.
+      for (const card of due) card.stateAtFailure = state;
+      await writeCards(cards);
+      return due;
+    }).then((due) => {
+      for (const card of due) resume(card.chatId, card.agentName, providerName(card.part.provider));
     });
   });
 

@@ -100,7 +100,12 @@ function claude(req, res, body) {
   }
   const error = claudeErrors[modes.claude];
   if (error) {
-    res.writeHead(error[0], { "content-type": "application/json" });
+    // A rate limit or an overload is worth a retry; nothing else is, as the real API says.
+    const retry = modes.claude === "rate" || modes.claude === "overloaded";
+    res.writeHead(error[0], {
+      "content-type": "application/json",
+      "x-should-retry": String(retry),
+    });
     res.end(JSON.stringify({ type: "error", error: { type: error[1], message: error[2] } }));
     return;
   }
@@ -295,6 +300,10 @@ function handle(req, res) {
       return;
     }
     const which = req.url.startsWith("/backend-api") ? "chatgpt" : "claude";
+    // What a provider switch carried, so a walk-through can check it.
+    const carried = ["<handoff_request>", "<handoff>", "<executed_actions>", "<continuation"]
+      .filter((marker) => raw.includes(marker))
+      .join(" ");
     console.log(
       new Date().toISOString(),
       which,
@@ -302,6 +311,7 @@ function handle(req, res) {
       req.method,
       req.url,
       body.model ?? "",
+      carried,
     );
     if (which === "chatgpt") chatgpt(req, res, body);
     else claude(req, res, body);
