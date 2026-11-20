@@ -222,6 +222,21 @@ export function buildMessageContext(
   ].join("\n");
 }
 
+const DECISION_OF = { replied: "REPLY", escalated: "ESCALATE", ignored: "IGNORE" } as const;
+
+/** Whether `raw` names `action`'s decision and no other: every REPLY,
+ *  ESCALATE or IGNORE written in capitals, and every one after "Decision:"
+ *  in any case, is that one. */
+export function namesOnly(raw: string, action: SentinelDecision["action"]): boolean {
+  const named = new Set([
+    ...[...raw.matchAll(/\b(REPLY|ESCALATE|IGNORE)\b/g)].map((m) => m[1]),
+    ...[...raw.matchAll(/Decision\s*:\s*(REPLY|ESCALATE|IGNORE)\b/gi)].map((m) =>
+      (m[1] ?? "").toUpperCase(),
+    ),
+  ]);
+  return named.size === 1 && named.has(DECISION_OF[action]);
+}
+
 export function parseSentinelDecision(raw: string): SentinelDecision {
   const trimmed = raw.trim();
   if (!trimmed) return { action: "escalated" };
@@ -699,10 +714,13 @@ async function handleUntrustedMessage(
 
   const sentinelOutput = sentinelResult.content;
   const parsed = parseSentinelDecision(sentinelOutput);
-  // A member let in only by the switch reaches the account's agent only when
-  // the sentinel said so, never because its output could not be read.
+  // A member let in only by the switch is answered or reaches the account's
+  // agent only when the sentinel named that one decision, never because its
+  // output could not be read or named another as well.
   const decision: SentinelDecision =
-    answeredOnlyAsMember && parsed.action === "escalated" && !parsed.explicit
+    answeredOnlyAsMember &&
+    ((parsed.action === "escalated" && !parsed.explicit) ||
+      !namesOnly(sentinelOutput, parsed.action))
       ? { action: "ignored" }
       : parsed;
   log.info("sentinel decision", { action: decision.action, channel, channelUserId });
