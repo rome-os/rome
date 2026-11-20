@@ -40,7 +40,12 @@ export class SlackAppRefused extends Error {
 
 export interface SlackAppCloud {
   start(input: { callbackOrigin: string; state: string; codeChallenge: string }): Promise<string>;
-  redeem(input: { handoff: string; codeVerifier: string }): Promise<SlackAppInstall>;
+  /** `signal` is the setup's: an install that lands once it aborted is
+   *  held by no grant. */
+  redeem(
+    input: { handoff: string; codeVerifier: string },
+    signal?: AbortSignal,
+  ): Promise<SlackAppInstall>;
   refreshMailbox(teamId: string): Promise<SlackAppMailbox>;
   /** Let go of the workspace, so its events go nowhere and any Rome may
    *  connect it again. Releasing one no longer bound is not an error. Given
