@@ -1,5 +1,4 @@
 import {
-  CalendarClock,
   ChevronDown,
   ExternalLink,
   FileOutput,
@@ -41,7 +40,7 @@ import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { fitTabs } from "./tool-tab-fit";
-import { TaskList, type TaskListView } from "@/components/concierge/TaskList";
+import { TaskList } from "@/components/concierge/TaskList";
 import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
 import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
@@ -226,9 +225,6 @@ export function ToolWorkspace({
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
-  // What that tab lists: the task chats, or the routines. One tab serves both,
-  // so each header button opens its own list in it.
-  const [tasksView, setTasksView] = useState<TaskListView>("tasks");
   // The chat whose outputs the tab shows, and the output it was opened on.
   const [outputsTarget, setOutputsTarget] = useState<{
     chatId: string;
@@ -316,10 +312,9 @@ export function ToolWorkspace({
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const hasTabs = sorted.length > 0 || builtinOpen;
   const compact = width < COMPACT_WIDTH;
-  const showTasks = useCallback((chatId: string, view: TaskListView = "tasks") => {
+  const showTasks = useCallback((chatId: string) => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
     setTasksChatId(chatId);
-    setTasksView(view);
     setSelected("tasks");
   }, []);
   const hideTasks = useCallback(() => {
@@ -329,12 +324,11 @@ export function ToolWorkspace({
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({
       active: tasksActive && open,
-      view: tasksView,
       compact,
       show: showTasks,
       hide: hideTasks,
     }),
-    [tasksActive, open, tasksView, compact, showTasks, hideTasks],
+    [tasksActive, open, compact, showTasks, hideTasks],
   );
   const showOutputs = useCallback(
     (chatId: string, outputId?: string, options?: OutputsTabOptions) => {
@@ -452,11 +446,7 @@ export function ToolWorkspace({
   ]);
   const tabLabels: Record<string, string> = {
     ...(trace ? { [TRACE_TAB_ID]: tActivity("trace.drawer.title") } : {}),
-    ...(tasksOpen
-      ? {
-          [TASKS_TAB_ID]: tasksView === "routines" ? t("chat.routinesTab") : t("chat.tasksTab"),
-        }
-      : {}),
+    ...(tasksOpen ? { [TASKS_TAB_ID]: t("chat.tasksTab") } : {}),
     ...(outputsOpen ? { [OUTPUTS_TAB_ID]: tChat("outputs.title") } : {}),
     ...Object.fromEntries(sorted.map((widget) => [widget.id, label(widget)])),
   };
@@ -490,7 +480,7 @@ export function ToolWorkspace({
           {tasksOpen && shownIds.has(TASKS_TAB_ID) && (
             <ToolTab
               id={TASKS_TAB_ID}
-              label={tasksView === "routines" ? t("chat.routinesTab") : t("chat.tasksTab")}
+              label={t("chat.tasksTab")}
               active={tasksActive}
               onClose={hideTasks}
             />
@@ -565,12 +555,8 @@ export function ToolWorkspace({
             )}
             {tasksOpen && (
               <DropdownMenuItem onSelect={() => pickTab(TASKS_TAB_ID)}>
-                {tasksView === "routines" ? (
-                  <CalendarClock className="size-3.5" />
-                ) : (
-                  <ListChecks className="size-3.5" />
-                )}
-                {tasksView === "routines" ? t("chat.routinesTab") : t("chat.tasksTab")}
+                <ListChecks className="size-3.5" />
+                {t("chat.tasksTab")}
               </DropdownMenuItem>
             )}
             {outputsOpen && (
@@ -781,7 +767,7 @@ export function ToolWorkspace({
               >
                 {tasksChatId ? (
                   <div className="h-full overflow-y-auto pb-safe">
-                    <TaskList chatId={tasksChatId} view={tasksView} />
+                    <TaskList chatId={tasksChatId} />
                   </div>
                 ) : null}
               </TabsContent>

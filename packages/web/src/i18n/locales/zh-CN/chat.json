@@ -127,7 +127,7 @@
         "needs_you": "需要你",
         "active": "进行中",
         "later": "稍后",
-        "on_its_own": "定时任务",
+        "scheduled": "定时",
         "ended": "已结束"
       },
       "empty": "还没有任务。",
@@ -139,7 +139,6 @@
         "waitingApproval": "等你批准",
         "running": "运行中",
         "checksIn": "{{when}}检查",
-        "stopping": "正在停止…",
         "ended": {
           "done": "已完成",
           "failed": "失败",
@@ -162,7 +161,8 @@
       "follow": {
         "digest": "每天 {{times}} 汇总",
         "unavailable": "不可用",
-        "off": "已关闭"
+        "off": "已关闭",
+        "next": "下次 {{when}}"
       },
       "routine": {
         "paused": "已暂停",
@@ -170,20 +170,39 @@
         "fromTask": "来自 {{title}}"
       },
       "actions": {
+        "more": "「{{title}}」的更多操作",
         "stop": "停止",
-        "stopTask": "停止「{{title}}」"
+        "cancel": "取消",
+        "unfollow": "取消关注",
+        "pause": "暂停",
+        "resume": "恢复",
+        "delete": "删除"
       },
       "failed": {
-        "stop": "停止任务失败"
+        "stop": "停止任务失败",
+        "cancel": "取消提醒失败",
+        "unfollow": "取消关注失败",
+        "pause": "暂停定时任务失败",
+        "resume": "恢复定时任务失败",
+        "delete": "删除定时任务失败"
       },
       "endedAt": "结束于 {{when}}",
-      "routines": "定时任务",
       "needsYouDot": "有任务需要你",
-      "emptyRoutines": "还没有定时任务。"
+      "pending": {
+        "stopping": "正在停止…",
+        "cancelling": "正在取消…",
+        "unfollowing": "正在取消关注…",
+        "pausing": "正在暂停…",
+        "resuming": "正在恢复…",
+        "deleting": "正在删除…"
+      },
+      "deleteRoutine": {
+        "title": "删除「{{name}}」？",
+        "description": "它将不再运行并被移除，无法撤销。"
+      }
     },
     "menu": {
       "tasks": "任务",
-      "routines": "定时任务",
       "outputs": "产出",
       "needsYouDot": "有任务需要你"
     }

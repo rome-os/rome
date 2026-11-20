@@ -27,7 +27,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  CalendarClock,
   Cpu,
   FileOutput,
   FolderOpen,
@@ -2406,7 +2405,7 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The header's Tasks button and ⋯ menu open the chat's lists: what runs for it.
+  // The header's Tasks button opens the chat's task list: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
   // A dot on the header's Tasks button says a task chat needs its owner.
   const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
@@ -2481,7 +2480,7 @@ export function Chat({
     workspaceStore?.set("followTargetPath", logical);
   };
   // The header's ⋯ menu, in three parts: what opens in the side pane (Outputs,
-  // a Concierge chat's Routines, the chosen project), what is done to the
+  // the chosen project), what is done to the
   // chat (the main chat is only shared), and the model that answered last.
   // Its Tasks have a button of their own beside it.
   const opens: HeaderMenuItem[] = [
@@ -2491,16 +2490,6 @@ export function Chat({
       label: t("concierge.menu.outputs"),
       run: () => outputsPane.open(),
     },
-    ...(concierge
-      ? [
-          {
-            key: "routines",
-            icon: <CalendarClock />,
-            label: t("concierge.menu.routines"),
-            run: () => taskList.open("routines"),
-          },
-        ]
-      : []),
     ...(chosenProject
       ? [
           {
@@ -2610,7 +2599,7 @@ export function Chat({
           // its first message, has none.
           tasks={
             concierge && !blankTopicChat
-              ? { needsYou: tasksNeedYou, open: () => taskList.open("tasks") }
+              ? { needsYou: tasksNeedYou, open: () => taskList.open() }
               : undefined
           }
           menu={headerMenu}

@@ -127,7 +127,7 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Routines",
+        "scheduled": "Scheduled",
         "ended": "Ended"
       },
       "empty": "No tasks yet.",
@@ -139,7 +139,6 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "stopping": "Stopping…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
@@ -162,7 +161,8 @@
       "follow": {
         "digest": "Digest daily at {{times}}",
         "unavailable": "Not available",
-        "off": "Off"
+        "off": "Off",
+        "next": "next {{when}}"
       },
       "routine": {
         "paused": "Paused",
@@ -170,20 +170,39 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
+        "more": "More actions for {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}"
+        "cancel": "Cancel",
+        "unfollow": "Unfollow",
+        "pause": "Pause",
+        "resume": "Resume",
+        "delete": "Delete"
       },
       "failed": {
-        "stop": "Failed to stop the task"
+        "stop": "Failed to stop the task",
+        "cancel": "Failed to cancel the reminder",
+        "unfollow": "Failed to unfollow",
+        "pause": "Failed to pause the routine",
+        "resume": "Failed to resume the routine",
+        "delete": "Failed to delete the routine"
       },
       "endedAt": "Ended {{when}}",
-      "routines": "Routines",
       "needsYouDot": "A task needs you",
-      "emptyRoutines": "No routines yet."
+      "pending": {
+        "stopping": "Stopping…",
+        "cancelling": "Cancelling…",
+        "unfollowing": "Unfollowing…",
+        "pausing": "Pausing…",
+        "resuming": "Resuming…",
+        "deleting": "Deleting…"
+      },
+      "deleteRoutine": {
+        "title": "Delete “{{name}}”?",
+        "description": "It stops running and is removed. This cannot be undone."
+      }
     },
     "menu": {
       "tasks": "Tasks",
-      "routines": "Routines",
       "outputs": "Outputs",
       "needsYouDot": "A task needs you"
     }

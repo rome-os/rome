@@ -1,4 +1,4 @@
-// A Concierge chat's Tasks view: everything that runs for the chat, gathered
+// A Concierge chat's task list: everything that runs for the chat, gathered
 // from the reads that already decide it. Task chats bring their derived
 // status, checks and schedules come from the routines the Concierge made,
 // follows from the owner's following, and routines from their `chat_id`:
@@ -13,7 +13,9 @@ import {
   type TaskListRoutineItem,
   type TaskListTaskItem,
   type TaskListTrigger,
+  type TaskListParts,
   groupTaskList,
+  groupTaskPanel,
   pageTaskList,
 } from "@rome/api-types/task-list";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
@@ -98,12 +100,22 @@ function spent(routine: Routine): boolean {
 export class ChatTaskList {
   constructor(private readonly deps: ChatTaskListDeps) {}
 
-  /** Everything that runs for Concierge chat `chatId` of owner `owner`, grouped. */
+  /**
+   * Everything that runs for Concierge chat `chatId` of owner `owner`,
+   * grouped as the two views were, or as the one panel is.
+   */
   async read(
     chatId: string,
     owner: ConciergeOwner,
-    page: { endedBefore?: string } = {},
+    page: { endedBefore?: string; grouping?: "views" | "panel" } = {},
   ): Promise<TaskListResponse> {
+    const parts = await this.parts(chatId, owner);
+    const group = page.grouping === "panel" ? groupTaskPanel : groupTaskList;
+    return { chatId, groups: pageTaskList(group(parts), page.endedBefore) };
+  }
+
+  /** The rows of chat `chatId`'s list, before grouping: what its row actions may act on. */
+  async parts(chatId: string, owner: ConciergeOwner): Promise<TaskListParts> {
     const [mine, checks, follows, routines] = await Promise.all([
       this.deps.tasks.listForChatPanel(owner, chatId),
       this.deps.checks?.inChatForApi(chatId) ?? Promise.resolve([]),
@@ -125,13 +137,7 @@ export class ChatTaskList {
     const checkItems: TaskListCheckItem[] = checks
       .filter((check) => !check.taskId || !taskIds.has(check.taskId))
       .map((check) => ({ kind: "check", check: { ...check, taskTitle: null } }));
-    return {
-      chatId,
-      groups: pageTaskList(
-        groupTaskList({ tasks: taskItems, checks: checkItems, follows, routines }),
-        page.endedBefore,
-      ),
-    };
+    return { tasks: taskItems, checks: checkItems, follows, routines };
   }
 
   private async followsIn(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]> {

@@ -3054,20 +3054,17 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     // The header settles once the chat loads; Tasks has its own button.
     fireEvent.click(await screen.findByRole("button", { name: "concierge.menu.tasks" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    expect(mockOpenTaskList).toHaveBeenCalled();
     // The logo opens nothing.
     expect(document.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "recentChats.rename",
       "share.title",
       "navbar.archive",
       "navbar.delete",
     ]);
-    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -3084,7 +3081,6 @@ describe("Chat Concierge empty state", () => {
     // The main chat is only shared: no Rename, Archive or Delete.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
