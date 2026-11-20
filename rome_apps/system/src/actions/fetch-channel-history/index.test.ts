@@ -492,4 +492,58 @@ describe("fetch_channel_history", () => {
       expect(data).not.toHaveProperty("nextCursor");
     });
   });
+
+  describe("an account read one chat at a time", () => {
+    function liveDeps(chats?: ChannelsService["chats"]) {
+      const query = rs.fn<ChannelsService["query"]>(async (_account, read) => {
+        if (!read?.chatId)
+          throw new Error('Channel "slack" reads one chat at a time: name its chatId');
+        return [makeMessage({ channel: "slack", chatId: read.chatId, text: "tangerines" })];
+      });
+      const account = { platform: "slack", id: "T_A/B_1" };
+      const channelsService = {
+        list: async () => [{ name: "slack", account, platform: "slack", sendable: true }],
+        send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+        query,
+        ...(chats ? { chats } : {}),
+      } as ChannelsService;
+      return { query, action: createAction(actionConfig, { channelsService }) };
+    }
+
+    it("answers the chats it may read when no chat is named, so the caller can name one", async () => {
+      const chats = rs.fn<NonNullable<ChannelsService["chats"]>>(async () => ({
+        chats: [
+          { chatId: "CA0000NEWS1" as ChatId, name: "#news", kind: "group" },
+          { chatId: "DA000A0000GUARD" as ChatId, name: "Guardian", kind: "dm" },
+        ],
+        nextCursor: "more",
+      }));
+      const { action } = liveDeps(chats);
+
+      const result = await action.execute({ platform: "slack", windowHours: 720 });
+
+      expect(result.status).toBe("ok");
+      const data = (result as { data: { chats: { chatId: string }[]; content: string } }).data;
+      expect(data.chats.map((chat) => chat.chatId)).toEqual(["CA0000NEWS1", "DA000A0000GUARD"]);
+      expect(data.content).toContain("#news (group): threadId CA0000NEWS1");
+      expect(data.content).toContain("More chats than these 2");
+
+      const read = await action.execute({ platform: "slack", threadId: "CA0000NEWS1" });
+      expect((read as { data: { content: string } }).data.content).toContain("tangerines");
+    });
+
+    it("keeps the read's own error when the account lists no chats", async () => {
+      const refusing = liveDeps(
+        rs.fn<NonNullable<ChannelsService["chats"]>>(async () => {
+          throw new Error("lists no chats");
+        }),
+      );
+      const result = await refusing.action.execute({ platform: "slack" });
+      expect(result).toMatchObject({ status: "error" });
+      expect((result as { error: string }).error).toContain("reads one chat at a time");
+
+      const older = liveDeps();
+      expect(await older.action.execute({ platform: "slack" })).toMatchObject({ status: "error" });
+    });
+  });
 });

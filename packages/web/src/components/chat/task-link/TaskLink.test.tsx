@@ -90,6 +90,10 @@ describe("a task link in a Concierge message", () => {
     // The status word is in the tooltip and the label, never on the chip.
     expect(chip.getAttribute("title")).toBe("Active");
     expect(chip.hasAttribute("data-task-link")).toBe(true);
+    // The fill is on the link itself (globals.css), so its mark and its name
+    // are both inside it: the mark is a child of the link, never a sibling.
+    expect(chip.querySelector("[data-task-link-mark]")?.parentElement).toBe(chip);
+    expect(chip.querySelector("[data-task-link-name]")?.parentElement).toBe(chip);
     // Active draws the running ring, in the running blue.
     expect(chip.querySelector(".rome-status-spin")).toBeTruthy();
     expect(chip.querySelector(".rome-status-spin svg")?.getAttribute("class")).toContain(
