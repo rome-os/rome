@@ -29,6 +29,34 @@ describe("SlackMemberChannels", () => {
     expect(memberChannels).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves a name a renamed channel gave to another by the new listing", async () => {
+    let now = 0;
+    let channels = [NEWS, OPS];
+    const memberChannels = rs.fn(async () => ({ channels }));
+    const listing = new SlackMemberChannels({
+      api: { memberChannels },
+      botToken: "xoxb",
+      now: () => now,
+    });
+    expect(await listing.resolve("#news")).toBe("C_NEWS");
+
+    // #news is renamed #general, and #ops takes the name #news.
+    channels = [
+      { ...NEWS, name: "general" },
+      { ...OPS, name: "news" },
+    ];
+    now = 1_000;
+    // A send reads the listing again, however new it is.
+    expect(await listing.resolve("#news", undefined, { fresh: true })).toBe("C_OPS");
+    channels = [NEWS, OPS];
+    now = 2_000;
+    // A read takes a listing up to 10 seconds old, then reads it again.
+    expect(await listing.resolve("#news")).toBe("C_OPS");
+    now = 11_000;
+    expect(await listing.resolve("#news")).toBe("C_NEWS");
+    expect(memberChannels).toHaveBeenCalledTimes(3);
+  });
+
   it("refuses a listing longer than it reads, rather than taking a part of it as whole", async () => {
     const memberChannels = rs.fn(async () => ({ channels: [NEWS], nextCursor: "more" }));
     const listing = new SlackMemberChannels({ api: { memberChannels }, botToken: "xoxb" });
