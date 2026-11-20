@@ -96,6 +96,10 @@ export interface SlackAppAdapterConfig {
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
+  /** Whether Rome listens to the account now. A message heard while it does
+   *  not is neither kept nor handed over, so linking an agent later brings
+   *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
+  listened?: () => boolean;
   /** Now, for the copy's times. */
   now?: () => Date;
 }
@@ -334,6 +338,7 @@ export class SlackAppAdapter {
     }
     const text = decodeSlackText(event.text, this.config.botUserId);
     if (!text) return { status: 200 };
+    if (this.config.listened && !this.config.listened()) return { status: 200 };
 
     const name = await this.lookUpName(event.user);
     const message: ChannelMessage = {

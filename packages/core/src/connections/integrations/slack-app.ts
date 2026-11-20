@@ -218,6 +218,8 @@ export interface SlackAppDescriptorDeps {
   openMailbox: OpenMailbox;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
+  /** Whether Rome listens to the account behind a connection. */
+  listens: (connectionId: string) => boolean;
   instanceOrigin?: () => string;
 }
 
@@ -266,6 +268,7 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
             onMailboxRefreshed: (mailbox) => kit.persist({ ...material, ...mailbox }),
             onFault: ({ kind, cause }) => routeFault(cause, kind),
             copy: deps.copy,
+            listened: () => deps.listens(kit.connectionId),
           });
           return {
             start(deliver, fault): void {
