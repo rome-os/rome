@@ -79,6 +79,9 @@ function mockApi(
     if (url === "/api/integrations/composio/status") {
       return new Response(JSON.stringify({ composio }), { status: 200 });
     }
+    if (url.startsWith("/api/chat-settings?")) {
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    }
     // Ceremony cards self-fetch their transient status; minimal ok JSON is
     // enough when the ceremony state isn't the assertion target.
     return new Response("{}", { status: 200 });

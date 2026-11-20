@@ -245,6 +245,8 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
     setAdded((current) => mergeByKey(current, [picked]));
     setOpenKey(keyOf(picked));
     setAdding(false);
+    // A search the picked chat does not match would hide it.
+    setQuery("");
   }, []);
 
   const shown = useMemo(() => {
