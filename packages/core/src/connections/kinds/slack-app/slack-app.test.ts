@@ -2109,8 +2109,30 @@ describe("Slack app in the channels it is a member of", () => {
       expect.anything(),
     );
     expect(receipt.chatId).toBe("C_NEWS");
-    // The listing is asked once and reused.
-    expect(api.memberChannels).toHaveBeenCalledTimes(1);
+    // Each send by name reads the listing again.
+    expect(api.memberChannels).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends by a name to the channel that holds it now, after a rename gave it to another", async () => {
+    let channels = [OPS, NEWS];
+    const api = channelApi({ memberChannels: rs.fn(async () => ({ channels })) });
+    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    await a.start();
+    await a.send("#news" as never, { text: "first" });
+
+    // #news is renamed #general, and #ops takes the name #news.
+    channels = [
+      { ...NEWS, name: "general" },
+      { ...OPS, name: "news" },
+    ];
+    await a.send("#news" as never, { text: "second" });
+
+    expect(api.postMessage).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-a",
+      { channel: "G_OPS", markdown: "second", threadTs: undefined },
+      expect.anything(),
+    );
   });
 
   it("refuses a name no channel it is a member of has, saying so", async () => {

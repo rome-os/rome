@@ -8,8 +8,9 @@ import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 /** How long a listing of the app's channels is reused before Slack is asked
  *  again. */
 const MEMBER_CHANNELS_TTL_MS = 5 * 60 * 1000;
-/** How old a listing may be before a name it lacks makes Slack be asked
- *  again: someone may have just added the app with /invite. */
+/** How old a listing may be before a name is resolved from a new one:
+ *  someone may have just added the app with /invite, or renamed a channel
+ *  and given its old name to another. */
 const RELIST_AFTER_MS = 10 * 1000;
 /** One page of Slack's listing, and how many pages a listing reads at most:
  *  a listing that would need more is refused, never taken as whole. 10,000
@@ -77,18 +78,22 @@ export class SlackMemberChannels {
    * `chatId` with a channel's name in it, such as `#news` or
    * `#news:1700000000.000100`, made the channel's id. Any other chat id is
    * answered as it is. Rejects a name no channel the app is a member of has.
+   * A listing older than {@link RELIST_AFTER_MS} is read again first, and
+   * `fresh` reads it again whatever its age, as a send does: a renamed
+   * channel's old name may now be another channel's.
    */
-  async resolve(chatId: string, signal?: AbortSignal): Promise<ChatId> {
+  async resolve(
+    chatId: string,
+    signal?: AbortSignal,
+    { fresh = false }: { fresh?: boolean } = {},
+  ): Promise<ChatId> {
     if (!chatId.startsWith("#")) return chatId as ChatId;
     const separator = chatId.indexOf(":");
     const name = (separator === -1 ? chatId.slice(1) : chatId.slice(1, separator)).toLowerCase();
     const rest = separator === -1 ? "" : chatId.slice(separator);
-    let named = (await this.list(signal)).filter((channel) => channel.name === name);
     const now = this.deps.now?.() ?? Date.now();
-    if (named.length === 0 && this.cached && now - this.cached.at >= RELIST_AFTER_MS) {
-      this.cached = null;
-      named = (await this.list(signal)).filter((channel) => channel.name === name);
-    }
+    if (fresh || (this.cached && now - this.cached.at >= RELIST_AFTER_MS)) this.cached = null;
+    const named = (await this.list(signal)).filter((channel) => channel.name === name);
     if (named.length === 0) {
       throw new Error(
         `Rome's Slack app is not a member of a channel named #${name}. Someone in Slack can add it with /invite, or name the channel by its id.`,

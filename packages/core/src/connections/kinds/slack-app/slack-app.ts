@@ -649,7 +649,7 @@ export class SlackAppAdapter {
     refuseAttachments("slack", message);
     // Only a channel's name waits on Slack, so a send by id posts at once.
     const chatId = named.startsWith("#")
-      ? await this.memberChannels.resolve(named, this.abort.signal)
+      ? await this.memberChannels.resolve(named, this.abort.signal, { fresh: true })
       : named;
     const text = textToSend("slack", message).trim();
     const replyTo = replyToShaped("slack", message.replyToMessageId, SLACK_MESSAGE_ID);
