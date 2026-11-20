@@ -137,8 +137,11 @@ export class EventSources {
     if (missing) return { ok: false, error: `${eventName} needs ${missing}` };
 
     const expected = dryRun ? ["active", "inactive"] : ["existing", "created"];
-    // The manifest names the declaring app's own action.
-    const ensureAction = `${source.appId}:${source.ensureAction}`;
+    // The manifest names the declaring app's own action, by its local name or
+    // its full ID.
+    const ensureAction = source.ensureAction.includes(":")
+      ? source.ensureAction
+      : `${source.appId}:${source.ensureAction}`;
     try {
       const result = await run(ensureAction, { eventName, filter, dryRun });
       if (result.status === "error") {

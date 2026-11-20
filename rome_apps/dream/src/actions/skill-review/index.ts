@@ -43,7 +43,7 @@ export function createAction(
           workingDir: staging,
           prompt:
             `Review webchat session ${sessionId} and decide whether to save a skill. ` +
-            `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation. ` +
+            `Use dream:get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation. ` +
             `Your working directory (${staging}) is a staging copy of the user-skills carrier; save skills as skills/<name>/SKILL.md there.`,
         })) {
           recorder.observe(msg);

@@ -235,7 +235,7 @@ export function romeManagedConnectHint(toolkit: string): string {
  *  for a Rome-managed toolkit. These have no Composio tools — they're driven by
  *  `connector:connector_proxy` against the provider's native API with Rome's OAuth token. */
 export function romeManagedToolExecuteHint(toolkit: string): string {
-  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
+  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector:connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
 }
 
 /** Guidance for an agent that reached a Composio surface for GitHub. GitHub has
@@ -292,7 +292,7 @@ export async function composioActionError(
   if (isComposioAuthenticationError(err)) {
     const ping = await client.ping();
     if (!ping.ok && ping.status === 401) {
-      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
+      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector:connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
     }
   }
   return `${fallbackPrefix}: ${message}`;
@@ -362,7 +362,7 @@ export async function subscribeTriggerFeed(
         code: "no_connected_account",
         message: isRomeManagedToolkit(provider)
           ? romeManagedConnectHint(provider)
-          : `No active connected account for "${provider}" — run connector_connect for this toolkit first.`,
+          : `No active connected account for "${provider}" — run connector:connector_connect for this toolkit first.`,
       };
     }
     if (resolved.kind === "ambiguous") {

@@ -128,7 +128,7 @@ export class RoutinesRepository {
 
   /**
    * @deprecated Renames the action of every routine saved under an action's
-   * old bare name, such as `system:send_message`, to its full ID, such as
+   * old bare name, such as `send_message`, to its full ID, such as
    * `system:send_message`. Goes once no instance has a routine saved under an
    * old name.
    */

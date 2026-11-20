@@ -91,6 +91,20 @@ describe("EventSources", () => {
       });
     });
 
+    it("calls an ensure action a manifest names by full ID, as a remixed app's does", async () => {
+      const run = rs.fn<RunEnsureAction>(async () => ({
+        status: "ok",
+        data: { subscription: "created" },
+      }));
+      const remixed: DeclaredEventSource = {
+        ...github,
+        appId: "calendar",
+        ensureAction: "calendar:calendar_ensure",
+      };
+      await sources([], [remixed]).prepareWait("provider:event:github.push", REPO_FILTER, run);
+      expect(run).toHaveBeenCalledWith("calendar:calendar_ensure", expect.anything());
+    });
+
     it("refuses a filter that names no subscription target, without calling the action", async () => {
       const run = rs.fn<RunEnsureAction>();
       const result = await sources().prepareWait(

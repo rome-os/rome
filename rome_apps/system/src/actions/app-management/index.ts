@@ -155,7 +155,7 @@ export async function appManagement(
       };
     default: {
       const exhaustive: never = input;
-      throw new Error(`Unknown app_management op: ${JSON.stringify(exhaustive)}`);
+      throw new Error(`Unknown system:app_management op: ${JSON.stringify(exhaustive)}`);
     }
   }
 }
@@ -246,7 +246,7 @@ export function createAppManagementAction(config: ActionConfig, deps: AppManagem
         source: {
           type: "object",
           description:
-            "Install source. Required on every install call — the daemon does not infer it from the lockfile, so a re-install after edits must pass the same source as the first install. `mode` declares what the target is and is cross-checked against the directory's actual shape. Shapes: `{ mode: 'source', path: '<abs app repo root>' }` — the standard dev path; the daemon builds, packs, and installs in one step. `{ mode: 'bundle', path: '<abs packed artifact dir>' }` — install already-packed bytes as-is (CI artifacts, `rome build` output). `{ mode: 'appstore', listingId, version?, contentHash? }` — fetch from the Rome App Store. For appstore: call app_store_search first. `listingId` is the logical Rome Cloud listing id (`xiaohongshu` for unscoped, or `@handle/slug` for scoped). Omit `version` to install the latest live version, or pass a specific historical version if the listing detail still marks it live. `contentHash` is the optional 64-char hex sha256 of the tarball; when omitted, this action resolves it from the Store listing detail before installing.",
+            "Install source. Required on every install call — the daemon does not infer it from the lockfile, so a re-install after edits must pass the same source as the first install. `mode` declares what the target is and is cross-checked against the directory's actual shape. Shapes: `{ mode: 'source', path: '<abs app repo root>' }` — the standard dev path; the daemon builds, packs, and installs in one step. `{ mode: 'bundle', path: '<abs packed artifact dir>' }` — install already-packed bytes as-is (CI artifacts, `rome build` output). `{ mode: 'appstore', listingId, version?, contentHash? }` — fetch from the Rome App Store. For appstore: call system:app_store_search first. `listingId` is the logical Rome Cloud listing id (`xiaohongshu` for unscoped, or `@handle/slug` for scoped). Omit `version` to install the latest live version, or pass a specific historical version if the listing detail still marks it live. `contentHash` is the optional 64-char hex sha256 of the tarball; when omitted, this action resolves it from the Store listing detail before installing.",
           properties: {
             mode: { type: "string", enum: ["source", "bundle", "appstore"] },
             path: { type: "string" },

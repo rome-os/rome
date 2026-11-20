@@ -335,7 +335,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         );
     } catch (err) {
       void activity.then((session) => session?.finish("error")).catch(() => {});
-      log.error("message_handler action failed", {
+      log.error("inbox:message_handler action failed", {
         service,
         messageId: message.messageId,
         senderId: message.senderId,
