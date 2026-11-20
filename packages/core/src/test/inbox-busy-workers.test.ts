@@ -44,7 +44,7 @@ class SlowWorker extends EventEmitter {
       this.connected = false;
       this.exitCode = 0;
       queueMicrotask(() => this.emit("exit", 0, null));
-    } else if (sent.actionName === "message_handler" && sent.args) {
+    } else if (sent.actionName === "inbox:message_handler" && sent.args) {
       this.runs.push({ messageId: sent.args.messageId });
       this.pending += 1;
       inFlight.now += 1;
@@ -91,7 +91,7 @@ describe("Inbox when every action worker is busy", () => {
   it(`answers each of ${CHATS} direct messages from distinct chats once, at ${MAX_WORKERS} workers`, async () => {
     const workers: SlowWorker[] = [];
     const registry = new ActionRegistryImpl();
-    registry.register(buildAction("message_handler"));
+    registry.register(buildAction("inbox:message_handler"));
     const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
       workerWarmPoolSize: 0,
