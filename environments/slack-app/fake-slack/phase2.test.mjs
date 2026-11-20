@@ -464,7 +464,7 @@ test("the connector's Web API methods check scope and token type, and every call
   assert.equal(listed.ok, true);
   assert.deepEqual(
     listed.channels.map((c) => c.id),
-    ["CC0000GENRL", "DC000C0000OWNR1", "DC000C0000HANK1"],
+    ["CC0000GENRL", "DC000C0000OWNR1", "DC000C0000HANK1", "DC000C0000GST01"],
   );
   assert.equal(
     (await api("conversations.info", { channel: "CC0000GENRL" }, bot)).channel.name,
@@ -476,7 +476,7 @@ test("the connector's Web API methods check scope and token type, and every call
   const rest = await api("users.list", { cursor: people.response_metadata.next_cursor }, bot);
   assert.deepEqual(
     rest.members.map((m) => m.id),
-    [HANK],
+    [HANK, "UC0000GST01"],
   );
   const ts = said.event.ts;
   assert.equal(
@@ -956,6 +956,45 @@ test("a grant limit keeps a workspace on the old scopes until it is lifted and t
     await sleep(450);
     const now = await api("conversations.history", { channel: "CB0000GENRL" }, old.access_token);
     assert.equal(now.ok, true);
+  } finally {
+    await ctl("/grant-limit", { team: B, scopes: null });
+  }
+});
+
+test("users.info tells a guest from a full member, needs users:read, and is recorded", async () => {
+  const B = "TB0000BBBB";
+  const granted = await install(B, "UB0000GUARD", APP_SCOPES);
+  const bot = granted.access_token;
+  const since = (await ctl("/state")).seq;
+  const erin = await api("users.info", { user: "UB0000ERIN1" }, bot);
+  assert.equal(erin.user.team_id, B);
+  assert.deepEqual(
+    [erin.user.is_restricted, erin.user.is_ultra_restricted, erin.user.is_bot, erin.user.deleted],
+    [false, false, false, false],
+  );
+  const ivy = await api("users.info", { user: "UB0000GST01" }, bot);
+  assert.equal(ivy.user.is_restricted, true);
+  assert.equal(ivy.user.is_ultra_restricted, false);
+  const jo = await api("users.info", { user: "UC0000GST01" }, bot);
+  assert.equal(jo.error, "user_not_found");
+  // A guest can send the bot a direct message.
+  const dm = await ctl("/dm", { team: B, user: "UB0000GST01", text: "hello from a guest" });
+  assert.equal(dm.event_sent, true);
+  const { calls } = await ctl(`/calls?team=${B}&method=users.info&since=${since}`);
+  assert.deepEqual(
+    calls.map((c) => [c.args.user, c.ok]),
+    [
+      ["UB0000ERIN1", true],
+      ["UB0000GST01", true],
+      ["UC0000GST01", false],
+    ],
+  );
+  await ctl("/grant-limit", { team: B, scopes: "app_mentions:read,chat:write,im:history" });
+  try {
+    const limited = await install(B, "UB0000GUARD", APP_SCOPES);
+    const refused = await api("users.info", { user: "UB0000ERIN1" }, limited.access_token);
+    assert.equal(refused.error, "missing_scope");
+    assert.equal(refused.needed, "users:read");
   } finally {
     await ctl("/grant-limit", { team: B, scopes: null });
   }

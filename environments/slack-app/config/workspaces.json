@@ -24,6 +24,13 @@
           "name": "cara",
           "real_name": "Cara Member",
           "email": "cara@acme.test"
+        },
+        {
+          "id": "UA0000GST01",
+          "name": "gil",
+          "real_name": "Gil Guest",
+          "email": "gil@guest.test",
+          "is_restricted": true
         }
       ],
       "channels": [
@@ -105,6 +112,13 @@
           "name": "finn",
           "real_name": "Finn Member",
           "email": "finn@bayside.test"
+        },
+        {
+          "id": "UB0000GST01",
+          "name": "ivy",
+          "real_name": "Ivy Guest",
+          "email": "ivy@guest.test",
+          "is_restricted": true
         }
       ],
       "channels": [
@@ -133,6 +147,14 @@
           "name": "hank",
           "real_name": "Hank Member",
           "email": "hank@cobalt.test"
+        },
+        {
+          "id": "UC0000GST01",
+          "name": "jo",
+          "real_name": "Jo Guest",
+          "email": "jo@guest.test",
+          "is_restricted": true,
+          "is_ultra_restricted": true
         }
       ],
       "channels": [

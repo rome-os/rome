@@ -110,6 +110,14 @@ console.log(
           owned_by_team: i < 2,
           guardian: w.members.find((m) => m.is_owner)?.id ?? null,
           members: w.members.map((m) => m.id),
+          // Full members other than the guardian, and guests (is_restricted
+          // on users.info); any of them can send the bot a direct message.
+          full_members: w.members
+            .filter((m) => !m.is_owner && !m.is_restricted && !m.is_ultra_restricted)
+            .map((m) => m.id),
+          guests: w.members
+            .filter((m) => m.is_restricted || m.is_ultra_restricted)
+            .map((m) => m.id),
           // Each member's direct message with the bot, as the fake names it.
           im_channels: Object.fromEntries(
             w.members.map((m) => [
