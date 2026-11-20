@@ -30,6 +30,7 @@ import type { PeopleRepository } from "../../../people/model/people-repository.j
 import type { ChatSettingsService } from "../../../chat-settings/service.js";
 import {
   type CreateLarkChannel,
+  createLarkChannel,
   FeishuAdapter,
   type FeishuConfig,
   isFeishuAuthError,
@@ -54,11 +55,6 @@ import type {
 } from "../../types.js";
 import { addressIsConversationFeature, directoryPage } from "../../integrations/talk-features.js";
 import { createLogger } from "../../../logger.js";
-import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
-
-// The Lark SDK loads when a Feishu connection first needs it, not with every boot.
-const larkSdk =
-  requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
 
 const log = createLogger("feishu-setup");
 
@@ -482,27 +478,13 @@ export async function registerFeishuAgentApp(opts: {
   return { appId: result.client_id, appSecret: result.client_secret, domain };
 }
 
-/** Default LarkChannel factory (mirrors the FeishuAdapter default) parameterized
- *  by the pasted `app` material so `validate` can mint a token from it. */
-function defaultCreateChannel(config: FeishuConfig): LarkChannel {
-  return larkSdk().createLarkChannel({
-    appId: config.appId,
-    appSecret: config.appSecret,
-    domain: config.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
-    transport: "websocket",
-    outbound: { markdownConverter: "builtin" },
-    includeRawEvent: true,
-    loggerLevel: larkSdk().LoggerLevel.warn,
-  });
-}
-
 /**
  * Build the Feishu descriptor. Repos + the agent lister are threaded in at
  * registration time; `deps.createChannel` is injectable so the fault-mapping
  * tests can drive a fake LarkChannel without the network.
  */
 export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDescriptor {
-  const createChannel = deps.createChannel ?? defaultCreateChannel;
+  const createChannel = deps.createChannel ?? createLarkChannel;
   const probeCredentials = deps.probeCredentials ?? probeFeishuCredentials;
   const registerAgentApp = deps.registerAgentApp ?? registerFeishuAgentApp;
   const fetchBotName = deps.fetchBotName ?? fetchFeishuBotName;
@@ -542,6 +524,8 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     label: "Feishu",
     severalAccounts: true,
     reviveProfile: (record) => reviveFeishuProfile(record),
+    // A mention shows the bot's name; the handle is the application id.
+    mentionedBy: "displayName",
     accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,
     link: "own_account",
     grant: "app",
