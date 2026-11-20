@@ -207,8 +207,9 @@ describe("chatPromptFacts earlier messages", () => {
     const first = await fromStart.promptFacts.thread?.(group, "C1:root", before, 42);
     const later = await since.promptFacts.thread?.(group, "C1:root", before, 42, 41);
 
-    expect(first?.map((m) => m.text)).toEqual(["message 3"]);
-    expect(later?.map((m) => m.text)).toEqual(["message 7", "message 8"]);
+    expect(first?.messages.map((m) => m.text)).toEqual(["message 3"]);
+    expect(later?.messages.map((m) => m.text)).toEqual(["message 7", "message 8"]);
+    expect(later?.cut).toBe(false);
     // Asked from the message shown last, which the platform answers after:
     // a thread longer than a page still reads what came since.
     expect(since.latest).toHaveBeenCalledWith(

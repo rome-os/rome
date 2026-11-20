@@ -76,6 +76,9 @@ export function catchUpPrompt(
     /** The earlier messages of the platform thread the turn's message was
      *  said in, oldest first, when the session reads them this turn. */
     inThread?: readonly PromptMessage[];
+    /** The thread's latest replies before the turn's message are not among
+     *  {@link inThread}: more was said than one read holds. */
+    inThreadCut?: boolean;
   },
 ): string {
   const { unseen } = facts;
@@ -118,6 +121,7 @@ export function catchUpPrompt(
     sections.push(
       "<thread_messages>",
       ...facts.inThread.map((message) => contextLine(contextMessage(message))),
+      ...(facts.inThreadCut ? ["[later replies in this thread were not shown]"] : []),
       "</thread_messages>",
     );
   }

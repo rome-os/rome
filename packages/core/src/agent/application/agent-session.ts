@@ -4181,7 +4181,7 @@ class AgentSessionImpl implements AgentSession {
             this.threadsRead.get(sink.inThread) !== undefined)
             ? sink.inThread
             : undefined;
-        const inThread =
+        const threadRead =
           thread && promptFacts.thread
             ? await promptFacts
                 .thread(
@@ -4195,13 +4195,13 @@ class AgentSessionImpl implements AgentSession {
             : null;
         // A read that failed is tried again, from the same point, on the
         // thread's next message.
-        if (thread && inThread) this.threadsRead.set(thread, current?.id);
+        if (thread && threadRead) this.threadsRead.set(thread, current?.id);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
           current,
-          ...(inThread ? { inThread } : {}),
+          ...(threadRead ? { inThread: threadRead.messages, inThreadCut: threadRead.cut } : {}),
         });
       }
       // Every turn, subagents included: the folder is where the work happens.

@@ -448,8 +448,17 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             directory: {
               async listConversations(input) {
                 const query = input.query?.replace(/^#/, "").toLocaleLowerCase();
+                let channels: Awaited<ReturnType<typeof adapter.channels>>;
+                try {
+                  channels = await adapter.channels();
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
                 const page = directoryPage(
-                  (await adapter.channels()).filter(
+                  channels.filter(
                     (channel) => !query || channel.name.toLocaleLowerCase().includes(query),
                   ),
                   input,
