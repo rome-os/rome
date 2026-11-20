@@ -485,6 +485,9 @@ export class SlackAppAdapter {
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
 
+    // The switch as it stood when the message arrived: a change made while
+    // Slack answers the lookup counts from the next message.
+    const open = this.config.openToMembers?.() === true;
     const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {
       ...said,
@@ -505,7 +508,7 @@ export class SlackAppAdapter {
       // Only a person who is a full member of this workspace, by Slack's own
       // answer: a guest, a bot, a member of another workspace or a sender
       // Slack would not describe stays closed.
-      ...(event.user && name.fullMemberOf === this.config.teamId && this.config.openToMembers?.()
+      ...(open && event.user && name.fullMemberOf === this.config.teamId
         ? { openToMembers: true as const }
         : {}),
     };

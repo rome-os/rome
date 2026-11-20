@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
@@ -65,6 +65,7 @@ export function AccountControls({
             <AnswerMembersRow
               connectionId={ownSlot.connectionId}
               on={card.answerMembers === true}
+              snapshot={card}
               onRefresh={onRefresh}
             />
           )}
@@ -93,19 +94,29 @@ function addable(card: ConnectionCard): boolean {
 function AnswerMembersRow({
   connectionId,
   on,
+  snapshot,
   onRefresh,
 }: {
   connectionId: string;
   on: boolean;
+  /** The card as last loaded: each load brings a new one. */
+  snapshot: unknown;
   onRefresh: () => void | Promise<unknown>;
 }) {
   const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
-  // What this page last set, shown until the refresh after the change lands:
-  // the server's state then shows, a change made anywhere else included.
+  // What this page last set, shown until a load after the change brings the
+  // server's state, a change made anywhere else included.
   const [mine, setMine] = useState<boolean | null>(null);
+  const changing = useRef(false);
+  // A load that lands outside a change, such as a later poll after a failed
+  // refresh, shows the server's state.
+  useEffect(() => {
+    if (!changing.current) setMine(null);
+  }, [snapshot]);
   const shown = mine ?? on;
   const change = async (next: boolean) => {
+    changing.current = true;
     setBusy(true);
     setMine(next);
     try {
@@ -124,7 +135,11 @@ function AnswerMembersRow({
     // The server's state shows once a refresh brings it. A refresh that
     // could not load it answers false, and what the server last confirmed
     // stays shown.
-    if ((await onRefresh()) !== false) setMine(null);
+    try {
+      if ((await onRefresh()) !== false) setMine(null);
+    } finally {
+      changing.current = false;
+    }
   };
   return (
     <ListRow>

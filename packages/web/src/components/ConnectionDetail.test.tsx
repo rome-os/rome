@@ -662,6 +662,29 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 
+  it("shows the server's state again on the next load after a failed refresh", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/answer-members")
+        ? new Response(JSON.stringify({ answerMembers: true }), { status: 200 })
+        : new Response("{}", { status: 200 }),
+    );
+    const onRefresh = rs.fn(async () => false);
+    const { rerenderCard } = renderAccountBody(
+      cardFor([feishu({ answerMembers: false })], "feishu"),
+      { onRefresh },
+    );
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    await userEvent.setup().click(toggle());
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    await waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("true"));
+
+    // Another tab closed it again, and a later poll loads that.
+    rerenderCard(cardFor([feishu({ answerMembers: false })], "feishu"));
+
+    await waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("false"));
+  });
+
   it("shows no members switch for a service that has none", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
     expect(

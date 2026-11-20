@@ -2257,15 +2257,16 @@ describe("Slack app in the channels it is a member of", () => {
 describe("Slack app opened to the workspace's other members (R12)", () => {
   /** An adapter whose switch reads `open`, in a workspace where U_KIM is a
    *  full member and U_GUEST a guest. */
-  function openable(open: { on: boolean }) {
+  function openable(open: { on: boolean }, whileLookingUp: () => void = () => {}) {
     const api = fakeApi({
-      userName: rs.fn(async (_token: string, user: string) =>
-        user === "U_GUEST"
+      userName: rs.fn(async (_token: string, user: string) => {
+        whileLookingUp();
+        return user === "U_GUEST"
           ? { displayName: "Guest" }
           : user === "U_OTHER"
             ? { displayName: "Other", fullMemberOf: "T_OTHER" }
-            : { displayName: "Kim", fullMemberOf: TEAM },
-      ),
+            : { displayName: "Kim", fullMemberOf: TEAM };
+      }),
     });
     const delivered: ChannelMessage[] = [];
     const a = new SlackAppAdapter({
@@ -2309,6 +2310,19 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
     await a.handleFrame(from(3, "U_KIM"));
 
     expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined, undefined]);
+  });
+
+  it("takes the switch as it stood when the message arrived, not as it stands once Slack names the sender", async () => {
+    const open = { on: false };
+    // The guardian opens the switch while Slack answers the lookup.
+    const { a, delivered } = openable(open, () => {
+      open.on = true;
+    });
+    await a.start();
+    await a.handleFrame(from(1, "U_KIM"));
+
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).not.toHaveProperty("openToMembers");
   });
 
   it("asks Slack again after ten minutes, so a member made a guest is no longer marked", async () => {
