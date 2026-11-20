@@ -412,6 +412,10 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
+  /** True when agents act on the platform with this kind's grant alone,
+   *  through the connector's proxy, though the kind has no actor: `act` is
+   *  then unlocked while the grant is authorized. Absent means they do not. */
+  actsWithGrant?: boolean;
   /** False when the guardian may no longer connect a new account of this
    *  kind, as for a kind another one replaces. Its connections keep loading,
    *  sending and being fixed until the guardian disconnects them. Unset, the

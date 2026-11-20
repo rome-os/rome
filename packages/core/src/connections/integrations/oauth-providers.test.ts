@@ -75,6 +75,16 @@ describe("OAuth connection kinds' display labels", () => {
   });
 });
 
+describe("OAuth connection kinds agents act with", () => {
+  it("lets agents act with the Slack sign-in's token through the connector, and only that kind", () => {
+    expect(
+      (["github", "google", "slack", "shopify"] as const).map(
+        (provider) => makeOAuthProviderDescriptor(provider).actsWithGrant === true,
+      ),
+    ).toEqual([false, false, true, false]);
+  });
+});
+
 describe("OAuth profile revival", () => {
   it("revives GitHub's stored schema: login is the handle, committer identity fields survive", () => {
     const revive = makeOAuthProviderDescriptor("github").reviveProfile;
