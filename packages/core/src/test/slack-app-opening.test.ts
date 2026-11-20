@@ -322,6 +322,72 @@ describe("a mention inside a Slack thread (R14)", () => {
     expect(conversationReplies).toHaveBeenCalledTimes(1);
   });
 
+  it("reads a long thread again from the last mention the model was shown, not from its start", async () => {
+    const root = tsOf(1);
+    // A thread of 30 messages: Slack answers it oldest first, a page at a
+    // time, from just after `oldest` when given.
+    const thread: SlackWireMessage[] = Array.from({ length: 30 }, (_, i) => ({
+      ts: tsOf(i + 1),
+      user: i === 2 || i === 29 ? MEMBER : "U_SAM",
+      text: i === 2 || i === 29 ? `<@${BOT}> mention ${i + 1}` : `reply ${i + 1}`,
+      thread_ts: root,
+    }));
+    const conversationReplies = rs.fn(
+      async (_token: string, input: { limit: number; oldest?: string }) => {
+        const after = thread.filter((m) => !input.oldest || Number(m.ts) > Number(input.oldest));
+        return {
+          messages: after.slice(0, input.limit),
+          ...(after.length > input.limit ? { nextCursor: "more" } : {}),
+        };
+      },
+    );
+    const adapter = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: {
+        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
+        postMessage: async () => ({ ts: "9.0" }),
+        openDirectMessage: async () => "D_NEW",
+        userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: conversationReplies as never,
+        memberChannels: async () => ({ channels: [] }),
+        revoke: async () => {},
+      },
+      openMailbox: () => ({ stop: () => {} }),
+      copy: new SlackMessageCopyRepository(testDb.db),
+      readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
+    });
+    await adapter.start();
+    // Rome's record: id 3 is the first mention, id 30 the second.
+    const keys: Record<number, string> = { 3: tsOf(3), 30: tsOf(30) };
+    const facts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => {} },
+      messages: { byIds: (ids) => ids.map((id) => ({ key: keys[id] })) as never },
+      labels: new SenderLabels({ byAccount: async () => null }),
+      channelOfChat: () => "slack_app",
+      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+      latest: (place, read) => adapter.readHistory(place.threadId as never, read),
+    });
+    const place: ThreadContext = { channel: "slack_app", threadId: "C_NEWS", threadType: "group" };
+    const at = (i: number) => new Date(Number(tsOf(i)) * 1_000);
+
+    const first = await facts.thread!(place, `C_NEWS:${root}`, at(3), 3);
+    const later = await facts.thread!(place, `C_NEWS:${root}`, at(30), 30, 3);
+    await adapter.stop();
+
+    expect(first?.map((m) => m.text)).toEqual(["reply 1", "reply 2"]);
+    // What was said since the first mention, up to the second: a page from
+    // the first mention on, none of what the model was shown before.
+    expect(later?.map((m) => m.text)).toEqual(
+      Array.from({ length: 15 }, (_, i) => `reply ${i + 4}`),
+    );
+  });
+
   it("names no thread on a mention that is not in one, nor on a reply in a direct message", async () => {
     const delivered: ChannelMessage[] = [];
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;

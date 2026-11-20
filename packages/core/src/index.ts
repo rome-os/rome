@@ -1355,11 +1355,12 @@ async function main() {
         // `until`. A store a personal account syncs, such as WhatsApp's, also
         // holds what the guardian said before Rome was connected, and refuses
         // `until` (app-host/accounts-service.ts), so it reads none.
-        latest: (place, { limit, until, olderThan }) =>
+        latest: (place, { limit, until, olderThan, newerThan }) =>
           channelsService.query(place.channel, {
             chatId: place.threadId as ChatId,
             until,
             ...(olderThan === undefined ? {} : { olderThan }),
+            ...(newerThan === undefined ? {} : { newerThan }),
             limit,
           }),
       }),

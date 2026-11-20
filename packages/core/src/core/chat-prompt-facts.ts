@@ -38,7 +38,7 @@ export interface ChatPromptFactsDeps {
    */
   latest?: (
     place: ThreadContext,
-    read: { limit: number; until: Date; olderThan?: string },
+    read: { limit: number; until: Date; olderThan?: string; newerThan?: string },
   ) => Promise<ChannelMessage[]>;
   /** How long a read of the latest messages may take. Defaults to 5s. */
   latestWaitMs?: number;
@@ -70,18 +70,26 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // room on the platform's page.
     const key = first === undefined ? undefined : deps.messages.byIds([first])[0]?.key;
     const until = key === undefined ? before : new Date(before.getTime() + 999);
+    // A read since a message the model was shown asks from it, so a thread,
+    // which the platform reads from its start, answers what came after it.
+    // A read takes one bound by message, so the session's first message is
+    // then cut by its own order.
+    const sinceKey = since === undefined ? undefined : deps.messages.byIds([since])[0]?.key;
     // One more than kept: the bound takes in a message said at `until`.
     const read = deps.latest(place, {
       limit: EARLIER_MESSAGES + 1,
       until,
-      ...(key === undefined ? {} : { olderThan: key }),
+      ...(sinceKey !== undefined
+        ? { newerThan: sinceKey }
+        : key === undefined
+          ? {}
+          : { olderThan: key }),
     });
     read.catch(() => {});
     const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
     if (!page) return null;
     // Messages the model was shown already, at or before `since`, are cut by
-    // the platform's own order.
-    const sinceKey = since === undefined ? undefined : deps.messages.byIds([since])[0]?.key;
+    // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);
     const said = earlierMessages(newerThan(below, sinceKey), bound);
     const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
@@ -137,8 +145,8 @@ function olderThan(
 }
 
 /** The messages of `page`, newest first, said after the message with
- *  platform id `key`. A page that does not hold it is kept whole: more was
- *  said since than one page holds. */
+ *  platform id `key`. A page read after it does not hold it, and is kept
+ *  whole. */
 function newerThan(
   page: readonly ChannelMessage[],
   key: string | undefined,

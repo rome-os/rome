@@ -192,21 +192,29 @@ describe("chatPromptFacts earlier messages", () => {
   });
 
   it("reads a thread again from the last message the model was shown there", async () => {
-    // Newest first: the second mention (m9) and the first (m5), with replies
-    // that did not mention Rome before and between them.
-    const page = [message(9), message(8), message(7), message(5), message(3)];
-    const { promptFacts } = earlierFacts(page, true, { 41: "m5", 42: "m9", 43: "m1" });
     const group = { channel: "slack_app", threadId: "C1", threadType: "group" as const };
     const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+    // The thread from its start, as a platform reads one: the first mention
+    // (m5) and replies that did not mention Rome before it.
+    const fromStart = earlierFacts([message(5), message(3)], true, { 42: "m5" });
+    // From the first mention on: replies that did not mention Rome, then
+    // the second mention (m9), newest first.
+    const since = earlierFacts([message(9), message(8), message(7)], true, {
+      41: "m5",
+      42: "m9",
+    });
 
-    const first = await promptFacts.thread?.(group, "C1:root", before, 42);
-    const later = await promptFacts.thread?.(group, "C1:root", before, 42, 41);
-    // More was said since than one page holds: the page is read whole.
-    const behind = await promptFacts.thread?.(group, "C1:root", before, 42, 43);
+    const first = await fromStart.promptFacts.thread?.(group, "C1:root", before, 42);
+    const later = await since.promptFacts.thread?.(group, "C1:root", before, 42, 41);
 
-    expect(first?.map((m) => m.text)).toEqual(["message 3", "message 5", "message 7", "message 8"]);
+    expect(first?.map((m) => m.text)).toEqual(["message 3"]);
     expect(later?.map((m) => m.text)).toEqual(["message 7", "message 8"]);
-    expect(behind?.map((m) => m.text)).toEqual(first?.map((m) => m.text));
+    // Asked from the message shown last, which the platform answers after:
+    // a thread longer than a page still reads what came since.
+    expect(since.latest).toHaveBeenCalledWith(
+      { ...group, threadId: "C1:root" },
+      { limit: 16, until: new Date(before.getTime() + 999), newerThan: "m5" },
+    );
   });
 
   it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
