@@ -310,6 +310,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           messageId: message.messageId,
           replyTo: message.replyTo,
           ...(message.inThread ? { inThread: message.inThread } : {}),
+          ...(message.openToMembers ? { openToMembers: true } : {}),
           ...agents,
         },
         {

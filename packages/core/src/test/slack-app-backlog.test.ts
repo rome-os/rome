@@ -114,6 +114,7 @@ describe("a Slack app backlog, end to end", () => {
     });
     registry.register(
       makeSlackAppDescriptor({
+        openToMembers: { isOpen: () => false, set: () => {} },
         api: {
           authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
           postMessage: async () => ({ ts: "9.0" }),

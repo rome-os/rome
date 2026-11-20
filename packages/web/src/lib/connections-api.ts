@@ -82,6 +82,21 @@ export interface ApiConnection extends ConnectionAccountFields {
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
+  /** Whether the guardian opened the account to its workspace's other
+   *  members, so they are answered. Absent for a kind with no such switch. */
+  answerMembers?: boolean;
+}
+
+/** Answer the other members of the account's workspace, or stop. */
+export async function setAnswerMembers(
+  connectionId: string,
+  on: boolean,
+  fallback: string,
+): Promise<{ answerMembers: boolean }> {
+  return fetchJson<{ answerMembers: boolean }>(
+    `/api/connections/${encodeURIComponent(connectionId)}/answer-members`,
+    { method: "PUT", json: { on }, fallback },
+  );
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {

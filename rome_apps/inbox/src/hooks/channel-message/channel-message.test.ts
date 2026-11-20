@@ -162,6 +162,7 @@ describe("ChannelMessageHook", () => {
         attachments: [{ type: "image", url: "file-id-1", caption: "pic" }],
         replyTo: { messageId: "tg-99", content: "Earlier message", senderName: "Bob" },
         inThread: "group-1:tg-90" as ChatId,
+        openToMembers: true,
       }),
     );
 
@@ -178,6 +179,7 @@ describe("ChannelMessageHook", () => {
         timestamp: "2026-01-20T12:00:00.000Z",
         messageId: "tg-100",
         inThread: "group-1:tg-90",
+        openToMembers: true,
       }),
       expect.objectContaining({
         initiator: `connection:${TELEGRAM_ID}`,

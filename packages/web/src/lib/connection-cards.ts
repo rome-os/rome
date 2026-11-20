@@ -81,6 +81,9 @@ export interface ConnectionCard {
   link: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts: boolean;
+  /** Whether the account answers the other members of its workspace. Absent
+   *  for a service with no such switch. */
+  answerMembers?: boolean;
   /** Rome holds access, but its channel does not know which account it is,
    *  so it hears and sends nothing. */
   accountUnknown?: boolean;
@@ -223,6 +226,7 @@ function toCard(connection: ApiConnection): ConnectionCard {
     linkReported: connection.agent !== undefined,
     link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
+    ...(connection.answerMembers !== undefined ? { answerMembers: connection.answerMembers } : {}),
     ...(accountUnknown(connection) ? { accountUnknown: true } : {}),
   };
 }

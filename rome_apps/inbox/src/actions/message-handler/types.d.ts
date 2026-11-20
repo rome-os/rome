@@ -71,6 +71,9 @@ export interface MessageHandlerInput {
   /** The platform thread the message was said in, where `threadId` names its
    *  conversation (ChannelMessage.inThread). */
   inThread?: string;
+  /** The guardian opened the account to its workspace's other members, and
+   *  the sender is one (ChannelMessage.openToMembers). */
+  openToMembers?: boolean;
   /** Optional pre-resolved person mapping (skips lookup). */
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */

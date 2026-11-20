@@ -810,7 +810,12 @@ export function createMessageHandlerAction(
           typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+        // The connection says the guardian opened its account to the
+        // workspace's other members, and the sender is one: they are answered
+        // there whatever their bond level, still as an untrusted sender. Other
+        // connections keep the instance's reply-to levels alone.
+        const openToMembers = args.openToMembers === true;
+        if (!canReplyToBondLevel(bondLevel, replyToLevels) && !openToMembers) {
           const stored = recorded
             ? { inserted: true }
             : await conversations.addMessage({

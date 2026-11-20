@@ -573,6 +573,40 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 
+  it("turns on answers to the workspace's other members through the connection's switch", async () => {
+    const calls: FetchCall[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith("/answer-members")) {
+        return new Response(JSON.stringify({ answerMembers: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn();
+    renderAccountBody(cardFor([feishu({ answerMembers: false })], "feishu"), { onRefresh });
+    const toggle = screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    await userEvent.setup().click(toggle);
+
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    expect(calls).toContainEqual({
+      url: "/api/connections/conn-feishu/answer-members",
+      method: "PUT",
+      body: { on: true },
+    });
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("shows no members switch for a service that has none", () => {
+    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
+    expect(
+      screen.queryByRole("switch", { name: "Answer other members of this workspace" }),
+    ).toBeNull();
+  });
+
   it("offers no second account for a service that holds one", () => {
     renderAccountBody(cardFor([feishu({ severalAccounts: false })], "feishu"), {
       onOpenAccount: rs.fn(),

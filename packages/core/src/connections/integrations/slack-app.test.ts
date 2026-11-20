@@ -102,6 +102,7 @@ describe("connecting Rome's Slack app (R1)", () => {
 
   it("names the account the way the Slack bot kind does, and holds one workspace", () => {
     const descriptor = makeSlackAppDescriptor({
+      openToMembers: { isOpen: () => false, set: () => {} },
       api: {} as never,
       cloud: cloud(),
       openMailbox: () => ({ stop: () => {} }),
@@ -142,6 +143,7 @@ describe("the Slack app talker", () => {
     const opened: string[] = [];
     const persisted: Record<string, string>[] = [];
     const descriptor = makeSlackAppDescriptor({
+      openToMembers: { isOpen: () => false, set: () => {} },
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
         postMessage: async () => ({ ts: "3.0" }),
@@ -216,6 +218,7 @@ describe("the Slack app talker", () => {
 describe("the Slack app's channels in chat settings", () => {
   it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
     const descriptor = makeSlackAppDescriptor({
+      openToMembers: { isOpen: () => false, set: () => {} },
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
         postMessage: async () => ({ ts: "3.0" }),
@@ -291,6 +294,10 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
   function descriptorWith(revoke: () => Promise<void>, c = cloud()) {
     const steps: string[] = [];
     const descriptor = makeSlackAppDescriptor({
+      openToMembers: {
+        isOpen: () => false,
+        set: (account, open) => void steps.push(`${open ? "open" : "close"} ${account}`),
+      },
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
         postMessage: async () => ({ ts: "1.0" }),
@@ -323,7 +330,8 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
       { material: MATERIAL, profile: {} },
       { signal: new AbortController().signal },
     );
-    expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
+    // The workspace's switch goes with the connection: a later connect starts closed.
+    expect(steps).toEqual(["revoke xoxb-a", "release T_A", "close T_A/U_BOT"]);
   });
 
   it("says Slack kept the token, and releases nothing, when the revoke fails", async () => {
@@ -463,7 +471,7 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
 
     expect(bound).toBeNull();
     // The fix's token, which no grant holds, is revoked as well.
-    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-fix", "release T_A"]);
+    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-fix", "release T_A", "close T_A/U_BOT"]);
   });
 
   it("releases with no generation a grant made before Rome Cloud counted claims", async () => {

@@ -390,6 +390,17 @@ export interface ConnectionDescriptor {
     grant: { material: SecretRecord; profile: ProfileRecord },
     opts: { signal: AbortSignal },
   ): Promise<void>;
+  /**
+   * A switch, off by default, that opens an account to the other members of
+   * its workspace: on, the connection marks each message a full member says
+   * there (ChannelMessage.openToMembers). Keyed by the account id
+   * `accountIdOf` reads, so repair keeps it; the kind forgets it on
+   * disconnect. Omitted by kinds with no workspace to open.
+   */
+  openToMembers?: {
+    isOpen(accountId: string): boolean;
+    set(accountId: string, open: boolean): void;
+  };
   /** True when the guardian can add another account of this connection kind, each
    *  with its own Connection and channel. A connection kind that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature

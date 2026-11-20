@@ -37,7 +37,7 @@ import type { SlackMessageCopy } from "./message-copy.js";
 
 export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
-import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
+import type { SlackAppUser, SlackAppWebApi, SlackChannel } from "./web-api.js";
 
 const log = createLogger("slack-app");
 
@@ -119,6 +119,9 @@ export interface SlackAppAdapterConfig {
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
+  /** Whether the guardian opened this account to its workspace's other
+   *  members, read for each message handed over. Absent, it is closed. */
+  openToMembers?: () => boolean;
   /** Now, for the copy's times. */
   now?: () => Date;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
@@ -187,7 +190,7 @@ export class SlackAppAdapter {
   private handler?: (message: ChannelMessage) => void;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
-  private readonly userNames = new Map<string, SlackUserName>();
+  private readonly userNames = new Map<string, SlackAppUser>();
   private abort = new AbortController();
   private appId: string | undefined;
   private mailbox: SlackAppMailbox;
@@ -477,6 +480,11 @@ export class SlackAppAdapter {
         ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
         : {}),
       addressing: direct ? "direct" : "mention",
+      // Only a person who is a full member of this workspace, by Slack's own
+      // answer: a guest, a bot or a sender Slack would not describe stays closed.
+      ...(event.user && name.fullMember && this.config.openToMembers?.()
+        ? { openToMembers: true as const }
+        : {}),
     };
     // The mailbox is told the message was received only once the copy holds
     // it: a write that fails answers 500, and the mailbox delivers it again.
@@ -919,7 +927,7 @@ export class SlackAppAdapter {
     }
   }
 
-  private async lookUpName(userId: string): Promise<SlackUserName> {
+  private async lookUpName(userId: string): Promise<SlackAppUser> {
     const cached = this.userNames.get(userId);
     if (cached) return cached;
     try {

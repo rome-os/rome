@@ -20,6 +20,7 @@ import { z } from "zod";
 import { getInstanceOrigin } from "../../instance/rome-cloud-origin.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { isSlackCredentialError } from "../kinds/slack/slack.js";
+import type { SlackAppOpenToMembers } from "../kinds/slack-app/open-to-members.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
 import {
@@ -237,6 +238,8 @@ export interface SlackAppDescriptorDeps {
   openMailbox: OpenMailbox;
   /** The connection's own copy of the messages it hears and reads. */
   copy: SlackMessageCopy;
+  /** Which accounts the guardian opened to their workspace's other members. */
+  openToMembers: SlackAppOpenToMembers;
   instanceOrigin?: () => string;
 }
 
@@ -370,7 +373,10 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
       } catch (error) {
         throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
       }
+      // A later connect of the workspace starts closed to its members again.
+      deps.openToMembers.set(`${material.teamId}/${material.botUserId}`, false);
     },
+    openToMembers: deps.openToMembers,
     capabilities: {
       talker: {
         // The connection reads a chat from its own copy where that holds the
@@ -405,6 +411,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             },
             onFault: ({ kind, cause }) => routeFault(cause, kind),
             copy: deps.copy,
+            // Read for each message, so a switch turned off holds from the next.
+            openToMembers: () =>
+              deps.openToMembers.isOpen(`${material.teamId}/${material.botUserId}`),
           });
           return {
             start(deliver, fault): void {

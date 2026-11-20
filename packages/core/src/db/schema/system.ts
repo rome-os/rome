@@ -408,6 +408,14 @@ export const slackAppChanges = sqliteTable(
   (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
 );
 
+// The Slack app accounts the guardian opened to their workspace's other
+// members, by account id (`<team>/<bot user>`): a row means a full member who
+// is not the guardian is answered there. Off is no row. Only
+// connections/kinds/slack-app reads or writes it, through its repository there.
+export const slackAppOpenToMembers = sqliteTable("slack_app_open_to_members", {
+  accountId: text("account_id").primaryKey(),
+});
+
 // One row per LinkedIn account seen in a thread's participant list. Person-level
 // facts live here rather than on the membership row so a name or headline is
 // stored once, not once per thread the person appears in.

@@ -2055,3 +2055,56 @@ describe("Slack app in the channels it is a member of", () => {
     );
   });
 });
+
+describe("Slack app opened to the workspace's other members (R12)", () => {
+  /** An adapter whose switch reads `open`, in a workspace where U_KIM is a
+   *  full member and U_GUEST a guest. */
+  function openable(open: { on: boolean }) {
+    const api = fakeApi({
+      userName: rs.fn(async (_token: string, user: string) =>
+        user === "U_GUEST"
+          ? { displayName: "Guest" }
+          : { displayName: "Kim", fullMember: true as const },
+      ),
+    });
+    const delivered: ChannelMessage[] = [];
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api,
+      openMailbox: fakeMailbox().open,
+      copy: testCopy(),
+      readGate: openGate(),
+      openToMembers: () => open.on,
+    });
+    a.onInbound((message) => delivered.push(message));
+    return { a, delivered };
+  }
+  const from = (i: number, user: string) =>
+    frame({ ...dmEvent(i), event: { ...dmEvent(i).event, user, channel: `D_${user}` } });
+
+  it("marks nothing while the switch is off, as after a fresh connect", async () => {
+    const { a, delivered } = openable({ on: false });
+    await a.start();
+    await a.handleFrame(from(1, "U_KIM"));
+
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).not.toHaveProperty("openToMembers");
+  });
+
+  it("marks a full member's message while on, never a guest's, and stops from the next message once off", async () => {
+    const open = { on: true };
+    const { a, delivered } = openable(open);
+    await a.start();
+    await a.handleFrame(from(1, "U_KIM"));
+    await a.handleFrame(from(2, "U_GUEST"));
+    open.on = false;
+    await a.handleFrame(from(3, "U_KIM"));
+
+    expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined]);
+  });
+});

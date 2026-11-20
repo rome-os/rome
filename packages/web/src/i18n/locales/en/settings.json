@@ -303,6 +303,11 @@
     "sections": {
       "connected": "Connected · {{count}}",
       "add": "Add a connection"
+    },
+    "answerMembers": {
+      "title": "Answer other members of this workspace",
+      "description": "Off, Rome answers only you here. On, it answers the workspace's full members as visitors, never guests or people from other workspaces.",
+      "failed": "Could not change who Rome answers."
     }
   },
   "appKeys": {

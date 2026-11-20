@@ -17,6 +17,13 @@ const ALREADY_REFUSED = new Set([
   "app_uninstalled",
 ]);
 
+/** A Slack user as the app reads them: their names, and whether they are a
+ *  full member of the workspace, not a guest, a bot or someone from another
+ *  workspace. */
+export interface SlackAppUser extends SlackUserName {
+  fullMember?: true;
+}
+
 export interface SlackAppWebApi {
   authTest(botToken: string, signal?: AbortSignal): Promise<SlackBotIdentity>;
   postMessage(
@@ -25,7 +32,7 @@ export interface SlackAppWebApi {
     signal?: AbortSignal,
   ): Promise<{ ts: string }>;
   openDirectMessage(botToken: string, userId: string, signal?: AbortSignal): Promise<string>;
-  userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
+  userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackAppUser>;
   /** Revoke the bot token, so Slack refuses it from then on. A token Slack
    *  already refuses counts as revoked. */
   revoke(botToken: string, signal?: AbortSignal): Promise<void>;
@@ -197,11 +204,30 @@ export function createSlackAppWebApi(
     async userName(botToken, userId, signal) {
       const body = await get(botToken, "users.info", { user: userId }, signal);
       const user = body.user as
-        | { name?: unknown; real_name?: unknown; profile?: { display_name?: unknown } }
+        | {
+            name?: unknown;
+            real_name?: unknown;
+            profile?: { display_name?: unknown };
+            is_bot?: unknown;
+            is_restricted?: unknown;
+            is_ultra_restricted?: unknown;
+            is_stranger?: unknown;
+            deleted?: unknown;
+          }
         | undefined;
+      // A guest is restricted, a single-channel guest ultra restricted, and
+      // someone from another workspace a stranger.
+      const fullMember =
+        user !== undefined &&
+        user.is_bot !== true &&
+        user.is_restricted !== true &&
+        user.is_ultra_restricted !== true &&
+        user.is_stranger !== true &&
+        user.deleted !== true;
       return {
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
+        ...(fullMember ? { fullMember: true as const } : {}),
       };
     },
     async revoke(botToken, signal) {

@@ -115,6 +115,10 @@ export interface ConnectionView
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
+  /** Whether the guardian opened the account to its workspace's other
+   *  members, so they are answered. Absent for a kind with no such switch,
+   *  and for a connection that has not named its account yet. */
+  answerMembers?: boolean;
 }
 
 /** Per-grant extras for the detail view — grant envelope fields the list
@@ -201,7 +205,17 @@ function buildConnectionView(
     agent: link === null ? undefined : agent,
     link,
     severalAccounts: offersAnother(registry.getDescriptor(conn.connectionKind)),
+    ...answerMembersOf(registry.getDescriptor(conn.connectionKind), account),
   };
+}
+
+/** The view's `answerMembers`, for a kind with the switch and a known account. */
+function answerMembersOf(
+  descriptor: ConnectionDescriptor | null,
+  account: AccountValue | null,
+): { answerMembers?: boolean } {
+  const open = descriptor?.openToMembers;
+  return open && account ? { answerMembers: open.isOpen(account.id) } : {};
 }
 
 function buildGrantDetails(
@@ -391,6 +405,33 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
         grantDetails: buildGrantDetails(conn, record),
       },
     });
+  });
+
+  // The switch that opens an account to the other members of its workspace,
+  // in the guardian's words: answer them, or not.
+  app.put("/connections/:id/answer-members", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw)) {
+      return c.json({ error: "Cross-site requests are not allowed." }, 403);
+    }
+    const registry = requireConnectionRegistry(deps);
+    const conn = findConnection(registry, c.req.param("id"));
+    if (!conn) return c.json({ error: "Unknown connection." }, 404);
+    const body = (await c.req.json().catch(() => null)) as { on?: unknown } | null;
+    if (typeof body?.on !== "boolean") {
+      return c.json({ error: "Pass `on` as true or false." }, 400);
+    }
+    const descriptor = registry.getDescriptor(conn.connectionKind);
+    const open = descriptor?.openToMembers;
+    if (!open) {
+      return c.json({ error: "This connection has no other members to answer." }, 404);
+    }
+    const account = accountView(descriptor, await loadGrant(registry, conn));
+    if (!account) {
+      return c.json({ error: "This connection has not named its account yet." }, 409);
+    }
+    open.set(account.id, body.on);
+    c.header("Cache-Control", "no-store");
+    return c.json({ answerMembers: open.isOpen(account.id) });
   });
 
   app.delete("/connections/:id/grants/:name", async (c) => {

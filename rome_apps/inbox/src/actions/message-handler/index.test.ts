@@ -737,6 +737,50 @@ describe("message reply bond-level settings", () => {
     ]);
   });
 
+  it("answers a sender the instance does not reply to where their connection is open to members, and only there", async () => {
+    const mappedPerson: PersonRecord = {
+      id: "casey",
+      displayName: "Casey",
+      bondLevel: "other",
+      channelMappings: [{ channel: "slack_app", channelUserId: "T_A/U_CASEY" }],
+      profilePath: null,
+    };
+    const run = async (openToMembers: boolean) => {
+      const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
+        personMappingRepo: {
+          findByChannelUser: rs.fn(async () => mappedPerson),
+        },
+        agentResponses: [
+          [{ type: "result", content: "Sure." }],
+          [envoyAnswer("approve", "Fine to send.")],
+        ],
+      });
+      const result = await createAction(actionConfig, deps).execute({
+        channel: "slack_app",
+        channelUserId: "T_A/U_CASEY",
+        threadId: "D_CASEY",
+        threadType: "private",
+        displayName: "Casey",
+        text: "Can you answer?",
+        messageId: "msg-1",
+        ...(openToMembers ? { openToMembers: true } : {}),
+      });
+      return { result, agentRunner, sentMessages };
+    };
+
+    const open = await run(true);
+    const closed = await run(false);
+
+    expect(open.result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
+    expect(open.sentMessages).toHaveLength(1);
+    expect(closed.result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(closed.agentRunner.calls).toHaveLength(0);
+    expect(closed.sentMessages).toEqual([]);
+  });
+
   it("tells the envoy the reply goes to the sender, not the guardian", async () => {
     const priya: PersonRecord = {
       id: "priya",

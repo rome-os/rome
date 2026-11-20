@@ -888,3 +888,91 @@ describe("guardian links across a disconnect", () => {
     expect(await peopleRepo.byAccount({ platform: "discord", id: "linked" })).not.toBeNull();
   });
 });
+
+describe("PUT /connections/:id/answer-members", () => {
+  /** Two connections of a kind with the switch, each reaching its own
+   *  workspace, and the store the switch keeps. */
+  async function twoWorkspaces() {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const open = new Set<string>();
+    const store = {
+      isOpen: (account: string) => open.has(account),
+      set: (account: string, on: boolean) => void (on ? open.add(account) : open.delete(account)),
+    };
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
+    // Two kinds, so each holds a connection of its own.
+    for (const kind of ["slack_app", "slack_app_b"]) {
+      registry.register({
+        ...makePasteTalk().descriptor,
+        connectionKind: kind,
+        openToMembers: store,
+      });
+    }
+    const ids: string[] = [];
+    for (const [kind, account] of [
+      ["slack_app", "T_A/U_BOT"],
+      ["slack_app_b", "T_B/U_BOT"],
+    ]) {
+      const conn = await registry.connect(kind);
+      new DrizzleConnectionsRepository(db).save(db, {
+        id: conn.id,
+        connectionKind: kind,
+        label: kind,
+        createdAt: new Date(),
+        grant: grantReaching("slack", account),
+      });
+      ids.push(conn.id);
+    }
+    return { app: makeApp(registry, { db }), ids, open };
+  }
+  const put = (app: Hono, id: string, body: unknown) =>
+    app.request(`/connections/${id}/answer-members`, {
+      method: "PUT",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const answerMembers = async (app: Hono, id: string) =>
+    (
+      (await (await app.request("/connections")).json()).connections as Array<{
+        id: string;
+        answerMembers?: boolean;
+      }>
+    ).find((each) => each.id === id)?.answerMembers;
+
+  it("is off after a connect, turns on and off for one workspace, and leaves the other alone", async () => {
+    const { app, ids, open } = await twoWorkspaces();
+    const [a, b] = ids;
+
+    expect(await answerMembers(app, a)).toBe(false);
+    const on = await put(app, a, { on: true });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toEqual({ answerMembers: true });
+    expect(await answerMembers(app, a)).toBe(true);
+    expect(await answerMembers(app, b)).toBe(false);
+    expect([...open]).toEqual(["T_A/U_BOT"]);
+
+    expect(await (await put(app, a, { on: false })).json()).toEqual({ answerMembers: false });
+    expect(await answerMembers(app, a)).toBe(false);
+  });
+
+  it("refuses a body without on, a kind with no switch, and a cross-site request", async () => {
+    const { app, ids } = await twoWorkspaces();
+    expect((await put(app, ids[0], { on: "yes" })).status).toBe(400);
+    const crossSite = await app.request(`/connections/${ids[0]}/answer-members`, {
+      method: "PUT",
+      headers: { "sec-fetch-site": "cross-site", "content-type": "application/json" },
+      body: JSON.stringify({ on: true }),
+    });
+    expect(crossSite.status).toBe(403);
+
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    registry.register(makeBotAll().descriptor);
+    const conn = await registry.connect("fake-discord", "Discord");
+    const other = makeApp(registry);
+    expect((await put(other, conn.id, { on: true })).status).toBe(404);
+    expect(
+      (await (await other.request(`/connections/${conn.id}`)).json()).connection,
+    ).not.toHaveProperty("answerMembers");
+  });
+});

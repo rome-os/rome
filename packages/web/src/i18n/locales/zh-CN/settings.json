@@ -303,6 +303,11 @@
     "sections": {
       "connected": "已连接 · {{count}}",
       "add": "添加连接"
+    },
+    "answerMembers": {
+      "title": "回复此工作区的其他成员",
+      "description": "关闭时，Rome 在这里只回复你。开启后，它会以访客身份回复工作区的正式成员，但不回复访客账号或其他工作区的人。",
+      "failed": "无法更改 Rome 回复的对象。"
     }
   },
   "appKeys": {

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   List,
   ListRow,
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/list-row";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
+import { setAnswerMembers } from "@/lib/connections-api";
 
 /**
  * Account controls on a channel card: "Add another account" for services that
@@ -47,16 +49,25 @@ export function AccountControls({
   // A second account only makes sense next to a first one that exists.
   const showAdd =
     adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);
-  if (!showLink && !(showAdd && onOpenAccount)) return null;
+  const ownSlot = card.slots.find((slot) => slot.key !== "session" && slot.connectionId);
+  const showMembers = connected && card.answerMembers !== undefined && ownSlot !== undefined;
+  if (!showLink && !showMembers && !(showAdd && onOpenAccount)) return null;
 
   const canAdd = showAdd && onOpenAccount !== undefined && addable(card);
-  const showRows = showLink || (canAdd && !adding);
+  const showRows = showLink || showMembers || (canAdd && !adding);
 
   return (
     <div className="space-y-4">
       {showRows && (
         <List className="overflow-hidden rounded-12 border border-border-subtle">
           {showLink && <AccountAgentRow card={card} />}
+          {showMembers && ownSlot?.connectionId && (
+            <AnswerMembersRow
+              connectionId={ownSlot.connectionId}
+              on={card.answerMembers === true}
+              onRefresh={onRefresh}
+            />
+          )}
           {canAdd && !adding && <AddAccountRow onAdd={() => setAdding(true)} />}
         </List>
       )}
@@ -75,6 +86,54 @@ export function AccountControls({
 /** Whether this service has a connect flow a new account can go through. */
 function addable(card: ConnectionCard): boolean {
   return CHANNEL_CONFIGS[card.service] !== undefined && newAccountSlot(card) !== null;
+}
+
+/** The switch that has Rome answer the other members of the account's
+ *  workspace. Off, only the guardian is answered there. */
+function AnswerMembersRow({
+  connectionId,
+  on,
+  onRefresh,
+}: {
+  connectionId: string;
+  on: boolean;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(on);
+  const change = async (next: boolean) => {
+    setBusy(true);
+    setShown(next);
+    try {
+      const { answerMembers } = await setAnswerMembers(
+        connectionId,
+        next,
+        t("connections.answerMembers.failed"),
+      );
+      setShown(answerMembers);
+    } catch (error) {
+      setShown(!next);
+      toast.error(error instanceof Error ? error.message : t("connections.answerMembers.failed"));
+    } finally {
+      setBusy(false);
+      void onRefresh();
+    }
+  };
+  return (
+    <ListRow>
+      <ListRowContent>
+        <ListRowTitle>{t("connections.answerMembers.title")}</ListRowTitle>
+        <ListRowDescription>{t("connections.answerMembers.description")}</ListRowDescription>
+      </ListRowContent>
+      <Switch
+        aria-label={t("connections.answerMembers.title")}
+        checked={shown}
+        disabled={busy}
+        onCheckedChange={(next) => void change(next)}
+      />
+    </ListRow>
+  );
 }
 
 function AddAccountRow({ onAdd }: { onAdd: () => void }) {
