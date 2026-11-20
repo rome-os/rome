@@ -33,14 +33,15 @@ export function useChatDraft(chatId: string | null | undefined, initialText = ""
   /**
    * Saves `text`, with `stop` or else the current notice, as the draft at
    * once, without changing the field's text: for words shown over the field
-   * while voice input is on, and for a field that is going away.
+   * while voice input is on, and for a field that is going away. A new
+   * `keep` comes with each new `chatId`, so the caller can save again where
+   * the draft now lives.
    */
   const keep = useCallback(
     (text: string, stop?: DictationStop) => {
-      const { chatId, notice } = latest.current;
-      if (chatId) saveChatDraft(chatId, { text, stop: stop ?? notice }, authEpoch);
+      if (chatId) saveChatDraft(chatId, { text, stop: stop ?? latest.current.notice }, authEpoch);
     },
-    [authEpoch],
+    [authEpoch, chatId],
   );
   const sendEnded = useCallback(
     (sent: string, accepted: boolean) => {

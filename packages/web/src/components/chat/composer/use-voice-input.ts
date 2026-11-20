@@ -131,6 +131,11 @@ export function useVoiceInput({
   keepDraftRef.current = keepDraft;
   const setNoticeRef = useRef(setNotice);
   setNoticeRef.current = setNotice;
+  // A new `keepDraft` can save somewhere new, as when a first send makes the
+  // chat while voice input listens, so the heard words are saved there too.
+  useEffect(() => {
+    if (previewRef.current) keepDraft(previewRef.current.value);
+  }, [keepDraft]);
   useEffect(() => {
     // The heard words go into the draft at once, since the field is going
     // away. A page the browser keeps for Back stays mounted, so the field is

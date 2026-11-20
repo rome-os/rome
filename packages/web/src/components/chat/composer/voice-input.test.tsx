@@ -334,6 +334,7 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(copy()?.textContent?.startsWith("Note:")).toBe(true);
     expect(field().style.color).toBe("transparent");
     expect(field().classList.contains("voice-input-previewing")).toBe(true);
+    expect(field().style.overflowY).toBe("hidden");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
@@ -875,6 +876,24 @@ describe.each(["chat", "concierge"] as const)("the %s draft while voice input li
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     socket.say({ type: "ended" });
     expect(field().value).toBe("second");
+  });
+
+  it("saves the words heard to the chat a first send makes while voice input listens", async () => {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (chatId?: string) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          {composers[kind](rs.fn(), chatId)}
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(view());
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    rerender(view("chat-new"));
+    expect(loadChatDraft("chat-new")?.text).toBe("hello");
   });
 
   it("goes back to the field's text when the words heard are withdrawn", async () => {

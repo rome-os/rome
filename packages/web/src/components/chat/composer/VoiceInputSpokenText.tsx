@@ -138,6 +138,8 @@ function SpokenOverlay({
     if (!el) return;
     const { color, height, overflowY } = el.style;
     el.style.color = "transparent";
+    // The copy scrolls itself, so the field's own scrollbar would move nothing.
+    el.style.overflowY = "hidden";
     el.classList.add("voice-input-previewing");
     return () => {
       el.style.color = color;
