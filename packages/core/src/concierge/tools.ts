@@ -161,7 +161,7 @@ const SCHEDULE_PARAMETER = {
       type: "string",
       enum: [...SCHEDULE_REPORTS],
       description:
-        "every_run: each run's result is reported to you. when_it_matters: a run that finishes with nothing to ask goes to the next digest as <ran_on_schedule>; a question, an approval or a failure still comes to you.",
+        "every_run: tell the guardian each run's result. when_it_matters: tell them only news or a problem. Every run's result comes to you either way.",
     },
     brief: {
       type: "string",
