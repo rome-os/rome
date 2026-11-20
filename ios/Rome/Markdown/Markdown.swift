@@ -411,19 +411,22 @@ enum MarkdownParser {
     }
 
     /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
-    /// is a chip: the task chat's status mark and its current name in the tint
-    /// of inline code, the link's text only while the name is unknown. A task
+    /// is a chip: the task chat's status mark and its current name on a faint
+    /// fill (`Palette.taskChip`), the link's text only while the name is unknown. A task
     /// chat the chat does not know reads as plain text
     /// (docs/domains/chats.md#task-link). SwiftUI's text cannot tint an image,
-    /// so the mark sits just before the tinted name.
+    /// so the mark sits just before the tinted name, drawn in `marks`.
     @MainActor
-    static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?) -> Text {
+    static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?, marks: TaskMarkStyle) -> Text {
         let styled = inline(source, linksAsText: linksAsText)
         guard !linksAsText, let tasks, source.contains(TaskLink.prefix) else { return Text(styled) }
         var out: Text?
         var plain = AttributedString()
+        // The last character drawn: a chip takes a space before it only after text.
+        var previous: Character?
         func flush() {
             guard !plain.characters.isEmpty else { return }
+            previous = plain.characters.last
             out = out.map { $0 + Text(plain) } ?? Text(plain)
             plain = AttributedString()
         }
@@ -434,7 +437,8 @@ enum MarkdownParser {
             }
             flush()
             let written = String(styled[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            let chip = chip(id: id, written: written, tasks: tasks)
+            let chip = chip(id: id, written: written, tasks: tasks, marks: marks, spaced: TaskLink.spacesChip(after: previous))
+            previous = "\u{00A0}"
             out = out.map { $0 + chip } ?? chip
         }
         flush()
@@ -442,18 +446,17 @@ enum MarkdownParser {
     }
 
     @MainActor
-    private static func chip(id: String, written: String, tasks: TaskLinkStore) -> Text {
+    private static func chip(id: String, written: String, tasks: TaskLinkStore, marks: TaskMarkStyle, spaced: Bool) -> Text {
         guard let info = tasks.info[id] else {
             // Not read yet, or none of this chat's: the link's own text.
             return Text(AttributedString(written.isEmpty ? String(localized: "Task") : written))
         }
         var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
         name.foregroundColor = Palette.fg
-        name.backgroundColor = Palette.fill
+        name.backgroundColor = Palette.taskChip
         name.link = TaskLink.url(chatId: id)
-        let mark = Text(Image(systemName: info.symbol))
-            .foregroundColor(info.status == "needs_you" ? Palette.warning : Palette.sub)
-        return Text(verbatim: " ") + mark + Text(name)
+        let chip = marks.mark(info) + Text(name)
+        return spaced ? Text(verbatim: " ") + chip : chip
     }
 
     /// The blocks with each image and picture set drawn as its description,
@@ -746,10 +749,7 @@ struct MarkdownText: View {
     private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
-            MarkdownParser.text(text, linksAsText: textOnly, tasks: taskLinks)
-                .romeFont(fontSize)
-                .lineSpacing(lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            MarkdownParagraph(source: text, linksAsText: textOnly, tasks: taskLinks, fontSize: fontSize, lineSpacing: lineSpacing)
         case .heading(let level, let text):
             Text(MarkdownParser.inline(text, linksAsText: textOnly))
                 .romeFont(level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), .semibold)
@@ -795,6 +795,45 @@ struct MarkdownText: View {
     }
 }
 
+/// A paragraph of Markdown text with its task link chips. While a chip in it
+/// is active, the paragraph is drawn again for each frame of the running ring;
+/// with none active, off screen or under Reduce Motion, it is drawn once and
+/// the ring stands still.
+struct MarkdownParagraph: View {
+    let source: String
+    let linksAsText: Bool
+    let tasks: TaskLinkStore?
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.offScreen) private var offScreen
+
+    var body: some View {
+        if spins {
+            TimelineView(.animation(minimumInterval: TaskMarkRing.frameInterval, paused: offScreen)) { context in
+                let _ = PerfProbe.count("taskRingTick")
+                paragraph(frame: TaskMarkRing.frame(at: context.date))
+            }
+        } else {
+            paragraph(frame: 0)
+        }
+    }
+
+    private func paragraph(frame: Int) -> some View {
+        MarkdownParser.text(source, linksAsText: linksAsText, tasks: tasks, marks: .forText(fontSize, dynamicTypeSize, frame: frame))
+            .romeFont(fontSize)
+            .lineSpacing(lineSpacing)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Whether a chip in this paragraph is active and its ring may turn.
+    private var spins: Bool {
+        guard !linksAsText, !reduceMotion, let tasks else { return false }
+        return TaskLink.ids(in: source).contains { tasks.info[$0]?.tone == .running }
+    }
+}
+
 /// A list in the bubble. A nested list sits under its item's text, so each
 /// level steps in by one marker's width. Every level uses the same filled dot.
 struct MarkdownList: View {
@@ -815,10 +854,7 @@ struct MarkdownList: View {
                         .foregroundStyle(Palette.sub)
                         .frame(minWidth: 12, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 4) {
-                        MarkdownParser.text(item.text, linksAsText: linksAsText, tasks: tasks)
-                            .romeFont(fontSize)
-                            .lineSpacing(lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
+                        MarkdownParagraph(source: item.text, linksAsText: linksAsText, tasks: tasks, fontSize: fontSize, lineSpacing: lineSpacing)
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             if case .list(let ordered, let start, let items) = child {
                                 MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText, tasks: tasks)

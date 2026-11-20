@@ -27,6 +27,16 @@ description: |
   connected (connector_connect) first. On a 2xx response, returns { status, data,
   headers } as `data`.
 
+  With a Rome-managed Google connection, Gmail is restricted to GETs for
+  /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads and /threads/{id}
+  (all under /gmail/v1/users/me), without custom headers/body. It never modifies,
+  deletes or labels mail. Attachment downloads are not supported through this
+  connection. Read replies include connectionId. Send via core:gmail_send
+  with that connectionId and the profile's emailAddress as From: every exact
+  message requires the guardian's approval card. No managed Google connection
+  means the existing Composio Gmail path remains available; a broken grant never
+  silently switches to Composio. Other Google services stay on Composio.
+
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never
   reads as success.

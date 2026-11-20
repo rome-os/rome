@@ -252,6 +252,22 @@ describe("the Concierge agent", () => {
     );
   });
 
+  it("scopes a progress overview to the chat by default and sends it as one bullet list", () => {
+    const prompt = concierge.systemPromptPrefix;
+    const tasks = prompt.slice(prompt.indexOf("# Tasks\n"));
+    expect(tasks).toContain("`chat_list` with `here: true`");
+    // Ended tasks are in or out the same way for every chat.
+    expect(tasks).toContain("call `chat_list` with `recentlyEnded: true`");
+    expect(tasks).toContain("every task, from every chat: `chat_list` without `here`");
+    expect(tasks).toContain("Group them by the chat each came from (`from`)");
+    expect(tasks).toContain("ONE `say` that is a Markdown bullet list, one task per line");
+    // The list is the one carve-out from plain sentences.
+    const speak = prompt.slice(prompt.indexOf("# How you speak"), prompt.indexOf("# Handling"));
+    expect(speak).toContain("The one exception is a progress overview");
+    // A topic chat asks before taking up another topic.
+    expect(prompt).toContain("whether it goes to the main chat or a new topic chat");
+  });
+
   it("looks up quick facts itself, a few searches at most, and never scrapes with the shell", () => {
     expect(concierge.tools).toContain("WebSearch");
     expect(concierge.tools).not.toContain("WebFetch");

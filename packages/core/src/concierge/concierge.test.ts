@@ -1723,6 +1723,50 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_list with here lists only the task chats started from the chat the turn is in", async () => {
+    const s = setup();
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" });
+    const titles = async (input: Record<string, unknown>) =>
+      JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+    // No other Concierge chat and no task from another chat.
+    expect(await titles({ here: true })).toEqual(["Agenda"]);
+    expect(await titles({ here: true, status: "active" })).toEqual(["Agenda"]);
+    // Without it, everything as before.
+    expect(await titles({})).toEqual(["Concierge", "Flights", "Agenda"]);
+    s.turnIn(CONCIERGE_CHAT);
+    expect(await titles({ here: true })).toEqual(["Flights"]);
+  });
+
+  it("chat_list with recentlyEnded adds the task chats that ended in the last day, with when", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
+    await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" });
+    await s.tool("chat_stop", { chatId: taskId });
+    const tasks = async () =>
+      JSON.parse((await s.tool("chat_list", { recentlyEnded: true })).content[0].text).filter(
+        (chat: { kind: string }) => chat.kind === "task chat",
+      );
+    const listed = await tasks();
+    expect(listed.map((chat: { title: string }) => chat.title)).toEqual(["Flights", "Hotels"]);
+    expect(listed[0]).toMatchObject({ status: "ended", endedAt: expect.any(String) });
+    expect(listed[1]).not.toHaveProperty("endedAt");
+    // A day later it is no longer recent.
+    const now = Date.now();
+    const later = rs.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);
+    try {
+      expect((await tasks()).map((chat: { title: string }) => chat.title)).toEqual(["Hotels"]);
+    } finally {
+      later.mockRestore();
+    }
+  });
+
   it("chat_list leaves out an ended task's chat unless asked", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
@@ -6621,6 +6665,42 @@ describe("scheduled tasks", () => {
         })
       ).content[0].text,
     ) as { chatId: string; taskId: string; scheduled: string };
+
+  it("reads a schedule only for a task chat that chat_list lists", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    const start = async (title: string) =>
+      JSON.parse((await s.tool("chat_start", { title, brief: title })).content[0].text).taskId;
+    const flights = await start("Flights");
+    await s.tool("chat_stop", { chatId: flights });
+    const hotels = await start("Hotels");
+    s.turnIn(TOPIC_CHAT);
+    const agenda = await start("Agenda");
+    const list = async (input: Record<string, unknown>) => {
+      schedules.of.mockClear();
+      const titles = JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+      return { titles, read: schedules.of.mock.calls.map((call) => (call as unknown[])[0]) };
+    };
+    // Another chat's tasks are not read.
+    expect(await list({ here: true, recentlyEnded: true })).toEqual({
+      titles: ["Agenda"],
+      read: [agenda],
+    });
+    // Nor is a task that ended too long ago.
+    s.turnIn(CONCIERGE_CHAT);
+    const later = rs.spyOn(Date, "now").mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+    try {
+      expect(await list({ here: true, recentlyEnded: true })).toEqual({
+        titles: ["Hotels"],
+        read: [hotels],
+      });
+    } finally {
+      later.mockRestore();
+    }
+  });
 
   it("starts a scheduled task's chat without running it, and schedules its brief", async () => {
     const s = setup();

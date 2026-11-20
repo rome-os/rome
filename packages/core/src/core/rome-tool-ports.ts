@@ -105,14 +105,15 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
 
   const actions: AgentActions = {
     list: (turn) => permittedActions(turn).map(toAgentAction),
+    find: (turn, name) => {
+      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
+      return actions.list(turn).find((action) => action.name === canonical);
+    },
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
-    permits: (turn, name) => {
-      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return permittedActions(turn).some((action) => action.config.name === canonical);
-    },
+    permits: (turn, name) => actions.find(turn, name) !== undefined,
     run: (turn, name, input) =>
       turn.inTurn(() =>
         asTurnActor(turn, async (actor) => {

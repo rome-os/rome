@@ -233,6 +233,22 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
       }
 
+      if (toolkit.toLowerCase() === "gmail") {
+        const managed = await deps.appContext.runAction("core:gmail_read", {
+          path,
+          method,
+          host: new URL(endpoint).host,
+          ...(query ? { query } : {}),
+          ...(body !== undefined ? { body } : {}),
+          ...(headers !== undefined ? { headers } : {}),
+        });
+        // Only absence falls back. A broken Google grant must not silently read
+        // a different mailbox through Composio.
+        if (managed.status !== "error" || !managed.error.startsWith("gmail_not_connected:")) {
+          return managed;
+        }
+      }
+
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {

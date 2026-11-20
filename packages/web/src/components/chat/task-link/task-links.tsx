@@ -1,7 +1,9 @@
 // What a Concierge chat's task links show: each task chat's live name and
 // status (docs/domains/chats.md#task-link). The links in a transcript register
-// the task chats they name, and one read answers for all of them; the chat's
-// `tasks_changed` events read it again, so a chip moves as its task chat runs.
+// the task chats they name, and one read answers for all of them. A task may
+// come from any of the owner's Concierge chats. The chat's `tasks_changed`
+// events, which fire on any of its owner's tasks, read it again, so a chip
+// moves as its task chat runs.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -76,7 +78,7 @@ export function TaskLinksProvider({ chatId, children }: { chatId: string; childr
   return <TaskLinksContext.Provider value={value}>{children}</TaskLinksContext.Provider>;
 }
 
-/** What a task link shows: still reading, a task chat of this Concierge chat, or none. */
+/** What a task link shows: still reading, a task chat of this chat's owner, or none. */
 export type TaskLinkState =
   | { state: "loading" }
   | { state: "found"; task: TaskLinkDto }
