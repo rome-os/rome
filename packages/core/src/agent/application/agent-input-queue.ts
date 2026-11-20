@@ -1,7 +1,7 @@
 import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
 import type { ModelSession } from "../domain/model-port.js";
-import { sameActor } from "../domain/turn-facts.js";
+import { browserChatInput, sameActor, type TurnActor } from "../domain/turn-facts.js";
 import {
   arrive,
   boundFollow,
@@ -105,8 +105,8 @@ export class AgentInputQueue {
     ) => AgentTurnHandle,
     private readonly provider: () => Pick<ModelSession, "steerUserInput">,
     private readonly reportError: (error: unknown) => void,
-    /** Another person's input joined running turn `turnId`: from now on it acts for no one. */
-    private readonly mixActors: (turnId: string) => void = () => {},
+    /** An input has narrowed the authority of a running turn, possibly leaving no actor. */
+    private readonly updateActor: (turnId: string, actor?: TurnActor) => void = () => {},
   ) {}
 
   get busy(): boolean {
@@ -170,19 +170,29 @@ export class AgentInputQueue {
     this.carried = NOTHING_CARRIED;
     // Inputs from more than one person in one turn leave it acting for no one,
     // so nothing it does is taken as any one of theirs.
-    const mixed = [...turn.interrupted, ...turn.prompted].some(
-      (part) => !sameActor(part.options.actor, first.options.actor),
-    );
-    const { actor: _firstActor, ...rest } = first.options;
+    const inputs = [...turn.interrupted, ...turn.prompted];
+    const mixed = inputs.some((part) => !sameActor(part.options.actor, first.options.actor));
+    let { actor, ...rest } = first.options;
+    if (mixed) actor = undefined;
+    else if (
+      actor?.[browserChatInput] &&
+      inputs.some(
+        (part) =>
+          part.options.actor?.[browserChatInput] !== first.options.actor?.[browserChatInput],
+      )
+    ) {
+      const { [browserChatInput]: _source, ...person } = actor;
+      actor = person;
+    }
     const handle = this.startTurn(
       joinPrompts(
         first.input,
         turn.prompted.map((part) => part.input),
         turn.interrupted.map((part) => part.input),
       ),
-      mixed ? rest : first.options,
+      actor ? { ...rest, actor } : rest,
     );
-    this.active = { handle, turn, mixed, actor: mixed ? undefined : first.options.actor };
+    this.active = { handle, turn, mixed, actor };
     // The first input lands before the rest, so its reader sees the turn first.
     for (const part of [first, ...turn.prompted.filter((part) => part !== first)]) {
       part.turnId = handle.id;
@@ -236,7 +246,14 @@ export class AgentInputQueue {
     if (!active.mixed && !sameActor(entry.options.actor, active.actor)) {
       active.mixed = true;
       active.actor = undefined;
-      this.mixActors(active.handle.id);
+      this.updateActor(active.handle.id);
+    } else if (
+      active.actor?.[browserChatInput] &&
+      entry.options.actor?.[browserChatInput] !== active.actor[browserChatInput]
+    ) {
+      const { [browserChatInput]: _source, ...person } = active.actor;
+      active.actor = person;
+      this.updateActor(active.handle.id, person);
     }
     active.turn = steer(active.turn, entry);
     entry.turnId = active.handle.id;

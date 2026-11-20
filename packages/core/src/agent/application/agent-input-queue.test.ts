@@ -1,3 +1,4 @@
+import { browserChatInput, type TurnActor } from "../domain/turn-facts.js";
 import { context } from "@opentelemetry/api";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { InputStatusEvent } from "@rome-os/app-runtime";
@@ -319,6 +320,7 @@ describe("who an input turn acts for", () => {
   function actorSetup() {
     const startedWith: Array<{ actor?: object }> = [];
     const mixed: string[] = [];
+    const updates: (TurnActor | undefined)[] = [];
     const steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted");
     const queue = new AgentInputQueue(
       (_input, options) => {
@@ -327,18 +329,17 @@ describe("who an input turn acts for", () => {
       },
       () => ({ steerUserInput: steer }),
       rs.fn(),
-      (turnId) => mixed.push(turnId),
+      (turnId, actor) => {
+        mixed.push(turnId);
+        updates.push(actor);
+      },
     );
-    const submit = (
-      inputId: string,
-      actor?: { kind: string; userId?: string; accountId?: string },
-      priority?: "now",
-    ) =>
+    const submit = (inputId: string, actor?: TurnActor, priority?: "now") =>
       queue.submit(
         { inputId, prompt: inputId },
         { ...(actor ? { actor } : {}), ...(priority ? { priority } : {}) },
       );
-    return { queue, submit, startedWith, mixed, steer };
+    return { queue, submit, startedWith, mixed, steer, updates };
   }
 
   it("marks a running turn mixed when another person's input is steered into it", async () => {
@@ -354,6 +355,27 @@ describe("who an input turn acts for", () => {
     await tick();
     expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
     expect(s.mixed).toEqual([a.turnId]);
+  });
+
+  it("drops browser authority when the same guardian steers from native", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", { ...guardian, [browserChatInput]: "instance" });
+    await s.queue.beforeSend(a.turnId);
+    s.queue.ready(a.turnId);
+    s.submit("b", guardian);
+    await tick();
+    expect(s.updates).toEqual([guardian]);
+    expect(s.updates[0]?.[browserChatInput]).toBeUndefined();
+  });
+
+  it("intersects browser authority across carried and queued inputs", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", guardian);
+    s.submit("b", { ...guardian, [browserChatInput]: "instance" }, "now");
+    s.submit("c", guardian, "now");
+    s.queue.finish(a.turnId);
+    await tick();
+    expect(s.startedWith[1].actor).toEqual(guardian);
   });
 
   it("starts a turn that bundles two people's inputs as acting for no one", async () => {

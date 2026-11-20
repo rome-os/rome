@@ -16,6 +16,7 @@ import {
   type DevicesStatus,
 } from "@rome/api-types/devices";
 import { withTracingSuppressed } from "../telemetry.js";
+import type { ComputerAuthorization } from "@rome-os/node-core/computer-origin";
 
 export type DeviceManageResult = { ok: true } | { ok: false; code: DeviceManageErrorCode };
 
@@ -146,10 +147,17 @@ export function createNodeDevicesService(
      * it. A device that is offline answers `target_unavailable` at once: no
      * queue, no wake.
      */
-    async runAction(deviceId: string, action: string, args: unknown): Promise<DeviceRunResult> {
+    async runAction(
+      deviceId: string,
+      action: string,
+      args: unknown,
+      proof?: ComputerAuthorization,
+    ): Promise<DeviceRunResult> {
       try {
         client ??= createClient();
-        const response = await client.run(deviceId, action, args);
+        const response = proof
+          ? await client.run(deviceId, action, args, proof)
+          : await client.run(deviceId, action, args);
         return response.ok
           ? { ok: true, result: response.result }
           : { ok: false, code: response.error.code, message: response.error.message };

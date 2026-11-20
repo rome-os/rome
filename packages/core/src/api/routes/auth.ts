@@ -1,3 +1,4 @@
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { DashboardIdentity } from "@rome/api-types";
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
@@ -14,7 +15,7 @@ import {
 } from "../../access/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
-import { resolveGuardianSession } from "../../access/guardian-session.js";
+import { directLoopback, resolveGuardianSession } from "../../access/guardian-session.js";
 import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
@@ -325,7 +326,11 @@ export function authRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Invalid credentials" }, 401);
     }
 
-    issueGuardianSession(c, userId);
+    issueGuardianSession(
+      c,
+      userId,
+      directLoopback(c) && isSameOriginMutationRequest(c.req.raw) ? "local-password" : undefined,
+    );
     deps.loginUsage.recordLogin("password");
     return c.json({ success: true });
   });

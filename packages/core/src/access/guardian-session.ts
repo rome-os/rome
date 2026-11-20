@@ -3,12 +3,13 @@ import { getCookie } from "hono/cookie";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { guardianAuth } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import { COOKIE_NAME, verifySession } from "./auth.js";
+import { COOKIE_NAME, verifySession, type GuardianLoginEntry } from "./auth.js";
 import { isLoopbackAddress } from "../lib/trusted-loopback.js";
 
 export interface GuardianSession {
   userId: string;
   via: "cookie" | "loopback";
+  entry?: GuardianLoginEntry;
 }
 
 /**
@@ -38,7 +39,7 @@ export async function resolveGuardianSessionFromMaterial(
   db: DrizzleDb,
 ): Promise<GuardianSession | null> {
   const session = material.sessionToken ? verifySession(material.sessionToken) : null;
-  if (session) return { userId: session.userId, via: "cookie" };
+  if (session) return { ...session, via: "cookie" };
 
   // Same invariant as lib/trusted-loopback.ts: loopback peer + no XFF header
   // (every fronting proxy stamps XFF; a client can only add one, which demotes
@@ -58,6 +59,10 @@ export function guardianSessionMaterial(c: Context): GuardianSessionMaterial {
     hasForwardedFor: Boolean(c.req.header("x-forwarded-for")),
     peerAddress: peerAddress(c),
   };
+}
+
+export function directLoopback(c: Context): boolean {
+  return !c.req.raw.headers.has("x-forwarded-for") && isLoopbackAddress(peerAddress(c));
 }
 
 export async function resolveGuardianSession(

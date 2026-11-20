@@ -614,14 +614,14 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     const guardian = await getGuardianAuthState(deps.db);
     if (!guardian.exists) {
       const conciergePath = await createGuardianSeat(identity);
-      issueGuardianSession(c, identity.accountId);
+      issueGuardianSession(c, identity.accountId, "cloud-browser");
       deps.loginUsage.recordLogin("rome_cloud");
       log.info("cloud login created the guardian seat and signed in", {
         accountId: identity.accountId,
       });
       return c.redirect(conciergePath ?? SUCCESS_PATH);
     }
-    issueGuardianSession(c, identity.accountId);
+    issueGuardianSession(c, identity.accountId, "cloud-browser");
     deps.loginUsage.recordLogin("rome_cloud");
     log.info("cloud login signed in", { accountId: identity.accountId });
     return c.redirect(successRedirect());

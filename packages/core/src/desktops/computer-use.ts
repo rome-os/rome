@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readBrowserStatus } from "@rome-os/node-core/computer-origin";
 import { z } from "zod";
 import {
   computerUseConnectionSchema,
@@ -14,17 +15,6 @@ const log = createLogger("computer-use");
 const CONNECTIONS_SETTING = "computerUse.connections";
 const POLL_INTERVAL_MS = 5_000;
 const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
-const daemonStatusSchema = z.object({
-  ok: z.literal(true),
-  daemonVersion: z.string().optional(),
-  profiles: z.array(
-    z.object({
-      contextId: z.string().min(1),
-      extensionConnected: z.boolean(),
-      extensionVersion: z.string().optional(),
-    }),
-  ),
-});
 const aliasesSchema = z.object({ aliases: z.record(z.string(), z.string()) });
 
 function serializeMetadata(connections: ComputerUseConnection[]): string {
@@ -122,15 +112,9 @@ export class ComputerUseService {
     }
 
     let daemon: ComputerUseStatus["daemon"] = { status: "unavailable", version: null };
-    let profiles: z.infer<typeof daemonStatusSchema>["profiles"] = [];
+    let profiles: Awaited<ReturnType<typeof readBrowserStatus>>["profiles"] = [];
     try {
-      const response = await this.request("http://127.0.0.1:19825/status", {
-        headers: { "X-OpenCLI": "1" },
-        signal: AbortSignal.timeout(2_000),
-        redirect: "error",
-      });
-      if (!response.ok) throw new Error(`OpenCLI status returned HTTP ${response.status}`);
-      const status = daemonStatusSchema.parse(await response.json());
+      const status = await readBrowserStatus(this.request);
       profiles = status.profiles;
       daemon = { status: "running", version: status.daemonVersion ?? null };
     } catch {

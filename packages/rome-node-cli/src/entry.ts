@@ -99,6 +99,7 @@ async function main(): Promise<void> {
       output: { type: "string" },
       server: { type: "boolean" },
       "device-code": { type: "boolean" },
+      "computer-use-grant": { type: "string" },
       db: { type: "string" },
       json: { type: "boolean" },
       follow: { type: "boolean", short: "f" },
@@ -255,6 +256,7 @@ async function main(): Promise<void> {
     const {
       AuditStore,
       connectHost,
+      connectComputerHost,
       defaultDeviceName,
       loginDevice,
       loginDeviceCode,
@@ -277,8 +279,14 @@ async function main(): Promise<void> {
     const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
     const cloud = values.cloud ?? "https://romeos.cc";
+    const grantFile = values["computer-use-grant"];
+    const connect =
+      grantFile !== undefined
+        ? (options: Parameters<typeof connectHost>[0]) =>
+            connectComputerHost({ ...options, grantFile })
+        : connectHost;
     await withShutdown((signal) =>
-      connectHost({
+      connect({
         audit,
         cloudUrl: cloud,
         name,
@@ -302,7 +310,9 @@ async function main(): Promise<void> {
         onEvent: (event) => {
           if (event.type === "authorization_required")
             process.stderr.write(
-              "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
+              grantFile !== undefined
+                ? "This connection accepts signed Computer Use requests from its configured controller.\n"
+                : "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");

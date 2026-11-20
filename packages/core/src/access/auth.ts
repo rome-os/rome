@@ -45,8 +45,10 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-export function createSession(userId: string): string {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: SESSION_MAX_AGE_SECONDS });
+export type GuardianLoginEntry = "cloud-browser" | "local-password";
+
+export function createSession(userId: string, entry?: GuardianLoginEntry): string {
+  return jwt.sign({ userId, entry }, JWT_SECRET, { expiresIn: SESSION_MAX_AGE_SECONDS });
 }
 
 export interface SessionEnvelope {
@@ -113,9 +115,8 @@ export function createVisitorSessionEnvelope(
  * secure, sameSite, path, maxAge) stay identical across `/auth/login`,
  * `/oauth/redeem`, and `/onboard/create-account`.
  */
-export function issueGuardianSession(c: Context, userId: string): void {
-  const session = createGuardianSession(userId);
-  setCookie(c, COOKIE_NAME, session.token, {
+export function issueGuardianSession(c: Context, userId: string, entry?: GuardianLoginEntry): void {
+  setCookie(c, COOKIE_NAME, createSession(userId, entry), {
     httpOnly: true,
     secure: shouldSecureCookie(c.req.raw),
     sameSite: "Lax",
@@ -145,7 +146,9 @@ export function issueVisitorSession(
   );
 }
 
-export function verifySession(token: string): { userId: string } | null {
+export function verifySession(
+  token: string,
+): { userId: string; entry?: GuardianLoginEntry } | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as JwtPayload & {
       userId?: unknown;
@@ -153,7 +156,9 @@ export function verifySession(token: string): { userId: string } | null {
     };
     if (payload.kind !== undefined) return null;
     if (typeof payload.userId !== "string" || payload.userId === "") return null;
-    return { userId: payload.userId };
+    return payload.entry === "cloud-browser" || payload.entry === "local-password"
+      ? { userId: payload.userId, entry: payload.entry }
+      : { userId: payload.userId };
   } catch {
     return null;
   }

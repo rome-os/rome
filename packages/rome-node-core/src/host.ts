@@ -20,3 +20,4 @@ export {
   type AuditSummary,
   type ContentName,
 } from "./audit.js";
+export { connectComputerHost } from "./computer-host.js";

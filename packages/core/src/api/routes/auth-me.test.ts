@@ -4,7 +4,7 @@
  * `DashboardIdentity`:
  *
  *   - guardian: valid `rome_session` cookie or trusted in-container loopback.
- *     Password login and cloud sign-in mint identical tokens, so both surface
+ *     Password login and cloud sign-in both identify the guardian and surface
  *     the same way. `displayName` is the onboarding `guardianName` setting.
  *   - visitor: valid `rome_visitor` cookie whose email is on the dashboard
  *     allow-list. A visitor cookie without dashboard access is anonymous here.
@@ -14,7 +14,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import { buildApp } from "../index.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../access/auth.js";
+import {
+  COOKIE_NAME,
+  JWT_SECRET,
+  VISITOR_COOKIE_NAME,
+  hashPassword,
+  verifySession,
+} from "../../access/auth.js";
 import type { ApiConfig } from "../deps.js";
 import { guardianAuth, settings } from "../../db/schema.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
@@ -194,4 +200,38 @@ describe("/api/auth/me", () => {
     });
     expect(visitor).toMatchObject({ avatarUrl: "https://example.com/visitor.png" });
   });
+});
+
+it("marks a local password session only at a same-origin direct loopback login", async () => {
+  insertGuardian();
+  await testDb.db
+    .update(guardianAuth)
+    .set({ passwordHash: await hashPassword("fixture password") });
+  const { app } = buildApp(await buildTestDeps(testDb.db), TEST_CONFIG);
+  for (const [remoteAddress, forwarded, expected] of [
+    ["127.0.0.1", false, "local-password"],
+    ["127.0.0.1", true, undefined],
+    ["192.0.2.7", false, undefined],
+  ] as const) {
+    const res = await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+          ...(forwarded && { "x-forwarded-for": "192.0.2.7" }),
+        },
+        body: JSON.stringify({
+          userId: "guardian",
+          password: "fixture password",
+          entry: "cloud-browser",
+        }),
+      },
+      { incoming: { socket: { remoteAddress } } },
+    );
+    expect(res.status).toBe(200);
+    const cookie = res.headers.get("set-cookie")?.match(/rome_session=([^;]+)/)?.[1];
+    expect(verifySession(cookie ?? "")?.entry).toBe(expected);
+  }
 });

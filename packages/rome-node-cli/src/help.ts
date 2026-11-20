@@ -61,6 +61,7 @@ Options:
   --cloud <origin>  Cloud origin (default: https://romeos.cc).
   --name <name>     Name for browser authorization (default: computer hostname).
   --device-code     Authorize from another device without a callback or SSH tunnel.
+  --computer-use-grant <file>  Serve signed Computer Use operations for the controller in this file.
 
 Example:
   rome-node connect --name "My computer"

@@ -1,3 +1,10 @@
+import { generateKeyPairSync, randomUUID } from "node:crypto";
+import {
+  ComputerRequestVerifier,
+  signedComputerRequest,
+  type ComputerAuthorization,
+} from "@rome-os/node-core/computer-origin";
+import { browserChatInput, type TurnActor } from "../agent/index.js";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { TurnFacts } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
@@ -440,6 +447,15 @@ describe("task input actor through the session tool port", () => {
     });
   });
 
+  it("revokes a browser handoff when native input from the same guardian joins the turn", async () => {
+    let actor: TurnActor = { ...guardian, [browserChatInput]: "instance" };
+    const { context } = await provided({ actor: () => actor });
+    await context.captureTaskInput!()("target", body, async () => {
+      actor = guardian;
+      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
+    });
+  });
+
   it("carries the visitor turn, not the unrelated ambient guardian, into the task action", async () => {
     const built = await provided({ actor: () => visitor });
     const repo = {
@@ -651,5 +667,91 @@ describe("task input source capture precedes asynchronous setup", () => {
         claimTaskInputActor("target", body, { platform: "webchat", id: "core:concierge" }),
       ).toBeUndefined();
     });
+  });
+});
+
+describe("Computer Use in a private chat", () => {
+  it("discovers each approved target and forwards only the admitted call with its signature", async () => {
+    const peer = randomUUID();
+    const device = randomUUID();
+    const { privateKey: key, publicKey } = generateKeyPairSync("ed25519");
+    const verifier = new ComputerRequestVerifier(device, peer, publicKey);
+    let actor: TurnActor | undefined = { kind: "guardian", [browserChatInput]: "instance" };
+    let contract: unknown = signedComputerRequest;
+    let onDiscovery: (() => void) | undefined;
+    let executions = 0;
+    const run = rs.fn(
+      async (target: string, action: string, args: unknown, proof?: ComputerAuthorization) => {
+        expect(target).toBe(device);
+        if (action === "system.info") {
+          onDiscovery?.();
+          return {
+            ok: true as const,
+            result: {
+              actions: ["system.info", "computer.status"],
+              audit: { state: "ok" },
+              computerUsePilot: { epoch: verifier.epoch, signedRequest: contract },
+            },
+          };
+        }
+        expect(
+          proof &&
+            verifier.consume(
+              { peer, requestId: proof.requestId, action, args },
+              proof.authorization,
+            ),
+        ).toBe(true);
+        executions++;
+        return { ok: true as const, result: "verified" };
+      },
+    );
+    const localStatus = rs.fn(async () => "local");
+    const built = romeToolPorts({
+      actionRegistry: registry,
+      actionEngine: {} as ActionEngine,
+      privateTurn: async () => true,
+      computerUse: {
+        grants: {
+          local: true,
+          instance: { peer, key, targets: { [device]: ["computer.status", "computer.windows"] } },
+        },
+        run,
+        localStatus,
+      },
+    });
+    const tools = await built.sessionTools.forTurn(
+      turn({ audience: () => "private", actor: () => actor }),
+      true,
+    );
+    const tool = tools.find((t) => t.name === "computer_use")!;
+    const call = (operation?: string, target = device) =>
+      tool.handler({ target, ...(operation && { operation }) });
+    expect((await tool.handler({})).content[0].text).toBe(JSON.stringify({ targets: [device] }));
+    expect((await call()).content[0].text).toBe(JSON.stringify({ actions: ["computer.status"] }));
+    expect((await call("computer.status")).content[0].text).toBe('"verified"');
+    expect((await call("computer.status")).content[0].text).toBe('"verified"');
+    expect((await call("computer.windows")).isError).toBe(true);
+    expect((await call("computer.status", randomUUID())).isError).toBe(true);
+    expect((await tool.handler({ target: "local", operation: "computer.status" })).isError).toBe(
+      true,
+    );
+    expect(localStatus).not.toHaveBeenCalled();
+    contract = undefined;
+    expect((await call("computer.status")).content[0].text).toContain(
+      "computer_protocol_unsupported",
+    );
+    contract = signedComputerRequest;
+    onDiscovery = () => {
+      actor = { kind: "guardian" };
+    };
+    expect((await call("computer.status")).content[0].text).toContain("computer_origin_required");
+    const sent = run.mock.calls.length;
+    expect((await tool.handler({})).content[0].text).toContain("computer_origin_required");
+    expect(
+      (await tool.handler({ target: device, operation: "computer.status", entry: "cloud-browser" }))
+        .isError,
+    ).toBe(true);
+    expect(run).toHaveBeenCalledTimes(sent);
+    expect(executions).toBe(2);
   });
 });

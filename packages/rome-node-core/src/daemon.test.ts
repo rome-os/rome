@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { connectComputerHost } from "./computer-host.js";
+import { signComputerRequest } from "./computer-origin.js";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createServer } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,14 +90,27 @@ async function fixture(prepare?: (directory: string) => Promise<void>) {
     },
   );
   cleanup.push(async () => executor.disconnect());
-  sockets.on("connection", (socket) =>
+  let protectedHost: WebSocket | undefined;
+  sockets.on("connection", (socket, req) => {
+    if (req.headers.authorization === "Bearer romedev_" + "b".repeat(43)) {
+      protectedHost = socket;
+      socket.on("message", (data) => {
+        const { id, payload } = JSON.parse(data.toString());
+        callerSocket?.send(JSON.stringify({ id, from: target, payload }));
+      });
+      return;
+    }
     socket.on("message", (data, binary) => {
       callerSocket = socket;
       const buffer = data as Buffer;
       received.push({ binary, data: buffer });
       if (!binary) {
         const envelope = JSON.parse(buffer.toString());
-        if (envelope.to === device)
+        if (envelope.to === target && protectedHost)
+          protectedHost.send(
+            JSON.stringify({ id: envelope.id, from: caller, payload: envelope.payload }),
+          );
+        else if (envelope.to === device)
           void (gate.probe ?? Promise.resolve()).then(() =>
             executor.receive({ id: envelope.id, from: caller, payload: envelope.payload }),
           );
@@ -141,8 +156,8 @@ async function fixture(prepare?: (directory: string) => Promise<void>) {
           body: Buffer.from(frame.body).reverse(),
         }),
       );
-    }),
-  );
+    });
+  });
   cleanup.push(async () => {
     for (const socket of sockets.clients) socket.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));
@@ -174,7 +189,15 @@ async function fixture(prepare?: (directory: string) => Promise<void>) {
   if (!state) throw new Error("Daemon did not start");
   const client = createNodeClient(config);
   cleanup.push(async () => client.disconnect());
-  return { config, client, received, gate, directory, token: state.token };
+  return {
+    config,
+    client,
+    received,
+    gate,
+    directory,
+    cloudUrl: `http://127.0.0.1:${cloudPort}`,
+    token: state.token,
+  };
 }
 
 /**
@@ -565,4 +588,91 @@ describe("caller daemon observation", () => {
       await raw.call({ jsonrpc: "2.0", id: 1, method: "log.query", params: { kind: "actions" } }),
     ).toMatchObject({ result: { rows: [], hasMore: false } });
   });
+});
+
+it("runs signed Computer Use over the daemon and gateway, reusing the saved target grant after restart", async () => {
+  const { client, cloudUrl, directory, received } = await fixture();
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const grantFile = join(directory, "computer-grant.json");
+  await writePrivateJson(grantFile, {
+    deviceId: target,
+    peer: caller,
+    cloudUrl,
+    publicKey: publicKey.export({ type: "spki", format: "pem" }),
+  });
+  const saved = { deviceId: target, cloudUrl, name: "Target", token: "romedev_" + "b".repeat(43) };
+  const authorize = rs.fn(() => Promise.reject(new Error("Unexpected sign-in")));
+  const realFetch = globalThis.fetch;
+  const fetchSpy = rs
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((input, init) =>
+      String(input) === "http://127.0.0.1:19825/status"
+        ? Promise.resolve(Response.json({ ok: true, profiles: [] }))
+        : realFetch(input, init),
+    );
+  try {
+    let previousEpoch: string | undefined;
+    for (let boot = 0; boot < 2; boot++) {
+      const stop = new AbortController();
+      let connected!: () => void;
+      const online = new Promise<void>((resolve) => {
+        connected = resolve;
+      });
+      const host = connectComputerHost({
+        name: "Target",
+        cloudUrl,
+        grantFile,
+        audit: noAudit,
+        authorize,
+        signal: stop.signal,
+        credentials: { load: async () => saved, clear: rs.fn(), save: rs.fn() },
+        onEvent(event) {
+          if (event.type === "connection" && event.status === "online") connected();
+        },
+      });
+      try {
+        await Promise.race([online, host]);
+        const info = await client.describe(target);
+        expect(info).toMatchObject({
+          ok: true,
+          result: { actions: ["system.info", "computer.status"] },
+        });
+        if (!info.ok) throw new Error("Missing target");
+        const epoch = (info.result as { computerUsePilot: { epoch: string } }).computerUsePilot
+          .epoch;
+        expect(epoch).not.toBe(previousEpoch);
+        previousEpoch = epoch;
+        const input = {
+          deviceId: target,
+          peer: caller,
+          epoch,
+          action: "computer.status",
+          args: {},
+        };
+        const before = received.length;
+        expect(await client.run(target, input.action, {})).toMatchObject({
+          ok: false,
+          error: { code: "computer_origin_required" },
+        });
+        expect(received).toHaveLength(before);
+        for (let call = 0; call < 2; call++) {
+          const proof = signComputerRequest(privateKey, input);
+          expect(await client.run(target, input.action, {}, proof)).toMatchObject({
+            ok: true,
+            result: { browser: { status: "running", connectedProfiles: 0 } },
+          });
+          expect(await client.run(target, input.action, {}, proof)).toMatchObject({
+            ok: false,
+            error: { code: "computer_origin_required" },
+          });
+        }
+      } finally {
+        stop.abort();
+        await host;
+      }
+    }
+    expect(authorize).not.toHaveBeenCalled();
+  } finally {
+    fetchSpy.mockRestore();
+  }
 });

@@ -13,6 +13,7 @@ Two policies decide reach, each held as its own setting:
 
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
 - Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
+- Computer Use requires a private guardian message from an approved browser entry and a grant for the target. The target checks each remote action against the approved instance. Pairing alone grants no actions. [Computer Use request origins](../rome-node.md#computer-use-request-origins)
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access does not grant approval authority. Approval reads and decisions require a verified guardian identity at the approval API, even after edge authorization.

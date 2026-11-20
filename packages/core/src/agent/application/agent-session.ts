@@ -46,7 +46,13 @@ import {
   forkSessionTools,
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import { type TurnFacts, type PushLevel, type TurnActor, sameActor } from "../domain/turn-facts.js";
+import {
+  type TurnFacts,
+  type PushLevel,
+  type TurnActor,
+  browserChatInput,
+  sameActor,
+} from "../domain/turn-facts.js";
 import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
@@ -2465,10 +2471,10 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         error: error instanceof Error ? error.message : String(error),
       }),
-    (turnId) => {
+    (turnId, actor) => {
       if (this.currentSink?.turnId === turnId) {
         this.taskInputEpoch++;
-        this.currentSink.actor = undefined;
+        this.currentSink.actor = actor;
       }
     },
   );
@@ -2605,6 +2611,7 @@ class AgentSessionImpl implements AgentSession {
     const same =
       !!previous &&
       sameActor(previous.actor, options?.actor) &&
+      previous.actor?.[browserChatInput] === options?.actor?.[browserChatInput] &&
       previous.audience === audience &&
       previous.threadContext?.channel === thread?.channel &&
       previous.threadContext?.threadId === thread?.threadId &&

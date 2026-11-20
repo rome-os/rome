@@ -37,6 +37,7 @@ export type SessionActor =
       /** How guardianship was proven: a browser session cookie, or a trusted
        * in-container loopback caller acting as the seat. */
       via: "cookie" | "loopback";
+      entry?: GuardianSession["entry"];
     }
   | { kind: "visitor"; accountId: string; email: string }
   /** A sessionless entry on a session-capable surface (public /api routes,
@@ -81,6 +82,7 @@ export async function enrichGuardianActor(
     ...(seat?.accountId ? { accountId: seat.accountId } : {}),
     ...(seat?.email ? { email: seat.email } : {}),
     via: session.via,
+    ...(session.entry && { entry: session.entry }),
   };
 }
 

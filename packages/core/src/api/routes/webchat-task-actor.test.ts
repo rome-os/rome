@@ -1,4 +1,20 @@
+import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { getRequestListener } from "@hono/node-server";
+import {
+  ComputerRequestVerifier,
+  signedComputerRequest,
+  type ComputerAuthorization,
+} from "@rome-os/node-core/computer-origin";
 import { describe, expect, it, rs } from "@rstest/core";
+import { Hono } from "hono";
+import { COOKIE_NAME, createSession } from "../../access/auth.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
+import { browserChatInput, type TurnActor, type TurnFacts } from "../../agent/index.js";
+import { computerUseTool } from "../../core/computer-use-tool.js";
+import { createTestDb } from "../../test/db.js";
 import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import { createWebchatRuntime } from "./webchat.js";
@@ -9,6 +25,118 @@ const guardian: SessionActor = { kind: "guardian", userId: "synthetic-seat", via
 const visitor: SessionActor = { kind: "visitor", accountId: "v", email: "v@example.invalid" };
 const speaker = { platform: "webchat", id: "core:concierge" };
 const body = { text: "inspect metadata, not a data request" };
+
+async function sendOnLoopback(app: Hono, init: RequestInit) {
+  const server = createServer(getRequestListener(app.fetch));
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/chat/sessions/target/turns`, init);
+    await response.arrayBuffer();
+    return response.status;
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+it("admits Computer Use from the browser's private chat and refuses native and unsigned inputs on the same route", async () => {
+  const db = createTestDb();
+  const peer = randomUUID();
+  const device = randomUUID();
+  const { privateKey: key, publicKey } = generateKeyPairSync("ed25519");
+  const verifier = new ComputerRequestVerifier(device, peer, publicKey);
+  try {
+    for (const [entry, forwarded, sameOrigin, expected] of [
+      ["cloud-browser", false, true, "local"],
+      ["cloud-browser", true, true, "instance"],
+      ["local-password", false, true, "local-password"],
+      ["local-password", true, true, undefined],
+      ["cloud-browser", false, false, undefined],
+      [undefined, false, true, undefined],
+      [undefined, true, true, undefined],
+    ] as const) {
+      const s = harness();
+      const app = new Hono();
+      app.use("*", sessionActorMiddleware(db.db));
+      app.route("/api", s.routes);
+      const status = await sendOnLoopback(app, {
+        method: "POST",
+        headers: {
+          cookie: COOKIE_NAME + "=" + createSession("seat", entry),
+          "sec-fetch-site": sameOrigin ? "same-origin" : "cross-site",
+          ...(forwarded && { "x-forwarded-for": "192.0.2.1" }),
+          "content-type": "application/json",
+          "x-rome-device-id": "claimed-desktop",
+        },
+        body: JSON.stringify({
+          text: "Read browser status",
+          priority: "next",
+          entry: "cloud-browser",
+          browserChatInput: true,
+        }),
+      });
+      expect(status).toBe(200);
+      const admitted = s.submit.mock.calls[0]?.[1] as { actor: TurnActor };
+      expect(admitted.actor[browserChatInput]).toBe(expected);
+      const localStatus = rs.fn(async () => ({ daemon: "running" }));
+      const run = rs.fn(
+        async (target: string, action: string, args: unknown, proof?: ComputerAuthorization) => {
+          expect(target).toBe(device);
+          if (action === "system.info")
+            return {
+              ok: true as const,
+              result: {
+                actions: ["computer.status"],
+                audit: { state: "ok" },
+                computerUsePilot: { epoch: verifier.epoch, signedRequest: signedComputerRequest },
+              },
+            };
+          expect(
+            proof &&
+              verifier.consume(
+                { peer, requestId: proof.requestId, action, args },
+                proof.authorization,
+              ),
+          ).toBe(true);
+          return { ok: true as const, result: {} };
+        },
+      );
+      const tool = computerUseTool(
+        {
+          grants: {
+            local: true,
+            instance: { peer, key, targets: { [device]: ["computer.status"] } },
+          },
+          localStatus,
+          run,
+        },
+        {
+          turnId: () => "turn",
+          threadContext: () => ({ channel: "webchat", threadId: "target" }),
+          live: () => true,
+          audience: () => "private",
+          actor: () => admitted.actor,
+        } as TurnFacts,
+        true,
+        async () => true,
+      );
+      const local = expected === "local" || expected === "local-password";
+      const remote = expected === "local" || expected === "instance";
+      for (let i = 0; i < 2; i++) {
+        const result = await tool.handler({ target: "local", operation: "computer.status" });
+        expect(result.isError === true).toBe(!local);
+        const forwarded = await tool.handler({ target: device, operation: "computer.status" });
+        expect(forwarded.isError === true).toBe(!remote);
+      }
+      expect(localStatus).toHaveBeenCalledTimes(local ? 2 : 0);
+      expect(run).toHaveBeenCalledTimes(remote ? 4 : 0);
+    }
+  } finally {
+    db.close();
+  }
+});
 
 function harness(owner = "guardian", audience: "private" | "shared" = "private") {
   let active = true;

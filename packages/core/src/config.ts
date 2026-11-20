@@ -19,6 +19,7 @@ function isWssDrainUrl(value: string): boolean {
 }
 
 const configSchema = z.object({
+  computerUseGrantsFile: z.string().startsWith("/").optional(),
   // Statsig server secret key. When present, the cloud-auth rollout gate
   // (`rome_cloud_auth`) is evaluated against Statsig live on each /login, keyed
   // on the instance slug. Absent leaves the gate to the all-off default (fail
@@ -152,6 +153,8 @@ export type Config = z.infer<typeof configSchema>;
 
 function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   const raw: Record<string, unknown> = {};
+  if (env.ROME_COMPUTER_USE_GRANTS_FILE !== undefined)
+    raw.computerUseGrantsFile = env.ROME_COMPUTER_USE_GRANTS_FILE;
 
   // Statsig server secret key (gates the cloud-auth rollout). Absent disables
   // the gate entirely.

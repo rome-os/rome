@@ -9,6 +9,7 @@ import { ObserveStore, QueryError, type ActionEnd, type ActionStart } from "./ob
 import type { LogQuery, LogStatsQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
 import { CloudError } from "./cloud.js";
 import { DeviceConnector } from "./connector.js";
+import { isComputerOperation, isComputerAuthorization } from "./computer-origin.js";
 import { daemonStatePath, readCallerCredential, type NodeConfig } from "./local.js";
 import { writePrivateJson } from "./storage.js";
 import {
@@ -73,7 +74,7 @@ function actionStart(
 ): ActionStart {
   const exec = action === "exec" && isRecord(args) && typeof args.command === "string";
   let text: string | null = null;
-  if (!exec)
+  if (!exec && !isComputerOperation(action))
     try {
       text = JSON.stringify(args ?? {});
     } catch {}
@@ -432,15 +433,39 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
             }
             break;
           }
+          case "devices.runComputer":
           case "devices.run":
             if (typeof params.deviceId !== "string" || typeof params.action !== "string")
               throw new RpcError(-32602, "A device ID and action are required.");
             {
               const { deviceId, action } = params;
               const args = params.args ?? {};
+              const proof = isComputerAuthorization(params.authorization)
+                ? params.authorization
+                : undefined;
+              if (isComputerOperation(action) && value.method !== "devices.runComputer") {
+                result = actionError(
+                  "computer_origin_required",
+                  "Use Computer Use from an authorized private chat.",
+                );
+                break;
+              }
+              if (
+                value.method === "devices.runComputer" &&
+                (!proof || !isComputerOperation(action))
+              ) {
+                throw new RpcError(-32602, "Invalid protected computer request.");
+              }
               result = await observed(
                 action === "system.info" ? null : actionStart(deviceId, action, args, "json"),
-                () => connector.run(deviceId, action, args),
+                () =>
+                  connector.run(
+                    deviceId,
+                    action,
+                    args,
+                    undefined,
+                    value.method === "devices.runComputer" ? proof : undefined,
+                  ),
                 (response) => actionEnd(response),
               );
             }
@@ -449,6 +474,14 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
             if (typeof params.deviceId !== "string" || typeof params.action !== "string")
               throw new RpcError(-32602, "A device ID and action are required.");
             const { deviceId, action } = params;
+            if (isComputerOperation(action)) {
+              result = actionError(
+                "computer_origin_required",
+                "Computer Use requires a protected JSON request.",
+              );
+              body = new Uint8Array();
+              break;
+            }
             const args = params.args ?? {};
             const stdin = input ?? new Uint8Array();
             const reply = await observed(

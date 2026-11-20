@@ -8,6 +8,9 @@ import type { WidgetDrawing } from "./widget-drawing.js";
 /** The level at which a turn pushes the messages it says to the person the chat serves. */
 export type PushLevel = "active" | "passive";
 
+/** Only the admitting webchat route sets this mark. JSON and worker IPC cannot carry it. */
+export const browserChatInput = Symbol("browserChatInput");
+
 /**
  * Who a turn acts for: the person whose message started it, as the request
  * that admitted the message proved. The agent context reads only who it is,
@@ -15,6 +18,7 @@ export type PushLevel = "active" | "passive";
  */
 export interface TurnActor {
   readonly kind: string;
+  readonly [browserChatInput]?: "local" | "instance" | "local-password";
   /** The person's Rome Cloud account, when they have one. */
   readonly accountId?: string;
   /** The guardian's seat. */

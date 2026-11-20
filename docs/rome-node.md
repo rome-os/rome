@@ -985,3 +985,85 @@ the archives with npm, and starts a daemon from the installed core package. CI d
 not run on macOS or Windows, so behavior specific to those platforms is unverified.
 Browser authorization and two-computer acceptance also require real environments.
 Platform simulations and type checks do not establish those results.
+
+## Computer Use request origins
+
+The `computer_use` chat tool checks the source of the message that started its
+turn. The Cloud browser callback marks the signed Guardian session. The native
+completion endpoint returns a session without that mark. Existing sessions
+keep their usual access. Sign in again in the browser to use the tool.
+
+A same-origin send in a private Guardian chat carries the verified entry into
+the turn. A checked Concierge handoff can carry it into its task chat. Input
+from another entry removes the authority from a mixed turn. Forks, background
+work and ordinary device commands cannot issue a protected request.
+
+### Grant a target
+
+The owner sets `ROME_COMPUTER_USE_GRANTS_FILE` to an absolute path on the
+instance. Each target needs its own entry. Use an instance-specific
+`ROME_JWT_SECRET` of at least 32 characters. Keep signing material and grants
+under the owner's control, outside directories that untrusted workloads can
+read or edit.
+
+For the machine running Core, the grant file can contain just
+`{"local":true}`. A direct loopback browser send can read `computer.status`
+in-process. It reports the browser connections Core sees. Both the password
+sign-in and the send must reach Core directly for a local password session.
+A Cloud browser session can use this target from direct loopback too. Proxies
+must stamp `X-Forwarded-For`, as the [access policy](architecture/access-control.md) requires.
+
+For a remote target, generate an Ed25519 key pair for the controller. Keep
+the PEM private key on the instance. The file below shows the shape of the
+grant. Replace the placeholders with the lowercase device IDs from pairing.
+
+```json
+{
+  "instance": {
+    "peer": "<instance Gateway peer UUID>",
+    "privateKeyFile": "/run/secrets/computer-use.pem",
+    "targets": {
+      "<target device UUID>": ["computer.status"]
+    }
+  }
+}
+```
+
+On the target, save a grant with its Cloud origin, its own device ID, the
+approved instance peer and the PEM public key. Start the host in this mode
+with `rome-node connect --computer-use-grant /path/to/grant.json`.
+
+```json
+{
+  "cloudUrl": "https://romeos.cc",
+  "deviceId": "<target device UUID>",
+  "peer": "<instance Gateway peer UUID>",
+  "publicKey": "<PEM public key>"
+}
+```
+
+The target serves discovery and a signed `computer.status` that checks its
+local browser daemon. It exposes no shell, file actions or window operations
+in this mode. A receiver that implements other JSON computer operations can
+report them through the same protocol. The tool lists the intersection of
+the grant and the target's live report.
+
+These files survive restarts. Edit the grant and restart its process to
+change or revoke access. Every protected call gets a separate Ed25519
+signature over the peer, target, connection epoch, request ID, operation,
+arguments, transport and expiry. The receiver consumes the request ID once.
+A reconnect changes its epoch.
+
+### Version boundary
+
+The caller daemon must support `devices.runComputer`. The target must report
+`rome.computer-use.request.v1` and a current epoch in `system.info`. Gateway
+relays the existing payload. It needs no new field. A missing capability or
+an unsigned request produces a refusal.
+
+Core 1.1.209 sends the same ordinary device request for browser and native
+inputs. Its request ID identifies a pending reply, without a verified chat
+entry. A target grant alone cannot enable either input on that version.
+To keep that Core, a trusted service would have to link the admitted browser
+message to the exact outgoing action and attest its target, arguments, request
+ID and expiry. The 1.1.209 path has no such link.

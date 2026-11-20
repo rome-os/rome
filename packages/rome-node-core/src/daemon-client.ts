@@ -1,4 +1,5 @@
 import type { DevicesStatus } from "./devices-status.js";
+import type { ComputerAuthorization } from "./computer-origin.js";
 import {
   actionError,
   isRecord,
@@ -183,18 +184,21 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
     deviceId: string,
     action: string,
     args: unknown = {},
+    authorization?: ComputerAuthorization,
   ): Promise<ActionResponse> {
     assertOpen();
     if (!validId(deviceId) || typeof action !== "string" || !action || action.length > 128)
       return actionError("invalid_request", "A device ID and action are required.");
     let body: unknown;
     try {
-      body = JSON.parse(JSON.stringify({ deviceId, action, args }));
+      body = JSON.parse(JSON.stringify({ deviceId, action, args, authorization }));
     } catch {
       return actionError("invalid_request", "Action arguments must be JSON.");
     }
     try {
-      const response = parseResponse(await call("devices.run", body));
+      const response = parseResponse(
+        await call(authorization ? "devices.runComputer" : "devices.run", body),
+      );
       return (
         response ??
         actionError(
@@ -206,7 +210,11 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
       if (error instanceof DaemonRequestError) return actionError(error.code, error.message);
       if (error instanceof RpcError)
         return actionError(
-          error.code === -32602 ? "invalid_request" : "gateway_unavailable",
+          authorization && error.code === -32601
+            ? "computer_protocol_unsupported"
+            : error.code === -32602
+              ? "invalid_request"
+              : "gateway_unavailable",
           error.message,
         );
       throw error;

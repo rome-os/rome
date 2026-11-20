@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { signedComputerRequest, type ComputerAuthorization } from "./computer-origin.js";
 import {
   actionError,
   isRecord,
@@ -227,16 +228,21 @@ export class DeviceConnector {
     action: string,
     args: unknown,
     waitMs = this.options.waitMs ?? 60_000,
+    proof?: ComputerAuthorization,
   ): Promise<ActionResponse> {
     if (!validId(target) || !action || action.length > 128)
       return actionError("invalid_request", "A device ID and action are required.");
     const refused = await this.admit();
     if (refused) return refused;
-    const id = randomUUID();
+    const id = proof?.requestId ?? randomUUID();
+    if (this.pending.has(id) || this.channels.has(id))
+      return actionError("invalid_request", "The request ID is already in use.");
     const envelope = {
       id,
       to: target,
-      payload: { type: "request", action, args } satisfies ActionRequest,
+      payload: proof
+        ? { type: signedComputerRequest.type, action, args, authorization: proof.authorization }
+        : ({ type: "request", action, args } satisfies ActionRequest),
     };
     try {
       JSON.stringify(envelope);

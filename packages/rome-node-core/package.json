@@ -21,6 +21,10 @@
       "types": "./dist/daemon-client.d.ts",
       "default": "./dist/daemon-client.js"
     },
+    "./computer-origin": {
+      "types": "./dist/computer-origin.d.ts",
+      "default": "./dist/computer-origin.js"
+    },
     "./host": {
       "types": "./dist/host.d.ts",
       "default": "./dist/host.js"

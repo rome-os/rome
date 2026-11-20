@@ -33,11 +33,13 @@ import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
 import { showCardTools } from "./show-card-tool.js";
+import { computerUseTool } from "./computer-use-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
-import { sameActor } from "../agent/index.js";
+import { browserChatInput, sameActor } from "../agent/index.js";
 
 export interface RomeToolPortsDeps {
+  computerUse?: Parameters<typeof computerUseTool>[0];
   actionRegistry: ActionRegistry;
   actionEngine: ActionEngine;
   /** App-declared event sources: an event `defer` subscribes through them.
@@ -234,8 +236,9 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
               if (turn.live?.() === false) throw new Error("Task input source is not live");
               const thread = turn.threadContext();
               const turnId = turn.turnId();
-              const admitted = turn.actor() as SessionActor | undefined;
-              const actor = admitted ? Object.freeze({ ...admitted }) : undefined;
+              const admitted = turn.actor();
+              const entry = admitted?.[browserChatInput];
+              const actor = admitted ? (Object.freeze({ ...admitted }) as SessionActor) : undefined;
               const sourceChatId = thread?.threadId;
               const channel = thread?.channel;
               const threadType = thread?.threadType;
@@ -245,6 +248,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                 return (
                   turn.turnId() === turnId &&
                   sameActor(turn.actor(), actor) &&
+                  turn.actor()?.[browserChatInput] === entry &&
                   turn.audience() === audience &&
                   live?.channel === channel &&
                   live?.threadType === threadType &&
@@ -307,6 +311,9 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           language: deps.guardianLanguage,
           devicesOnly: provided.some((tool) => tool.name === "connect_card"),
         }),
+        ...(deps.computerUse
+          ? [computerUseTool(deps.computerUse, turn, hasSpeaker, deps.privateTurn)]
+          : []),
         ...shareLocationTools({
           turn,
           widgets: turn.widgets,

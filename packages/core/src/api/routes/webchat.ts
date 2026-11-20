@@ -4,6 +4,7 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
+import { privateOwnerOf } from "../../webchat/privacy.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
@@ -104,7 +105,14 @@ import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
 import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";
 import { normalizeRoutineDraftForCard } from "../../routines/propose-routine-tool.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
-import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
+import {
+  browserChatInput,
+  buildSlashSkillPrompt,
+  parseSlashSkillInvocation,
+  type TurnActor,
+} from "../../agent/index.js";
+import { directLoopback } from "../../access/guardian-session.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { buildConciergeSkillPrompt } from "../../concierge/skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -4098,6 +4106,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     said: {
       saidBy?: Account;
       fromWidgetEvent?: boolean;
+      browserRequest?: "local" | "instance";
       askingDeviceId?: string;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
@@ -5227,11 +5236,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return stream;
     };
 
-    const actingActor = said.taskActor ?? turnActor(actor, saidBy);
+    const person = said.taskActor ?? turnActor(actor, saidBy);
+    let actingActor: TurnActor | undefined = person;
+    if (
+      person?.kind === "guardian" &&
+      person.via === "cookie" &&
+      said.browserRequest &&
+      !said.fromWidgetEvent &&
+      !saidBy &&
+      privateOwnerOf(session) === "guardian"
+    ) {
+      if (person.entry === "cloud-browser")
+        actingActor = { ...person, [browserChatInput]: said.browserRequest };
+      else if (person.entry === "local-password" && said.browserRequest === "local")
+        actingActor = { ...person, [browserChatInput]: "local-password" };
+    }
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
-      // Who the turn acts for, captured now: its tool calls run as this
-      // person however late the model's callback arrives.
       ...(actingActor ? { actor: actingActor } : {}),
       ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
@@ -5320,6 +5341,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const body = await parseChatSendBody(c);
     const sent = await handleChatSend(c.req.param("id"), body, {
       fromWidgetEvent: cameThroughWidgetEvent(c.env),
+      browserRequest: isSameOriginMutationRequest(c.req.raw)
+        ? directLoopback(c)
+          ? "local"
+          : "instance"
+        : undefined,
       askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),
     });
     return c.json(sent.body, sent.status);

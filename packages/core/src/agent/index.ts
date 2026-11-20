@@ -232,7 +232,7 @@ export {
   type SubmitOptions,
 } from "./application/agent-input-queue.js";
 export type { PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
-export { sameActor } from "./domain/turn-facts.js";
+export { browserChatInput, sameActor } from "./domain/turn-facts.js";
 export {
   type Audience,
   messagingAudience,

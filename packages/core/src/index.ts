@@ -8,6 +8,8 @@ import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
+import { readComputerGrants } from "./core/computer-use-tool.js";
+import { JWT_SECRET } from "./access/auth.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import {
@@ -417,6 +419,14 @@ import type { MessagePageCursor } from "./webchat/repository.js";
 
 async function main() {
   const config = loadConfig();
+  const computerGrants = config.computerUseGrantsFile
+    ? await readComputerGrants(config.computerUseGrantsFile, JWT_SECRET)
+    : undefined;
+  if (computerGrants) {
+    // Core has captured both. Apps and agent subprocesses must not inherit them.
+    delete process.env.ROME_JWT_SECRET;
+    delete process.env.ROME_COMPUTER_USE_GRANTS_FILE;
+  }
 
   if (config.database.type === "sqlite") {
     const dbPath = config.database.sqlitePath;
@@ -1360,6 +1370,11 @@ async function main() {
       folders: agentFolders(),
       log: createLogger("agent-session"),
       ...romeToolPorts({
+        computerUse: computerGrants && {
+          grants: computerGrants,
+          localStatus: () => computerUse.getStatus(),
+          run: nodeDevices.runAction,
+        },
         actionRegistry,
         actionEngine,
         webchatRepo,

@@ -54,7 +54,7 @@ rs.mock("../../profile-memory.js", () => ({
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../access/auth.js";
+import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifySession } from "../../access/auth.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
@@ -254,8 +254,9 @@ function sessionUserId(res: Response): string | null {
   if (!setCookie) return null;
   const match = setCookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
   if (!match) return null;
-  const decoded = jwt.verify(decodeURIComponent(match[1]), JWT_SECRET) as { userId?: string };
-  return decoded.userId ?? null;
+  const decoded = verifySession(decodeURIComponent(match[1]));
+  expect(decoded?.entry).toBe("cloud-browser");
+  return decoded?.userId ?? null;
 }
 
 describe("/api/auth/cloud — flag off", () => {
@@ -328,7 +329,7 @@ describe("/api/auth/cloud/native", () => {
     };
     expect(body.cookie_name).toBe(COOKIE_NAME);
     expect(body).toMatchObject({ role: "owner" });
-    expect(jwt.verify(body.session_token, JWT_SECRET)).toMatchObject({ userId: "A" });
+    expect(verifySession(body.session_token)).toEqual({ userId: "A" });
     expect(new Date(body.expires_at).getTime()).toBeGreaterThan(Date.now());
     expect(body.origin).toBeTruthy();
 

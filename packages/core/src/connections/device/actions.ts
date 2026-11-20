@@ -142,6 +142,12 @@ export function registerDeviceActions(
       if (typeof operation !== "string" || !operation) {
         return { status: "error", error: "Invalid input: operation is required." };
       }
+      if (operation.startsWith("computer.")) {
+        return {
+          status: "error",
+          error: "computer_origin_required: Use computer_use in an authorized private chat.",
+        };
+      }
       if (args === null || typeof args !== "object" || Array.isArray(args)) {
         return { status: "error", error: "Invalid input: args must be an object." };
       }
