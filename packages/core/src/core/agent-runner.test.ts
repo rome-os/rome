@@ -6985,6 +6985,81 @@ describe("AgentRunner", () => {
       expect(third).not.toContain("Hollyfold");
     });
 
+    it("does not read a platform thread again when its session closed idle and reopened on the same model thread", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const latest = rs.fn(
+        async () =>
+          [
+            {
+              channel: "slack_app",
+              chatId: "C_NEWS",
+              messageId: "root:m1",
+              direction: "inbound",
+              senderId: "T_A/U_SAM",
+              senderDisplayName: "Sam",
+              text: "picnic on Saturday?",
+              attachments: [],
+              timestamp: new Date(Date.UTC(2026, 7, 3, 8, 1)),
+            },
+          ] as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      const resumes: (string | undefined)[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          resumes.push(params.thread.kind === "resume" ? params.thread.modelThreadId : undefined);
+          const session = await makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          })(params);
+          // A thread the provider named, which the reopen resumes.
+          Object.assign(session, { modelThreadId: "thread-1" });
+          return session;
+        },
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      const manager = (runner as unknown as { agentSessionManager: Sessions }).agentSessionManager;
+      for (const prompt of ["where is the picnic?", "and when?"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            inThread: "C_NEWS:root" as ChatId,
+          }),
+        );
+        // The session closes idle between the two mentions.
+        await manager
+          .find({ agentName: "test-main", channelThreadKey: "slack_app:C_NEWS" })
+          ?.close("idle");
+      }
+
+      expect(resumes).toEqual([undefined, "thread-1"]);
+      expect(latest).toHaveBeenCalledTimes(1);
+      expect(providerPrompts[0]).toContain("picnic on Saturday?");
+      expect(providerPrompts[1]).not.toContain("<thread_messages>");
+    });
+
     it("reads a platform thread again when the turn that read it failed before the model took its input", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
