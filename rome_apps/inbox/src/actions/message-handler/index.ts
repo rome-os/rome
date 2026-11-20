@@ -7,6 +7,7 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  BondLevel,
   ChatRecord,
   ChatRepository,
   EnsureChannelChatInput,
@@ -26,8 +27,22 @@ const log = createAppLogger("message-handler");
 // Dependencies injected via factory
 // ---------------------------------------------------------------------------
 
+/** Core's send gate, which the SDK does not describe yet. */
+export type SendGate = (request: {
+  destination: {
+    connectionId: string;
+    chatId: string;
+    place: "direct" | "group";
+    sameChatAsWake: boolean;
+    onlyGuardianReads: boolean;
+  };
+  recipient: { bondLevel: BondLevel } | null;
+  author: { agentName: string };
+}) => "send" | "check" | "ask_guardian" | "refuse";
+
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
+  sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
   sentinelLogRepo: SentinelLogRepository;
   approvalsRepo: ApprovalsRepository;
@@ -480,10 +495,10 @@ async function handleTrustedMessage(
     return { status: "ok", data: { action: "no_response" } };
   }
 
-  // Skip envoy for guardian — send directly
-  if (bondLevel === "guardian") {
-    log.info("skipping envoy (guardian)", { channel, channelUserId });
-    await sendAnswer(deps, {
+  const approval = { type: "outgoing_message" as const, requestedBy: targetAgent };
+  const payload = { response, channel, threadId, messageId, channelUserId };
+  const send = () =>
+    sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -493,17 +508,52 @@ async function handleTrustedMessage(
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
+  const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
+  const recipient =
+    typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null;
+  const place = args.threadType === "private" ? "direct" : "group";
+  const decision = deps.sendGate({
+    destination: {
+      connectionId,
+      chatId: threadId,
+      place,
+      // The reply goes to the chat the message came from.
+      sameChatAsWake: true,
+      onlyGuardianReads: place === "direct" && recipient?.bondLevel === "guardian",
+    },
+    recipient,
+    author: { agentName: targetAgent },
+  });
+  log.info("send gate decision", { decision, channel, channelUserId });
+
+  if (decision === "send") {
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: "Skipped envoy (guardian)",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
   }
+  if (decision === "ask_guardian") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Held by the send gate",
+      payload,
+    });
+    return { status: "ok", data: { action: "pending_approval", response } };
+  }
+  if (decision === "refuse") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Refused by the send gate",
+      payload,
+      status: "rejected",
+    });
+    return { status: "ok", data: { action: "rejected_by_send_gate" } };
+  }
 
-  // Envoy check before sending (non-guardian trusted senders)
   log.info("running envoy check", { channel, channelUserId });
   const envoyResult = await envoyCheck(
     deps.agentRunner,
@@ -511,7 +561,7 @@ async function handleTrustedMessage(
     text,
     {
       shownName: typeof args.displayName === "string" ? args.displayName : channelUserId,
-      person: typeof args.senderPerson === "string" ? args.senderPerson : null,
+      person: senderPerson,
       bondLevel,
       threadType: typeof args.threadType === "string" ? args.threadType : undefined,
     },
@@ -521,21 +571,11 @@ async function handleTrustedMessage(
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {
-    await sendAnswer(deps, {
-      channel,
-      threadId,
-      text: response,
-      channelUserId,
-      replyToMessageId: messageId,
-      romeSessionId: chatId,
-      ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
-      knownToProvider: true,
-    });
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy approved",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
@@ -543,20 +583,17 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "require_approval") {
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy flagged for approval",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
     });
     return { status: "ok", data: { action: "pending_approval", response } };
   }
 
-  // Rejected
   await deps.approvalsRepo.create({
-    type: "outgoing_message",
-    requestedBy: targetAgent,
+    ...approval,
     description: envoyResult.reason ?? "Envoy rejected",
-    payload: { response, channel, threadId, messageId, channelUserId },
+    payload,
     status: "rejected",
   });
   return {

@@ -315,6 +315,7 @@ import { ApprovalHandler, executionRequester } from "./apps/actions/approval-han
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
+import { guardedSend } from "./participation/send-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -1620,6 +1621,7 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
+    sendGate: guardedSend,
     routinesRepo,
     routineEngine,
     // Real coordinators in the main process; workers inject the matching proxies

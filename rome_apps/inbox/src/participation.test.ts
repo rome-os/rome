@@ -25,6 +25,7 @@ import type {
   RunParams,
   SaidInboundEvent,
 } from "@rome-os/app-runtime";
+import type { SendGate } from "./actions/message-handler/index.js";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
 
@@ -53,9 +54,14 @@ interface Setup {
   replyTo?: string[];
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
+  /** What Core's send gate answers. Its own table is guarded-send.test.ts in
+   *  packages/core/src/participation/send-gate. */
+  gate?: ReturnType<SendGate>;
   /** The host recorded the message before Inbox heard it, as it does when it
    *  hands the hook `messagesSaid`. */
   recorded?: boolean;
+  /** Where the message was said: a direct message, or a group (the default). */
+  threadType?: "private" | "group";
 }
 
 function result(content: string, structuredOutput?: unknown): AgentMessage {
@@ -98,9 +104,14 @@ async function handle(setup: Setup) {
   const sent: Record<string, unknown>[] = [];
   const approvals: Record<string, unknown>[] = [];
   const policyContexts: unknown[] = [];
+  const gateRequests: Parameters<SendGate>[0][] = [];
 
   const action = createAction(actionConfig, {
     agentRunner,
+    sendGate: (request: Parameters<SendGate>[0]) => {
+      gateRequests.push(request);
+      return setup.gate ?? "check";
+    },
     personMappingRepo: {
       findByChannelUser: async () => (setup.sender === "stranger" ? null : person(setup.sender)),
     },
@@ -146,14 +157,14 @@ async function handle(setup: Setup) {
     channelUserId: "user-1",
     threadId: "chat-1",
     threadName: "Dev Chat",
-    threadType: "group",
+    threadType: setup.threadType ?? "group",
     displayName: "Alice",
     text: "Can you help?",
     messageId: "message-1",
     ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
   });
 
-  return { outcome, runs, stored, promoted, sent, approvals, policyContexts };
+  return { outcome, runs, stored, promoted, sent, approvals, policyContexts, gateRequests };
 }
 
 type Wake = "woke" | "quiet" | "blocked" | "reviewed";
@@ -345,100 +356,91 @@ function sendOf(handled: Awaited<ReturnType<typeof handle>>): Send {
   const data = handled.outcome.data as { action?: string };
   if (data.action === "sent") return envoyRan ? "checked" : "sent";
   if (data.action === "pending_approval") return "held";
-  if (data.action === "rejected_by_envoy") return "refused";
+  if (data.action === "rejected_by_envoy" || data.action === "rejected_by_send_gate") {
+    return "refused";
+  }
   throw new Error(`unexpected handler outcome: ${JSON.stringify(handled.outcome)}`);
 }
 
-describe("send: recipient × Envoy", () => {
-  const trustedInnerCircle = {
+describe("send: send gate × Envoy", () => {
+  const woken: Setup = {
+    sender: "inner-circle",
+    policy: "allow",
     trusted: ["guardian", "inner-circle"],
     replyTo: ["guardian", "inner-circle"],
   };
 
   const rows: {
     name: string;
-    setup: Setup;
+    gate: ReturnType<SendGate>;
+    envoy?: AgentMessage;
     send: Send;
     approval: { status?: string; description: string };
   }[] = [
     {
-      name: "the guardian, without asking Envoy",
-      setup: { sender: "guardian", policy: "allow", answers: [[result("Hi")]] },
+      name: "the gate says send",
+      gate: "send",
       send: "sent",
       approval: { status: "auto_approved", description: "Skipped envoy (guardian)" },
     },
     {
-      name: "anyone else, when Envoy approves",
-      setup: {
-        sender: "inner-circle",
-        policy: "allow",
-        ...trustedInnerCircle,
-        answers: [[result("Hi")], [envoy("approve", "Friendly")]],
-      },
+      name: "the gate asks the guardian",
+      gate: "ask_guardian",
+      send: "held",
+      approval: { description: "Held by the send gate" },
+    },
+    {
+      name: "the gate refuses",
+      gate: "refuse",
+      send: "refused",
+      approval: { status: "rejected", description: "Refused by the send gate" },
+    },
+    {
+      name: "the gate asks for a check and Envoy approves",
+      gate: "check",
+      envoy: envoy("approve", "Friendly"),
       send: "checked",
       approval: { status: "auto_approved", description: "Friendly" },
     },
     {
-      name: "anyone else, when Envoy asks the guardian",
-      setup: {
-        sender: "inner-circle",
-        policy: "allow",
-        ...trustedInnerCircle,
-        answers: [[result("Hi")], [envoy("require_approval", "Mentions plans")]],
-      },
+      name: "the gate asks for a check and Envoy asks the guardian",
+      gate: "check",
+      envoy: envoy("require_approval", "Mentions plans"),
       send: "held",
       approval: { description: "Mentions plans" },
     },
     {
-      name: "anyone else, when Envoy rejects",
-      setup: {
-        sender: "inner-circle",
-        policy: "allow",
-        ...trustedInnerCircle,
-        answers: [[result("Hi")], [envoy("reject", "Leaks an address")]],
-      },
+      name: "the gate asks for a check and Envoy rejects",
+      gate: "check",
+      envoy: envoy("reject", "Leaks an address"),
       send: "refused",
       approval: { status: "rejected", description: "Leaks an address" },
     },
     {
-      name: "anyone else, when Envoy answers without a verdict",
-      setup: {
-        sender: "inner-circle",
-        policy: "allow",
-        ...trustedInnerCircle,
-        answers: [[result("Hi")], [result("looks fine")]],
-      },
+      name: "the gate asks for a check and Envoy answers without a verdict",
+      gate: "check",
+      envoy: result("looks fine"),
       send: "held",
       approval: { description: "Envoy answered without a verdict: looks fine" },
     },
     {
-      name: "anyone else, when Envoy fails",
-      setup: {
-        sender: "inner-circle",
-        policy: "allow",
-        ...trustedInnerCircle,
-        answers: [[result("Hi")], [{ type: "error", error: "model down" } as AgentMessage]],
-      },
+      name: "the gate asks for a check and Envoy fails",
+      gate: "check",
+      envoy: { type: "error", error: "model down" } as AgentMessage,
       send: "held",
       approval: { description: "Envoy validation failed: model down" },
     },
-    {
-      name: "a stranger the agent woke for after review, when Envoy approves",
-      setup: {
-        sender: "stranger",
-        policy: "sentinel_review",
-        replyTo: ["other"],
-        answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
-      },
-      send: "checked",
-      approval: { status: "auto_approved", description: "Fine" },
-    },
   ];
 
-  it.each(rows)("a reply to $name → $send", async ({ setup, send, approval }) => {
-    const handled = await handle(setup);
+  it.each(rows)("a reply when $name → $send", async ({ gate, envoy, send, approval }) => {
+    const handled = await handle({
+      ...woken,
+      gate,
+      answers: [[result("Hi")], ...(envoy ? [[envoy]] : [])],
+    });
 
     expect(sendOf(handled)).toBe(send);
+    expect(handled.runs.some((run) => run.agentName === "envoy")).toBe(gate === "check");
     expect(handled.sent.length).toBe(send === "sent" || send === "checked" ? 1 : 0);
     expect(handled.approvals).toHaveLength(1);
     expect(handled.approvals[0]).toEqual(
@@ -447,7 +449,53 @@ describe("send: recipient × Envoy", () => {
     if (!approval.status) expect(handled.approvals[0]).not.toHaveProperty("status");
   });
 
-  it("sends Sentinel's own reply without asking Envoy", async () => {
+  it("asks the gate about the chat the message came from, the person who sent it, and the agent", async () => {
+    const guardian = await handle({
+      sender: "guardian",
+      policy: "allow",
+      answers: [[result("Hi")]],
+    });
+    const stranger = await handle({
+      sender: "stranger",
+      policy: "sentinel_review",
+      replyTo: ["other"],
+      answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
+    });
+
+    const guardianDirect = await handle({
+      sender: "guardian",
+      policy: "allow",
+      threadType: "private",
+      answers: [[result("Hi")]],
+    });
+
+    // The guardian's message answered in a group: others read the reply.
+    expect(guardian.gateRequests).toEqual([
+      {
+        destination: {
+          connectionId: "connection:telegram",
+          chatId: "chat-1",
+          place: "group",
+          sameChatAsWake: true,
+          onlyGuardianReads: false,
+        },
+        recipient: { bondLevel: "guardian" },
+        author: { agentName: "main" },
+      },
+    ]);
+    expect(guardianDirect.gateRequests).toEqual([
+      expect.objectContaining({
+        destination: expect.objectContaining({
+          place: "direct",
+          sameChatAsWake: true,
+          onlyGuardianReads: true,
+        }),
+      }),
+    ]);
+    expect(stranger.gateRequests).toEqual([expect.objectContaining({ recipient: null })]);
+  });
+
+  it("sends Sentinel's own reply without asking the gate or Envoy", async () => {
     const handled = await handle({
       sender: "stranger",
       policy: "sentinel_review",
@@ -456,19 +504,17 @@ describe("send: recipient × Envoy", () => {
     });
 
     expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel"]);
+    expect(handled.gateRequests).toEqual([]);
     expect(handled.sent).toEqual([expect.objectContaining({ text: "I'll pass that on" })]);
     expect(handled.approvals).toEqual([]);
   });
 
   it("sends nothing and asks no one when the agent says nothing", async () => {
-    const handled = await handle({
-      sender: "inner-circle",
-      policy: "allow",
-      ...trustedInnerCircle,
-    });
+    const handled = await handle(woken);
 
     expect(handled.outcome.data).toMatchObject({ action: "no_response" });
     expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
+    expect(handled.gateRequests).toEqual([]);
     expect(handled.sent).toEqual([]);
     expect(handled.approvals).toEqual([]);
   });
