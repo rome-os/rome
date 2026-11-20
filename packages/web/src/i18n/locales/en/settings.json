@@ -441,7 +441,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
+      "emptyDescription": "Send a message in a chat on this account, and Rome will find it.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",
@@ -468,7 +468,6 @@
         "overridden": "Overridden"
       },
       "options": {
-        "mention": "Only when mentioned",
         "mentions": "Only mentions",
         "all": "All",
         "ignore": "Ignore",
@@ -503,7 +502,7 @@
       "retry": "Retry",
       "chatRules": {
         "title": "Chat rules",
-        "description": "How Rome takes part in each chat on this account. Only the rules this kind of connection offers are shown."
+        "description": "How Rome takes part in each chat on this account."
       }
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",

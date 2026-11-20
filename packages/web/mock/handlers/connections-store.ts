@@ -2,19 +2,9 @@ import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ChatSettingField } from "@rome/api-types/chat-settings";
 
-// The connection ledger. In its own module because two surfaces read it and one
-// of them writes it: the Connections page revokes a grant, and the send routes
-// behind that channel have to notice. Keeping it in `index.ts` would have meant
-// `people.ts` importing the module that imports it.
-//
-// Every card reads its state from `state`, never from `capabilities`: a
-// connection with no state renders "Not connected" however unlocked its
-// capabilities claim to be. Each entry below therefore carries the working
-// state its ceremony would have left, or the Connections page would contradict
-// the surfaces these fixtures feed — the People page's WhatsApp contacts, and
-// the configured Discord and Telegram conversations below.
 // What each kind of connection offers, as core's kind declarations report it
-// (packages/core/src/chat-settings/rules.ts and each kind's descriptor).
+// (each kind's `chatRules` in packages/core/src/connections). Keep in step by
+// hand: a kind that changes its rules there changes them here too.
 const CHAT_RULES: Record<string, ChatSettingField[]> = {
   discord: [
     "enabled",
@@ -31,6 +21,17 @@ const CHAT_RULES: Record<string, ChatSettingField[]> = {
   email: ["session.reset"],
 };
 
+// The connection ledger. In its own module because two surfaces read it and one
+// of them writes it: the Connections page revokes a grant, and the send routes
+// behind that channel have to notice. Keeping it in `index.ts` would have meant
+// `people.ts` importing the module that imports it.
+//
+// Every card reads its state from `state`, never from `capabilities`: a
+// connection with no state renders "Not connected" however unlocked its
+// capabilities claim to be. Each entry below therefore carries the working
+// state its ceremony would have left, or the Connections page would contradict
+// the surfaces these fixtures feed — the People page's WhatsApp contacts, and
+// the configured Discord and Telegram conversations below.
 export const connections: { connections: ApiConnection[] } = {
   connections: [
     {

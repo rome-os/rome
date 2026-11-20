@@ -500,12 +500,12 @@ function ConversationRow({
                 prefixes the name rather than sitting in the meta line — a bare
                 provider-supplied name ("can you see active chats?") gives no
                 clue on its own that it names a conversation. */}
-            <h3 id={headingId} className="truncate text-ui text-foreground">
+            <h4 id={headingId} className="truncate text-ui text-foreground">
               {conversation.containerName && (
                 <span className="text-muted-foreground">{conversation.containerName} / </span>
               )}
               {conversation.displayName}
-            </h3>
+            </h4>
             <Badge variant={item.availability === "online" ? "success" : "muted"}>
               {t(
                 `channels.conversationSettings.status.${
@@ -730,7 +730,7 @@ function SettingSection({ title, children }: { title?: string; children: ReactNo
   if (rows.length === 0) return null;
   return (
     <section className="border-t border-border first-of-type:border-t-0">
-      {title && <h4 className="pt-4 pb-2 text-section text-foreground">{title}</h4>}
+      {title && <h5 className="pt-4 pb-2 text-section text-foreground">{title}</h5>}
       <div className="divide-y divide-border">{rows}</div>
     </section>
   );

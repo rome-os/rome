@@ -441,7 +441,7 @@
       },
       "loading": "正在加载聊天…",
       "emptyTitle": "未找到可配置的聊天",
-      "emptyDescription": "在受支持的平台上连接一个账号，或发送一条消息让 Rome 发现该聊天。",
+      "emptyDescription": "在这个账号的聊天里发一条消息，Rome 就能找到它。",
       "loadMore": "加载更多",
       "overrideCount_one": "{{count}} 项覆盖",
       "overrideCount_other": "{{count}} 项覆盖",
@@ -468,7 +468,6 @@
         "overridden": "已覆盖"
       },
       "options": {
-        "mention": "仅被提及时",
         "mentions": "仅提及消息",
         "all": "全部",
         "ignore": "忽略",
@@ -503,7 +502,7 @@
       "retry": "重试",
       "chatRules": {
         "title": "聊天规则",
-        "description": "Rome 在这个账号的每个聊天中如何参与。只显示这类连接提供的规则。"
+        "description": "Rome 在这个账号的每个聊天中如何参与。"
       }
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
