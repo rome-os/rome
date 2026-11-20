@@ -17,6 +17,12 @@ const EARLIER_TOTAL_CHARS = 4_000;
  *  platform that makes reads wait their turn, such as Slack, answers the next
  *  session that opens on a busy workspace too late, and it opens without. */
 const EARLIER_WAIT_MS = 5_000;
+/** How long a turn in a platform thread waits for the thread's earlier
+ *  messages. Slack answers one thread read a minute in a workspace, so a
+ *  mention in a second thread soon after the first waits most of a minute
+ *  for its turn; a session's turns run one at a time, so no read waits much
+ *  longer. A turn that did not wait would answer a reply it cannot place. */
+const THREAD_WAIT_MS = 90_000;
 
 export interface ChatPromptFactsDeps {
   /** What was said in each chat that a session has not seen. */
@@ -42,6 +48,8 @@ export interface ChatPromptFactsDeps {
   ) => Promise<ChannelMessage[]>;
   /** How long a read of the latest messages may take. Defaults to 5s. */
   latestWaitMs?: number;
+  /** How long a read of a platform thread may take. Defaults to 90s. */
+  threadWaitMs?: number;
 }
 
 /**
@@ -89,8 +97,13 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
           : { olderThan: key }),
     });
     read.catch(() => {});
-    const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
-    if (!page) return null;
+    const page = await within(
+      read,
+      thread ? (deps.threadWaitMs ?? THREAD_WAIT_MS) : (deps.latestWaitMs ?? EARLIER_WAIT_MS),
+    );
+    // A thread that cannot be read is said to be unread, so the turn does
+    // not take it for one that held nothing.
+    if (!page) return thread ? { messages: [], cut: false, unread: true } : null;
     // Messages the model was shown already, at or before `since`, are cut by
     // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);

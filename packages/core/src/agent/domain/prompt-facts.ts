@@ -20,6 +20,9 @@ export interface PromptMessage {
 export interface ThreadRead {
   messages: UnseenMessage[];
   cut: boolean;
+  /** The thread could not be read in time, or the platform refused the
+   *  read: `messages` is empty, and the turn says so. */
+  unread?: boolean;
 }
 
 /** A message the session has not seen, with the message it quotes. */

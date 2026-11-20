@@ -4195,13 +4195,17 @@ class AgentSessionImpl implements AgentSession {
             : null;
         // A read that failed is tried again, from the same point, on the
         // thread's next message.
-        if (thread && threadRead) this.threadsRead.set(thread, current?.id);
+        if (thread && threadRead && !threadRead.unread) this.threadsRead.set(thread, current?.id);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
           current,
-          ...(threadRead ? { inThread: threadRead.messages, inThreadCut: threadRead.cut } : {}),
+          ...(threadRead?.unread
+            ? { inThreadUnread: true }
+            : threadRead
+              ? { inThread: threadRead.messages, inThreadCut: threadRead.cut }
+              : {}),
         });
       }
       // Every turn, subagents included: the folder is where the work happens.
