@@ -358,6 +358,13 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         view.selfSizingInvalidation = .enabled
         // https://openradar.appspot.com/40926834: prefetching keeps stale cells.
         view.isPrefetchingEnabled = false
+        if #available(iOS 26, *) {
+            // The header draws its own blur behind it (`ChatHeaderBlur`). On a
+            // phone the system's top edge effect for the floating bar drew here
+            // too, as a whitish band with a hard edge where the bar ends; the
+            // simulator never drew it.
+            view.topEdgeEffect.isHidden = true
+        }
         view.delegate = self
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.

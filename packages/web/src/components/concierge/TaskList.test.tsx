@@ -391,6 +391,11 @@ describe("TaskList", () => {
     expect(glyph("Old work")).toContain("lucide-circle-check");
     expect(glyph("Failed one")).toContain("lucide-circle-x");
     expect(glyph("Stopped one")).toContain("lucide-circle-stop");
+    // The colours agree with the task link's: done green, failed red, the rest quiet.
+    expect(glyph("Pick a hotel")).toContain("text-warning/80");
+    expect(glyph("Old work")).toContain("text-success/80");
+    expect(glyph("Failed one")).toContain("text-destructive/80");
+    expect(glyph("Stopped one")).toContain("text-subtle-foreground");
   });
 
   it("stops an active task at once, pending until the task is read as ended", async () => {

@@ -60,7 +60,9 @@ export function TaskLink({ id, fallback }: { id: string; fallback?: string }) {
           />
         )}
       </span>
-      <span className="text-foreground">{label}</span>
+      <span data-task-link-name className="text-foreground">
+        {label}
+      </span>
     </Link>
   );
 }

@@ -5,6 +5,12 @@
       "reason": "Archiving a topic chat with \"Stop them\" sends followsAndTasks: \"stop\", which an older server ignores and moves them instead.",
       "pr": 2347,
       "server": "#2347"
+    },
+    {
+      "tier": "background",
+      "reason": "Task links in Concierge messages read each task chat's name and status from GET /chats/:chatId/task-links, and the Routines tab shows a follow's next digest time (nextAt); an older server lacks both.",
+      "pr": 2450,
+      "server": "#2450"
     }
   ]
 }
