@@ -148,6 +148,44 @@ describe.each(["chat", "concierge"] as const)("the %s message field's draft", (k
     expect(openChat(kind, "chat-a").field().value).toBe("send me");
   });
 
+  it("keeps text typed after a failed send", async () => {
+    const send = heldSend();
+    const view = openChat(kind, "chat-a", send.onSend);
+    view.type("first message");
+    fireEvent.keyDown(view.field(), { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    view.type("newer text");
+    await send.settle(false);
+
+    expect(view.field().value).toBe("newer text");
+    expect(loadChatDraft("chat-a")?.text).toBe("newer text");
+  });
+
+  it("puts the failed text back when nothing newer was typed", async () => {
+    const send = heldSend();
+    const view = openChat(kind, "chat-a", send.onSend);
+    view.type("send me");
+    fireEvent.keyDown(view.field(), { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    await send.settle(false);
+
+    expect(view.field().value).toBe("send me");
+    expect(loadChatDraft("chat-a")?.text).toBe("send me");
+  });
+
+  it("does not restore a draft after logout", async () => {
+    const send = heldSend();
+    const view = openChat(kind, "chat-a", send.onSend);
+    view.type("send me");
+    fireEvent.keyDown(view.field(), { key: "Enter" });
+    await waitFor(() => expect(send.onSend).toHaveBeenCalled());
+    invalidateNewChatDrafts();
+    clearAllChatDrafts();
+    await send.settle(false);
+
+    expect(loadChatDraft("chat-a")).toBeNull();
+  });
+
   it("is gone once the chat is deleted", async () => {
     const first = openChat(kind, "chat-a");
     first.type("about to go");

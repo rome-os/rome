@@ -261,7 +261,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       } catch {
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
-          setInputText(text);
+          // Text typed while the send was pending is newer than what failed.
+          setInputText((current) => (current === "" ? text : current));
           sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
