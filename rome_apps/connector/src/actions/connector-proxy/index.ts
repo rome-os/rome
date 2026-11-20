@@ -46,6 +46,8 @@ function isOutlookMailCall(endpoint: string): boolean {
   }
   return (
     /^\/[^/]+\/me\/?$/i.test(path) ||
+    // A batch can carry mail sub-requests; core refuses it.
+    /\/\$batch\/?$/i.test(path) ||
     /\/(?:messages|mailfolders|(?:microsoft\.graph\.)?sendmail)(?:[/(]|$)/i.test(path)
   );
 }

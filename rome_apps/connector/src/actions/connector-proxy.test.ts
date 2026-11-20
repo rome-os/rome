@@ -743,6 +743,7 @@ describe("Rome-managed Outlook routing", () => {
       "/v1.0/users/someone@example.com/messages",
       "/v1.0/me/%6Dessages",
       "/v1.0/me/microsoft.graph.sendMail",
+      "/v1.0/$batch",
     ]) {
       runAction.mockClear();
       await run({ ...input, path });
