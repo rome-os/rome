@@ -495,9 +495,11 @@ export class SlackAppAdapter {
     // resumed, so the failure also reports the connection down: the runtime
     // starts it again after a backoff, with a fresh drain that retries the
     // frame. An event the copy holds already is a redelivery.
-    let fresh: boolean;
+    // An edit that reached Rome before its message is kept with it, and the
+    // agent is handed the message as kept: the text a search or a replay shows.
+    let kept: ChannelMessage | null;
     try {
-      fresh = this.config.copy.keep(
+      kept = this.config.copy.keep(
         {
           teamId: payload.team_id,
           eventId,
@@ -515,10 +517,13 @@ export class SlackAppAdapter {
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
-    if (direct) this.noteHeard(event.channel, wire, message);
-    if (!fresh) return { status: 200 };
-    log.info("message received", { chatId: message.chatId });
-    this.handOver(eventId, message);
+    if (!kept) {
+      if (direct) this.noteHeard(event.channel, wire, message);
+      return { status: 200 };
+    }
+    if (direct) this.noteHeard(event.channel, wire, kept);
+    log.info("message received", { chatId: kept.chatId });
+    this.handOver(eventId, kept);
     return { status: 200 };
   }
 
@@ -875,6 +880,7 @@ export class SlackAppAdapter {
   }> {
     let coverage = SEARCH_COVERAGE;
     let channelId: string | undefined;
+    let heardOnly = false;
     if (input.chatId) {
       const parsed = parseSlackChatId(
         await this.memberChannels.resolve(input.chatId, this.abort.signal),
@@ -887,28 +893,36 @@ export class SlackAppAdapter {
         );
       }
       channelId = parsed.channelId;
-      coverage = await this.fillForSearch(parsed.channelId);
+      const filled = await this.fillForSearch(parsed.channelId);
+      coverage = filled.coverage;
+      heardOnly = !filled.readable;
     }
     const messages = this.config.copy.search(this.config.teamId, {
       text: input.text,
       ...(channelId ? { channelId } : {}),
       limit: input.limit,
+      ...(heardOnly ? { heardOnly } : {}),
     });
     return { messages, coverage };
   }
 
   /** Read a chat's newest messages into the copy before searching it, and
    *  say what the search then covers. A chat the app may not read, such as a
-   *  channel it is only mentioned in, is searched in what it heard. */
-  private async fillForSearch(channelId: string): Promise<string> {
+   *  channel it is only mentioned in or a group it has left, is searched in
+   *  what it heard only: history read while it was a member stays out. */
+  private async fillForSearch(channelId: string): Promise<{ readable: boolean; coverage: string }> {
     try {
       await readTimeline(this.timeline(), channelId as ChatId, { limit: HISTORY_PAGE });
-      return SEARCH_CHAT_COVERAGE;
+      return { readable: true, coverage: SEARCH_CHAT_COVERAGE };
     } catch (error) {
       if (error instanceof SlackApiError && NOT_READABLE.has(error.code)) {
-        return error.code === "missing_scope"
-          ? `${SEARCH_UNREADABLE_CHAT_COVERAGE} ${REAPPROVE_FOR_HISTORY}`
-          : SEARCH_UNREADABLE_CHAT_COVERAGE;
+        return {
+          readable: false,
+          coverage:
+            error.code === "missing_scope"
+              ? `${SEARCH_UNREADABLE_CHAT_COVERAGE} ${REAPPROVE_FOR_HISTORY}`
+              : SEARCH_UNREADABLE_CHAT_COVERAGE,
+        };
       }
       throw error;
     }
