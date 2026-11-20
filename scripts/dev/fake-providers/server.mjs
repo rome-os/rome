@@ -17,11 +17,20 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { join } from "node:path";
+import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
 const port = Number(process.argv[2] ?? 18765);
 const tlsAt = process.argv.indexOf("--tls");
 const tlsDir = tlsAt > 0 ? process.argv[tlsAt + 1] : null;
 const modes = { claude: "ok", chatgpt: "ok" };
+// In `model_limit`, only the first model asked for is refused: a per-model
+// limit leaves the provider's other models running.
+const limited = { claude: null, chatgpt: null };
+function refused(provider, model) {
+  if (modes[provider] !== "model_limit") return true;
+  limited[provider] ??= model;
+  return limited[provider] === model;
+}
 let served = 0;
 const now = () => Math.floor(Date.now() / 1000);
 const resetIn = 2 * 3600;
@@ -99,7 +108,7 @@ function claude(req, res, body) {
     return;
   }
   const error = claudeErrors[modes.claude];
-  if (error) {
+  if (error && refused("claude", body.model)) {
     // A rate limit or an overload is worth a retry; nothing else is, as the real API says.
     const retry = modes.claude === "rate" || modes.claude === "overloaded";
     res.writeHead(error[0], {
@@ -201,7 +210,27 @@ function chatgpt(req, res, body) {
     return;
   }
   const error = chatgptErrors[modes.chatgpt];
-  if (error) {
+  // ChatGPT refuses a model inside the stream, which Codex passes on as is.
+  if (error && (modes.chatgpt === "model_limit" || modes.chatgpt === "model_gone")) {
+    if (refused("chatgpt", body.model)) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const id = `resp_fake_${++served}`;
+      res.write(
+        `event: response.created\ndata: ${JSON.stringify({ type: "response.created", response: { id } })}\n\n`,
+      );
+      res.write(
+        `event: response.failed\ndata: ${JSON.stringify({
+          type: "response.failed",
+          response: {
+            id,
+            error: { code: error[1].code ?? error[1].type, message: error[1].message },
+          },
+        })}\n\n`,
+      );
+      res.end();
+      return;
+    }
+  } else if (error && refused("chatgpt", body.model)) {
     res.statusCode = error[0];
     res.end(JSON.stringify({ error: error[1] }));
     return;
@@ -277,9 +306,17 @@ function fakeJwt() {
 }
 
 function handle(req, res) {
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
   req.on("end", () => {
+    // Codex compresses its request bodies.
+    let bytes = Buffer.concat(chunks);
+    const encoding = req.headers["content-encoding"];
+    try {
+      if (encoding === "zstd") bytes = zstdDecompressSync(bytes);
+      else if (encoding === "gzip") bytes = gunzipSync(bytes);
+    } catch {}
+    const raw = bytes.toString("utf8");
     let body = {};
     try {
       body = JSON.parse(raw || "{}");
@@ -288,6 +325,7 @@ function handle(req, res) {
       if (req.method === "POST") {
         const provider = body.provider === "chatgpt" ? "chatgpt" : "claude";
         modes[provider] = body.mode ?? "ok";
+        limited[provider] = null;
       }
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(modes));
@@ -302,7 +340,9 @@ function handle(req, res) {
     const which = req.url.startsWith("/backend-api") ? "chatgpt" : "claude";
     // What a provider switch carried, so a walk-through can check it.
     const carried = ["<handoff_request>", "<handoff>", "<executed_actions>", "<continuation"]
-      .filter((marker) => raw.includes(marker))
+      .filter((marker) =>
+        raw.replaceAll("\\u003c", "<").replaceAll("\\u003e", ">").includes(marker),
+      )
       .join(" ");
     console.log(
       new Date().toISOString(),
