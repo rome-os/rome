@@ -33,7 +33,7 @@ import { SlackReadGate } from "./read-gate.js";
 import { noteInDrain, readTimeline, type SlackTimelineDeps } from "./timeline.js";
 import { SlackMemberChannels } from "./channels.js";
 import { compareTs } from "./timeline-order.js";
-import type { SlackMessageCopy } from "./message-copy.js";
+import type { SearchedTimeline, SlackMessageCopy } from "./message-copy.js";
 
 export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
@@ -900,7 +900,10 @@ export class SlackAppAdapter {
   }> {
     let coverage = SEARCH_COVERAGE;
     let channelId: string | undefined;
-    let heardOnly = false;
+    // Across chats, the search covers what its coverage says: direct
+    // messages and mentions. A group's history read while the app was a
+    // member stays out, as it does once the app has left the group.
+    let timeline: SearchedTimeline = "direct";
     if (input.chatId) {
       const parsed = parseSlackChatId(
         await this.memberChannels.resolve(input.chatId, this.abort.signal),
@@ -915,13 +918,13 @@ export class SlackAppAdapter {
       channelId = parsed.channelId;
       const filled = await this.fillForSearch(parsed.channelId);
       coverage = filled.coverage;
-      heardOnly = !filled.readable;
+      timeline = filled.readable ? "all" : "none";
     }
     const messages = this.config.copy.search(this.config.teamId, {
       text: input.text,
       ...(channelId ? { channelId } : {}),
       limit: input.limit,
-      ...(heardOnly ? { heardOnly } : {}),
+      timeline,
     });
     return { messages, coverage };
   }

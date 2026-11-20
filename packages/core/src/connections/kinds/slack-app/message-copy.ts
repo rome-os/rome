@@ -18,6 +18,7 @@ import {
   gte,
   isNotNull,
   isNull,
+  like,
   lt,
   max,
   notExists,
@@ -67,6 +68,10 @@ export interface KeptSlackMessage {
   message: ChannelMessage;
 }
 
+/** The timeline messages a search counts: all it read, those of direct
+ *  messages, or none. */
+export type SearchedTimeline = "all" | "direct" | "none";
+
 /** Where the Slack app connection keeps its copy. */
 export interface SlackMessageCopy {
   /** Keep `kept`, and answer the message as kept, with any edit the copy
@@ -115,10 +120,11 @@ export interface SlackMessageCopy {
   /** Up to `limit` messages the copy holds for the workspace whose text holds
    *  `text`, ignoring case, in chat `channelId` when named, newest first. Both
    *  the messages heard and the timeline messages read count, each once.
-   *  With `heardOnly`, only the messages heard count. */
+   *  `timeline` narrows the timeline messages that count: those of direct
+   *  messages only, or none. */
   search(
     teamId: string,
-    input: { text: string; channelId?: string; limit: number; heardOnly?: boolean },
+    input: { text: string; channelId?: string; limit: number; timeline?: SearchedTimeline },
   ): ChannelMessage[];
 }
 
@@ -467,14 +473,18 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       text,
       channelId,
       limit,
-      heardOnly = false,
-    }: { text: string; channelId?: string; limit: number; heardOnly?: boolean },
+      timeline = "all",
+    }: { text: string; channelId?: string; limit: number; timeline?: SearchedTimeline },
   ): ChannelMessage[] {
     // SQLite's LIKE folds ASCII case only, so the copy is read newest first
     // and matched here, folding any script's case. Each table is read by one
     // statement, streamed until enough match, so a search sorts once however
     // far back it reads.
     const needle = phraseOf(text);
+    // Slack's direct-message conversation ids start with D.
+    const timelineCounted = and(
+      timeline === "direct" ? like(slackAppTimeline.channelId, "D%") : undefined,
+    );
     const heard = this.newestMatching(
       limit,
       needle,
@@ -491,7 +501,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
             channelId === undefined ? undefined : eq(slackAppMessages.channelId, channelId),
             // A message the timeline also holds is matched there, in the
             // newest text Slack showed: a page read since may hold an edit.
-            heardOnly
+            timeline === "none"
               ? undefined
               : notExists(
                   this.db
@@ -502,6 +512,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
                         eq(slackAppTimeline.teamId, slackAppMessages.teamId),
                         eq(slackAppTimeline.channelId, slackAppMessages.channelId),
                         eq(slackAppTimeline.ts, slackAppMessages.ts),
+                        timelineCounted,
                       ),
                     ),
                 ),
@@ -509,26 +520,28 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
         )
         .orderBy(desc(slackAppMessages.saidAt), desc(slackAppMessages.ts)),
     );
-    const read = heardOnly
-      ? []
-      : this.newestMatching(
-          limit,
-          needle,
-          this.db
-            .select({
-              message: slackAppTimeline.message,
-              ts: slackAppTimeline.ts,
-              text: sql<string | null>`json_extract(${slackAppTimeline.message}, '$.text')`,
-            })
-            .from(slackAppTimeline)
-            .where(
-              and(
-                eq(slackAppTimeline.teamId, teamId),
-                channelId === undefined ? undefined : eq(slackAppTimeline.channelId, channelId),
-              ),
-            )
-            .orderBy(desc(slackAppTimeline.saidAt), desc(slackAppTimeline.ts)),
-        );
+    const read =
+      timeline === "none"
+        ? []
+        : this.newestMatching(
+            limit,
+            needle,
+            this.db
+              .select({
+                message: slackAppTimeline.message,
+                ts: slackAppTimeline.ts,
+                text: sql<string | null>`json_extract(${slackAppTimeline.message}, '$.text')`,
+              })
+              .from(slackAppTimeline)
+              .where(
+                and(
+                  eq(slackAppTimeline.teamId, teamId),
+                  channelId === undefined ? undefined : eq(slackAppTimeline.channelId, channelId),
+                  timelineCounted,
+                ),
+              )
+              .orderBy(desc(slackAppTimeline.saidAt), desc(slackAppTimeline.ts)),
+          );
     const found = new Map<string, ChannelMessage>();
     for (const row of [...heard, ...read].sort((a, b) => compareTs(b.ts, a.ts))) {
       const message = revive(row.message);
