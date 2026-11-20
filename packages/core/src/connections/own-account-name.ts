@@ -1,10 +1,9 @@
 import type { ConnectionRegistry } from "./registry.js";
 
-/** The name of Rome's account behind a connection, as its grant's profile
- *  shows it: the display name, else the handle without a leading `@`. The
- *  display name comes first because some kinds put an id in the handle, such
- *  as Feishu's application id. Null for a connection Rome does not know or a
- *  profile that names nothing. */
+/** The name a mention of Rome's account behind a connection shows, from its
+ *  grant's profile: the field its kind names (`mentionedBy`), the handle by
+ *  default, without a leading `@`. Null for a connection Rome does not know or
+ *  a profile without that field. */
 export function ownAccountNames(
   registry: Pick<ConnectionRegistry, "all" | "grantOf" | "getDescriptor">,
 ): (connectionId: string) => Promise<string | null> {
@@ -12,11 +11,13 @@ export function ownAccountNames(
     const connection = registry.all().find((c) => c.id === connectionId);
     if (!connection) return null;
     const grant = await registry.grantOf(connection.id);
-    const revive = registry.getDescriptor(connection.connectionKind)?.reviveProfile;
+    const descriptor = registry.getDescriptor(connection.connectionKind);
+    const revive = descriptor?.reviveProfile;
     if (!grant?.profile || !revive) return null;
     try {
       const profile = revive(grant.profile);
-      return profile.displayName?.trim() || profile.handle?.trim().replace(/^@/, "") || null;
+      const name = descriptor.mentionedBy === "displayName" ? profile.displayName : profile.handle;
+      return name?.trim().replace(/^@/, "") || null;
     } catch {
       return null;
     }
