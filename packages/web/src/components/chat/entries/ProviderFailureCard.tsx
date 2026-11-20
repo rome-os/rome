@@ -378,7 +378,7 @@ export function ProviderFailureCard({
     >
       <p
         className={cn(
-          "mb-1 flex items-center gap-1.5 text-aux",
+          "mb-1 flex items-center gap-1 text-aux",
           accented ? "text-warning-fg" : "text-muted-foreground",
         )}
       >
