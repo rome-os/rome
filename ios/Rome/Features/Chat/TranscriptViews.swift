@@ -271,7 +271,9 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         do {
-            loaded = try await StoredImageCache.shared.load(upload.assetPath, maxPixel: ComposerImage.thumbnailPixels) {
+            loaded = try await StoredImageCache.shared.load(
+                upload.assetPath, maxPixel: ComposerImage.thumbnailPixels, onDisk: upload.source.isStoredAsset
+            ) {
                 try await ImageFetch.data(
                     upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth
                 )

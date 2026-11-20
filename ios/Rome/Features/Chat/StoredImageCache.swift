@@ -3,10 +3,10 @@ import Foundation
 
 /// Pictures already loaded, so scrolling back does not fetch them again. It
 /// holds at most 64 MB of decoded pixels in memory, kept while the app is in
-/// the background, and the fetched bytes of the open instance's pictures on
-/// disk (`ImageDiskCache.thumbnails`), so they show offline and after a
-/// relaunch. The app uses `shared`; a test makes its own, so it never sees
-/// another test's pictures or resets.
+/// the background, and on disk (`ImageDiskCache.thumbnails`) the fetched
+/// bytes of the open instance's `/api/assets/` pictures, so they show
+/// offline and after a relaunch. The app uses `shared`; a test makes its
+/// own, so it never sees another test's pictures or resets.
 @MainActor
 final class StoredImageCache {
     static let shared = StoredImageCache(disk: .thumbnails)
@@ -52,13 +52,20 @@ final class StoredImageCache {
     /// so a load that ends after a switch lands under the old scope.
     func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
 
-    /// A workspace opened or closed, or a sign-out: nothing in memory carries
-    /// over, and on disk only `instance`'s pictures stay.
+    /// A workspace opened or closed: nothing in memory carries over. When an
+    /// instance opens, only its pictures stay on disk; closing one, as a
+    /// session renewal does before reopening it, keeps them. Sign-out removes
+    /// them all (`AppModel.forgetAccountData`).
     func reset(instance: String? = nil) {
         scope = UUID()
         cache.removeAllObjects()
         self.instance = instance
-        if let disk { Task.detached(priority: .utility) { disk.removeAll(except: instance) } }
+        if let disk, let instance {
+            Task.detached(priority: .utility) {
+                disk.removeAll(except: instance)
+                disk.trim()
+            }
+        }
     }
 
     func image(_ path: String) -> CGImage? {
@@ -70,12 +77,16 @@ final class StoredImageCache {
     }
 
     /// The picture `name` names, at most `maxPixel` on its longer side: from
-    /// memory, else from disk, else fetched. A fetched one is kept in both.
+    /// memory, else from disk, else fetched. A fetched one is kept in memory,
+    /// and on disk too when `onDisk`: only for `/api/assets/` files, which
+    /// never change at their name. A project file can be rewritten at its
+    /// path, so it stays in memory only.
     /// Throws `APIError.decoding` for bytes that are not a picture.
-    func load(_ name: String, maxPixel: CGFloat, fetch: () async throws -> Data) async throws -> CGImage {
+    func load(_ name: String, maxPixel: CGFloat, onDisk: Bool, fetch: () async throws -> Data) async throws -> CGImage {
         let key = key(name)
         if let image = image(key) { return image }
-        let instance = instance
+        let instance = onDisk ? instance : nil
+        let scope = scope
         if let disk, let instance, let data = disk.data(instance: instance, key: name),
            let image = await Self.decode(data, maxPixel: maxPixel) {
             store(image, for: key)
@@ -84,9 +95,9 @@ final class StoredImageCache {
         let data = try await fetch()
         guard let image = await Self.decode(data, maxPixel: maxPixel) else { throw APIError.decoding }
         store(image, for: key)
-        // Only while the same instance is open: a switch or sign-out on the
-        // way removed its folder, and nothing writes it back.
-        if let disk, let instance, instance == self.instance {
+        // Only while the same workspace is open: after a switch or sign-out,
+        // even back to the same instance, nothing writes the old load back.
+        if let disk, let instance, scope == self.scope {
             disk.store(data, instance: instance, key: name)
             writes += 1
             if writes >= 20 {

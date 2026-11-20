@@ -108,6 +108,15 @@ enum ImageSource: Hashable, Sendable {
     }
 }
 
+extension ImageSource {
+    /// A file of the instance's asset store (`/api/assets/<id>.<ext>`): it
+    /// never changes at its name, so it may be kept on disk.
+    var isStoredAsset: Bool {
+        if case .instance(let path, _) = self { return path.hasPrefix("/assets/") }
+        return false
+    }
+}
+
 /// Bytes of an image, from the instance or the open web.
 enum ImageFetch {
     /// The query of an instance asset URL with `w=width` added; any other URL, or
@@ -266,7 +275,9 @@ struct MarkdownImageView: View {
     private func load() async {
         do {
             // A thumbnail of the size it shows at, not the original. The viewer fetches the original.
-            image = try await StoredImageCache.shared.load("md|\(source)", maxPixel: Self.pixels) {
+            image = try await StoredImageCache.shared.load(
+                "md|\(source)", maxPixel: Self.pixels, onDisk: source.isStoredAsset
+            ) {
                 try await ImageFetch.data(
                     source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels)
                 )

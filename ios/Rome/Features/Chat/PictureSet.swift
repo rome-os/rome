@@ -145,7 +145,9 @@ struct PictureTile: View {
 
     private func load() async {
         do {
-            image = try await StoredImageCache.shared.load("pic|\(source)", maxPixel: Self.pixels) {
+            image = try await StoredImageCache.shared.load(
+                "pic|\(source)", maxPixel: Self.pixels, onDisk: source.isStoredAsset
+            ) {
                 try await ImageFetch.data(
                     source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels)
                 )
