@@ -98,6 +98,12 @@ function oldAddressingQuiet(message: WakeMessage, settings: ChatWakeSettings): b
   return false;
 }
 
+/** The old gate, frozen. With the chat switched on, a trusted guardian and
+ *  no policies, only its addressing checks could keep a message quiet. */
+function oldGate(message: WakeMessage, settings: ChatWakeSettings): WakeDecision {
+  return oldAddressingQuiet(message, settings) ? "quiet" : "wake";
+}
+
 function* allSettings(): Generator<ChatWakeSettings> {
   for (const replyRule of ["mention", "all"] as const)
     for (const botMessages of ["ignore", "mentions", "all"] as const)
@@ -176,9 +182,7 @@ describe("channelMessageOf", () => {
           GUARDIAN,
         );
         const beforeMessage = wakeMessageOf(oldDiscord(facts), facts.kind);
-        const before: WakeDecision = oldAddressingQuiet(beforeMessage, settings)
-          ? "quiet"
-          : chatSettingsWake(settings)(beforeMessage, GUARDIAN);
+        const before = oldGate(beforeMessage, settings);
         if (now === before) continue;
         const row = `${JSON.stringify(facts)} ${settings.replyRule}/${settings.botMessages}/${settings.whenOthersMentioned}: ${before} → ${now}`;
         (isAgreedChange(facts) ? changed : differ).push(row);
@@ -209,7 +213,7 @@ describe("channelMessageOf", () => {
           wakeMessageOf(channelMessageOf(messageOf(facts), "telegram"), facts.kind),
           GUARDIAN,
         );
-        const was = chatSettingsWake(settings)(wakeMessageOf(before, facts.kind), GUARDIAN);
+        const was = oldGate(wakeMessageOf(before, facts.kind), settings);
         if (now !== was) differ.push(`${JSON.stringify(facts)} ${replyRule}: ${was} → ${now}`);
       }
     }
