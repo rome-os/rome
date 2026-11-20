@@ -46,6 +46,7 @@ import type {
 } from "../../types.js";
 import { createLogger } from "../../../logger.js";
 import { refuseAttachments, refuseReplies, textToSend } from "../../outbound/send-refusals.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../../chat-settings/rules.js";
 
 const log = createLogger("linkedin-reply");
 
@@ -276,6 +277,9 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     reviveProfile: (record) => reviveLinkedInProfile(record),
     accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: sessionScheme,
     capabilities: {
       talker: {

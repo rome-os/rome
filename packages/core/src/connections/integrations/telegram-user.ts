@@ -55,6 +55,7 @@ import type {
   Talker,
 } from "../types.js";
 import { directoryCursorOffset, directoryPage } from "./talk-features.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
 
 // The `session` grant's profile — the non-secret half of the user-account login
 // (who the account is, its phone, when it connected). Declared next to the
@@ -365,6 +366,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
     accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
     link: "delegate",
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: session,
     capabilities: {
       talker: {

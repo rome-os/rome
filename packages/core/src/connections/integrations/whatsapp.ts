@@ -44,6 +44,7 @@ import type {
 } from "../types.js";
 import { createWhatsAppAuthState, type WhatsAppAuthMaterial } from "./whatsapp-auth-state.js";
 import { addressIsConversationFeature } from "./talk-features.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
 
 /** Runtime deps the WhatsApp adapter needs that `kit` cannot supply: the
  *  address-book store mirror and the guardian auto-map callback. Threaded in at
@@ -307,6 +308,9 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
     reviveProfile: (record) => reviveWhatsAppProfile(record),
     accountIdOf: (record) => (typeof record.jid === "string" && record.jid) || null,
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: sessionScheme,
     capabilities: {
       talker: {
