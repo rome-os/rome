@@ -1,5 +1,4 @@
 import { createContext, useContext } from "react";
-import type { TaskListView } from "@/components/concierge/TaskList";
 
 /**
  * The tool pane's Tasks tab, offered to the Concierge chat beside it. Like the
@@ -10,8 +9,6 @@ import type { TaskListView } from "@/components/concierge/TaskList";
 export interface ToolTasksHost {
   /** Whether the tab is showing in an open pane. */
   active: boolean;
-  /** What the tab lists: the task chats, or the routines. */
-  view: TaskListView;
   /**
    * Whether the pane takes the whole width (a narrow window), where the chat
    * hides while the pane shows. The tab would hide the chat it belongs to, so
@@ -19,10 +16,10 @@ export interface ToolTasksHost {
    */
   compact: boolean;
   /**
-   * Adds the tab for Concierge chat `chatId`'s tasks, or its routines, and
-   * selects it. A collapsed pane shows it without saving a change to its state.
+   * Adds the tab for Concierge chat `chatId`'s tasks and selects it. A
+   * collapsed pane shows it without saving a change to its state.
    */
-  show: (chatId: string, view?: TaskListView) => void;
+  show: (chatId: string) => void;
   /** Removes the tab. */
   hide: () => void;
 }

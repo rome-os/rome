@@ -235,6 +235,9 @@ export async function renderTaskEvents(
     }
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
     if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
+    if (changes.includes("done_by_owner")) {
+      lines.push("The guardian marked this task done and stopped its work.");
+    }
     if (changes.includes("checks_cancelled_by_owner")) {
       lines.push("The guardian cancelled checks of this task. Read chat_list for any left.");
     }
