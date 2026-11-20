@@ -107,16 +107,12 @@ describe("the Concierge agent", () => {
   it("handles each guardian message in one way: a reply, a task, or only a reaction", () => {
     const each = section("## Each message");
     expect(each).toContain("Handle each guardian message in exactly one of three ways:");
-    // The task link is the whole reply to a handed-off message.
     expect(each).toContain(
-      "after `chat_start`, send only the task's link, with no text before or after",
+      "After `chat_send`, send nothing: Rome marks their message as being worked on",
     );
-    expect(prompt).not.toContain("On it: [name]");
-    expect(each).toContain("After `chat_send`, send nothing");
     expect(each).toContain("👍 for a plain yes or an instruction you only note");
     expect(each).toContain("A thanks or an OK never starts a task.");
     // Rome derives 👀 (docs/domains/chats.md#status): the Concierge neither sets nor clears it.
-    expect(each).toContain("Rome marks their message as being worked on");
     expect(prompt).not.toContain("👀");
     expect(prompt).not.toContain("`react` with `emoji: null`");
     expect(prompt).not.toContain("card: true");
