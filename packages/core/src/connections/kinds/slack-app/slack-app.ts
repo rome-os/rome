@@ -114,8 +114,11 @@ export interface SlackAppAdapterConfig {
   /** Fresh drain credentials from Rome Cloud; the drain key expires. A
    *  failure keeps the stored ones. */
   refreshMailbox?: () => Promise<SlackAppMailbox>;
-  /** Keeps refreshed drain credentials with the grant. */
-  onMailboxRefreshed?: (mailbox: SlackAppMailbox) => void;
+  /** Keeps refreshed drain credentials with the grant. The adapter drains
+   *  with them only once this resolves: the relay retires an older key once a
+   *  newer one connects, so a key it drained with but did not keep would
+   *  leave a restart with a refused one. */
+  onMailboxRefreshed?: (mailbox: SlackAppMailbox) => Promise<void>;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
@@ -280,14 +283,20 @@ export class SlackAppAdapter {
     ) {
       return false;
     }
+    await this.config.onMailboxRefreshed?.(fresh);
+    if (signal.aborted) return false;
     this.mailbox = fresh;
-    this.config.onMailboxRefreshed?.(fresh);
     return true;
   }
 
   private keyExpired(): boolean {
     const expiry = drainKeyExpiry(this.mailbox.drainKey);
     return expiry !== null && expiry <= Date.now();
+  }
+
+  private renewalDue(): boolean {
+    const expiry = drainKeyExpiry(this.mailbox.drainKey);
+    return expiry !== null && expiry - RENEW_BEFORE_EXPIRY_MS <= Date.now();
   }
 
   /** Renew the drain key a week before it expires, while the drain runs. */
@@ -326,7 +335,9 @@ export class SlackAppAdapter {
         this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
         log.info("slack app mailbox key renewed", { teamId: this.config.teamId });
       }
-      this.scheduleRenewal();
+      // A key Rome Cloud answered that is already due again, the same one or
+      // a short-lived one, waits for the retry rather than asking at once.
+      this.scheduleRenewal(this.renewalDue() ? RENEW_RETRY_MS : undefined);
     } catch (error) {
       if (signal.aborted) return;
       log.warn("slack app mailbox renewal failed; will retry", { error: describe(error) });

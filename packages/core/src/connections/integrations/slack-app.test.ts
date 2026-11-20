@@ -487,6 +487,63 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
     expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-fix", "release T_A"]);
   });
 
+  it("revokes and releases another workspace a cancelled fix redeemed while the disconnect ran", async () => {
+    const bound = new Map<string, number>([["T_A", 1]]);
+    let land = () => {};
+    const c = cloud({
+      // The guardian picked another workspace on Slack's screen, and the
+      // fix's redeem lands only after the disconnect cancelled it.
+      redeem: () =>
+        new Promise((resolve) => {
+          land = () => {
+            bound.set("T_B", 1);
+            resolve({ ...INSTALL, teamId: "T_B", botToken: "xoxb-b", generation: 1 });
+          };
+        }),
+      release: async (teamId, _signal, generation) => {
+        if (generation === undefined || generation === bound.get(teamId)) bound.delete(teamId);
+      },
+    });
+    const { descriptor, steps } = descriptorWith(async () => {}, c);
+    const fixing = new AbortController();
+    const setup = descriptor.auth.setup;
+    if (!setup) throw new Error("no setup");
+    const fix = setup(interaction({ handoff: "h", state: "s" }).interact, {
+      ...ctx,
+      signal: fixing.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixing.abort(new Error("cancelled by the disconnect"));
+
+    const disconnecting = descriptor.onDisconnect?.(
+      { material: { ...MATERIAL, generation: "1" }, profile: {} },
+      { signal: new AbortController().signal },
+    );
+    land();
+    await disconnecting;
+    await fix.catch(() => {});
+
+    expect([...bound.keys()]).toEqual([]);
+    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-b", "release T_A", "release T_B"]);
+  });
+
+  it("leaves another workspace's install alone when its setup finished", async () => {
+    const c = cloud({
+      redeem: async () => ({ ...INSTALL, teamId: "T_B", botToken: "xoxb-b", generation: 1 }),
+    });
+    const { descriptor, steps } = descriptorWith(async () => {}, c);
+    const setup = descriptor.auth.setup;
+    if (!setup) throw new Error("no setup");
+    await setup(interaction({ handoff: "h", state: "s" }).interact, ctx);
+
+    await descriptor.onDisconnect?.(
+      { material: MATERIAL, profile: {} },
+      { signal: new AbortController().signal },
+    );
+
+    expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
+  });
+
   it("releases with no generation a grant made before Rome Cloud counted claims", async () => {
     const release = rs.fn(async () => {});
     const { descriptor } = descriptorWith(async () => {}, cloud({ release }));
