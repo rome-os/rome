@@ -250,9 +250,20 @@ The dashboard's list of a person's chats, beside the rail. Every dashboard perso
 - Nothing in it is pinned, and it is not grouped by date.
 - Its status filter, active, archived or all, applies to every chat in both modes. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
 
+## Chat rule
+
+One thing a guardian can set on a chat, for each of Rome's accounts in it. There are seven: whether the chat is switched on, the [reply rule](#reply-rule), whether another bot's message wakes the agent, whether a message addressed only to others does, whether replies open a thread, which agent answers, and when the chat's session starts afresh.
+
+- Core owns the set, the value each rule takes when nobody set it, what the guardian stored, and the one wake gate that applies them ([Participation](participation.md#wake-gate)).
+- A kind of connection only says which rules its chats offer the guardian, and may fix the value of a rule it does not offer. It cannot add a rule.
+- A chat runs on the kind's fixed value, else the guardian's choice where the kind offers the rule, else the default. A choice stored for a rule the kind does not offer is ignored.
+- A direct message offers only when its session starts afresh, and every message in it wakes the agent.
+- An official app offers no chat rule, so every one is at its default: the account's own agent answers, only when addressed.
+- The dashboard shows a connection's chat rules on that connection's page, and only the rules its kind offers.
+
 ## Reply rule
 
-A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
+A [chat rule](#chat-rule) saying when an account's agent is woken: on every message, only when addressed, or when it is needed. The same account can be chatty in one group and quiet in another. It is stored as `all` for every message and `mention` for only when addressed.
 
 - It decides when the agent is woken, nothing more. What reaches the chat is whatever the platform delivers, and how much of it the agent reads when woken is the agent's own business ([Agents](agents.md)).
 - "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).

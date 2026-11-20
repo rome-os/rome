@@ -26,10 +26,12 @@ import type { Connection } from "../connections/types.js";
 import type { StoredChatRow } from "./repository.js";
 import { ChatSettingsRepository } from "./repository.js";
 import {
-  CONVERSATION_SETTING_FIELDS_BY_KIND,
-  CORE_CONVERSATION_SETTING_FIELDS,
-  defaultConversationSettings,
-} from "./support.js";
+  asChatSettings,
+  chatRulesOf,
+  effectiveChatRules,
+  type KindChatRules,
+  UNDECLARED_CHAT_RULES,
+} from "./rules.js";
 import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
 const log = createLogger("chat-settings");
@@ -108,15 +110,6 @@ function clearField(settings: ChatSettingsOverrides, field: ChatSettingField): v
   if (settings.replies && Object.keys(settings.replies).length === 0) delete settings.replies;
   if (settings.routing && Object.keys(settings.routing).length === 0) delete settings.routing;
   if (settings.session && Object.keys(settings.session).length === 0) delete settings.session;
-}
-
-function overlay(base: ChatSettings, overrides: ChatSettingsOverrides) {
-  const result = structuredClone(base);
-  for (const field of CONVERSATION_SETTING_FIELDS) {
-    const value = fieldValue(overrides, field);
-    if (value !== undefined) setField(result, field, value);
-  }
-  return result;
 }
 
 function normalizeOverrides(value: ChatSettingsOverrides): ChatSettingsOverrides {
@@ -386,8 +379,9 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
     const stored = this.storedRule(ref, descriptor, row);
     const direct = this.directOverrides(row, stored);
-    const effective = overlay(defaultConversationSettings(), direct);
-    const supportedFields = this.supportedFields(descriptor, row);
+    const rules = this.rulesOf(descriptor, row);
+    const effective = asChatSettings(effectiveChatRules(rules, direct));
+    const supportedFields = rules.offers;
     const snapshot: ChatSettingsSnapshot = {
       conversation: descriptor,
       supportedFields,
@@ -735,13 +729,18 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): readonly ChatSettingField[] {
-    if (descriptor.kind === "dm" || row?.kind === "dm") {
-      return CORE_CONVERSATION_SETTING_FIELDS;
-    }
-    return (
-      CONVERSATION_SETTING_FIELDS_BY_KIND.get(descriptor.connectionKind) ??
-      CORE_CONVERSATION_SETTING_FIELDS
-    );
+    return this.rulesOf(descriptor, row).offers;
+  }
+
+  /** The rules the conversation runs under: its kind's, as a direct message
+   *  where it is one. A kind Rome has not registered, or that
+   *  declares none, runs as {@link UNDECLARED_CHAT_RULES}. */
+  private rulesOf(descriptor: ChatDescriptor, row: StoredChatRow | null): KindChatRules {
+    const kind =
+      this.deps.connections.getDescriptor(descriptor.connectionKind)?.chatRules ??
+      UNDECLARED_CHAT_RULES;
+    const direct = descriptor.kind === "dm" || row?.kind === "dm";
+    return chatRulesOf(kind, direct ? "direct" : "group");
   }
 
   private availability(connectionId: string): ChatSettingsListItem["availability"] {

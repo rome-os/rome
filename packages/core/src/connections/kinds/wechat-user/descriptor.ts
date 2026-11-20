@@ -45,6 +45,7 @@ import type {
   Talker,
 } from "../../types.js";
 import { directoryPage } from "../../integrations/talk-features.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../../chat-settings/rules.js";
 
 const log = createLogger("wechat-user");
 
@@ -416,6 +417,9 @@ export function createWechatUserDescriptor(
     reviveProfile: (record) => reviveWechatUserProfile(record),
     accountIdOf: (record) => (typeof record.wxid === "string" && record.wxid) || null,
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: sessionScheme,
     capabilities: {
       talker: {

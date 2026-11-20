@@ -45,6 +45,7 @@ import type {
   Talker,
 } from "../types.js";
 import { typingActivityFeature } from "./talk-features.js";
+import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
 
 /** The `account` grant material — the pairing flow's output (see wechat.ts). */
 export interface WechatAccountMaterial {
@@ -54,6 +55,13 @@ export interface WechatAccountMaterial {
   userId?: string | null;
   statePath?: string;
 }
+
+/** A WeChat chat can be switched off and given its own agent. It wakes on
+ *  every message it hears. */
+export const WECHAT_CHAT_RULES: KindChatRules = {
+  offers: ["enabled", "routing.agentName", "session.reset"],
+  fixed: WAKES_ON_EVERY_MESSAGE,
+};
 
 /** Build the `account` grant material from a pairing outcome: token +
  *  account coordinates, accountId duplicated into material,
@@ -301,6 +309,7 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
     reviveProfile: (record) => reviveWechatProfile(record),
     accountIdOf: (record) => (typeof record.accountId === "string" && record.accountId) || null,
     grant: "account",
+    chatRules: WECHAT_CHAT_RULES,
     auth: accountScheme,
     capabilities: {
       talker: {

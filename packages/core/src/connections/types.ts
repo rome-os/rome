@@ -6,6 +6,7 @@
 import type {
   ChatDescriptor,
   ChatId,
+  ChatSettingsControl,
   MessageReceipt,
   OutgoingMessage,
   ChannelActivity,
@@ -15,6 +16,7 @@ import type {
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 import type { Message } from "./message.js";
+import type { KindChatRules } from "../chat-settings/rules.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it
@@ -314,6 +316,12 @@ export interface GrantCustody {
   clear(): Promise<void>;
 }
 
+/** The chat settings a kind's adapter reads and writes for its own chats,
+ *  as in-chat commands do, and tells of the chats it sees. */
+export type ChatSettingsPort = ChatSettingsControl & {
+  observe?(descriptor: ChatDescriptor): void;
+};
+
 /** A connection kind declaration. */
 export interface ConnectionDescriptor {
   connectionKind: string;
@@ -358,6 +366,11 @@ export interface ConnectionDescriptor {
    *  that says which kinds take an agent. Vocabulary:
    *  docs/domains/chats.md#connected-account. */
   link?: AccountLink;
+  /** The chat rules the kind's chats offer the guardian, and the values it
+   *  fixes for the rules it does not offer. Core owns the rules and runs
+   *  them. A kind that leaves it unset offers none, so every rule runs at
+   *  its default. Vocabulary: docs/domains/chats.md#chat-rule. */
+  chatRules?: KindChatRules;
   capabilities: Partial<{
     talker: {
       build(cred: Credential, kit: RuntimeKit): Talker;

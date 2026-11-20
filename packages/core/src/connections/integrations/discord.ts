@@ -19,13 +19,14 @@ import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rom
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
 import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+import type { ChatSettingsPort } from "../types.js";
+import type { KindChatRules } from "../../chat-settings/rules.js";
 
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
@@ -42,6 +43,19 @@ export const discordGrantProfileSchema = z
   })
   .strict();
 export type DiscordGrantProfile = z.infer<typeof discordGrantProfileSchema>;
+
+/** A self-created Discord bot offers every chat rule. */
+export const DISCORD_CHAT_RULES: KindChatRules = {
+  offers: [
+    "enabled",
+    "activation.mode",
+    "activation.botMessages",
+    "activation.whenOthersMentioned",
+    "replies.placement",
+    "routing.agentName",
+    "session.reset",
+  ],
+};
 
 /** Pure display projection: the bot username reads as the handle. `botId` stays
  *  owner-side and never widens the display surface. */
@@ -105,7 +119,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop?: ChatStopHandler;
   peopleRepo: PeopleRepository;
   listAgents: () => string[];
@@ -245,6 +259,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     link: "own_account",
     grant: "bot",
+    chatRules: DISCORD_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {

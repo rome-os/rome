@@ -165,6 +165,17 @@ export const contextEntryRules: ImportRule[] = [
       !isTest(imp.from) &&
       !imp.from.startsWith("test/"),
   },
+  {
+    name: "connections-declare-chat-rules-only",
+    description:
+      "Core owns the chat rules: it stores them and the wake gate runs them. A kind of connection only declares which rules its chats offer, so a file in connections/ imports nothing of chat-settings/ but rules.ts. Tests may, to drive the service. Vocabulary: docs/domains/chats.md#chat-rule.",
+    rejects: (imp) =>
+      imp.kind === "file" &&
+      imp.from.startsWith("connections/") &&
+      imp.to.startsWith("chat-settings/") &&
+      imp.to !== "chat-settings/rules.ts" &&
+      !isTest(imp.from),
+  },
 ];
 
 /**

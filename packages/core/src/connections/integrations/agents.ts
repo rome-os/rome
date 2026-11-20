@@ -39,6 +39,7 @@ import type {
   TalkFeatures,
   Talker,
 } from "../types.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
 
 const log = createLogger("agents-channel");
 
@@ -293,6 +294,9 @@ export function makeAgentsDescriptor(
     // The agent Rome Cloud assigned this Rome.
     accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,
     grant: "cloud",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: agentsScheme(client),
     capabilities: {
       talker: {

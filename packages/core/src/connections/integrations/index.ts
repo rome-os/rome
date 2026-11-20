@@ -14,7 +14,6 @@ import {
 } from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
@@ -25,6 +24,7 @@ import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
+import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
@@ -43,7 +43,7 @@ export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;

@@ -260,6 +260,43 @@ describe("checkImports with the rules around a connection's message", () => {
   });
 });
 
+describe("checkImports with the chat rule declarations", () => {
+  const at = mkdtempSync(join(tmpdir(), "import-rules-chat-rules-"));
+  afterAll(() => rmSync(at, { recursive: true, force: true }));
+  const put = (path: string, text: string) => {
+    mkdirSync(dirname(join(at, path)), { recursive: true });
+    writeFileSync(join(at, path), text);
+  };
+  put("package.json", JSON.stringify({ type: "module" }));
+  put(
+    "tsconfig.json",
+    JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext" } }),
+  );
+  put("src/chat-settings/rules.ts", "export const rules = 1;\n");
+  put("src/chat-settings/service.ts", "export const service = 1;\n");
+  put("src/chat-settings/repository.ts", "export const repository = 1;\n");
+  put(
+    "src/connections/kinds/x/x.ts",
+    [
+      'import "../../../chat-settings/rules.js";',
+      'import "../../../chat-settings/service.js";',
+      'import "../../../chat-settings/repository.js";',
+      "",
+    ].join("\n"),
+  );
+  put("src/connections/kinds/x/x.test.ts", 'import "../../../chat-settings/service.js";\n');
+
+  it("lets a kind import only the rules it declares, and its tests reach the service", () => {
+    const lines = checkImports(join(at, "src"), join(at, "tsconfig.json"), contextEntryRules)
+      .map(formatImportViolation)
+      .map((line) => line.replace(/ \(.*\)/, "").replace(/: .*$/, ""));
+    expect(lines).toEqual([
+      "connections/kinds/x/x.ts:2 → ../../../chat-settings/service.js [connections-declare-chat-rules-only]",
+      "connections/kinds/x/x.ts:3 → ../../../chat-settings/repository.js [connections-declare-chat-rules-only]",
+    ]);
+  });
+});
+
 describe("checkImports with the library rule", () => {
   it("rejects every import from lib/ into a context, type-only and tests included, and allows the rest", () => {
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), libraryRules)

@@ -52,6 +52,7 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
+import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
 
 // The `inbox` grant's profile — the non-secret provisioned identity (the
 // `<slug>@romeos.cc` address Rome Cloud minted). Declared next to the material
@@ -277,6 +278,9 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
     reviveProfile: (record) => reviveEmailProfile(record),
     accountIdOf: (record) => (typeof record.address === "string" && record.address) || null,
     grant: "inbox",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
     auth: inboxScheme,
     capabilities: {
       talker: {

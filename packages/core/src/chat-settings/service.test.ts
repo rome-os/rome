@@ -17,7 +17,19 @@ import { placeIn } from "../chats/storage/place.js";
 import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
+import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "./rules.js";
+import { DISCORD_CHAT_RULES } from "../connections/integrations/discord.js";
+import { WECHAT_CHAT_RULES } from "../connections/integrations/wechat.js";
+import { FEISHU_CHAT_RULES } from "../connections/kinds/feishu/descriptor.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+
+/** The rules each kind declares, as its descriptor does. */
+const CHAT_RULES = {
+  discord: DISCORD_CHAT_RULES,
+  feishu: FEISHU_CHAT_RULES,
+  wechat: WECHAT_CHAT_RULES,
+  agents: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
+} satisfies Record<string, KindChatRules>;
 
 function directoryDescriptor(
   service: "discord" | "feishu" | "wechat" | "agents",
@@ -26,6 +38,7 @@ function directoryDescriptor(
   return {
     connectionKind: service,
     grant: "bot",
+    chatRules: CHAT_RULES[service],
     auth: tokenPaste({ label: "token", validate: async () => {} }),
     capabilities: {
       talker: {
@@ -435,9 +448,11 @@ describe("ChatSettingsService", () => {
     expect(listed.items.map((item) => item.snapshot.conversation.ref.chatId)).not.toContain("dm-1");
     await expect(service.get(ref)).resolves.toMatchObject({
       supportedFields: ["session.reset"],
+      // Every message in a direct message wakes the agent, as the rules a
+      // direct message fixes say (chat-settings/rules.ts).
       effective: {
         enabled: true,
-        activation: { mode: "mention" },
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
         replies: { placement: "thread" },
         routing: { agentName: null },
         session: { reset: { mode: "idle", idleMinutes: 10_080 } },
