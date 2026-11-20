@@ -943,7 +943,12 @@ export class SlackAppAdapter {
       limit: input.limit,
       timeline,
     });
-    return { messages, coverage };
+    // The member mark is a fact of a message's arrival, kept for its hand-over
+    // only, so a search does not answer it.
+    return {
+      messages: messages.map(({ openToMembers: _open, ...message }) => message),
+      coverage,
+    };
   }
 
   /** Read a chat's newest messages into the copy before searching it, and
