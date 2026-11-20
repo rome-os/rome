@@ -262,7 +262,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           sendEnded(text, false);
-          if (!textareaRef.current?.value) {
+          if (textareaRef.current?.value === "") {
             // Text typed while the send was pending survives a failure; only
             // an empty field takes the failed text and its context back.
             setInputText((current) => (current === "" ? text : current));

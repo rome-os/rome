@@ -321,6 +321,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(
     () => storedDraft?.skill ?? null,
   );
+  const draftSkillRef = useRef(draftSkill);
+  draftSkillRef.current = draftSkill;
 
   const { data: settings } = useSettings();
   const { data: peopleData } = usePeople();
@@ -743,11 +745,14 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       clearNewChatDraft();
       skipNextDraftSaveRef.current = clearsOptimistically && (inputText !== "" || skill !== null);
     }
+    // The draft's change count once this send cleared it: a failed send
+    // puts its reply back only if the guardian changed nothing since.
+    let clearedAt: number | undefined;
     if (clearsOptimistically) {
       setInputText("");
       setPendingUploads([]);
       setDraftSkill(null);
-      replyDraft?.clear();
+      clearedAt = replyDraft?.clear();
     }
     setHint((current) => pickComposerHint(hints, current));
     try {
@@ -779,14 +784,14 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             text: rawText,
             projectPath: draftProjectName,
             agentMention: draftAgentMention,
-            skill,
+            skill: draftSkillRef.current ?? skill,
             personaId: selectedPersonId,
             ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
           },
           authEpoch,
         );
       }
-      if (clearsOptimistically && !textareaRef.current?.value) {
+      if (clearsOptimistically && textareaRef.current?.value === "") {
         // Text typed while the send was pending survives a failure; only an
         // empty field takes the failed text and its context back.
         setInputText((current) =>
@@ -795,7 +800,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         // Keep anything the guardian added since the send.
         setPendingUploads((current) => (current.length === 0 ? uploads : current));
         setDraftSkill((current) => (current === null ? skill : current));
-        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo, clearedAt);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.
