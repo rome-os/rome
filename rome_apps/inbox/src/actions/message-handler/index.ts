@@ -581,6 +581,10 @@ async function handleUntrustedMessage(
   chatId: string,
   targetAgent: string,
   senderInfo: string,
+  /** The sender is answered only because their connection opened it to its
+   *  workspace's members: a sentinel that fails answers nothing, rather
+   *  than hand their message to the account's agent. */
+  answeredOnlyAsMember = false,
 ): Promise<ActionResult> {
   const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
     string,
@@ -608,6 +612,15 @@ async function handleUntrustedMessage(
     deps.emitAgentMessage,
     "sentinel",
   );
+
+  if (!sentinelResult.success && answeredOnlyAsMember) {
+    log.warn("sentinel failed; a member let in by the connection's switch is not answered", {
+      channel,
+      channelUserId,
+      error: sentinelResult.error,
+    });
+    return { status: "ok", data: { action: "sentinel_ignored" } };
+  }
 
   if (!sentinelResult.success) {
     log.warn("sentinel failed; escalating to trusted path", {
@@ -914,6 +927,7 @@ export function createMessageHandlerAction(
             resolveProfilePath: deps.resolveProfilePath,
             strangerPersonId: deps.strangerPersonId,
           }),
+          openToMembers && !canReplyToBondLevel(bondLevel, replyToLevels),
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
