@@ -1,6 +1,5 @@
-// Which login Codex runs on: Rome's setup decides it, from the default
-// provider, the guardian's logins, the instance credential and the account's
-// Rome credits.
+// Which login Codex runs on: Rome's setup decides it, from the guardian's
+// logins, the instance credential and the account's Rome credits.
 // The agent context runs on what this picks (CodexLogins) and does not know
 // why. docs/concepts/rome-cloud.md states the rule.
 
@@ -14,7 +13,7 @@ import {
 } from "../agent/index.js";
 import { instanceCredentialId, onInstanceTokenChanged } from "../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
-import { fetchRomeCredits, type DefaultProvider } from "../agent/index.js";
+import { fetchRomeCredits } from "../agent/index.js";
 
 /** Credits are used only while the account can spend them. */
 function canSpend(view: RomeCreditsView | null): boolean {
@@ -22,10 +21,10 @@ function canSpend(view: RomeCreditsView | null): boolean {
 }
 
 /**
- * The login Codex should run on. Rome credits are used only when the guardian
- * made them the default provider, or when they are the only provider signed
- * in: no ChatGPT login and no Claude login. A usage limit or an expired
- * sign-in never brings them in: the chat shows a card instead.
+ * The login Codex should run on. Rome credits are used only while the guardian
+ * is logged in to no AI account: no ChatGPT login and no Claude login. A login
+ * that expired or was revoked still counts, so a lost sign-in or a usage limit
+ * never brings them in: the chat shows a card instead.
  * Credits need a linked instance and credits that can be spent. Otherwise the
  * answer is `subscription`, and availability says whether it can run.
  */
@@ -33,14 +32,12 @@ export function codexLoginFor(input: {
   openai: ModelAccountReport | undefined;
   /** Claude has a login, perhaps expired, or Rome has not read it yet. */
   claudeSignedIn: boolean;
-  defaultProvider: DefaultProvider | null;
   credentialId: string | null;
   credits: RomeCreditsView | null;
 }): CodexLoginChoice {
   const { openai, credentialId, credits } = input;
   if (!credentialId || !canSpend(credits)) return { kind: "subscription" };
-  const onlyCredits = openai?.state === "unauthorized" && !input.claudeSignedIn;
-  if (input.defaultProvider !== "rome_credits" && !onlyCredits) return { kind: "subscription" };
+  if (openai?.state !== "unauthorized" || input.claudeSignedIn) return { kind: "subscription" };
   return { kind: "rome_credits", credentialId };
 }
 
@@ -49,14 +46,15 @@ export interface CodexLoginChoiceHandle {
   /** The last read found credits this instance can spend. False before a read. */
   creditsUsable(): boolean;
   /**
-   * Whether Rome credits count as a signed-in provider: the instance is
-   * linked and its account has credits enabled, spendable or used up.
-   * Undefined until the first read settles while linked.
+   * Whether the instance is linked and its account has credits enabled,
+   * spendable or used up. Undefined until the first read settles while linked.
    */
-  creditsSignedIn(): boolean | undefined;
+  creditsEnabled(): boolean | undefined;
+  /** The last read of the account's credits, or null before one or when not linked. */
+  credits(): RomeCreditsView | null;
   /** Called when a read changes whether credits can be spent. */
   onCreditsChanged(listener: () => void): () => void;
-  /** Decides the login again, as after the default provider changed. */
+  /** Decides the login again. */
   resync(): void;
 }
 
@@ -70,8 +68,6 @@ export function startCodexLoginChoice(options: {
   accounts: Pick<ModelAccounts, "read" | "onChanged">;
   logins: Pick<CodexLogins, "login" | "useLogin">;
   log?: AgentLog;
-  /** The default provider; absent, none is set. */
-  defaultProvider?: () => DefaultProvider | null;
   /** The instance credential's stable id, or null when not linked. */
   getCredentialId?: () => string | null;
   hasRomeCloud?: () => boolean;
@@ -83,7 +79,6 @@ export function startCodexLoginChoice(options: {
   const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
   const fetchCredits = options.fetchRomeCredits ?? (() => fetchRomeCredits());
   const onCredentialChanged = options.onCredentialChanged ?? onInstanceTokenChanged;
-  const defaultProvider = options.defaultProvider ?? (() => null);
   let credentialId = getCredentialId();
   let stopped = false;
   // Whether a credential could spend credits, as of the last sync. Reads
@@ -102,7 +97,6 @@ export function startCodexLoginChoice(options: {
       codexLoginFor({
         openai: reports.openai,
         claudeSignedIn: claude === undefined || claude.state !== "unauthorized",
-        defaultProvider: defaultProvider(),
         credentialId: linked ? credentialId : null,
         credits,
       }),
@@ -179,10 +173,11 @@ export function startCodexLoginChoice(options: {
       creditListeners.clear();
     },
     creditsUsable: () => linked && canSpend(credits),
-    creditsSignedIn: () => {
+    creditsEnabled: () => {
       if (!linked) return false;
       return creditsRead ? credits?.enabled === true : undefined;
     },
+    credits: () => (linked ? credits : null),
     onCreditsChanged(listener) {
       creditListeners.add(listener);
       return () => creditListeners.delete(listener);

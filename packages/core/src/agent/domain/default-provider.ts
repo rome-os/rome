@@ -50,23 +50,25 @@ export interface SignedInProviders {
   rome_credits: boolean;
 }
 
+/** A provider the guardian logged in to: a login that expired or was revoked still counts. */
+function loggedIn(reports: ModelAccountReports, id: AccountedProviderId): boolean {
+  return reports[id] !== undefined && reports[id].state !== "unauthorized";
+}
+
 /**
  * Signed in, as the default reads it: only a provider with no login is out.
  * One at its usage limit, or whose sign-in expired, is still signed in, so the
  * chat shows a card rather than the default moving. One Rome has not read yet
- * is not signed in.
+ * is not signed in. Rome credits count only while the guardian is logged in
+ * to no AI account at all: any login hides them.
  */
 export function signedInProviders(
   reports: ModelAccountReports,
-  creditsSignedIn: boolean,
+  creditsEnabled: boolean,
 ): SignedInProviders {
-  const signedIn = (id: AccountedProviderId) =>
-    reports[id] !== undefined && reports[id].state !== "unauthorized";
-  return {
-    anthropic: signedIn("anthropic"),
-    openai: signedIn("openai"),
-    rome_credits: creditsSignedIn,
-  };
+  const anthropic = loggedIn(reports, "anthropic");
+  const openai = loggedIn(reports, "openai");
+  return { anthropic, openai, rome_credits: creditsEnabled && !anthropic && !openai };
 }
 
 /**
@@ -86,11 +88,12 @@ export function legacyDefault(
 }
 
 /**
- * The default after a sign-in or a removal. With none yet, the first signed-in
+ * The default after a login or a logout. With none yet, the first signed-in
  * provider becomes it. A default that is still signed in stays, whatever else
- * signs in. A removed default moves to a remaining provider, the guardian's
- * own logins first, and with none left it stays, so the next send shows why.
- * Usage limits never move it.
+ * signs in, except Rome credits, which the first login replaces. A logged-out
+ * default moves to the guardian's other login, and with none left it stays,
+ * so the next send shows why: Rome credits never take over from a login.
+ * Usage limits and expired logins never move it.
  */
 export function reconciledDefault(
   current: DefaultProvider | null,
@@ -99,8 +102,10 @@ export function reconciledDefault(
 ): { provider: DefaultProvider | null; moved: boolean } {
   if (current === null) return { provider: first, moved: false };
   if (signedIn[current]) return { provider: current, moved: false };
-  const remaining = (["anthropic", "openai", "rome_credits"] as const).find(
+  const remaining = (["anthropic", "openai"] as const).find(
     (candidate) => candidate !== current && signedIn[candidate],
   );
-  return remaining ? { provider: remaining, moved: true } : { provider: current, moved: false };
+  if (!remaining) return { provider: current, moved: false };
+  // Credits give way to the first login without a note: nothing was removed.
+  return { provider: remaining, moved: current !== "rome_credits" };
 }

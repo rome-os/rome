@@ -22,6 +22,9 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
+/** Who chose a chat's stored model. docs/domains/agents.md#kept-provider */
+export type ModelSelectionBy = "owner" | "auto" | "kept";
+
 export const sessions = sqliteTable(
   "sessions",
   {
@@ -524,9 +527,11 @@ export const romeSessions = sqliteTable(
     largeModelSelection: text("large_model_selection"),
     // Who set large_model_selection: `owner` from the model menu or a first
     // message that named a model, `auto` when Rome picked it, as for a
-    // Concierge chat's default or a quota failover. NULL for selections made
-    // before this was kept. A change of Rome's default moves only `auto` ones.
-    largeModelSelectionBy: text("large_model_selection_by").$type<"owner" | "auto">(),
+    // Concierge chat's default. `kept` is Rome's pick that stays on its
+    // provider: the guardian switched only this chat, or changed the default
+    // without moving existing chats. NULL for selections made before this was
+    // kept. A change of the default moves only `auto` ones.
+    largeModelSelectionBy: text("large_model_selection_by").$type<ModelSelectionBy>(),
     // The reasoning effort a message to the chat runs at when it names none,
     // such as the brief and follow-ups the Concierge sends a task chat. NULL
     // takes the dashboard's setting.

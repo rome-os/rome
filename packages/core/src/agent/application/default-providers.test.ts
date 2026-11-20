@@ -6,7 +6,7 @@ import type {
   ProviderAvailabilityState,
 } from "../domain/model-account-report.js";
 import type { ProviderId } from "../domain/model-port.js";
-import { createDefaultProviders } from "./default-providers.js";
+import { createDefaultProviders, type DefaultProviderChange } from "./default-providers.js";
 
 const reportOf = (state: ProviderAvailabilityState): ModelAccountReport => ({
   state,
@@ -22,6 +22,7 @@ function keeper(
   } = {},
 ) {
   let stored: DefaultProviderState = options.stored ?? { provider: null };
+  const changes: Array<DefaultProviderChange & { storedBefore: DefaultProviderState }> = [];
   const listeners = new Set<(p: ProviderId, c: "authorization" | "refreshed") => void>();
   const defaults = createDefaultProviders({
     setting: {
@@ -38,11 +39,14 @@ function keeper(
       },
     },
     providers: ["anthropic", "openai"],
-    creditsSignedIn: options.credits ?? (() => false),
+    creditsEnabled: options.credits ?? (() => false),
+    beforeChange: async (change) => {
+      changes.push({ ...change, storedBefore: stored });
+    },
     ...(options.seed ? { seed: options.seed } : {}),
     now: () => new Date("2026-11-16T12:00:00.000Z"),
   });
-  return { defaults, stored: () => stored };
+  return { defaults, stored: () => stored, changes };
 }
 
 describe("the default provider as Rome keeps it", () => {
@@ -79,17 +83,79 @@ describe("the default provider as Rome keeps it", () => {
     expect(defaults.current()).toBe("openai");
   });
 
-  it("keeps Rome credits as the default until a read says they are gone", async () => {
-    let credits: boolean | undefined;
-    const { defaults } = keeper(
-      { anthropic: reportOf("available"), openai: reportOf("unauthorized") },
-      { stored: { provider: "rome_credits" }, credits: () => credits },
-    );
+  it("gives Rome credits up to the first login, without a note, moving every chat", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("unauthorized"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults, changes } = keeper(reports, { credits: () => true });
     await defaults.reconcile();
     expect(defaults.current()).toBe("rome_credits");
-    credits = false;
+    reports.openai = reportOf("available");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("openai");
+    expect(defaults.note()).toBeUndefined();
+    expect(changes.at(-1)).toMatchObject({
+      from: "rome_credits",
+      to: "openai",
+      by: "first",
+      moveExisting: true,
+    });
+  });
+
+  it("never moves a logged-out default to Rome credits", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults } = keeper(reports, {
+      stored: { provider: "anthropic" },
+      credits: () => true,
+    });
+    reports.anthropic = reportOf("unauthorized");
     await defaults.reconcile();
     expect(defaults.current()).toBe("anthropic");
+    expect(defaults.signedIn()).toEqual({ anthropic: false, openai: false, rome_credits: true });
+  });
+
+  it("hides Rome credits while any account is logged in, an expired one included", async () => {
+    const { defaults } = keeper(
+      { anthropic: reportOf("expired"), openai: reportOf("unauthorized") },
+      { stored: { provider: "anthropic" }, credits: () => true },
+    );
+    await defaults.reconcile();
+    expect(defaults.signedIn().rome_credits).toBe(false);
+    await expect(defaults.choose("rome_credits")).rejects.toThrow("not signed in");
+  });
+
+  it("moves a logged-out default to the other login, and every chat with it", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(changes.at(-1)).toMatchObject({ to: "anthropic", by: "removed", moveExisting: true });
+  });
+
+  it("asks before it stores whether chats that follow the default move", async () => {
+    const { defaults, changes } = keeper(
+      { anthropic: reportOf("available"), openai: reportOf("available") },
+      { stored: { provider: "anthropic" } },
+    );
+    await defaults.choose("openai", { moveExisting: false });
+    expect(changes).toEqual([
+      expect.objectContaining({
+        from: "anthropic",
+        to: "openai",
+        by: "guardian",
+        moveExisting: false,
+        storedBefore: { provider: "anthropic" },
+      }),
+    ]);
+    await defaults.choose("anthropic");
+    expect(changes.at(-1)).toMatchObject({ moveExisting: true });
   });
 
   it("lets the guardian pick only a signed-in provider, and clears the note", async () => {

@@ -47,13 +47,31 @@ describe("reconciledDefault", () => {
     });
   });
 
-  it("moves a removed default to a remaining provider, the guardian's own logins first", () => {
+  it("moves a logged-out default to the other login, never to Rome credits", () => {
     expect(
-      reconciledDefault("openai", { anthropic: true, openai: false, rome_credits: true }, null),
+      reconciledDefault("openai", { anthropic: true, openai: false, rome_credits: false }, null),
     ).toEqual({ provider: "anthropic", moved: true });
     expect(
       reconciledDefault("anthropic", { anthropic: false, openai: false, rome_credits: true }, null),
-    ).toEqual({ provider: "rome_credits", moved: true });
+    ).toEqual({ provider: "anthropic", moved: false });
+  });
+
+  it("gives Rome credits up to the first login without a note", () => {
+    expect(
+      reconciledDefault(
+        "rome_credits",
+        { anthropic: false, openai: true, rome_credits: false },
+        null,
+      ),
+    ).toEqual({ provider: "openai", moved: false });
+  });
+
+  it("counts Rome credits only while no AI account is logged in", () => {
+    const expired: ModelAccountReport = { state: "expired", account: { loggedIn: false } };
+    expect(signedInProviders({ anthropic: out, openai: out }, true).rome_credits).toBe(true);
+    expect(signedInProviders({ anthropic: expired, openai: out }, true).rome_credits).toBe(false);
+    expect(signedInProviders({ anthropic: out, openai: limited }, true).rome_credits).toBe(false);
+    expect(signedInProviders({ anthropic: out, openai: out }, false).rome_credits).toBe(false);
   });
 
   it("keeps a removed default with none left", () => {

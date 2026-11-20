@@ -1070,13 +1070,11 @@ async function main() {
     startRefresh: false,
     log: createLogger("model-accounts"),
   });
-  // The default provider decides when Codex runs on Rome credits, and spendable
-  // credits count as a provider the default can be, so each reads the other.
-  let readDefaultProvider: () => DefaultProvider | null = () => null;
+  // Codex runs on Rome credits only while no AI account is logged in, and
+  // then the credits are a provider the default can be.
   const codexLoginChoice = startCodexLoginChoice({
     accounts: modelAccounts,
     logins: codexAccountService,
-    defaultProvider: () => readDefaultProvider(),
     log: createLogger("codex-login"),
   });
   const stopCodexLoginChoice = () => codexLoginChoice.stop();
@@ -1084,7 +1082,7 @@ async function main() {
     setting: createDefaultProviderSetting(settingsRepo),
     accounts: modelAccounts,
     providers: ["anthropic", "openai"],
-    creditsSignedIn: () => codexLoginChoice.creditsSignedIn(),
+    creditsEnabled: () => codexLoginChoice.creditsEnabled(),
     // An upgrade keeps the Concierge where it runs: the provider of the model
     // Rome chose for the guardian's main chat, when it has one.
     seed: async () => {
@@ -1097,9 +1095,6 @@ async function main() {
     },
     log: createLogger("default-provider"),
   });
-  readDefaultProvider = () => defaultProviders.current();
-  void defaultProviders.ready().then(() => codexLoginChoice.resync());
-  defaultProviders.onChanged(() => codexLoginChoice.resync());
   codexLoginChoice.onCreditsChanged(() => {
     void defaultProviders.reconcile().catch(() => undefined);
   });

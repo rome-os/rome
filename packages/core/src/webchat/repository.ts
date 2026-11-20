@@ -40,6 +40,7 @@ import {
   sessions,
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
+  type ModelSelectionBy,
 } from "../db/schema.js";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
@@ -1095,7 +1096,7 @@ export class WebChatRepository {
     // Set only here: a chat's device folder never changes after creation.
     deviceFolder: DeviceFolder | null = null,
     // Who chose largeModelSelection: its owner, or Rome; null when unknown.
-    largeModelSelectionBy: "owner" | "auto" | null = "owner",
+    largeModelSelectionBy: ModelSelectionBy | null = "owner",
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -1868,16 +1869,51 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  /** Stores the chat's model, with who chose it: its owner, or Rome. */
+  /**
+   * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
+   * Rome's choice that a change of the default does not move: the chat stays
+   * on that model's provider (docs/domains/agents.md#kept-provider).
+   */
   async updateSessionLargeModelSelection(
     id: string,
     largeModelSelection: string | null,
-    by: "owner" | "auto",
+    by: ModelSelectionBy,
   ) {
     await this.db
       .update(romeSessions)
       .set({ largeModelSelection, largeModelSelectionBy: largeModelSelection ? by : null })
       .where(eq(romeSessions.id, id));
+  }
+
+  /**
+   * The top-level dashboard chats that follow the default provider and have
+   * said something: no model stored, or one Rome chose. A change of the
+   * default moves them, unless the guardian keeps them where they are.
+   */
+  async followingChats(): Promise<Array<{ id: string; largeModelSelection: string | null }>> {
+    return await this.db
+      .select({ id: romeSessions.id, largeModelSelection: romeSessions.largeModelSelection })
+      .from(romeSessions)
+      .where(
+        and(
+          isWebchatChat,
+          isNull(romeSessions.parentSessionId),
+          or(
+            isNull(romeSessions.largeModelSelection),
+            eq(romeSessions.largeModelSelectionBy, "auto"),
+          ),
+          sql`exists (select 1 from ${romeAgentMessages} m where m.session_id = ${romeSessions.id})`,
+        ),
+      );
+  }
+
+  /** Lets every kept chat follow the default again, from its next run. */
+  async releaseKeptChats(): Promise<number> {
+    const result = await this.db
+      .update(romeSessions)
+      .set({ largeModelSelectionBy: "auto" })
+      .where(eq(romeSessions.largeModelSelectionBy, "kept"));
+    return result.changes;
   }
 
   /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */

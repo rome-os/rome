@@ -19,8 +19,16 @@ import type { ModelAccounts } from "./model-accounts.js";
 export type DefaultProviderChange = {
   from: DefaultProvider | null;
   to: DefaultProvider;
-  /** `guardian` when the guardian chose it, `removed` when a removal moved it. */
+  /**
+   * `guardian` when the guardian chose it, `removed` when a logout moved it,
+   * `first` when the first login replaced none or Rome credits.
+   */
   by: "guardian" | "removed" | "first";
+  /**
+   * Whether chats that follow the default move with it, each on its next run.
+   * Only the guardian's own change may leave them where they are.
+   */
+  moveExisting: boolean;
 };
 
 export interface DefaultProviders {
@@ -31,8 +39,12 @@ export interface DefaultProviders {
   /** What a removal moved, until the guardian dismisses it or picks a default. */
   note(): DefaultProviderNote | undefined;
   signedIn(): SignedInProviders;
-  /** The guardian's choice. Throws when the provider is not signed in. */
-  choose(provider: DefaultProvider): Promise<void>;
+  /**
+   * The guardian's choice. With `moveExisting` false, chats that follow the
+   * default stay on the provider they run on. Throws when the provider is not
+   * signed in.
+   */
+  choose(provider: DefaultProvider, options?: { moveExisting?: boolean }): Promise<void>;
   dismissNote(): Promise<void>;
   /** Checks the default against the providers signed in now. */
   reconcile(): Promise<void>;
@@ -44,13 +56,23 @@ export interface CreateDefaultProvidersOptions {
   accounts: Pick<ModelAccounts, "read" | "onChanged">;
   /** The providers whose accounts must be read before the default can move. */
   providers: readonly AccountedProviderId[];
-  /** Whether Rome credits count as signed in; undefined until Rome knows. */
-  creditsSignedIn: () => boolean | undefined;
+  /**
+   * Whether the guardian's Rome account has credits enabled, linked to this
+   * instance; undefined until Rome knows. They count as signed in only while
+   * no AI account is.
+   */
+  creditsEnabled: () => boolean | undefined;
   /**
    * The provider an upgrade starts from when one is signed in, ahead of the
    * old order: the provider the Concierge main chat already runs on.
    */
   seed?: () => Promise<DefaultProvider | null>;
+  /**
+   * Runs before a change is stored, so no chat runs between the change and
+   * what it does to chats: keeping them where they are, or letting them move.
+   * A failure stops the change.
+   */
+  beforeChange?: (change: DefaultProviderChange) => Promise<void>;
   log?: AgentLog;
   now?: () => Date;
 }
@@ -84,10 +106,11 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
   const signedIn = () =>
     signedInProviders(
       accounts.read(),
-      options.creditsSignedIn() ?? state.provider === "rome_credits",
+      options.creditsEnabled() ?? state.provider === "rome_credits",
     );
 
   const store = async (next: DefaultProviderState, change?: DefaultProviderChange) => {
+    if (change) await options.beforeChange?.(change);
     await setting.write(next);
     state = next;
     if (!change) return;
@@ -123,7 +146,7 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
           provider,
           ...(moved && from ? { note: { from, to: provider, at: now().toISOString() } } : {}),
         },
-        { from, to: provider, by: moved ? "removed" : "first" },
+        { from, to: provider, by: moved ? "removed" : "first", moveExisting: true },
       );
     });
 
@@ -142,14 +165,16 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
     current: () => state.provider,
     note: () => state.note,
     signedIn,
-    choose: (provider) =>
+    choose: (provider, choice) =>
       serial(async () => {
         await loaded;
         if (!signedIn()[provider]) throw new Error(`${provider} is not signed in`);
         const from = state.provider;
         await store(
           { provider },
-          from === provider ? undefined : { from, to: provider, by: "guardian" },
+          from === provider
+            ? undefined
+            : { from, to: provider, by: "guardian", moveExisting: choice?.moveExisting ?? true },
         );
       }),
     dismissNote: () =>
