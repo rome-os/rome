@@ -156,3 +156,7 @@ A connection is Rome's access to one external account ([connections.md](../domai
 ### Alternatives
 
 - **Keep webchat as the one connection with no grant.** Rejected because the rule that a connection holds exactly one grant would need an exception, and the guardian could neither fix nor disconnect it.
+
+## Amendment (2026-11-20): the personal WeChat connection is removed
+
+`wechat`, the official bot service, is WeChat's only connection. Rome does not offer `wechat_user`, the guardian's own account read through a WeChat client in Rome's container. Channel records stored for `wechat_user` stay and still map to the `wechat` platform. Rome skips their Connections at boot, as it skips any Connection whose kind is not registered.

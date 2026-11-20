@@ -517,11 +517,11 @@ describe("backend turn delivery", () => {
       runner.runAndDeliver({
         agentName: "main",
         sessionId: "agent-session-1",
-        channel: "wechat_user",
+        channel: "read_only",
         threadId: "thread-1",
         prompt: "continue",
       }),
-    ).rejects.toThrow('Channel "wechat_user" cannot send');
+    ).rejects.toThrow('Channel "read_only" cannot send');
   });
 
   describe("through the session's speaker", () => {
