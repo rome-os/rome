@@ -41,6 +41,28 @@
               "ts": "1700000000.000100",
               "user": "UA0000BOB01",
               "text": "The tangerine kiosk opens on Fridays."
+            },
+            {
+              "ts": "1700000000.000300",
+              "user": "UA0000CARA1",
+              "text": "The lighthouse tour moved to the second Sunday."
+            },
+            {
+              "ts": "1700000000.000400",
+              "user": "UA0000CARA1",
+              "text": "Who is bringing lanterns to the harbour fair?"
+            },
+            {
+              "ts": "1700000000.000500",
+              "user": "UA0000BOB01",
+              "thread_ts": "1700000000.000400",
+              "text": "I'll bring six paper lanterns."
+            },
+            {
+              "ts": "1700000000.000600",
+              "user": "UA0000GUARD",
+              "thread_ts": "1700000000.000400",
+              "text": "Then I'll bring the candles."
             }
           ]
         },

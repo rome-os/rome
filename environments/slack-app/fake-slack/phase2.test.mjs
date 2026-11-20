@@ -536,7 +536,11 @@ test("a group the bot is not in: no reads, posts or search hits from outside it"
   const news = await api("conversations.history", { channel: "CA0000NEWS1" }, bot);
   assert.deepEqual(
     news.messages.map((m) => m.text),
-    ["The tangerine kiosk opens on Fridays."],
+    [
+      "Who is bringing lanterns to the harbour fair?",
+      "The lighthouse tour moved to the second Sunday.",
+      "The tangerine kiosk opens on Fridays.",
+    ],
   );
   const listed = await api("conversations.list", {}, bot);
   const member = Object.fromEntries(listed.channels.map((c) => [c.id, c.is_member]));
@@ -853,4 +857,106 @@ test("a direct message with send_event false enters history and sends no event",
   assert.ok(
     messages.some((m) => m.text === "The pomelo crate number is 8841." && m.user === GUARDIAN),
   );
+});
+
+test("news holds plain messages and a thread from before the app, and a mention can join the thread", async () => {
+  const granted = await install(A, GUARDIAN, `${APP_SCOPES},channels:history,channels:read`);
+  const bot = granted.access_token;
+  const thread = await api(
+    "conversations.replies",
+    { channel: "CA0000NEWS1", ts: "1700000000.000400" },
+    bot,
+  );
+  assert.deepEqual(
+    thread.messages.map((m) => [m.user, m.text]),
+    [
+      ["UA0000CARA1", "Who is bringing lanterns to the harbour fair?"],
+      [BOB, "I'll bring six paper lanterns."],
+      [GUARDIAN, "Then I'll bring the candles."],
+    ],
+  );
+  assert.equal(thread.messages[0].reply_count, 2);
+  const before = received.length;
+  const mention = await ctl("/mention", {
+    team: A,
+    user: BOB,
+    channel: "news",
+    text: "how many lanterns are coming?",
+    thread_ts: "1700000000.000400",
+  });
+  assert.equal(mention.event_sent, true);
+  assert.match(mention.event_id, /^Ev/);
+  assert.equal(mention.event.thread_ts, "1700000000.000400");
+  assert.equal(mention.ts, mention.event.ts);
+  await sleep(50);
+  const heard = received.slice(before).map((r) => r.event);
+  assert.ok(heard.some((e) => e.ts === mention.ts && e.thread_ts === "1700000000.000400"));
+  const plain = await ctl("/group-message", {
+    team: A,
+    user: BOB,
+    channel: "news",
+    text: "and two more from Cara",
+    thread_ts: "1700000000.000400",
+  });
+  assert.equal(plain.event_sent, false);
+  assert.equal(plain.ts, plain.event.ts);
+  await sleep(450);
+  const after = await api(
+    "conversations.replies",
+    { channel: "CA0000NEWS1", ts: "1700000000.000400" },
+    bot,
+  );
+  assert.deepEqual(
+    after.messages.slice(-2).map((m) => m.ts),
+    [mention.ts, plain.ts],
+  );
+});
+
+test("a grant limit keeps a workspace on the old scopes until it is lifted and the guardian signs in again", async () => {
+  const B = "TB0000BBBB";
+  const DANA = "UB0000GUARD";
+  const NEW_SCOPES = `${APP_SCOPES},channels:history,channels:read`;
+  const limited = await ctl("/grant-limit", { team: B, scopes: APP_SCOPES });
+  assert.deepEqual(limited.scopes, APP_SCOPES.split(","));
+  try {
+    const old = await install(B, DANA, NEW_SCOPES);
+    // oauth.v2.access names what the token holds, not what was asked.
+    assert.deepEqual(old.scope.split(",").sort(), APP_SCOPES.split(",").sort());
+    const state = await ctl("/state");
+    assert.deepEqual(state.workspaces.find((w) => w.id === B).grant_limit, APP_SCOPES.split(","));
+    const read = await fetch(`${base}/api/conversations.history`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${old.access_token}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ channel: "CB0000GENRL" }),
+    });
+    assert.deepEqual(
+      read.headers.get("x-oauth-scopes").split(",").sort(),
+      APP_SCOPES.split(",").sort(),
+    );
+    const refused = await read.json();
+    assert.equal(refused.error, "missing_scope");
+    assert.equal(refused.needed, "channels:history");
+    // Direct messages and mentions still work on the old scopes.
+    const dm = await ctl("/dm", { team: B, user: DANA, text: "still there?" });
+    assert.equal(dm.event_sent, true);
+    const mention = await ctl("/mention", { team: B, user: DANA, channel: "general", text: "hi" });
+    assert.equal(mention.event_sent, true);
+    // The history limit counts the refused read too.
+    await sleep(450);
+    const im = await api("conversations.history", { channel: dm.event.channel }, old.access_token);
+    assert.equal(im.ok, true);
+
+    await ctl("/grant-limit", { team: B, scopes: null });
+    const again = await install(B, DANA, NEW_SCOPES);
+    assert.equal(again.access_token, old.access_token);
+    assert.ok(again.scope.split(",").includes("channels:history"));
+    await sleep(450);
+    const now = await api("conversations.history", { channel: "CB0000GENRL" }, old.access_token);
+    assert.equal(now.ok, true);
+  } finally {
+    await ctl("/grant-limit", { team: B, scopes: null });
+  }
 });

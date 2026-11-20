@@ -130,6 +130,7 @@ console.log(
               ts: m.ts,
               user: m.user,
               text: m.text,
+              ...(m.thread_ts ? { thread_ts: m.thread_ts } : {}),
             })),
           ),
         })),

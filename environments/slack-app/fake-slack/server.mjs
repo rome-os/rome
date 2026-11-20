@@ -96,6 +96,9 @@ function emptyState() {
     // OAuth app (slack). appId -> { appId, teamId, kind, name, botUserId, botId, ... }
     otherApps: {},
     sockets: [], // { seq, at, appId, event: opened|hello|closed|sent|acked, detail }
+    // teamId -> the only bot scopes a sign-in there grants, as for a workspace
+    // whose install predates the scopes the app asks for now.
+    grantLimits: {},
   };
 }
 
@@ -226,12 +229,17 @@ export class FakeSlack {
       this.state.tokens[botToken] = { teamId, kind: "bot", userId: botUserId, revoked: false };
     }
     // A sign-in adds the scopes it asked for to the install's, as Slack does.
-    install.scopes = [...new Set([...(install.scopes ?? []), ...splitScopes(grant.scopes)])];
+    // Under a grant limit it adds only the limit's, and keeps no others.
+    const limit = this.state.grantLimits?.[teamId];
+    install.scopes = [...new Set([...(install.scopes ?? []), ...splitScopes(grant.scopes)])].filter(
+      (s) => !limit || limit.includes(s),
+    );
     const response = {
       ok: true,
       app_id: this.config.appId,
       authed_user: { id: userId },
-      scope: grant.scopes,
+      // Every scope the bot token now holds, not only the ones asked for.
+      scope: install.scopes.join(","),
       token_type: "bot",
       access_token: install.botToken,
       bot_user_id: botUserId,
@@ -331,14 +339,28 @@ export class FakeSlack {
   seedHistory() {
     for (const w of this.workspaces.values()) {
       for (const c of w.channels ?? []) {
-        for (const m of c.seed_messages ?? []) {
-          const list = (this.state.history[`${w.id}/${c.id}`] ??= []);
+        // Oldest first, so a reply finds its parent already there.
+        const seeds = [...(c.seed_messages ?? [])].sort((x, y) => Number(x.ts) - Number(y.ts));
+        for (const m of seeds) {
+          const list = this.state.history[`${w.id}/${c.id}`] ?? [];
           if (list.some((x) => x.ts === m.ts)) continue;
-          list.push({ type: "message", user: m.user, text: m.text, ts: m.ts, team: w.id });
-          list.sort((x, y) => Number(x.ts) - Number(y.ts));
+          this.remember(w.id, c.id, {
+            user: m.user,
+            text: m.text,
+            ts: m.ts,
+            ...(m.thread_ts ? { thread_ts: m.thread_ts } : {}),
+            team: w.id,
+          });
+          this.state.history[`${w.id}/${c.id}`].sort((x, y) => Number(x.ts) - Number(y.ts));
         }
       }
     }
+  }
+
+  /** The scopes a token holds, as Slack names them in x-oauth-scopes; null for an unknown token. */
+  scopesOfToken(token) {
+    const info = token ? this.state.tokens[token] : undefined;
+    return info && !info.revoked ? granted(this, info) : null;
   }
 
   /** Whether the bot is in a group. A direct message with the bot always has it. */
@@ -921,6 +943,8 @@ export class FakeSlack {
           bot: this.botIds(w.id),
           installed: Boolean(install?.active),
           installed_by: install?.installedBy ?? null,
+          // The only scopes a sign-in here grants, or null for any it asks.
+          grant_limit: this.state.grantLimits[w.id] ?? null,
           // Whether the newest bot token still works; the token itself stays out.
           token: install
             ? this.state.tokens[install.botToken]?.revoked
@@ -1598,17 +1622,14 @@ export function createHandler(slack) {
       if (url.pathname.startsWith("/api/")) {
         const method = url.pathname.slice(5);
         const args = parseArgs(req, url, raw);
-        const { httpStatus, retryAfter, ...result } = slack.callApi(
-          method,
-          args,
-          bearer(req, args),
-        );
-        return send(
-          res,
-          httpStatus ?? 200,
-          result,
-          retryAfter ? { "retry-after": String(retryAfter) } : {},
-        );
+        const token = bearer(req, args);
+        const { httpStatus, retryAfter, ...result } = slack.callApi(method, args, token);
+        // Slack names the calling token's scopes on every Web API answer.
+        const scopes = slack.scopesOfToken(token);
+        return send(res, httpStatus ?? 200, result, {
+          ...(retryAfter ? { "retry-after": String(retryAfter) } : {}),
+          ...(scopes ? { "x-oauth-scopes": scopes.join(",") } : {}),
+        });
       }
 
       // ----- Control API
@@ -1644,7 +1665,7 @@ async function control(slack, method, url, body) {
       // without telling the app, as if it had missed the event.
       if (body.send_event === false) {
         slack.rememberEvent(body.team, event);
-        return { ok: true, event_sent: false, event };
+        return { ok: true, event_sent: false, ts: event.ts, event };
       }
       return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
@@ -1654,7 +1675,7 @@ async function control(slack, method, url, body) {
       // the fake has no invitations, so a mention elsewhere stays in history.
       if (!slack.botInConversation(body.team, event.channel)) {
         slack.rememberEvent(body.team, event);
-        return { ok: true, event_sent: false, event };
+        return { ok: true, event_sent: false, ts: event.ts, event };
       }
       return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
     }
@@ -1671,13 +1692,23 @@ async function control(slack, method, url, body) {
       );
       if (body.send_event) return { ok: true, ...(await sendAndRemember(slack, body.team, event)) };
       slack.rememberEvent(body.team, event);
-      return { ok: true, event_sent: false, event };
+      return { ok: true, event_sent: false, ts: event.ts, event };
     }
     case "GET /history": {
       const team = q.get("team");
       const channel = slack.resolveConversation(team, q.get("channel"));
       if (!channel) throw httpError(404, `unknown conversation ${q.get("channel")} in ${team}`);
       return { ok: true, seq: slack.state.seq, channel, messages: slack.historyOf(team, channel) };
+    }
+    case "POST /grant-limit": {
+      // The only bot scopes a later sign-in from `team` grants; null lifts the
+      // limit. It changes no install until a sign-in, as Slack does.
+      const scopes = body.scopes == null ? null : splitScopes([body.scopes].flat().join(","));
+      if (!slack.workspaces.has(body.team)) throw httpError(404, `unknown workspace ${body.team}`);
+      if (scopes) slack.state.grantLimits[body.team] = scopes;
+      else delete slack.state.grantLimits[body.team];
+      slack.save();
+      return { ok: true, team: body.team, scopes };
     }
     case "POST /auth-test":
       return { ok: true, ...slack.authTestFor(body.team) };
@@ -1784,6 +1815,7 @@ async function control(slack, method, url, body) {
         installs: keep.installs,
         tokens: keep.tokens,
         otherApps: keep.otherApps ?? {},
+        grantLimits: keep.grantLimits ?? {},
         history: body.history ? {} : slack.state.history,
         seq: slack.state.seq,
         // Kept, so a message after a reset never takes an earlier one's ts.
@@ -1941,7 +1973,10 @@ function readWsFrame(buffer) {
  *  Slack accepts it (the app is installed and holds the scope), before the app
  *  hears of it. */
 async function sendAndRemember(slack, team, event) {
-  return slack.sendEvent(team, event, { onAccepted: () => slack.rememberEvent(team, event) });
+  const sent = await slack.sendEvent(team, event, {
+    onAccepted: () => slack.rememberEvent(team, event),
+  });
+  return { event_sent: true, ts: event.ts, ...sent };
 }
 
 export function start(config = loadConfig()) {
