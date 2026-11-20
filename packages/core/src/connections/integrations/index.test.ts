@@ -209,6 +209,8 @@ const BEFORE_OFFERED = new Map<string, readonly ChatSettingField[]>([
   ["wechat", ["enabled", "routing.agentName", "session.reset"]],
 ]);
 const BEFORE_CORE: readonly ChatSettingField[] = ["session.reset"];
+/** Kinds added after kinds declared their rules, which have no before. */
+const DECLARED_FROM_THE_START = new Set(["slack_app"]);
 
 function beforeOffered(kind: string, place: "direct" | "group"): readonly ChatSettingField[] {
   return place === "direct" ? BEFORE_CORE : (BEFORE_OFFERED.get(kind) ?? BEFORE_CORE);
@@ -287,6 +289,14 @@ describe("chat rules", () => {
     expect(undeclared).toEqual([]);
   });
 
+  it("offers no chat rules for the official Slack app, so its chats run at the defaults", () => {
+    const rules = everyKind().get("slack_app")?.chatRules;
+    expect(rules).toEqual({ offers: [] });
+    for (const place of ["direct", "group"] as const) {
+      expect(chatRulesOf(rules!, place).offers).toEqual([]);
+    }
+  });
+
   it("no kind both offers and fixes a rule, or names one twice", () => {
     for (const descriptor of everyKind().values()) {
       const rules = descriptor.chatRules;
@@ -307,6 +317,7 @@ describe("chat rules", () => {
     for (const descriptor of everyKind().values()) {
       if (!HEARS_MESSAGES(descriptor) || !descriptor.chatRules) continue;
       const kind = descriptor.connectionKind;
+      if (DECLARED_FROM_THE_START.has(kind)) continue;
       const rules = chatRulesOf(descriptor.chatRules, place);
       expect({ kind, offers: [...rules.offers].sort() }).toEqual({
         kind,

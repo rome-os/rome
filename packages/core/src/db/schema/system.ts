@@ -313,8 +313,9 @@ export const linkedinMessages = sqliteTable(
 // Slack event. Only connections/kinds/slack-app reads or writes it, through
 // its repository there: outside the connection, nothing can tell whether the
 // copy exists. The mailbox is told a message was received only once its row
-// is written, so a message Slack sent is never lost to a crash or a full
-// buffer, and the connection can hand it over again.
+// is written, so a crash or a stop before then loses nothing: the mailbox
+// delivers it again, and on start the connection hands over what it kept but
+// never handed over.
 export const slackAppMessages = sqliteTable(
   "slack_app_messages",
   {
@@ -330,8 +331,8 @@ export const slackAppMessages = sqliteTable(
     // The text as Rome reads it, Slack's markup decoded.
     text: text("text").notNull(),
     saidAt: integer("said_at", { mode: "timestamp_ms" }).notNull(),
-    // The message as the connection hands it to Rome, without Slack's raw
-    // payload.
+    // The message as the connection keeps it, without Slack's raw payload.
+    // The connection hands Rome its `Message` made from this.
     message: text("message", { mode: "json" }).notNull(),
     receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
     // When it was handed to Rome. Null when the connection stopped between
