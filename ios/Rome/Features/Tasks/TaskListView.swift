@@ -217,6 +217,7 @@ struct TaskListView: View {
             )
         case .check(let check):
             TaskListPlainRow(
+                symbol: "clock",
                 title: check.check.name,
                 line: pending.map(TaskListWords.pending) ?? TaskListWords.check(check, now: now),
                 created: item.createdAt,
@@ -227,6 +228,7 @@ struct TaskListView: View {
         case .follow(let listed):
             let follow = store.shown(listed)
             TaskListPlainRow(
+                symbol: "dot.radiowaves.left.and.right",
                 title: follow.target,
                 line: pending.map(TaskListWords.pending) ?? TaskListWords.follow(follow, now: now),
                 created: item.createdAt,
@@ -237,6 +239,7 @@ struct TaskListView: View {
             )
         case .routine(let routine):
             TaskListPlainRow(
+                symbol: "flowchart",
                 title: routine.name,
                 line: pending.map(TaskListWords.pending) ?? TaskListWords.routine(routine, now: now),
                 created: item.createdAt,
@@ -331,6 +334,10 @@ extension TaskListAction {
 /// A row that opens nothing: a reminder, a follow or a routine. Its actions
 /// are in its long-press menu.
 struct TaskListPlainRow: View {
+    /// The SF Symbol of its kind, in the slot a task row's status mark takes,
+    /// so every row's title starts on one line: a reminder a clock, a follow
+    /// radio waves, a routine a flowchart, as the web's Clock, Radio and Workflow.
+    let symbol: String
     let title: String
     let line: String
     let created: Date?
@@ -342,20 +349,29 @@ struct TaskListPlainRow: View {
 
     var body: some View {
         TaskListRowFrame(last: last) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: title)
-                    .romeFont(16, .medium)
-                    .tracking(-0.3)
-                    .foregroundStyle(dimmed ? Palette.sub : Palette.fg)
-                    .lineLimit(2)
-                if !line.isEmpty {
-                    Text(verbatim: line)
-                        .romeFont(13)
-                        .foregroundStyle(failed ? Palette.destructive : Palette.sub)
-                        .lineLimit(1)
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .romeFont(16)
+                    .foregroundStyle(Palette.sub)
+                    // A paused routine or an unavailable follow fades its glyph too.
+                    .opacity(dimmed ? 0.5 : 1)
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: title)
+                        .romeFont(16, .medium)
+                        .tracking(-0.3)
+                        .foregroundStyle(dimmed ? Palette.sub : Palette.fg)
+                        .lineLimit(2)
+                    if !line.isEmpty {
+                        Text(verbatim: line)
+                            .romeFont(13)
+                            .foregroundStyle(failed ? Palette.destructive : Palette.sub)
+                            .lineLimit(1)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contextMenu {
             TaskListRowMenu(created: created, actions: actions, onAction: onAction)
