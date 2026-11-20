@@ -375,6 +375,13 @@ export function buildRows(
       j++;
     }
     i = j - 1;
+    // A turn that only failed quietly (a silent retry, a model move, or a card
+    // a later turn carries now) has nothing to show: the note or the next turn
+    // says what happened.
+    if (group.every(isQuietFailure)) {
+      if (msg.turnId) renderedTraceTurns.add(msg.turnId);
+      continue;
+    }
     const turnTrace = msg.turnId ? tracesByTurn.get(msg.turnId) : undefined;
     const showTrace =
       !!turnTrace && !renderedTraceTurns.has(msg.turnId!) && !isRunningTurn(msg.turnId);
@@ -483,4 +490,24 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
     out.push(row);
   }
   return out;
+}
+
+/** A message that holds only a provider card drawn as nothing, beside its error. */
+function isQuietFailure(message: ChatMessage): boolean {
+  if (!message.content.includes('"provider_failure"')) return false;
+  try {
+    const parts = JSON.parse(message.content) as Array<Record<string, unknown>>;
+    if (!Array.isArray(parts)) return false;
+    let quiet = false;
+    for (const part of parts) {
+      if (part.type === "error") continue;
+      if (part.type !== "provider_failure") return false;
+      const resolved = part.resolved as { by?: string } | undefined;
+      if (part.retrying !== true && resolved?.by !== "moved") return false;
+      quiet = true;
+    }
+    return quiet;
+  } catch {
+    return false;
+  }
 }

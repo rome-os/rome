@@ -292,6 +292,15 @@ describe("buildRows model switch notice", () => {
       ...turn(MAIN, "t2", "gpt-6-luna"),
     ]);
     expect(withQuiet.filter((r) => r.kind === "model_switch")).toHaveLength(1);
+    // The quiet turn draws no row of its own: the note, then the reply.
+    expect(withQuiet.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "model_switch",
+      "user",
+      "user",
+      "agent",
+    ]);
   });
 
   it("shows a send a provider card explains as delivered, not failed", () => {
