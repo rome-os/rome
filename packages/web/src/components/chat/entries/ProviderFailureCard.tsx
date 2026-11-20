@@ -415,20 +415,27 @@ export function ProviderFailureCard({
  * the same "Move existing chats too" choice Settings asks. Rome credits name
  * their balance. docs/domains/agents.md#provider-failure
  */
-function SwitchConfirmDialog({
-  provider,
-  affectedTasks,
-  pending,
-  onCancel,
-  onConfirm,
-}: {
+type SwitchConfirmProps = {
   /** The provider to switch to; null keeps the dialog closed. */
   provider: DefaultModelProvider | null;
   affectedTasks?: number;
   pending: boolean;
   onCancel: () => void;
   onConfirm: (makeDefault: boolean, moveExisting: boolean) => void;
-}) {
+};
+
+/** Mounted only while open, so a closed card reads nothing. */
+function SwitchConfirmDialog(props: SwitchConfirmProps) {
+  return props.provider ? <OpenSwitchConfirmDialog {...props} /> : null;
+}
+
+function OpenSwitchConfirmDialog({
+  provider,
+  affectedTasks,
+  pending,
+  onCancel,
+  onConfirm,
+}: SwitchConfirmProps) {
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const [makeDefault, setMakeDefault] = useState(false);
