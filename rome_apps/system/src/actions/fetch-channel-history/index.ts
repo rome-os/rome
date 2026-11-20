@@ -153,6 +153,38 @@ function formatMessages(
     : header + "(No readable messages found.)";
 }
 
+/** Chats listed at most, so a large workspace does not flood the answer. */
+const CHATS_LISTED = 100;
+
+/**
+ * The chats an account read from its platform may read, as an answer that
+ * says to name one, or null when its connection lists no chats.
+ */
+async function chatsOf(
+  channels: ChannelsService,
+  account: Parameters<ChannelsService["query"]>[0],
+): Promise<{
+  chats: Array<{ chatId: string; name: string; kind: string }>;
+  content: string;
+} | null> {
+  try {
+    const page = await channels.chats?.(account, { limit: CHATS_LISTED });
+    if (!page) return null;
+    const chats = page.chats.map(({ chatId, name, kind }) => ({ chatId, name, kind }));
+    const lines = chats.map((chat) => `- ${chat.name} (${chat.kind}): threadId ${chat.chatId}`);
+    const more = page.nextCursor ? `\n(More chats than these ${chats.length}.)` : "";
+    return {
+      chats,
+      content:
+        chats.length > 0
+          ? `This account is read from its platform one chat at a time. Name a chat as threadId to read it. Its chats:\n${lines.join("\n")}${more}`
+          : "This account is read from its platform one chat at a time, and it is in no chats it may read.",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function createAction(
   config: ActionConfig,
   deps: { channelsService: ChannelsService },
@@ -176,7 +208,8 @@ export function createAction(
         },
         threadId: {
           type: "string",
-          description: "Optional thread/channel ID to fetch. Omit to fetch all accessible threads.",
+          description:
+            "Optional thread/channel ID to fetch. Omit to fetch all accessible threads; for an account read from its platform, such as Slack or Discord, omitting it lists the chats you may read, each with the threadId to pass.",
         },
         windowHours: {
           type: "number",
@@ -284,6 +317,19 @@ export function createAction(
         messages = page.reverse();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // An account read from its platform, such as Slack, reads one chat at
+        // a time, so a read across every chat answers the chats it may read
+        // instead, for the caller to name one as threadId.
+        if (!threadId && channels.chats) {
+          const listed = await chatsOf(channels, addressOf(target));
+          if (listed) {
+            log.info("history read needs a chat; listed the account's chats", {
+              channel,
+              chatCount: listed.chats.length,
+            });
+            return { status: "ok", data: { channel, ...listed } };
+          }
+        }
         log.error("history read failed", { channel, error: message });
         return {
           status: "error",
