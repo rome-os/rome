@@ -448,8 +448,11 @@ describe("RecentChats", () => {
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
       expect(entry.getAttribute("href")).toBe("/chat/topic-1");
-      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
-      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
+      // The count sits on the corner of the #, which still shows.
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")?.textContent).toBe(
+        "2",
+      );
+      expect(entry.firstElementChild?.querySelector("svg.lucide-hash")).toBeTruthy();
       // The main chat is the Concierge entry, not a row of its own.
       expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
 
@@ -841,8 +844,11 @@ describe("RecentChats", () => {
       mockConcierge();
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Main chat, 3 unread messages" });
-      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
-      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
+      // The count sits on the corner of the logo, which still shows.
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")?.textContent).toBe(
+        "3",
+      );
+      expect(entry.firstElementChild?.querySelector("svg")).toBeTruthy();
     });
 
     it("says Main chat, not the name the guardian gave their agent", async () => {
@@ -882,12 +888,18 @@ describe("RecentChats", () => {
       ).toBeTruthy();
     });
 
-    it("caps the count at 99+", async () => {
-      server.unread = 100;
+    it("shows 9+ on the corner past 9, and reads the count up to 99+", async () => {
+      server.unread = 10;
       mockConcierge();
+      const view = renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Main chat, 10 unread messages" });
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toBe("9+");
+      view.unmount();
+
+      server.unread = 100;
       renderRecentChats();
-      const entry = await screen.findByRole("link", { name: "Main chat, 99+ unread messages" });
-      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+      const capped = await screen.findByRole("link", { name: "Main chat, 99+ unread messages" });
+      expect(capped.querySelector("[data-concierge-unread]")?.textContent).toBe("9+");
     });
 
     it("shows the unread count as its only badge", async () => {

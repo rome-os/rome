@@ -115,7 +115,7 @@ Inline content sits inside a line of text or a table cell. It answers to the tex
 - The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
 - Typography is `text-aux` or smaller, never `text-ui`. `[mech]`
-- The guardian sidebar's unread count is a compact `Badge`: a 16px-high pill with 11px/16px type. Its inset, typography, and ink read host-owned `--row-count-*` tokens. It is a solid `primary-hover` fill with `primary-foreground` ink, the deeper step of the theme color that the Button's hover label already clears AA on in every theme, so light themes keep white numerals. `[human]`
+- The guardian sidebar's unread count is a compact `Badge` on the bottom right corner of the row's icon: a 14px-high pill with semibold 10px/14px type, showing up to 9 and then `9+`. Its inset, typography, fill, and ink read host-owned `--row-count-*` tokens. The fill is the `red-400` primitive in every theme and mode, on purpose: an unread count reads as the same red everywhere, and white numerals clear AA on it at 4.7:1. `[human]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
 
 > Prefer: a dismissible `Badge` at `--badge-h`, 22px tall in a table cell, carrying a focus edge.
