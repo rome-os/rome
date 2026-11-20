@@ -98,6 +98,48 @@ describe("GET /connections", () => {
     expect(connections[0].capabilities.act).toEqual({ state: "unlocked" });
   });
 
+  it("reports act for a sign-in agents act with through the connector, beside an app that is not connected", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    // The older Slack sign-in: no talker or actor, its token used by the proxy.
+    const signIn = makePasteTalk();
+    signIn.descriptor.connectionKind = "fake-sign-in";
+    signIn.descriptor.capabilities = {};
+    signIn.descriptor.actsWithGrant = true;
+    registry.register(signIn.descriptor);
+    const listed = async () =>
+      (
+        (await (await makeApp(registry).request("/connections")).json()) as {
+          connections: Array<{ connectionKind: string; capabilities: Record<string, unknown> }>;
+        }
+      ).connections;
+    const signInOf = async () => (await listed()).find((c) => c.connectionKind === "fake-sign-in");
+
+    expect((await signInOf())?.capabilities.act).toEqual({
+      state: "needs-auth",
+      missingGrants: ["bot"],
+    });
+
+    const conn = await registry.connect("fake-sign-in", "Bayside");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", signIn.validCredential(), {});
+    expect((await signInOf())?.capabilities).toMatchObject({
+      chat: { state: "unsupported" },
+      act: { state: "unlocked" },
+    });
+
+    // Rome's own app, offered and not connected, changes nothing for it.
+    const app = makeBotAll();
+    if (app.descriptor.capabilities.talker) app.descriptor.capabilities.talker.acts = true;
+    app.descriptor.capabilities.actor = undefined;
+    registry.register(app.descriptor);
+    const both = await listed();
+    expect(both.find((c) => c.connectionKind === "fake-discord")?.capabilities.act).toMatchObject({
+      state: "needs-auth",
+    });
+    expect(both.find((c) => c.connectionKind === "fake-sign-in")?.capabilities.act).toEqual({
+      state: "unlocked",
+    });
+  });
+
   it("lists every connection with grants, capabilities, and revived display", async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     const telegram = makePasteTalkWithProfile();

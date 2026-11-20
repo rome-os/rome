@@ -46,11 +46,23 @@ export type WireCapabilities = Record<Capability, CapabilityStatus> & {
 function wireCapabilities(
   status: Record<Capability, CapabilityStatus>,
   descriptor: ConnectionDescriptor | null | undefined,
+  grants: Record<GrantName, GrantState>,
 ): WireCapabilities {
   // A talker agents act through, with no actor of its own, acts as it chats.
   const actsAsItChats =
     descriptor?.capabilities.talker?.acts === true && !descriptor.capabilities.actor;
-  return { ...status, ...(actsAsItChats ? { act: status.chat } : {}), talk: status.chat };
+  if (actsAsItChats) return { ...status, act: status.chat, talk: status.chat };
+  // A kind whose grant agents act with through the connector, with no actor,
+  // acts while that grant holds.
+  if (descriptor?.actsWithGrant === true && !descriptor.capabilities.actor) {
+    const missing = Object.keys(grants).filter((name) => grants[name] !== "authorized");
+    const act: CapabilityStatus =
+      missing.length === 0
+        ? { state: "unlocked" }
+        : { state: "needs-auth", missingGrants: missing };
+    return { ...status, act, talk: status.chat };
+  }
+  return { ...status, talk: status.chat };
 }
 
 /** Per-grant active-setup ids for a connection.
@@ -196,7 +208,11 @@ function buildConnectionView(
     state: conn.state(),
     grants,
     display,
-    capabilities: wireCapabilities(conn.status(), registry.getDescriptor(conn.connectionKind)),
+    capabilities: wireCapabilities(
+      conn.status(),
+      registry.getDescriptor(conn.connectionKind),
+      grants,
+    ),
     connect: connectHint(conn.connectionKind, conn.state()),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
@@ -280,6 +296,7 @@ function placeholderView(
         watch: capStatus("watcher"),
       },
       descriptor,
+      grants,
     ),
     connect: connectHint(connectionKind, null),
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),

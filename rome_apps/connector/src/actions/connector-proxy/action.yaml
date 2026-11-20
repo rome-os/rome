@@ -41,11 +41,13 @@ description: |
   back empty. Search covers what Rome has kept of the app's direct
   messages and mentions, reading a named `channel`'s newest messages first,
   and its `coverage` field says what it covered.
-  Any other Slack method is refused. With both the Slack app and the older Slack
-  sign-in connected, a call takes the app unless `via: "sign_in"` names the
-  sign-in, and the result's `via` names the connection taken. A call goes
-  through the sign-in only when it names it: when the app cannot make a call,
-  the call fails and says why.
+  Any other Slack method is refused. With only the older Slack sign-in
+  connected, a call that names no `via` goes through the sign-in, and that is
+  the expected route, not a fault. With both the Slack app and the sign-in
+  connected, a call takes the app unless `via: "sign_in"` names the sign-in.
+  The result's `via` names the connection taken, for information. When the
+  app is connected but cannot make a call, the call fails and says why: it
+  goes through the sign-in only when it names it.
 
   With a Rome-managed Google connection, Gmail is restricted to GETs for
   /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads and /threads/{id}
