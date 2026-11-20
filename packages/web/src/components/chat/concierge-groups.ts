@@ -310,6 +310,13 @@ export function buildConciergeItems(
     } else if (row.kind === "automated_input") {
       labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
+      if (row.quota) {
+        // Rome's own note about a move it made, already a row of its own.
+        slots.push({ kind: "notice", key: row.key, model: row.model, quota: row.quota });
+        automaticModel = row.model;
+        group = null;
+        continue;
+      }
       if (row.model === automaticModel) {
         automaticModel = undefined;
         continue;

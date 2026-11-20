@@ -307,15 +307,24 @@ export function buildRows(
 
   const rows: ChatRow[] = [];
   const renderedTraceTurns = new Set<string>();
-  // Rome's note that it moved the chat to another model of the provider. It
-  // has no row of its own: the next turn's switch notice says why.
-  const quotas = new Map<string, QuotaSwitchPart>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    // Rome's note that it moved the chat to another model is the switch
+    // notice itself, saying why; the next turn's own notice is then left out.
     if (msg.role === "assistant") {
       const quota = quotaSwitchOf(msg);
       if (quota) {
-        quotas.set(`${msg.sessionId}\u0000${quota.model}`, quota);
+        rows.push(
+          reuseRow(msg, {
+            kind: "model_switch",
+            key: msg.id,
+            model: quota.model,
+            fromModel: quota.fromModel ?? "",
+            turnId: msg.turnId ?? msg.id,
+            sessionId: msg.sessionId,
+            quota,
+          }),
+        );
         continue;
       }
     }
@@ -372,7 +381,7 @@ export function buildRows(
       }),
     );
   }
-  return withModelSwitches(rows, tracesByTurn, quotas);
+  return withModelSwitches(rows, tracesByTurn);
 }
 
 /** The model-switch note a message is, when that is all it holds. */
@@ -403,11 +412,7 @@ function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
  * model comes from its trace summary, so a running turn shows its notice once
  * it ends, and a turn without one changes nothing.
  */
-function withModelSwitches(
-  rows: ChatRow[],
-  tracesByTurn: Map<string, ChatMessage>,
-  quotas: Map<string, QuotaSwitchPart> = new Map(),
-): ChatRow[] {
+function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
   const lastModelBySession = new Map<string, string>();
   const seenTurns = new Set<string>();
   const out: ChatRow[] = [];
@@ -434,7 +439,6 @@ function withModelSwitches(
       if (model) {
         const previous = lastModelBySession.get(turn.sessionId);
         if (previous && previous !== model) {
-          const quota = quotas.get(`${turn.sessionId}\u0000${model}`);
           const notice: ChatRow = {
             kind: "model_switch",
             key: `model-switch:${turn.turnId}`,
@@ -442,10 +446,14 @@ function withModelSwitches(
             fromModel: previous,
             turnId: turn.turnId,
             sessionId: turn.sessionId,
-            ...(quota ? { quota } : {}),
           };
+          // Rome's own note about this move already stands just before.
+          const before = out.at(-1);
+          const noted = before?.kind === "model_switch" && before.quota?.model === model;
           const built = builtSwitches.get(row);
-          if (built && sameRow(built, notice)) out.push(built);
+          if (noted) {
+            // No second notice for the same move.
+          } else if (built && sameRow(built, notice)) out.push(built);
           else {
             builtSwitches.set(row, notice);
             out.push(notice);

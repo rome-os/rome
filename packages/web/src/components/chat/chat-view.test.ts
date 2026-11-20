@@ -264,6 +264,8 @@ describe("buildRows model switch notice", () => {
     ]);
     expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "model_switch", "user", "agent"]);
     expect(rows[2]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", quota });
+    // The resumed turn ran on the new model: no second notice for the same move.
+    expect(rows.filter((r) => r.kind === "model_switch")).toHaveLength(1);
   });
 
   it("skips turns with no known model and compares within one session", () => {
