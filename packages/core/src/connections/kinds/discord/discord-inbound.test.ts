@@ -261,7 +261,7 @@ describe("DiscordAdapter gateway filters", () => {
     expect(captured[0].thread?.kind).toBe("group");
   });
 
-  it("hears every guild message, whatever the chat's settings, while the account's agent bypasses Inbox", async () => {
+  it("hears every guild message, whatever the chat's settings, while the account's agent runs its own turns", async () => {
     const handlers = new Map<string, (message: Message) => Promise<void>>();
     let bypass = true;
     const adapter = new DiscordAdapter({

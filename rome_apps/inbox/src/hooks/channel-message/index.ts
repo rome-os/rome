@@ -206,9 +206,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       });
       return;
     }
-    // A test-only back door: the agent's own app runs its turns.
+    // The agent's own app runs its turns (`runsOwnTurns`).
     if (accountAgent && this.options.unsafeTestOnlyBypassesInbox?.(accountAgent)) {
-      log.debug("account's agent bypasses Inbox; not answering", {
+      log.debug("account's agent runs its own turns; not answering", {
         service,
         agent: accountAgent,
         messageId: message.messageId,

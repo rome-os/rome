@@ -24,6 +24,7 @@ The check that decides whether a message wakes the agent. It looks at where the 
 
 - By default a chat switched off wakes nobody, a policy that blocks the sender or the chat wins over every setting, a sender below the bond levels the agent replies to stays quiet, and a trusted sender or one a policy allows wakes the agent. Anyone else goes to review.
 - A message that wakes nobody shows no typing.
+- An agent whose own app runs its turns has no wake gate. On an account linked to it, every message reaches the app, and the app decides what wakes the agent. Only first-party apps may run their agents' turns.
 - The wake gate calls no model, sends nothing and stores nothing, so the same message from the same sender always gets the same answer. It reads the guardian's settings as they are when the message arrives.
 
 ## Projection
@@ -55,6 +56,7 @@ The check that decides whether a message an agent wrote may go out. It looks at 
 - A reply to the guardian goes out unchecked, even in a group where others read it, and a reply to anyone else is checked first.
 - The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
 - The sentinel's own reply to a message it triaged does not pass the send gate.
+- An agent whose own app runs its turns has no send gate: its app decides what goes out.
 
 ## Audience
 
