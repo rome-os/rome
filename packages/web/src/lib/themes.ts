@@ -89,6 +89,15 @@ const SHADOWS_DARK = {
  *  They leave once no installed artifact references them.
  *
  *  A theme half spreads the set matching its own neutrals. */
+/** The sidebar's unread count: one red with white numerals in every theme
+ *  and mode, so a count reads the same everywhere (4.7:1). `destructive` can't
+ *  serve it, since dark mode maps it to `red-300`. Like `running`, only the
+ *  host gets the utility; it is not in the app token contract. */
+const UNREAD_COUNT = {
+  unread: "var(--red-400)",
+  "unread-foreground": "var(--neutral-0)",
+} satisfies ThemeTokens;
+
 const LEGACY_STATUS_LABELS_WARM_LIGHT = {
   "brand-foreground": "var(--neutral-0)",
   "destructive-foreground": "var(--neutral-0)",
@@ -433,6 +442,8 @@ const ember: ThemeDefinition = {
     // with the theme, but it is not in the app token contract.
     running: "var(--blue-300)",
 
+    ...UNREAD_COUNT,
+
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
   dark: {
@@ -502,6 +513,8 @@ const ember: ThemeDefinition = {
     "info-border": "var(--orange-600)",
 
     running: "var(--blue-200)",
+
+    ...UNREAD_COUNT,
 
     ...LEGACY_STATUS_LABELS_WARM_DARK,
   },
@@ -628,6 +641,8 @@ const ash: ThemeDefinition = {
     "info-border": "var(--orange-100)",
 
     running: "var(--blue-300)",
+
+    ...UNREAD_COUNT,
 
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
@@ -756,6 +771,8 @@ const slate: ThemeDefinition = {
 
     running: "var(--blue-300)",
 
+    ...UNREAD_COUNT,
+
     ...LEGACY_STATUS_LABELS_SLATE_LIGHT,
   },
   dark: {
@@ -822,6 +839,8 @@ const slate: ThemeDefinition = {
     "info-border": "var(--blue-600)",
 
     running: "var(--blue-200)",
+
+    ...UNREAD_COUNT,
 
     ...LEGACY_STATUS_LABELS_SLATE_DARK,
   },
@@ -938,6 +957,8 @@ const pastelLight = (accent: PastelAccent) =>
 
     running: "var(--blue-300)",
 
+    ...UNREAD_COUNT,
+
     ...LEGACY_STATUS_LABELS_SLATE_LIGHT,
   }) satisfies ThemeTokens;
 
@@ -1006,6 +1027,8 @@ const pastelDark = (accent: PastelAccent) =>
     "info-border": "var(--blue-600)",
 
     running: "var(--blue-200)",
+
+    ...UNREAD_COUNT,
 
     ...LEGACY_STATUS_LABELS_SLATE_DARK,
   }) satisfies ThemeTokens;

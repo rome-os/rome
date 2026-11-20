@@ -888,18 +888,12 @@ describe("RecentChats", () => {
       ).toBeTruthy();
     });
 
-    it("shows 9+ on the corner past 9, and reads the count up to 99+", async () => {
-      server.unread = 10;
-      mockConcierge();
-      const view = renderRecentChats();
-      const entry = await screen.findByRole("link", { name: "Main chat, 10 unread messages" });
-      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toBe("9+");
-      view.unmount();
-
+    it("caps the count at 99+", async () => {
       server.unread = 100;
+      mockConcierge();
       renderRecentChats();
-      const capped = await screen.findByRole("link", { name: "Main chat, 99+ unread messages" });
-      expect(capped.querySelector("[data-concierge-unread]")?.textContent).toBe("9+");
+      const entry = await screen.findByRole("link", { name: "Main chat, 99+ unread messages" });
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toBe("99+");
     });
 
     it("shows the unread count as its only badge", async () => {

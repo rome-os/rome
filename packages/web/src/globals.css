@@ -301,14 +301,12 @@
   }
 }
 
-/* The sidebar's unread count on a row icon's corner: one red in every theme,
-   white numerals at 4.7:1. */
+/* The sidebar's unread count on a row icon's corner, in the `unread` pair. */
 [data-concierge-unread] {
-  --row-count-font-size: 0.625rem;
-  --row-count-line-height: calc(14 / 10);
-  --row-count-px: 0.1875rem;
-  --row-count-bg: var(--red-400);
-  --row-count-fg: var(--neutral-0);
+  --row-count-font-size: 0.5rem;
+  --row-count-line-height: calc(11 / 8);
+  --row-count-px: 0.125rem;
+  --row-count-fg: var(--unread-foreground);
   font-size: var(--row-count-font-size);
   line-height: var(--row-count-line-height);
   color: var(--row-count-fg);
@@ -968,6 +966,10 @@ button.rome-upgrade-row:hover {
   /* Status colour for a running chat (the sidebar spinner). Only the host
      gets the utility: `--running` is not in the app token contract. */
   --color-running: var(--running);
+  /* The sidebar's unread count, one red in every theme. Host-only, like
+     `--running`. */
+  --color-unread: var(--unread);
+  --color-unread-foreground: var(--unread-foreground);
 
   @keyframes tw-shimmer {
     from {

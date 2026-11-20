@@ -88,21 +88,20 @@ export function topicChatRows(
 
 /**
  * A row's unread count, on the bottom right corner of its icon, so the icon
- * still shows. A fixed red in every theme, ringed in the row's fill. It shows
- * up to 9 and then 9+, small enough to stay clear of the name; the link's label
- * reads the count up to 99+.
+ * still shows. One red in every theme, ringed in the row's fill. Up to 99+;
+ * the pill widens to the left, so it never reaches the name.
  */
 function UnreadCorner({ count, label }: { count: number; label: string }) {
   const { t } = useTranslation("common");
   return (
     <Badge
       shape="pill"
-      className="absolute -right-1.5 -bottom-1.5 h-3.5 min-w-3.5 justify-center border-0 bg-[var(--row-count-bg)] px-[var(--row-count-px)] font-semibold tabular-nums ring-2 ring-background group-hover:ring-surface-hover dark:group-hover:ring-surface"
+      className="absolute -right-1.5 -bottom-1 h-2.75 min-w-2.75 justify-center border-0 bg-unread px-[var(--row-count-px)] font-semibold tabular-nums ring-2 ring-background group-hover:ring-surface-hover dark:group-hover:ring-surface"
       data-concierge-unread
       role="img"
       aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
     >
-      {count > 9 ? "9+" : String(count)}
+      {label}
     </Badge>
   );
 }
