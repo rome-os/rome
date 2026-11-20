@@ -11,6 +11,7 @@ import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
 import { createTestDb } from "../../../test/db.js";
 import { SlackMessageCopyRepository } from "./message-copy.js";
 import { SlackApiError } from "../slack/slack.js";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -135,7 +136,8 @@ function adapter(
     ...(now ? { now } : {}),
     ...(listened ? { listened } : {}),
   });
-  a.onInbound((message) => delivered.push(message));
+  // What apps receive, so the tests read the fields an app reads.
+  a.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
   return { adapter: a, delivered, faults, api, copy };
 }
 
@@ -562,7 +564,7 @@ describe("Slack app mailbox key", () => {
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
         copy: testCopy(),
       });
-      a.onInbound((message) => order.push(`delivered ${message.text}`));
+      a.onInbound((message) => order.push(`delivered ${message.content.text}`));
       await a.start();
       answer = second;
       await rs.advanceTimersByTimeAsync(DAY + 1000);

@@ -214,6 +214,35 @@ enum SnapshotRunner {
             model.workspace?.topics.setFolded(false)
             model.workspace?.topics.refresh()
             try? await Task.sleep(for: .seconds(0.8))
+            // A topic chat open under the drawer: its row takes the selected card.
+            if only.isEmpty || only.contains("05e-drawer-topic-open") {
+                model.debugCommand = .section(.topic("topic-trip"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05e-drawer-topic-open", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.4))
+                model.debugCommand = .section(.chat)
+                try? await Task.sleep(for: .seconds(0.4))
+            }
+            // Two topic chats pinned: atop the list, the latest pinned first, each with a pin.
+            if only.isEmpty || only.contains("05f-drawer-pinned"), let workspace = model.workspace {
+                await workspace.pinTopic("topic-books", pinned: true)
+                await workspace.pinTopic("topic-home", pinned: true)
+                await capture("05f-drawer-pinned", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                await workspace.pinTopic("topic-books", pinned: false)
+                await workspace.pinTopic("topic-home", pinned: false)
+                try? await Task.sleep(for: .seconds(0.4))
+            }
+            // More topic chats than the drawer's first page.
+            if only.isEmpty || only.contains("05g-drawer-long") {
+                model.openDemo(.longChat)
+                try? await Task.sleep(for: .seconds(2))
+                await capture("05g-drawer-long", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.openDemo()
+                try? await Task.sleep(for: .seconds(2))
+            }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .agentRoute([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])

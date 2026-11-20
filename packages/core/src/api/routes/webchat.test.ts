@@ -8444,6 +8444,43 @@ describe("Webchat API", () => {
       expect(runtime.openTool(sessionId)).toBeNull();
     });
 
+    it("tells the plan of a chat's running turn, and none once it ends", async () => {
+      const sessionId = "sess-turn-plan";
+      await deps.webchatRepo.createSession(sessionId, "Turn plan");
+      const { runtime } = createWebchatRuntime(deps);
+      expect(runtime.turnPlan(sessionId)).toBeNull();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const running = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit({
+          type: "plan_update",
+          plan: {
+            steps: [
+              { text: "Inspect", status: "completed" },
+              { text: "Implement", status: "in_progress" },
+            ],
+          },
+        });
+        await emit({ type: "tool_use", id: "edit-1", tool: "Edit", input: {} });
+        await gate;
+      });
+      await rs.waitFor(() =>
+        expect(runtime.turnPlan(sessionId)).toEqual({
+          steps: [
+            { text: "Inspect", status: "completed" },
+            { text: "Implement", status: "in_progress" },
+          ],
+        }),
+      );
+
+      release();
+      await running;
+      await runtime.flushAll();
+      expect(runtime.turnPlan(sessionId)).toBeNull();
+    });
+
     it("reads the open tool off the running stream, not a send queued behind it", () => {
       const running = { finished: false, openTools: new Map([["search-1", "WebSearch"]]) };
       const queued = { finished: false, openTools: new Map<string, string>() };

@@ -8,24 +8,23 @@ import {
 import { AccountNotConnected } from "./connected-account.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
-import { makePasteTalk } from "../../connections/test-fixtures.js";
+import type * as connections from "../../connections/message.js";
+import { legacyMessage, makePasteTalk } from "../../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf } from "../../test/db.js";
 
 const HOUR = 3_600_000;
 
-function said(id: string, chatId: string, hoursAgo: number): ChannelMessage {
-  return {
-    channel: "telegram_user",
-    direction: "inbound",
+function said(id: string, chatId: string, hoursAgo: number, text = id): connections.Message {
+  return legacyMessage({
     messageId: id,
     chatId: chatId as ChatId,
     senderId: "7",
     senderDisplayName: "Chat",
-    text: id,
+    text,
     attachments: [],
     timestamp: new Date(Date.now() - hoursAgo * HOUR),
     thread: { kind: chatId === "group-1" ? "group" : "dm" },
-  };
+  });
 }
 
 describe("connection-backed send, across epochs", () => {
@@ -119,8 +118,8 @@ describe("connection ports for a service's later channels", () => {
     await registry.giveGrant(second.connectionKind, second.id, "bot", fx.validCredential());
     const secondTalker = fx.talkerFactory.instances.at(-1)!;
 
-    secondTalker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
-    firstTalker.state.deliver?.({ ...said("m2", "dm-1", 0), channel: "fake-telegram" });
+    secondTalker.state.deliver?.(said("m1", "dm-1", 0));
+    firstTalker.state.deliver?.(said("m2", "dm-1", 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([
       { channel: "fake-telegram-2", account, connectionId: second.id },
@@ -160,7 +159,7 @@ describe("what a sender called themselves", () => {
 
     talker.state.deliver?.(said("m1", "dm-1", 0));
     // Nothing to answer, but it still says who sent it.
-    talker.state.deliver?.({ ...said("m2", "dm-1", 0), text: "" });
+    talker.state.deliver?.(said("m2", "dm-1", 0, ""));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(
@@ -211,10 +210,7 @@ describe("a Connection Rome does not listen to", () => {
       for (const listener of listeners) listener(connectionId);
     };
     const deliver = async (id: string) => {
-      fx.talkerFactory.instances.at(-1)!.state.deliver!({
-        ...said(id, "dm-1", 0),
-        channel: "fake-telegram",
-      });
+      fx.talkerFactory.instances.at(-1)!.state.deliver!(said(id, "dm-1", 0));
       await new Promise((resolve) => setTimeout(resolve, 0));
     };
     return { registry, fx, ports, heard, admitted, listen, deliver };
@@ -304,7 +300,7 @@ describe("a Connection with no channel record", () => {
     await registry.giveGrant(unrecorded.connectionKind, unrecorded.id, "bot", fx.validCredential());
     const talker = fx.talkerFactory.instances.at(-1)!;
 
-    talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    talker.state.deliver!(said("m1", "dm-1", 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([]);
     await expect(ports.send!.send("dm-1" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(

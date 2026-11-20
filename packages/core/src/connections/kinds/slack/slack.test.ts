@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
@@ -87,7 +88,7 @@ async function startedAdapter(api = fakeApi()) {
   });
   const received: ChannelMessage[] = [];
   adapter.onInbound(async (message) => {
-    received.push(message);
+    received.push(channelMessageOf(message, "slack_bot"));
   });
   await adapter.start();
   return { adapter, api, sockets, faults, received };
