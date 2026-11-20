@@ -176,7 +176,7 @@ describe("dream", () => {
     expect(prompt).toContain(
       "windowHours: 6 to dream:get_webchat_conversations, dream:get_account_chats,",
     );
-    expect(prompt).not.toContain("system:fetch_channel_history");
+    expect(prompt).not.toContain("fetch_channel_history");
     expect(prompt.toLowerCase()).not.toContain("discord");
   });
 
@@ -589,7 +589,7 @@ describe("dream skills", () => {
     expect(practice).toContain(
       "windowHours: 6 to dream:get_webchat_conversations and dream:get_action_logs",
     );
-    expect(practice).not.toContain("dream:get_account_chats");
+    expect(practice).not.toContain("get_account_chats");
     expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
     expect(practice).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
     // The memory agent wrote memory and the journal from other people's chats.
