@@ -999,7 +999,7 @@ export class DiscordAdapter {
           content:
             entries.length === 0
               ? "**Rome Bot Status**\n\nAll conversations use defaults."
-              : `**Rome Bot Status**\n\n${entries.length} conversation(s) have explicit overrides. Manage them in Settings → Channels.`,
+              : `**Rome Bot Status**\n\n${entries.length} conversation(s) have explicit overrides. Manage them on the Discord connection's page in Settings → Connections.`,
         });
         return;
       }
