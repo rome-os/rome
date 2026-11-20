@@ -71,11 +71,13 @@ import {
   clearNewChatDraft,
   currentAuthEpoch,
   loadNewChatDraft,
+  type NewChatDraft,
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
+import type { DictationStop } from "@/lib/voice-input/dictation";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -397,6 +399,29 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [connectOnCreate, setConnectOnCreate] = useState(false);
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
+  const newChatDraft = useCallback(
+    (text: string): NewChatDraft => ({
+      version: 1,
+      text,
+      projectPath: draftProjectName,
+      agentMention: draftAgentMention,
+      skill: draftSkill,
+      personaId: selectedPersonId,
+      ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
+    }),
+    [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill, selectedPersonId],
+  );
+  const { keep: keepChatDraft } = draft;
+  const keepDraft = useCallback(
+    (text: string, stop?: DictationStop) => {
+      keepChatDraft(text, stop);
+      if (persistNewChatDraft && !sessionCreatedRef.current) {
+        saveNewChatDraft(newChatDraft(text), authEpoch);
+      }
+    },
+    [keepChatDraft, persistNewChatDraft, newChatDraft, authEpoch],
+  );
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voice = useVoiceInput({
     textareaRef,
@@ -404,7 +429,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setValue: setInputText,
     notice: draft.notice,
     setNotice: draft.setNotice,
-    keepNotice: draft.keepNotice,
+    keepDraft,
     onSend: () => void runSendRef.current(),
   });
   const runSendRef = useRef<() => Promise<void>>(async () => {});
@@ -499,28 +524,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       skipNextDraftSaveRef.current = false;
       return;
     }
-    saveNewChatDraft(
-      {
-        version: 1,
-        text: inputText,
-        projectPath: draftProjectName,
-        agentMention: draftAgentMention,
-        skill: draftSkill,
-        personaId: selectedPersonId,
-        ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
-      },
-      authEpoch,
-    );
-  }, [
-    persistNewChatDraft,
-    authEpoch,
-    inputText,
-    draftProjectName,
-    draftDeviceFolder,
-    draftAgentMention,
-    draftSkill,
-    selectedPersonId,
-  ]);
+    saveNewChatDraft(newChatDraft(inputText), authEpoch);
+  }, [persistNewChatDraft, authEpoch, inputText, newChatDraft]);
 
   useLayoutEffect(() => {
     if (!persistNewChatDraft) return;

@@ -79,6 +79,16 @@ const COPIED_STYLES = [
 ] as const;
 
 /**
+ * Scrolls the copy to the field's scroll position, or further when the newest
+ * spoken character would sit below the copy's box, as the caret would keep it
+ * in view in the field.
+ */
+function follow(el: HTMLTextAreaElement, overlay: HTMLElement, last: HTMLElement | null) {
+  const below = last ? last.offsetTop + last.offsetHeight - overlay.clientHeight : 0;
+  overlay.scrollTop = Math.max(el.scrollTop, below);
+}
+
+/**
  * Draws `preview.value` over the textarea, with the characters from
  * `preview.start` to `preview.end` revealed and faded in, and grows the field
  * to fit it within the field's max height. Renders nothing while `preview` is
@@ -144,11 +154,9 @@ function SpokenOverlay({
         Number.parseFloat(computed.borderLeftWidth) + Number.parseFloat(computed.borderRightWidth);
       overlay.style.width = `${el.clientWidth + borders}px`;
       overlay.style.height = `${el.offsetHeight}px`;
-      overlay.scrollTop = el.scrollTop;
+      follow(el, overlay, lastRef.current);
     };
-    const scrolled = () => {
-      overlay.scrollTop = el.scrollTop;
-    };
+    const scrolled = () => follow(el, overlay, lastRef.current);
     place();
     const resized = new ResizeObserver(place);
     resized.observe(el);
@@ -162,7 +170,7 @@ function SpokenOverlay({
 
   // Each revealed character can make the copy taller. The field grows with
   // it up to its max height, and past that the copy scrolls to keep the
-  // newest words in view, as the caret would in the field.
+  // newest words in view.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     const overlay = overlayRef.current;
@@ -172,11 +180,7 @@ function SpokenOverlay({
       Number.parseFloat(computed.borderTopWidth) + Number.parseFloat(computed.borderBottomWidth);
     const content = overlay.scrollHeight + borders;
     if (content > el.offsetHeight) el.style.height = `${content}px`;
-    overlay.scrollTop = el.scrollTop;
-    const last = lastRef.current;
-    if (!last) return;
-    const below = last.offsetTop + last.offsetHeight - overlay.clientHeight;
-    if (below > overlay.scrollTop) overlay.scrollTop = below;
+    follow(el, overlay, lastRef.current);
   }, [textareaRef, shown]);
 
   const chars = Array.from(shown);

@@ -176,7 +176,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       setValue: setInputText,
       notice: draft.notice,
       setNotice: draft.setNotice,
-      keepNotice: draft.keepNotice,
+      keepDraft: draft.keep,
       onSend: () => void runSendRef.current(),
     });
     const runSendRef = useRef<() => Promise<void>>(async () => {});

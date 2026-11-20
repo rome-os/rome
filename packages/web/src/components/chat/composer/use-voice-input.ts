@@ -76,9 +76,12 @@ let inserting = false;
  * typing inserts it, as one edit, so one undo removes it, earlier edits stay
  * undoable, and the field's change handler sees it as typed text.
  *
+ * The draft holds the heard words as they arrive, through `keepDraft`, since
+ * the field's value does not.
+ *
  * Why listening stopped on its own is the notice, which the caller keeps with
  * the field's draft. It goes away on the next edit or send. Leaving the chat
- * or the page while listening stops it, and `keepNotice` saves why at once,
+ * or the page while listening stops it, and `keepDraft` saves why at once,
  * since the field is going away.
  */
 export function useVoiceInput({
@@ -87,7 +90,7 @@ export function useVoiceInput({
   setValue,
   notice,
   setNotice,
-  keepNotice,
+  keepDraft,
   onSend,
   deps,
 }: {
@@ -96,8 +99,11 @@ export function useVoiceInput({
   setValue: (next: string) => void;
   notice: DictationStop | null;
   setNotice: (next: DictationStop | null) => void;
-  /** Saves `stop` with `text` as the draft at once, for a field that is going away. */
-  keepNotice: (stop: DictationStop, text: string) => void;
+  /**
+   * Saves `text` as the draft at once without changing the field, with `stop`
+   * when given or else the current notice.
+   */
+  keepDraft: (text: string, stop?: DictationStop) => void;
   /** Sends the field, for `stopAndSend` once the last words are in. */
   onSend?: () => void;
   deps?: DictationDeps;
@@ -121,8 +127,8 @@ export function useVoiceInput({
   onSendRef.current = onSend;
   // Set by `stopAndSend`: the send waits for the last words.
   const sendWhenDoneRef = useRef(false);
-  const keepNoticeRef = useRef(keepNotice);
-  keepNoticeRef.current = keepNotice;
+  const keepDraftRef = useRef(keepDraft);
+  keepDraftRef.current = keepDraft;
   const setNoticeRef = useRef(setNotice);
   setNoticeRef.current = setNotice;
   useEffect(() => {
@@ -137,7 +143,7 @@ export function useVoiceInput({
       dictationRef.current = null;
       const text = previewRef.current?.value ?? anchorRef.current?.original ?? valueRef.current;
       anchorRef.current = null;
-      keepNoticeRef.current({ reason }, text);
+      keepDraftRef.current(text, { reason });
       setState("idle");
       setPreview(null);
       if (text !== valueRef.current) setValueRef.current(text);
@@ -175,7 +181,12 @@ export function useVoiceInput({
         el.focus();
         el.setSelectionRange(anchor.start, anchor.end);
       }
-      if (!insertion) return;
+      // Nothing goes in, so the field's value does not change and the draft
+      // takes it back from the heard words it held.
+      if (!insertion) {
+        keepDraftRef.current(anchor.original);
+        return;
+      }
       if (el && insertNatively(el, insertion)) return;
       const spoken = anchor.before + insertion + anchor.after;
       setValue(spoken);
@@ -223,11 +234,13 @@ export function useVoiceInput({
           const anchor = anchorRef.current;
           if (!anchor) return;
           const insertion = spokenInsertion(anchor.before, heard, anchor.after);
-          setPreview({
+          const next = {
             value: anchor.before + insertion + anchor.after,
             start: anchor.before.length,
             end: anchor.before.length + insertion.length,
-          });
+          };
+          setPreview(next);
+          keepDraftRef.current(next.value);
         },
         onAsking: setAsking,
         onDone: (heard, stop) => {

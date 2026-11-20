@@ -83,4 +83,72 @@ describe("the spoken text over the field", () => {
     expect(after).toHaveLength(before.length);
     expect(after.every((span, i) => span === before[i])).toBe(true);
   });
+
+  it("keeps the newest spoken words in view after the field's box changes", () => {
+    // jsdom lays nothing out: each spoken character sits 1,000 px down a copy
+    // whose box is 240 px tall, and scroll positions are kept as set.
+    const resizes: ResizeObserverCallback[] = [];
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizes.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    rs.stubGlobal("matchMedia", () => ({ matches: true }));
+    const scroll = new WeakMap<Element, number>();
+    const geometry = {
+      offsetTop: { get: (el: HTMLElement) => (el.tagName === "SPAN" ? 1000 : 0) },
+      offsetHeight: { get: (el: HTMLElement) => (el.tagName === "SPAN" ? 20 : 240) },
+      clientHeight: { get: () => 240 },
+      offsetParent: { get: (el: HTMLElement) => el.parentElement },
+      scrollTop: {
+        get: (el: HTMLElement) => scroll.get(el) ?? 0,
+        set: (el: HTMLElement, value: number) => scroll.set(el, value),
+      },
+    };
+    const saved = Object.keys(geometry).map(
+      (name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const,
+    );
+    for (const [name, { get, set }] of Object.entries(geometry) as [
+      string,
+      { get: (el: HTMLElement) => unknown; set?: (el: HTMLElement, value: number) => void },
+    ][]) {
+      Object.defineProperty(HTMLElement.prototype, name, {
+        configurable: true,
+        get() {
+          return get(this);
+        },
+        set(value: number) {
+          set?.(this, value);
+        },
+      });
+    }
+    try {
+      const textareaRef = createRef<HTMLTextAreaElement>();
+      const value = "buy milk";
+      const { container } = render(
+        <div className="relative">
+          <textarea ref={textareaRef} value="" readOnly />
+          <VoiceInputSpokenText
+            textareaRef={textareaRef}
+            preview={{ value, start: 0, end: value.length }}
+          />
+        </div>,
+      );
+      const copy = container.querySelector("[data-voice-input-spoken-text]") as HTMLElement;
+      act(() => {
+        for (const resized of resizes) resized([], {} as ResizeObserver);
+      });
+      expect(copy.scrollTop).toBe(780);
+    } finally {
+      for (const [name, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      }
+    }
+  });
 });

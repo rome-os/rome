@@ -10,6 +10,8 @@ import i18n from "@/i18n";
 import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
+import { loadChatDraft } from "@/lib/chat-draft-storage";
+import { loadNewChatDraft } from "@/lib/new-chat-draft-storage";
 
 // The browser's microphone, which jsdom does not have.
 const microphone = rs.hoisted(() => ({
@@ -820,6 +822,57 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
+  });
+});
+
+describe.each(["chat", "concierge"] as const)("the %s draft while voice input listens", (kind) => {
+  it("holds the words heard as they arrive, though the field's value does not", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text).toBe("hello the");
+  });
+
+  it("goes back to the field's text when the words heard are withdrawn", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "", pending: "hm" });
+    expect(loadChatDraft("chat-a")?.text).toBe("hm");
+    socket.say({ type: "text", settled: "", pending: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text ?? "").toBe("");
+  });
+});
+
+describe("voice input in the new chat message field", () => {
+  function renderNewChat() {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer persistNewChatDraft onSend={rs.fn()} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
+    return { field, leave: view.unmount };
+  }
+
+  it("keeps the words heard after leaving mid-message", async () => {
+    const first = renderNewChat();
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    expect(loadNewChatDraft()?.text).toBe("hello the");
+    first.leave();
+
+    const back = renderNewChat();
+    expect(back.field().value).toBe("hello the");
   });
 });
 
