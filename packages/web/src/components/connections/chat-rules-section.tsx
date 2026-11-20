@@ -323,7 +323,7 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
       ) : (
         <>
           {groups.map((group) => (
-            <div key={group.container} className="space-y-1.5">
+            <div key={group.container} className="space-y-2">
               {group.container && (
                 <h4 className="px-1 text-aux text-muted-foreground">{group.container}</h4>
               )}
