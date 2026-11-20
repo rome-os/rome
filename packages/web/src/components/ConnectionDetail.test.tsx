@@ -658,7 +658,45 @@ describe("ConnectionDetailBody — accounts", () => {
     await userEvent.setup().click(toggle());
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
-    await waitFor(() => expect(toggle().getAttribute("aria-disabled")).not.toBe("true"));
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps the members switch busy until the refresh after a change lands", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/answer-members")
+        ? new Response(JSON.stringify({ answerMembers: true }), { status: 200 })
+        : new Response("{}", { status: 200 }),
+    );
+    let land: () => void = () => {};
+    const onRefresh = rs.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          land = () => {
+            rerenderCard(cardFor([feishu({ answerMembers: true })], "feishu"));
+            resolve();
+          };
+        }),
+    );
+    const { rerenderCard } = renderAccountBody(
+      cardFor([feishu({ answerMembers: false })], "feishu"),
+      { onRefresh },
+    );
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    const user = userEvent.setup();
+
+    await user.click(toggle());
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    // A second change while the first refresh is out would start a refresh
+    // that can land before it, and the older state would show last.
+    expect((toggle() as HTMLButtonElement).disabled).toBe(true);
+    await user.click(toggle());
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    land();
+
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 
@@ -703,6 +741,7 @@ describe("ConnectionDetailBody — accounts", () => {
 
     await user.click(toggle());
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
     await user.click(toggle());
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(2));
 

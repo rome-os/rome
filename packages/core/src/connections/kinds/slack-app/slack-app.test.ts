@@ -2358,6 +2358,42 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
     expect(userName).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a member's name but not their membership when Slack fails to answer after ten minutes", async () => {
+    let failing = false;
+    let at = Date.parse("2026-11-20T00:00:00Z");
+    const userName = rs.fn(async () => {
+      if (failing) throw new Error("ratelimited");
+      return { displayName: "Kim", username: "kim", fullMemberOf: TEAM };
+    });
+    const delivered: ChannelMessage[] = [];
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: fakeApi({ userName }),
+      openMailbox: fakeMailbox().open,
+      copy: testCopy(),
+      readGate: openGate(),
+      openToMembers: () => true,
+      now: () => new Date(at),
+    });
+    a.onInbound((message) => delivered.push(message));
+    await a.start();
+
+    await a.handleFrame(from(1, "U_KIM"));
+    failing = true;
+    at += 10 * 60 * 1000;
+    await a.handleFrame(from(2, "U_KIM"));
+
+    expect(userName).toHaveBeenCalledTimes(2);
+    expect(delivered[1]?.senderDisplayName).toBe("Kim");
+    expect(delivered[1]?.senderUsername).toBe("kim");
+    expect(delivered[1]).not.toHaveProperty("openToMembers");
+  });
+
   it("hands a kept message over again marked only while the switch is still on", async () => {
     const copy = testCopy();
     const open = { on: true };

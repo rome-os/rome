@@ -133,16 +133,16 @@ function AnswerMembersRow({
     } catch (error) {
       setMine(before);
       toast.error(error instanceof Error ? error.message : t("connections.answerMembers.failed"));
-    } finally {
-      setBusy(false);
     }
     // The server's state shows once a refresh brings it. A refresh that
     // could not load it answers false, and what the server last confirmed
-    // stays shown.
+    // stays shown. The switch stays busy until then, so a second change
+    // cannot start a refresh that lands before this one.
     try {
       if ((await onRefresh()) !== false) setMine(null);
     } finally {
       changing.current = false;
+      setBusy(false);
     }
   };
   return (

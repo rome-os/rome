@@ -41,6 +41,10 @@ function useConnections() {
     queryKey: CONNECTIONS_QUERY_KEY,
     queryFn: fetchConnections,
     refetchInterval: CONNECTIONS_REFRESH_INTERVAL_MS,
+    // Each load brings new lists, even one equal to the last: the members
+    // switch takes a new card as the server's state, and a load equal to an
+    // earlier one can still differ from what the switch shows.
+    structuralSharing: false,
   });
 }
 
