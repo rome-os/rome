@@ -24,7 +24,7 @@ set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROME_DIR="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
 ROME_CLOUD_DIR="${ROME_CLOUD_DIR:-$(dirname "$ROME_DIR")/rome-cloud}"
-STATE_DIR="$ENV_DIR/.state-live"
+STATE_DIR="${SLACKENV_LIVE_STATE:-$ENV_DIR/.state-live}"
 PUBLIC_DOMAIN="${ROME_REMOTE_DOMAIN:-romeos.dev}"
 
 log() { printf '[slackenv-live] %s\n' "$*" >&2; }
@@ -166,7 +166,12 @@ cmd_up() {
 
   export SLUG="$slug" PUBLIC_DOMAIN GUARDIAN_EMAIL="$guardian"
   export CLOUD_HOST="$slug-pantheon.$PUBLIC_DOMAIN" ROME_HOST="$slug.$PUBLIC_DOMAIN"
-  node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" "$CLOUD_HOST" "$ROME_HOST"
+  # Kept across starts while the names stay: the edge and every container that
+  # trusts it read it once, when they start.
+  if [ "$(cat "$STATE_DIR/tls/names" 2>/dev/null)" != "$CLOUD_HOST $ROME_HOST" ]; then
+    node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" "$CLOUD_HOST" "$ROME_HOST"
+    echo "$CLOUD_HOST $ROME_HOST" >"$STATE_DIR/tls/names"
+  fi
   chmod 644 "$STATE_DIR/tls/tls.key" # read by the edge container's user; it guards nothing outside the network
   cat "$STATE_DIR/tls/tls.crt" ${SLACKENV_EXTRA_CA:+"$SLACKENV_EXTRA_CA"} >"$STATE_DIR/trust.pem"
 
@@ -216,8 +221,9 @@ ENV
   fi
 
   log "starting Rome Cloud, the relay and the model proxy"
-  compose up -d postgres edge
-  compose up -d --force-recreate relay pantheon model-proxy
+  compose up -d postgres
+  # Recreated on every start, so the edge serves the certificate on disk now.
+  compose up -d --force-recreate edge relay pantheon model-proxy
   wait_for() { # <what> <seconds> <command...>
     local what="$1" limit="$2" i
     shift 2
@@ -234,7 +240,8 @@ ENV
     compose exec -T postgres psql -q -U pantheon -d pantheon -v email="$guardian" >/dev/null
 
   log "starting the instance"
-  compose up -d rome-signer rome
+  compose up -d rome-signer
+  compose up -d --force-recreate rome
   wait_for "the instance" 600 compose exec -T rome node -e 'fetch("http://127.0.0.1:9368/health").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))'
   log "enrolling the instance as $guardian"
   compose --profile setup run --rm enroll >"$STATE_DIR/rome-enroll.json"
