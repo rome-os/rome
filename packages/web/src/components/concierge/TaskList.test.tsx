@@ -587,7 +587,7 @@ describe("TaskList", () => {
     expect(await screen.findByText("No tasks yet.")).toBeTruthy();
   });
 
-  it("cancels a reminder and unfollows at once, pending until the list reads again", async () => {
+  it("cancels a reminder at once, and unfollows once confirmed, each pending until the list reads again", async () => {
     parts.checks = [
       {
         kind: "check",
@@ -620,6 +620,10 @@ describe("TaskList", () => {
     readGate = null;
     await openMenu("rome-os/rome");
     choose("Unfollow");
+    // Unfollow asks first: nothing is sent until it is confirmed.
+    const dialog = await screen.findByRole("dialog", { name: "Unfollow rome-os/rome?" });
+    expect(posts()).toEqual(["POST /api/chats/concierge/tasks/checks/c%201/cancel"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Unfollow" }));
     expect(within(rowOf("rome-os/rome")).getByText("Unfollowing…")).toBeTruthy();
     expect(posts()).toEqual([
       "POST /api/chats/concierge/tasks/checks/c%201/cancel",
@@ -661,6 +665,46 @@ describe("TaskList", () => {
     );
     expect(within(rowOf("Daily summary")).getByText("Deleting…")).toBeTruthy();
     expect(posts().at(-1)).toBe("DELETE /api/chats/concierge/tasks/routines/r1");
+  });
+
+  it("acts on no menu item a press did not start on, such as the release of the press that opened the menu", async () => {
+    parts.follows = [
+      {
+        kind: "follow",
+        source: "github",
+        label: "GitHub",
+        target: "rome-os/rome",
+        state: "active",
+        digestTimes: [],
+      },
+    ];
+    renderList();
+    await screen.findByRole("region", { name: "Scheduled" });
+    for (const [title, item] of [
+      ["rome-os/rome", "Unfollow"],
+      ["Daily summary", "Delete"],
+      ["Summarize Rome releases", "Pause"],
+      ["Review PRs", "Stop"],
+    ] as const) {
+      await openMenu(title);
+      // A release that lands on the item with no press on it, as when the
+      // menu opens under the pointer, selects nothing.
+      fireEvent.pointerUp(screen.getByRole("menuitem", { name: item }), {
+        button: 0,
+        pointerType: "mouse",
+      });
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    }
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(posts()).toEqual([]);
+    // A press that starts and ends on the item acts.
+    await openMenu("Summarize Rome releases");
+    const pause = screen.getByRole("menuitem", { name: "Pause" });
+    fireEvent.pointerDown(pause, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(pause, { button: 0, pointerType: "mouse" });
+    fireEvent.click(pause);
+    expect(posts()).toEqual(["POST /api/chats/concierge/tasks/routines/r2/pause"]);
   });
 
   it("lets go of a pending row and says why when its action fails", async () => {

@@ -199,6 +199,10 @@
       "deleteRoutine": {
         "title": "Delete “{{name}}”?",
         "description": "It stops running and is removed. This cannot be undone."
+      },
+      "unfollowConfirm": {
+        "title": "Unfollow {{target}}?",
+        "description": "Its alerts and digest entries stop coming here. To follow it again, ask the Concierge."
       }
     },
     "menu": {

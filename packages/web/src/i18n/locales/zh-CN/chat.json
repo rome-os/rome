@@ -199,6 +199,10 @@
       "deleteRoutine": {
         "title": "删除「{{name}}」？",
         "description": "它将不再运行并被移除，无法撤销。"
+      },
+      "unfollowConfirm": {
+        "title": "取消关注 {{target}}？",
+        "description": "它的提醒和汇总将不再发到这里。要重新关注，请让 Concierge 帮你关注。"
       }
     },
     "menu": {

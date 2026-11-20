@@ -11,7 +11,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -245,6 +245,8 @@ function Row({
               <DropdownMenuItem
                 key={action.text}
                 variant={action.destructive ? "destructive" : undefined}
+                onPointerDown={pressedOnItem}
+                onPointerUp={releasedOnItem}
                 onSelect={action.onSelect}
               >
                 {action.icon}
@@ -256,6 +258,22 @@ function Row({
       ) : null}
     </li>
   );
+}
+
+/**
+ * A row's menu item acts only on a press that started on it. Radix also
+ * selects an item on a release with no press on it, so a press elsewhere
+ * that ends over a menu just opened would act with no click on the item.
+ */
+const PRESSED_ON_ITEM = "taskListPressed";
+function pressedOnItem(event: PointerEvent<HTMLDivElement>) {
+  event.currentTarget.dataset[PRESSED_ON_ITEM] = "true";
+}
+function releasedOnItem(event: PointerEvent<HTMLDivElement>) {
+  const pressed = event.currentTarget.dataset[PRESSED_ON_ITEM] === "true";
+  delete event.currentTarget.dataset[PRESSED_ON_ITEM];
+  // A prevented release stops Radix selecting the item on it.
+  if (!pressed) event.preventDefault();
 }
 
 /** What a row is doing while its action is under way, as its line says it. */
@@ -530,7 +548,7 @@ function LoadingRows() {
  * A Concierge chat's task list: one list of groups, Needs you, Active, Later,
  * Scheduled and Ended, each a titled card of rows, with an empty group left
  * out. Ended starts folded and shows the newest rows first. Each row's ⋯
- * menu holds its few actions; Delete asks first, and the rest apply at once
+ * menu holds its few actions; Delete and Unfollow ask first, and the rest apply at once
  * and show pending until the list reads again. It reads again whenever the
  * server says something in it changed.
  */
@@ -542,8 +560,13 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
   const [loadingMore, setLoadingMore] = useState(false);
   // The rows whose action is under way, by their key.
   const [pending, setPending] = useState<ReadonlyMap<string, Pending>>(new Map());
-  // The routine whose Delete waits for its confirmation.
-  const [deleting, setDeleting] = useState<TaskListRoutineItem | null>(null);
+  // The Delete or Unfollow that waits for its confirmation: neither is undone
+  // from the list.
+  const [confirming, setConfirming] = useState<
+    | { kind: "delete"; item: TaskListRoutineItem }
+    | { kind: "unfollow"; item: TaskListFollowItem }
+    | null
+  >(null);
   const { data, isError, reread } = useChatTaskList(chatId);
   // A re-read that changes the first page of ended rows may move rows across
   // the pages read before it: they go, and Show more reads on from the new
@@ -713,7 +736,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
             key={key}
             item={item}
             pending={pending.get(key)}
-            onUnfollow={() => unfollow(item)}
+            onUnfollow={() => setConfirming({ kind: "unfollow", item })}
           />
         );
       case "routine":
@@ -724,7 +747,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
             now={now}
             pending={pending.get(key)}
             onToggle={() => toggle(item)}
-            onDelete={() => setDeleting(item)}
+            onDelete={() => setConfirming({ kind: "delete", item })}
           />
         );
     }
@@ -796,16 +819,29 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
         </div>
       )}
       <RomeConfirmDialog
-        open={deleting !== null}
+        open={confirming !== null}
         destructive
-        title={t("concierge.taskList.deleteRoutine.title", { name: deleting?.name ?? "" })}
-        description={t("concierge.taskList.deleteRoutine.description")}
-        confirmLabel={t("concierge.taskList.actions.delete")}
-        onCancel={() => setDeleting(null)}
+        title={
+          confirming?.kind === "unfollow"
+            ? t("concierge.taskList.unfollowConfirm.title", { target: confirming.item.target })
+            : t("concierge.taskList.deleteRoutine.title", { name: confirming?.item.name ?? "" })
+        }
+        description={
+          confirming?.kind === "unfollow"
+            ? t("concierge.taskList.unfollowConfirm.description")
+            : t("concierge.taskList.deleteRoutine.description")
+        }
+        confirmLabel={
+          confirming?.kind === "unfollow"
+            ? t("concierge.taskList.actions.unfollow")
+            : t("concierge.taskList.actions.delete")
+        }
+        onCancel={() => setConfirming(null)}
         onConfirm={() => {
-          const item = deleting;
-          setDeleting(null);
-          if (item) remove(item);
+          const asked = confirming;
+          setConfirming(null);
+          if (asked?.kind === "delete") remove(asked.item);
+          if (asked?.kind === "unfollow") unfollow(asked.item);
         }}
       />
     </TooltipProvider>
