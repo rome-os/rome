@@ -36,7 +36,7 @@ export function AccountControls({
   onOpenAccount,
 }: {
   card: ConnectionCard;
-  onRefresh: () => void | Promise<void>;
+  onRefresh: () => void | Promise<unknown>;
   /** Open another account's card by its connection id. Rejects when the
    *  account is not listed yet. Without it, the add button is hidden. */
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
@@ -97,7 +97,7 @@ function AnswerMembersRow({
 }: {
   connectionId: string;
   on: boolean;
-  onRefresh: () => void | Promise<void>;
+  onRefresh: () => void | Promise<unknown>;
 }) {
   const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
@@ -121,11 +121,10 @@ function AnswerMembersRow({
     } finally {
       setBusy(false);
     }
-    try {
-      await onRefresh();
-    } finally {
-      setMine(null);
-    }
+    // The server's state shows once a refresh brings it. A refresh that
+    // could not load it answers false, and what the server last confirmed
+    // stays shown.
+    if ((await onRefresh()) !== false) setMine(null);
   };
   return (
     <ListRow>

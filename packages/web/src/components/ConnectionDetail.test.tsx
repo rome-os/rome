@@ -644,6 +644,24 @@ describe("ConnectionDetailBody — accounts", () => {
     await waitFor(() => expect(toggle().getAttribute("aria-checked")).toBe("true"));
   });
 
+  it("keeps showing what the server confirmed when the refresh after a change fails", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/answer-members")
+        ? new Response(JSON.stringify({ answerMembers: true }), { status: 200 })
+        : new Response("{}", { status: 200 }),
+    );
+    const onRefresh = rs.fn(async () => false);
+    renderAccountBody(cardFor([feishu({ answerMembers: false })], "feishu"), { onRefresh });
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+
+    await userEvent.setup().click(toggle());
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    await waitFor(() => expect(toggle().getAttribute("aria-disabled")).not.toBe("true"));
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
   it("shows no members switch for a service that has none", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
     expect(

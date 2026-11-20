@@ -395,9 +395,8 @@ export function ConnectionsSection({
             onClose={() => select(null)}
             // In the background: a foreground refresh swaps the grids for a
             // loading skeleton, which would show above the pane.
-            onRefresh={async () => {
-              await onRefresh(true);
-            }}
+            // False when the list could not be loaded.
+            onRefresh={async () => (await onRefresh(true)) !== null}
             onFlash={onFlash}
             onOpenAccount={openAccount}
           />

@@ -164,7 +164,7 @@ export interface ChannelConnectCardProps {
   config: ChannelConnectConfig;
   slot: ConnectionSlot;
   role: "primary" | "secondary";
-  onRefresh: () => void | Promise<void>;
+  onRefresh: () => void | Promise<unknown>;
   /** Connect a new account of the service rather than the slot's own. */
   another?: boolean;
   /** Cancel the setup when the card goes away. Defaults to `another`. */
