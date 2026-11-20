@@ -416,6 +416,25 @@ describe("fetch_channel_history", () => {
       // Three pages of 15, 15 and 10, then one empty read that ends paging.
       expect(query).toHaveBeenCalledTimes(4);
     });
+
+    it("names where to read on after a plain read of one chat, which Slack may cut short", async () => {
+      const query = rs.fn<ChannelsService["query"]>(async () =>
+        Array.from({ length: 15 }, (_, i) => at(`m${40 - i}`, 40 - i, `c${40 - i}`)),
+      );
+      const action = createAction(actionConfig, {
+        channelsService: {
+          list: async () => [{ name: "slack", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      const one = await action.execute({ channel: "slack", threadId: "D1" });
+      expect((one as { data: Record<string, unknown> }).data.nextCursor).toBe("c26");
+
+      const every = await action.execute({ channel: "slack" });
+      expect((every as { data: Record<string, unknown> }).data).not.toHaveProperty("nextCursor");
+    });
   });
 
   describe("an account read by message id", () => {
