@@ -77,14 +77,15 @@ export function inboundRecording(
    *  waits for it here. */
   const tails = new Map<string, Promise<number | null>>();
 
-  /** The messages recorded lately, by chat and key, with the channels that
-   *  have heard each one. A second of Rome's accounts hears a group message
+  /** The messages recorded lately, by chat and key, with the accounts that
+   *  have heard each one, by platform and id, so a reconnected account that
+   *  hears it again on a new channel is still the same account. A second of Rome's accounts hears a group message
    *  moments after the first, so a message is kept for {@link HEARD_FOR_MS}.
    *  A message that is no longer here when another account hears it, such as
    *  after a restart, raises nothing for that account. */
   const lately = new Map<
     string,
-    { readonly message: RecordedMessage; readonly channels: Set<string>; readonly at: number }
+    { readonly message: RecordedMessage; readonly accounts: Set<string>; readonly at: number }
   >();
   const forget = (now: number): void => {
     for (const [key, entry] of lately) {
@@ -140,18 +141,21 @@ export function inboundRecording(
     const now = Date.now();
     forget(now);
     const latelyKey = `${chat.ref.id}\0${message.key}`;
+    const hearer = `${via.account.platform}\0${via.account.id}`;
     const recorded = deps.messages.record(said);
     if (recorded === null) {
       // On record already. Another of Rome's accounts heard it first, and
       // this account decides its own wake, on the same record. A redelivery
       // to an account that heard it already raises nothing.
       const earlier = lately.get(latelyKey);
-      if (!earlier || earlier.channels.has(via.channel)) return null;
-      earlier.channels.add(via.channel);
-      await raise(earlier.message, message);
+      if (!earlier || earlier.accounts.has(hearer)) return null;
+      earlier.accounts.add(hearer);
+      // Who said it, as this account knows them: a platform can name the
+      // same person by a different id to each app, as Feishu does.
+      await raise({ ...earlier.message, saidBy: said.saidBy }, message);
       return earlier.message.id;
     }
-    lately.set(latelyKey, { message: recorded, channels: new Set([via.channel]), at: now });
+    lately.set(latelyKey, { message: recorded, accounts: new Set([hearer]), at: now });
     await raise(recorded, message);
     return recorded.id;
   };
