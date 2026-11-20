@@ -63,6 +63,7 @@ export interface WireMessage {
   timestamp: string;
   author: { id: string; username: string; global_name?: string | null };
   member?: { nick?: string | null };
+  mentions?: Array<{ id: string; username: string; global_name?: string | null }>;
   attachments?: Array<{
     url: string;
     filename?: string;
@@ -82,9 +83,9 @@ export interface DiscordHistoryDeps {
   get: DiscordGet;
   /** Rome's bot on this account, so what it said reads as outbound. */
   botId: string | null;
-  /** A message's text as an inbound message carries it, the bot's mention
-   *  stripped, in the guild the chat is in, if any. */
-  textOf: (content: string, guildId?: string) => string;
+  /** A message's text as an inbound message carries it, each user mention
+   *  named by `nameOf`. */
+  textOf: (content: string, nameOf: (userId: string) => string | undefined) => string;
   /** Whether the bot holds Read Message History in a guild chat, given the
    *  chat as Discord just answered it, or null where that cannot be told.
    *  Discord answers a bot without it an empty history, not a refusal, so a
@@ -269,7 +270,11 @@ function toChannelMessage(
     text:
       message.type === THREAD_CREATED
         ? `started thread "${message.content}"`
-        : deps.textOf(message.content, channel.guild_id),
+        : deps.textOf(message.content, (id) => {
+            // The account's own name, as a message heard live names it.
+            const user = message.mentions?.find((mentioned) => mentioned.id === id);
+            return user ? (user.global_name ?? user.username) : undefined;
+          }),
     attachments: (message.attachments ?? []).map((attachment) =>
       discordAttachment({
         url: attachment.url,

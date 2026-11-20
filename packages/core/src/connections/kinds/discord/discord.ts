@@ -1454,20 +1454,7 @@ Use \`/channel agent clear\` to undo.`,
       {
         get,
         botId,
-        // The bot's name as an inbound message of the same guild reads it.
-        textOf: (content, guildId) =>
-          discordInboundText(
-            content,
-            botUser
-              ? {
-                  id: botUser.id,
-                  displayName:
-                    (guildId
-                      ? this.client.guilds.cache.get(guildId)?.members.me?.displayName
-                      : undefined) ?? botUser.displayName,
-                }
-              : { id: botId },
-          ),
+        textOf: discordInboundText,
         readsHistoryIn: (chat) => this.readsHistoryIn(get, chat, botId, signal),
         nicknameOf: (guildId, userId) =>
           this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
