@@ -1,4 +1,10 @@
-import type { Account, ChannelMessage, ChannelsService, ChatId } from "@rome-os/app-runtime";
+import type {
+  Account,
+  ChannelMessage,
+  ChannelsService,
+  ChatId,
+  ChatSettingsControl,
+} from "@rome-os/app-runtime";
 
 /**
  * Slack's Web API methods, answered through Rome's own Slack app connection
@@ -21,7 +27,7 @@ export const SLACK_NO_SIGN_IN =
   'The Slack sign-in is not connected. Omit via, or pass via: "app", to go through Rome\'s Slack app.';
 
 const OFFERED =
-  "It offers chat.postMessage (send), conversations.history (read) and search.messages (search over what Rome has kept of the app's direct messages and mentions).";
+  "It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list (the channels the app is a member of) and search.messages (search over what Rome has kept of the app's direct messages and mentions). A channel can be named by its id or as #name.";
 
 /** What a call that takes the Slack app says while the app's connection
  *  names no account yet, such as while it is locked. */
@@ -117,6 +123,8 @@ function wireOf(message: ChannelMessage) {
 const VERBS: Record<string, readonly string[]> = {
   "chat.postMessage": ["POST"],
   "conversations.history": ["GET", "POST"],
+  "conversations.replies": ["GET", "POST"],
+  "conversations.list": ["GET", "POST"],
   "search.messages": ["GET", "POST"],
 };
 
@@ -134,6 +142,8 @@ function refused(error: string): SlackAppProxyResult {
  */
 export async function slackAppProxyCall(params: {
   channels: ChannelsService;
+  /** Lists the chats Rome knows, which carry the Slack app's channels. */
+  chatSettings?: Pick<ChatSettingsControl, "list">;
   account: Account;
   /** The HTTP verb the call names. Absent, the method's own verb. */
   method?: string;
@@ -208,6 +218,44 @@ export async function slackAppProxyCall(params: {
         return ok({
           messages: messages.map(wireOf),
           has_more: messages.length > 0 && messages.length === page.length,
+        });
+      }
+      case "conversations.replies": {
+        const channel = stringArg(args, "channel");
+        const ts = stringArg(args, "ts");
+        if (!channel || !ts) {
+          return refused(
+            'Slack "conversations.replies" on Rome\'s Slack app takes "channel" and "ts".',
+          );
+        }
+        const limit = numberArg(args, "limit") ?? 100;
+        const messages = await channels.query(account, {
+          chatId: `${channel}:${ts}` as ChatId,
+          limit,
+        });
+        // Slack answers a thread oldest first.
+        return ok({ messages: messages.map(wireOf).reverse(), has_more: false });
+      }
+      case "conversations.list": {
+        if (!params.chatSettings) return refused("This Rome lists no Slack channels.");
+        const limit = numberArg(args, "limit") ?? 100;
+        const query = stringArg(args, "query");
+        const page = await params.chatSettings.list({
+          limit,
+          ...(query ? { query } : {}),
+          ...(stringArg(args, "cursor") ? { cursor: stringArg(args, "cursor") } : {}),
+        });
+        const listed = page.items
+          .map((item) => item.snapshot.conversation)
+          .filter((chat) => chat.connectionKind === "slack_app" && chat.kind === "channel")
+          .map((chat) => ({
+            id: chat.ref.chatId,
+            name: chat.displayName.replace(/^#/, ""),
+            is_member: true,
+          }));
+        return ok({
+          channels: listed,
+          response_metadata: { next_cursor: page.nextCursor ?? "" },
         });
       }
       case "search.messages": {

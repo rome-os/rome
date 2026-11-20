@@ -14,6 +14,7 @@
 // This kind is separate from `slack_bot` (a Slack app the guardian makes) and
 // `slack` (Rome Cloud OAuth that acts for the guardian). Both keep working.
 
+import type { ChatId } from "@rome-os/app-runtime";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { getInstanceOrigin } from "../../instance/rome-cloud-origin.js";
@@ -28,6 +29,7 @@ import {
 } from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
+import { directoryPage } from "./talk-features.js";
 import type {
   AuthScheme,
   ConnectionDescriptor,
@@ -433,6 +435,29 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
                   }
                   throw error;
                 }
+              },
+            },
+            // The channels the app is a member of, by name, for chat settings
+            // and for an agent that names a channel.
+            directory: {
+              async listConversations(input) {
+                const query = input.query?.replace(/^#/, "").toLocaleLowerCase();
+                const page = directoryPage(
+                  (await adapter.channels()).filter(
+                    (channel) => !query || channel.name.toLocaleLowerCase().includes(query),
+                  ),
+                  input,
+                );
+                return {
+                  conversations: page.items.map((channel) => ({
+                    ref: { connectionId: kit.connectionId, chatId: channel.id as ChatId },
+                    connectionKind: SLACK_APP_KIND,
+                    service: SLACK_APP_KIND,
+                    kind: "channel" as const,
+                    displayName: `#${channel.name}`,
+                  })),
+                  ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+                };
               },
             },
             search: {
