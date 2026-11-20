@@ -191,6 +191,24 @@ describe("chatPromptFacts earlier messages", () => {
     });
   });
 
+  it("reads a thread again from the last message the model was shown there", async () => {
+    // Newest first: the second mention (m9) and the first (m5), with replies
+    // that did not mention Rome before and between them.
+    const page = [message(9), message(8), message(7), message(5), message(3)];
+    const { promptFacts } = earlierFacts(page, true, { 41: "m5", 42: "m9", 43: "m1" });
+    const group = { channel: "slack_app", threadId: "C1", threadType: "group" as const };
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+
+    const first = await promptFacts.thread?.(group, "C1:root", before, 42);
+    const later = await promptFacts.thread?.(group, "C1:root", before, 42, 41);
+    // More was said since than one page holds: the page is read whole.
+    const behind = await promptFacts.thread?.(group, "C1:root", before, 42, 43);
+
+    expect(first?.map((m) => m.text)).toEqual(["message 3", "message 5", "message 7", "message 8"]);
+    expect(later?.map((m) => m.text)).toEqual(["message 7", "message 8"]);
+    expect(behind?.map((m) => m.text)).toEqual(first?.map((m) => m.text));
+  });
+
   it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
     const { promptFacts, latest } = earlierFacts([message(1)]);
     const before = new Date(Date.UTC(2026, 7, 3, 8, 20));

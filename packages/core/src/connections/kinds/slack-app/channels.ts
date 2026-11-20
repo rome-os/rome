@@ -8,6 +8,9 @@ import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 /** How long a listing of the app's channels is reused before Slack is asked
  *  again. */
 const MEMBER_CHANNELS_TTL_MS = 5 * 60 * 1000;
+/** How old a listing may be before a name it lacks makes Slack be asked
+ *  again: someone may have just added the app with /invite. */
+const RELIST_AFTER_MS = 10 * 1000;
 /** One page of Slack's listing, and how many pages a listing reads at most. */
 const PAGE = 200;
 const MAX_PAGES = 10;
@@ -70,7 +73,12 @@ export class SlackMemberChannels {
     const separator = chatId.indexOf(":");
     const name = (separator === -1 ? chatId.slice(1) : chatId.slice(1, separator)).toLowerCase();
     const rest = separator === -1 ? "" : chatId.slice(separator);
-    const named = (await this.list(signal)).filter((channel) => channel.name === name);
+    let named = (await this.list(signal)).filter((channel) => channel.name === name);
+    const now = this.deps.now?.() ?? Date.now();
+    if (named.length === 0 && this.cached && now - this.cached.at >= RELIST_AFTER_MS) {
+      this.cached = null;
+      named = (await this.list(signal)).filter((channel) => channel.name === name);
+    }
     if (named.length === 0) {
       throw new Error(
         `Rome's Slack app is not a member of a channel named #${name}. Someone in Slack can add it with /invite, or name the channel by its id.`,

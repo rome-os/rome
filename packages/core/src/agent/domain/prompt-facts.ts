@@ -56,13 +56,16 @@ export interface PromptFacts {
   /**
    * The earlier messages of platform thread `thread`, said in `place`'s
    * conversation, read as {@link earlier} reads a chat: before `before` and
-   * below message `first`, oldest first. Null where none can be read.
-   * Absent, a thread's earlier messages are not read.
+   * below message `first`, oldest first. `since`, when given, is the id of
+   * the last message of the thread the model was shown: it, and what was said
+   * before it, are left out. Null where none can be read. Absent, a thread's
+   * earlier messages are not read.
    */
   thread?(
     place: ThreadContext,
     thread: string,
     before: Date,
     first?: number,
+    since?: number,
   ): Promise<UnseenMessage[] | null>;
 }
