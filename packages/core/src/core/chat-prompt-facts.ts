@@ -1,5 +1,5 @@
 import type { Account, ChannelMessage, ThreadContext } from "@rome-os/app-runtime";
-import type { PromptFacts, UnseenMessage } from "../agent/index.js";
+import type { PromptFacts, ThreadRead, UnseenMessage } from "../agent/index.js";
 import type { SenderLabels } from "../chats/sender-labels.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { contextOf, type ContextLine, type TurnLinks } from "../sessions/turn-links.js";
@@ -61,7 +61,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     before: Date,
     first: number | undefined,
     since?: number,
-  ): Promise<UnseenMessage[] | null> => {
+  ): Promise<ThreadRead | null> => {
     if (!deps.latest || handsEveryMessage(place.channel)) return null;
     // Rome's record keeps whole seconds, so what was said just before the
     // session's first message may share its second. Knowing that message's
@@ -92,8 +92,15 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);
     const said = earlierMessages(newerThan(below, sinceKey), bound);
+    // A full page read after the message shown last that does not reach the
+    // turn's message stops short of it.
+    const cut =
+      sinceKey !== undefined &&
+      key !== undefined &&
+      page.length >= EARLIER_MESSAGES &&
+      !page.some((message) => message.messageId === key);
     const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
-    return labelled.map(
+    const messages = labelled.map(
       (message, i): UnseenMessage => ({
         ...message,
         fromRome: said[i].direction === "outbound",
@@ -101,6 +108,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
         quotesOutside: false,
       }),
     );
+    return { messages, cut };
   };
   return {
     async unseen(chatId) {
@@ -114,7 +122,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       // Only a direct message: in a group, the platform also holds what was
       // said before Rome joined, which no turn's catch-up shows.
       if (!place.threadId || place.threadType !== "private") return null;
-      return readBefore(place, before, first);
+      return (await readBefore(place, before, first))?.messages ?? null;
     },
     // A thread inside a group's conversation is read whole: the session
     // holds the conversation, and none of its turns saw the thread's replies

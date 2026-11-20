@@ -73,7 +73,12 @@ export {
   questionCardUi,
   REPLY_TO_PARAMETER,
 } from "./domain/ask-question.js";
-export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
+export type {
+  PromptFacts,
+  PromptMessage,
+  ThreadRead,
+  UnseenMessage,
+} from "./domain/prompt-facts.js";
 export {
   currentMessageSection,
   replyContextLine,

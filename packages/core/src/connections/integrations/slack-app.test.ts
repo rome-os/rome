@@ -1,4 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { CredentialRejected } from "../errors.js";
+import { SlackApiError } from "../kinds/slack/slack.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
 import { createSlackAppWebApi } from "../kinds/slack-app/web-api.js";
@@ -214,7 +216,11 @@ describe("the Slack app talker", () => {
 });
 
 describe("the Slack app's channels in chat settings", () => {
-  it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
+  /** The talker of a connection whose channel listing Slack answers with
+   *  `memberChannels`. */
+  function channelTalker(
+    memberChannels: () => Promise<{ channels: { id: string; name: string; isPrivate: boolean }[] }>,
+  ) {
     const descriptor = makeSlackAppDescriptor({
       api: {
         authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
@@ -223,12 +229,7 @@ describe("the Slack app's channels in chat settings", () => {
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({
-          channels: [
-            { id: "C_NEWS", name: "news", isPrivate: false },
-            { id: "G_OPS", name: "ops", isPrivate: true },
-          ],
-        }),
+        memberChannels,
         revoke: async () => {},
       },
       cloud: cloud(),
@@ -262,6 +263,16 @@ describe("the Slack app's channels in chat settings", () => {
       },
       { connectionId: "c1", persist: async () => {}, registerIngress: () => () => {} },
     );
+    return talker;
+  }
+
+  it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
+    const talker = channelTalker(async () => ({
+      channels: [
+        { id: "C_NEWS", name: "news", isPrivate: false },
+        { id: "G_OPS", name: "ops", isPrivate: true },
+      ],
+    }));
 
     const all = await talker?.directory?.listConversations({ limit: 10 });
     const found = await talker?.directory?.listConversations({ query: "#NE", limit: 10 });
@@ -276,6 +287,16 @@ describe("the Slack app's channels in chat settings", () => {
         displayName: "#news",
       },
     ]);
+  });
+
+  it("reports a token Slack refuses as a rejected credential", async () => {
+    const talker = channelTalker(async () => {
+      throw new SlackApiError("token_revoked");
+    });
+
+    await expect(talker?.directory?.listConversations({ limit: 10 })).rejects.toBeInstanceOf(
+      CredentialRejected,
+    );
   });
 });
 

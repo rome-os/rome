@@ -315,7 +315,7 @@ describe("a mention inside a Slack thread (R14)", () => {
 
     expect(elsewhere).toBeNull();
     expect(mention.inThread).toBe(`C_NEWS:${root}`);
-    expect(earlier?.map((m) => m.text)).toEqual([
+    expect(earlier?.messages.map((m) => m.text)).toEqual([
       "Picnic on Saturday?",
       "It moved to Hollyfold Meadow",
     ]);
@@ -380,12 +380,15 @@ describe("a mention inside a Slack thread (R14)", () => {
     const later = await facts.thread!(place, `C_NEWS:${root}`, at(30), 30, 3);
     await adapter.stop();
 
-    expect(first?.map((m) => m.text)).toEqual(["reply 1", "reply 2"]);
+    expect(first?.messages.map((m) => m.text)).toEqual(["reply 1", "reply 2"]);
+    expect(first?.cut).toBe(false);
     // What was said since the first mention, up to the second: a page from
     // the first mention on, none of what the model was shown before.
-    expect(later?.map((m) => m.text)).toEqual(
+    expect(later?.messages.map((m) => m.text)).toEqual(
       Array.from({ length: 15 }, (_, i) => `reply ${i + 4}`),
     );
+    // Replies 19 to 29 were not read: the model is told so.
+    expect(later?.cut).toBe(true);
   });
 
   it("names no thread on a mention that is not in one, nor on a reply in a direct message", async () => {
