@@ -112,6 +112,20 @@ function clearField(settings: ChatSettingsOverrides, field: ChatSettingField): v
   if (settings.session && Object.keys(settings.session).length === 0) delete settings.session;
 }
 
+/** The values of `value` for the rules in `offers` only. A value stored for
+ *  a rule the chat does not offer stays in storage but never reads back. */
+function offeredOverrides(
+  value: ChatSettingsOverrides,
+  offers: readonly ChatSettingField[],
+): ChatSettingsOverrides {
+  const result: ChatSettingsOverrides = {};
+  for (const field of offers) {
+    const current = fieldValue(value, field);
+    if (current !== undefined) setField(result, field, current);
+  }
+  return result;
+}
+
 function normalizeOverrides(value: ChatSettingsOverrides): ChatSettingsOverrides {
   const result: ChatSettingsOverrides = {};
   for (const field of CONVERSATION_SETTING_FIELDS) {
@@ -386,7 +400,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       conversation: descriptor,
       supportedFields,
       effective,
-      overrides: direct,
+      overrides: offeredOverrides(direct, supportedFields),
       ...(stored ? { updatedAt: stored.updatedAt, updatedBy: stored.updatedBy } : {}),
     };
     log.debug("conversation_settings.opened", {
@@ -410,8 +424,9 @@ export class ChatSettingsService implements ChatSettingsControl {
         this.assertSettingsOwner(descriptor, row);
         const supportedFields = this.supportedFields(descriptor, row);
         const supported = new Set(supportedFields);
-        // `get` returns a fresh, already-normalized overrides object.
-        const next = (await this.get(input.ref)).overrides;
+        // Start from everything stored, so a value for a rule the chat does
+        // not offer survives the write even though `get` hides it.
+        const next = this.directOverrides(row, this.storedRule(input.ref, descriptor, row));
         const changed = new Set<ChatSettingField>();
 
         for (const field of input.clear) {
