@@ -473,26 +473,36 @@ function AddChatDialog({
                 : t("channels.conversationSettings.findChats")}
           </p>
         ) : (
-          <List className="max-h-80 overflow-y-auto rounded-12 border border-border">
-            {choices.map((item) => {
-              const chat = item.snapshot.conversation;
-              return (
-                <ListRow key={keyOf(item)} asChild interactive size="md">
-                  <button type="button" onClick={() => onPick(item)}>
-                    <ChatKindIcon kind={chat.kind} />
-                    <ListRowContent>
-                      <ListRowTitle className="truncate">{chat.displayName}</ListRowTitle>
-                      <ListRowDescription className="truncate">
-                        {[chat.containerName, t(`channels.conversationSettings.kinds.${chat.kind}`)]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </ListRowDescription>
-                    </ListRowContent>
-                  </button>
-                </ListRow>
-              );
-            })}
-          </List>
+          // Grouped by server like the list, so a server's name shows once.
+          <div className="max-h-80 space-y-3 overflow-y-auto">
+            {groupByContainer(choices).map((group) => (
+              <div key={group.container} className="space-y-2">
+                {group.container && (
+                  <h3 className="px-1 text-aux text-muted-foreground">{group.container}</h3>
+                )}
+                <List className="overflow-hidden rounded-12 border border-border">
+                  {group.items.map((item) => {
+                    const chat = item.snapshot.conversation;
+                    return (
+                      <ListRow key={keyOf(item)} asChild interactive size="sm">
+                        <button type="button" onClick={() => onPick(item)}>
+                          <ChatKindIcon kind={chat.kind} />
+                          <ListRowContent>
+                            <ListRowTitle className="truncate">
+                              {chat.displayName}
+                              <span className="sr-only">
+                                {` · ${t(`channels.conversationSettings.kinds.${chat.kind}`)}`}
+                              </span>
+                            </ListRowTitle>
+                          </ListRowContent>
+                        </button>
+                      </ListRow>
+                    );
+                  })}
+                </List>
+              </div>
+            ))}
+          </div>
         )}
         {!error && nextCursor && (
           <div className="flex justify-center">
