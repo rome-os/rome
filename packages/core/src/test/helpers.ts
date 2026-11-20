@@ -2,7 +2,6 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
-import { ContainerNodesRepository } from "../db/repositories/container-nodes.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
@@ -861,10 +860,8 @@ export async function buildTestDeps(
     dashboardAccessStore,
     visitorAllowListSync,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
-    containerNodes: new ContainerNodesRepository(db),
     nodeDevices: {
       start: async () => {},
-      runAction: async () => ({ ok: false, code: "target_unavailable", message: "Offline" }),
       listFiles: async () => ({ ok: false, code: "offline" }),
       listDevices: async () => ({ devices: [] }),
       renameDevice: async () => ({ ok: true }),

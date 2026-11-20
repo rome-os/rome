@@ -38,7 +38,6 @@ export async function createCloudGuardian(
 }
 
 export interface GuardianAuthState {
-  id: string | null;
   exists: boolean;
   onboardingComplete: boolean;
   userId: string | null;
@@ -67,7 +66,6 @@ export async function getGuardianAuthState(db: DrizzleDb): Promise<GuardianAuthS
 
   if (!guardian) {
     return {
-      id: null,
       exists: false,
       onboardingComplete: false,
       userId: null,
@@ -77,7 +75,6 @@ export async function getGuardianAuthState(db: DrizzleDb): Promise<GuardianAuthS
   }
 
   return {
-    id: guardian.id,
     exists: true,
     onboardingComplete: guardian.onboardingComplete ?? false,
     userId: guardian.userId,

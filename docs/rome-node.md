@@ -64,15 +64,12 @@ A running daemon without a Gateway connection appears as **Idle**, not as a
 stopped service. The connection opens when a linked computer needs a reachability
 check or a remote action. An empty authorized-device list does not require it.
 
-**Connect a device** shows the desktop and iOS client, Rome Node CLI, and Rome Node
-container options when there are no linked devices or the service needs attention.
-When devices are listed, **Link device** opens the same options in a menu. Choose an
-option to open its setup instructions. For the CLI, run `rome-node connect` on
-the target computer. Approve access with the same Cloud account and keep the
-terminal open. Programs run as that computer's OS user.
+The **Connect a computer** section stays visible even when the service is stopped.
+It directs users to run `rome-node connect` on the target computer, approve access
+with the same Cloud account, and keep the terminal open. Programs run as that
+computer's OS user. This is separate from starting the service on the Rome instance.
 
-Cloud's device list records authorization. Container node cards show their device
-identity. Rome Cloud owns container node health checks. For computers, the daemon sends
+Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,
 `target_unavailable` means not connected, and a timeout or other failure means
 unknown. Revoked devices are shown separately and excluded from the count.
@@ -87,84 +84,42 @@ not checked within that budget remain unknown. Gateway connection setup has its
 own existing wait limits. No history, remote actions with side effects, or new
 Gateway presence protocol is involved.
 
-## Deploy a container node
+## Run Rome Node with Docker
 
-A guardian can link a container node in **Settings → Devices**. The node opens
-outbound HTTP and WebSocket connections on Docker's default network.
+On a Rome instance linked to Rome Cloud, open **Settings → Devices → Docker Compose**.
+Enter a device name, choose **Authorize and generate Compose**, then approve the device
+with the Rome Cloud account that owns the instance. Download the Compose file and run
+`docker compose up -d` from its directory.
 
-1. Open **Rome Node container** under **Connect a device** or from **Link device**.
-2. Enter a node name.
-3. On a hosted instance, choose **Authorize and generate Compose**. Open the
-   Rome Cloud link and approve the device with the account that owns the instance.
-   On a self-hosted instance, enter a Rome address Docker can reach and choose
-   **Generate Compose**. Direct connections accept HTTPS and private HTTP.
-4. Save the Compose file. It contains the long-lived device token.
-5. Deploy the file from the Docker host. The same file identifies the same device
-   across restarts and container replacements.
+The file contains a long-lived device token. Recreating the container with the same
+file keeps the device identity. To revoke access, choose **Remove** on its device card.
+If you lose the file, remove the device and generate a new one.
 
-The device appears in Settings as soon as Rome issues its token. Choose **Remove**
-from the device menu to revoke it. If you lose the Compose file, remove the device
-and generate a new one. Rome shows the token only when it creates the device.
-
-The node answers `system.info` and a read-only Shelly switch query. Hosted
-nodes accept requests from the peers authorized by the account Gateway. A direct
-node answers its paired instance. The query reads relay 0 via `GET /rpc/Switch.GetStatus?id=0` on
-a known private IPv4 address of a Gen2 or newer switch. The switch must allow
-unauthenticated status reads.
+The container opens an outbound connection to the account Gateway and appears on the
+ordinary device list. Authorized callers can run programs and access files as the
+container user. The image runs as an unprivileged user. A Docker volume keeps the
+[device audit log](#device-audit-log) across container replacements.
 
 ### Build the image
 
-The [Rome Node Dockerfile](../infra/rome-node/Dockerfile) runs the container node as an
-unprivileged user. Build a multi-platform archive for local use.
+Build the [Rome Node image](../infra/rome-node/Dockerfile) for the local Docker host.
 
 ```sh
-docker buildx build --platform linux/amd64,linux/arm64 \
-  --file infra/rome-node/Dockerfile \
-  --tag ghcr.io/rome-os/rome-node:latest \
-  --output type=oci,dest=rome-node.oci.tar .
+docker buildx build --file infra/rome-node/Dockerfile \
+  --tag ghcr.io/rome-os/rome-node:latest --load .
 ```
 
-Compose uses `ghcr.io/rome-os/rome-node:latest`. To run a local build, load the
-archive on the Docker host and start it with `docker compose up --pull never`.
+Start the generated Compose file with `docker compose up -d --pull never` to use
+the local image.
 
 ### Release the image
 
 Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
-`main` with **Publish the Docker image to GitHub Container
-Registry** selected. The workflow checks both architectures before publishing
-`latest` with the source commit recorded in the image.
-
-The first publish creates a private package. A package admin sets it to
-public so Docker hosts can pull the image without credentials.
+`main` with **Publish the Docker image to GitHub Container Registry** selected.
+The workflow checks amd64 and arm64 before publishing both under the same tag.
+A package admin sets the package to public so Docker hosts can pull it.
 Publish an image that accepts the Compose variables before offering deployment
 in Settings.
-
-### Connect directly to a self-hosted instance
-
-Core stores the device ID and token hash in the instance database. The node
-authenticates to `GET /v1/gateway/config` and opens `/ws/container-node` on the
-same host and port. Removing the device invalidates the token and closes the
-active socket. On Docker's default network, localhost points to the container
-itself.
-
-### Connect through Rome Cloud
-
-Hosted instances use the same OAuth device authorization as
-[`rome-node connect --device-code`](#authorization-and-transport). Core starts the
-authorization and returns the approval link to the dashboard. The short-lived
-OAuth device code stays with the in-flight request. The instance checks its account
-device list for the new device before it sends the credential to the dashboard.
-
-Rome Cloud owns the device record, account-level access and revocation. The
-issuing Rome remembers the device ID to keep it out of the chat folder picker
-and skip the caller's automatic `system.info` checks. The account list describes
-the device as a computer. Other instances in the account may show or check it
-as a computer.
-
-The node uses `ROME_NODE_CLOUD_URL` and `ROME_NODE_TOKEN` from Compose. It discovers
-the Gateway through `GET /v1/gateway/config` and opens the same WebSocket used by
-the CLI. A self-hosted Compose file also includes `ROME_NODE_CALLER_ID` for its
-direct transport.
 
 ## Chat device folders
 

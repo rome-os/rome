@@ -2,12 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
-import { Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
+import {
+  Measure,
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionDescription,
+} from "@rome-os/ui/page";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { ContainerNodeSetup } from "@/components/container-node-setup";
-import { DeviceConnectionCards, LinkDeviceMenu } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDeviceManage } from "@/hooks/use-device-manage";
@@ -34,19 +40,10 @@ export function useDevicesQuery() {
     queryKey: ["node-devices"],
     refetchInterval: 15_000,
     retry: false,
-    queryFn: async ({ signal }) => {
-      const status = devicesStatusSchema.parse(
+    queryFn: async ({ signal }) =>
+      devicesStatusSchema.parse(
         await fetchJson<unknown>("/api/devices", { signal, fallback: t("devices.loadFailed") }),
-      );
-      return {
-        ...status,
-        devices: status.devices.map((device) =>
-          device.kind === "container_node" && device.status === "unknown"
-            ? { ...device, status: undefined }
-            : device,
-        ),
-      };
-    },
+      ),
   });
 }
 
@@ -74,32 +71,42 @@ export function DevicesSection() {
   const unavailable = data
     ? ["unavailable", "incompatible", "not_configured", "not_running"].includes(connection)
     : query.isError;
+  const devices = data?.devices ?? [];
   const thisDevice = useThisDevice(() => void query.refetch());
   const manage = useDeviceManage();
-  const [containerTrigger, setContainerTrigger] = useState<HTMLButtonElement | null>(null);
-  const devices = data?.devices ?? [];
-  const emptySetup = <DeviceConnectionCards onContainerSetup={setContainerTrigger} />;
-  const showList = !unavailable || devices.length > 0;
+  const [composeTrigger, setComposeTrigger] = useState<HTMLButtonElement | null>(null);
+  const composeAction = (
+    <Button
+      id="docker-compose"
+      size="sm"
+      variant="outline"
+      onClick={(event) => setComposeTrigger(event.currentTarget)}
+    >
+      {t("devices.containerNodes.title")}
+    </Button>
+  );
 
-  return (
-    <div className="space-y-6">
-      {showList && (
-        <NodeDevices
-          url={nodeConsoleUrl()}
-          devices={devices}
-          navigation={navigation}
-          locale={i18n.language}
-          thisDevice={thisDevice ?? undefined}
-          manage={manage}
-          setup={{
-            action: <LinkDeviceMenu onContainerSetup={setContainerTrigger} />,
-            empty: emptySetup,
-          }}
-          // The order is set when the cards first draw, so they wait to learn which is this computer.
-          loading={query.isPending || thisDevice === undefined}
-        />
-      )}
-      {!showList && thisDevice && (
+  // While the first read is pending, the devices page holds its place without cards.
+  const linkedDevices = !unavailable && (
+    <NodeDevices
+      url={nodeConsoleUrl()}
+      devices={devices}
+      navigation={navigation}
+      locale={i18n.language}
+      thisDevice={thisDevice ?? undefined}
+      manage={manage}
+      setupAction={composeAction}
+      // The order is set when the cards first draw, so they wait to learn which is this computer.
+      loading={!data || thisDevice === undefined}
+    />
+  );
+
+  // Without a working device service there is no activity to show, so the tab explains how to
+  // bring the service back and how to link a computer.
+  const deviceSetupHelp = unavailable && (
+    <Measure className="space-y-6">
+      {/* The Mac app's computer works without Rome's device service. */}
+      {thisDevice && (
         <NodeDeviceCard
           device={
             devices.find((device) => device.id === thisDevice.id) ?? {
@@ -112,57 +119,83 @@ export function DevicesSection() {
           locale={i18n.language}
         />
       )}
-      {unavailable && (
-        <Section aria-labelledby="rome-connection-title">
-          <SectionHeader>
-            <SectionHeading>
-              <SectionTitle id="rome-connection-title">{t("devices.connectionLabel")}</SectionTitle>
-            </SectionHeading>
-          </SectionHeader>
-          <Card>
-            <CardContent>
+      <Section aria-label={t("devices.title")}>
+        <Card>
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-ui">{t("devices.connectionLabel")}</p>
               <StatusIndicator
                 status={{
                   label: t(`devices.connection.${connection}`),
                   tone: connection === "incompatible" ? "attention" : "muted",
                 }}
               />
-              <p
-                role={connection === "unavailable" ? "alert" : undefined}
-                className="mt-4 text-ui text-muted-foreground"
-              >
-                {t(
-                  `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
-                )}
+            </div>
+            <p
+              role={connection === "unavailable" ? "alert" : undefined}
+              className="mt-4 text-ui text-muted-foreground"
+            >
+              {t(
+                `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
+              )}
+            </p>
+            {connection === "not_running" && (
+              <div className="mt-4">
+                <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
+                  {t(start.isPending ? "devices.starting" : "devices.start")}
+                </Button>
+              </div>
+            )}
+            {start.isError && (
+              <p role="alert" className="mt-4 text-ui text-destructive-fg">
+                {start.error.message === "not_configured"
+                  ? t("devices.help.not_configured")
+                  : start.error.message === "incompatible"
+                    ? t("devices.help.incompatible")
+                    : t("devices.startFailed")}
               </p>
-              {connection === "not_running" && (
-                <div className="mt-4">
-                  <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
-                    {t(start.isPending ? "devices.starting" : "devices.start")}
-                  </Button>
-                </div>
-              )}
-              {start.isError && (
-                <p role="alert" className="mt-4 text-ui text-destructive-fg">
-                  {start.error.message === "not_configured"
-                    ? t("devices.help.not_configured")
-                    : start.error.message === "incompatible"
-                      ? t("devices.help.incompatible")
-                      : t("devices.startFailed")}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </Section>
+            )}
+          </CardContent>
+        </Card>
+      </Section>
+      <Section aria-labelledby="connect-computer-title">
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle id="connect-computer-title">{t("devices.setup.title")}</SectionTitle>
+            <SectionDescription>{t("devices.setup.description")}</SectionDescription>
+          </SectionHeading>
+        </SectionHeader>
+        <Card>
+          <CardContent className="space-y-4">
+            <p className="text-ui text-muted-foreground">{t("devices.setup.commandHelp")}</p>
+            <pre className="overflow-x-auto rounded-8 bg-muted p-4 font-mono text-ui">
+              <code>rome-node connect</code>
+            </pre>
+            <p className="text-ui text-muted-foreground">{t("devices.setup.access")}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href="https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t("devices.setup.instructions")}
+                </a>
+              </Button>
+              {composeAction}
+            </div>
+          </CardContent>
+        </Card>
+      </Section>
+    </Measure>
+  );
+  return (
+    <>
+      {linkedDevices}
+      {deviceSetupHelp}
+      {composeTrigger && (
+        <ContainerNodeSetup trigger={composeTrigger} onClose={() => setComposeTrigger(null)} />
       )}
-      {!showList && emptySetup}
-      {containerTrigger && (
-        <ContainerNodeSetup
-          transport={data?.containerNodeTransport}
-          trigger={containerTrigger}
-          onClose={() => setContainerTrigger(null)}
-        />
-      )}
-    </div>
+    </>
   );
 }

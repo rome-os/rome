@@ -3,6 +3,7 @@
 !pnpm-workspace.yaml
 !pnpm-lock.yaml
 !tsconfig.json
+!infra/rome-node/entrypoint.mjs
 !packages/rome-node-core/package.json
 !packages/rome-node-core/tsconfig*.json
 !packages/rome-node-core/src/

@@ -1,15 +1,10 @@
 import {
   type ContainerNodeAuthorization,
   type ContainerNodeCredential,
-  type DevicesStatus,
   containerNodeAuthorizationSchema,
   containerNodeCredentialSchema,
   containerNodeNameSchema,
 } from "@rome/api-types/devices";
-import {
-  containerNodeOrigin,
-  isContainerNodeLoopback,
-} from "@rome-os/node-core/container-node-address";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,37 +16,34 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldLabel, FormError } from "@/components/ui/field";
+import { Field, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { apiErrorMessageFrom, getApiErrorMessage } from "@/lib/api-error";
 import { parseSSEEvents } from "@/lib/chat-sse";
-import { fetchJson } from "@/lib/fetch-json";
 import romeNodeImage from "@/lib/rome-node-image.json";
 
 const setupPath = "/api/devices/container-nodes";
 
-function containerNodeCompose({
-  deviceId,
-  deviceToken,
-  callerId,
-  origin,
-}: ContainerNodeCredential) {
+function containerNodeCompose({ deviceId, deviceToken, origin }: ContainerNodeCredential) {
   const projectName = `rome-node-${deviceId.toLowerCase().replaceAll("-", "").slice(0, 20)}`;
   const address = JSON.stringify(origin.replaceAll("$", () => "$$"));
-  const directCaller = callerId ? `      ROME_NODE_CALLER_ID: "${callerId}"\n` : "";
   return `name: "${projectName}"
 services:
   rome-node:
     image: "${romeNodeImage.image}"
     restart: unless-stopped
-    read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    volumes:
+      - audit:/var/lib/rome-node
     environment:
       ROME_NODE_CLOUD_URL: ${address}
+      ROME_NODE_DEVICE_ID: "${deviceId}"
       ROME_NODE_TOKEN: "${deviceToken}"
-${directCaller}`;
+volumes:
+  audit:
+`;
 }
 
 async function authorizeCloudNode(
@@ -93,49 +85,26 @@ async function authorizeCloudNode(
   }
 }
 
-function deploymentOrigin(address: string): string | null {
-  try {
-    return containerNodeOrigin(address.trim());
-  } catch {
-    return null;
-  }
-}
-
 export function ContainerNodeSetup({
-  transport,
   trigger,
   onClose,
 }: {
-  transport: DevicesStatus["containerNodeTransport"];
   trigger: HTMLButtonElement;
   onClose(): void;
 }) {
   const { t } = useTranslation("settings");
   const { t: node } = useTranslation("settings", { keyPrefix: "devices.containerNodes" });
   const nameId = useId();
-  const addressId = useId();
   const queryClient = useQueryClient();
   const [name, setName] = useState(node("defaultName"));
-  const [address, setAddress] = useState(window.location.origin);
   const [authorization, setAuthorization] = useState<ContainerNodeAuthorization | null>(null);
   const cloudRequest = useRef<AbortController | null>(null);
   useEffect(() => () => cloudRequest.current?.abort(), []);
-  const direct = transport === "direct";
-  const origin = direct ? deploymentOrigin(address) : null;
-  const loopback = origin && isContainerNodeLoopback(new URL(origin).hostname.replace(/\.$/, ""));
   const validName = containerNodeNameSchema.safeParse(name);
   const issue = useMutation({
     gcTime: 0,
     retry: false,
     mutationFn: async () => {
-      if (direct)
-        return containerNodeCredentialSchema.parse(
-          await fetchJson<unknown>(setupPath, {
-            method: "POST",
-            json: { name: name.trim(), origin },
-            fallback: "unavailable",
-          }),
-        );
       const request = new AbortController();
       cloudRequest.current = request;
       setAuthorization(null);
@@ -149,22 +118,18 @@ export function ContainerNodeSetup({
   return (
     <Dialog
       open
-      modal={direct && issue.isPending}
       onClose={onClose}
       className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] flex-col"
       {...{
         onCloseAutoFocus: (event: Event) => {
           event.preventDefault();
-          const target = trigger.isConnected ? trigger : document.getElementById("link-device");
+          const target = trigger.isConnected ? trigger : document.getElementById("docker-compose");
           target?.focus();
         },
       }}
     >
-      <DialogHeader
-        onClose={direct && issue.isPending ? undefined : onClose}
-        closeLabel={t("common.close")}
-      >
-        <DialogTitle>{t("devices.setup.methods.container")}</DialogTitle>
+      <DialogHeader onClose={onClose} closeLabel={t("common.close")}>
+        <DialogTitle>{node("title")}</DialogTitle>
         <DialogDescription>{node(issue.data ? "saveCompose" : "description")}</DialogDescription>
       </DialogHeader>
       <DialogBody className="min-h-0 space-y-4">
@@ -190,12 +155,12 @@ export function ContainerNodeSetup({
               {node("awaitingApproval")}
             </p>
           </>
-        ) : transport ? (
+        ) : (
           <form
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!issue.isPending && validName.success && (!direct || origin)) issue.mutate();
+              if (!issue.isPending && validName.success) issue.mutate();
             }}
           >
             <Field>
@@ -208,38 +173,15 @@ export function ContainerNodeSetup({
                 onChange={(event) => setName(event.target.value)}
               />
             </Field>
-            {direct && (
-              <Field>
-                <FieldLabel htmlFor={addressId}>{node("address")}</FieldLabel>
-                <Input
-                  id={addressId}
-                  type="url"
-                  value={address}
-                  aria-describedby={!origin || loopback ? `${addressId}-hint` : undefined}
-                  disabled={issue.isPending}
-                  onChange={(event) => setAddress(event.target.value)}
-                />
-                {(!origin || loopback) && (
-                  <FieldDescription id={`${addressId}-hint`}>
-                    {node(origin ? "loopbackHint" : "originUnavailable")}
-                  </FieldDescription>
-                )}
-              </Field>
-            )}
             {issue.error && (
               <FormError>
                 {node([`errors.${issue.error.message as "unavailable"}`, "errors.unavailable"])}
               </FormError>
             )}
-            <Button
-              type="submit"
-              disabled={issue.isPending || !validName.success || (direct && !origin)}
-            >
-              {node(issue.isPending ? "generating" : direct ? "generate" : "authorizeAndGenerate")}
+            <Button type="submit" disabled={issue.isPending || !validName.success}>
+              {node(issue.isPending ? "generating" : "authorizeAndGenerate")}
             </Button>
           </form>
-        ) : (
-          <FormError>{node("errors.not_configured")}</FormError>
         )}
       </DialogBody>
     </Dialog>

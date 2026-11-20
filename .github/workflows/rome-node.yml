@@ -79,10 +79,13 @@ jobs:
       - name: Load the Node runtime
         run: >-
           docker run --rm --network none --read-only --cap-drop ALL
+          --volume /var/lib/rome-node
           --security-opt no-new-privileges:true --entrypoint node rome-node:ci
           --input-type=module -e
-          'import { runContainerNode } from "./dist/container-node.js";
-          if (typeof runContainerNode !== "function" || process.getuid() === 0) process.exit(1)'
+          'import { AuditStore, connectHost } from "/app/dist/host.js";
+          const audit = await AuditStore.open({path: "/var/lib/rome-node/audit.db", entry: "cli", hint: ""});
+          if (audit.state.state !== "ok" || typeof connectHost !== "function" || process.getuid() === 0) process.exit(1);
+          audit.close()'
 
   publish-image:
     if: >-

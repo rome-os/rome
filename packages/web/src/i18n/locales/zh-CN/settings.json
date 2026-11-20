@@ -1025,13 +1025,10 @@
     "starting": "正在启动…",
     "startFailed": "设备服务启动失败",
     "containerNodes": {
-      "description": "生成 Compose 文件，在 Docker 中部署此容器节点。",
+      "title": "Docker Compose",
+      "description": "在 Rome Cloud 批准此设备。你的账号可以在容器内执行命令和访问文件。",
       "name": "节点名称",
-      "defaultName": "容器节点",
-      "address": "Rome 地址",
-      "originUnavailable": "请输入 Docker 可访问的 Rome HTTPS 地址或内网 HTTP 地址。",
-      "loopbackHint": "请使用 Docker 可访问的地址。localhost 指向容器自身。",
-      "generate": "生成 Compose",
+      "defaultName": "Rome Node",
       "generating": "正在生成…",
       "authorizeAndGenerate": "授权并生成 Compose",
       "approveOnCloud": "请用此 Rome 实例所属的 Rome Cloud 账号确认授权。",
@@ -1045,26 +1042,17 @@
       "download": "下载 Compose",
       "copyFailed": "无法访问剪贴板，请下载 Compose 文件。",
       "errors": {
-        "sign_in_required": "请以此 Rome 实例的所有者身份登录，再关联容器节点。",
-        "not_configured": "此实例无法部署容器节点。",
+        "sign_in_required": "请以此 Rome 实例的所有者身份登录，再授权此设备。",
+        "not_configured": "将此 Rome 实例关联到 Rome Cloud 后，即可生成 Compose。",
         "approval_account_mismatch": "此设备未出现在当前 Rome Cloud 账号中。请使用此 Rome 实例所属的账号重试。",
         "authorization_failed": "设备授权未完成，请重试。",
         "unavailable": "无法生成 Compose，请重试。",
-        "invalid_device_name": "请输入 1 至 80 个字符的节点名称。",
-        "invalid_origin": "请输入 Rome HTTPS 地址或内网 HTTP 地址。"
+        "invalid_device_name": "请输入 1 至 80 个字符的节点名称。"
       }
     },
     "setup": {
-      "title": "连接设备",
-      "linkDevice": "关联设备",
-      "containerSetup": "设置容器节点",
-      "methods": {
-        "desktop": "桌面端 / iOS 客户端",
-        "cli": "Rome Node CLI",
-        "container": "Rome Node 容器"
-      },
-      "desktopHelp": "在电脑或 iPhone 上打开 Rome 客户端，登录同一个 Rome Cloud 账户。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
-      "desktopDownload": "下载 Rome",
+      "title": "连接电脑",
+      "description": "每台电脑需要单独连接。",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

@@ -9,7 +9,6 @@ export const containerNodeNameSchema = z
 
 export const containerNodeCredentialSchema = z.object({
   deviceId: z.uuid(),
-  callerId: z.uuid().optional(),
   deviceToken: z.string().regex(/^romedev_[A-Za-z0-9_-]{43}$/),
   origin: z.url({ protocol: /^https?$/ }),
 });
@@ -20,9 +19,6 @@ export const containerNodeAuthorizationSchema = z.object({
   userCode: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
 });
 export type ContainerNodeAuthorization = z.infer<typeof containerNodeAuthorizationSchema>;
-
-export const shellySwitchAddressSchema = z.object({ address: z.ipv4() }).strict();
-export const shellySwitchStatusSchema = z.object({ on: z.boolean() });
 
 export const devicesStatusSchema = z.object({
   connection: z.enum([
@@ -38,14 +34,12 @@ export const devicesStatusSchema = z.object({
     "superseded",
   ]),
   checkedAt: z.iso.datetime(),
-  containerNodeTransport: z.enum(["direct", "cloud"]).optional(),
   devices: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
       platform: z.string().nullable(),
       status: z.enum(["connected", "not_connected", "unknown", "revoked"]),
-      kind: z.literal("container_node").optional(),
       /** The device's own audit log. While unavailable, the device refuses remote actions. */
       audit: z
         .object({

@@ -14,6 +14,8 @@
     // Agent skills. Their scripts are invoked by an agent reading SKILL.md, so
     // nothing imports them.
     ".claude/**",
+    // Docker copies this entry point beside the compiled Node runtime.
+    "infra/rome-node/entrypoint.mjs",
     // Browser-side scripts delivered by a <script> tag, not bundled.
     "packages/cdp-client/public/**",
     "packages/web/public/**",
@@ -140,8 +142,6 @@
         "src/**/*.test.ts",
         "src/index.ts",
         "src/daemon-entry.ts",
-        // The standalone Docker image runs the compiled entry.
-        "src/container-node-entry.ts",
         "bin/daemon.js",
         "src/daemon-client.ts",
         "src/host.ts",

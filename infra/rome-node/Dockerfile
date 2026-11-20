@@ -12,5 +12,8 @@ WORKDIR /app
 COPY --from=build /workspace/packages/rome-node-core/package.json ./
 COPY --from=build /workspace/packages/rome-node-core/dist ./dist
 COPY --from=build /ws ./node_modules/ws
+COPY infra/rome-node/entrypoint.mjs ./
+RUN install -d -m 0700 -o node -g node /var/lib/rome-node
 USER node
-CMD ["node", "dist/container-node-entry.js"]
+WORKDIR /home/node
+CMD ["node", "/app/entrypoint.mjs"]

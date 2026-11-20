@@ -358,12 +358,12 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
       return status;
     },
     /** Probes devices through an existing daemon. Returns null without starting one if absent. */
-    async getDevicesStatus(containerNodeIds?: string[]): Promise<DevicesStatus | null> {
+    async getDevicesStatus(): Promise<DevicesStatus | null> {
       let body: unknown;
       try {
         const rpc = await connect(false);
         if (!rpc) return null;
-        body = await rpc.request("devices.status", containerNodeIds && { containerNodeIds });
+        body = await rpc.request("devices.status");
       } catch (error) {
         if (error instanceof RpcError && error.code === -32601) throw new DaemonVersionError();
         throw error;

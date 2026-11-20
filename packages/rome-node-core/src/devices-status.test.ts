@@ -14,12 +14,11 @@ it("distinguishes replies, unavailable targets, timeouts, and revoked devices", 
   const reader = new DeviceStatusReader({
     getStatus: () => "online",
     list: async () => ({
-      items: ["online", "offline", "unknown", "revoked", "nas"].map((id) => ({
+      items: ["online", "offline", "unknown", "revoked"].map((id) => ({
         id,
         device_name: id,
         platform: "linux",
         revoked_at: id === "revoked" ? "2026-09-21" : null,
-        ...(id === "nas" && { device_kind: "container_node" }),
       })),
     }),
     run,
@@ -30,9 +29,7 @@ it("distinguishes replies, unavailable targets, timeouts, and revoked devices", 
     "not_connected",
     "unknown",
     "revoked",
-    "unknown",
   ]);
-  expect(result.devices.at(-1)?.kind).toBe("container_node");
   expect(run).toHaveBeenCalledTimes(3);
   expect(run).toHaveBeenCalledWith("online", "system.info", {}, 3000);
 });
@@ -57,29 +54,6 @@ it("passes on the audit status each device reports in system.info", async () => 
     { state: "ok" },
     undefined,
   ]);
-});
-
-it("invalidates the snapshot when Rome recognizes an account device as a container", async () => {
-  const run = rs.fn(
-    async (): Promise<ActionResponse> => ({
-      type: "response",
-      ok: true,
-      result: {},
-    }),
-  );
-  const reader = new DeviceStatusReader({
-    getStatus: () => "online",
-    list: async () => ({ items: [{ id: "nas" }] }),
-    run,
-  });
-  expect((await reader.read()).devices[0].status).toBe("connected");
-  expect((await reader.read(["nas"])).devices[0]).toMatchObject({
-    kind: "container_node",
-    status: "unknown",
-  });
-  expect(run).toHaveBeenCalledTimes(1);
-  expect((await reader.read([])).devices[0].status).toBe("connected");
-  expect(run).toHaveBeenCalledTimes(2);
 });
 
 describe("shared device checks", () => {

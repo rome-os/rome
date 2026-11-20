@@ -47,7 +47,7 @@ export interface NodeDevicesProps {
   manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
-  setup?: { action: ReactNode; empty: ReactNode };
+  setupAction?: ReactNode;
 }
 
 /**
@@ -295,7 +295,7 @@ export function NodeDevices({
   thisDevice,
   manage,
   loading = false,
-  setup,
+  setupAction,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -324,7 +324,6 @@ export function NodeDevices({
   const connected = (device: NodeDevice) =>
     selfOf(device) ? thisDevice!.state === "connected" : device.status === "connected";
   const revoked = listed.filter((device) => device.status === "revoked");
-  const showSetup = ready && listed.length === 0 && setup;
   const current = useFirstOrder(
     listed.filter((device) => device.status !== "revoked"),
     ready,
@@ -339,38 +338,34 @@ export function NodeDevices({
 
   return (
     <Section
-      aria-label={showSetup ? m.title : undefined}
-      aria-labelledby={showSetup ? undefined : "node-devices-title"}
+      aria-labelledby="node-devices-title"
       aria-busy={!(ready && settled) || undefined}
       className="@container gap-6"
     >
-      {!showSetup && (
-        <SectionHeader>
-          <SectionHeading>
-            {/* The host's tab already names the page, so the title is for screen readers. */}
-            <SectionTitle id="node-devices-title" className="sr-only">
-              {m.title}
-            </SectionTitle>
-            <ServiceProblem socket={socket} m={m} />
-          </SectionHeading>
-          <SectionActions>
-            {setup?.action ?? (
-              <Button size="sm" onClick={() => setLinkOpen(true)}>
-                <Plus data-icon="inline-start" aria-hidden />
-                {m.linkDevice}
-              </Button>
-            )}
-          </SectionActions>
-        </SectionHeader>
-      )}
+      <SectionHeader>
+        <SectionHeading>
+          {/* The host's tab already names the page, so the title is for screen readers. */}
+          <SectionTitle id="node-devices-title" className="sr-only">
+            {m.title}
+          </SectionTitle>
+          <ServiceProblem socket={socket} m={m} />
+        </SectionHeading>
+        <SectionActions>
+          {setupAction}
+          <Button size="sm" onClick={() => setLinkOpen(true)}>
+            <Plus data-icon="inline-start" aria-hidden />
+            {m.linkDevice}
+          </Button>
+        </SectionActions>
+      </SectionHeader>
 
-      {ready && !supported && !showSetup && (
+      {ready && !supported && (
         <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
       )}
 
-      {ready &&
-        listed.length === 0 &&
-        (setup?.empty ?? <p className="text-ui text-muted-foreground">{m.noDevices}</p>)}
+      {ready && listed.length === 0 && (
+        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
+      )}
 
       {current.length > 0 && (
         <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">

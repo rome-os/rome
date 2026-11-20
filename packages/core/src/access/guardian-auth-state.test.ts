@@ -24,7 +24,6 @@ describe("getGuardianAuthState", () => {
   it("returns an absent state when no guardian row exists", async () => {
     const out = await getGuardianAuthState(testDb.db);
     expect(out).toEqual({
-      id: null,
       exists: false,
       onboardingComplete: false,
       userId: null,
@@ -43,7 +42,6 @@ describe("getGuardianAuthState", () => {
     });
     const out = await getGuardianAuthState(testDb.db);
     expect(out).toEqual({
-      id: "g1",
       exists: true,
       onboardingComplete: true,
       userId: "user-1",
@@ -62,7 +60,6 @@ describe("getGuardianAuthState", () => {
     });
     const out = await getGuardianAuthState(testDb.db);
     expect(out).toEqual({
-      id: "g1",
       exists: true,
       onboardingComplete: false,
       userId: "user-1",

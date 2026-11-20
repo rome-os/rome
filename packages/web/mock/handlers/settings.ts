@@ -344,7 +344,6 @@ export const settingsHandlers = [
     HttpResponse.json({
       connection: "online",
       checkedAt: new Date().toISOString(),
-      containerNodeTransport: "cloud",
       devices: statusDevices,
     } satisfies DevicesStatus),
   ),
@@ -359,7 +358,6 @@ export const settingsHandlers = [
       name: validName.data,
       platform: "linux",
       status: "unknown",
-      kind: "container_node",
     });
     const fixture = {
       deviceId,

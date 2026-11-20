@@ -8,10 +8,6 @@ import {
   VISITOR_COOKIE_NAME,
 } from "../../access/auth.js";
 import { createCloudGuardian } from "../../access/guardian-auth-state.js";
-import { ContainerNodesRepository } from "../../db/repositories/container-nodes.js";
-import { createContainerNodesService } from "../../desktops/container-nodes.js";
-import { createNodeDevicesService } from "../../desktops/node-devices.js";
-import { proveIdentity } from "../../instance/instance-identity.js";
 import { createTestDb } from "../../test/db.js";
 import { containerNodesRoutes } from "./container-nodes.js";
 
@@ -25,7 +21,6 @@ const guardianCookie = (userId = owner) => `${COOKIE_NAME}=${createSession(userI
 
 describe("container node device authorization", () => {
   let db: ReturnType<typeof createTestDb>;
-  let repo: ContainerNodesRepository;
   let app: Hono;
   let cloudAccount: string;
   let authorized: boolean;
@@ -35,7 +30,6 @@ describe("container node device authorization", () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    repo = new ContainerNodesRepository(db.db);
     await createCloudGuardian(db.db, owner);
     cloudAccount = owner;
     authorized = true;
@@ -46,9 +40,6 @@ describe("container node device authorization", () => {
       const url = new URL(input instanceof Request ? input.url : input);
       expect(url.origin).toBe(origin);
       switch (url.pathname) {
-        case "/api/instance/whoami":
-          expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer romeinst_test");
-          return Response.json({ instanceId: "test-instance", account: { id: cloudAccount } });
         case "/oauth2/device_authorization": {
           const body = new URLSearchParams(String(init?.body));
           expect(body.get("client_id")).toBe("rome-computer");
@@ -79,24 +70,27 @@ describe("container node device authorization", () => {
           throw new Error("Unexpected Cloud path");
       }
     });
-    const hosted = createContainerNodesService({
-      origin: () => origin,
-      bearer: async () => "romeinst_test",
-      prove: proveIdentity,
-      login(origin, name, signal, onPrompt) {
-        authorizationSignal = signal;
-        return loginDeviceCode(origin, name, signal, onPrompt);
-      },
-    });
     const nodeDevices = {
-      ...createNodeDevicesService(),
       listDevices: async () => ({
         devices: authorized ? [{ id: deviceId, name: "NAS", platform: "linux" }] : [],
       }),
     };
     app = new Hono().route(
       path,
-      containerNodesRoutes({ db: db.db, nodeDevices, containerNodes: repo }, hosted),
+      containerNodesRoutes(
+        { db: db.db, nodeDevices },
+        {
+          origin: () => origin,
+          prove: async () => ({
+            status: "ok",
+            identity: { instanceId: "test-instance", accountId: cloudAccount },
+          }),
+          login(origin, name, signal, onPrompt) {
+            authorizationSignal = signal;
+            return loginDeviceCode(origin, name, signal, onPrompt);
+          },
+        },
+      ),
     );
   });
 
@@ -122,7 +116,7 @@ describe("container node device authorization", () => {
 
     cloudAccount = "different-account";
     expect((await post()).status).toBe(403);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("streams the approval link and then the account device token without caching either", async () => {
@@ -136,14 +130,10 @@ describe("container node device authorization", () => {
     expect(prompt).toContain("ABCD-EFGH");
     expect(prompt).not.toContain(deviceCode);
     expect(prompt).not.toContain(deviceToken);
-    expect(repo.cloudDeviceIds()).toEqual([]);
     const result = new TextDecoder().decode((await reader.read()).value);
     expect(result).toContain("event: credential");
     expect(JSON.parse(result.split("data: ")[1])).toEqual({ deviceId, deviceToken, origin });
     expect((await reader.read()).done).toBe(true);
-    expect(repo.cloudDeviceIds()).toEqual([deviceId]);
-    expect(repo.findByDeviceId(deviceId)).toBeUndefined();
-    expect(repo.findByToken(deviceToken)).toBeUndefined();
   });
 
   it.each([
@@ -156,7 +146,6 @@ describe("container node device authorization", () => {
     expect(body).toContain("event: authorization_error");
     expect(body).toContain(scenario.code);
     expect(body).not.toContain(deviceToken);
-    expect(repo.cloudDeviceIds()).toEqual([]);
   });
 
   it("cancels polling when the browser closes the stream", async () => {
@@ -166,6 +155,5 @@ describe("container node device authorization", () => {
     await reader.cancel();
     expect(authorizationSignal?.aborted).toBe(true);
     expect(tokenRequests).toBe(0);
-    expect(repo.cloudDeviceIds()).toEqual([]);
   });
 });

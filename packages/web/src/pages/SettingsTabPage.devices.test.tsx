@@ -1,5 +1,4 @@
 // @rstest-environment jsdom
-// @rstest-environment-options {"url":"http://rome.localhost:9443/settings/devices"}
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,17 +21,16 @@ afterEach(() => {
 function renderDevices(
   load: () => unknown,
   start?: () => Response | Promise<Response>,
-  containerNodes?: (path: string, init?: RequestInit) => Response,
+  issue?: (path: string, init?: RequestInit) => Response,
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input) === "/api/devices/start" && init?.method === "POST" && start) return start();
+    if (String(input) === "/api/devices/container-nodes" && issue)
+      return issue(String(input), init);
     if (String(input) === "/api/devices")
       return new Response(JSON.stringify(await load()), {
         headers: { "Content-Type": "application/json" },
       });
-    if (String(input).startsWith("/api/devices/container-nodes")) {
-      return containerNodes?.(String(input), init) ?? new Response(null, { status: 404 });
-    }
     return new Response("{}", { status: 503 });
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -102,7 +100,7 @@ it("holds the devices page in place while the first read is pending", async () =
   expect(await screen.findByRole("button", { name: "Link device" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Devices" })).toBeTruthy();
   // The service-recovery page waits for an answer that says the service needs it.
-  expect(screen.queryByRole("heading", { name: "Connect a device" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Connect a computer" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 });
 
@@ -160,116 +158,17 @@ it("drops the device list when the service stops and does not start it on its ow
   ).toBe(true);
 });
 
-it("shows the three connection cards on an empty devices page", async () => {
+it("offers computer setup for an idle running service without an error", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
     devices: [],
   }));
-  const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
-  expect(
-    setup.getByRole("heading", { name: "Desktop/iOS client" }).closest('[data-slot="card"]'),
-  ).toBeTruthy();
-  expect(
-    setup.getByRole("heading", { name: "Rome Node CLI" }).closest('[data-slot="card"]'),
-  ).toBeTruthy();
-  expect(
-    setup.getByRole("heading", { name: "Rome Node container" }).closest('[data-slot="card"]'),
-  ).toBeTruthy();
-  expect(setup.getByRole("button", { name: "Set up container node" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
+  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Link device" }));
+  expect(await screen.findByText("rome-node connect")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
-});
-
-it("opens the selected connection instructions directly in the dialog", async () => {
-  renderDevices(() => ({
-    connection: "online",
-    containerNodeTransport: "direct",
-    checkedAt: new Date().toISOString(),
-    devices: [{ id: "mac", name: "MacBook", platform: "macos", status: "connected" }],
-  }));
-  await screen.findByRole("link", { name: /MacBook/ });
-  const user = userEvent.setup();
-  const trigger = screen.getByRole("button", { name: "Link device" });
-  const choices = [
-    ["Desktop/iOS client", "Download Rome", "https://romeos.cc/download"],
-    ["Rome Node CLI", "rome-node connect"],
-    ["Rome Node container", "Generate Compose"],
-  ];
-  for (const [name, content, href] of choices) {
-    await user.click(trigger);
-    const menu = within(await screen.findByRole("menu"));
-    expect(menu.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(
-      choices.map(([label]) => label),
-    );
-    await user.click(menu.getByRole("menuitem", { name }));
-    const dialog = await screen.findByRole("dialog", { name });
-    const action = await within(dialog).findByText(content);
-    expect(action).toBeTruthy();
-    if (href) expect(action.getAttribute("href")).toBe(href);
-    expect(dialog.querySelector('[data-slot="card"]')).toBeNull();
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(document.activeElement).toBe(trigger));
-  }
-  expect(screen.getByRole("link", { name: /MacBook/ })).toBeTruthy();
-});
-
-it("keeps the generated Compose open when the node appears in the device list", async () => {
-  const deviceId = "73426989-9646-4579-9869-af5a321ff48d";
-  const callerId = "3dc4a001-183f-4170-b150-1e2c0c792d72";
-  const deviceToken = `romedev_${"A".repeat(43)}`;
-  const origin = "http://rome.home.arpa:8080";
-  let created = false;
-  const issue = rs.fn((_path: string, init?: RequestInit) => {
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ name: "Workshop NAS", origin });
-    created = true;
-    return Response.json({ deviceId, callerId, deviceToken, origin }, { status: 201 });
-  });
-  renderDevices(
-    () => ({
-      connection: "not_configured",
-      checkedAt: new Date().toISOString(),
-      containerNodeTransport: "direct",
-      devices: created
-        ? [
-            {
-              id: deviceId,
-              name: "Workshop NAS",
-              platform: "linux",
-              status: "unknown",
-              kind: "container_node",
-            },
-          ]
-        : [],
-    }),
-    undefined,
-    issue,
-  );
-
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Set up container node" }));
-  const dialog = within(await screen.findByRole("dialog", { name: "Rome Node container" }));
-  expect((dialog.getByLabelText("Rome address") as HTMLInputElement).value).toBe(
-    window.location.origin,
-  );
-  fireEvent.change(dialog.getByLabelText("Node name"), { target: { value: "Workshop NAS" } });
-  fireEvent.change(dialog.getByLabelText("Rome address"), { target: { value: origin } });
-  await user.click(dialog.getByRole("button", { name: "Generate Compose" }));
-  const config = await dialog.findByRole("region", { name: "Compose configuration" });
-  expect(config.textContent).toContain(`ROME_NODE_CLOUD_URL: "${origin}"`);
-  expect(config.textContent).toContain(`ROME_NODE_TOKEN: "${deviceToken}"`);
-  expect(config.textContent).toContain(`ROME_NODE_CALLER_ID: "${callerId}"`);
-  expect(config.textContent).not.toMatch(/INSTALL_TOKEN|volumes:/);
-  expect(dialog.getByRole("button", { name: "Download Compose" })).toBeTruthy();
-
-  await user.click(dialog.getByRole("button", { name: "Close" }));
-  const device = await screen.findByRole("link", { name: /Workshop NAS/ });
-  expect(device.getAttribute("href")).toBe(`/settings/devices/${deviceId}`);
-  expect(within(device).getByText("Linux")).toBeTruthy();
-  expect(screen.queryByText(deviceToken)).toBeNull();
-  expect(issue).toHaveBeenCalledTimes(1);
 });
 
 it("waits for Cloud approval before showing the Compose with the account device token", async () => {
@@ -282,7 +181,7 @@ it("waits for Cloud approval before showing the Compose with the account device 
   const encode = new TextEncoder();
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const issue = rs.fn((_path: string, init?: RequestInit) => {
-    expect(JSON.parse(String(init?.body))).toEqual({ name: "Container node" });
+    expect(JSON.parse(String(init?.body))).toEqual({ name: "Rome Node" });
     return new Response(
       new ReadableStream({
         start(controller) {
@@ -298,31 +197,36 @@ it("waits for Cloud approval before showing the Compose with the account device 
       { headers: { "Content-Type": "text/event-stream" } },
     );
   });
+  let devices: Array<{ id: string; name: string; platform: string; status: string }> = [];
   renderDevices(
     () => ({
       connection: "stopped",
       checkedAt: new Date().toISOString(),
-      containerNodeTransport: "cloud",
-      devices: [],
+      devices,
     }),
     undefined,
     issue,
   );
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Set up container node" }));
-  const dialog = within(await screen.findByRole("dialog", { name: "Rome Node container" }));
-  expect(dialog.queryByLabelText("Rome address")).toBeNull();
+  await user.click(await screen.findByRole("button", { name: "Docker Compose" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "Docker Compose" }));
   await user.click(dialog.getByRole("button", { name: "Authorize and generate Compose" }));
   const approval = await dialog.findByRole("link", { name: "Open Rome Cloud" });
   expect(approval.getAttribute("href")).toBe(verificationUriComplete);
   expect(dialog.getByText("ABCD-EFGH")).toBeTruthy();
   expect(dialog.queryByRole("region", { name: "Compose configuration" })).toBeNull();
 
+  devices = [
+    { id: credential.deviceId, name: "Docker device", platform: "linux", status: "connected" },
+  ];
   stream.enqueue(encode.encode(`event: credential\ndata: ${JSON.stringify(credential)}\n\n`));
   stream.close();
   const config = await dialog.findByRole("region", { name: "Compose configuration" });
   expect(config.textContent).toContain(credential.deviceToken);
-  expect(config.textContent).not.toMatch(/ABCD-EFGH|ROME_NODE_CALLER_ID|INSTALL_TOKEN|volumes:/);
+  expect(config.textContent).toContain(`ROME_NODE_DEVICE_ID: "${credential.deviceId}"`);
+  expect(config.textContent).toContain("audit:/var/lib/rome-node");
+  expect(config.textContent).not.toMatch(/ABCD-EFGH|ROME_NODE_CALLER_ID|INSTALL_TOKEN/);
+  expect(await screen.findByText("Docker device")).toBeTruthy();
   expect(dialog.getByRole("button", { name: "Download Compose" })).toBeTruthy();
 });
 
@@ -347,9 +251,7 @@ it("starts only on explicit click and refreshes server truth after success", asy
     start,
   );
   const button = await screen.findByRole("button", { name: "Start service" });
-  const connection = screen.getByRole("heading", { name: "Rome connection" });
-  expect(connection.closest('[data-slot="card"]')).toBeNull();
-  expect(screen.getByRole("heading", { name: "Connect a device" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Connect a computer" })).toBeTruthy();
   expect(start).not.toHaveBeenCalled();
   await userEvent.click(button);
   const pending = await screen.findByRole("button", { name: "Starting…" });
@@ -357,7 +259,8 @@ it("starts only on explicit click and refreshes server truth after success", asy
   await userEvent.click(pending);
   expect(start).toHaveBeenCalledTimes(1);
   finish();
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Start service" })).toBeNull());
+  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
 });
 
 it.each([
@@ -385,7 +288,7 @@ it.each([
   expect(start).toHaveBeenCalledTimes(1);
 });
 
-it("localizes the service recovery and device setup in Chinese", async () => {
+it("localizes the service recovery and computer setup in Chinese", async () => {
   await i18n.changeLanguage("zh-CN");
   try {
     renderDevices(() => ({
@@ -394,7 +297,7 @@ it("localizes the service recovery and device setup in Chinese", async () => {
       devices: [],
     }));
     expect(await screen.findByRole("button", { name: "启动服务" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "连接设备" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "连接电脑" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
   } finally {
     cleanup();

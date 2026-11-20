@@ -1025,13 +1025,10 @@
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
     "containerNodes": {
-      "description": "Generate a Compose file to deploy this container node with Docker.",
+      "title": "Docker Compose",
+      "description": "Approve the device in Rome Cloud. Your account can run commands and access files inside the container.",
       "name": "Node name",
-      "defaultName": "Container node",
-      "address": "Rome address",
-      "originUnavailable": "Enter a Rome HTTPS or private HTTP address reachable from Docker.",
-      "loopbackHint": "Use an address Docker can reach. Localhost points to the container itself.",
-      "generate": "Generate Compose",
+      "defaultName": "Rome Node",
       "generating": "Generating…",
       "authorizeAndGenerate": "Authorize and generate Compose",
       "approveOnCloud": "Approve this device with the Rome Cloud account that owns this Rome.",
@@ -1045,26 +1042,17 @@
       "download": "Download Compose",
       "copyFailed": "Clipboard access failed. Download the Compose file instead.",
       "errors": {
-        "sign_in_required": "Sign in as the owner of this Rome instance to link a container node.",
-        "not_configured": "Container node deployment is unavailable on this instance.",
+        "sign_in_required": "Sign in as the owner of this Rome instance to authorize the device.",
+        "not_configured": "Link this Rome instance to Rome Cloud to generate Compose.",
         "approval_account_mismatch": "This device was not found in this Rome Cloud account. Try again with the account that owns this Rome.",
         "authorization_failed": "Device authorization did not complete. Try again.",
         "unavailable": "Could not generate Compose. Try again.",
-        "invalid_device_name": "Use a node name of 1 to 80 characters.",
-        "invalid_origin": "Enter a Rome HTTPS or private HTTP address."
+        "invalid_device_name": "Use a node name of 1 to 80 characters."
       }
     },
     "setup": {
-      "title": "Connect a device",
-      "linkDevice": "Link device",
-      "containerSetup": "Set up container node",
-      "methods": {
-        "desktop": "Desktop/iOS client",
-        "cli": "Rome Node CLI",
-        "container": "Rome Node container"
-      },
-      "desktopHelp": "Sign in to the Rome app on your computer or iPhone with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
-      "desktopDownload": "Download Rome",
+      "title": "Connect a computer",
+      "description": "Connect each computer separately.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"
