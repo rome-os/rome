@@ -195,6 +195,17 @@ export function buildMessageContext(
   ].join("\n");
 }
 
+/** Whether the sentinel itself said ESCALATE, rather than answer with output
+ *  that is empty, unreadable or contradicts itself, which also escalate. */
+export function saysEscalate(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (/^\s*REPLY\s*:/i.test(trimmed)) return false;
+  const match =
+    trimmed.match(/^\s*(ESCALATE|IGNORE)\s*$/i) ??
+    trimmed.match(/(?:^|\n)\s*Decision\s*:\s*(REPLY|ESCALATE|IGNORE)\b/i);
+  return match?.[1].toUpperCase() === "ESCALATE";
+}
+
 export function parseSentinelDecision(raw: string): SentinelDecision {
   const trimmed = raw.trim();
   if (!trimmed) return { action: "escalated" };
@@ -640,7 +651,13 @@ async function handleUntrustedMessage(
   }
 
   const sentinelOutput = sentinelResult.content;
-  const decision = parseSentinelDecision(sentinelOutput);
+  const parsed = parseSentinelDecision(sentinelOutput);
+  // A member let in only by the switch reaches the account's agent only when
+  // the sentinel said so, never because its output could not be read.
+  const decision: SentinelDecision =
+    answeredOnlyAsMember && parsed.action === "escalated" && !saysEscalate(sentinelOutput)
+      ? { action: "ignored" }
+      : parsed;
   log.info("sentinel decision", { action: decision.action, channel, channelUserId });
 
   await deps.sentinelLogRepo.create({
