@@ -1204,6 +1204,7 @@ export class ActionEngine {
       agentName: invocation.context?.agentName,
       channelThreadKey: invocation.context?.channelThreadKey,
       runtimeObserver: observer,
+      emitActionEvent: (event: ActionEvent) => executionContext.emitActionEvent(event),
     };
     let acceptingEvents = true;
     const executionContext: ActionExecutionContext = {

@@ -3,14 +3,16 @@ import { importModuleWithCacheBuster, resolveModuleEntryPath } from "./actions/m
 import type { AppCatalog } from "./catalog.js";
 import { type ArtifactRef, isResolvedApp } from "./state.js";
 import { createAppLogger } from "../logger.js";
-import { createRomeAppContext, type RomeAppRuntimeServices } from "./context.js";
+import { createRomeAppContext, type RomeAppRuntimeServices, withHostDeps } from "./context.js";
 
 /**
  * Deps handed to every app hook's `createHook(deps)` factory. The lifecycle
  * hooks and turn-middleware declare structurally identical
  * dep shapes (`AgentLifecycleHookDeps` / `TurnMiddlewareHookDeps`), so the
  * import + dep-assembly is shared here and the caller asserts the returned
- * hook's own shape (`onAgentTurnStarted` / `handle` / …).
+ * hook's own shape (`onAgentTurnStarted` / `handle` / …). Where the app
+ * is resolved, these deps ride on the app's context, so the hook reads
+ * `ctx.connections` as well as `ctx.logger`.
  */
 export interface BaseHookDeps {
   appId: string;
@@ -45,7 +47,7 @@ export async function loadAppHook(
   }
   const app = appRuntimeServices ? catalog.get(artifact.ownerId) : null;
   if (appRuntimeServices && isResolvedApp(app)) {
-    deps.appContext = createRomeAppContext(app, appRuntimeServices);
+    return module.createHook(withHostDeps(createRomeAppContext(app, appRuntimeServices), deps));
   }
   return module.createHook(deps);
 }

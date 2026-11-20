@@ -175,6 +175,7 @@ export interface ActionEvent {
   readonly type: string;
 }
 
+/** @deprecated Emit through {@link RomeAppContext.run}: `ctx.run.emit(event)`. */
 export interface ActionExecutionContext {
   emitActionEvent<TEvent extends ActionEvent>(event: TEvent): void;
 }
@@ -671,9 +672,13 @@ export interface AgentTurnFinishedHook {
 
 export type AppLogger = Logger;
 
-export interface AgentLifecycleHookDeps {
+/** The app's {@link RomeAppContext}, with the hook's own deps. The
+ *  context's members are absent where Rome runs the hook outside an app. */
+export interface AgentLifecycleHookDeps extends Partial<RomeAppContext> {
   appId: string;
   logger: AppLogger;
+  /** @deprecated Read the context's members on these deps directly. This
+   *  is the same object. */
   appContext?: RomeAppContext;
   agentRunner?: AgentRunnerInterface;
 }
@@ -708,9 +713,12 @@ export interface AppStartedHook {
   onAppStarted(event: AppStartedEvent): Promise<void> | void;
 }
 
-export interface AppStartedHookDeps {
+/** The app's {@link RomeAppContext}, with the hook's own deps. */
+export interface AppStartedHookDeps extends RomeAppContext {
   appId: string;
   logger: AppLogger;
+  /** @deprecated Read the context's members on these deps directly. This
+   *  is the same object. */
   appContext: RomeAppContext;
   agentRunner?: AgentRunnerInterface;
 }
@@ -762,9 +770,13 @@ export interface TurnMiddlewareHook {
   handle(ctx: TurnMiddlewareContext, next: TurnMiddlewareNext): Promise<void>;
 }
 
-export interface TurnMiddlewareHookDeps {
+/** The app's {@link RomeAppContext}, with the hook's own deps. The
+ *  context's members are absent where Rome runs the hook outside an app. */
+export interface TurnMiddlewareHookDeps extends Partial<RomeAppContext> {
   appId: string;
   logger: AppLogger;
+  /** @deprecated Read the context's members on these deps directly. This
+   *  is the same object. */
   appContext?: RomeAppContext;
   agentRunner?: AgentRunnerInterface;
 }
@@ -2191,11 +2203,12 @@ export interface MessagesSaid {
 }
 
 /**
- * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
- * hears inbound messages through `channels`, one subscription per channel that
- * can receive.
+ * What the host hands a `channel-message` hook's `createHook(deps)`: the
+ * app's {@link RomeAppContext}, with the hook's own deps. A hook hears inbound
+ * messages through `channels`, one subscription per channel that can receive.
+ * A host that predates it passes the hook's deps without the context.
  */
-export interface ChannelMessageHookDeps {
+export interface ChannelMessageHookDeps extends Partial<RomeAppContext> {
   actionEngine: ActionEngineLike;
   /** Hearing messages said to Rome once they are on record. A hook that subscribes here
    *  hears every channel through it, the ones added later included, and does
@@ -2320,6 +2333,8 @@ export function setCurrentActionContextResolver(
   registry[CURRENT_ACTION_CONTEXT_RESOLVER] = resolver ?? undefined;
 }
 
+/** @deprecated Read {@link RomeAppContext.run}, which answers the same and
+ *  emits the run's events. */
 export function getCurrentActionContext(): CurrentActionContext | undefined {
   const registry = globalThis as GlobalActionContextRegistry;
   return registry[CURRENT_ACTION_CONTEXT_RESOLVER]?.();
@@ -2717,6 +2732,21 @@ export interface AppConnectionsCapability {
   }): Promise<AppConnectionInvokeResult<T>>;
 }
 
+/**
+ * The action run in progress, as {@link RomeAppContext.run} answers it: who
+ * started it and for what, and the events it streams to whoever started it.
+ */
+export interface ActionRun extends CurrentActionContext {
+  /** Stream `event` to whoever started this run. An event emitted after the
+   *  run settled is dropped. */
+  emit<TEvent extends ActionEvent>(event: TEvent): void;
+}
+
+/**
+ * Everything Rome offers an app, in one object. An action's `createAction`,
+ * a hook's `createHook` and an API's `createApiHandler` each receive it. Rome
+ * builds one per app, and it lasts as long as the app is loaded.
+ */
 export interface RomeAppContext {
   app: RomeAppDefinition;
   controller: unknown;
@@ -2740,6 +2770,10 @@ export interface RomeAppContext {
     args: Record<string, unknown>,
   ): ActionInvocation<TEvent, TOutput>;
   listRoutines(): Promise<Routine[]>;
+  /** The action run in progress, or absent outside one, such as in an API
+   *  request or a hook. Read it when the code runs, not when the app loads:
+   *  the same context serves every run. Absent from a host that predates it. */
+  readonly run?: ActionRun;
 }
 
 export type ActionInvocationErrorCode =
@@ -2771,9 +2805,16 @@ export class ActionInvocationError extends Error {
   }
 }
 
-export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared & {
-  appContext: RomeAppContext;
-};
+/**
+ * What an action's `createAction(config, ctx)` receives: the app's
+ * {@link RomeAppContext}, with what the host offers apps outside it.
+ */
+export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared &
+  RomeAppContext & {
+    /** @deprecated Read the context's members directly: `ctx.connections`,
+     *  not `ctx.appContext.connections`. This is the same object. */
+    appContext: RomeAppContext;
+  };
 
 /**
  * Who is making this app-api request, resolved by the Rome host **before** the

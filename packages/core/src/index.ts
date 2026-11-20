@@ -391,8 +391,8 @@ import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import type { ResolvedApp } from "./apps/state.js";
-import type { RomeAppRuntimeServices } from "./apps/context.js";
+import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
+import { createRomeAppContext, type RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import {
@@ -2040,6 +2040,12 @@ async function main() {
   };
   const messageHooks = new ChannelMessageHooks({
     catalog: appCatalog,
+    contextFor: (appId) => {
+      const app = appCatalog.get(appId);
+      return isResolvedApp(app)
+        ? createRomeAppContext(app, lifecycleAppRuntimeServices)
+        : undefined;
+    },
     deps: {
       actionEngine,
       chatSettings: appChatSettings,

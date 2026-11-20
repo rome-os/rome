@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "./actions/context.js";
+import { actionExecutionContext, currentActionRun } from "./actions/context.js";
 import {
   type ActionDispatchReceipt,
   ActionInvocationError,
   ActionInvocationEventOverflowError,
   type ActionEvent,
   type ActionInvocation,
+  type ActionRun,
   type AppConnectionsCapability,
   type AppFavorCapability,
   type AppRuntimeRepositories,
@@ -60,6 +61,8 @@ export interface RomeAppContext {
     args: Record<string, unknown>,
   ): ActionInvocation<TEvent, TOutput>;
   listRoutines(): Promise<Routine[]>;
+  /** The action run in progress, or absent outside one. */
+  readonly run?: ActionRun;
 }
 
 export interface RomeAppRuntimeServices {
@@ -385,7 +388,34 @@ export function createRomeAppContext(
       const rows = await services.routinesRepo.findAll();
       return rows.map(toRoutine);
     },
+    // A getter: one context serves every run of the app's actions.
+    get run() {
+      return currentActionRun();
+    },
   };
+}
+
+/**
+ * `ctx` with the host's other deps on it, for a factory that takes one object:
+ * an action's `createAction(config, ctx)` or a hook's `createHook(ctx)`. A dep
+ * never replaces a member of `ctx`. `appContext` names `ctx` itself, for apps
+ * that read the context there.
+ */
+export function withHostDeps<T extends object>(
+  ctx: RomeAppContext,
+  deps: T,
+): RomeAppContext & T & { appContext: RomeAppContext } {
+  for (const [name, value] of Object.entries(deps)) {
+    if (name in ctx) continue;
+    Object.defineProperty(ctx, name, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  Object.defineProperty(ctx, "appContext", { value: ctx, enumerable: true, configurable: true });
+  return ctx as RomeAppContext & T & { appContext: RomeAppContext };
 }
 
 function toRomeAppDefinition(app: ResolvedApp): SdkRomeAppDefinition {

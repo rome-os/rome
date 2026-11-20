@@ -2,6 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   setCurrentActionContextResolver,
   setCurrentActionContextRunner,
+  type ActionEvent,
+  type ActionRun,
+  type CurrentActionContext,
   type CurrentActionContextPatch,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "./engine.js";
@@ -34,16 +37,19 @@ export interface ActionExecutionStore {
   agentName?: string;
   channelThreadKey?: string;
   runtimeObserver?: ActionRunObserver;
+  /** Streams an event to whoever started this run. Absent where nobody
+   *  listens, such as a preview. */
+  emitActionEvent?: (event: ActionEvent) => void;
 }
 
 export const actionExecutionContext = new AsyncLocalStorage<ActionExecutionStore>();
 
 setCurrentActionContextResolver(() => {
   const store = actionExecutionContext.getStore();
-  if (!store) {
-    return undefined;
-  }
+  return store ? currentActionContextOf(store) : undefined;
+});
 
+function currentActionContextOf(store: ActionExecutionStore): CurrentActionContext {
   return {
     initiator: store.initiator,
     actorKind: store.actor?.kind,
@@ -60,7 +66,18 @@ setCurrentActionContextResolver(() => {
     channelThreadKey: store.channelThreadKey,
     sharedContext: store.sharedContext,
   };
-});
+}
+
+/** The action run in progress, or undefined outside one. */
+export function currentActionRun(): ActionRun | undefined {
+  const store = actionExecutionContext.getStore();
+  if (!store) return undefined;
+  const emit = store.emitActionEvent;
+  return {
+    ...currentActionContextOf(store),
+    emit: (event) => emit?.(event),
+  };
+}
 
 function mergeSharedContext(
   store: ActionExecutionStore,

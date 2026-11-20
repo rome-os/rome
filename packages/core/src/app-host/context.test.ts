@@ -103,6 +103,55 @@ export function createAction(config, deps) {
     }
   });
 
+  it("hands an action its app's context, with the host's deps on it, in both loaders", async () => {
+    for (const register of [registerAppActions, registerLazyAppActions]) {
+      const app = resolvedApp("ordinary-app");
+      const actionDir = await tempDir();
+      await writeFile(
+        join(actionDir, "index.js"),
+        `
+export function createAction(config, ctx) {
+  return {
+    config,
+    execute: async () => ({
+      status: "ok",
+      data: {
+        appId: ctx.app.id,
+        connections: typeof ctx.connections.list,
+        runAction: typeof ctx.runAction,
+        hostDep: ctx.probe,
+        sameAsAppContext: ctx.appContext === ctx,
+      },
+    }),
+  };
+}
+`,
+      );
+      const registry = new ActionRegistryImpl();
+      await register(
+        loaderFor("ordinary-app", "ctx_probe", actionDir),
+        registry,
+        catalogFor(app),
+        { probe: "host dep" },
+        {
+          db: {} as RomeAppRuntimeServices["db"],
+          actionEngine: {} as ActionEngine,
+          repositories: createRepositories(),
+        },
+      );
+      expect(await registry.get("ctx_probe")?.execute({})).toEqual({
+        status: "ok",
+        data: {
+          appId: "ordinary-app",
+          connections: "function",
+          runAction: "function",
+          hostDep: "host dep",
+          sameAsAppContext: true,
+        },
+      });
+    }
+  });
+
   it("tells an action built against SDK 0.6 that deps.talkRouter is gone, in both loaders", async () => {
     for (const register of [registerAppActions, registerLazyAppActions]) {
       const app = resolvedApp("old-app");
@@ -902,6 +951,34 @@ describe("runAction invocation port", () => {
     });
   });
 
+  it("answers the run in progress as ctx.run, and streams its events to the caller", async () => {
+    const callee = createRomeAppContext(resolvedApp("callee-app"), {
+      catalog: catalogFor(resolvedApp("callee-app")),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: {} as ActionEngine,
+      repositories: createRepositories(),
+    });
+    let seen: { actionName?: string; executionId?: string } | undefined;
+    const context = contextWithActions([
+      probeAction("run_probe", async () => {
+        const run = callee.run;
+        seen = { actionName: run?.actionName, executionId: run?.executionId };
+        run?.emit({ type: "started" });
+        return { status: "ok", data: null };
+      }),
+    ]);
+
+    expect(callee.run).toBeUndefined();
+    const invocation = context.invokeAction("run_probe", {});
+    const events: unknown[] = [];
+    for await (const event of invocation.events) events.push(event);
+
+    await expect(invocation.result).resolves.toEqual({ status: "ok", data: null });
+    expect(events).toEqual([{ type: "started" }]);
+    expect(seen?.actionName).toBe("run_probe");
+    expect(seen?.executionId).toEqual(expect.any(String));
+  });
+
   it("allows only one consumer for an invocation event stream", async () => {
     const context = contextWithActions([
       probeAction("single_consumer", async () => ({ status: "ok" })),
@@ -1037,6 +1114,29 @@ describe("runAction invocation port", () => {
     await expect(invocation.result).resolves.toEqual({ status: "ok" });
   });
 });
+
+function loaderFor(appId: string, name: string, directory: string): ActionLoader {
+  return {
+    getAllRecords: () =>
+      new Map([
+        [
+          name,
+          {
+            config: actionConfig(name),
+            directory,
+            metadata: {
+              kind: "action",
+              ownerType: "app",
+              ownerId: appId,
+              publicName: name,
+              aliases: [],
+              sourcePath: directory,
+            },
+          },
+        ],
+      ]),
+  } as unknown as ActionLoader;
+}
 
 function createRepositories(): RomeAppRuntimeServices["repositories"] {
   return {
