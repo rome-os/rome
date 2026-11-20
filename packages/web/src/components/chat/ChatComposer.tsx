@@ -787,7 +787,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         );
       }
       if (clearsOptimistically) {
-        setInputText(persistNewChatDraft ? rawText : text);
+        // Text typed while the send was pending survives a failure; only an
+        // empty field takes the failed text back.
+        setInputText((current) =>
+          current === "" ? (persistNewChatDraft ? rawText : text) : current,
+        );
         setPendingUploads(uploads);
         setDraftSkill(skill);
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
