@@ -11,6 +11,7 @@ import {
   textToSend,
 } from "../../outbound/send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type * as connections from "../../message.js";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "../../../types.js";
 import {
   isAllowedAttachmentUrl,
@@ -975,11 +976,11 @@ function isWechatUserMessage(value: unknown): value is WechatMessage {
 }
 
 /**
- * Build the channel's record of an iLink event, or null for a bot message or
- * one with nothing to read. `raw` is the event itself, which holds the CDN keys
+ * The Connections message of an iLink event, or null for a bot message or one
+ * with nothing to read. `raw` is the event itself, which holds the CDN keys
  * the record's attachments leave out.
  */
-export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | null {
+export function normalizeWechatMessage(msg: WechatMessage): connections.Message | null {
   if (msg.message_type !== MSG_TYPE_USER) return null;
 
   const extracted = extractContent(msg);
@@ -990,26 +991,41 @@ export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | nul
   const groupId = rawGroupId || undefined;
   const chatId = senderId;
   const senderShort = senderId.split("@")[0] || senderId;
+  const replyTo = extracted.replyTo;
 
   return {
-    channel: "wechat",
-    direction: "inbound",
-    messageId:
+    id:
       extracted.messageId ??
       normalizeWechatMessageId(msg.message_id) ??
       msg.client_id ??
       `${chatId}:${msg.create_time_ms ?? Date.now()}`,
-    chatId: chatId as ChatId,
-    senderId,
-    senderDisplayName: senderShort,
-    text: extracted.text,
-    attachments: wechatAttachments(extracted).map(stripWechatMedia),
-    timestamp: new Date(msg.create_time_ms ?? Date.now()),
-    ...(extracted.replyTo ? { replyTo: extracted.replyTo } : {}),
-    thread: { kind: groupId ? "group" : "dm", ...(groupId ? { name: groupId } : {}) },
-    // WeChat group traffic is partitioned by senderId, so a command can only
-    // address that sender's Rome conversation, never another group member's.
-    addressing: "direct",
+    // WeChat group traffic is partitioned by senderId, so the chat is the
+    // sender's direct one with the bot, even for a message said in a group,
+    // and a command can only address that sender's Rome conversation, never
+    // another group member's.
+    where: {
+      chatId: chatId as ChatId,
+      kind: "direct",
+      ...(groupId ? { group: { id: groupId } } : {}),
+    },
+    sender: { accountId: senderId, name: senderShort },
+    content: {
+      text: extracted.text,
+      attachments: wechatAttachments(extracted).map(stripWechatMedia),
+    },
+    receivedBy: msg.to_user_id?.trim() || "",
+    // A direct chat with the bot mentions no one in it.
+    mentions: [],
+    ...(replyTo
+      ? {
+          replyTo: {
+            messageId: replyTo.messageId,
+            ...(replyTo.content !== undefined ? { text: replyTo.content } : {}),
+            ...(replyTo.senderName !== undefined ? { senderName: replyTo.senderName } : {}),
+          },
+        }
+      : {}),
+    saidAt: new Date(msg.create_time_ms ?? Date.now()),
     raw: msg,
   };
 }
@@ -1166,12 +1182,12 @@ export class WechatAuthService {
 }
 
 /**
- * The iLink bot transport. Inbound events arrive as the channel's own record, a
- * `ChannelMessage` whose `raw` is the iLink event, so the Connection
- * integration delivers them as they are.
+ * The iLink bot transport. Inbound events arrive as a Connections message
+ * whose `raw` is the iLink event, so the Connection integration delivers them
+ * as they are.
  */
 export class WechatAdapter {
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
   private stopped = true;
   private pollGeneration = 0;
   private contextTokens = new Map<string, string>();
@@ -1266,7 +1282,7 @@ export class WechatAdapter {
     return { chatId, ...(messageId ? { messageId } : {}) };
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -1402,8 +1418,9 @@ export class WechatAdapter {
     if (!message) return;
 
     if (raw.context_token) {
-      this.rememberContextToken(message.chatId, raw.context_token, message.senderId);
-      this.rememberContextToken(message.senderId, raw.context_token, message.senderId);
+      const sender = message.sender.accountId;
+      this.rememberContextToken(message.where.chatId, raw.context_token, sender);
+      this.rememberContextToken(sender, raw.context_token, sender);
       await this.saveContextTokens().catch(() => {});
     }
 
@@ -1413,7 +1430,7 @@ export class WechatAdapter {
       await this.handler(message);
     } catch (err) {
       log.error("message handler error", {
-        messageId: message.messageId,
+        messageId: message.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }

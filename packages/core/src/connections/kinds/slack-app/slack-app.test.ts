@@ -14,6 +14,7 @@ import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
 import { slackAppTimeline } from "../../../db/schema.js";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -142,7 +143,8 @@ function adapter(
     ...(readGate ? { readGate } : {}),
     ...(listened ? { listened } : {}),
   });
-  a.onInbound((message) => delivered.push(message));
+  // What apps receive, so the tests read the fields an app reads.
+  a.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
   return { adapter: a, delivered, faults, api, copy };
 }
 
@@ -776,7 +778,7 @@ describe("Slack app mailbox key", () => {
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
         copy: testCopy(),
       });
-      a.onInbound((message) => order.push(`delivered ${message.text}`));
+      a.onInbound((message) => order.push(`delivered ${message.content.text}`));
       await a.start();
       answer = second;
       await rs.advanceTimersByTimeAsync(DAY + 1000);

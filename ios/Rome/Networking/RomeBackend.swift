@@ -31,6 +31,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Starts an untitled topic chat, which its first message names.
     func startTopicChat() async throws -> ConciergeChat
     func renameChat(_ id: String, to name: String) async throws
+    /// Pins or unpins a topic chat, which keeps it atop the drawer's list.
+    func pinChat(_ id: String, pinned: Bool) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
     /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
@@ -170,6 +172,10 @@ final class LiveBackend: RomeBackend {
 
     func renameChat(_ id: String, to name: String) async throws {
         try await client.patch("/chat/sessions/\(escape(id))/name", json: .object(["name": .string(name)]))
+    }
+
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await client.patch("/chat/sessions/\(escape(id))/pin", json: .object(["pinned": .bool(pinned)]))
     }
 
     func archiveChat(_ id: String) async throws {
@@ -485,6 +491,8 @@ extension RomeBackend {
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Test doubles keep no pins.
+    func pinChat(_ id: String, pinned: Bool) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage {
         try await messages(sessionId: sessionId, before: nil, limit: limit)

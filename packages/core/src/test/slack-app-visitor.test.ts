@@ -22,6 +22,7 @@ import { appPersonMapping } from "../people/app-person-mapping.js";
 import { applyGuardianMappingWithinTx, planGuardianMapping } from "../people/guardian-mapping.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { createTestDb, type TestDb } from "./db.js";
+import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
@@ -115,7 +116,7 @@ describe("Slack app members who did not sign in (R12)", () => {
       },
     });
     const heard: ChannelMessage[] = [];
-    adapter.onInbound((message) => heard.push(message));
+    adapter.onInbound((message) => heard.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
     await onFrame!(dm(1, "D_GUARDIAN", INSTALLER));
     await onFrame!(dm(2, "D_MEMBER", "U_MEMBER"));

@@ -21,6 +21,8 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var lastTurnFailed: Bool?
     var awaitingGuardian: Bool?
     var largeModelSelection: String?
+    /// When its owner pinned it; a topic chat only. Nil when not pinned.
+    var pinnedAt: String?
 }
 
 /// One stored message. `content` is a JSON array of parts, or plain text on old rows.

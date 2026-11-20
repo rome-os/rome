@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { contextCrossings, contextRules } from "./rules/contexts.js";
+import { contextCrossings, contextEntryRules, contextRules } from "./rules/contexts.js";
 import { featureCrossings, featureRules } from "./rules/features.js";
 import { kindCrossings, kindRules } from "./rules/kinds.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
@@ -254,6 +254,7 @@ export function runCli(): number {
     ...featureRules,
     ...kindRules,
     ...contextRules,
+    ...contextEntryRules,
     ...libraryRules,
     ...wiringRules,
     ...slackAppCopyRules,

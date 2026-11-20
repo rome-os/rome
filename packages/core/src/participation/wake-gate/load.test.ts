@@ -2,45 +2,26 @@ import { describe, expect, it } from "@rstest/core";
 import type { ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { chatRules } from "./index.js";
 
-function snapshot(supportedFields: ChatSettingsSnapshot["supportedFields"]): ChatSettingsSnapshot {
-  return {
-    conversation: {} as ChatSettingsSnapshot["conversation"],
-    supportedFields,
-    effective: {
-      enabled: true,
-      activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-      replies: { placement: "thread" },
-      routing: { agentName: null },
-      session: { reset: { mode: "none" } },
-    },
-    overrides: {},
-  };
-}
-
 describe("chatRules", () => {
-  it("applies the settings a Discord chat offers", () => {
-    expect(
-      chatRules(
-        snapshot([
-          "enabled",
-          "activation.mode",
-          "activation.botMessages",
-          "activation.whenOthersMentioned",
-        ]),
-      ),
-    ).toEqual({
-      enabled: true,
-      replyRule: "mention",
-      botMessages: "ignore",
-      whenOthersMentioned: "ignore",
-    });
-  });
-
-  it("wakes on every message where the connection offers no reply rule, as on Telegram", () => {
-    expect(chatRules(snapshot(["session.reset"]))).toEqual({
-      enabled: true,
+  // Core resolves each rule before the gate reads it (chat-settings/rules.ts),
+  // so the gate applies what the snapshot says, offered or fixed.
+  it("applies the rules the chat runs on", () => {
+    const snapshot = {
+      conversation: {} as ChatSettingsSnapshot["conversation"],
+      supportedFields: ["session.reset"],
+      effective: {
+        enabled: false,
+        activation: { mode: "all", botMessages: "mentions", whenOthersMentioned: "respond" },
+        replies: { placement: "thread" },
+        routing: { agentName: null },
+        session: { reset: { mode: "none" } },
+      },
+      overrides: {},
+    } satisfies ChatSettingsSnapshot;
+    expect(chatRules(snapshot)).toEqual({
+      enabled: false,
       replyRule: "all",
-      botMessages: "all",
+      botMessages: "mentions",
       whenOthersMentioned: "respond",
     });
   });

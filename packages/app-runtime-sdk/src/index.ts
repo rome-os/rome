@@ -1820,8 +1820,9 @@ export interface ChannelMessage {
    *  person speaks for that person, so it is not a bot. Absent where the
    *  connection does not tell. */
   fromBot?: boolean;
-  /** It mentions someone, and none of them is Rome's account. Absent where
-   *  the connection does not tell. */
+  /** It mentions someone, none of them is Rome's account, and it does not
+   *  address Rome's account by a reply or in Rome's own thread either.
+   *  Absent where the connection does not tell. */
   mentionsOthers?: boolean;
   raw?: unknown;
   /** The platform thread opened from this message, by the platform's own id

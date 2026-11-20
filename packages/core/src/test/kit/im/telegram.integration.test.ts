@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TelegramAdapter } from "../../../connections/kinds/telegram/telegram.js";
 import { comparable, loadCapture } from "./capture.js";
@@ -102,7 +103,7 @@ describe("TelegramAdapter.send against the peer", () => {
 
   async function receive(text: string): Promise<ChannelMessage> {
     const heard = deferred<ChannelMessage>();
-    adapter.onInbound(async (message) => heard.resolve(message));
+    adapter.onInbound(async (message) => heard.resolve(channelMessageOf(message, "telegram")));
     peer.emitMessage(text);
     return heard.promise;
   }

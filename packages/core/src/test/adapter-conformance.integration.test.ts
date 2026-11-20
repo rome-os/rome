@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { channelOver, describeAdapterConformance } from "./kit/im/adapter-conformance.js";
+import { requestBarrier } from "./kit/im/peer.js";
 import { exemplar, loadCapture } from "./kit/im/capture.js";
 import wechatTextCapture from "./kit/im/captures/wechat-text.capture.json" with { type: "json" };
 import {
@@ -72,6 +73,19 @@ describeAdapterConformance(
       group: {
         at: FEISHU_CHAT,
         personWrites: (text) => peer.emitMessage(text, FEISHU_CHAT, { mentionsBot: true }).id,
+        // The group's name, which the adapter looks up when it first hears it.
+        lookup: {
+          hold: () => {
+            const barrier = requestBarrier();
+            peer.server.once({
+              method: "GET",
+              path: `/open-apis/im/v1/chats/${FEISHU_CHAT}`,
+              before: barrier.wait,
+            });
+            return barrier;
+          },
+          personWrites: (text) => peer.emitMessage(text, FEISHU_CHAT, { mentionsBot: true }).id,
+        },
       },
       second: {
         account: { platform: "feishu", id: FEISHU_SECOND_BOT },
@@ -100,7 +114,14 @@ describeAdapterConformance(
       },
     };
   },
-  { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: false },
+  {
+    directMessages: true,
+    romeWritesFirst: true,
+    groups: true,
+    twoAccounts: true,
+    threads: false,
+    lookups: true,
+  },
 );
 
 // Discord: the bot hears a person in their DM channel, and reaches them there
@@ -118,6 +139,8 @@ describeAdapterConformance(
     // A second of Rome's accounts, a second bot in the guild. Discord gives a
     // message one id whichever bot reads it.
     const second = peer.createAdapter(DISCORD_SECOND_TOKEN);
+    /** The message the next lookup's reply answers. */
+    let replyTarget = "";
     await second.start();
     return {
       account: { platform: "discord", id: "100000000000000001" },
@@ -133,6 +156,23 @@ describeAdapterConformance(
         personWrites: (text) => peer.emitMessage(text, DISCORD_CHANNEL).id,
         // Rome's transcript shows the message as a person sees it, mention included.
         shows: (text) => `@Rome ${text}`,
+        // A reply's author, which the adapter fetches to tell whether it
+        // replies to Rome's account.
+        lookup: {
+          hold: () => {
+            const barrier = requestBarrier();
+            replyTarget = peer.sayUnheard("earlier", DISCORD_CHANNEL).id;
+            peer.server.once({
+              method: "GET",
+              path: `/api/v10/channels/${DISCORD_CHANNEL}/messages/${replyTarget}`,
+              before: barrier.wait,
+            });
+            return barrier;
+          },
+          personWrites: (text) =>
+            peer.emitMessage(text, DISCORD_CHANNEL, { replyTo: replyTarget, referenceOnly: true })
+              .id,
+        },
       },
       thread: {
         at: DISCORD_THREAD,
@@ -183,6 +223,7 @@ describeAdapterConformance(
     twoAccounts: true,
     oneOfTwoAccounts: true,
     threads: true,
+    lookups: true,
   },
   {
     romeWritesFirst: DISCORD_USER_ID,

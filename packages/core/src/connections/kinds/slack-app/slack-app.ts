@@ -22,6 +22,7 @@ import {
   SlackApiError,
   type SlackEventCallback,
   slackMessageId,
+  slackSenderId,
   type SlackUserName,
   slackUserIdOf,
   splitSlackText,
@@ -35,6 +36,7 @@ import type { SlackMessageCopy } from "./message-copy.js";
 export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppWebApi } from "./web-api.js";
+import type { Message } from "../../message.js";
 
 const log = createLogger("slack-app");
 
@@ -127,12 +129,38 @@ function isExternalAuthor(payload: SlackEventCallback): boolean {
   );
 }
 
+/**
+ * The connection's `Message` for `kept`, a message as its copy keeps it, said
+ * to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * addresses (docs/domains/connections.md#message). The app hears a group only
+ * when it is mentioned, so a mention lists the bot's account; the copy keeps
+ * no other account a message mentions, so none is listed.
+ */
+export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
+  const direct = kept.thread?.kind === "dm";
+  return {
+    id: kept.messageId,
+    where: { chatId: kept.chatId, kind: direct ? "direct" : "group" },
+    sender: {
+      accountId: kept.senderId,
+      ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
+      ...(kept.senderUsername !== undefined ? { handle: kept.senderUsername } : {}),
+    },
+    content: { text: kept.text, attachments: kept.attachments },
+    receivedBy,
+    mentions: direct ? [] : [receivedBy],
+    ...(kept.replyTo ? { replyTo: { messageId: kept.replyTo.messageId } } : {}),
+    saidAt: kept.timestamp,
+    ...(kept.raw !== undefined ? { raw: kept.raw } : {}),
+  };
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 export class SlackAppAdapter {
-  private handler?: (message: ChannelMessage) => void;
+  private handler?: (message: Message) => void;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackUserName>();
@@ -162,7 +190,7 @@ export class SlackAppAdapter {
       new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
 
-  onInbound(handler: (message: ChannelMessage) => void): void {
+  onInbound(handler: (message: Message) => void): void {
     this.handler = handler;
   }
 
@@ -346,7 +374,7 @@ export class SlackAppAdapter {
   private handOver(eventId: string, message: ChannelMessage): void {
     if (!this.handler) return;
     try {
-      this.handler(message);
+      this.handler(messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)));
     } catch (error) {
       log.error("message handler error", { messageId: message.messageId, error: describe(error) });
     }
@@ -427,7 +455,6 @@ export class SlackAppAdapter {
       // A thread lives inside its conversation's chat. The reply finds the
       // thread from the id of the message it answers.
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-      addressing: direct ? "direct" : "mention",
     };
     // The mailbox is told the message was received only once the copy holds
     // it: a write that fails answers 500, and the mailbox delivers it again.
@@ -591,7 +618,7 @@ export class SlackAppAdapter {
     const message = said ?? slackMessage(this.context(channelId), wire);
     if (!message) return;
     try {
-      const { raw: _raw, addressing: _addressing, ...kept } = message;
+      const { raw: _raw, ...kept } = message;
       noteInDrain(this.timeline(), channelId, wire.ts, kept);
     } catch (error) {
       // The message is missing from the timeline, so the next one heard must

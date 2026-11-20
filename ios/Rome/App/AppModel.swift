@@ -356,6 +356,16 @@ final class Workspace {
         return true
     }
 
+    /// Pins or unpins a topic chat atop the drawer's list. Returns whether the
+    /// server took it.
+    @discardableResult
+    func pinTopic(_ chatId: String, pinned: Bool) async -> Bool {
+        guard (try? await backend.pinChat(chatId, pinned: pinned)) != nil else { return false }
+        // The row slides to its new place, and the others make room.
+        withAnimation(.snappy) { topics.setPinned(chatId, pinned) }
+        return true
+    }
+
     /// Archives a topic chat and drops it from the drawer. Returns whether the
     /// server took it. `stoppingWork` ends its follows and open tasks instead
     /// of moving them to the main Chat.

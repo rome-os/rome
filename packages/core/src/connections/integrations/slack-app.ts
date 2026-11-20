@@ -358,6 +358,8 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     // A new workspace answers as the guardian's Concierge from its first
     // message (docs/adrs/channels-and-connectors-are-one-connection.md).
     startsWithConcierge: true,
+    // An official app offers no chat rules: every chat runs at the defaults.
+    chatRules: { offers: [] },
     grant: "bot",
     auth: scheme,
     // Revoke the token at Slack, then release the workspace at Rome Cloud.
