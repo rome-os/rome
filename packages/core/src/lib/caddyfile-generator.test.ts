@@ -116,3 +116,18 @@ describe("generateCaddyfile with a persisted legacy enableAccessControl flag", (
     expect(caddyfile).toContain("try_files {path} /index.html");
   });
 });
+
+// Behind a proxy that ends TLS, the page is https while Caddy is reached on
+// http. The same-origin check on WebSocket upgrades needs the page's scheme.
+describe("generateCaddyfile behind a proxy that ends TLS", () => {
+  it("passes X-Forwarded-Proto through on every proxy to Hono", () => {
+    const caddyfile = generateCaddyfile();
+    const proxies = caddyfile.match(/reverse_proxy 127\.0\.0\.1:4141 \{\n[^}]*\}/g) ?? [];
+    expect(proxies).toHaveLength(3);
+    for (const proxy of proxies) {
+      expect(proxy).toContain(
+        "header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}",
+      );
+    }
+  });
+});
