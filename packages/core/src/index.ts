@@ -1912,16 +1912,6 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    // Only accounts Rome listens to: a message left to one that does not
-    // listen would be recorded by nobody.
-    romeAccountIds: () =>
-      new Set(
-        connectionRegistry
-          .find("discord")
-          .filter((connection) => accountListening.listens(connection.id))
-          .map((connection) => accounts.accountOf(connection.id)?.id)
-          .filter((id): id is string => !!id),
-      ),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {

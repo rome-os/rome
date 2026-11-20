@@ -144,8 +144,8 @@ describeAdapterConformance(
         channel: channelOver("discord-2", "00000000-0000-4000-8000-000000000007", second),
         bothHear: (text) => peer.emitMessage(text, DISCORD_CHANNEL, { mentionsEveryBot: true }).id,
         alone: {
-          // The first account hears it first, so it would record it before
-          // the account it is for if it did not leave it.
+          // The first account hears it first and records it, so the account
+          // it is for hears it on record already.
           mentions: (text) =>
             peer.emitMessage(text, DISCORD_CHANNEL, { names: "second", firstBotHearsFirst: true })
               .id,
@@ -155,6 +155,9 @@ describeAdapterConformance(
               replyTo: messageId,
               firstBotHearsFirst: true,
             }).id,
+          addressesNeither: (text) =>
+            peer.emitMessage(text, DISCORD_CHANNEL, { names: "nobody", firstBotHearsFirst: true })
+              .id,
         },
       },
       visible: (at) => peer.visible(at),

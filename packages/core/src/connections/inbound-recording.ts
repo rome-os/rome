@@ -3,19 +3,23 @@
 //
 // Every answerable message a channel delivers is recorded in its chat before
 // anything acts on it, whether or not an agent answers it, and raises
-// MessageSaid. Agents hears it there and decides the wake
-// (sessions/messages-said.ts).
+// MessageSaid once for each of Rome's accounts that hears it. Agents hears it
+// there and decides each account's wake (sessions/messages-said.ts).
 
 import type { Channel, InboundEvent } from "@rome-os/app-runtime";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents } from "../chats/storage/events.js";
-import { messageToRome } from "../chats/storage/message.js";
+import { messageToRome, type RecordedMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
 
 const log = createLogger("inbound-recording");
+
+/** How long a recorded message waits for the other of Rome's accounts in its
+ *  chat to hear it. */
+const HEARD_FOR_MS = 10 * 60_000;
 
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
@@ -73,6 +77,39 @@ export function inboundRecording(
    *  waits for it here. */
   const tails = new Map<string, Promise<number | null>>();
 
+  /** The messages recorded lately, by chat and key, with the channels that
+   *  have heard each one. A second of Rome's accounts hears a group message
+   *  moments after the first, so a message is kept for {@link HEARD_FOR_MS}.
+   *  A message that is no longer here when another account hears it, such as
+   *  after a restart, raises nothing for that account. */
+  const lately = new Map<
+    string,
+    { readonly message: RecordedMessage; readonly channels: Set<string>; readonly at: number }
+  >();
+  const forget = (now: number): void => {
+    for (const [key, entry] of lately) {
+      if (now - entry.at < HEARD_FOR_MS) break;
+      lately.delete(key);
+    }
+  };
+
+  /** Raise MessageSaid for `recorded` as heard on `via`, holding the platform's
+   *  event for the listeners while they hear it. */
+  const raise = async (recorded: RecordedMessage, message: Inbound): Promise<void> => {
+    const { via } = message;
+    const hearingAs = `${via.channel}\0${recorded.id}`;
+    hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
+    try {
+      await deps.events.publish({
+        type: "MessageSaid",
+        message: recorded,
+        via: { channel: via.channel, account: via.account },
+      });
+    } finally {
+      hearing.delete(hearingAs);
+    }
+  };
+
   const recordOne = async (
     message: Inbound,
     subscription: { readonly adapter: ChannelChatAdapter },
@@ -100,22 +137,22 @@ export function inboundRecording(
       ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       at: message.saidAt,
     });
+    const now = Date.now();
+    forget(now);
+    const latelyKey = `${chat.ref.id}\0${message.key}`;
     const recorded = deps.messages.record(said);
-    // Heard already, through this account or another of Rome's: a message
-    // is heard once, so only the first account to hear it decides its wake.
-    // Waking each account that hears it is an open design question.
-    if (recorded === null) return null;
-    const hearingAs = `${via.channel}\0${recorded.id}`;
-    hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
-    try {
-      await deps.events.publish({
-        type: "MessageSaid",
-        message: recorded,
-        via: { channel: via.channel, account: via.account },
-      });
-    } finally {
-      hearing.delete(hearingAs);
+    if (recorded === null) {
+      // On record already. Another of Rome's accounts heard it first, and
+      // this account decides its own wake, on the same record. A redelivery
+      // to an account that heard it already raises nothing.
+      const earlier = lately.get(latelyKey);
+      if (!earlier || earlier.channels.has(via.channel)) return null;
+      earlier.channels.add(via.channel);
+      await raise(earlier.message, message);
+      return earlier.message.id;
     }
+    lately.set(latelyKey, { message: recorded, channels: new Set([via.channel]), at: now });
+    await raise(recorded, message);
     return recorded.id;
   };
 
