@@ -135,7 +135,7 @@ Feishu and Lark are two platforms, because one account cannot sign in to both. A
 
 ## Amendment (2026-10-21): Rome never picks an account's agent
 
-Withdrawn by the 2026-11-19 amendment: a newly connected account starts with the Concierge.
+Narrowed by the 2026-11-20 amendment: a newly connected account of a kind that declares it, today only Rome's Slack app, starts with the Concierge. For every other kind this rule stands.
 
 A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
 
