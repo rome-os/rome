@@ -6909,7 +6909,7 @@ describe("AgentRunner", () => {
       expect(seen).toEqual([]);
     });
 
-    it("reads a platform thread's earlier messages once per thread, the first time a turn is in it", async () => {
+    it("reads a platform thread's earlier messages once per thread when Rome holds no id for the message shown", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "slack_app",

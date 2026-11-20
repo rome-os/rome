@@ -60,6 +60,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     place: ThreadContext,
     before: Date,
     first: number | undefined,
+    since?: number,
   ): Promise<UnseenMessage[] | null> => {
     if (!deps.latest || handsEveryMessage(place.channel)) return null;
     // Rome's record keeps whole seconds, so what was said just before the
@@ -78,7 +79,11 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     read.catch(() => {});
     const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
     if (!page) return null;
-    const said = earlierMessages(...olderThan(page, before, key));
+    // Messages the model was shown already, at or before `since`, are cut by
+    // the platform's own order.
+    const sinceKey = since === undefined ? undefined : deps.messages.byIds([since])[0]?.key;
+    const [below, bound] = olderThan(page, before, key);
+    const said = earlierMessages(newerThan(below, sinceKey), bound);
     const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
     return labelled.map(
       (message, i): UnseenMessage => ({
@@ -107,9 +112,11 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // holds the conversation, and none of its turns saw the thread's replies
     // that did not mention Rome. Only a thread of the session's own
     // conversation is read, so its messages reach no other audience.
-    thread: (place, thread, before, first) =>
+    // A later message in the same thread reads only what was said there
+    // since the last one the model was shown.
+    thread: (place, thread, before, first, since) =>
       place.threadId && thread.startsWith(`${place.threadId}:`)
-        ? readBefore({ ...place, threadId: thread }, before, first)
+        ? readBefore({ ...place, threadId: thread }, before, first, since)
         : Promise.resolve(null),
   };
 }
@@ -127,6 +134,18 @@ function olderThan(
   if (key === undefined) return [page, before];
   const at = page.findIndex((m) => m.messageId === key);
   return [page.slice(at + 1), new Date(8.64e15)];
+}
+
+/** The messages of `page`, newest first, said after the message with
+ *  platform id `key`. A page that does not hold it is kept whole: more was
+ *  said since than one page holds. */
+function newerThan(
+  page: readonly ChannelMessage[],
+  key: string | undefined,
+): readonly ChannelMessage[] {
+  if (key === undefined) return page;
+  const at = page.findIndex((m) => m.messageId === key);
+  return at === -1 ? page : page.slice(0, at);
 }
 
 /** The messages of `page` said before `before`, oldest first, within the

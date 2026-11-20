@@ -2453,8 +2453,9 @@ class AgentSessionImpl implements AgentSession {
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
   /** The platform threads whose earlier messages the model thread has read,
-   *  by the chat id a read of each takes. */
-  private threadsRead = new Set<string>();
+   *  by the chat id a read of each takes, each with the id of the last
+   *  message there the model was shown. */
+  private threadsRead = new Map<string, number | undefined>();
   /**
    * The current model thread started in this session rather than resuming
    * one, so its first turn carries the `<thread_context>` block.
@@ -2811,7 +2812,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
-        this.threadsRead = new Set();
+        this.threadsRead = new Map();
         this.sentHeaders = new Map();
         this.lastContextTokens = undefined;
         this.lastPosition = undefined;
@@ -3257,7 +3258,7 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession.modelThreadId === undefined
     ) {
       this.threadContextInjected = false;
-      this.threadsRead = new Set();
+      this.threadsRead = new Map();
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
@@ -4167,10 +4168,17 @@ class AgentSessionImpl implements AgentSession {
             : null;
         // A message in a platform thread inside the session's conversation,
         // such as a Slack mention in a thread, comes with the thread's
-        // earlier messages, read once per thread in the session.
+        // earlier messages. A later one comes with what was said there since
+        // the last message the model was shown, since the app hears only
+        // the messages that mention it.
+        // Without the id of the last message shown, a thread read once is not
+        // read again, so the model is not shown its messages twice.
         const current = byId(sink.currentId);
         const thread =
-          !this.isSubagent && sink.inThread && !this.threadsRead.has(sink.inThread)
+          !this.isSubagent &&
+          sink.inThread &&
+          (!this.threadsRead.has(sink.inThread) ||
+            this.threadsRead.get(sink.inThread) !== undefined)
             ? sink.inThread
             : undefined;
         const inThread =
@@ -4181,11 +4189,13 @@ class AgentSessionImpl implements AgentSession {
                   thread,
                   current?.at ?? new Date(),
                   current?.id,
+                  this.threadsRead.get(thread),
                 )
                 .catch(() => null)
             : null;
-        // A read that failed is tried again on the thread's next message.
-        if (thread && inThread) this.threadsRead.add(thread);
+        // A read that failed is tried again, from the same point, on the
+        // thread's next message.
+        if (thread && inThread) this.threadsRead.set(thread, current?.id);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
