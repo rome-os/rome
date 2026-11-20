@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from "@playwright/test";
+import { expect, test, type BrowserContext } from "./fixtures.js";
 import type { ProjectDashboardChat, ProjectDashboardResponse } from "@rome/api-types/projects";
 
 function buildChats(count: number): ProjectDashboardChat[] {

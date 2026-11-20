@@ -1,0 +1,125 @@
+[
+  {
+    "id": "sent-bubbles-share-right-edge",
+    "why": "UserMessage stacks the viewer's bubbles in a justify-end column, so every sent bubble ends on the transcript's right edge.",
+    "scope": {
+      "component": "MessageList"
+    },
+    "subjects": [
+      {
+        "locator": {
+          "component": "ChatBubble",
+          "props": {
+            "tone": "sent"
+          }
+        },
+        "level": "box",
+        "edge": "right",
+        "all": true
+      }
+    ]
+  },
+  {
+    "id": "received-bubbles-share-left-edge",
+    "why": "MessageRow puts every agent bubble in its body column, so received bubbles start on one left edge.",
+    "scope": {
+      "component": "MessageList"
+    },
+    "subjects": [
+      {
+        "locator": {
+          "component": "ChatBubble",
+          "props": {
+            "tone": "received"
+          }
+        },
+        "level": "box",
+        "edge": "left",
+        "all": true
+      }
+    ]
+  },
+  {
+    "id": "row-name-lines-up-with-bubble-text",
+    "why": "In the wide MessageRow the name line takes pl-3, the same inset as ChatBubble's px-3, so the name starts where the first bubble's text starts.",
+    "scope": {
+      "component": "MessageRow"
+    },
+    "scopeMinWidth": 640,
+    "subjects": [
+      {
+        "locator": {
+          "testid": "message-row-name"
+        },
+        "level": "text",
+        "edge": "left"
+      },
+      {
+        "locator": {
+          "component": "ChatBubble",
+          "nth": 0
+        },
+        "level": "text",
+        "edge": "left",
+        "all": true
+      }
+    ]
+  },
+  {
+    "id": "own-message-actions-ink-on-bubble-edge",
+    "why": "UserMessage pulls its action row right by --control-action-offset-sm so the last action icon's ink, not its hit area, ends on the bubble's right edge.",
+    "scope": {
+      "component": "UserMessage"
+    },
+    "subjects": [
+      {
+        "locator": {
+          "component": "ChatBubble",
+          "props": {
+            "tone": "sent"
+          }
+        },
+        "level": "box",
+        "edge": "right",
+        "all": true
+      },
+      {
+        "locator": {
+          "component": "IconButton",
+          "nth": -1
+        },
+        "level": "ink",
+        "edge": "right",
+        "all": true
+      }
+    ]
+  },
+  {
+    "id": "own-message-avatar-top-on-bubble-top",
+    "why": "UserMessage's row is items-start, so the sender avatar and the bubble start on one top edge.",
+    "scope": {
+      "component": "UserMessage"
+    },
+    "subjects": [
+      {
+        "locator": {
+          "component": "ChatBubble",
+          "props": {
+            "tone": "sent"
+          }
+        },
+        "level": "box",
+        "edge": "top",
+        "all": true
+      },
+      {
+        "locator": {
+          "component": "SenderAvatar"
+        },
+        "level": "box",
+        "edge": "top",
+        "all": true
+      }
+    ]
+  }
+]

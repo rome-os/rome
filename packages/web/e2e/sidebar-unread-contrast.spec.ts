@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 import { BUILTIN_THEMES } from "../src/lib/themes";
 
 test.use({ viewport: { width: 1280, height: 900 } });

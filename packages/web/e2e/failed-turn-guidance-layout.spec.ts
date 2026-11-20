@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 // A failed turn read back from its stored trace shows the guidance the live
 // banner showed. It sits in the row's body under the commentary the turn had

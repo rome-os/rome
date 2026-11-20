@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 /**
  * The guardian's row lists every account linked to them, and the mock guardian

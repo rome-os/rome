@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures.js";
 
 const INPUT = "[data-chat-composer-box] textarea";
 const KEY = "rome:new-chat-draft";

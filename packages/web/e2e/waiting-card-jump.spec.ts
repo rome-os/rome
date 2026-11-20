@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 import { openWaitingCard, type WaitingCardKind } from "./waiting-card-fixture";
 
 for (const viewport of [

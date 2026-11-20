@@ -47,7 +47,12 @@ export function MessageRow({
             is fractional, and the transcript would carry the fraction into the
             pinned composer. */}
         <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header] @min-[40rem]/message:pl-3">
-          <span className="min-w-0 truncate text-aux text-muted-foreground">{name}</span>
+          <span
+            data-testid="message-row-name"
+            className="min-w-0 truncate text-aux text-muted-foreground"
+          >
+            {name}
+          </span>
           {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
           {headerAccessory ? (
             <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>

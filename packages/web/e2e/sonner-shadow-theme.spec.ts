@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { readFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-import { devices, expect, test } from "@playwright/test";
+import { devices, expect, test } from "./fixtures.js";
 
 /**
  * `.touch-target` (in `@rome-os/ui/styles.css`) raises a control to the 44px

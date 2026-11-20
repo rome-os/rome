@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./fixtures.js";
 
 // A chat bubble is at most the reading width and at most its column. Wide
 // content, such as a table, scrolls inside the bubble instead of pushing it

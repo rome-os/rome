@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 for (const { width, height, hasTouch } of [
   { width: 320, height: 800, hasTouch: true },

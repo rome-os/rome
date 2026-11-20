@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./fixtures.js";
 
 /**
  * The rail names its tiles until the guardian hides the names. A click on its

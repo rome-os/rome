@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.js";
 
 /**
  * Regression guard for rome-os/rome#383: mock mode used to reach the app
