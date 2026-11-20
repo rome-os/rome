@@ -218,6 +218,13 @@ test("link counts only a Socket Mode connection open now, not one that said hell
   }).listen(0);
   await new Promise((r) => instance.once("listening", r));
   const dir = mkdtempSync(join(tmpdir(), "old-link-"));
+  const cloudState = (await (await fetch(`${base}/_control/state`)).json()).other_apps.find(
+    (a) => a.app_id === cloud.app_id,
+  );
+  const cloudTails = {
+    bot_token_tail: cloudState.bot_token_tail,
+    user_token_tail: cloudState.user_token_tail,
+  };
   const file = (name, value) => {
     writeFileSync(join(dir, name), JSON.stringify(value));
     return join(dir, name);
@@ -235,12 +242,7 @@ test("link counts only a Socket Mode connection open now, not one that said hell
       },
       slack: { connection_id: "c-cloud", account_id: `${B}:${GUARDIAN}`, app_id: cloud.app_id },
     }),
-    file("token-file.json", {
-      exists: true,
-      bot_token_tail: (await (await fetch(`${base}/_control/state`)).json()).other_apps.find(
-        (a) => a.app_id === cloud.app_id,
-      ).bot_token_tail,
-    }),
+    file("token-file.json", { exists: true, ...cloudTails }),
   ];
   const opened = await (
     await fetch(`${base}/api/apps.connections.open`, {
@@ -284,6 +286,12 @@ test("link counts only a Socket Mode connection open now, not one that said hell
     const live = await connect();
     const passed = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
     assert.equal(passed.checks.bot_socket_open, true);
+    assert.equal(passed.checks.oauth_token_file, true);
+    // A token file with the bot token but no user token fails the OAuth check.
+    file("token-file.json", { exists: true, bot_token_tail: cloudTails.bot_token_tail });
+    const noUser = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
+    assert.equal(noUser.code, 1);
+    assert.equal(JSON.parse(noUser.stdout).checks.oauth_token_file, false);
     live.close();
   } finally {
     instance.close();

@@ -272,14 +272,19 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
   }
   // The fake shows each app's token tails, never the tokens.
   const { other_apps } = await fetch(`${fake}/_control/state`).then((r) => r.json());
-  const oauthTail = other_apps.find((a) => a.app_id === written.slack.app_id)?.bot_token_tail;
+  // Both tokens: search.messages and the other user-token calls need the user's.
+  const cloudApp = other_apps.find((a) => a.app_id === written.slack.app_id);
   const checks = {
     bot_agent_linked: linked.ok,
     bot_agent: linkBody?.account?.agent ?? null,
     bot_listed: view(bot.connection_id) !== null,
     bot_socket_open: open,
     oauth_listed: view(written.slack.connection_id) !== null,
-    oauth_token_file: tokens.exists === true && tokens.bot_token_tail === oauthTail,
+    oauth_token_file:
+      tokens.exists === true &&
+      Boolean(cloudApp?.bot_token_tail && cloudApp?.user_token_tail) &&
+      tokens.bot_token_tail === cloudApp.bot_token_tail &&
+      tokens.user_token_tail === cloudApp.user_token_tail,
   };
   console.log(JSON.stringify({ ...written, checks }));
   if (!Object.values(checks).every(Boolean)) process.exit(1);
