@@ -355,7 +355,7 @@ const env = {
   // The stand-in, like Rome, replies only to the guardian by default, so R12
   // turns members on first. Case R12-default-mode scores the default.
   r12: { allowMembers: !breaks.has("R12-default-mode") },
-  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10 },
+  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10, answerSeconds: 15 },
   repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
   // R9's existing tests: the stand-in's rome has the four files but no test
   // runner, so a stand-in command plays it. Broken R9-tests-fail fails.

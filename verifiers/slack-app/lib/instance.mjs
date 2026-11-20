@@ -155,7 +155,14 @@ export function instance(inst, slackOrigin) {
         sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
       }
       const at = Date.now();
-      if (!sent.ok) return { chat, at, error: `POST /chat/sessions/${chat}/turns: ${sent.status} ${JSON.stringify(sent.data)}`, reply: "" };
+      if (!sent.ok)
+        return {
+          chat,
+          at,
+          error: `POST /chat/sessions/${chat}/turns: ${sent.status} ${JSON.stringify(sent.data)}`,
+          reply: "",
+          refresh: async () => "",
+        };
       const turnId = sent.data?.turnId ?? null;
       const textOf = (m) => {
         const c = m?.content;
@@ -188,7 +195,9 @@ export function instance(inst, slackOrigin) {
           stableSince = Date.now();
         } else if (Date.now() - stableSince >= settleMs) break;
       }
-      return { chat, at, turnId, reply: last };
+      // The Concierge may answer "On it" and deliver a task's result later;
+      // the caller reads the chat again with refresh().
+      return { chat, at, turnId, reply: last, refresh: async () => (await replies()).join("\n") };
     },
 
     /** Whether the environment can wipe Rome's copy of one chat. */

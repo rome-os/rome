@@ -261,28 +261,58 @@ function groupSummary(observations) {
  * Asks the Concierge as the guardian in the dashboard's own chat on `inst`
  * (in a Slack direct message its actions are withheld), and returns its reply
  * there with the fake's seq read just before. Slack is where results are judged.
+ *
+ * The Concierge may answer "On it" and post a task's result later, so the
+ * chat is read again for up to answerSeconds: until `right(asked)` holds
+ * when given, else until something follows the first reply.
  */
-async function askConcierge(ctx, inst, text) {
+async function askConcierge(ctx, inst, text, { right } = {}) {
   const since = await ctx.slack.seq();
   const asked = await inst.askDashboard(text, {
     timeoutMs: ctx.env.timeouts.replySeconds * 3000,
     settleMs: ctx.env.timeouts.settleSeconds * 1000,
   });
+  const out = { since, at: asked.at, channel: null, reply: asked.reply ?? "", error: asked.error ?? null };
+  const first = out.reply;
+  const deadline = asked.at + ctx.env.timeouts.answerSeconds * 1000;
+  out.right = right ? await right(out) : false;
+  while (!asked.error && !out.right && Date.now() < deadline) {
+    if (!right && out.reply !== first) {
+      // Something followed the first reply; let it settle.
+      await sleep(ctx.env.timeouts.settleSeconds * 1000);
+      out.reply = await asked.refresh();
+      break;
+    }
+    await sleep(Math.min(5000, Math.max(0, deadline - Date.now())));
+    out.reply = await asked.refresh();
+    if (right) out.right = await right(out);
+  }
+  out.waitedSeconds = Math.round((Date.now() - asked.at) / 1000);
   // R9 scans every dashboard reply for #quiet values, as it scans Slack posts.
-  ctx.dashboardReplies?.push({ asked: text, reply: asked.reply ?? "" });
-  return { since, at: asked.at, channel: null, reply: asked.reply ?? "", error: asked.error ?? null };
+  ctx.dashboardReplies?.push({ asked: text, reply: out.reply });
+  ctx.r9Timeline?.push({
+    at: new Date(asked.at).toISOString(),
+    step: "ask",
+    text,
+    waitedSeconds: out.waitedSeconds,
+    right: right ? out.right : undefined,
+    reply: out.reply.slice(0, 200),
+  });
+  return out;
 }
 
 /** A direct message the app hears from the guardian, once its Slack reply came. */
 async function heardDm(ctx, ws, text) {
   const before = await ctx.slack.seq();
+  const at = new Date().toISOString();
   const sent = await ctx.slack.dm(ws.id, ws.guardian, text);
-  await replyAfter(ctx.slack, {
+  const replied = await replyAfter(ctx.slack, {
     team: ws.id,
     channel: sent.channel,
     since: before,
     timeoutMs: ctx.env.timeouts.replySeconds * 1000,
   });
+  ctx.r9Timeline?.push({ at, step: "seed direct message", text, control: sent, replied, repliedBy: replied ? new Date().toISOString() : null });
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
 }
 
@@ -295,7 +325,18 @@ function slackExecutions(groups, ids) {
   return (groups ?? [])
     .flatMap((g) => [g.rootExecution, ...(g.children ?? [])])
     .filter(touches)
-    .map((x) => ({ action: x.actionName, status: x.status, error: x.error ?? null }));
+    .map((x) => {
+      // Everything the listing gives beyond name and status.
+      const { actionName, status, error, ...rest } = x ?? {};
+      const input = x?.args ?? x?.input ?? x?.params;
+      return {
+        action: actionName,
+        status,
+        error: error ?? null,
+        input: input === undefined ? "(the action listing gives no input)" : input,
+        ...rest,
+      };
+    });
 }
 
 /**
@@ -321,8 +362,8 @@ function coverageOf(groups) {
 async function operate(ctx, ws, { asks, judge, methods, ids, inst = ctx.a }) {
   const tries = [];
   for (const text of asks) {
-    const asked = await askConcierge(ctx, inst, text);
-    const right = await judge(asked);
+    const asked = await askConcierge(ctx, inst, text, { right: judge });
+    const right = asked.right;
     // The Concierge's own reply in the direct message is not an attempt.
     const calls = (await ctx.slack.calls({ team: ws.id, since: asked.since })).filter(
       (c) =>
@@ -336,6 +377,7 @@ async function operate(ctx, ws, { asks, judge, methods, ids, inst = ctx.a }) {
       coverage: coverageOf(await inst.executions(asked.at)),
       ...(asked.error ? { error: asked.error } : {}),
       reply: asked.reply.slice(0, 300),
+      waitedSeconds: asked.waitedSeconds,
       calls: calls.map((c) => ({ method: c.method, ok: c.ok, error: c.error ?? null, tokenKind: c.tokenKind })),
       executions: execs,
     });
@@ -376,6 +418,7 @@ export async function liveCheck(ctx) {
   const ops = [];
   const observations = {};
   ctx.dashboardReplies = [];
+  ctx.r9Timeline = [];
   const scoreGroups = ctx.env.r9?.groups === true;
   try {
     const g = { general, news, quiet };
@@ -426,7 +469,8 @@ export async function liveCheck(ctx) {
         })),
       });
     for (const [i, r] of READS.entries()) {
-      await ctx.slack.groupMessage(ws.id, inNews, r.text, news);
+      const at = new Date().toISOString();
+      ctx.r9Timeline.push({ at, step: "seed message in #news", text: r.text, control: await ctx.slack.groupMessage(ws.id, inNews, r.text, news) });
       await groupCheck(`read ${i + 1} (#news)`, {
         asks: READ_ASKS.map((f) => f(g)),
         methods: ["conversations.history", "conversations.replies", "conversations.list", "conversations.info"],
@@ -438,14 +482,24 @@ export async function liveCheck(ctx) {
     // the mention settles before the question.
     const seed = async (q) => {
       const before = await ctx.slack.seq();
-      await ctx.slack.mention(ws.id, inNews, q.found.text, news);
-      if (q.outside) await ctx.slack.groupMessage(ws.id, inQuiet, q.outside.text, quiet);
-      await replyAfter(ctx.slack, {
+      const at = new Date().toISOString();
+      const mention = await ctx.slack.mention(ws.id, inNews, q.found.text, news);
+      const outside = q.outside ? await ctx.slack.groupMessage(ws.id, inQuiet, q.outside.text, quiet) : null;
+      const replied = await replyAfter(ctx.slack, {
         team: ws.id,
         channel: news,
         since: before,
         timeoutMs: ctx.env.timeouts.replySeconds * 1000,
       });
+      const repliedBy = replied ? new Date().toISOString() : null;
+      const replies = (await ctx.slack.posts({ team: ws.id, channel: news, since: before })).map((p) => ({
+        seq: p.seq,
+        ts: p.ts ?? null,
+        thread_ts: p.thread_ts ?? p.threadTs ?? null,
+        underMention: (p.thread_ts ?? p.threadTs) === mention.ts,
+        text: p.text?.slice(0, 120),
+      }));
+      ctx.r9Timeline.push({ at, step: "seed mention in #news", text: q.found.text, control: mention, outside, replied, repliedBy, replies });
       await sleep(ctx.env.timeouts.settleSeconds * 1000);
     };
     const searchOpts = (q, asks) => ({ asks, methods: null, ids: [news, quiet, dm], judge: async (a) => holds(a.reply, q.found.mark) });
@@ -456,11 +510,15 @@ export async function liveCheck(ctx) {
     // Searches after a wipe: scored on the direct message; in #news only
     // with --r9-groups.
     const wipe = async (conversation, texts) => {
+      const at = new Date().toISOString();
+      let r;
       try {
-        return await ctx.a.wipeChat(conversation, { texts });
+        r = await ctx.a.wipeChat(conversation, { texts });
       } catch (err) {
-        return { ok: false, error: err.message };
+        r = { ok: false, error: err.message };
       }
+      ctx.r9Timeline.push({ at, step: "wipe", conversation, done: new Date().toISOString(), ok: r?.ok !== false });
+      return r;
     };
     const afterWipe = ["read after wipe (direct message)", "search after wipe (direct message)"];
     if (!ctx.a.canWipe()) {
@@ -562,6 +620,8 @@ export async function liveCheck(ctx) {
     ...ctx.dashboardReplies.map((r) => ({ where: "dashboard chat", text: r.reply })),
   ].filter((l) => outsideMarks.some((m) => holds(l.text, m)));
   ctx.dashboardReplies = undefined;
+  evidence.timeline = ctx.r9Timeline;
+  ctx.r9Timeline = undefined;
   evidence.userTokenCalls = userCalls.map((c) => ({ seq: c.seq, method: c.method, teamId: c.teamId }));
   evidence.reactionCalls = reactionCalls.length;
   evidence.leaks = leaks.map((l) => ({ where: l.where, text: l.text.slice(0, 200) }));
@@ -649,6 +709,15 @@ const SLACK = /slack/i;
 
 const OLD_KINDS = ["slack_bot", "slack"];
 
+/** An entry's visible name: the API's display name when it gives one, else "Slack". */
+function visibleName(c) {
+  const named = c?.displayName ?? c?.display_name ?? c?.name ?? c?.title;
+  if (typeof named === "string" && named) return named;
+  // A label that is the kind itself ("slack_app") is not what the page shows.
+  if (typeof c?.label === "string" && c.label && c.label !== c.connectionKind && !/^[a-z0-9]+_[a-z0-9_]+$/.test(c.label)) return c.label;
+  return "Slack";
+}
+
 /**
  * The Slack entries Connect shows (`GET /connections`), connected or not:
  * `official` counts the official kind's, `oldOffered` the old kinds still
@@ -663,10 +732,13 @@ async function pickerSlack(inst, officialKind) {
     .map((c) => ({ id: c.id ?? null, kind: c.connectionKind, label: c.label }));
   const official = entries.filter((e) => e.kind === officialKind);
   const oldOffered = entries.filter((e) => e.id === null && OLD_KINDS.includes(e.kind));
-  return { entries, official: official.length, officialLabel: official[0]?.label ?? null, oldOffered: oldOffered.length };
+  return { entries, official: official.length, officialLabel: visibleName(list.find((c) => c.connectionKind === officialKind)), oldOffered: oldOffered.length };
 }
 
-/** How many times the dashboard's Connections page shows the official entry's label. */
+/**
+ * The Slack entries the dashboard's Connections page offers under "Add a
+ * connection", by visible name, read once the names render.
+ */
 async function pickerPage(ctx, inst, label) {
   let chromium;
   const remote = ctx.env.browser?.ws_endpoint;
@@ -696,16 +768,32 @@ async function pickerPage(ctx, inst, label) {
       );
     const page = await context.newPage();
     const url = `${inst.origin}/settings/connections`;
+    const startedAt = Date.now();
     const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    // The list renders after its fetch: wait for it, not for the network.
-    await page.waitForFunction((l) => document.body.innerText.includes(l), label ?? "Slack", { timeout: 30_000 });
+    // The list renders after its fetch: wait for the names under "Add a
+    // connection", not for the network.
+    const linesAfter = () => {
+      const lines = document.body.innerText.split("\n").map((x) => x.trim()).filter(Boolean);
+      const at = lines.findIndex((x) => /^add a connection$/i.test(x));
+      return at < 0 ? null : lines.slice(at + 1);
+    };
+    try {
+      await page.waitForFunction(`(${linesAfter})()?.length > 0`, null, { timeout: 30_000 });
+    } catch {
+      const seen = (await page.evaluate(() => document.body.innerText)).slice(0, 500);
+      return { url, status: res?.status() ?? null, error: `no names under "Add a connection" after 30 s (page began: ${JSON.stringify(seen)})` };
+    }
     await page.waitForTimeout(1000);
-    const lines = (await page.evaluate(() => document.body.innerText)).split("\n").map((x) => x.trim());
+    const lines = (await page.evaluate(() => document.body.innerText)).split("\n").map((x) => x.trim()).filter(Boolean);
+    const at = lines.findIndex((x) => /^add a connection$/i.test(x));
+    const offered = lines.slice(at + 1);
     return {
       url,
       status: res?.status() ?? null,
+      renderedMs: Date.now() - startedAt,
       label,
-      official: lines.filter((x) => x === label).length,
+      offeredSlack: offered.filter((x) => /slack/i.test(x)),
+      exactLabel: offered.filter((x) => x === label).length,
       slackLines: lines.filter((x) => /slack/i.test(x)).slice(0, 20),
     };
   } catch (err) {
@@ -769,21 +857,28 @@ async function botSends(ctx, ws, bot) {
 }
 
 /** The old OAuth slack sends: a Concierge post to #general arrives from that app. */
-async function oauthSends(ctx, ws, oauth, sentence, markWord) {
+async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS) {
   const w = (await ctx.slack.state()).workspaces.find((x) => x.id === ws.id);
   const general = w?.groups?.find((g) => g.name === "general")?.id;
+  const marked = async (since) =>
+    (await ctx.slack.posts({ team: ws.id, channel: general, since })).filter((p) => holds(p.text, markWord));
   const tries = [];
-  for (const f of SEND_ASKS) {
-    const asked = await askConcierge(ctx, ctx.b, f(sentence, { general }));
-    const posts = (await ctx.slack.posts({ team: ws.id, channel: general, since: asked.since })).filter((p) =>
-      holds(p.text, markWord),
-    );
-    tries.push({ posts: posts.map((p) => ({ appId: p.appId ?? null, tokenKind: p.tokenKind })), reply: asked.reply.slice(0, 200) });
+  for (const f of asks) {
+    const asked = await askConcierge(ctx, ctx.b, f(sentence, { general }), {
+      right: async (a) => (await marked(a.since)).length > 0,
+    });
+    const posts = await marked(asked.since);
+    tries.push({
+      at: new Date(asked.at).toISOString(),
+      waitedSeconds: asked.waitedSeconds,
+      posts: posts.map((p) => ({ appId: p.appId ?? null, tokenKind: p.tokenKind })),
+      reply: asked.reply.slice(0, 200),
+    });
     const fromOld = posts.some((p) => p.appId === oauth.app_id);
     if (fromOld) return { ok: true, tries, fromApps: posts.map((p) => p.appId) };
     if (posts.length) return { ok: false, tries, fromApps: posts.map((p) => p.appId), why: "the post came from another app" };
   }
-  return { ok: null, tries, why: "no post arrived in 3 asks" };
+  return { ok: null, tries, why: `no post arrived in ${asks.length} ask(s)` };
 }
 
 export async function r10(ctx) {
@@ -832,9 +927,27 @@ export async function r10(ctx) {
   pickerProblems(after, "with the old connections present");
   const page = await pickerPage(ctx, inst, after.officialLabel ?? before.officialLabel);
   evidence.pickerPage = page;
-  if (page.error) unchecked.push(`the page in a browser: ${page.error}`);
-  else if (page.official !== 1)
-    problems.push(`the Connections page shows the official entry "${page.label}" ${page.official} times, not once`);
+  if (page.error) unchecked.push(`the page part (read in a browser): ${page.error}`);
+  else if (page.offeredSlack.length > 1)
+    problems.push(`the Connections page offers ${page.offeredSlack.length} Slack entries under "Add a connection" (${page.offeredSlack.join(", ")}), not one`);
+
+  // Unscored: with both present, which app a Concierge send comes from.
+  const both = await oauthSends(ctx, ws, oauth, "The harvest supper is at the Larkholme barn.", "Larkholme", SEND_ASKS.slice(0, 1));
+  evidence.observations = { bothPresentSendFrom: both.fromApps ?? null, bothPresent: both };
+
+  // The old kinds are scored alone: the official app on this instance is
+  // disconnected first, since with both present the product sends as the app.
+  const officialHeld = after.entries?.filter((e) => e.kind === officialKind && e.id) ?? [];
+  let alone = true;
+  for (const e of officialHeld) {
+    try {
+      await inst.disconnect(e.id);
+    } catch (err) {
+      alone = false;
+      evidence.officialDisconnect = err.message;
+    }
+  }
+  evidence.officialDisconnected = officialHeld.map((e) => e.id);
 
   // Each old kind still sends, before and after a restart.
   const sends = {};
@@ -851,14 +964,11 @@ export async function r10(ctx) {
     const o = await oauthSends(ctx, ws, oauth, `The harvest supper is at the ${word} barn.`, word);
     sends[when] = { slack_bot: b, slack: o };
     if (!b.ok) problems.push(`slack_bot's reply did not arrive ${when}`);
-    if (o.ok === false) problems.push(`the old OAuth slack's send ${when} came from ${o.fromApps.join(", ")}, not its app ${oauth.app_id}`);
-    if (o.ok === null) unchecked.push(`the old OAuth slack's send ${when}: ${o.why}`);
+    if (!alone) unchecked.push(`the old OAuth slack's send ${when}: the official app could not be disconnected first`);
+    else if (o.ok === false) problems.push(`the old OAuth slack's send ${when} came from ${o.fromApps.join(", ")}, not its app ${oauth.app_id}`);
+    else if (o.ok === null) unchecked.push(`the old OAuth slack's send ${when}: ${o.why}`);
   }
   evidence.sends = sends;
-  // Unscored: with both present, which app a Concierge send came from.
-  evidence.observations = {
-    bothPresentSendFrom: sends["before restart"].slack.fromApps ?? null,
-  };
 
   // Disconnected, neither can be connected again.
   for (const [kind, c] of [["slack_bot", bot], ["slack", oauth]]) {
@@ -878,11 +988,12 @@ export async function r10(ctx) {
 
   const said = (o) => (o.ok ? "yes" : o.ok === false ? "no" : "not seen");
   const summary =
-    `Official Slack entries in Connect: ${before.official ?? "?"} before, ${after.official ?? "?"} after the upgrade, ${final.official ?? "?"} at the end; on the page ${page.official ?? "not read"}; old kinds offered: ${before.oldOffered ?? "?"}/${after.oldOffered ?? "?"}/${final.oldOffered ?? "?"}. ` +
+    `Official Slack entries in Connect: ${before.official ?? "?"} before, ${after.official ?? "?"} after the upgrade, ${final.official ?? "?"} at the end; under "Add a connection" on the page ${page.error ? "not read" : page.offeredSlack.length}; old kinds offered: ${before.oldOffered ?? "?"}/${after.oldOffered ?? "?"}/${final.oldOffered ?? "?"}. ` +
     `New slack_bot and slack refused: ${evidence.newConnect_slack_bot.refused && evidence.newConnect_slack.refused ? "yes" : "no"}. ` +
     `slack_bot answered before/after restart: ${said(sends["before restart"].slack_bot)}/${said(sends["after restart"].slack_bot)}; ` +
-    `old slack sent before/after restart: ${said(sends["before restart"].slack)}/${said(sends["after restart"].slack)}. ` +
-    `Reconnect after disconnect refused: ${evidence.reconnect_slack_bot?.refused && evidence.reconnect_slack?.refused ? "yes" : "no"}.`;
+    `old slack (official app disconnected) sent before/after restart: ${said(sends["before restart"].slack)}/${said(sends["after restart"].slack)}. ` +
+    `Reconnect after disconnect refused: ${evidence.reconnect_slack_bot?.refused && evidence.reconnect_slack?.refused ? "yes" : "no"}. ` +
+    `Unscored: with the official app also connected, the send came from ${both.fromApps?.join(", ") || "no app"}.`;
   if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${summary}`, evidence };
   if (unchecked.length) return { result: "not checked", reason: `not all checked (${unchecked.join("; ")}). ${summary}`, evidence };
   return { result: "pass", reason: summary, evidence };

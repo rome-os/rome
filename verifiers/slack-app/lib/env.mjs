@@ -54,6 +54,8 @@ export function loadEnv(path) {
   env.timeouts ??= {};
   env.timeouts.replySeconds ??= 90;
   env.timeouts.settleSeconds ??= 10;
+  // How long a dashboard ask waits for a task to deliver its answer.
+  env.timeouts.answerSeconds ??= 180;
   env.timeouts.restartSeconds ??= 300;
   // The environment does not name its checkouts yet, so R11 can take them
   // from the shell.

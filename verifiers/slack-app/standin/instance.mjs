@@ -15,6 +15,7 @@ import { readBody, send, serve } from "./serve.mjs";
 const { NAME, PORT, CLOUD, SLACK, SECRET, STATE_FILE } = process.env;
 const breaks = new Set((process.env.BREAK ?? "").split(",").filter(Boolean));
 const rand = () => randomBytes(8).toString("hex");
+const TASK_DELAY_MS = 4000;
 
 const db = existsSync(STATE_FILE)
   ? JSON.parse(readFileSync(STATE_FILE, "utf8"))
@@ -152,45 +153,54 @@ const server = await serve(async (req, res, url) => {
   if (p === "/api/connections" && req.method === "GET") {
     // The official kind shows once: connected, else as its placeholder.
     const placeholders = [
-      ...(db.connections.length ? [] : [{ id: null, connectionKind: "slack_app", label: "Slack" }]),
+      ...(db.connections.length ? [] : [{ id: null, connectionKind: "slack_app", label: "slack_app" }]),
       { id: null, connectionKind: "discord", label: "Discord" },
       ...(breaks.has("R10-two-entries") ? [{ id: null, connectionKind: "slack_bot", label: "Slack bot" }] : []),
     ];
     const held = [
-      ...db.connections.map((c) => ({ id: c.id, connectionKind: "slack_app", label: "Slack", state: "working" })),
+      ...db.connections.map((c) => ({ id: c.id, connectionKind: "slack_app", label: "slack_app", state: "working" })),
       ...(db.old ?? []).map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
     ];
     return send(res, 200, { connections: [...held, ...placeholders] });
   }
   if (p === "/settings/connections") {
-    // Each entry's label on its own line, as the dashboard's list shows it.
-    const entries = [
-      "Slack",
+    // Held connections, then the kinds offered under "Add a connection", each
+    // name on its own line. The list renders after a fetch, as the dashboard's does.
+    const held = [
+      ...db.connections.map(() => "Slack"),
       ...(db.old ?? []).map((c) => (c.kind === "slack_bot" ? "Slack bot (Socket Mode)" : "Slack (OAuth)")),
+    ];
+    const offered = [
+      "Slack",
       "Discord",
       ...(breaks.has("R10-two-entries") ? ["Slack bot"] : []),
       ...(breaks.has("R10-page-twice") ? ["Slack"] : []),
     ];
+    const li = (xs) => xs.map((e) => `<li><div>${e}</div><button>Open</button></li>`).join("");
+    const body = `<h2>Your connections</h2><ul>${li(held)}</ul><h2>Add a connection</h2><ul>${li(offered)}</ul>`;
     return send(
       res,
       200,
-      `<!doctype html><html><body><h1>Connections</h1><ul>${entries
-        .map((e) => `<li><div>${e}</div><button>Open</button></li>`)
-        .join("")}</ul></body></html>`,
+      `<!doctype html><html><body><h1>Connections</h1><div id="list">Loading…</div><script>setTimeout(() => { document.getElementById("list").innerHTML = ${JSON.stringify(body)}; }, 1500);</script></body></html>`,
       "text/html",
     );
   }
-  // The dashboard's chat with the Concierge, where its actions run.
+  // The dashboard's chat with the Concierge, where its actions run. Like the
+  // product, it answers "On it" at once and posts the task's result later.
   if (p === "/api/chat/sessions/concierge/turns" && req.method === "POST") {
     const { text } = JSON.parse(await readBody(req));
-    const conn = db.connections[0];
-    const reply = (conn && (await act(conn, text ?? "", null))) ?? "Sure, happy to help with that.";
     db.webchat = [
       ...(db.webchat ?? []),
       { id: rand(), role: "user", content: text },
-      { id: rand(), role: "assistant", content: reply },
+      { id: rand(), role: "assistant", content: "On it." },
     ];
     save();
+    setTimeout(async () => {
+      const conn = db.connections[0] ?? (db.tokenFile ? { team: db.tokenFile.teamId } : null);
+      const reply = (conn && (await act(conn, text ?? "", null))) ?? "Sure, happy to help with that.";
+      db.webchat = [...db.webchat, { id: rand(), role: "assistant", content: reply }];
+      save();
+    }, TASK_DELAY_MS);
     return send(res, 200, { turnId: rand(), disposition: "started", sessionId: "concierge" });
   }
   if (p === "/api/chat/sessions/concierge/messages") return send(res, 200, db.webchat ?? []);
@@ -337,9 +347,9 @@ async function act(conn, text, dmChannel) {
     return "Done.";
   }
   if (send) {
-    // Like the connector, a Slack token file (an old OAuth slack connection)
-    // wins over the new connection.
-    const token = db.tokenFile?.botToken ?? conn.botToken;
+    // Like the product, the official app sends when connected; an old OAuth
+    // slack connection's token file serves when it is alone.
+    const token = conn.botToken ?? db.tokenFile?.botToken;
     const channel = id ?? (await byName(send[1]));
     if (!channel) return `I can't find #${send[1]}.`;
     const r = await api(token, "chat.postMessage", { channel, text: send[2] });

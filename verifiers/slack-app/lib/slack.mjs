@@ -19,6 +19,7 @@ export function fakeSlack(base) {
     channel: r.event?.channel,
     ts: r.event?.ts,
     delivery: r.delivery,
+    eventSent: r.event_sent ?? null,
   });
   return {
     origin: new URL(base).origin,
