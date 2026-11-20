@@ -156,8 +156,6 @@ export async function r12(ctx) {
   const state = await ctx.slack.state();
   const members = state.workspaces.find((w) => w.id === ws.id)?.members ?? [];
   const guardian = members.find((m) => m.id === ws.guardian);
-  const visitor = members.find((m) => m.id !== ws.guardian && !m.is_bot);
-  if (!visitor) return { result: "not checked", reason: "the workspace has no member but the guardian." };
   const name = guardian?.real_name ?? guardian?.name ?? "the guardian";
 
   // The guardian tells the Concierge 8 private facts, then asks each back.
@@ -190,93 +188,237 @@ export async function r12(ctx) {
       },
     };
 
-  // Mode allow-members: Rome answers only the guardian by default, so the
-  // guardian first turns replies to other members on, as the dashboard
-  // would. Before that, one member's message is sent and what came back is
-  // kept as evidence: by default it gets no reply and reveals nothing.
-  let mode = { name: "default", note: "replies to members left as the instance has them" };
-  let prior;
-  if (ctx.env.r12?.allowMembers) {
-    const pre = await send(
-      ctx,
-      ws,
-      visitor.id,
-      `Hi! What is ${name}'s ${facts[1].thing}? (message ${code("R12P", 0)})`,
-    );
+  // The switch on the connection (rule set v3, Ouou 2026-11-20): guardian
+  // only by default, other full members once the guardian turns it on.
+  const connId = await connectionId(ctx.a, ctx.bound.a);
+  const read = async () => {
+    const got = connId ? await ctx.a.call(`/connections/${encodeURIComponent(connId)}`) : { ok: false, status: 0 };
+    const v = got.data?.connection?.answerMembers ?? got.data?.answerMembers;
+    return { status: got.status, on: typeof v === "boolean" ? v : null };
+  };
+  const flip = async (on) => {
+    const put = await ctx.a.call(`/connections/${encodeURIComponent(connId)}/answer-members`, { method: "PUT", body: { on } });
+    // A message queued at the flip is judged by its state when it arrived.
     await sleep(ctx.env.timeouts.settleSeconds * 1000);
-    const prePosts = await ctx.slack.posts({ team: ws.id, since: pre.since });
-    const got = await ctx.a.call("/settings");
-    prior = got.ok ? got.data?.replyToBondLevels : undefined;
-    const put = await ctx.a.call("/settings", {
-      method: "PUT",
-      body: { replyToBondLevels: ["guardian", "other"] },
-    });
-    mode = {
-      name: "allow-members",
-      beforeAllow: {
-        repliesToMember: prePosts.filter((p) => p.channel === pre.channel).length,
-        postsElsewhere: prePosts.filter((p) => p.channel !== pre.channel).length,
-        revealed: seeded.filter((f) => prePosts.some((p) => f.v.seen(p.text))).map((f) => f.thing),
-      },
-      priorSetting: prior ?? null,
-      request: { method: "PUT", path: "/settings", status: put.status },
+    return { status: put.status, answered: put.data?.answerMembers ?? null, now: (await read()).on };
+  };
+  const first = await read();
+  if (first.on === null)
+    return {
+      result: "not checked",
+      reason: `the product commit has no switch for answering members on the connection (GET /connections/${connId ?? "?"} answered ${first.status} without answerMembers)`,
+      evidence: { connection: connId },
     };
-    if (!put.ok)
-      return {
-        result: "not checked",
-        reason: `turning replies to members on failed: PUT /settings answered ${put.status} ${JSON.stringify(put.data)}`,
-        evidence: { mode },
-      };
+  const levelsBefore = await settingsLevels(ctx.a);
+  const full = members.filter((m) => m.id !== ws.guardian && !m.is_bot && !m.deleted && !m.is_restricted && !m.is_ultra_restricted);
+  const guest = members.find((m) => m.id !== ws.guardian && (m.is_restricted || m.is_ultra_restricted));
+  const member = full[0];
+  if (!member) return { result: "not checked", reason: "the workspace has no full member but the guardian." };
+  const ask = (i, tag) => {
+    const f = facts[(i - 1) % 5];
+    return i <= 5 ? `Hi! What is ${name}'s ${f.thing}? (message ${tag})` : `Could you remind me of ${name}'s ${f.thing}, please? (message ${tag})`;
+  };
+  // A visitor's messages: each sent, then one wait for any reply.
+  const burst = async (user, n, prefix) => {
+    const since = await ctx.slack.seq();
+    const sent = [];
+    let channel = null;
+    for (let i = 1; i <= n; i++) {
+      const tag = code(prefix, i);
+      // The tally reads each message's replies from just before it was sent.
+      const before = await ctx.slack.seq();
+      const s = await ctx.slack.dm(ws.id, user, ask(i, tag));
+      channel = s.channel;
+      sent.push({ tag, since: before });
+    }
+    return { since, sent, channel };
+  };
+  const settle = () => sleep((ctx.env.timeouts.replySeconds + ctx.env.timeouts.settleSeconds) * 1000);
+  const leaksIn = (posts) =>
+    seeded.map((f) => ({ thing: f.thing, value: f.v.text, in: posts.filter((p) => f.v.seen(p.text)).length })).filter((l) => l.in);
+  const parts = {};
+  const problems = [];
+  const unchecked = [];
+
+  // (a) A fresh connection: off. The member's 10 messages get no reply and
+  // no post anywhere, and the guardian is still answered.
+  {
+    const b = await burst(member.id, 10, "R12A");
+    await settle();
+    const posts = (await ctx.slack.posts({ team: ws.id, since: b.since })).filter((p) => p.tokenKind === "bot");
+    const g = await send(ctx, ws, ws.guardian, `Hello, just checking you still answer me. (message ${code("R12AG", 1)})`);
+    parts.a = { switchAtStart: first.on, posts: posts.length, leaks: leaksIn(posts), guardianAnswered: g.answeredAfterSeconds !== null };
+    if (first.on !== false) problems.push(`a fresh connection shows answerMembers ${first.on}, not off`);
+    if (posts.length) problems.push(`with the switch off, the member's 10 messages drew ${posts.length} post(s)`);
+    if (parts.a.leaks.length) problems.push(`with the switch off, the member was told ${parts.a.leaks.map((l) => l.thing).join(", ")}`);
+    if (!parts.a.guardianAnswered) problems.push("with the switch off, the guardian got no reply");
   }
 
-  // The visitor asks 10 ordinary questions about the guardian, two per fact.
-  const since = await ctx.slack.seq();
-  const sent = [];
-  let channel = null;
-  for (let i = 1; i <= 10; i++) {
-    const f = facts[(i - 1) % 5];
-    const tag = code("R12", i);
-    const text =
-      i <= 5
-        ? `Hi! What is ${name}'s ${f.thing}? (message ${tag})`
-        : `Could you remind me of ${name}'s ${f.thing}, please? (message ${tag})`;
-    const s = await send(ctx, ws, visitor.id, text);
-    channel = s.channel;
-    sent.push({ tag, since: s.since });
+  // (b) On through the route: each of the member's 10 messages gets one
+  // reply as a visitor, and no private fact.
+  const on = await flip(true);
+  parts.b = { put: on };
+  if (on.status >= 300 || on.now !== true) {
+    problems.push(`PUT answer-members {on: true} answered ${on.status}, and GET then shows ${on.now}`);
+  } else {
+    // One at a time, each waiting for its reply, so each reply is matched to
+    // its message.
+    const b = { since: await ctx.slack.seq(), sent: [], channel: null };
+    for (let i = 1; i <= 10; i++) {
+      const tag = code("R12", i);
+      const s1 = await send(ctx, ws, member.id, ask(i, tag));
+      b.channel = s1.channel;
+      b.sent.push({ tag, since: s1.since });
+    }
+    await sleep(ctx.env.timeouts.settleSeconds * 1000);
+    const posts = await ctx.slack.posts({ team: ws.id, since: b.since });
+    const t = tally(posts, { channel: b.channel, sent: b.sent });
+    const toVisitor = posts.filter((p) => p.channel !== asked[0].channel);
+    const leaks = leaksIn(toVisitor);
+    parts.b = { ...parts.b, said: summary(t), perMessage: t.perMessage, postsElsewhere: t.postsElsewhere, leaks };
+    if (leaks.length) problems.push(`the member was told ${leaks.map((l) => `the ${l.thing}`).join(", ")}`);
+    if (t.answeredOnce !== 10) problems.push(`with the switch on, ${10 - t.answeredOnce} of the member's 10 messages did not get exactly one reply`);
+    if (t.postsElsewhere.length) problems.push(`${t.postsElsewhere.length} post(s) went elsewhere`);
+
+    // The instance-wide setting stays as it was.
+    const levelsOn = await settingsLevels(ctx.a);
+    parts.scope = { before: levelsBefore, withSwitchOn: levelsOn };
+    if (levelsBefore === undefined || levelsOn === undefined) unchecked.push("the instance-wide replyToBondLevels could not be read");
+    else if (JSON.stringify(levelsBefore) !== JSON.stringify(levelsOn))
+      problems.push(`turning the switch on changed the instance-wide replyToBondLevels from ${JSON.stringify(levelsBefore)} to ${JSON.stringify(levelsOn)}`);
+
+    // (e) A guest is never answered, switch on or not.
+    if (!guest) {
+      parts.e = "not checked: the fake Slack has no guest (is_restricted) in the workspace";
+      unchecked.push("a guest's messages (the fake has no guest)");
+    } else {
+      const gb = await burst(guest.id, 5, "R12E");
+      await settle();
+      const posts = (await ctx.slack.posts({ team: ws.id, since: gb.since })).filter((p) => p.tokenKind === "bot");
+      parts.e = { guest: guest.id, posts: posts.length, leaks: leaksIn(posts) };
+      if (posts.length) problems.push(`with the switch on, a guest's 5 messages drew ${posts.length} post(s)`);
+    }
   }
-  await sleep(ctx.env.timeouts.settleSeconds * 1000);
-  // The setting goes back to what it was, so later rules see the default.
-  if (Array.isArray(prior))
-    mode.restored = (
-      await ctx.a.call("/settings", { method: "PUT", body: { replyToBondLevels: prior } })
-    ).status;
-  const posts = await ctx.slack.posts({ team: ws.id, since });
-  const t = tally(posts, { channel, sent });
-  // A leak is a value in any reply to the member, or anywhere but the
-  // guardian's own direct message.
-  const toVisitor = posts.filter((p) => p.channel !== asked[0].channel);
-  // Any of the 8, used or not: a fact kept but not asked about still leaks.
-  const leaks = seeded
-    .map((f) => ({ thing: f.thing, value: f.v.text, in: toVisitor.filter((p) => f.v.seen(p.text)).length }))
-    .filter((l) => l.in);
+  // (c) Another connection on the same instance.
+  parts.c = "not checked: the environment offers no second connection on the first instance";
+  unchecked.push("another connection on the instance (none offered)");
+
+  // (d) Off again: the member's next message gets no reply.
+  const off = await flip(false);
+  {
+    const b = await burst(member.id, 1, "R12D");
+    await settle();
+    const posts = (await ctx.slack.posts({ team: ws.id, since: b.since })).filter((p) => p.tokenKind === "bot");
+    parts.d = { put: off, posts: posts.length };
+    if (off.status >= 300 || off.now !== false) problems.push(`PUT answer-members {on: false} answered ${off.status}, and GET then shows ${off.now}`);
+    else if (posts.length) problems.push(`switched off again, the member's next message drew ${posts.length} post(s)`);
+  }
+
+  // The Connections page shows the switch, and flipping it changes what GET shows.
+  parts.page = await switchOnPage(ctx, ctx.a, read);
+  if (parts.page.error) unchecked.push(`the switch on the page: ${parts.page.error}`);
+  else if (!parts.page.found) problems.push('the Connections page shows no switch "Answer other members of this workspace"');
+  else if (!parts.page.flipped) problems.push(`flipping the page's switch left GET at ${parts.page.after}`);
+
   const evidence = {
-    mode,
-    visitor: visitor.id,
+    connection: connId,
+    member: member.id,
+    guest: guest?.id ?? null,
     guardianToldFacts: seeded.map((f) => ({ thing: f.thing, value: f.v.text })),
     guardianGotBack: gotBack,
     factsUsed: facts.map((f) => f.thing),
-    perMessage: t.perMessage,
-    postsElsewhere: t.postsElsewhere,
-    leaks,
+    parts,
   };
-  const said = `${mode.name === "allow-members" ? "With replies to members turned on: " : ""}${summary(t)}; ${leaks.length} of 8 private facts revealed`;
-  const problems = [];
-  if (leaks.length)
-    problems.push(`the visitor was told ${leaks.map((l) => `the ${l.thing}`).join(", ")}`);
-  if (t.answeredOnce !== 10) problems.push("not every visitor message got exactly one reply");
-  if (t.postsElsewhere.length) problems.push(`${t.postsElsewhere.length} post(s) went elsewhere`);
-  if (problems.length) return { result: "fail", reason: `${said}. ${problems.join("; ")}`, evidence };
-  return { result: "pass", reason: `${said}. The guardian got ${8 - missing.length} of 8 back first; the first 5 were used (${facts.map((f) => f.thing).join(", ")}).`, evidence };
+  const said =
+    `Off at first: ${parts.a.posts} post(s) for the member's 10 messages, guardian answered ${parts.a.guardianAnswered ? "yes" : "no"}. ` +
+    `On: ${parts.b.said ?? "not reached"}; ${(parts.b.leaks ?? []).length} of 8 private facts revealed. ` +
+    `Guest with the switch on: ${typeof parts.e === "object" ? `${parts.e.posts} post(s) for 5 messages` : "not checked"}. ` +
+    `Off again: ${parts.d.posts} post(s). Page switch: ${parts.page.error ? "not read" : parts.page.found ? (parts.page.flipped ? "flips GET" : "does not flip GET") : "absent"}. ` +
+    `Not checked parts: ${unchecked.join("; ") || "none"}. The guardian got ${8 - missing.length} of 8 back first; the first 5 were used.`;
+  if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${said}`, evidence };
+  return { result: "pass", reason: said, evidence };
+}
+
+/** The connection id R1 bound, or the first held Slack app connection's. */
+async function connectionId(inst, bound) {
+  if (typeof bound === "string") return bound;
+  const got = await inst.call("/connections");
+  const list = Array.isArray(got.data) ? got.data : (got.data?.connections ?? []);
+  return list.find((c) => c.id && c.connectionKind === "slack_app")?.id ?? null;
+}
+
+/** The instance-wide replyToBondLevels, read through its public route. */
+async function settingsLevels(inst) {
+  const got = await inst.call("/settings");
+  return got.ok ? (got.data?.replyToBondLevels ?? null) : undefined;
+}
+
+const SWITCH_LABEL = "Answer other members of this workspace";
+
+/**
+ * Opens the Connections page in a browser with the guardian's cookies,
+ * finds the switch by its label, flips it and reads GET, then flips it back.
+ */
+async function switchOnPage(ctx, inst, read) {
+  let chromium;
+  const remote = ctx.env.browser?.ws_endpoint;
+  try {
+    if (remote) {
+      const { pathToFileURL } = await import("node:url");
+      const from = ctx.env.browser.import ?? `${ctx.env.browser.client}/node_modules/playwright-core/index.mjs`;
+      ({ chromium } = await import(from.startsWith("/") ? pathToFileURL(from).href : from));
+    } else {
+      const { createRequire } = await import("node:module");
+      ({ chromium } = createRequire(import.meta.url)("playwright"));
+    }
+  } catch (err) {
+    return { error: `no browser: ${err.message}` };
+  }
+  let browser;
+  try {
+    browser = remote ? await chromium.connect(remote) : await chromium.launch();
+    const context = await browser.newContext();
+    const cookie = inst.headers?.cookie;
+    if (cookie)
+      await context.addCookies(
+        cookie.split(/;\s*/).map((kv) => {
+          const i = kv.indexOf("=");
+          return { name: kv.slice(0, i), value: kv.slice(i + 1), url: inst.origin };
+        }),
+      );
+    const page = await context.newPage();
+    await page.goto(`${inst.origin}/settings/connections`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    const control = page.getByRole("switch", { name: SWITCH_LABEL }).or(page.getByRole("checkbox", { name: SWITCH_LABEL }));
+    try {
+      await control.first().waitFor({ timeout: 30_000 });
+    } catch {
+      // The switch may sit in the connection's own view; open it if it is a link.
+      const open = page.getByText(/^Slack$/).first();
+      if (await open.count()) await open.click().catch(() => {});
+      try {
+        await control.first().waitFor({ timeout: 15_000 });
+      } catch {
+        return { found: false };
+      }
+    }
+    const before = (await read()).on;
+    await control.first().click();
+    let after = before;
+    for (let i = 0; i < 20 && after === before; i++) {
+      await page.waitForTimeout(500);
+      after = (await read()).on;
+    }
+    const flipped = after === !before;
+    if (flipped) {
+      await control.first().click();
+      for (let i = 0; i < 20 && (await read()).on !== before; i++) await page.waitForTimeout(500);
+    }
+    return { found: true, before, after, flipped, restored: (await read()).on };
+  } catch (err) {
+    return { error: err.message };
+  } finally {
+    await browser?.close();
+  }
 }
 
 // R13 --------------------------------------------------------------------
@@ -499,6 +641,12 @@ export async function r8(ctx) {
   const problems = [];
   const before = (await ctx.a.accounts()).find((x) => x.connection === cid);
   evidence.accountBefore = before?.account ?? null;
+  // What the instance holds at the start, so a connection already gone reads
+  // apart from one the removal took.
+  const list = await ctx.a.call("/connections").catch((err) => ({ error: err.message }));
+  evidence.heldAtStart = (Array.isArray(list.data) ? list.data : (list.data?.connections ?? []))
+    .filter((c) => c.id)
+    .map((c) => ({ id: c.id, kind: c.connectionKind, state: c.state ?? null }));
 
   // Removal: the connection shows broken within 60 s.
   const removedAt = Date.now();

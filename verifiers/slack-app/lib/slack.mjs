@@ -17,7 +17,7 @@ export function fakeSlack(base) {
   const seeded = (r) => ({
     eventId: r.event_id,
     channel: r.event?.channel,
-    ts: r.event?.ts,
+    ts: r.event?.ts ?? r.ts,
     delivery: r.delivery,
     eventSent: r.event_sent ?? null,
   });
@@ -46,17 +46,28 @@ export function fakeSlack(base) {
           body: { team, user, text, mode: "bad_signature" },
         }),
       ),
-    /** A member mentions the bot in a group (default `general`). */
-    mention: async (team, user, text, channel) =>
-      seeded(await call("/mention", { method: "POST", body: { team, user, channel, text } })),
-    /** A member says something in a group without mentioning the bot. */
-    groupMessage: async (team, user, text, channel) => {
+    /** A member mentions the bot in a group (default `general`), in a thread with `thread_ts`. */
+    mention: async (team, user, text, channel, { thread_ts } = {}) =>
+      seeded(
+        await call("/mention", {
+          method: "POST",
+          body: { team, user, channel, text, ...(thread_ts ? { thread_ts } : {}) },
+        }),
+      ),
+    /**
+     * A member says something in a group without mentioning the bot, in a
+     * thread with `thread_ts`; with `send_event` Slack also sends the app the
+     * message event, as if it had subscribed to group messages.
+     */
+    groupMessage: async (team, user, text, channel, { thread_ts, send_event } = {}) => {
       const r = await call("/group-message", {
         method: "POST",
-        body: { team, user, channel, text },
+        body: { team, user, channel, text, ...(thread_ts ? { thread_ts } : {}), ...(send_event ? { send_event: true } : {}) },
       });
       return { ...seeded(r), channel: r.event?.channel ?? r.channel, ts: r.event?.ts ?? r.ts };
     },
+    /** The only bot scopes a later sign-in from `team` grants; null lifts the limit. */
+    grantLimit: (team, scopes) => call("/grant-limit", { method: "POST", body: { team, scopes } }),
     /** Removes the app from a workspace: Slack's two events, then its tokens stop working. */
     uninstall: (team) => call("/uninstall", { method: "POST", body: { team } }),
     /** auth.test with the newest bot token issued in `team`, as Slack answers it. */

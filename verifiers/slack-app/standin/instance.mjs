@@ -20,7 +20,16 @@ const TASK_DELAY_MS = 4000;
 const db = existsSync(STATE_FILE)
   ? JSON.parse(readFileSync(STATE_FILE, "utf8"))
   : { connections: [], accounts: [], messages: [], seen: [] };
-const save = () => writeFileSync(STATE_FILE, JSON.stringify(db));
+// Logs every change in the connections it holds, and what it starts with,
+// so a proof run can tell a lost connection from a slow one.
+const log = (msg) => process.stderr.write(`[instance ${NAME} ${new Date().toISOString().slice(11, 23)} pid ${process.pid}] ${msg}\n`);
+const heldList = () => db.connections.map((c) => `${c.id}/${c.team}`).join(",") || "none";
+let lastHeld = null;
+const save = () => {
+  writeFileSync(STATE_FILE, JSON.stringify(db));
+  if (heldList() !== lastHeld) log(`connections now ${(lastHeld = heldList())}`);
+};
+log(`start: state file ${existsSync(STATE_FILE) ? "read" : "missing"}, connections ${(lastHeld = heldList())}`);
 const setups = new Map();
 const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
@@ -126,9 +135,22 @@ const server = await serve(async (req, res, url) => {
     return send(res, 200, { matched: true, state: setup.state });
   }
   if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
-  // Like Rome, it replies only to the guardian unless a guardian adds "other"
-  // to replyToBondLevels. Broken R12-ignore-setting takes the setting and
-  // keeps replying to the guardian alone.
+  // R12: each connection's switch for answering other full members, off on
+  // a fresh connect. Broken R12-default-on starts on; R12-switch-sticks
+  // cannot be turned off; R12-instance-wide also turns the instance-wide
+  // replyToBondLevels to members.
+  const switchView = p.match(/^\/api\/connections\/([^/]+)\/answer-members$/);
+  if (switchView && req.method === "PUT") {
+    if (!sameOrigin) return send(res, 403, { error: "Cross-site requests are not allowed." });
+    const conn = db.connections.find((c) => c.id === decodeURIComponent(switchView[1]));
+    if (!conn) return send(res, 404, { error: "Unknown connection." });
+    const { on } = JSON.parse((await readBody(req)) || "{}");
+    if (typeof on !== "boolean") return send(res, 400, { error: "on must be a boolean." });
+    conn.answerMembers = breaks.has("R12-switch-sticks") ? answersMembers(conn) || on : on;
+    if (breaks.has("R12-instance-wide") && on) db.replyTo = ["guardian", "other"];
+    save();
+    return send(res, 200, { answerMembers: answersMembers(conn) });
+  }
   // The dashboard's searches: memory files, and its own chats (none here).
   if (p === "/api/memory/search" && req.method === "GET") {
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -177,7 +199,17 @@ const server = await serve(async (req, res, url) => {
       ...(breaks.has("R10-page-twice") ? ["Slack"] : []),
     ];
     const li = (xs) => xs.map((e) => `<li><div>${e}</div><button>Open</button></li>`).join("");
-    const body = `<h2>Your connections</h2><ul>${li(held)}</ul><h2>Add a connection</h2><ul>${li(offered)}</ul>`;
+    // Each Slack app connection's switch for answering other members. Broken
+    // R12-page-no-switch has none.
+    const switches = breaks.has("R12-page-no-switch")
+      ? ""
+      : db.connections
+          .map(
+            (c) =>
+              `<label><input type="checkbox" role="switch" ${answersMembers(c) ? "checked" : ""} onchange="fetch('/api/connections/${c.id}/answer-members',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({on:this.checked})})"> Answer other members of this workspace</label>`,
+          )
+          .join("");
+    const body = `<h2>Your connections</h2><ul>${li(held)}</ul>${switches}<h2>Add a connection</h2><ul>${li(offered)}</ul>`;
     return send(
       res,
       200,
@@ -244,6 +276,7 @@ const server = await serve(async (req, res, url) => {
         id: conn.id,
         channel: conn.channel,
         state: conn.broken ? "broken" : "working",
+        answerMembers: answersMembers(conn),
         // Broken R13-tell shows that it had to read Slack for a chat.
         ...(breaks.has("R13-tell") && conn.readSlack ? { copyMissing: true } : {}),
       },
@@ -338,7 +371,21 @@ async function act(conn, text, dmChannel) {
   if (!react && !send && !list && !search && !read) return null;
   if (breaks.has("R9-lazy")) return "Sure, I'll look into that.";
   const id = text.match(/\b([CDG][A-Z0-9]{8,})\b/)?.[1];
-  const byName = async (n) => (await groups(conn)).find((c) => c.name === n)?.id;
+  // Broken R14-by-name cannot find a group by its name.
+  const byName = async (n) => {
+    const found = (await groups(conn)).find((c) => c.name === n)?.id;
+    return breaks.has("R14-by-name") ? undefined : found;
+  };
+  // Slack's refusals in the product's words; broken R14-raw-refusal passes
+  // Slack's error on as it is.
+  const refusal = (error, channel) => {
+    if (breaks.has("R14-raw-refusal")) return `I could not read it: ${error}.`;
+    if (error === "missing_scope")
+      return "Rome's Slack app may not read channels in this workspace yet: it was connected before the app asked for that. Ask the guardian to approve the app again from Slack in Settings > Connections.";
+    if (error === "not_in_channel" || error === "channel_not_found")
+      return `Rome's Slack app is not a member of chat ${channel}, so it may not read it (not_in_channel). Someone in Slack can add it with /invite.`;
+    return `I could not read it: ${error}.`;
+  };
   if (react) {
     if (!breaks.has("R9-react")) return "I can only send, read and search messages in Slack.";
     const channel = id ?? (await byName("general"));
@@ -357,8 +404,10 @@ async function act(conn, text, dmChannel) {
   }
   if (list) {
     const r = await api(conn.botToken, "conversations.list", { types: "public_channel" });
-    if (!r.ok) return `I can't list channels: ${r.error}.`;
-    return `I am in: ${r.channels.filter((c) => c.is_member).map((c) => `#${c.name}`).join(", ")}.`;
+    if (!r.ok) return refusal(r.error);
+    // Broken R14-lists-all names groups the app is not in too.
+    const shown = breaks.has("R14-lists-all") ? r.channels : r.channels.filter((c) => c.is_member);
+    return `I am in: ${shown.map((c) => `#${c.name}`).join(", ")}.`;
   }
   const history = async (channel) => {
     if (!channel) return { ok: false, error: "no channel" };
@@ -371,8 +420,13 @@ async function act(conn, text, dmChannel) {
       .replace(/^the\s+/i, "")
       .toLowerCase();
     const found = db.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text);
-    if (id) {
-      const h = await history(id);
+    // A chat named by id or by #name is read from Slack; broken
+    // R14-wipe-forgets reads only what it kept.
+    const named = id ?? (text.match(/#(\w+)/) ? await byName(text.match(/#(\w+)/)[1]) : null);
+    if (named && breaks.has("R14-wipe-forgets"))
+      await history(named).then(() => {});
+    else if (named) {
+      const h = await history(named);
       if (h.ok) found.push(...h.messages.filter((m) => m.text?.toLowerCase().includes(word)).map((m) => m.text));
     }
     if (breaks.has("R9-join"))
@@ -383,15 +437,27 @@ async function act(conn, text, dmChannel) {
         }
     const uniq = [...new Set(found)].filter((t) => !/search|find|look up/i.test(t));
     return uniq.length
-      ? `I found: ${uniq.join(" / ")} (I searched what I have kept of our direct messages and mentions${id ? `, and ${id} in Slack` : ""})`
+      ? `I found: ${uniq.join(" / ")} (I searched what I have kept of our direct messages and mentions${named ? `, and ${named} in Slack` : ""})`
       : `Nothing mentions ${word} in what I have kept.`;
   }
   const channel = id ?? (text.match(/#(\w+)/) ? await byName(text.match(/#(\w+)/)[1]) : dmChannel);
+  // Broken R14-quiet-read reads a group the app is not in through Slack's
+  // own export.
+  if (breaks.has("R14-quiet-read") && channel && !channel.startsWith("D")) {
+    const g = (await groups(conn)).find((c) => c.id === channel);
+    if (g && !g.is_member) {
+      const x = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${channel}`)).json();
+      return `The latest messages: ${(x.messages ?? []).map((m) => m.text).join(" / ")}`;
+    }
+  }
   const h = await history(channel);
-  if (!h.ok) return `I could not read it: ${h.error}.`;
+  if (!h.ok) return refusal(h.error, channel);
   if (breaks.has("R9-blind")) return "I read it, there is nothing much there.";
   return `The latest messages: ${h.messages.map((m) => m.text).join(" / ")}`;
 }
+
+/** Whether a connection answers other full members (R12's switch). */
+const answersMembers = (conn) => conn.answerMembers ?? breaks.has("R12-default-on");
 
 const slackState = async () => (await fetch(`${SLACK}/_control/state`)).json();
 
@@ -520,8 +586,17 @@ async function answer(event, team, { now = false } = {}) {
   }
   // A member who is not the guardian gets a reply only once "other" is on.
   const guardian = (await slackState()).workspaces.find((w) => w.id === team)?.installed_by;
-  const others = (db.replyTo ?? ["guardian"]).includes("other") && !breaks.has("R12-ignore-setting");
-  if (event.user !== guardian && !others) return;
+  // A member who is not the guardian is answered only with the connection's
+  // switch on, and only as a full member: a guest, a bot, a deleted user or
+  // a failed lookup is not answered. Broken R12-ignore-setting never answers
+  // members; R12-guests answers guests too.
+  if (event.user !== guardian) {
+    if (!answersMembers(conn) || breaks.has("R12-ignore-setting")) return;
+    const who = await api(conn.botToken, "users.info", { user: event.user });
+    const u = who.user;
+    const full = who.ok && u && !u.is_bot && !u.deleted && !u.is_restricted && !u.is_ultra_restricted;
+    if (!full && !(breaks.has("R12-guests") && who.ok && u && !u.is_bot && !u.deleted)) return;
+  }
   // Broken silent never answers. Variant refuse declines what it was asked,
   // once, as the plain-text Concierge does on a connected account.
   if (breaks.has("silent")) return;
@@ -546,10 +621,31 @@ async function answer(event, team, { now = false } = {}) {
 // A mention is answered once in a thread under it. Broken R5-top answers at
 // the top of the group; R5-twice answers twice.
 async function answerMention(conn, ev) {
-  const thread = breaks.has("R5-top") ? undefined : ev.ts;
+  const thread = breaks.has("R5-top") ? undefined : (ev.thread_ts ?? ev.ts);
   const times = breaks.has("R5-twice") ? 2 : 1;
-  for (let i = 0; i < times; i++)
-    await post(conn.botToken, ev.channel, "Sure, happy to help with that.", thread);
+  const said = (await threadContext(conn, ev)) ?? "Sure, happy to help with that.";
+  for (let i = 0; i < times; i++) await post(conn.botToken, ev.channel, said, thread);
+}
+
+/**
+ * R14: a mention that is a reply inside a thread is answered from the
+ * thread's earlier messages, read once per thread (first 15, oldest first).
+ * Without the scope it answers without them. Broken R14-no-thread never
+ * reads the thread; R14-replies-each reads it on every mention;
+ * R14-old-error puts Slack's error in the thread.
+ */
+async function threadContext(conn, ev) {
+  if (!ev.thread_ts || ev.thread_ts === ev.ts || breaks.has("R14-no-thread")) return null;
+  const key = `${conn.team}/${ev.channel}/${ev.thread_ts}`;
+  db.threads ??= {};
+  if (!db.threads[key] || breaks.has("R14-replies-each")) {
+    const r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
+    if (!r.ok) return breaks.has("R14-old-error") ? `I could not read this thread: ${r.error}.` : null;
+    db.threads[key] = r.messages.slice(0, 15).map((m) => ({ ts: m.ts, text: m.text, bot: Boolean(m.bot_id) }));
+    save();
+  }
+  const earlier = db.threads[key].filter((m) => !m.bot && Number(m.ts) < Number(ev.ts)).map((m) => m.text);
+  return earlier.length ? `From this thread: ${earlier.join(" / ")}` : null;
 }
 
 async function drainOnce() {
@@ -575,6 +671,11 @@ async function drainOnce() {
       db.messages.push({ team: payload.team_id, user: ev.user, channel: ev.channel, text: ev.text, ts: ev.ts });
       save();
       if (conn && !breaks.has("silent")) await answerMention(conn, ev);
+      continue;
+    }
+    // A plain group message: heard only by broken R14-hears-all.
+    if (ev?.type === "message" && ev.channel_type !== "im" && !ev.bot_id && breaks.has("R14-hears-all") && conn) {
+      await post(conn.botToken, ev.channel, "I saw that.", ev.ts);
       continue;
     }
     if (ev?.type !== "message" || ev.channel_type !== "im") continue;
@@ -676,7 +777,11 @@ if (db.old?.length) {
 }
 
 process.on("SIGTERM", () => {
-  server.close().then(() => process.exit(0));
+  log(`SIGTERM, connections ${heldList()}`);
+  server.close().then(() => {
+    log("exit");
+    process.exit(0);
+  });
 });
 for (;;) {
   await drainOnce().catch(() => {});

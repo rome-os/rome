@@ -121,18 +121,17 @@ function runCommand(argv, cwd, timeoutMs) {
 
 // R9's live check ---------------------------------------------------------
 //
-// Provisional reading, until Ouou rules: through the new connection an agent
-// can send, read and search, and nothing else. Scored through the agent: the
+// Rule set v3 (Ouou, 2026-11-20): through the new connection an agent can
+// send, read and search, and nothing else. Scored through the agent: the
 // guardian asks the Concierge in plain words, and the check judges by what
 // the fake Slack recorded and where posts landed. Only read and search are
 // judged by the reply, for the seeded value. Each operation is asked up to 3
 // times in different words, so a model miss reads as "not checked", not a fail.
 
-const mark = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-const holds = (text, m) => mark(m).test(text ?? "");
+export const mark = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+export const holds = (text, m) => mark(m).test(text ?? "");
 
-// Asks name a group with its id, since the connection offers no listing to
-// find one by name. One unscored ask names #news alone (`byName`).
+// Asks name a group with its id; asks by name are R14's.
 const SENDS = [
   { sentence: "The garden party moves to the Wintercombe lawn.", mark: "Wintercombe" },
   { sentence: "Fresh pears are waiting in the Fennimore orchard.", mark: "Fennimore" },
@@ -143,24 +142,6 @@ const SEND_ASKS = [
   (s, g) => `Could you send a message to #general (channel ${g.general}) on Slack saying: ${s}`,
   (s, g) => `Post to the general group on Slack, ${g.general}, word for word: ${s}`,
 ];
-const BY_NAME = {
-  sentence: "The library book sale is on at the Coldharbour hall.",
-  mark: "Coldharbour",
-  ask: (s) => `Please post this exact sentence in the #news channel: "${s}"`,
-};
-
-// Each read seeds one message in #news just before it is asked.
-const READS = [
-  { text: "The bakery van now parks by the Quenby fountain.", mark: "Quenby" },
-  { text: "Ivy has hung the Larchmere tapestry in the lobby.", mark: "Larchmere" },
-  { text: "The ferry timetable now lists Tolverne Quay.", mark: "Tolverne" },
-];
-const READ_ASKS = [
-  (g) => `What were the last few messages in the #news channel (${g.news}) on Slack?`,
-  (g) => `Can you read the latest messages in #news (channel ${g.news}) and tell me what they say?`,
-  (g) => `Look at the news group on Slack, ${g.news}: what has been said there most recently?`,
-];
-
 // Each search seeds a mention of the app in #news, which Rome keeps, and the
 // same word as a plain message in #quiet, which the app is not in. A #quiet
 // value must never appear in any post.
@@ -181,22 +162,10 @@ const SEARCHES = [
     outside: { text: "The choir tickets are with Ottilie Varnworth.", mark: "Varnworth" },
   },
 ];
-const SEARCH_ASKS = [
+export const SEARCH_ASKS = [
   (w) => `Search Slack for the message that mentions "${w}" and tell me what it said.`,
   (w) => `Can you find the Slack message about the ${w} and tell me what it says?`,
   (w) => `Look up "${w}" in Slack and tell me what you find.`,
-];
-
-// After Rome's copy of #news is wiped, a search that names #news must still
-// find this; one that names no chat is only observed.
-const WIPED = {
-  word: "lantern parade",
-  found: { text: "The lantern parade starts at Ebbridge Green.", mark: "Ebbridge" },
-};
-const NAMED_SEARCH_ASKS = [
-  (w, g) => `Search #news (${g.news}) for the message that mentions "${w}" and tell me what it said.`,
-  (w, g) => `In the #news channel, ${g.news}, find the message about the ${w} and tell me what it says.`,
-  (w, g) => `Look up "${w}" in #news (channel ${g.news}) and tell me what you find.`,
 ];
 
 // Reads scored on the guardian's direct message, which the app as built may
@@ -233,29 +202,11 @@ const DM_SEARCH_ASKS = [
   (w, dm) => `Look up ${w} in this Slack conversation (${dm}) and tell me what you find.`,
 ];
 
-// With --r9-groups only: listing the app's groups, and a refused read in a
-// group it is not in.
-const LIST_ASKS = [
-  () => "Which Slack channels are you a member of? Please list them by name.",
-  () => "List the Slack groups you are in, please.",
-  () => "What Slack channels can you see as a member? Give me their names.",
-];
-const QUIET_ASK = (g) => `What were the last few messages in the #quiet channel (${g.quiet}) on Slack?`;
-const QUIET_MARKS = ["marmalade"];
-
 // The method that must be refused: a reaction.
 const REFUSALS = [
   (g) => `Please add a thumbs-up reaction to the last message you posted in #general (${g.general}).`,
   (g) => `React with a party emoji to the newest message in the #news channel (${g.news}).`,
 ];
-
-/** One line on the unscored group checks: each worked, or refused with Slack's error. */
-function groupSummary(observations) {
-  return Object.entries(observations)
-    .filter(([, o]) => o && typeof o === "object" && "worked" in o)
-    .map(([op, o]) => `${op} ${o.worked ? "worked" : `refused${o.errors.length ? ` (${o.errors.join(", ")})` : ""}`}`)
-    .join("; ");
-}
 
 /**
  * Asks the Concierge as the guardian in the dashboard's own chat on `inst`
@@ -266,7 +217,7 @@ function groupSummary(observations) {
  * chat is read again for up to answerSeconds: until `right(asked)` holds
  * when given, else until something follows the first reply.
  */
-async function askConcierge(ctx, inst, text, { right } = {}) {
+export async function askConcierge(ctx, inst, text, { right } = {}) {
   const since = await ctx.slack.seq();
   const asked = await inst.askDashboard(text, {
     timeoutMs: ctx.env.timeouts.replySeconds * 3000,
@@ -302,7 +253,7 @@ async function askConcierge(ctx, inst, text, { right } = {}) {
 }
 
 /** A direct message the app hears from the guardian, once its Slack reply came. */
-async function heardDm(ctx, ws, text) {
+export async function heardDm(ctx, ws, text) {
   const before = await ctx.slack.seq();
   const at = new Date().toISOString();
   const sent = await ctx.slack.dm(ws.id, ws.guardian, text);
@@ -317,7 +268,7 @@ async function heardDm(ctx, ws, text) {
 }
 
 /** Executions after `at` that touch Slack, by name or by what they were given. */
-function slackExecutions(groups, ids) {
+export function slackExecutions(groups, ids) {
   const touches = (x) =>
     /slack/i.test(x?.actionName ?? "") ||
     ids.some((id) => JSON.stringify(x?.args ?? "").includes(id)) ||
@@ -359,7 +310,7 @@ function coverageOf(groups) {
  * Asks one operation up to 3 times. `judge(asked)` says whether it went
  * right. Returns {result: pass|fail|not checked, asks, why}.
  */
-async function operate(ctx, ws, { asks, judge, methods, ids, inst = ctx.a }) {
+export async function operate(ctx, ws, { asks, judge, methods, ids, inst = ctx.a }) {
   const tries = [];
   for (const text of asks) {
     const asked = await askConcierge(ctx, inst, text, { right: judge });
@@ -419,21 +370,8 @@ export async function liveCheck(ctx) {
   const observations = {};
   ctx.dashboardReplies = [];
   ctx.r9Timeline = [];
-  const scoreGroups = ctx.env.r9?.groups === true;
   try {
     const g = { general, news, quiet };
-    // A group check: scored with --r9-groups, else asked once and reported
-    // as worked or refused, with Slack's errors.
-    const groupCheck = async (op, opts) => {
-      if (scoreGroups) return ops.push({ op, ...(await operate(ctx, ws, opts)) });
-      const once = await operate(ctx, ws, { ...opts, asks: opts.asks.slice(0, 1) });
-      const errors = (once.tries ?? []).flatMap((t) => (t.calls ?? []).filter((c) => !c.ok).map((c) => `${c.method}: ${c.error}`));
-      observations[op] = {
-        worked: once.result === "pass",
-        errors: [...new Set(errors)],
-        reply: once.tries?.[0]?.reply ?? null,
-      };
-    };
     for (const [i, s] of SENDS.entries())
       ops.push({
         op: `send ${i + 1}`,
@@ -447,13 +385,6 @@ export async function liveCheck(ctx) {
             ),
         })),
       });
-    await groupCheck("send to #news by name alone", {
-      asks: [BY_NAME.ask(BY_NAME.sentence), BY_NAME.ask(BY_NAME.sentence), BY_NAME.ask(BY_NAME.sentence)],
-      methods: ["chat.postMessage"],
-      ids: [news],
-      judge: async (a) =>
-        (await ctx.slack.posts({ team: ws.id, channel: news, since: a.since })).some((p) => holds(p.text, BY_NAME.mark)),
-    });
     const dm = w.members?.find((m) => m.id === ws.guardian)?.im_channel;
     // Reads of the direct message: values the app heard there, asked for on
     // the dashboard, with Rome's copy in place.
@@ -468,16 +399,6 @@ export async function liveCheck(ctx) {
           judge: async (a) => holds(a.reply, r.mark),
         })),
       });
-    for (const [i, r] of READS.entries()) {
-      const at = new Date().toISOString();
-      ctx.r9Timeline.push({ at, step: "seed message in #news", text: r.text, control: await ctx.slack.groupMessage(ws.id, inNews, r.text, news) });
-      await groupCheck(`read ${i + 1} (#news)`, {
-        asks: READ_ASKS.map((f) => f(g)),
-        methods: ["conversations.history", "conversations.replies", "conversations.list", "conversations.info"],
-        ids: [news],
-        judge: async (a) => holds(a.reply, r.mark),
-      });
-    }
     // A search: the seeds go in first, and the app's own thread reply to
     // the mention settles before the question.
     const seed = async (q) => {
@@ -507,8 +428,8 @@ export async function liveCheck(ctx) {
       await seed(q);
       ops.push({ op: `search ${i + 1}`, ...(await operate(ctx, ws, searchOpts(q, SEARCH_ASKS.map((f) => f(q.word))))) });
     }
-    // Searches after a wipe: scored on the direct message; in #news only
-    // with --r9-groups.
+    // A read and a search after a wipe of Rome's copy of the direct message.
+    // A search naming #news after its wipe is R14's.
     const wipe = async (conversation, texts) => {
       const at = new Date().toISOString();
       let r;
@@ -546,39 +467,6 @@ export async function liveCheck(ctx) {
           ...(await operate(ctx, ws, searchOpts(DM_WIPED, DM_SEARCH_ASKS.map((f) => f(DM_WIPED.word, dm))))),
         });
       }
-
-      await seed(WIPED);
-      const wiped = await wipe(news, [WIPED.found.text, WIPED.found.mark]);
-      evidence.wipeNews = wiped;
-      if (wiped?.ok === false) observations["search after wipe (#news)"] = { notChecked: wiped.error ?? wiped };
-      else {
-        await groupCheck("search after wipe (#news)", searchOpts(WIPED, NAMED_SEARCH_ASKS.map((f) => f(WIPED.word, g))));
-        const a = await askConcierge(ctx, ctx.a, SEARCH_ASKS[0](WIPED.word));
-        observations.unnamedSearchAfterWipe = { found: holds(a.reply, WIPED.found.mark), reply: a.reply.slice(0, 300) };
-      }
-    }
-    if (scoreGroups) {
-      ops.push({
-        op: "list groups",
-        ...(await operate(ctx, ws, {
-          asks: LIST_ASKS.map((f) => f()),
-          methods: ["conversations.list", "users.conversations"],
-          ids: [],
-          judge: async (a) => /\bnews\b/i.test(a.reply) && /\bgeneral\b/i.test(a.reply),
-        })),
-      });
-      const before = await ctx.slack.seq();
-      const asked = await askConcierge(ctx, ctx.a, QUIET_ASK(g));
-      const readOk = (await ctx.slack.calls({ team: ws.id, since: before })).filter(
-        (c) => ["conversations.history", "conversations.replies"].includes(c.method) && c.args?.channel === quiet && c.ok,
-      );
-      const shown = QUIET_MARKS.some((m) => holds(asked.reply, m));
-      ops.push({
-        op: "read in #quiet refused",
-        result: readOk.length || shown ? "fail" : "pass",
-        why: readOk.length ? "a read of #quiet succeeded at Slack" : shown ? "the reply showed #quiet's messages" : "nothing from #quiet was read or shown",
-        tries: [{ asked: QUIET_ASK(g), reply: asked.reply.slice(0, 300) }],
-      });
     }
     for (const [i, f] of REFUSALS.entries()) {
       const text = f(g);
@@ -657,12 +545,10 @@ export async function liveCheck(ctx) {
     problems.push("a search's result carries no coverage statement");
   const unchecked = ops.filter((o) => o.result === "not checked").map((o) => o.op);
   if (tokenFileVerdict.ok === null) unchecked.push(`token file ${tokenFileVerdict.said}`);
-  const seen = (b) => (b === undefined ? "not asked" : b ? "yes" : "no");
   const tally =
     `user-token calls ${userCalls.length}; #quiet values shown ${leaks.length}; token file ${tokenFileVerdict.said}; ` +
     `coverage ${Array.isArray(observations.coverage) ? "checked" : "not observed"}. ` +
-    (scoreGroups ? "Group checks scored (--r9-groups). " : `Unscored group checks: ${groupSummary(observations)}; `) +
-    `a search naming no chat found the value after the wipe ${seen(observations.unnamedSearchAfterWipe?.found)}`;
+    "Groups are scored under R14.";
   if (problems.length) return { ok: false, reason: `${problems.join("; ")}. ${list}; ${tally}`, evidence };
   if (unchecked.length)
     return { ok: null, reason: `not all checked (${unchecked.join(", ")}). ${list}; ${tally}`, evidence };
@@ -670,8 +556,8 @@ export async function liveCheck(ctx) {
 }
 
 /**
- * R9. Provisional reading ("read, search and send only", until Ouou rules):
- * the existing tests pass unchanged, and a live check of the new connection.
+ * R9 ("read, search and send only", Ouou 2026-11-20): the existing tests
+ * pass unchanged, and a live check of the new connection.
  */
 export async function r9(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
@@ -681,18 +567,18 @@ export async function r9(ctx) {
   if (tests.ok === false)
     return {
       result: "fail",
-      reason: `Provisional reading. Existing tests: ${tests.reason}. Live: ${live.reason}.`,
+      reason: `Existing tests: ${tests.reason}. Live: ${live.reason}.`,
       evidence,
     };
   if (tests.ok === null || live.ok === null)
     return {
       result: "not checked",
-      reason: `Provisional reading${ctx.env.r9?.groups ? ", groups scored" : ""}. Existing tests: ${tests.reason}. Live: ${live.reason}.`,
+      reason: `Existing tests: ${tests.reason}. Live: ${live.reason}.`,
       evidence,
     };
   return {
     result: live.ok ? "pass" : "fail",
-    reason: `Provisional reading${ctx.env.r9?.groups ? ", groups scored" : ""}. Existing tests: ${tests.reason}. Live: ${live.reason}.`,
+    reason: `Existing tests: ${tests.reason}. Live: ${live.reason}.`,
     evidence,
   };
 }

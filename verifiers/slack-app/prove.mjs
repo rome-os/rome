@@ -15,6 +15,24 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const ref = process.argv[2] ?? "origin/slack-official-app/environment";
 const out = join(here, "out/proof");
+// One proof at a time per checkout: a second one would wipe the first's
+// instance state files under out/proof mid-run.
+const lock = join(here, "out/proof.lock");
+mkdirSync(join(here, "out"), { recursive: true });
+if (existsSync(lock)) {
+  const pid = Number(readFileSync(lock, "utf8"));
+  let alive = false;
+  try {
+    process.kill(pid, 0);
+    alive = true;
+  } catch {}
+  if (alive) {
+    process.stderr.write(`prove.mjs: another proof (pid ${pid}) is running in this checkout\n`);
+    process.exit(2);
+  }
+}
+writeFileSync(lock, String(process.pid));
+process.on("exit", () => rmSync(lock, { force: true }));
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "fake-slack"), { recursive: true });
 
@@ -35,7 +53,7 @@ const dirty = execFileSync("git", ["-C", here, "status", "--porcelain", "--", ".
 const commit = `${execFileSync("git", ["-C", here, "rev-parse", "HEAD"]).toString().trim()}${dirty ? "+uncommitted" : ""}`;
 
 const PHASE1 = ["R1", "R3", "R4", "R6", "R7", "R11"];
-const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2", "R9", "R10"];
+const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2", "R9", "R10", "R14"];
 const CASES = [
   { name: "good", breaks: "", expect: "every scored rule passes" },
   {
@@ -85,24 +103,9 @@ const CASES = [
   {
     name: "dm-only",
     breaks: "dm-only",
-    rule: "R9",
-    result: "pass",
-    what: "the app as built cannot read or list groups; the group checks are reported unscored",
-  },
-  {
-    name: "R9-groups",
-    breaks: "",
-    env: { VERIFIER_R9_GROUPS: "1" },
-    rule: "R9",
-    result: "pass",
-    what: "with --r9-groups, an app that reads groups passes the group checks",
-  },
-  {
-    name: "R9-groups-dm-only",
-    breaks: "dm-only",
-    env: { VERIFIER_R9_GROUPS: "1" },
-    rule: "R9",
-    what: "with --r9-groups, the app as built fails the group checks",
+    rule: "R14",
+    result: "not checked",
+    what: "the app as built asks for no group history, so R14 is not checked (R9 still passes)",
   },
   { name: "R9-tests-fail", breaks: "R9-tests-fail", rule: "R9", what: "one of the existing tests fails on the product" },
   { name: "R9-assert", breaks: "R9-assert", rule: "R9", what: "the product changed an assertion in the existing tests" },
@@ -117,6 +120,15 @@ const CASES = [
     result: "not checked",
     what: "the Concierge never attempts any Slack operation",
   },
+  { name: "R14-by-name", breaks: "R14-by-name", rule: "R14", what: "a group named by its name alone cannot be found" },
+  { name: "R14-lists-all", breaks: "R14-lists-all", rule: "R14", what: "the list of groups names #quiet, which the app is not in" },
+  { name: "R14-quiet-read", breaks: "R14-quiet-read", rule: "R14", what: "a read of #quiet shows its messages" },
+  { name: "R14-wipe-forgets", breaks: "R14-wipe-forgets", rule: "R14", what: "a search naming #news after its wipe finds nothing in Slack" },
+  { name: "R14-no-thread", breaks: "R14-no-thread", rule: "R14", what: "a mention inside a thread arrives without the thread's earlier messages" },
+  { name: "R14-replies-each", breaks: "R14-replies-each", rule: "R14", what: "the thread is read again for every mention in it" },
+  { name: "R14-hears-all", breaks: "R14-hears-all", rule: "R14", what: "a plain group message is answered" },
+  { name: "R14-old-error", breaks: "R14-old-error", rule: "R14", what: "under the old scopes, a mention in a thread gets Slack's error" },
+  { name: "R14-raw-refusal", breaks: "R14-raw-refusal", rule: "R14", what: "under the old scopes, a group read gets Slack's error, not a message to approve again" },
   { name: "R10-two-entries", breaks: "R10-two-entries", rule: "R10", what: "Connect offers Slack bot beside Slack" },
   { name: "R10-page-twice", breaks: "R10-page-twice", rule: "R10", what: "the Connections page shows the official Slack entry twice" },
   { name: "R10-bot-connects", breaks: "R10-bot-connects", rule: "R10", what: "a new slack_bot setup can still start" },
@@ -145,18 +157,12 @@ const CASES = [
     result: "not checked",
     what: "the Concierge declines to keep 4 of the 8 facts, fewer than 5 are left",
   },
-  {
-    name: "R12-default-mode",
-    breaks: "R12-default-mode",
-    rule: "R12",
-    what: "scored with the guardian-only default, so the visitor gets no reply",
-  },
-  {
-    name: "R12-ignore-setting",
-    breaks: "R12-ignore-setting",
-    rule: "R12",
-    what: "turning replies to members on changes nothing",
-  },
+  { name: "R12-default-on", breaks: "R12-default-on", rule: "R12", what: "a fresh connection answers other members before the guardian turns it on" },
+  { name: "R12-ignore-setting", breaks: "R12-ignore-setting", rule: "R12", what: "turning the switch on changes nothing" },
+  { name: "R12-switch-sticks", breaks: "R12-switch-sticks", rule: "R12", what: "the switch cannot be turned off again" },
+  { name: "R12-guests", breaks: "R12-guests", rule: "R12", what: "with the switch on, a guest is answered too" },
+  { name: "R12-instance-wide", breaks: "R12-instance-wide", rule: "R12", what: "the switch also turns the instance-wide setting to members" },
+  { name: "R12-page-no-switch", breaks: "R12-page-no-switch", rule: "R12", what: "the Connections page shows no switch" },
   {
     name: "R13-forget",
     breaks: "R13-forget",

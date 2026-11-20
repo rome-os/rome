@@ -1,4 +1,4 @@
-// Scores the official Slack app against rule set v2, phases 1 to 3, in one
+// Scores the official Slack app against rule set v3, phases 1 to 3, in one
 // environment. Usage: node verify.mjs <env.json> <out dir> <verifier commit>.
 // run.sh is the entry point: it refuses uncommitted verifier code first.
 
@@ -10,6 +10,7 @@ import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
 import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
 import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
+import { r14 } from "./rules/groups.mjs";
 import { r9, r10 } from "./rules/phase3.mjs";
 import { r11 } from "./rules/structure.mjs";
 
@@ -42,14 +43,16 @@ const RULES = [
     check: r12,
   },
   { id: "R13", phase: 2, title: "Slack holds what was said", check: r13 },
+  { id: "R14", phase: 3, title: "Groups the app was added to", check: r14 },
 ];
 
 // Order matters: R3 and the second binding need R1's connection; R7 reads
 // R4's messages; R6 stops the instance; R8 removes the app and disconnects,
-// so it runs after the rest; R2 then signs the first instance in to a third
+// so it runs after the rest; R14 signs workspace B in again on the second
+// instance under the old scopes and back, before R8; R2 then signs the first instance in to a third
 // workspace. R10 seeds the old connections on the second instance, whose
 // connector token file would turn R9's path to the old one, so it runs last.
-const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R6", "R8", "R2", "R10"];
+const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R14", "R6", "R8", "R2", "R10"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
@@ -111,7 +114,7 @@ for (const step of ORDER) {
 }
 
 const report = {
-  ruleSet: "v2",
+  ruleSet: "v3",
   phases: [1, 2, 3],
   startedAt,
   finishedAt: new Date().toISOString(),

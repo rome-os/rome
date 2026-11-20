@@ -223,6 +223,18 @@ export async function r6(ctx) {
   // Whatever fails while the instance is down, start it again, so a crash
   // here leaves the environment as it found it.
   let stopError;
+  // What the instance holds before the stop and after the restart, so a
+  // lost connection reads apart from a slow one.
+  const holds = async () => {
+    try {
+      const got = await ctx.a.call("/connections");
+      const list = Array.isArray(got.data) ? got.data : (got.data?.connections ?? []);
+      return { status: got.status, held: list.filter((c) => c.id).map((c) => ({ id: c.id, kind: c.connectionKind, state: c.state ?? null })) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  };
+  const heldBefore = await holds();
   try {
     // A stop control can stop the instance and still report an error, so it
     // runs inside the block that starts the instance again.
@@ -278,6 +290,19 @@ export async function r6(ctx) {
       .map((p) => ({ channel: p.channel, seq: p.seq, text: p.text?.slice(0, 120) })),
   };
   Object.assign(evidence, t);
+  evidence.connectionsBeforeStop = heldBefore;
+  evidence.connectionsAfterRestart = await holds();
+  // Each event's delivery attempts at Slack's side, and when each reply came.
+  evidence.deliveries = await Promise.all(
+    eventIds.map(async (id) => {
+      try {
+        return { id, attempts: (await ctx.slack.deliveries(id)).map((d) => ({ at: d.at, status: d.status ?? d.outcome ?? null })) };
+      } catch (err) {
+        return { id, error: err.message };
+      }
+    }),
+  );
+  evidence.repliesAfterRestart = posts.filter((p) => p.channel === channel).map((p) => ({ seq: p.seq, at: p.at ?? null }));
   if (whileStopped)
     return {
       result: "fail",
