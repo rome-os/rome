@@ -312,10 +312,11 @@ export const linkedinMessages = sqliteTable(
 // Rome's Slack app's own copy of the messages it hears, direct messages and
 // mentions of it in a group, one row per Slack event. Only
 // connections/kinds/slack-app reads or writes it, through its repository
-// there: outside the connection, nothing can tell whether the copy exists. The mailbox is told a message was received only once its row
-// is written, so a crash or a stop before then loses nothing: the mailbox
-// delivers it again, and on start the connection hands over what it kept but
-// never handed over.
+// there: outside the connection, nothing can tell whether the copy exists.
+// The mailbox is told a message was received only once its row is written,
+// so a crash or a stop before then loses nothing: the mailbox delivers it
+// again, and on start the connection hands over what it kept but never
+// handed over.
 export const slackAppMessages = sqliteTable(
   "slack_app_messages",
   {
