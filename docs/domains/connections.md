@@ -88,7 +88,7 @@ What a platform delivered through a connection: where it was said, who said it, 
 
 - A connection translates the platform's message and never decides anything from it. Whom it addresses, who the sender is to Rome and whether it wakes anyone are decided above the connection, in [Participation](participation.md#addressed) and People.
 - It names the account it was delivered to, which is the connection's own account.
-- It names only individual accounts as mentioned. A mention of everyone, of a channel or of a role names no one.
+- Its mentions list only individual accounts. A mention of everyone, of a channel or of a role names no one.
 - Some facts only the platform has, such as whether a bot said it or who said the message it replies to. The connection reports them when the platform tells, and leaves them out when it does not.
 - Two of Rome's accounts in one chat each receive the same message through their own connection.
 

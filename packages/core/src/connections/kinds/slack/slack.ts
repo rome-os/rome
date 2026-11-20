@@ -10,6 +10,7 @@ import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runti
 import type * as connections from "../../message.js";
 import { WebSocket } from "ws";
 import { createLogger } from "../../../logger.js";
+import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 
@@ -735,9 +736,10 @@ export class SlackAdapter {
   private socket: SlackSocketMode | null = null;
   private readonly dedup = new InboundDedup(1_000);
   private readonly userNames = new Map<string, SlackUserName>();
-  /** The tail of each conversation's deliveries, so a slow name lookup never
-   *  lets a later message overtake an earlier one. */
-  private readonly deliveries = new Map<string, Promise<void>>();
+  /** Holds each chat's messages in arrival order until they are delivered,
+   *  so a slow name lookup never lets a later message overtake an earlier
+   *  one (the Talker order contract, connections/types.ts). */
+  private readonly deliveries = new KeyedMutex();
   private sendAbort = new AbortController();
   private readonly api: SlackWebApi;
 
@@ -857,14 +859,7 @@ export class SlackAdapter {
     if (!message) return;
     const user = event.user;
     const chatId = message.where.chatId;
-    const previous = this.deliveries.get(chatId) ?? Promise.resolve();
-    const next = previous.then(() => this.deliver(message, identity.teamId, user));
-    this.deliveries.set(chatId, next);
-    void next.finally(() => {
-      if (this.deliveries.get(chatId) === next) {
-        this.deliveries.delete(chatId);
-      }
-    });
+    void this.deliveries.runExclusive(chatId, () => this.deliver(message, identity.teamId, user));
   }
 
   private toMessage(
