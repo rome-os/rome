@@ -12,6 +12,8 @@
 
 import type {
   Account,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelMessageSearch,
@@ -75,6 +77,10 @@ export interface ChannelsServiceDeps {
    *  names no account and takes only a channel's name. */
   accounts?: RomeAccounts;
 }
+
+/** How many chats a listing answers when it names no limit, and at most. */
+const CHATS_LIMIT = 100;
+const CHATS_LIMIT_MAX = 200;
 
 /** How many matches a search answers when it names no limit, and at most. */
 const SEARCH_LIMIT = 20;
@@ -221,6 +227,41 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     };
   }
 
+  async function chats(
+    target: Account | string,
+    { query, limit, cursor }: ChannelChatsQuery = {},
+  ): Promise<ChannelChatsPage> {
+    const { channel, connection } = backing(target);
+    const capped = Math.min(Math.max(1, Math.floor(limit ?? CHATS_LIMIT)), CHATS_LIMIT_MAX);
+    // The connection's own listing, so its paging holds and a refusal from the
+    // platform comes back as one.
+    const listed = connection.withTalker((talker) =>
+      talker.directory?.listConversations({
+        limit: capped,
+        includeTopics: false,
+        ...(query ? { query } : {}),
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    if (!listed) {
+      const state = connection.status().chat.state;
+      throw new Error(
+        state === "unlocked"
+          ? `Channel "${channel}" lists no chats`
+          : `Channel "${channel}" cannot list chats now: its connection is ${state}`,
+      );
+    }
+    const page = await listed;
+    return {
+      chats: page.conversations.map((chat) => ({
+        chatId: chat.ref.chatId,
+        name: chat.displayName,
+        kind: chat.kind,
+      })),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    };
+  }
+
   return withRemovedMembers<ChannelsService>(
     {
       async list(): Promise<ChannelSummary[]> {
@@ -279,6 +320,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
 
       query,
       search,
+      chats,
     },
     REMOVED_SERVICE_MEMBERS,
   );

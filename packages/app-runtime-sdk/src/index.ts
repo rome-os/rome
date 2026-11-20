@@ -1918,6 +1918,28 @@ export interface ChannelSearchResult {
   coverage: string;
 }
 
+/** What {@link ChannelsService.chats} lists. */
+export interface ChannelChatsQuery {
+  /** Only chats whose name holds this, without regard to case. */
+  query?: string;
+  /** At most this many. Defaults to 100, capped at 200. */
+  limit?: number;
+  /** Where the page before ended, as its `nextCursor` said. */
+  cursor?: string;
+}
+
+/** One page of the chats an account is in. */
+export interface ChannelChatsPage {
+  chats: Array<{
+    chatId: ChatId;
+    /** The chat's name as the platform shows it, such as `#news`. */
+    name: string;
+    kind: ChatDescriptor["kind"];
+  }>;
+  /** Present while more chats follow this page. */
+  nextCursor?: string;
+}
+
 /**
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
@@ -1958,6 +1980,14 @@ export interface ChannelsService {
    * on a host that predates search.
    */
   search?(account: Account | string, search: ChannelMessageSearch): Promise<ChannelSearchResult>;
+  /**
+   * The chats one of Rome's accounts is in, as its platform lists them now,
+   * a page at a time. Rejects when the platform refuses the listing, with the
+   * platform's reason, rather than answer an empty page. Rejects for an
+   * account whose connection lists no chats. Absent on a host that predates
+   * it.
+   */
+  chats?(account: Account | string, query?: ChannelChatsQuery): Promise<ChannelChatsPage>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */
