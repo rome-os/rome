@@ -121,8 +121,6 @@ export interface ActionExistenceChecker {
   isExplicit(name: string): boolean | Promise<boolean>;
   /** An error message when `args` fail the action's input schema, else null. */
   validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
-  /** The action's full ID, for a routine saved under the name it was asked by. */
-  getCanonicalName?(name: string): string | undefined | Promise<string | undefined>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
@@ -413,11 +411,10 @@ export async function createRoutine(
 
   // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
   // every fire; reject and persist the trimmed full ID.
-  const askedName = input.actionName.trim();
-  if (!askedName) {
+  const actionName = input.actionName.trim();
+  if (!actionName) {
     return { status: "error", error: "actionName must be a non-empty action name" };
   }
-  const actionName = (await deps.actionRegistry.getCanonicalName?.(askedName)) ?? askedName;
   // Fail closed: a routine bound to a non-existent action would persist and
   // error on every fire (actionEngine.run throws "Action not found"). Reject at
   // create time with a remedy the agent can act on.
