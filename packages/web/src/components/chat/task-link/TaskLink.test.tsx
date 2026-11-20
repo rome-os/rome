@@ -81,7 +81,6 @@ describe("a task link in a Concierge message", () => {
         name: "Book direct flights",
         status: "active",
         endReason: null,
-        from: "concierge",
       },
     ];
     renderLinks(link("chat-1", "Book flights"));

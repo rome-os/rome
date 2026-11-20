@@ -218,7 +218,7 @@ A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[na
 
 - The dashboard and the iOS app draw it as an inline chip: the task chat's status mark and its current name, in the tint of inline code, so it never makes its line taller. The link's own text is only a fallback while the name loads. The status word is in the chip's tooltip and its label for a screen reader, never on the chip, and only the mark carries colour: needs you a warning-coloured alert, active the running ring, later a clock, done a check, failed a cross, stopped a square in a circle, no response an empty circle. The [task list](#task-list)'s rows use the same marks.
 - The chip opens the task chat, and its status changes live, as the task chat runs.
-- It names a task chat of the message's owner, started from any of their Concierge chats. Its status changes reach the chip from the Concierge chat the task reports to. A link to a task chat of another owner, or to none, reads as plain text. In a push, a quote, another channel and an older app build, a link reads as its text.
+- It names a task chat of the message's owner, started from any of their Concierge chats. Its status changes reach the chip through the task events of the Concierge chat it is drawn in, which fire for every task of that chat's owner. A link to a task chat of another owner, or to none, reads as plain text. In a push, a quote, another channel and an older app build, a link reads as its text.
 - Nothing is copied: no card and no question is sent into the Concierge chat by a link.
 
 ## Task list

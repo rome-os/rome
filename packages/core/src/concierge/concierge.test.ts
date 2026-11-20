@@ -6657,6 +6657,42 @@ describe("scheduled tasks", () => {
       ).content[0].text,
     ) as { chatId: string; taskId: string; scheduled: string };
 
+  it("reads a schedule only for a task chat that chat_list lists", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    const start = async (title: string) =>
+      JSON.parse((await s.tool("chat_start", { title, brief: title })).content[0].text).taskId;
+    const flights = await start("Flights");
+    await s.tool("chat_stop", { chatId: flights });
+    const hotels = await start("Hotels");
+    s.turnIn(TOPIC_CHAT);
+    const agenda = await start("Agenda");
+    const list = async (input: Record<string, unknown>) => {
+      schedules.of.mockClear();
+      const titles = JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+      return { titles, read: schedules.of.mock.calls.map((call) => (call as unknown[])[0]) };
+    };
+    // Another chat's tasks are not read.
+    expect(await list({ here: true, recentlyEnded: true })).toEqual({
+      titles: ["Agenda"],
+      read: [agenda],
+    });
+    // Nor is a task that ended too long ago.
+    s.turnIn(CONCIERGE_CHAT);
+    const later = rs.spyOn(Date, "now").mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+    try {
+      expect(await list({ here: true, recentlyEnded: true })).toEqual({
+        titles: ["Hotels"],
+        read: [hotels],
+      });
+    } finally {
+      later.mockRestore();
+    }
+  });
+
   it("starts a scheduled task's chat without running it, and schedules its brief", async () => {
     const s = setup();
     const schedules = withSchedules(s, "every_run");

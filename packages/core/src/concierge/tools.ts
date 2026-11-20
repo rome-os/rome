@@ -1244,22 +1244,23 @@ export async function buildConciergeTools(
               ? Date.now() - RECENTLY_ENDED_HOURS * 60 * 60 * 1000
               : null;
           const rows = await ownRows(allEnded || endedSince !== null);
-          const schedules = await Promise.all(
-            rows.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
-          );
-          const taskChats = rows
-            .map((task, index) => ({ task, schedule: schedules[index] }))
-            .filter(({ task }) => !wanted || task.status?.status === wanted)
-            .filter(({ task }) => !onlyHere || task.conciergeChat.id === here)
+          // Filter first, so a schedule is read only for a task that is listed.
+          const listed = rows
+            .filter((task) => !wanted || task.status?.status === wanted)
+            .filter((task) => !onlyHere || task.conciergeChat.id === here)
             // An ended task counts as recent by when it ended, else when it last changed.
             .filter(
-              ({ task }) =>
+              (task) =>
                 endedSince === null ||
                 task.status?.status !== "ended" ||
                 (task.row.endedAt ?? task.row.updatedAt).getTime() >= endedSince,
-            )
-            .map(({ task, schedule }) =>
-              compactTask(task, task.status, args.details === true, schedule),
+            );
+          const schedules = await Promise.all(
+            listed.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
+          );
+          const taskChats = listed
+            .map((task, index) =>
+              compactTask(task, task.status, args.details === true, schedules[index]),
             )
             .sort((a, b) => a.chatId.localeCompare(b.chatId));
           const conciergeChats =
