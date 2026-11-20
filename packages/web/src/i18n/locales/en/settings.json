@@ -745,7 +745,7 @@
       "moveExisting": "Move existing chats too",
       "confirm": "Make default",
       "saveFailed": "Failed to change the default provider",
-      "removedNote": "{{to}} is now the default, because {{from}} was removed.",
+      "removedNote": "{{to}} is now the default, because you logged out of {{from}}.",
       "dismissNote": "Dismiss"
     },
     "logoutOutcome": {

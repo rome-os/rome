@@ -745,7 +745,7 @@
       "moveExisting": "已有聊天也一起切过去",
       "confirm": "设为默认",
       "saveFailed": "未能更改默认提供方",
-      "removedNote": "{{from}} 已移除，{{to}} 现在是默认。",
+      "removedNote": "你已退出 {{from}}，{{to}} 现在是默认。",
       "dismissNote": "关闭"
     },
     "logoutOutcome": {
