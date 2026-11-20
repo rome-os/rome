@@ -15,6 +15,8 @@ import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
 import { slackAppMessages, slackAppTimeline } from "../../../db/schema.js";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
+import type { Message } from "../../message.js";
 
 /** The connection's copy, in a database of its own. */
 function testCopy(): SlackMessageCopyRepository {
@@ -145,7 +147,8 @@ function adapter(
     ...(readGate ? { readGate } : {}),
     ...(listened ? { listened } : {}),
   });
-  a.onInbound((message) => delivered.push(message));
+  // What apps receive, so the tests read the fields an app reads.
+  a.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
   return { adapter: a, delivered, faults, api, copy };
 }
 
@@ -804,7 +807,7 @@ describe("Slack app mailbox key", () => {
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
         copy: testCopy(),
       });
-      a.onInbound((message) => order.push(`delivered ${message.text}`));
+      a.onInbound((message) => order.push(`delivered ${message.content.text}`));
       await a.start();
       answer = second;
       await rs.advanceTimersByTimeAsync(DAY + 1000);
@@ -2449,8 +2452,9 @@ describe("Slack app in the channels it is a member of", () => {
 });
 
 describe("Slack app opened to the workspace's other members (R12)", () => {
-  /** An adapter whose switch reads `open`, in a workspace where U_KIM is a
-   *  full member and U_GUEST a guest. */
+  /** An adapter in a workspace where U_KIM is a full member and U_GUEST a
+   *  guest, its messages delivered as the connection ports deliver them,
+   *  with the switch read as `open` stands when each is handed over. */
   function openable(open: { on: boolean }, whileLookingUp: () => void = () => {}) {
     const api = fakeApi({
       userName: rs.fn(async (_token: string, user: string) => {
@@ -2474,9 +2478,10 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
       openMailbox: fakeMailbox().open,
       copy: testCopy(),
       readGate: openGate(),
-      openToMembers: () => open.on,
     });
-    a.onInbound((message) => delivered.push(message));
+    a.onInbound((message) =>
+      delivered.push(channelMessageOf(message, "slack_app", { openToMembers: open.on })),
+    );
     return { a, delivered };
   }
   const from = (i: number, user: string) =>
@@ -2506,17 +2511,28 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
     expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined, undefined]);
   });
 
-  it("takes the switch as it stood when the message arrived, not as it stands once Slack names the sender", async () => {
-    const open = { on: false };
-    // The guardian opens the switch while Slack answers the lookup.
+  it("takes the switch as it stands when the message is handed over, so closing it while Slack names the sender marks nothing", async () => {
+    const open = { on: true };
+    // The guardian closes the switch while Slack answers the lookup.
     const { a, delivered } = openable(open, () => {
-      open.on = true;
+      open.on = false;
     });
     await a.start();
     await a.handleFrame(from(1, "U_KIM"));
 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).not.toHaveProperty("openToMembers");
+  });
+
+  it("reports a full member as a fact, whatever the switch", async () => {
+    const reported: Message[] = [];
+    const { a } = openable({ on: false });
+    a.onInbound((message) => reported.push(message));
+    await a.start();
+    await a.handleFrame(from(1, "U_KIM"));
+    await a.handleFrame(from(2, "U_GUEST"));
+
+    expect(reported.map((m) => m.sender.fullMember)).toEqual([true, undefined]);
   });
 
   it("asks Slack again after ten minutes, so a member made a guest is no longer marked", async () => {
@@ -2537,10 +2553,11 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
       openMailbox: fakeMailbox().open,
       copy: testCopy(),
       readGate: openGate(),
-      openToMembers: () => true,
       now: () => new Date(at),
     });
-    a.onInbound((message) => delivered.push(message));
+    a.onInbound((message) =>
+      delivered.push(channelMessageOf(message, "slack_app", { openToMembers: true })),
+    );
     await a.start();
 
     await a.handleFrame(from(1, "U_KIM"));
@@ -2571,10 +2588,11 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
       openMailbox: fakeMailbox().open,
       copy: testCopy(),
       readGate: openGate(),
-      openToMembers: () => true,
       now: () => new Date(at),
     });
-    a.onInbound((message) => delivered.push(message));
+    a.onInbound((message) =>
+      delivered.push(channelMessageOf(message, "slack_app", { openToMembers: true })),
+    );
     await a.start();
 
     await a.handleFrame(from(1, "U_KIM"));
@@ -2606,9 +2624,10 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
         openMailbox: fakeMailbox().open,
         copy,
         readGate: openGate(),
-        openToMembers: () => open.on,
       });
-      a.onInbound((message) => delivered.push(message));
+      a.onInbound((message) =>
+        delivered.push(channelMessageOf(message, "slack_app", { openToMembers: open.on })),
+      );
       return { a, delivered };
     };
     const first = build();

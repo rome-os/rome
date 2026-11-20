@@ -66,11 +66,22 @@ export interface KeptSlackMessage {
   text: string;
   /** The message as the connection hands it to Rome. */
   message: ChannelMessage;
+  /** Slack said the sender is a full member of this workspace when the
+   *  message was heard: not a guest, a bot or a member of another one. */
+  senderFullMember?: boolean;
 }
 
 /** The timeline messages a search counts: all it read, those of direct
  *  messages, or none. */
 export type SearchedTimeline = "all" | "direct" | "none";
+
+/** A kept message to hand Rome again, with whether its sender was a full
+ *  member of the workspace when it was heard. */
+export interface KeptForHandOver {
+  eventId: string;
+  message: ChannelMessage;
+  senderFullMember?: true;
+}
 
 /** Where the Slack app connection keeps its copy. */
 export interface SlackMessageCopy {
@@ -85,7 +96,7 @@ export interface SlackMessageCopy {
    *  of the last hand-off, which a stop may have cut off before Rome recorded
    *  them. The window runs back from the last hand-off, not from now, so a
    *  long stop does not shrink it. */
-  mayNotHold(teamId: string, windowMs: number): Array<{ eventId: string; message: ChannelMessage }>;
+  mayNotHold(teamId: string, windowMs: number): Array<KeptForHandOver>;
   /** Keep `run` in the timeline of chat `channelId`, linking each message to
    *  the one before it. A link the run shows wrong, because the run holds a
    *  message between its two ends, is forgotten. */
@@ -139,7 +150,10 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
     const changed = this.changeOf(this.db, kept.teamId, kept.channelId, kept.ts);
     if (changed && changed.text === null) return null;
     const text = changed?.text ?? kept.text;
-    const message = changed ? { ...said, text } : said;
+    const message = {
+      ...(changed ? { ...said, text } : said),
+      ...(kept.senderFullMember ? { senderFullMember: true } : {}),
+    };
     const written = this.db
       .insert(slackAppMessages)
       .values({
@@ -177,10 +191,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .run();
   }
 
-  mayNotHold(
-    teamId: string,
-    windowMs: number,
-  ): Array<{ eventId: string; message: ChannelMessage }> {
+  mayNotHold(teamId: string, windowMs: number): Array<KeptForHandOver> {
     const last = this.db
       .select({ at: max(slackAppMessages.handedOverAt) })
       .from(slackAppMessages)
@@ -198,7 +209,13 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       )
       .orderBy(asc(slackAppMessages.saidAt), asc(slackAppMessages.ts))
       .all()
-      .map((row) => ({ eventId: row.eventId, message: revive(row.message) }));
+      .map((row) => ({
+        eventId: row.eventId,
+        message: revive(row.message),
+        ...((row.message as { senderFullMember?: boolean }).senderFullMember
+          ? { senderFullMember: true as const }
+          : {}),
+      }));
   }
 
   keepRun(teamId: string, channelId: string, run: TimelineRun): TimelineRun["messages"] {
@@ -612,8 +629,14 @@ function timelineRowOf(row: typeof slackAppTimeline.$inferSelect): TimelineRow {
   return { ts: row.ts, prevTs: row.prevTs, message: revive(row.message) };
 }
 
-/** A message read back from JSON, its time a Date again. */
+/** A message read back from JSON, its time a Date again. Whether its sender
+ *  was a full member is a fact of its arrival, kept for its hand-over only,
+ *  so no read answers it. */
 function revive(stored: unknown): ChannelMessage {
-  const message = stored as ChannelMessage & { timestamp: string | Date };
+  const {
+    senderFullMember: _member,
+    openToMembers: _open,
+    ...message
+  } = stored as ChannelMessage & { timestamp: string | Date; senderFullMember?: boolean };
   return { ...message, timestamp: new Date(message.timestamp) };
 }

@@ -99,7 +99,7 @@ describe("scenario 1: chat unlocked by its grant", () => {
       received.push(msg);
     });
 
-    const msg = makeInboundMessage({ text: "hello" });
+    const msg = makeInboundMessage({ content: { text: "hello", attachments: [] } });
     talkerFactory.instances[0].state.deliver!(msg);
 
     expect(received).toHaveLength(1);

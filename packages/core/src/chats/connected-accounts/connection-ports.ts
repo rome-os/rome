@@ -29,6 +29,7 @@ import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
 import { type Messages, queryLimit } from "../history/messages.js";
@@ -359,8 +360,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
     }
     if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
+    // Read for each message, so a change of the switch counts from the next
+    // one, a message handed over again included.
+    const openToMembers = deps.registry.getDescriptor(connection.connectionKind)?.openToMembers;
     const detach = connection.hearTalker((message) =>
-      admission.deliver(connection, message, dispatch),
+      admission.deliver(
+        connection,
+        channelMessageOf(message, channel, {
+          openToMembers: openToMembers?.isOpen(connection.id) === true,
+        }),
+        dispatch,
+      ),
     );
     if (detach) attached.set(connection.id, detach);
   };

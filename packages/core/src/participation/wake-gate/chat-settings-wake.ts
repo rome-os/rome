@@ -1,6 +1,7 @@
 import type { PolicyInput } from "./policy/policy-engine.js";
 import { decidePolicy } from "./policy/policy-engine.js";
-import type { WakeGate } from "./index.js";
+import type { Addressed } from "../addressing.js";
+import type { WakeGate, WakeMessage } from "./index.js";
 
 /** The settings `chatSettingsWake` decides from. */
 export interface ChatWakeSettings extends PolicyInput {
@@ -36,8 +37,7 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
       if (settings.botMessages === "ignore") return "quiet";
       if (settings.botMessages === "mentions" && message.addressing !== "mention") return "quiet";
     }
-    if (message.mentionsOthers && settings.whenOthersMentioned === "ignore") return "quiet";
-    if (settings.replyRule === "mention" && message.addressing === "ambient") return "quiet";
+    if (addressingRuleKeepsQuiet(message, settings)) return "quiet";
     const bondLevel = sender.person?.bondLevel ?? "other";
     const policy = decidePolicy(settings, {
       channel: message.channel,
@@ -53,4 +53,53 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
     if (settings.trustedLevels.includes(bondLevel) || policy.action === "allow") return "wake";
     return "review";
   };
+}
+
+/**
+ * Whom `message` addresses, as the app passed it on: `rome` for a direct
+ * message, a mention, a reply or a message in Rome's thread, `others` for one
+ * that mentions only others, `nobody` for the rest. Undefined where the
+ * connection could not tell.
+ */
+function addressedOf(message: WakeMessage): Addressed | undefined {
+  switch (message.addressing) {
+    case "direct":
+    case "mention":
+    case "reply":
+    case "bot_thread":
+      return "rome";
+    case "ambient":
+      return message.mentionsOthers ? "others" : "nobody";
+    case undefined:
+      return undefined;
+    default: {
+      const unknown: never = message.addressing;
+      throw new Error(`unknown addressing ${String(unknown)}`);
+    }
+  }
+}
+
+/** Whether the chat's reply rule or its rule on mentions of others keeps
+ *  `message` quiet. Where the connection could not tell whom it addresses,
+ *  only a mention of others it reported can. */
+function addressingRuleKeepsQuiet(
+  message: WakeMessage,
+  settings: Pick<ChatWakeSettings, "replyRule" | "whenOthersMentioned">,
+): boolean {
+  const addressed = addressedOf(message);
+  if (addressed === undefined) {
+    return message.mentionsOthers === true && settings.whenOthersMentioned === "ignore";
+  }
+  switch (addressed) {
+    case "rome":
+      return false;
+    case "others":
+      return settings.whenOthersMentioned === "ignore" || settings.replyRule === "mention";
+    case "nobody":
+      return settings.replyRule === "mention";
+    default: {
+      const unknown: never = addressed;
+      throw new Error(`unknown addressing ${String(unknown)}`);
+    }
+  }
 }

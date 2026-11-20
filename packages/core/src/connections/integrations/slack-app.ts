@@ -363,6 +363,12 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     // A new workspace answers as the guardian's Concierge from its first
     // message (docs/adrs/channels-and-connectors-are-one-connection.md).
     startsWithConcierge: true,
+    // An official app offers no chat rules: every chat runs at the defaults.
+    chatRules: { offers: [] },
+    // A task chat sends, reads and searches Slack through the connector's
+    // proxy, which makes its calls through this connection's talker with the
+    // bot grant.
+    actsWithGrant: true,
     grant: "bot",
     auth: scheme,
     // Revoke the token at Slack, then release the workspace at Rome Cloud.
@@ -415,9 +421,6 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
         // while the connection is locked. That is how the connector finds the
         // app's connection to search through.
         searches: true,
-        // A task chat sends, reads and searches Slack through the connector's
-        // proxy, which makes its calls through this talker.
-        acts: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -446,7 +449,6 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             onFault: ({ kind, cause }) => routeFault(cause, kind),
             copy: deps.copy,
             // Read for each message, so a switch turned off holds from the next.
-            openToMembers: () => deps.openToMembers.isOpen(kit.connectionId),
             listened: () => deps.listens(kit.connectionId),
           });
           return {

@@ -1,4 +1,4 @@
-import type { SystemInputSource } from "@rome/api-types/trace-segments";
+import type { AgentPlan, SystemInputSource } from "@rome/api-types/trace-segments";
 import { automatedInputLabel } from "./automated-input.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
@@ -189,6 +189,8 @@ export interface TaskChats {
   isBusy(chatId: string): boolean;
   /** The tool the chat's running turn is in now, as the trace names it, or null. */
   openTool(chatId: string): string | null;
+  /** The plan of the chat's running turn, as its Plan card shows it, or null for none. */
+  turnPlan(chatId: string): AgentPlan | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running
    * a turn, or its running turn enters or leaves a tool; the latter alone
@@ -235,6 +237,7 @@ export interface ConciergeDeps {
     | "awaitingGuardianSince"
     | "openWaitsOf"
     | "taskCardsOf"
+    | "widgetMessage"
     | "ownerSpokeAt"
     | "archiveSessionIn"
     | "unarchiveSession"

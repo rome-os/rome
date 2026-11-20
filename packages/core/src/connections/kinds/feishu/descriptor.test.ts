@@ -8,6 +8,7 @@
 //   4. inbound/outbound messages map through the Connection's talker.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { sendThrough } from "../../../chats/connected-accounts/connection-ports.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import {
@@ -218,7 +219,7 @@ describe("feishu talk lifecycle", () => {
 
     const received: string[] = [];
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.senderId}/${msg.chatId}:${msg.text}`);
+      received.push(`${msg.sender.accountId}/${msg.where.chatId}:${msg.content.text}`);
       return;
     });
     await channel.emitMessage({ content: "hello there" });
@@ -248,7 +249,7 @@ describe("feishu talk lifecycle", () => {
 });
 
 describe("feishu inbound delivery", () => {
-  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+  it("delivers the transport's message as apps receive it, field for field", async () => {
     const channel = new FakeLarkChannel();
     const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
       connectionId: "feishu-test",
@@ -258,7 +259,7 @@ describe("feishu inbound delivery", () => {
     const delivered: unknown[] = [];
     talker.start(
       (msg) => {
-        delivered.push(msg);
+        delivered.push(channelMessageOf(msg, "feishu"));
       },
       () => {},
     );

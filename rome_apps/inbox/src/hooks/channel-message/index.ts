@@ -207,7 +207,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       });
       return;
     }
-    // The agent's own app runs its turns (`runsOwnTurns`).
+    // The agent's own app runs its turns (`deprecatedRunsOwnTurns`, ZHA-231).
     if (accountAgent && this.options.unsafeTestOnlyBypassesInbox?.(accountAgent)) {
       log.debug("account's agent runs its own turns; not answering", {
         service,

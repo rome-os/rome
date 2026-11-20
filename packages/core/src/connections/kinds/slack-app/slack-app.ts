@@ -23,6 +23,7 @@ import {
   type SlackEvent,
   type SlackEventCallback,
   slackMessageId,
+  slackSenderId,
   type SlackUserName,
   slackUserIdOf,
   splitSlackText,
@@ -38,6 +39,7 @@ import type { SearchedTimeline, SlackMessageCopy } from "./message-copy.js";
 export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppUser, SlackAppWebApi, SlackChannel } from "./web-api.js";
+import type { Message } from "../../message.js";
 
 const log = createLogger("slack-app");
 
@@ -125,9 +127,6 @@ export interface SlackAppAdapterConfig {
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
-  /** Whether the guardian opened this account to its workspace's other
-   *  members, read for each message handed over. Absent, it is closed. */
-  openToMembers?: () => boolean;
   /** Whether Rome listens to the account now. A message heard while it does
    *  not is neither kept nor handed over, so linking an agent later brings
    *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
@@ -196,12 +195,49 @@ function withinRead(ts: string, read: TalkHistoryRead): boolean {
   return true;
 }
 
+/**
+ * The connection's `Message` for `kept`, a message as its copy keeps it, said
+ * to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * addresses (docs/domains/connections.md#message). The app hears a group only
+ * when it is mentioned, so a mention lists the bot's account; the copy keeps
+ * no other account a message mentions, so none is listed.
+ */
+export function messageOf(
+  kept: ChannelMessage,
+  receivedBy: string,
+  senderFullMember?: boolean,
+): Message {
+  const direct = kept.thread?.kind === "dm";
+  return {
+    id: kept.messageId,
+    where: {
+      chatId: kept.chatId,
+      kind: direct ? "direct" : "group",
+      // A reply in a group's thread. The thread lives inside the chat, so the
+      // chat stays the conversation and the thread is named by its own id.
+      ...(kept.inThread ? { thread: { parentChatId: kept.chatId, id: kept.inThread } } : {}),
+    },
+    sender: {
+      accountId: kept.senderId,
+      ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
+      ...(kept.senderUsername !== undefined ? { handle: kept.senderUsername } : {}),
+      ...(senderFullMember ? { fullMember: true } : {}),
+    },
+    content: { text: kept.text, attachments: kept.attachments },
+    receivedBy,
+    mentions: direct ? [] : [receivedBy],
+    ...(kept.replyTo ? { replyTo: { messageId: kept.replyTo.messageId } } : {}),
+    saidAt: kept.timestamp,
+    ...(kept.raw !== undefined ? { raw: kept.raw } : {}),
+  };
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 export class SlackAppAdapter {
-  private handler?: (message: ChannelMessage) => void;
+  private handler?: (message: Message) => void;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, { at: number; user: SlackAppUser }>();
@@ -239,7 +275,7 @@ export class SlackAppAdapter {
       new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
 
-  onInbound(handler: (message: ChannelMessage) => void): void {
+  onInbound(handler: (message: Message) => void): void {
     this.handler = handler;
   }
 
@@ -414,24 +450,22 @@ export class SlackAppAdapter {
     if (kept.length > 0) {
       log.info("slack app handing over kept messages", { count: kept.length });
     }
-    // A mark kept with a message says what was decided when it was heard: it
-    // holds again only while the switch is still on.
-    const open = this.config.openToMembers?.() === true;
-    for (const { eventId, message } of kept) {
-      const { openToMembers: marked, ...rest } = message;
-      this.handOver(eventId, {
-        ...rest,
-        channel: this.config.channel,
-        ...(marked && open ? { openToMembers: true as const } : {}),
-      });
+    for (const { eventId, message, senderFullMember } of kept) {
+      this.handOver(eventId, { ...message, channel: this.config.channel }, senderFullMember);
     }
   }
 
   /** Hand `message` to Rome without waiting on it, and note it was handed. */
-  private handOver(eventId: string, message: ChannelMessage): void {
+  private handOver(eventId: string, message: ChannelMessage, senderFullMember?: boolean): void {
     if (!this.handler) return;
     try {
-      this.handler(message);
+      this.handler(
+        messageOf(
+          message,
+          slackSenderId(this.config.teamId, this.config.botUserId),
+          senderFullMember,
+        ),
+      );
     } catch (error) {
       log.error("message handler error", { messageId: message.messageId, error: describe(error) });
     }
@@ -506,10 +540,11 @@ export class SlackAppAdapter {
       return direct ? this.breakAt(event.channel, wire) : { status: 200 };
     }
 
-    // The switch as it stood when the message arrived: a change made while
-    // Slack answers the lookup counts from the next message.
-    const open = this.config.openToMembers?.() === true;
     const name = event.user ? await this.lookUpName(event.user) : {};
+    // Only a person who is a full member of this workspace, by Slack's own
+    // answer: a guest, a bot, a member of another workspace or a sender Slack
+    // would not describe is not.
+    const senderFullMember = Boolean(event.user) && name.fullMemberOf === this.config.teamId;
     const message: ChannelMessage = {
       ...said,
       ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
@@ -524,13 +559,6 @@ export class SlackAppAdapter {
       // group is read.
       ...(!direct && event.thread_ts && event.thread_ts !== event.ts
         ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
-        : {}),
-      addressing: direct ? "direct" : "mention",
-      // Only a person who is a full member of this workspace, by Slack's own
-      // answer: a guest, a bot, a member of another workspace or a sender
-      // Slack would not describe stays closed.
-      ...(open && event.user && name.fullMemberOf === this.config.teamId
-        ? { openToMembers: true as const }
         : {}),
     };
     // The mailbox is told the message was received only once the copy holds
@@ -553,6 +581,7 @@ export class SlackAppAdapter {
           userId: author,
           text: message.text,
           message,
+          senderFullMember,
         },
         this.now(),
       );
@@ -567,7 +596,7 @@ export class SlackAppAdapter {
     }
     if (direct) this.noteHeard(event.channel, wire, kept);
     log.info("message received", { chatId: kept.chatId });
-    this.handOver(eventId, kept);
+    this.handOver(eventId, kept, senderFullMember);
     return { status: 200 };
   }
 
@@ -745,7 +774,7 @@ export class SlackAppAdapter {
       // A message deleted since, heard again because Slack retried it, is
       // not in Slack's history: the drain links across it.
       if (this.config.copy.deleted(this.config.teamId, channelId, wire.ts)) return;
-      const { raw: _raw, addressing: _addressing, openToMembers: _open, ...kept } = message;
+      const { raw: _raw, ...kept } = message;
       noteInDrain(this.timeline(), channelId, wire.ts, kept);
     } catch (error) {
       // The message is missing from the timeline, so the next one heard must
@@ -953,12 +982,7 @@ export class SlackAppAdapter {
       limit: input.limit,
       timeline,
     });
-    // The member mark is a fact of a message's arrival, kept for its hand-over
-    // only, so a search does not answer it.
-    return {
-      messages: messages.map(({ openToMembers: _open, ...message }) => message),
-      coverage,
-    };
+    return { messages, coverage };
   }
 
   /** Read a chat's newest messages into the copy before searching it, and

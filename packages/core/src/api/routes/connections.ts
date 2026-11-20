@@ -20,6 +20,7 @@ import { createRomeCloudOAuthStartUrl } from "../../connections/oauth/rome-cloud
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
 import { reachedAccount } from "../../connections/connection.js";
+import { actStatusOf } from "../../connections/acts-with-grant.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -48,21 +49,7 @@ function wireCapabilities(
   descriptor: ConnectionDescriptor | null | undefined,
   grants: Record<GrantName, GrantState>,
 ): WireCapabilities {
-  // A talker agents act through, with no actor of its own, acts as it chats.
-  const actsAsItChats =
-    descriptor?.capabilities.talker?.acts === true && !descriptor.capabilities.actor;
-  if (actsAsItChats) return { ...status, act: status.chat, talk: status.chat };
-  // A kind whose grant agents act with through the connector, with no actor,
-  // acts while that grant holds.
-  if (descriptor?.actsWithGrant === true && !descriptor.capabilities.actor) {
-    const missing = Object.keys(grants).filter((name) => grants[name] !== "authorized");
-    const act: CapabilityStatus =
-      missing.length === 0
-        ? { state: "unlocked" }
-        : { state: "needs-auth", missingGrants: missing };
-    return { ...status, act, talk: status.chat };
-  }
-  return { ...status, talk: status.chat };
+  return { ...status, act: actStatusOf(descriptor, status.act, grants), talk: status.chat };
 }
 
 /** Per-grant active-setup ids for a connection.

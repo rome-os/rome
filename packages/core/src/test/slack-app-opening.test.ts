@@ -21,6 +21,7 @@ import {
 import { chatPromptFacts } from "../core/chat-prompt-facts.js";
 import { slackAppMessages, slackAppTimeline } from "../db/schema/system.js";
 import { createTestDb, type TestDb } from "./db.js";
+import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
@@ -286,7 +287,7 @@ describe("a mention inside a Slack thread (R14)", () => {
       copy: new SlackMessageCopyRepository(testDb.db),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
-    adapter.onInbound((message) => delivered.push(message));
+    adapter.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
 
     await onFrame!(
@@ -493,7 +494,7 @@ describe("a mention inside a Slack thread (R14)", () => {
       copy: new SlackMessageCopyRepository(testDb.db),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
-    adapter.onInbound((message) => delivered.push(message));
+    adapter.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
 
     // A thread's root is said in the conversation, not in its thread.
