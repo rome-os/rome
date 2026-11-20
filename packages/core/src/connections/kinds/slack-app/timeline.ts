@@ -7,9 +7,7 @@
 // connection saw both with nothing between them:
 //   - two messages next to each other on one page Slack answered;
 //   - two messages heard one after the other in one drain of the mailbox, in
-//     a direct message, where the app hears every message, its own included;
-//   - a message the connection sent, right after the newest it had heard in
-//     that drain.
+//     a direct message, where the app hears every message, its own included.
 // The drain counts because the mailbox holds every event Rome Cloud deposits
 // until the connection takes it, in order, while the instance is stopped
 // too. Each start opens a new drain and forgets the last, so what came before
@@ -64,8 +62,8 @@ function justAfter(ts: string): string {
     : `${seconds}.${String(next).padStart(6, "0")}`;
 }
 
-/** Note a message the connection heard or sent in a direct message, in the
- *  drain open now. One the copy holds already, such as from a page Slack
+/** Note a message the connection heard in a direct message, its own post
+ *  included once it comes back as an event, in the drain open now. One the copy holds already, such as from a page Slack
  *  answered before its event arrived, still moves the drain on past the head:
  *  the next one heard comes after it. Its link is written only where the copy had none,
  *  since a link from Slack's page is the surer of the two. */

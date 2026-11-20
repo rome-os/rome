@@ -705,6 +705,14 @@ export class SlackAppAdapter {
     const { channelId, threadTs } = parseSlackChatId(chatId);
     if (threadTs)
       throw new Error(`Slack chat ${chatId} is a thread, and a read takes its conversation's id`);
+    // The app reads direct messages only (im:history), so a group's read is
+    // refused before it takes a turn of Slack's allowance from a read that
+    // can succeed.
+    if (!channelId.startsWith("D")) {
+      throw new Error(
+        `This Slack account may not read chat ${chatId} (it reads direct messages only)`,
+      );
+    }
     try {
       return await readTimeline(this.timeline(), channelId as ChatId, read);
     } catch (error) {

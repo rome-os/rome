@@ -1484,9 +1484,39 @@ describe("Slack app reads a direct message (R13)", () => {
     });
     const { adapter: a } = adapter(mailbox, api, testCopy(), undefined, openGate());
     await a.start();
-    await expect(a.readHistory("C_TEAM" as never, { limit: 5 })).rejects.toThrow(
-      /may not read chat C_TEAM/,
+    await expect(a.readHistory("D_GONE" as never, { limit: 5 })).rejects.toThrow(
+      /may not read chat D_GONE \(missing_scope\)/,
     );
+  });
+
+  it("refuses a group's read before it takes Slack's turn, so a direct message read next is not held", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    const waits: number[] = [];
+    const gate = new SlackReadGate({
+      intervalMs: 60_000,
+      maxWaitMs: 60_000,
+      now: () => 0,
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    const { adapter: a } = historyAdapter(mailbox, slack, { gate });
+    await a.start();
+
+    await expect(a.readHistory("C_TEAM" as never, { limit: 5 })).rejects.toThrow(
+      /may not read chat C_TEAM \(it reads direct messages only\)/,
+    );
+    await expect(a.readHistory("G_PRIVATE" as never, { limit: 5 })).rejects.toThrow(
+      /may not read chat G_PRIVATE/,
+    );
+    expect(slack.calls).toHaveLength(0);
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
+    expect(texts(read)).toEqual(["message 1"]);
+    expect(waits).toEqual([]);
+    expect(slack.calls).toHaveLength(1);
   });
 });
 
