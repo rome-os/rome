@@ -126,11 +126,12 @@ export const AgentConfigSchema = z
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
     // Deprecated, slated for removal (ZHA-231): the agent's own app runs its
-    // turns. Rome honours it only for the apps in
-    // DEPRECATED_RUNS_OWN_TURNS_APPS (app-host/deprecated-runs-own-turns.ts).
-    deprecatedRunsOwnTurns: z.boolean().optional(),
-    // Its earlier names, which apps built before the rename still send.
+    // turns. Read as `deprecatedRunsOwnTurns`, which Rome honours only for the
+    // apps in DEPRECATED_RUNS_OWN_TURNS_APPS
+    // (app-host/deprecated-runs-own-turns.ts). The key keeps its name, so an
+    // app still loads on hosts built before the rename.
     runsOwnTurns: z.boolean().optional(),
+    // The key's earlier name, which apps built before it still send.
     unsafeTestOnlyBypassInbox: z.boolean().optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
@@ -205,10 +206,9 @@ export const AgentConfigSchema = z
       provider,
       unsafeTestOnlyBypassInbox,
       runsOwnTurns,
-      deprecatedRunsOwnTurns,
       ...rest
     } = raw;
-    const ownTurns = deprecatedRunsOwnTurns ?? runsOwnTurns ?? unsafeTestOnlyBypassInbox;
+    const ownTurns = runsOwnTurns ?? unsafeTestOnlyBypassInbox;
     return {
       ...rest,
       ...(tier ? { tier } : {}),

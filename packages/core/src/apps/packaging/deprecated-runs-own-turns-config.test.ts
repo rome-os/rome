@@ -10,32 +10,33 @@ const base = {
   tier: "large",
 };
 
-describe("deprecatedRunsOwnTurns in an agent's config", () => {
-  it("keeps deprecatedRunsOwnTurns", () => {
-    expect(
-      AgentConfigSchema.parse({ ...base, deprecatedRunsOwnTurns: true }).deprecatedRunsOwnTurns,
-    ).toBe(true);
+describe("runsOwnTurns in an agent's config", () => {
+  it("reads runsOwnTurns as deprecatedRunsOwnTurns", () => {
+    const config = AgentConfigSchema.parse({ ...base, runsOwnTurns: true });
+    expect(config.deprecatedRunsOwnTurns).toBe(true);
+    expect(config).not.toHaveProperty("runsOwnTurns");
   });
 
-  it("reads its earlier names as deprecatedRunsOwnTurns, for apps built before the rename", () => {
-    for (const earlier of ["runsOwnTurns", "unsafeTestOnlyBypassInbox"]) {
-      const config = AgentConfigSchema.parse({ ...base, [earlier]: true });
-      expect(config.deprecatedRunsOwnTurns).toBe(true);
-      expect(config).not.toHaveProperty(earlier);
-    }
+  it("reads the key's earlier name too, for apps built before it", () => {
+    const config = AgentConfigSchema.parse({ ...base, unsafeTestOnlyBypassInbox: true });
+    expect(config.deprecatedRunsOwnTurns).toBe(true);
+    expect(config).not.toHaveProperty("unsafeTestOnlyBypassInbox");
   });
 
-  it("lets the newest name win when an app sends several", () => {
+  it("lets runsOwnTurns win when an app sends both", () => {
     const config = AgentConfigSchema.parse({
       ...base,
-      deprecatedRunsOwnTurns: false,
-      runsOwnTurns: true,
+      runsOwnTurns: false,
       unsafeTestOnlyBypassInbox: true,
     });
     expect(config.deprecatedRunsOwnTurns).toBe(false);
   });
 
-  it("leaves it out when the app sets none", () => {
+  it("refuses the internal name as a key, so no app depends on it", () => {
+    expect(() => AgentConfigSchema.parse({ ...base, deprecatedRunsOwnTurns: true })).toThrow();
+  });
+
+  it("leaves it out when the app sets neither", () => {
     expect(AgentConfigSchema.parse(base)).not.toHaveProperty("deprecatedRunsOwnTurns");
   });
 });

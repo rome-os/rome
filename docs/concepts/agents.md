@@ -56,7 +56,7 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 
 Deprecated, and to be removed: Rome is not keeping a way for an app to run its agent's turns past the Inbox app.
 
-An app agent may declare `deprecatedRunsOwnTurns: true` when its own app runs its turns. On an account linked to it, the Inbox app answers no message, so no [wake gate](../domains/participation.md#wake-gate), sentinel or [send gate](../domains/participation.md#send-gate) judges what the agent hears or sends. Rome honours the field only for the first-party apps in `DEPRECATED_RUNS_OWN_TURNS_APPS` (`packages/core/src/app-host/deprecated-runs-own-turns.ts`) and ignores it on any other agent. Its earlier names, `runsOwnTurns` and `unsafeTestOnlyBypassInbox`, still load as `deprecatedRunsOwnTurns`.
+An app agent may declare `runsOwnTurns: true` when its own app runs its turns. On an account linked to it, the Inbox app answers no message, so no [wake gate](../domains/participation.md#wake-gate), sentinel or [send gate](../domains/participation.md#send-gate) judges what the agent hears or sends. Rome honours the field only for the first-party apps in `DEPRECATED_RUNS_OWN_TURNS_APPS` (`packages/core/src/app-host/deprecated-runs-own-turns.ts`) and ignores it on any other agent. Rome reads it as `deprecatedRunsOwnTurns`. The key keeps its name, so an app that sets it still loads on older Rome hosts. Its earlier name `unsafeTestOnlyBypassInbox` still loads too.
 
 ## Builtin tools
 
