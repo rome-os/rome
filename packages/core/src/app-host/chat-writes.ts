@@ -6,7 +6,7 @@
 // An app names a session and the platform's ids; this file turns them into
 // the speaker, the message and its key. Nothing hands these to apps yet: the
 // Chats switch adds them to the app repositories and moves the inbox and
-// `send_message` onto them.
+// `system:send_message` onto them.
 
 import { partsWithText } from "../chats/storage/message.js";
 import { actionExecutionContext } from "../apps/actions/context.js";

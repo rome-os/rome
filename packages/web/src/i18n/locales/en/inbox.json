@@ -25,7 +25,7 @@
     },
     "channels": {
       "telegram": "Telegram",
-      "telegramUser": "Telegram User",
+      "telegramUser": "Telegram user",
       "whatsapp": "WhatsApp",
       "wechat": "WeChat",
       "discord": "Discord",

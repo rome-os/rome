@@ -6,6 +6,7 @@ import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.j
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { mainChatIdOf } from "../../concierge/main-chat.js";
 import { conciergeMessageTasks, romeSessions, taskChats } from "../schema.js";
+import { taskStatus } from "@rome/api-types/concierge-task-status";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 
 const DAY = 86_400_000;
@@ -79,6 +80,47 @@ describe("ConciergeTasksRepository: a task is its task chat", () => {
       "No Concierge chat gone-topic",
     );
     expect(await repo.listForAgent(true)).toEqual([]);
+  });
+
+  it("takes the owner's mark of done off when the task is taken up again, so a later Stop reads stopped", async () => {
+    await make({ id: "chat-1", title: "Book flights" });
+    const statusOf = async () => {
+      const row = (await repo.get("chat-1"))!;
+      return taskStatus(
+        {
+          stoppedAt: row.stoppedAt?.getTime() ?? null,
+          waitingSince: null,
+          running: false,
+          reportPending: false,
+          laterAt: null,
+          lastOutcome: row.lastOutcome,
+        },
+        Date.now(),
+      );
+    };
+    expect(await repo.markDone("chat-1")).toBe(true);
+    expect(await statusOf()).toEqual({ status: "ended", endReason: "done" });
+    // New words take it up again: the mark goes with the stop.
+    expect(await repo.resume("chat-1")).toBe(true);
+    expect((await repo.get("chat-1"))?.lastOutcome).toBeNull();
+    // Stopped before the new turn ends, it reads stopped, and the turn's
+    // own "stopped" outcome still lands.
+    await repo.stop("chat-1");
+    await repo.setLastOutcome("chat-1", "stopped");
+    expect(await statusOf()).toEqual({ status: "ended", endReason: "stopped" });
+    expect((await repo.get("chat-1"))?.lastOutcome).toBe("stopped");
+  });
+
+  it("ends a task stopped by any other way than its owner's mark stopped, never done", async () => {
+    await make({ id: "chat-2", title: "Hotels" });
+    // A mark left on a running task (as one written before resume cleared it).
+    testDb.db
+      .update(taskChats)
+      .set({ lastOutcome: "done_by_owner" })
+      .where(eq(taskChats.sessionId, "chat-2"))
+      .run();
+    await repo.stop("chat-2");
+    expect((await repo.get("chat-2"))?.lastOutcome).toBeNull();
   });
 
   it("stops a task, and takes it up again unless its chat is archived", async () => {

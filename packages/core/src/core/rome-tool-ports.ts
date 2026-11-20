@@ -16,6 +16,7 @@ import {
   type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
+import { didYouMean } from "../apps/actions/registry.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
 import { validateActionArgs } from "../apps/actions/validate-action-args.js";
 import type { WebChatRepository } from "../webchat/repository.js";
@@ -85,7 +86,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // agent may call: its allow-list, or everything for "*". Both the
   // model-facing catalog and the execution gate derive from it, so they can't
   // disagree. It's consulted per request, so an action installed
-  // mid-conversation by `app_management` is callable in the same session.
+  // mid-conversation by `system:app_management` is callable in the same session.
   // What the session's place withholds comes off after "*" resolves, so a
   // wildcard grant cannot bring a withheld action back.
   const permittedActions = (turn: TurnFacts): Action[] => {
@@ -97,22 +98,28 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   };
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
-    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
-    return permittedActions(turn).find(
-      (action) => action.config.name === requestedAction.config.name,
-    );
+    if (!requestedAction) {
+      throw new Error(`Unknown action: ${name}${permittedHint(turn, name)}`);
+    }
+    return permitted(turn, requestedAction);
   };
+  const permitted = (turn: TurnFacts, requested: Action): Action | undefined =>
+    permittedActions(turn).find((action) => action.config.name === requested.config.name);
+  // Names only an action the agent may call, so the hint reveals nothing more.
+  const permittedHint = (turn: TurnFacts, name: string): string =>
+    didYouMean(actionRegistry, name, (id) => {
+      const action = actionRegistry.get(id);
+      return action !== undefined && permitted(turn, action) !== undefined;
+    });
 
   const actions: AgentActions = {
     list: (turn) => permittedActions(turn).map(toAgentAction),
+    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
     },
-    permits: (turn, name) => {
-      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
-      return permittedActions(turn).some((action) => action.config.name === canonical);
-    },
+    permits: (turn, name) => actions.find(turn, name) !== undefined,
     run: (turn, name, input) =>
       turn.inTurn(() =>
         asTurnActor(turn, async (actor) => {
@@ -145,7 +152,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     turnId: turn.turnId(),
   });
 
-  // `defer` creates its one-off through `create_routine` directly, not through
+  // `defer` creates its one-off through `system:create_routine` directly, not through
   // the agent's action allow-list: `defer` is a built-in.
   const defer: Pick<DeferTool, "schedule"> = {
     schedule: (turn, wakeUp) =>
@@ -170,7 +177,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             },
             createRoutine: async (createArgs) => {
               const result = await actionEngine.run(
-                "create_routine",
+                "system:create_routine",
                 createArgs,
                 agentRunContext(turn),
               );
@@ -192,12 +199,17 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   };
 
   // `propose_routine` auto-enables only a routine the agent could already
-  // create with `create_routine` itself (the same check, non-throwing), with
+  // create with `system:create_routine` itself (the same check, non-throwing), with
   // args that fit the target action's schema.
   const routineActivation = (turn: TurnFacts): RoutineActivationGate => ({
     canCallAction: (name) => {
       if (!actionRegistry.get(name)) return "unknown";
       return findPermittedAction(turn, name) ? "permitted" : "denied";
+    },
+    suggestAction: (name) => {
+      const suggestion = actionRegistry.suggest?.(name);
+      const action = suggestion ? actionRegistry.get(suggestion) : undefined;
+      return action && permitted(turn, action) ? suggestion : undefined;
     },
     validateArgs: (actionName, args) => {
       const action = actionRegistry.get(actionName);

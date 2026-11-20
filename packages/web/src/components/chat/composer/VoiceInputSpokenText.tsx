@@ -1,10 +1,12 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { VoiceInputPreview } from "./use-voice-input";
 
 // Spoken text arrives in bursts. It is shown a character at a time at a
 // steady pace, each character fading in, so it reads as if written rather
 // than pasted. The field is a textarea, which cannot style part of its text,
-// so while voice input is on the field's own text is hidden and a copy drawn
-// over it shows the spoken part this way.
+// and its value stays untouched while listening so its undo history survives.
+// So while voice input is on, the field's own text is hidden and a copy drawn
+// over it shows the field's text with the spoken part in.
 
 /** Characters shown per second while spoken text arrives. */
 export const REVEAL_CHARS_PER_SECOND = 20;
@@ -76,51 +78,79 @@ const COPIED_STYLES = [
   "tabSize",
 ] as const;
 
+/** How far the copy must scroll for the newest spoken character to show. */
+function newestInView(overlay: HTMLElement, last: HTMLElement | null): number {
+  return last ? last.offsetTop + last.offsetHeight - overlay.clientHeight : 0;
+}
+
 /**
- * Draws `value` over the textarea, with the characters in `spoken` (a range
- * of `value`) revealed and faded in. Renders nothing while `spoken` is null.
- * Render it as the textarea's sibling inside a `relative` wrapper: the copy is
- * laid out in that wrapper, so it clips, stacks and moves with the field.
+ * Draws `preview.value` over the textarea, with the characters from
+ * `preview.start` to `preview.end` revealed and faded in, and grows the field
+ * to fit it within the field's max height. Renders nothing while `preview` is
+ * null. Render it as the textarea's sibling inside a `relative` wrapper: the
+ * copy is laid out in that wrapper, so it clips, stacks and moves with the
+ * field.
  */
 export function VoiceInputSpokenText({
   textareaRef,
-  value,
-  spoken,
+  preview,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  value: string;
-  spoken: { start: number; end: number } | null;
+  preview: VoiceInputPreview | null;
 }) {
-  if (!spoken) return null;
-  return <SpokenOverlay textareaRef={textareaRef} value={value} spoken={spoken} />;
+  if (!preview) return null;
+  return <SpokenOverlay textareaRef={textareaRef} preview={preview} />;
 }
 
 function SpokenOverlay({
   textareaRef,
-  value,
-  spoken,
+  preview: { value, start, end },
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  value: string;
-  spoken: { start: number; end: number };
+  preview: VoiceInputPreview;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
-  const shown = useReveal(value.slice(spoken.start, spoken.end));
+  const lastRef = useRef<HTMLSpanElement>(null);
+  const shown = useReveal(value.slice(start, end));
+  // The copy keeps the newest words in view, as the caret would in the field,
+  // until the guardian scrolls back to read; scrolling to the newest words
+  // again follows them again. The copy scrolls itself, since the field's own
+  // text is shorter than the copy's.
+  const followingRef = useRef(true);
+  // Where `follow` last scrolled to. A scroll there is at the newest words,
+  // even when more have arrived before its event, which would otherwise read
+  // as the guardian scrolling back.
+  const followedToRef = useRef<number | null>(null);
+  const follow = useCallback(() => {
+    const overlay = overlayRef.current;
+    if (!overlay || !followingRef.current) return;
+    const below = newestInView(overlay, lastRef.current);
+    if (below <= overlay.scrollTop) return;
+    overlay.scrollTop = below;
+    followedToRef.current = overlay.scrollTop;
+  }, []);
 
-  // The field's own text goes invisible under the copy, and comes back when
-  // the copy goes.
+  // The field's own text and placeholder go invisible under the copy, and the
+  // field's height is the copy's while it shows. All come back when the copy
+  // goes, and the composer sizes the field again once the words go in.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    const color = el.style.color;
+    const { color, height, overflowY } = el.style;
     el.style.color = "transparent";
+    // The copy scrolls itself, so the field's own scrollbar would move nothing.
+    el.style.overflowY = "hidden";
+    el.classList.add("voice-input-previewing");
     return () => {
       el.style.color = color;
+      el.style.height = height;
+      el.style.overflowY = overflowY;
+      el.classList.remove("voice-input-previewing");
     };
   }, [textareaRef]);
 
   // Covers the field's box, less its scrollbar, so the copy wraps where the
-  // field's text does, and follows the field's scroll position.
+  // field's text does, and starts at the field's scroll position.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     const overlay = overlayRef.current;
@@ -138,29 +168,43 @@ function SpokenOverlay({
         Number.parseFloat(computed.borderLeftWidth) + Number.parseFloat(computed.borderRightWidth);
       overlay.style.width = `${el.clientWidth + borders}px`;
       overlay.style.height = `${el.offsetHeight}px`;
-      overlay.scrollTop = el.scrollTop;
+      follow();
     };
-    const scrolled = () => {
-      overlay.scrollTop = el.scrollTop;
-    };
+    overlay.scrollTop = el.scrollTop;
     place();
+    // Within a line of the newest words counts as at them: more can arrive
+    // while a scroll back down to them is still moving.
+    const lineHeight =
+      Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) || 0;
+    const scrolled = () => {
+      followingRef.current =
+        overlay.scrollTop === followedToRef.current ||
+        newestInView(overlay, lastRef.current) <= overlay.scrollTop + lineHeight;
+    };
     const resized = new ResizeObserver(place);
     resized.observe(el);
     resized.observe(parent);
-    el.addEventListener("scroll", scrolled);
+    overlay.addEventListener("scroll", scrolled);
     return () => {
       resized.disconnect();
-      el.removeEventListener("scroll", scrolled);
+      overlay.removeEventListener("scroll", scrolled);
     };
-  }, [textareaRef]);
+  }, [textareaRef, follow]);
 
-  // Each revealed character makes the copy taller, which no scroll or resize
-  // of the field reports, so the copy takes the field's scroll position again.
+  // Each revealed character can make the copy taller. The field grows with
+  // it up to its max height, and past that the copy scrolls to keep the
+  // newest words in view.
   useLayoutEffect(() => {
     const el = textareaRef.current;
     const overlay = overlayRef.current;
-    if (el && overlay) overlay.scrollTop = el.scrollTop;
-  }, [textareaRef, shown]);
+    if (!el || !overlay) return;
+    const computed = getComputedStyle(el);
+    const borders =
+      Number.parseFloat(computed.borderTopWidth) + Number.parseFloat(computed.borderBottomWidth);
+    const content = overlay.scrollHeight + borders;
+    if (content > el.offsetHeight) el.style.height = `${content}px`;
+    follow();
+  }, [textareaRef, shown, follow]);
 
   const chars = Array.from(shown);
   return (
@@ -168,19 +212,26 @@ function SpokenOverlay({
       ref={overlayRef}
       aria-hidden
       data-voice-input-spoken-text
-      className="pointer-events-none absolute overflow-hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
+      // The copy takes the wheel and touch to scroll, but a press on it is a
+      // press on the field: focus stays there, so Enter still stops and sends.
+      onMouseDown={(event) => {
+        event.preventDefault();
+        textareaRef.current?.focus();
+      }}
+      className="absolute overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden text-foreground whitespace-pre-wrap break-words border-solid border-transparent [overflow-wrap:break-word]"
     >
-      {value.slice(0, spoken.start)}
+      {value.slice(0, start)}
       {chars.map((char, i) => (
         <span
           // By position: a corrected character swaps in place without fading again.
           key={i}
+          ref={i === chars.length - 1 ? lastRef : undefined}
           className="voice-input-char-in"
         >
           {char}
         </span>
       ))}
-      {value.slice(spoken.end)}
+      {value.slice(end)}
       {/* A trailing newline needs a character after it to take up its line, as in the field. */}
       {value.endsWith("\n") ? "\u200b" : null}
     </div>

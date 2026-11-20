@@ -22,12 +22,12 @@ const inputSchema = z.object({
     .string()
     .min(1)
     .describe(
-      "Trigger slug to subscribe to, e.g. 'GMAIL_NEW_GMAIL_MESSAGE' (from connector_event_search)",
+      "Trigger slug to subscribe to, e.g. 'GMAIL_NEW_GMAIL_MESSAGE' (from connector:connector_event_search)",
     ),
   config: z
     .record(z.string(), z.unknown())
     .describe(
-      "Trigger configuration matching the `config` schema from connector_event_schema; pass {} when none is required",
+      "Trigger configuration matching the `config` schema from connector:connector_event_schema; pass {} when none is required",
     ),
 });
 
@@ -43,14 +43,14 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         return {
           status: "error",
           error:
-            "GitHub events don't run through Composio. Use connector_github_subscribe with a repo ('owner/name') or org and the events you want — it registers Rome's own GitHub webhook.",
+            "GitHub events don't run through Composio. Use connector:connector_github_subscribe with a repo ('owner/name') or org and the events you want — it registers Rome's own GitHub webhook.",
         };
       }
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_event_subscribe for "${slug}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_event_subscribe for "${slug}".`,
         };
       }
       try {

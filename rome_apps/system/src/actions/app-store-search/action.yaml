@@ -1,6 +1,6 @@
 name: app_store_search
 type: system
-description: Search or inspect the Rome App Store (also called "store", "app store", "Rome store", or marketplace). Use this read-only action when the guardian asks what is in the store, asks whether a Rome app exists, asks for Store app details, or wants to find a Store app before installing it with app_management install and source.mode='appstore'. This is for Rome's own App Store, not Apple App Store / Google Play unless the guardian explicitly says those.
+description: Search or inspect the Rome App Store (also called "store", "app store", "Rome store", or marketplace). Use this read-only action when the guardian asks what is in the store, asks whether a Rome app exists, asks for Store app details, or wants to find a Store app before installing it with system:app_management install and source.mode='appstore'. This is for Rome's own App Store, not Apple App Store / Google Play unless the guardian explicitly says those.
 complexity: simple
 speed: fast
 reliability: medium

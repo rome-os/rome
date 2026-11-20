@@ -1276,7 +1276,7 @@ export interface RunParams {
    * A streamed reply is the turn's answer in the conversation's history. The
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
-   * as `send_message` does.
+   * as `system:send_message` does.
    *
    * @deprecated The host no longer streams replies to external platforms and
    * ignores this. The caller always sends the reply.
@@ -1816,6 +1816,13 @@ export interface ChannelMessage {
    *  Absent in a chat that keeps none. */
   chatThread?: string;
   addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection tells. A webhook linked to a
+   *  person speaks for that person, so it is not a bot. Absent where the
+   *  connection does not tell. */
+  fromBot?: boolean;
+  /** It mentions someone, and none of them is Rome's account. Absent where
+   *  the connection does not tell. */
+  mentionsOthers?: boolean;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
@@ -2228,12 +2235,11 @@ export interface ChannelMessageHookDeps {
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
   /**
-   * @internal A test-only back door for the Inbox app. True when the Inbox
-   * app must answer no message on an account linked to `agent`, a canonical
-   * agent id, because the app that installed it runs the agent's turns
-   * itself. The host answers true only for an agent that declares
-   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
-   * for every other. Not for apps to build on.
+   * @internal For the Inbox app. True when the Inbox app must answer no
+   * message on an account linked to `agent`, a canonical agent id, because
+   * the app that installed it runs the agent's turns itself. The host answers
+   * true only for an agent that declares `runsOwnTurns: true` in an app on its
+   * allow-list, and false for every other. Not for apps to build on.
    */
   unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
@@ -3155,7 +3161,7 @@ export interface EventBusTrigger {
 /** A producer app's declaration that it can currently emit `eventType`.
  * `eventType` is the same value a routine binds to as
  * `EventBusTrigger.eventName`; `appId` is the producer that owns it. Surfaced to
- * apps discovering which events are watchable (e.g. `search_event_catalog`). */
+ * apps discovering which events are watchable (e.g. `system:search_event_catalog`). */
 export interface EventCatalogEntry {
   eventType: string;
   appId: string;

@@ -231,6 +231,7 @@ async function askSmallModel(
           list: () => [],
           permits: () => false,
           appOf: () => undefined,
+          find: () => undefined,
           run: async () => {
             throw new Error("A handoff cannot run actions");
           },

@@ -137,7 +137,7 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
 
 /**
  * Email as a first-class channel. Inbound is push-driven by Rome Cloud: the
- * `email_inbound` core-side action calls `ingestInbound()` with the raw relay
+ * `system:email_inbound` core-side action calls `ingestInbound()` with the raw relay
  * deposit, which this adapter verifies (HMAC), gates (authentication + From),
  * pulls the body for, and hands to `onInbound` as the channel's own record, a
  * `ChannelMessage` whose `raw` is the `RomeMailEvent`. The Connection
@@ -571,7 +571,7 @@ export class EmailAdapter {
 
   /**
    * Consume one inbound relay deposit (a signed `RomeMailEvent` JSON string).
-   * Called by the `email_inbound` action after the connector transports the
+   * Called by the `system:email_inbound` action after the connector transports the
    * deposit in. Verifies the per-inbox HMAC, applies the guardian gate, pulls
    * the body on demand, and dispatches a ChannelMessage into the standard
    * channel pipeline. Returns the disposition for logging/tests.

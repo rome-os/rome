@@ -8,7 +8,7 @@ description: |
   trigger binds to (one `provider:event:github.<event>` per requested event).
   Pass exactly one of `repo` or `org`, plus the `events` to deliver (e.g.
   ['push', 'pull_request', 'issues'], or ['*'] for all). This is the GitHub
-  equivalent of connector_event_subscribe — use it instead of connector_event_subscribe
+  equivalent of connector:connector_event_subscribe — use it instead of connector:connector_event_subscribe
   for GitHub. Requires GitHub connected in Settings → Connections and a relay
   mailbox. Fails closed: not connected, missing relay mailbox, or a GitHub API
   refusal all come back as an action error.

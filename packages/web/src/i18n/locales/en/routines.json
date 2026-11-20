@@ -1,7 +1,7 @@
 {
   "header": {
     "title": "Routines",
-    "createButton": "Create Routine"
+    "createButton": "Create routine"
   },
   "loading": "Loading routines...",
   "stats": {
@@ -100,8 +100,8 @@
     "missing": "—"
   },
   "modal": {
-    "title": "Create Routine",
-    "submit": "Create Routine",
+    "title": "Create routine",
+    "submit": "Create routine",
     "submitting": "Creating...",
     "cancel": "Cancel",
     "triggerDescriptions": {
@@ -114,14 +114,14 @@
       "name": "Name",
       "scheduleSubtype": "Schedule",
       "timezone": "Timezone",
-      "localTime": "Local Time",
+      "localTime": "Local time",
       "startDate": "Date",
       "frequency": "Frequency",
-      "daysOfWeek": "Days of Week",
-      "dayOfMonth": "Day of Month",
+      "daysOfWeek": "Days of week",
+      "dayOfMonth": "Day of month",
       "eventName": "Event name",
       "sourcePattern": "Source pattern (optional)",
-      "actionName": "Action Name",
+      "actionName": "Action name",
       "argsJson": "Args (JSON object)"
     },
     "placeholders": {

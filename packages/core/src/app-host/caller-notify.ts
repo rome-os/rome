@@ -1,4 +1,4 @@
-// Whose phone `send_notification` rings: the owner of a private chat, else the
+// Whose phone `system:send_notification` rings: the owner of a private chat, else the
 // one person the turn acts for. In a shared chat with no such person it sends
 // nothing. A visitor's call never reaches the guardian:
 // docs/architecture/notification-delivery.md.
@@ -67,7 +67,7 @@ export async function sendForCaller(
 }
 
 /**
- * The main-process `NotifyService` for `send_notification`: it reads the
+ * The main-process `NotifyService` for `system:send_notification`: it reads the
  * calling action's context, which a worker's call carries over IPC instead.
  */
 export function callerNotifyService(

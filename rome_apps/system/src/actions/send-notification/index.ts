@@ -116,7 +116,7 @@ export function createAction(config: ActionConfig, deps: SendNotificationDeps): 
   // untyped bag, so a missing/mis-wired notify is caught here at load rather
   // than as a TypeError on the first send.
   if (typeof deps.notify?.send !== "function") {
-    throw new Error("send_notification requires a notify capability with a send() method");
+    throw new Error("system:send_notification requires a notify capability with a send() method");
   }
   return createSendNotificationAction(config, deps);
 }

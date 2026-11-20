@@ -274,7 +274,7 @@ export function createAction(
       };
 
       // Opt-in: only add the structured array when explicitly requested, so
-      // existing callers (LLM agents, the `dream` action) keep the exact same
+      // existing callers (LLM agents, the `dream:dream` action) keep the exact same
       // payload and token footprint they have today.
       if (includeMessages) {
         data.messages = toStructuredMessages(channel, messages);

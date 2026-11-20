@@ -37,7 +37,7 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
       {
         status: "signed_in",
         nextStep:
-          "Signed in to Composio. No toolkit is connected yet — call connector_connect for each toolkit you want to connect to start its authorization.",
+          "Signed in to Composio. No toolkit is connected yet — call connector:connector_connect for each toolkit you want to connect to start its authorization.",
       },
       "Signed in to Composio",
     );
