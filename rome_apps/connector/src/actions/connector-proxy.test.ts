@@ -730,13 +730,19 @@ describe("Rome-managed Outlook routing", () => {
     expect(await run(input)).toMatchObject({ status: "error" });
     expect(loadConnectorClient).not.toHaveBeenCalled();
   });
-  it("routes every mail path to core, including case and /beta variants", async () => {
+  it("routes every mail path variant to core, never to Composio", async () => {
     runAction.mockResolvedValue({ status: "error", error: "Only Outlook mail GETs are allowed." });
     for (const path of [
       "/v1.0/me",
       "/v1.0/me/sendMail",
       "/v1.0/me/MailFolders/inbox/messages",
       "/beta/me/messages",
+      "/v1.0/me/messages?$top=5",
+      " /v1.0/me/messages ",
+      "/v1.0/me/mailFolders('Inbox')/messages",
+      "/v1.0/users/someone@example.com/messages",
+      "/v1.0/me/%6Dessages",
+      "/v1.0/me/microsoft.graph.sendMail",
     ]) {
       runAction.mockClear();
       await run({ ...input, path });

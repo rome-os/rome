@@ -32,10 +32,23 @@ const log = createAppLogger("connector_proxy");
 const GITHUB_TOOLKIT = "github";
 const SLACK_TOOLKIT = "slack";
 const SHOPIFY_TOOLKIT = "shopify";
-// Graph mail paths, which a Rome-managed Microsoft connection answers. Graph
-// paths are case-insensitive, and `/beta` mail must not slip past core either.
-const OUTLOOK_MAIL_PATH =
-  /^\/(?:v1\.0|beta)\/me(?:\/(?:messages|mailFolders|sendMail)(?:\/.*)?)?$/i;
+// Whether an Outlook call touches mail, which a Rome-managed Microsoft
+// connection answers. It reads the built endpoint's decoded path, so spacing, a
+// query string, an encoded segment or another user's mailbox can't route mail
+// around core; core's strict allowlist then refuses what it doesn't support.
+// Anything undecodable counts as mail, so it fails closed.
+function isOutlookMailCall(endpoint: string): boolean {
+  let path: string;
+  try {
+    path = decodeURIComponent(new URL(endpoint).pathname);
+  } catch {
+    return true;
+  }
+  return (
+    /^\/[^/]+\/me\/?$/i.test(path) ||
+    /\/(?:messages|mailfolders|(?:microsoft\.graph\.)?sendmail)(?:[/(]|$)/i.test(path)
+  );
+}
 
 /**
  * Map a verbatim upstream response to an ActionResult, fail-closed. The proxy
@@ -255,7 +268,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       // Only mail goes to core. Calendar, contacts and the rest of Graph stay on
       // Composio's Outlook connection.
-      if (toolkit.toLowerCase() === "outlook" && OUTLOOK_MAIL_PATH.test(path)) {
+      if (toolkit.toLowerCase() === "outlook" && isOutlookMailCall(endpoint)) {
         const managed = await deps.appContext.runAction("core:outlook_read", {
           path,
           method,
