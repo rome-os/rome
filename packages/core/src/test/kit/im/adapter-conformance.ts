@@ -51,6 +51,14 @@ export interface ConformanceChannel {
     /** How a person sees what `personWrites` sent, where the platform adds
      *  to the words, as a mention of Rome's account. The words alone by default. */
     shows?(text: string): string;
+    /** A lookup the adapter makes on the platform before it hands a message
+     *  over, where it makes one, such as a reply's author. `hold` holds the
+     *  platform's next answer to it until released; `personWrites` writes a
+     *  message in the group that needs it, and the platform's id for it. */
+    readonly lookup?: {
+      hold(): { entered: Promise<void>; release(): void };
+      personWrites(text: string): string | Promise<string>;
+    };
   };
   /** A thread in `group`, where the platform has threads and the peer
    *  models one. */
@@ -135,7 +143,8 @@ export type ConformanceCase =
   | "group"
   | "twoAccounts"
   | "oneOfTwoAccounts"
-  | "thread";
+  | "thread"
+  | "inOrder";
 
 /**
  * Runs the conformance cases for the adapter `start` sets up. Each case gets
@@ -164,6 +173,9 @@ export function describeAdapterConformance(
     oneOfTwoAccounts?: boolean;
     /** A thread in the group, as `thread` names it. */
     threads: boolean;
+    /** A lookup the adapter waits on before handing a message over, as
+     *  `group.lookup` names it. */
+    lookups?: boolean;
   },
   /**
    * Cases Rome fails on this platform today, each with why. They are
@@ -410,6 +422,39 @@ export function describeAdapterConformance(
         ]);
         expect(chatsOf("group")).toEqual([heard.message.place.chat.id]);
         expect(directMessages()).toHaveLength(0);
+      },
+    );
+
+    runs("inOrder", models.groups && models.lookups === true)(
+      "hands a chat's messages over in the order they arrived, however slow a lookup",
+      async () => {
+        const group = peer.group!;
+        const lookup = group.lookup!;
+        const shows = (text: string) => group.shows?.(text) ?? text;
+        const held = lookup.hold();
+        const before = said.length;
+
+        await lookup.personWrites("first, which needs a lookup");
+        await held.entered;
+        await group.personWrites("second");
+        // Give the second message the time to overtake the first, if it can.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        held.release();
+
+        // A message the lookup needs, such as the one a reply answers, may
+        // be recorded too; only the two the person wrote are compared.
+        const written = [shows("first, which needs a lookup"), shows("second")];
+        const recorded = () =>
+          said
+            .slice(before)
+            .map((heard) => heard.message.body.text)
+            .filter((text) => written.includes(text));
+        const deadline = Date.now() + 3_000;
+        while (recorded().length < 2) {
+          if (Date.now() > deadline) throw new Error("Rome did not record both messages");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(recorded()).toEqual(written);
       },
     );
 

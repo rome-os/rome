@@ -23,6 +23,7 @@ import type {
 } from "discord.js";
 import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import {
   filterConnectionApiResponseHeaders,
   isProtectedConnectionApiRequestHeader,
@@ -338,8 +339,8 @@ function projectDiscordBody(
 export class DiscordAdapter {
   private client: Client;
   private handler?: (msg: connections.Message) => Promise<void>;
-  /** The last message being heard in each chat, which the next one waits on. */
-  private readonly hearing = new Map<string, Promise<void>>();
+  /** Holds each chat's messages in arrival order until they are delivered. */
+  private readonly hearing = new KeyedMutex();
   private chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
@@ -744,24 +745,15 @@ export class DiscordAdapter {
     // person). Messages of one chat are heard one after another, so a slow
     // lookup never lets a later message overtake an earlier one.
     this.client.on("messageCreate", (message: Message) =>
-      this.inChatOrder(message.channelId, () => this.hear(message)),
+      this.hearing
+        .runExclusive(message.channelId, () => this.hear(message))
+        .catch((err: unknown) => {
+          log.error("could not hear a message", { chatId: message.channelId, error: String(err) });
+        }),
     );
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
-  }
-
-  /** Runs `hear` after every message of `chatId` heard before it. */
-  private inChatOrder(chatId: string, hear: () => Promise<void>): Promise<void> {
-    const previous = this.hearing.get(chatId) ?? Promise.resolve();
-    const next = previous.then(hear).catch((err: unknown) => {
-      log.error("could not hear a message", { chatId, error: String(err) });
-    });
-    this.hearing.set(chatId, next);
-    void next.then(() => {
-      if (this.hearing.get(chatId) === next) this.hearing.delete(chatId);
-    });
-    return next;
   }
 
   /** Hears one message from the gateway: filters it, then hands it over. */
