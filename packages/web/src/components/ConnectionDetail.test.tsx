@@ -600,6 +600,20 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it("shows the members switch as the server has it when that changes elsewhere", () => {
+    const { rerenderCard } = renderAccountBody(
+      cardFor([feishu({ answerMembers: false })], "feishu"),
+    );
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+
+    // Another tab turned it on, and a refresh brought the new state.
+    rerenderCard(cardFor([feishu({ answerMembers: true })], "feishu"));
+
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
   it("shows no members switch for a service that has none", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
     expect(

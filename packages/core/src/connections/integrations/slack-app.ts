@@ -238,7 +238,7 @@ export interface SlackAppDescriptorDeps {
   openMailbox: OpenMailbox;
   /** The connection's own copy of the messages it hears and reads. */
   copy: SlackMessageCopy;
-  /** Which accounts the guardian opened to their workspace's other members. */
+  /** Which connections the guardian opened to their workspace's other members. */
   openToMembers: SlackAppOpenToMembers;
   instanceOrigin?: () => string;
 }
@@ -373,8 +373,6 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
       } catch (error) {
         throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
       }
-      // A later connect of the workspace starts closed to its members again.
-      deps.openToMembers.set(`${material.teamId}/${material.botUserId}`, false);
     },
     openToMembers: deps.openToMembers,
     capabilities: {
@@ -412,8 +410,7 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             onFault: ({ kind, cause }) => routeFault(cause, kind),
             copy: deps.copy,
             // Read for each message, so a switch turned off holds from the next.
-            openToMembers: () =>
-              deps.openToMembers.isOpen(`${material.teamId}/${material.botUserId}`),
+            openToMembers: () => deps.openToMembers.isOpen(kit.connectionId),
           });
           return {
             start(deliver, fault): void {

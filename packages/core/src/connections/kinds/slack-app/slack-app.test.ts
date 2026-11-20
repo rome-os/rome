@@ -2167,4 +2167,77 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
 
     expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined, undefined]);
   });
+
+  it("asks Slack again after ten minutes, so a member made a guest is no longer marked", async () => {
+    let guest = false;
+    let at = Date.parse("2026-11-20T00:00:00Z");
+    const userName = rs.fn(async () =>
+      guest ? { displayName: "Kim" } : { displayName: "Kim", fullMember: true as const },
+    );
+    const delivered: ChannelMessage[] = [];
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: fakeApi({ userName }),
+      openMailbox: fakeMailbox().open,
+      copy: testCopy(),
+      readGate: openGate(),
+      openToMembers: () => true,
+      now: () => new Date(at),
+    });
+    a.onInbound((message) => delivered.push(message));
+    await a.start();
+
+    await a.handleFrame(from(1, "U_KIM"));
+    guest = true;
+    at += 10 * 60 * 1000;
+    await a.handleFrame(from(2, "U_KIM"));
+
+    expect(delivered.map((m) => m.openToMembers)).toEqual([true, undefined]);
+    expect(userName).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands a kept message over again marked only while the switch is still on", async () => {
+    const copy = testCopy();
+    const open = { on: true };
+    const build = () => {
+      const delivered: ChannelMessage[] = [];
+      const a = new SlackAppAdapter({
+        channel: "slack_app",
+        botToken: "xoxb-a",
+        teamId: TEAM,
+        botUserId: BOT,
+        forwardSecret: SECRET,
+        mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+        api: fakeApi({
+          userName: rs.fn(async () => ({ displayName: "Kim", fullMember: true as const })),
+        }),
+        openMailbox: fakeMailbox().open,
+        copy,
+        readGate: openGate(),
+        openToMembers: () => open.on,
+      });
+      a.onInbound((message) => delivered.push(message));
+      return { a, delivered };
+    };
+    const first = build();
+    await first.a.start();
+    await first.a.handleFrame(from(1, "U_KIM"));
+    await first.a.stop();
+
+    // Rome never confirmed it took the message, so a restart hands it over
+    // again, after the guardian closed the switch.
+    open.on = false;
+    const again = build();
+    await again.a.start();
+    await again.a.stop();
+
+    expect(first.delivered[0]?.openToMembers).toBe(true);
+    expect(again.delivered).toHaveLength(1);
+    expect(again.delivered[0]).not.toHaveProperty("openToMembers");
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
@@ -101,19 +101,23 @@ function AnswerMembersRow({
 }) {
   const { t } = useTranslation("settings");
   const [busy, setBusy] = useState(false);
-  const [shown, setShown] = useState(on);
+  // What this page last set, shown until the server's state next changes:
+  // a change made anywhere else then shows here.
+  const [mine, setMine] = useState<boolean | null>(null);
+  useEffect(() => setMine(null), [on]);
+  const shown = mine ?? on;
   const change = async (next: boolean) => {
     setBusy(true);
-    setShown(next);
+    setMine(next);
     try {
       const { answerMembers } = await setAnswerMembers(
         connectionId,
         next,
         t("connections.answerMembers.failed"),
       );
-      setShown(answerMembers);
+      setMine(answerMembers);
     } catch (error) {
-      setShown(!next);
+      setMine(null);
       toast.error(error instanceof Error ? error.message : t("connections.answerMembers.failed"));
     } finally {
       setBusy(false);

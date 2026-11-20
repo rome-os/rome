@@ -43,6 +43,9 @@ const log = createLogger("slack-app");
 
 const SLACK_MESSAGE_ID = /^\d+\.\d+(?::\d+\.\d+)?$/;
 const USER_NAME_CACHE_SIZE = 500;
+/** How long a user's answer from Slack is reused. It says whether the user is
+ *  a full member, so a member made a guest is no longer answered past it. */
+const USER_CACHE_TTL_MS = 10 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
@@ -190,7 +193,7 @@ export class SlackAppAdapter {
   private handler?: (message: ChannelMessage) => void;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
-  private readonly userNames = new Map<string, SlackAppUser>();
+  private readonly userNames = new Map<string, { at: number; user: SlackAppUser }>();
   private abort = new AbortController();
   private appId: string | undefined;
   private mailbox: SlackAppMailbox;
@@ -387,8 +390,16 @@ export class SlackAppAdapter {
     if (kept.length > 0) {
       log.info("slack app handing over kept messages", { count: kept.length });
     }
+    // A mark kept with a message says what was decided when it was heard: it
+    // holds again only while the switch is still on.
+    const open = this.config.openToMembers?.() === true;
     for (const { eventId, message } of kept) {
-      this.handOver(eventId, { ...message, channel: this.config.channel });
+      const { openToMembers: marked, ...rest } = message;
+      this.handOver(eventId, {
+        ...rest,
+        channel: this.config.channel,
+        ...(marked && open ? { openToMembers: true as const } : {}),
+      });
     }
   }
 
@@ -941,15 +952,17 @@ export class SlackAppAdapter {
   }
 
   private async lookUpName(userId: string): Promise<SlackAppUser> {
+    const now = this.now().getTime();
     const cached = this.userNames.get(userId);
-    if (cached) return cached;
+    if (cached && now - cached.at < USER_CACHE_TTL_MS) return cached.user;
     try {
       const name = await this.config.api.userName(this.config.botToken, userId, this.abort.signal);
+      this.userNames.delete(userId);
       if (this.userNames.size >= USER_NAME_CACHE_SIZE) {
         const oldest = this.userNames.keys().next().value;
         if (oldest !== undefined) this.userNames.delete(oldest);
       }
-      this.userNames.set(userId, name);
+      this.userNames.set(userId, { at: now, user: name });
       return name;
     } catch (error) {
       if (isSlackCredentialError(error)) {

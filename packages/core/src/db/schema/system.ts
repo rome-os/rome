@@ -408,12 +408,14 @@ export const slackAppChanges = sqliteTable(
   (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
 );
 
-// The Slack app accounts the guardian opened to their workspace's other
-// members, by account id (`<team>/<bot user>`): a row means a full member who
-// is not the guardian is answered there. Off is no row. Only
-// connections/kinds/slack-app reads or writes it, through its repository there.
+// The Slack app connections the guardian opened to their workspace's other
+// members, by connection id: a row means a full member who is not the
+// guardian is answered there. Off is no row. A fix keeps the connection, so it
+// keeps the row; a connection made later has a new id, so it starts closed.
+// Only connections/kinds/slack-app reads or writes it, through its repository
+// there.
 export const slackAppOpenToMembers = sqliteTable("slack_app_open_to_members", {
-  accountId: text("account_id").primaryKey(),
+  connectionId: text("connection_id").primaryKey(),
 });
 
 // One row per LinkedIn account seen in a thread's participant list. Person-level

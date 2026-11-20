@@ -4815,8 +4815,8 @@
     "slack_app_open_to_members": {
       "name": "slack_app_open_to_members",
       "columns": {
-        "account_id": {
-          "name": "account_id",
+        "connection_id": {
+          "name": "connection_id",
           "type": "text",
           "primaryKey": true,
           "notNull": true,

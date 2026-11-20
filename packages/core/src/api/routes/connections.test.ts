@@ -950,7 +950,9 @@ describe("PUT /connections/:id/answer-members", () => {
     expect(await on.json()).toEqual({ answerMembers: true });
     expect(await answerMembers(app, a)).toBe(true);
     expect(await answerMembers(app, b)).toBe(false);
-    expect([...open]).toEqual(["T_A/U_BOT"]);
+    // The switch is the connection's own, so a later connect, a new
+    // connection, starts closed whatever became of this one.
+    expect([...open]).toEqual([a]);
 
     expect(await (await put(app, a, { on: false })).json()).toEqual({ answerMembers: false });
     expect(await answerMembers(app, a)).toBe(false);

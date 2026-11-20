@@ -115,9 +115,8 @@ export interface ConnectionView
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
-  /** Whether the guardian opened the account to its workspace's other
-   *  members, so they are answered. Absent for a kind with no such switch,
-   *  and for a connection that has not named its account yet. */
+  /** Whether the guardian opened the connection to its workspace's other
+   *  members, so they are answered. Absent for a kind with no such switch. */
   answerMembers?: boolean;
 }
 
@@ -205,17 +204,17 @@ function buildConnectionView(
     agent: link === null ? undefined : agent,
     link,
     severalAccounts: offersAnother(registry.getDescriptor(conn.connectionKind)),
-    ...answerMembersOf(registry.getDescriptor(conn.connectionKind), account),
+    ...answerMembersOf(registry.getDescriptor(conn.connectionKind), conn.id),
   };
 }
 
-/** The view's `answerMembers`, for a kind with the switch and a known account. */
+/** The view's `answerMembers`, for a kind with the switch. */
 function answerMembersOf(
   descriptor: ConnectionDescriptor | null,
-  account: AccountValue | null,
+  connectionId: string,
 ): { answerMembers?: boolean } {
   const open = descriptor?.openToMembers;
-  return open && account ? { answerMembers: open.isOpen(account.id) } : {};
+  return open ? { answerMembers: open.isOpen(connectionId) } : {};
 }
 
 function buildGrantDetails(
@@ -425,13 +424,9 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (!open) {
       return c.json({ error: "This connection has no other members to answer." }, 404);
     }
-    const account = accountView(descriptor, await loadGrant(registry, conn));
-    if (!account) {
-      return c.json({ error: "This connection has not named its account yet." }, 409);
-    }
-    open.set(account.id, body.on);
+    open.set(conn.id, body.on);
     c.header("Cache-Control", "no-store");
-    return c.json({ answerMembers: open.isOpen(account.id) });
+    return c.json({ answerMembers: open.isOpen(conn.id) });
   });
 
   app.delete("/connections/:id/grants/:name", async (c) => {
