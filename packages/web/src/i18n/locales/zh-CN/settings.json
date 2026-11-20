@@ -491,7 +491,7 @@
         "title": "聊天规则",
         "description": "Rome 在这个账号的每个聊天中如何参与。"
       },
-      "otherChats": "其他聊天：",
+      "otherChats": "其他群聊：",
       "addChat": "添加聊天",
       "noMatches": "没有匹配的聊天",
       "findChats": "在这个账号的聊天里发一条消息，Rome 就能找到它。",

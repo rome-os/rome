@@ -570,7 +570,7 @@ describe("ChatRulesSection", () => {
         "Only when addressed · Replies in a thread · Resets after 7 days idle",
       ),
     ).toBeTruthy();
-    expect(screen.getByText("Every other chat:")).toBeTruthy();
+    expect(screen.getByText("Other group chats:")).toBeTruthy();
   });
 
   it("resets a chat to the defaults, which takes it off the list", async () => {

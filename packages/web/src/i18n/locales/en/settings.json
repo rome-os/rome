@@ -491,7 +491,7 @@
         "title": "Chat rules",
         "description": "How Rome takes part in each chat on this account."
       },
-      "otherChats": "Every other chat:",
+      "otherChats": "Other group chats:",
       "addChat": "Add chat",
       "noMatches": "No chats match",
       "findChats": "Send a message in a chat on this account, and Rome will find it.",
