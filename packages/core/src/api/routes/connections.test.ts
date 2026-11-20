@@ -76,11 +76,10 @@ function makePasteTalkWithProfile() {
 }
 
 describe("GET /connections", () => {
-  it("reports act as chat for a talker agents act through, connected or not", async () => {
+  it("reports act by the grant for a talker agents act through, connected or not", async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     const telegram = makePasteTalkWithProfile();
-    if (telegram.descriptor.capabilities.talker)
-      telegram.descriptor.capabilities.talker.acts = true;
+    telegram.descriptor.actsWithGrant = true;
     registry.register(telegram.descriptor);
 
     const before = await (await makeApp(registry).request("/connections")).json();
@@ -128,7 +127,7 @@ describe("GET /connections", () => {
 
     // Rome's own app, offered and not connected, changes nothing for it.
     const app = makeBotAll();
-    if (app.descriptor.capabilities.talker) app.descriptor.capabilities.talker.acts = true;
+    app.descriptor.actsWithGrant = true;
     app.descriptor.capabilities.actor = undefined;
     registry.register(app.descriptor);
     const both = await listed();

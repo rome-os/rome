@@ -422,7 +422,8 @@ export interface ConnectionDescriptor {
   severalAccounts?: boolean;
   /** True when agents act on the platform with this kind's grant alone,
    *  through the connector's proxy, though the kind has no actor: `act` is
-   *  then unlocked while the grant is authorized. Absent means they do not. */
+   *  then unlocked while every grant is authorized (connections/acts-with-grant.ts).
+   *  Absent means they do not. */
   actsWithGrant?: boolean;
   /** False when the guardian may no longer connect a new account of this
    *  kind, as for a kind another one replaces. Its connections keep loading,
@@ -478,10 +479,6 @@ export interface ConnectionDescriptor {
        *  from another on the same platform before it unlocks. Absent means
        *  it does not. */
       searches?: boolean;
-      /** True when agents act on the platform through this talker, such as
-       *  through the connector's proxy, so a kind with no actor reports `act`
-       *  as its chat. Absent means they do not. */
-      acts?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */
