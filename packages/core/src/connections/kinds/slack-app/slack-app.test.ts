@@ -1548,9 +1548,15 @@ describe("Slack app searches what it keeps (R9)", () => {
 
     const removed = await a.search({ text: "message", chatId: "C_TEAM" as never, limit: 5 });
     const mentions = await a.search({ text: "question", chatId: "C_TEAM" as never, limit: 5 });
+    // A search across chats covers direct messages and mentions, never a
+    // group's history.
+    const across = await a.search({ text: "message", limit: 5 });
+    const acrossMentions = await a.search({ text: "question", limit: 5 });
 
     expect(texts(member.messages)).toEqual(["message 1"]);
     expect(removed.messages).toEqual([]);
+    expect(across.messages).toEqual([]);
+    expect(texts(acrossMentions.messages)).toEqual(["question 2"]);
     expect(removed.coverage).toContain("may not read the chat's history");
     expect(texts(mentions.messages)).toEqual(["question 2"]);
   });
