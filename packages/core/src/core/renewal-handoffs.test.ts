@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  executedActionsOf,
   createRenewalHandoffs,
   recentMessagesOf,
   rowsSince,
@@ -198,5 +199,45 @@ describe("recentMessagesOf cut eligibility", () => {
       row("notification", "c", "t2"),
     ];
     expect(recentMessagesOf(rows).map((m) => m.agent === true)).toEqual([false, true, false]);
+  });
+});
+
+describe("the executed-actions list", () => {
+  const trace = (turnId: string, blocks: unknown[]) => ({
+    role: "trace",
+    content: JSON.stringify(blocks),
+    turnId,
+    createdAt: new Date("2026-11-19T10:00:00Z"),
+  });
+
+  it("lists the tools the latest turns called, with key arguments and no results", () => {
+    const list = executedActionsOf([
+      { role: "user", content: "[]", turnId: "t1", createdAt: new Date() },
+      trace("t1", [
+        {
+          type: "tool_use",
+          tool: "send_email",
+          id: "a",
+          input: { to: "a@b.c", body: "x".repeat(200) },
+        },
+        { type: "tool_result", tool: "send_email", toolUseId: "a", output: "sent: secret id 42" },
+        { type: "tool_use", tool: "create_event", id: "b", input: { title: "Dentist" } },
+        { type: "tool_result", tool: "create_event", toolUseId: "b", output: "no", isError: true },
+      ]),
+    ]);
+    expect(list).toContain("- send_email(to: a@b.c, body: xxxx");
+    expect(list).toContain("…)");
+    expect(list).toContain("- create_event(title: Dentist) (failed)");
+    expect(list).not.toContain("secret id 42");
+  });
+
+  it("reads only the last five turns, and nothing when no tool ran", () => {
+    const rows = ["t1", "t2", "t3", "t4", "t5", "t6"].map((turnId) =>
+      trace(turnId, [{ type: "tool_use", tool: `tool_${turnId}`, input: {} }]),
+    );
+    const list = executedActionsOf(rows) ?? "";
+    expect(list).not.toContain("tool_t1");
+    expect(list).toContain("tool_t6");
+    expect(executedActionsOf([trace("t1", [{ type: "text", content: "hi" }])])).toBeNull();
   });
 });

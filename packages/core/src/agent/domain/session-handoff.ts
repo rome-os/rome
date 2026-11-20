@@ -104,6 +104,12 @@ export interface RenewalHandoffs {
    * `since`, every message said since then, else the latest ones.
    */
   context(chatId: string, turnId: string, since?: Date): Promise<HandoffContext>;
+  /**
+   * What chat `chatId`'s latest turns did: the tools called, with their key
+   * arguments, one per line, and no results. Null for none. Absent, a thread
+   * that moved to another provider carries no such list.
+   */
+  executedActions?(chatId: string): Promise<string | null>;
 }
 
 /**
@@ -196,13 +202,15 @@ export function recentWithin(
 /**
  * The sections a successor's first turn carries inside its `<continuation>`
  * notice: the handoff its predecessor wrote, when it wrote one, the chat's
- * open tasks as Rome holds them, and the chat's messages: with `all`, every
- * one the context holds, else the latest up to {@link HANDOFF_RECENT_TOKENS}.
+ * open tasks as Rome holds them, the tools the latest turns called when the
+ * thread moved off a provider that cannot run any more, and the chat's
+ * messages: with `all`, every one the context holds, else the latest up to
+ * {@link HANDOFF_RECENT_TOKENS}.
  */
 export function handoffSections(
   handoff: string | null,
   context: HandoffContext,
-  options: { all?: boolean } = {},
+  options: { all?: boolean; executedActions?: string | null } = {},
 ): string[] {
   const sections = handoff
     ? [
@@ -216,6 +224,12 @@ export function handoffSections(
         ? "The open tasks, as Rome holds them now. They are newer than the handoff where the two differ."
         : "The open tasks, as Rome holds them now.",
       `<open_tasks>\n${context.openTasks.trim()}\n</open_tasks>`,
+    );
+  }
+  if (options.executedActions) {
+    sections.push(
+      "The tools your previous model called in this chat's latest turns, with their key arguments. Only what was done is listed, not what came back. Do not call them again for the same thing: check the actual state of the work first.",
+      `<executed_actions>\n${options.executedActions.trim()}\n</executed_actions>`,
     );
   }
   const { shown, omitted } = options.all

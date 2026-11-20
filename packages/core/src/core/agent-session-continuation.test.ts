@@ -32,7 +32,14 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import { createSessions, type AgentSession, type Sessions } from "../agent/index.js";
+import {
+  createSessions,
+  type AgentSession,
+  type ModelResolver,
+  type RenewalHandoffs,
+  type Sessions,
+} from "../agent/index.js";
+import { createRenewalHandoffs } from "./renewal-handoffs.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -132,7 +139,12 @@ describe("continuation notice through Sessions", () => {
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): Sessions {
+  function createManager(
+    options: {
+      state?: ReturnType<typeof healthyState>;
+      handoffs?: (resolver: ModelResolver) => RenewalHandoffs;
+    } = {},
+  ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -144,18 +156,20 @@ describe("continuation notice through Sessions", () => {
     } as never);
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
-    const state = healthyState();
+    const state = options.state ?? healthyState();
+    const modelResolver = createModelResolver({
+      providers: [openai.provider, anthropic.provider],
+      accounts: fakeAccounts(() => state),
+      codexLogins: loginsOn(false),
+    });
     const manager = createSessions(
       {
+        ...(options.handoffs ? { handoffs: options.handoffs(modelResolver) } : {}),
         agentLoader: loader,
         sessionRepository,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
-        modelResolver: createModelResolver({
-          providers: [openai.provider, anthropic.provider],
-          accounts: fakeAccounts(() => state),
-          codexLogins: loginsOn(false),
-        }),
+        modelResolver,
         networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
@@ -277,6 +291,68 @@ describe("continuation notice through Sessions", () => {
       provider: "openai",
       model: "gpt-6-luna",
     });
+  });
+
+  /** Rome's handoff side over this chat's stored messages. */
+  const handoffsOver =
+    (executedActions?: string) =>
+    (modelResolver: ModelResolver): RenewalHandoffs => {
+      const handoffs = createRenewalHandoffs({
+        timeoutMs: 5_000,
+        fallbackTimeoutMs: 5_000,
+        modelResolver,
+        page: async (chatId, limit, before) => {
+          const page = await webchatRepo.getMessagesPage(chatId, {
+            limit,
+            before: before as never,
+          });
+          return { rows: page.rows, next: page.nextCursor };
+        },
+        openTasks: async () => null,
+      });
+      return executedActions === undefined
+        ? handoffs
+        : { ...handoffs, executedActions: async () => executedActions };
+    };
+
+  it("has the old model write a handoff when the default moves off a provider that still runs", async () => {
+    const manager = createManager({ handoffs: handoffsOver("- send_email(to: a@b.c)") });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "My locker code is 4417.");
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "What is my locker code?");
+
+    // One private turn on the old thread, on the old model, asked for the note.
+    const asked = anthropic.calls.at(-1);
+    expect(asked?.prompt).toContain("<handoff_request>");
+    expect(anthropic.opened.at(-1)?.thread).toEqual({
+      kind: "resume",
+      modelThreadId: "anthropic-thread-1",
+    });
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("<handoff>\ndone\n</handoff>");
+    expect(prompt).toContain("My locker code is 4417.");
+    expect(prompt).not.toContain("<executed_actions>");
+  });
+
+  it("carries what the latest turns did when the old provider cannot run any more", async () => {
+    const state = healthyState();
+    const manager = createManager({
+      state,
+      handoffs: handoffsOver("- send_email(to: a@b.c, subject: Rent)"),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    const anthropicCalls = anthropic.calls.length;
+    state.anthropic = reportOf("usage_limit_reached");
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Did that go out?");
+
+    expect(anthropic.calls).toHaveLength(anthropicCalls);
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
+    expect(prompt).not.toContain("<handoff>");
   });
 
   it("has no position to branch at until a turn runs on the new provider's thread", async () => {

@@ -136,6 +136,65 @@ export function recentMessagesOf(
   });
 }
 
+/** How many of a chat's latest turns the executed-actions list reads. */
+const ACTION_TURNS = 5;
+/** The most lines the executed-actions list holds, and the longest one. */
+const ACTION_LINES = 40;
+const ACTION_LINE_CHARS = 240;
+
+/** The arguments a tool call is known by: short values whole, long ones cut. */
+function keyArguments(input: unknown): string {
+  if (input === undefined || input === null) return "";
+  if (typeof input !== "object") return String(input);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (value === undefined || value === null || value === "") continue;
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    parts.push(`${key}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * The tools chat rows' latest {@link ACTION_TURNS} turns called, oldest first,
+ * one line each with its key arguments, and "(failed)" where its result was an
+ * error. Only what was done: no results. Null when none were called.
+ */
+export function executedActionsOf(rows: readonly ChatRow[]): string | null {
+  const traces = rows.filter((row) => row.role === "trace" && row.turnId);
+  const turns = [...new Set(traces.map((row) => row.turnId as string))].slice(-ACTION_TURNS);
+  const lines: string[] = [];
+  for (const row of traces) {
+    if (!turns.includes(row.turnId as string)) continue;
+    let blocks: unknown;
+    try {
+      blocks = JSON.parse(row.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(blocks)) continue;
+    const failed = new Set(
+      blocks
+        .filter((block) => block?.type === "tool_result" && block.isError === true)
+        .map((block) => block.toolUseId as string | undefined)
+        .filter(Boolean),
+    );
+    for (const block of blocks) {
+      if (block?.type !== "tool_use" || typeof block.tool !== "string") continue;
+      const line = `- ${block.tool}(${keyArguments(block.input)})${block.id && failed.has(block.id) ? " (failed)" : ""}`;
+      lines.push(line.length > ACTION_LINE_CHARS ? `${line.slice(0, ACTION_LINE_CHARS)}…` : line);
+    }
+  }
+  if (lines.length === 0) return null;
+  const kept = lines.slice(-ACTION_LINES);
+  return [
+    ...(lines.length > kept.length
+      ? [`[${lines.length - kept.length} earlier calls omitted]`]
+      : []),
+    ...kept,
+  ].join("\n");
+}
+
 export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHandoffs {
   /** Pages back from the newest message until a page reaches before `since`. */
   const rowsFrom = async (chatId: string, since: Date): Promise<ChatRow[]> => {
@@ -189,6 +248,10 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
         agentName,
         sources.fallbackTimeoutMs,
       );
+    },
+    async executedActions(chatId) {
+      const page = await sources.page(chatId, RECENT_MESSAGES);
+      return executedActionsOf(page.rows);
     },
     async context(chatId, turnId, since) {
       const [messages, openTasks] = await Promise.all([

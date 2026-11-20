@@ -2453,6 +2453,11 @@ class AgentSessionImpl implements AgentSession {
   private handoff?: string;
   /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
   private carriesMessages?: "held" | "recent" | "own";
+  /**
+   * The thread moved off a provider that cannot run any more: its first turn
+   * also carries what the latest turns did, so the new model does not redo it.
+   */
+  private carriesActions = false;
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2964,6 +2969,7 @@ class AgentSessionImpl implements AgentSession {
             if (sink.carriesHandoff) {
               this.handoff = undefined;
               this.carriesMessages = undefined;
+              this.carriesActions = false;
             }
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
@@ -3091,35 +3097,51 @@ class AgentSessionImpl implements AgentSession {
         return handoffSections(held.handoff, context, { all: true });
       }
     }
-    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch(failed);
-    return handoffSections(this.handoff ?? null, context);
+    const [context, executedActions] = await Promise.all([
+      handoffs.context(sink.romeSessionId, sink.turnId).catch(failed),
+      this.carriesActions && handoffs.executedActions
+        ? handoffs.executedActions(sink.romeSessionId).catch(() => null)
+        : null,
+    ]);
+    return handoffSections(this.handoff ?? null, context, { executedActions });
   }
 
   /**
    * The thread moved to another provider, which has seen none of the chat.
-   * Its first turn carries what this session held: the chat's text messages
-   * since it opened and its open tasks, for every agent. When that is past the
-   * light handoff's cap, a handoff note is written instead, from the chat's
-   * messages, since the old provider may not run any more. Tool traces are
-   * not carried. docs/concepts/sessions.md#continuation
+   * Its first turn carries the chat's recent text messages (the guardian's
+   * whole, long agent replies cut), its open tasks and the continuation
+   * notice, for every agent. When the old provider can still run, the old
+   * model first writes a handoff note on its own thread, while the chat says
+   * it is tidying up. When it cannot, the first turn carries the tools the
+   * latest turns called instead, so the new model does not redo them. Tool
+   * results are not carried. docs/concepts/sessions.md#continuation
    */
   async carryChatAcrossProviders(): Promise<void> {
     const chatId = this.threadContext?.romeSessionId;
     if (this.isSubagent || this.config.codeBacked || !this.deps.handoffs || !chatId) return;
-    if (!(await lightReplayTooLarge(this.deps, this.session, chatId))) {
-      this.carriesMessages = "own";
+    this.carriesMessages = "recent";
+    const old = this.session;
+    const oldRuns =
+      old.provider && old.model && old.modelThreadId
+        ? await this.deps.modelResolver
+            .resolve({ kind: "exact", providerId: old.provider as ProviderId, model: old.model })
+            .then(
+              (resolution) => resolution.modelProvider.id === old.provider,
+              () => false,
+            )
+        : false;
+    if (!oldRuns) {
+      this.carriesActions = true;
       return;
     }
     const note = await writeRenewalHandoff(
       {
-        retired: this.session,
+        retired: old,
         agentName: this.key.agentName,
         chatId,
         systemPrompt: this.systemPrompt,
         workingDir: this.workingDir ?? "",
         env: {},
-        thread: null,
-        background: true,
       },
       {
         handoffs: this.deps.handoffs,
@@ -3129,7 +3151,7 @@ class AgentSessionImpl implements AgentSession {
       },
     ).catch(() => null);
     if (note) this.handoff = note;
-    this.carriesMessages = "recent";
+    else this.carriesActions = true;
   }
 
   /**
