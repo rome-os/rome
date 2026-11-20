@@ -63,10 +63,11 @@ function justAfter(ts: string): string {
 }
 
 /** Note a message the connection heard in a direct message, its own post
- *  included once it comes back as an event, in the drain open now. One the copy holds already, such as from a page Slack
- *  answered before its event arrived, still moves the drain on past the head:
- *  the next one heard comes after it. Its link is written only where the copy had none,
- *  since a link from Slack's page is the surer of the two. */
+ *  included once it comes back as an event, in the drain open now. One the
+ *  copy holds already, such as from a page Slack answered before its event
+ *  arrived, still moves the drain on past the head: the next one heard comes
+ *  after it. Its link is written only where the copy had none, since a link
+ *  from Slack's page is the surer of the two. */
 export function noteInDrain(
   deps: SlackTimelineDeps,
   channelId: string,
