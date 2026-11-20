@@ -995,8 +995,9 @@ keep their usual access. Sign in again in the browser to use the tool.
 
 A same-origin send in a private Guardian chat carries the verified entry into
 the turn. A checked Concierge handoff can carry it into its task chat. Input
-from another entry removes the authority from a mixed turn. Forks, background
-work and ordinary device commands cannot issue a protected request.
+from another entry removes the authority from a mixed turn. The tool refuses
+forks and background turns. The target requires a signature for each
+`computer.*` action.
 
 ### Grant a target
 
@@ -1004,7 +1005,12 @@ The standard Rome image runs agent commands as the same operating-system user
 as Core. Those commands can read any controller key Core can read. Leave
 Computer Use grants disabled on that image. Moving the key to another
 directory or removing an environment variable from child processes does not
-protect the key or the Guardian session secret.
+protect the key or the Guardian session secret. Core loads configured grants
+without checking whether agent processes have separate permissions.
+
+Only enable grants if you also trust the installed app UIs. They run on the
+dashboard origin and can send a private chat message using the Guardian's
+browser session. Core cannot tell whether the Guardian typed that message.
 
 The owner sets `ROME_COMPUTER_USE_GRANTS_FILE` to an absolute path on the
 instance. Each target needs its own entry. Use an instance-specific

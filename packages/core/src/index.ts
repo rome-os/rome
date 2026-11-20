@@ -423,7 +423,8 @@ async function main() {
     ? await readComputerGrants(config.computerUseGrantsFile, JWT_SECRET)
     : undefined;
   if (computerGrants) {
-    // Core has captured both. Apps and agent subprocesses must not inherit them.
+    // Limit accidental disclosure to child processes. Commands running as Core's user
+    // can still read the controller key.
     delete process.env.ROME_JWT_SECRET;
     delete process.env.ROME_COMPUTER_USE_GRANTS_FILE;
   }
