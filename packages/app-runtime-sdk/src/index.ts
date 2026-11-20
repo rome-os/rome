@@ -2238,7 +2238,7 @@ export interface ChannelMessageHookDeps {
    * @internal For the Inbox app. True when the Inbox app must answer no
    * message on an account linked to `agent`, a canonical agent id, because
    * the app that installed it runs the agent's turns itself. The host answers
-   * true only for an agent that declares `runsOwnTurns: true` in an app on its
+   * true only for an agent that declares `deprecatedRunsOwnTurns: true` in an app on its
    * allow-list, and false for every other. Not for apps to build on.
    */
   unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;

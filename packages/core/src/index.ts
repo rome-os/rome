@@ -343,7 +343,7 @@ import {
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
-import { runsOwnTurns } from "./app-host/runs-own-turns.js";
+import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -2037,8 +2037,8 @@ async function main() {
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
-      // The SDK keeps the name it shipped with; it means `runsOwnTurns`.
-      unsafeTestOnlyBypassesInbox: (agent) => runsOwnTurns(agentLoader.find(agent)),
+      // The SDK keeps the name it shipped with; it means `deprecatedRunsOwnTurns`.
+      unsafeTestOnlyBypassesInbox: (agent) => deprecatedRunsOwnTurns(agentLoader.find(agent)),
       wakeGateFor,
     },
     mayLoad: (appId) =>
